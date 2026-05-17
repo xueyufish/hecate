@@ -1,49 +1,49 @@
 ## 1. 项目骨架
 
-- [ ] 1.1 创建 `pyproject.toml`，声明 Python 3.12+ 和核心依赖（FastAPI, Pydantic v2, SQLAlchemy 2.0 async, LiteLLM, qdrant-client, llm-guard, nemoguardrails, docling, FlagEmbedding）
-- [ ] 1.2 创建 `src/hecate/` 目录结构和 `__init__.py` 包文件
-- [ ] 1.3 创建 `src/hecate/core/config.py` 配置模块（Pydantic Settings，支持环境变量和 `.env`）
-- [ ] 1.4 创建 `src/hecate/core/database.py` 数据库连接模块（SQLAlchemy async engine + session factory）
-- [ ] 1.5 创建 `docker/docker-compose.yml`（PostgreSQL 16 + Qdrant + MinIO + Hecate API 服务）
-- [ ] 1.6 创建 `Dockerfile`（Python 3.12 slim 基础镜像，多阶段构建）
-- [ ] 1.7 创建 `.env.example` 模板文件，列出所有配置项
-- [ ] 1.8 创建 `tests/` 目录和 `conftest.py`（pytest-asyncio + 测试数据库 fixture）
+- [x] 1.1 创建 `pyproject.toml`，声明 Python 3.12+ 和核心依赖（FastAPI, Pydantic v2, SQLAlchemy 2.0 async, LiteLLM, qdrant-client, llm-guard, nemoguardrails, docling, FlagEmbedding）
+- [x] 1.2 创建 `src/hecate/` 目录结构和 `__init__.py` 包文件
+- [x] 1.3 创建 `src/hecate/core/config.py` 配置模块（Pydantic Settings，支持环境变量和 `.env`）
+- [x] 1.4 创建 `src/hecate/core/database.py` 数据库连接模块（SQLAlchemy async engine + session factory）
+- [x] 1.5 创建 `docker/docker-compose.yml`（PostgreSQL 16 + Qdrant + MinIO + Hecate API 服务）
+- [x] 1.6 创建 `Dockerfile`（Python 3.12 slim 基础镜像，多阶段构建）
+- [x] 1.7 创建 `.env.example` 模板文件，列出所有配置项
+- [x] 1.8 创建 `tests/` 目录和 `conftest.py`（pytest-asyncio + 测试数据库 fixture）
 
 ## 2. 数据模型
 
-- [ ] 2.1 创建 `src/hecate/models/base.py`：BaseModel mixin（UUID 主键、created_at、updated_at、deleted_at 软删除）
-- [ ] 2.2 创建 `src/hecate/models/agent.py`：Agent ORM 模型 + Pydantic schema（Create/Update/Response）
-- [ ] 2.3 创建 `src/hecate/models/session.py`：Session ORM 模型 + Pydantic schema
-- [ ] 2.4 创建 `src/hecate/models/message.py`：Message ORM 模型 + Pydantic schema（支持 tool_calls JSONB）
-- [ ] 2.5 创建 `src/hecate/models/tool.py`：Tool ORM 模型 + Pydantic schema（source: builtin/custom/mcp，risk_level, approval_required）
-- [ ] 2.6 创建 `src/hecate/models/knowledge.py`：KnowledgeBase ORM 模型 + Pydantic schema（embedding_model, qdrant_collection, chunk_size）
-- [ ] 2.7 创建 `src/hecate/models/skill.py`：Skill ORM 模型 + Pydantic schema（source: system/user/project，path）
-- [ ] 2.8 创建 `src/hecate/models/conversation.py`：Conversation ORM 模型 + Pydantic schema（agent_id, title，CreateSchema/ReadSchema）
-- [ ] 2.9 创建 `src/hecate/models/document.py`：Document ORM 模型 + Pydantic schema（knowledge_base_id, filename, file_path, file_size, content_type, parsing_status, parsing_error, chunk_count）
-- [ ] 2.10 创建 `src/hecate/models/checkpoint.py`：Checkpoint ORM 模型 + Pydantic schema（session_id, superstep, node_id, channel_state JSONB, pending_writes JSONB, metadata JSONB，不可变约束）
-- [ ] 2.11 创建 Alembic 初始迁移脚本（9 张核心表：agents, conversations, sessions, messages, tools, knowledge_bases, documents, skills, checkpoints + 全部索引）
-- [ ] 2.12 编写数据模型单元测试（CRUD 操作、软删除、JSONB 字段、Conversation 自动创建回填、Document parsing_status 状态流转、Checkpoint 不可变校验）
+- [x] 2.1 创建 `src/hecate/models/base.py`：BaseModel mixin（UUID 主键、created_at、updated_at、deleted_at 软删除）
+- [x] 2.2 创建 `src/hecate/models/agent.py`：Agent ORM 模型 + Pydantic schema（Create/Update/Response）
+- [x] 2.3 创建 `src/hecate/models/session.py`：Session ORM 模型 + Pydantic schema
+- [x] 2.4 创建 `src/hecate/models/message.py`：Message ORM 模型 + Pydantic schema（支持 tool_calls JSONB）
+- [x] 2.5 创建 `src/hecate/models/tool.py`：Tool ORM 模型 + Pydantic schema（source: builtin/custom/mcp，risk_level, approval_required）
+- [x] 2.6 创建 `src/hecate/models/knowledge.py`：KnowledgeBase ORM 模型 + Pydantic schema（embedding_model, qdrant_collection, chunk_size）
+- [x] 2.7 创建 `src/hecate/models/skill.py`：Skill ORM 模型 + Pydantic schema（source: system/user/project，path）
+- [x] 2.8 创建 `src/hecate/models/conversation.py`：Conversation ORM 模型 + Pydantic schema（agent_id, title，CreateSchema/ReadSchema）
+- [x] 2.9 创建 `src/hecate/models/document.py`：Document ORM 模型 + Pydantic schema（knowledge_base_id, filename, file_path, file_size, content_type, parsing_status, parsing_error, chunk_count）
+- [x] 2.10 创建 `src/hecate/models/checkpoint.py`：Checkpoint ORM 模型 + Pydantic schema（session_id, superstep, node_id, channel_state JSONB, pending_writes JSONB, metadata JSONB，不可变约束）
+- [x] 2.11 创建 Alembic 初始迁移脚本（9 张核心表：agents, conversations, sessions, messages, tools, knowledge_bases, documents, skills, checkpoints + 全部索引）
+- [x] 2.12 编写数据模型单元测试（CRUD 操作、软删除、JSONB 字段、Conversation 自动创建回填、Document parsing_status 状态流转、Checkpoint 不可变校验）
 
 ## 3. Graph DSL + 编译器
 
-- [ ] 3.1 创建 `src/hecate/engine/types.py`：核心类型定义（NodeType, Command, Edge, NodeConfig, GraphConfig）
-- [ ] 3.2 创建 Graph DSL JSON Schema 定义文件（`schemas/graph-dsl.schema.json`）
-- [ ] 3.3 实现 `src/hecate/engine/graph_dsl.py`：JSON 解析 + 验证（jsonschema 校验）
-- [ ] 3.4 实现 `src/hecate/engine/compiler.py`：Graph 编译器（JSON → CompiledGraph：拓扑排序、Channel 写入权限映射、子图引用解析）
-- [ ] 3.5 实现三层 Agent 预设模板生成器（Guard→Plan→Sub-Agent → Graph JSON）
-- [ ] 3.6 编译器错误处理和友好错误消息
-- [ ] 3.7 编写 Graph DSL + 编译器单元测试（合法/非法 JSON、拓扑排序、权限映射、子图解析）
+- [x] 3.1 创建 `src/hecate/engine/types.py`：核心类型定义（NodeType, Command, Edge, NodeConfig, GraphConfig）
+- [x] 3.2 创建 Graph DSL JSON Schema 定义文件（`schemas/graph-dsl.schema.json`）
+- [x] 3.3 实现 `src/hecate/engine/graph_dsl.py`：JSON 解析 + 验证（jsonschema 校验）
+- [x] 3.4 实现 `src/hecate/engine/compiler.py`：Graph 编译器（JSON → CompiledGraph：拓扑排序、Channel 写入权限映射、子图引用解析）
+- [x] 3.5 实现三层 Agent 预设模板生成器（Guard→Plan→Sub-Agent → Graph JSON）
+- [x] 3.6 编译器错误处理和友好错误消息
+- [x] 3.7 编写 Graph DSL + 编译器单元测试（合法/非法 JSON、拓扑排序、权限映射、子图解析）
 
 ## 4. 执行引擎
 
-- [ ] 4.1 实现 `src/hecate/engine/channel.py`：Channel 状态管理（write/read/snapshot，可写/只读/注入权限控制）
-- [ ] 4.2 实现 `src/hecate/engine/checkpoint.py`：Checkpoint 持久化接口 + PostgreSQL 实现（save/load/list，不可变）
-- [ ] 4.3 实现 `src/hecate/engine/worker.py`：Worker 接口 + P1 线程池实现（concurrent.futures），WorkerResult 类型
-- [ ] 4.4 实现 `src/hecate/engine/pregel.py`：Pregel 运行时（superstep 循环：读 Channel → 分发 Worker → 收集结果 → 写 Channel → Checkpoint → 检查终止）
-- [ ] 4.5 实现 interrupt/恢复机制（WorkerResult.interrupt → 暂停 superstep → 保存 Checkpoint → 用户输入 → 恢复执行）
-- [ ] 4.6 实现子图执行（agent 类型节点：创建子 Channel → 递归 Pregel → 结果映射回父 Channel）
-- [ ] 4.7 实现 `src/hecate/engine/ports.py`：EnginePort 接口（Protocol/ABC，定义 7 个方法：llm_invoke, tool_execute, knowledge_query, checkpoint_save, checkpoint_load, conversation_load, conversation_save），引擎内部通过此接口调用能力服务层，不直接依赖具体服务实现
-- [ ] 4.8 编写执行引擎集成测试（线性图、条件分支、interrupt/恢复、子图嵌套）
+- [x] 4.1 实现 `src/hecate/engine/channel.py`：Channel 状态管理（write/read/snapshot，可写/只读/注入权限控制）
+- [x] 4.2 实现 `src/hecate/engine/checkpoint.py`：Checkpoint 持久化接口 + PostgreSQL 实现（save/load/list，不可变）
+- [x] 4.3 实现 `src/hecate/engine/worker.py`：Worker 接口 + P1 线程池实现（concurrent.futures），WorkerResult 类型
+- [x] 4.4 实现 `src/hecate/engine/pregel.py`：Pregel 运行时（superstep 循环：读 Channel → 分发 Worker → 收集结果 → 写 Channel → Checkpoint → 检查终止）
+- [x] 4.5 实现 interrupt/恢复机制（WorkerResult.interrupt → 暂停 superstep → 保存 Checkpoint → 用户输入 → 恢复执行）
+- [x] 4.6 实现子图执行（agent 类型节点：创建子 Channel → 递归 Pregel → 结果映射回父 Channel）
+- [x] 4.7 实现 `src/hecate/engine/ports.py`：EnginePort 接口（Protocol/ABC，定义 7 个方法：llm_invoke, tool_execute, knowledge_query, checkpoint_save, checkpoint_load, conversation_load, conversation_save），引擎内部通过此接口调用能力服务层，不直接依赖具体服务实现
+- [x] 4.8 编写执行引擎集成测试（线性图、条件分支、interrupt/恢复、子图嵌套）
 
 ## 5. API 层
 

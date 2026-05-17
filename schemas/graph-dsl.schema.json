@@ -1,0 +1,110 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hecate Graph DSL",
+  "description": "Schema for Hecate Agent workflow graph definitions",
+  "type": "object",
+  "required": ["version", "name", "state", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Graph DSL version"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "Graph name"
+    },
+    "state": {
+      "type": "object",
+      "description": "Channel declarations",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["last_value", "topic", "persistent_topic", "accumulator"]
+          },
+          "default": {},
+          "initial": {},
+          "reduce": {
+            "type": "string",
+            "enum": ["append", "add"]
+          }
+        }
+      }
+    },
+    "nodes": {
+      "type": "object",
+      "description": "Node definitions (key = NodeId)",
+      "not": {
+        "required": ["__start__"]
+      },
+      "propertyNames": {
+        "not": {
+          "const": "__start__"
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "config"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["conversation", "tool-call", "condition", "agent"]
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "model": { "type": "string" },
+              "system_prompt": { "type": "string" },
+              "tool_name": { "type": "string" },
+              "expression": { "type": "string" },
+              "agent_ref": { "type": "string" },
+              "skill_ref": { "type": "string" },
+              "channels": {
+                "type": "object",
+                "properties": {
+                  "readable": { "type": "array", "items": { "type": "string" } },
+                  "writable": { "type": "array", "items": { "type": "string" } }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              }
+            ]
+          },
+          "trigger": {
+            "type": ["string", "null"]
+          }
+        }
+      }
+    },
+    "entry": {
+      "type": "string",
+      "description": "Entry point node ID"
+    }
+  }
+}

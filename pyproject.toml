@@ -1,0 +1,71 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hecate"
+version = "0.1.0"
+description = "Enterprise-grade, open-source, self-hosted, model-agnostic, MCP-first Agent platform"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Hecate Team" },
+]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "httpx>=0.28.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+llm = [
+    "litellm>=1.50.0",
+]
+rag = [
+    "qdrant-client>=1.12.0",
+    "docling>=2.0",
+    "FlagEmbedding>=1.2",
+    "minio>=7.2",
+]
+security = [
+    "llm-guard>=0.3.0",
+    "nemoguardrails>=0.12.0",
+    "slowapi>=0.1.9",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "ruff>=0.8.0",
+    "mypy>=1.13",
+    "httpx>=0.28.0",
+    "aiosqlite>=0.20",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "S", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
