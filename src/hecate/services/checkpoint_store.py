@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -9,12 +10,22 @@ from hecate.engine.checkpoint import CheckpointStore
 
 class PostgresCheckpointStore(CheckpointStore):
     """PostgreSQL-backed checkpoint store using SQLAlchemy async sessions."""
+
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
         self._cache: dict[uuid.UUID, dict] = {}
 
-    async def save(self, session_id: uuid.UUID, superstep: int, node_id: str | None, channel_state: dict, pending_writes: list | None = None, metadata: dict | None = None) -> uuid.UUID:
+    async def save(
+        self,
+        session_id: uuid.UUID,
+        superstep: int,
+        node_id: str | None,
+        channel_state: dict,
+        pending_writes: list | None = None,
+        metadata: dict | None = None,
+    ) -> uuid.UUID:
         from hecate.models.checkpoint import CheckpointModel
+
         async with self._session_factory() as session:
             cp = CheckpointModel(
                 session_id=session_id,
@@ -26,6 +37,7 @@ class PostgresCheckpointStore(CheckpointStore):
             )
             session.add(cp)
             await session.flush()
+            await session.commit()
             record = {
                 "id": cp.id,
                 "session_id": session_id,
@@ -40,9 +52,27 @@ class PostgresCheckpointStore(CheckpointStore):
 
     async def load(self, session_id: uuid.UUID, checkpoint_id: uuid.UUID | None = None) -> dict | None:
         from sqlalchemy import select
+
         from hecate.models.checkpoint import CheckpointModel
+
         if checkpoint_id is None:
-            return self._cache.get(session_id)
+            cached = self._cache.get(session_id)
+            if cached is not None:
+                return cached
+            async with self._session_factory() as session:
+                stmt = (
+                    select(CheckpointModel)
+                    .where(CheckpointModel.session_id == session_id)
+                    .order_by(CheckpointModel.superstep.desc())
+                    .limit(1)
+                )
+                result = await session.execute(stmt)
+                cp = result.scalar_one_or_none()
+                if cp is None:
+                    return None
+                record = self._model_to_dict(cp)
+                self._cache[session_id] = record
+                return record
         async with self._session_factory() as session:
             stmt = select(CheckpointModel).where(
                 CheckpointModel.session_id == session_id,
@@ -52,19 +82,13 @@ class PostgresCheckpointStore(CheckpointStore):
             cp = result.scalar_one_or_none()
             if cp is None:
                 return None
-            return {
-                "id": cp.id,
-                "session_id": cp.session_id,
-                "superstep": cp.superstep,
-                "node_id": cp.node_id,
-                "channel_state": cp.channel_state,
-                "pending_writes": cp.pending_writes,
-                "metadata": cp.metadata_,
-            }
+            return self._model_to_dict(cp)
 
     async def list_checkpoints(self, session_id: uuid.UUID, limit: int = 10) -> list[dict]:
         from sqlalchemy import select
+
         from hecate.models.checkpoint import CheckpointModel
+
         async with self._session_factory() as session:
             stmt = (
                 select(CheckpointModel)
@@ -74,15 +98,16 @@ class PostgresCheckpointStore(CheckpointStore):
             )
             result = await session.execute(stmt)
             cps = result.scalars().all()
-            return [
-                {
-                    "id": cp.id,
-                    "session_id": cp.session_id,
-                    "superstep": cp.superstep,
-                    "node_id": cp.node_id,
-                    "channel_state": cp.channel_state,
-                    "pending_writes": cp.pending_writes,
-                    "metadata": cp.metadata_,
-                }
-                for cp in cps
-            ]
+            return [self._model_to_dict(cp) for cp in cps]
+
+    @staticmethod
+    def _model_to_dict(cp: Any) -> dict:
+        return {
+            "id": cp.id,
+            "session_id": cp.session_id,
+            "superstep": cp.superstep,
+            "node_id": cp.node_id,
+            "channel_state": cp.channel_state,
+            "pending_writes": cp.pending_writes,
+            "metadata": cp.metadata_,
+        }

@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Boolean, Index, Integer, String
+from sqlalchemy import Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hecate.models.base import BaseModel
@@ -21,9 +21,7 @@ class DocumentModel(BaseModel):
     file_path: Mapped[str] = mapped_column(nullable=False)
     file_size: Mapped[int] = mapped_column(default=0)
     content_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    parsing_status: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="pending"
-    )
+    parsing_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     parsing_error: Mapped[str | None] = mapped_column(nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
 

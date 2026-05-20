@@ -8,7 +8,6 @@ import jsonschema
 from hecate.engine.types import (
     ChannelDef,
     ChannelType,
-    CompiledGraph,
     Edge,
     GraphConfig,
     NodeConfig,
@@ -71,11 +70,13 @@ def parse_graph(raw: str | dict) -> GraphConfig:
 
     edges = []
     for edge_data in data.get("edges", []):
-        edges.append(Edge(
-            source=edge_data["source"],
-            target=edge_data["target"],
-            trigger=edge_data.get("trigger"),
-        ))
+        edges.append(
+            Edge(
+                source=edge_data["source"],
+                target=edge_data["target"],
+                trigger=edge_data.get("trigger"),
+            )
+        )
 
     return GraphConfig(
         version=data.get("version", "1.0"),

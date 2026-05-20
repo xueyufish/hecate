@@ -8,7 +8,15 @@ class CheckpointStore(ABC):
     """Abstract interface for persisting and retrieving execution checkpoints."""
 
     @abstractmethod
-    async def save(self, session_id: uuid.UUID, superstep: int, node_id: str | None, channel_state: dict, pending_writes: list | None = None, metadata: dict | None = None) -> uuid.UUID:
+    async def save(
+        self,
+        session_id: uuid.UUID,
+        superstep: int,
+        node_id: str | None,
+        channel_state: dict,
+        pending_writes: list | None = None,
+        metadata: dict | None = None,
+    ) -> uuid.UUID:
         """Save a checkpoint and return its ID."""
         ...
 
@@ -30,7 +38,15 @@ class InMemoryCheckpointStore(CheckpointStore):
         self._store: dict[uuid.UUID, list[dict]] = {}
         self._cache: dict[uuid.UUID, dict] = {}
 
-    async def save(self, session_id: uuid.UUID, superstep: int, node_id: str | None, channel_state: dict, pending_writes: list | None = None, metadata: dict | None = None) -> uuid.UUID:
+    async def save(
+        self,
+        session_id: uuid.UUID,
+        superstep: int,
+        node_id: str | None,
+        channel_state: dict,
+        pending_writes: list | None = None,
+        metadata: dict | None = None,
+    ) -> uuid.UUID:
         cp_id = uuid.uuid4()
         record = {
             "id": cp_id,

@@ -56,9 +56,9 @@ class ChannelManager:
         self._channels[name] = Channel(name, defn)
 
     def write(self, name: str, value: Any) -> None:
-        """Write a value to the named channel."""
+        """Write a value to the named channel. Silently skips unregistered channels."""
         if name not in self._channels:
-            raise KeyError(f"Channel '{name}' not registered")
+            return
         self._channels[name].write(value)
 
     def read(self, name: str) -> Any:

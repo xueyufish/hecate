@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
 from hecate.engine.types import (
-    ChannelDef,
-    Command,
     CompiledGraph,
     StreamMode,
     WorkerResult,
 )
-from hecate.engine.worker import Worker, ThreadPoolWorkerPool
+from hecate.engine.worker import DirectWorkerPool, Worker, WorkerPool
 
 
 class PregelRuntime:
@@ -20,6 +19,11 @@ class PregelRuntime:
 
     Executes a compiled graph in superstep cycles: read channels, dispatch workers,
     collect results, write channels, save checkpoint, resolve next nodes.
+
+    Supports interrupt/resume via CheckpointStore: when a worker returns
+    Command(interrupt=...), execution pauses and checkpoint is saved. Calling
+    execute() again with resume_value restores state from the last checkpoint
+    and continues from the node following the interrupt.
     """
 
     def __init__(
@@ -27,16 +31,17 @@ class PregelRuntime:
         graph: CompiledGraph,
         worker: Worker,
         checkpoint_store: CheckpointStore,
-        pool: ThreadPoolWorkerPool | None = None,
+        pool: WorkerPool | None = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
         self._checkpoint_store = checkpoint_store
-        self._pool = pool or ThreadPoolWorkerPool()
+        self._pool = pool or DirectWorkerPool()
         self._channel_manager = ChannelManager()
         self._superstep = 0
         self._interrupted = False
         self._interrupt_value: Any = None
+        self._interrupted_node: str | None = None
 
         for name, defn in graph.channels.items():
             self._channel_manager.register(name, defn)
@@ -50,19 +55,17 @@ class PregelRuntime:
     ) -> AsyncGenerator[dict, None]:
         """Execute the graph and yield events based on the stream mode.
 
-        Supports interrupt/resume: when a worker returns a Command(interrupt=...),
-        execution pauses, checkpoint is saved, and an interrupt event is yielded.
-        Call again with resume_value to continue from the checkpoint.
+        If resume_value is provided, restores state from the last checkpoint
+        and continues execution from the node after the interrupt point.
         """
-        if initial_input:
-            for key, value in initial_input.items():
-                self._channel_manager.write(key, value)
-
-        if resume_value is not None and self._interrupted:
-            self._interrupted = False
-            self._interrupt_value = None
-
-        current_nodes = [self._graph.entry_point] if self._graph.entry_point else []
+        if resume_value is not None:
+            await self._restore_from_checkpoint(session_id, resume_value)
+            current_nodes = self._resolve_next_nodes_after_interrupt()
+        else:
+            if initial_input:
+                for key, value in initial_input.items():
+                    self._channel_manager.write(key, value)
+            current_nodes = [self._graph.entry_point] if self._graph.entry_point else []
 
         while current_nodes and not self._interrupted:
             self._superstep += 1
@@ -81,6 +84,7 @@ class PregelRuntime:
                 )
                 results.append(result)
 
+            interrupted = False
             for result in results:
                 if result.error:
                     raise result.error
@@ -88,6 +92,7 @@ class PregelRuntime:
                     if result.command.is_interrupt():
                         self._interrupted = True
                         self._interrupt_value = result.command.interrupt
+                        self._interrupted_node = result.node_id
                         for k, v in result.channel_updates.items():
                             self._channel_manager.write(k, v)
                         await self._checkpoint_store.save(
@@ -98,12 +103,17 @@ class PregelRuntime:
                             metadata={"interrupted": True, "interrupt_value": self._interrupt_value},
                         )
                         yield {"type": "interrupt", "value": self._interrupt_value}
-                        return
+                        interrupted = True
+                        break
                     if result.command.update:
                         for k, v in result.command.update.items():
                             self._channel_manager.write(k, v)
-                for k, v in result.channel_updates.items():
-                    self._channel_manager.write(k, v)
+                if not self._interrupted:
+                    for k, v in result.channel_updates.items():
+                        self._channel_manager.write(k, v)
+
+            if interrupted:
+                return
 
             await self._checkpoint_store.save(
                 session_id=session_id,
@@ -119,6 +129,40 @@ class PregelRuntime:
                 yield {"type": "values", "state": self._channel_manager.snapshot()}
 
             current_nodes = self._resolve_next_nodes(results)
+
+    async def _restore_from_checkpoint(self, session_id: uuid.UUID, resume_value: Any) -> None:
+        """Restore channel state and execution context from the last checkpoint."""
+        checkpoint = await self._checkpoint_store.load(session_id)
+        if checkpoint is None:
+            return
+        self._channel_manager.restore(checkpoint["channel_state"])
+        self._superstep = checkpoint["superstep"]
+        self._interrupted_node = checkpoint.get("node_id")
+        self._interrupted = False
+        self._interrupt_value = None
+        if resume_value is not None:
+            self._channel_manager.write("_resume_value", resume_value)
+
+    def _resolve_next_nodes_after_interrupt(self) -> list[str]:
+        """Determine the next nodes to execute after restoring from an interrupt checkpoint."""
+        if self._interrupted_node is None:
+            return [self._graph.entry_point] if self._graph.entry_point else []
+        next_nodes: list[str] = []
+        for edge in self._graph.edges:
+            if edge.source == self._interrupted_node:
+                if isinstance(edge.target, str):
+                    next_nodes.append(edge.target)
+                elif isinstance(edge.target, dict):
+                    target = edge.target.get("true")
+                    if target:
+                        next_nodes.append(target)
+        if "__end__" in next_nodes:
+            return []
+        if next_nodes:
+            return list(dict.fromkeys(next_nodes))
+        if self._graph.entry_point:
+            return [self._graph.entry_point]
+        return []
 
     def _resolve_next_nodes(self, results: list[WorkerResult]) -> list[str]:
         """Determine the next set of nodes to execute based on edges and commands."""

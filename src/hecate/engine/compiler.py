@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from hecate.engine.graph_dsl import GraphValidationError
 from hecate.engine.types import (
-    ChannelDef,
     CompiledGraph,
-    Edge,
     GraphConfig,
-    NodeConfig,
 )
 
 

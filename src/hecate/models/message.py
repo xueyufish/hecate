@@ -6,8 +6,8 @@ from datetime import datetime
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
 from sqlalchemy import Index, String
-from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
 
 from hecate.models.base import BaseModel
 
@@ -20,13 +20,11 @@ class MessageModel(BaseModel):
     conversation_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(nullable=False)
-    tool_calls: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    tool_calls: Mapped[list | None] = mapped_column(JSON, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
-    __table_args__ = (
-        Index("idx_messages_conversation", "conversation_id", "created_at"),
-    )
+    __table_args__ = (Index("idx_messages_conversation", "conversation_id", "created_at"),)
 
 
 class MessageCreateSchema(PydanticBase):
@@ -53,5 +51,5 @@ class MessageReadSchema(PydanticBase):
     content: str
     tool_calls: list | None
     tool_call_id: str | None
-    metadata: dict
+    metadata: dict = Field(validation_alias="metadata_")
     created_at: datetime

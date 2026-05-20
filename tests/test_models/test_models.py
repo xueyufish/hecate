@@ -13,7 +13,6 @@ from hecate.models.agent import (
     AgentCreateSchema,
     AgentModel,
     AgentReadSchema,
-    AgentUpdateSchema,
 )
 from hecate.models.checkpoint import (
     CheckpointCreateSchema,
@@ -21,27 +20,20 @@ from hecate.models.checkpoint import (
     CheckpointReadSchema,
 )
 from hecate.models.conversation import (
-    ConversationCreateSchema,
     ConversationModel,
-    ConversationReadSchema,
 )
 from hecate.models.document import (
-    DocumentCreateSchema,
     DocumentModel,
-    DocumentReadSchema,
 )
 from hecate.models.knowledge import (
     KnowledgeBaseCreateSchema,
     KnowledgeBaseModel,
-    KnowledgeBaseReadSchema,
 )
 from hecate.models.message import (
-    MessageCreateSchema,
     MessageModel,
     MessageReadSchema,
 )
 from hecate.models.session import (
-    SessionCreateSchema,
     SessionModel,
     SessionReadSchema,
 )
@@ -53,7 +45,6 @@ from hecate.models.skill import (
 from hecate.models.tool import (
     ToolCreateSchema,
     ToolModel,
-    ToolReadSchema,
 )
 
 TEST_DB_URL = "sqlite+aiosqlite://"
@@ -463,3 +454,80 @@ class TestCheckpointModel:
         assert schema.channel_state == {}
         assert schema.pending_writes == []
         assert schema.metadata == {}
+
+
+class TestReadSchemaFromAttributes:
+    """Verify that ReadSchema.model_validate(orm_instance) works for all models with metadata_ columns."""
+
+    def _make_base_attrs(self) -> dict:
+        now = datetime.now()
+        return {"id": uuid.uuid4(), "created_at": now, "updated_at": now}
+
+    def test_session_read_schema(self) -> None:
+        from hecate.models.session import SessionModel
+
+        attrs = self._make_base_attrs()
+        session = SessionModel(
+            agent_id=uuid.uuid4(),
+            status="active",
+            metadata_={"key": "value"},
+            **attrs,
+        )
+        schema = SessionReadSchema.model_validate(session)
+        assert schema.metadata == {"key": "value"}
+        assert schema.status == "active"
+
+    def test_message_read_schema(self) -> None:
+        from hecate.models.message import MessageModel
+
+        attrs = self._make_base_attrs()
+        msg = MessageModel(
+            conversation_id=uuid.uuid4(),
+            role="user",
+            content="hello",
+            tool_calls=[{"id": "1", "name": "test"}],
+            metadata_={"tokens": 5},
+            **attrs,
+        )
+        schema = MessageReadSchema.model_validate(msg)
+        assert schema.metadata == {"tokens": 5}
+        assert schema.tool_calls == [{"id": "1", "name": "test"}]
+
+    def test_skill_read_schema(self) -> None:
+        from hecate.models.skill import SkillModel
+
+        attrs = self._make_base_attrs()
+        skill = SkillModel(
+            name="developer",
+            description="A developer skill",
+            source="system",
+            instructions="Write code",
+            allowed_tools=["tool1"],
+            metadata_={"version": "1.0"},
+            scripts=[],
+            references=[],
+            max_tokens=2000,
+            auto_load=False,
+            **attrs,
+        )
+        schema = SkillReadSchema.model_validate(skill)
+        assert schema.metadata == {"version": "1.0"}
+        assert schema.name == "developer"
+
+    def test_checkpoint_read_schema(self) -> None:
+        from hecate.models.checkpoint import CheckpointModel
+
+        cp_id = uuid.uuid4()
+        cp = CheckpointModel(
+            session_id=uuid.uuid4(),
+            superstep=1,
+            node_id="test_node",
+            channel_state={"messages": ["hello"]},
+            pending_writes=[],
+            metadata_={"interrupted": False},
+        )
+        cp.id = cp_id
+        cp.created_at = datetime.now()
+        schema = CheckpointReadSchema.model_validate(cp)
+        assert schema.metadata == {"interrupted": False}
+        assert schema.superstep == 1

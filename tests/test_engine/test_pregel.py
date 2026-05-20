@@ -6,8 +6,6 @@ import pytest
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import InMemoryCheckpointStore
-from hecate.engine.compiler import GraphCompiler
-from hecate.engine.graph_dsl import parse_graph
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.types import (
     ChannelDef,
@@ -17,7 +15,6 @@ from hecate.engine.types import (
     Edge,
     NodeConfig,
     NodeType,
-    StreamMode,
     WorkerResult,
 )
 from hecate.engine.worker import Worker
@@ -41,6 +38,31 @@ class InterruptWorker(Worker):
                 node_id=node_id,
                 channel_updates={"messages": ["interrupted"]},
                 command=Command(interrupt={"type": "approval", "message": "Please confirm"}),
+            )
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"messages": [f"{node_id}_output"]},
+        )
+
+
+class RoutingWorker(Worker):
+    def __init__(self, route_value: str = "true"):
+        self._route_value = route_value
+
+    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+        updates: dict = {"messages": [f"{node_id}_output"]}
+        if node_id == "check":
+            updates["_route"] = self._route_value
+        return WorkerResult(node_id=node_id, channel_updates=updates)
+
+
+class GotoWorker(Worker):
+    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+        if node_id == "A":
+            return WorkerResult(
+                node_id=node_id,
+                channel_updates={"messages": ["from_A"]},
+                command=Command(goto="C"),
             )
         return WorkerResult(
             node_id=node_id,
@@ -83,6 +105,24 @@ def _make_conditional_graph() -> CompiledGraph:
         channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
         entry_point="start",
         name="test-conditional",
+    )
+
+
+def _make_goto_graph() -> CompiledGraph:
+    return CompiledGraph(
+        nodes={
+            "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
+            "B": NodeConfig(id="B", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}),
+            "C": NodeConfig(id="C", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "C"}),
+        },
+        edges=[
+            Edge(source="A", target="B"),
+            Edge(source="B", target="C"),
+            Edge(source="C", target="__end__"),
+        ],
+        channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+        entry_point="A",
+        name="test-goto",
     )
 
 
@@ -136,20 +176,102 @@ class TestInterruptResume:
     @pytest.mark.asyncio
     async def test_resume_from_interrupt(self):
         graph = _make_linear_graph()
-        worker = SimpleWorker()
+        worker = InterruptWorker(interrupt_at="B")
         store = InMemoryCheckpointStore()
         runtime = PregelRuntime(graph, worker, store)
 
         session_id = uuid.uuid4()
-        async for _ in runtime.execute(session_id, resume_value="approved"):
+        results = []
+        async for event in runtime.execute(session_id, initial_input={"messages": ["init"]}):
+            results.append(event)
+
+        assert runtime.is_interrupted
+        assert len(results) == 2
+
+        runtime2 = PregelRuntime(graph, SimpleWorker(), store)
+        resume_results = []
+        async for event in runtime2.execute(session_id, resume_value="approved"):
+            resume_results.append(event)
+
+        assert not runtime2.is_interrupted
+        assert len(resume_results) == 1
+        assert resume_results[-1]["type"] == "values"
+        final_state = resume_results[-1]["state"]
+        assert "C_output" in final_state.get("messages", [])
+
+    @pytest.mark.asyncio
+    async def test_interrupt_preserves_channel_state(self):
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id, initial_input={"messages": ["init"]}):
             pass
 
-        assert not runtime.is_interrupted
+        checkpoint = await store.load(session_id)
+        assert checkpoint is not None
+        assert "A_output" in checkpoint["channel_state"].get("messages", [])
+
+
+class TestConditionalExecution:
+    @pytest.mark.asyncio
+    async def test_conditional_true_branch(self):
+        graph = _make_conditional_graph()
+        worker = RoutingWorker(route_value="true")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        assert len(results) == 3
+        final_messages = results[-1]["state"]["messages"]
+        assert "branch_a_output" in final_messages
+        assert "branch_b_output" not in final_messages
+
+    @pytest.mark.asyncio
+    async def test_conditional_false_branch(self):
+        graph = _make_conditional_graph()
+        worker = RoutingWorker(route_value="false")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        assert len(results) == 3
+        final_messages = results[-1]["state"]["messages"]
+        assert "branch_b_output" in final_messages
+        assert "branch_a_output" not in final_messages
+
+
+class TestCommandGoto:
+    @pytest.mark.asyncio
+    async def test_goto_skips_intermediate_node(self):
+        graph = _make_goto_graph()
+        worker = GotoWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        final_messages = results[-1]["state"]["messages"]
+        assert "from_A" in final_messages
+        assert "C_output" in final_messages
+        assert "B_output" not in final_messages
 
 
 class TestChannelManager:
     def test_last_value_overwrites(self):
-        from hecate.engine.channel import ChannelManager
         mgr = ChannelManager()
         mgr.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
         mgr.write("val", "a")
@@ -157,7 +279,6 @@ class TestChannelManager:
         assert mgr.read("val") == "b"
 
     def test_topic_appends(self):
-        from hecate.engine.channel import ChannelManager
         mgr = ChannelManager()
         mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
         mgr.write("msgs", "a")
@@ -165,10 +286,24 @@ class TestChannelManager:
         assert mgr.read("msgs") == ["a", "b"]
 
     def test_accumulator_adds(self):
-        from hecate.engine.channel import ChannelManager
         mgr = ChannelManager()
         mgr.register("count", ChannelDef(type=ChannelType.ACCUMULATOR, initial=0, reduce_fn="add"))
         mgr.write("count", 1)
         mgr.write("count", 2)
         mgr.write("count", 3)
         assert mgr.read("count") == 6
+
+    def test_restore_rebuilds_state(self):
+        mgr = ChannelManager()
+        mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
+        mgr.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
+        mgr.write("msgs", "a")
+        mgr.write("val", 42)
+        snapshot = mgr.snapshot()
+
+        mgr2 = ChannelManager()
+        mgr2.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
+        mgr2.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
+        mgr2.restore(snapshot)
+        assert mgr2.read("msgs") == ["a"]
+        assert mgr2.read("val") == 42

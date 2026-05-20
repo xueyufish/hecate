@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class NodeType(str, Enum):
+class NodeType(StrEnum):
     """Supported node types in the execution graph."""
 
     CONVERSATION = "conversation"
@@ -14,7 +14,7 @@ class NodeType(str, Enum):
     AGENT = "agent"
 
 
-class ChannelType(str, Enum):
+class ChannelType(StrEnum):
     """Channel write semantics determining how values are stored."""
 
     LAST_VALUE = "last_value"
@@ -23,7 +23,7 @@ class ChannelType(str, Enum):
     ACCUMULATOR = "accumulator"
 
 
-class StreamMode(str, Enum):
+class StreamMode(StrEnum):
     """Streaming output modes for graph execution."""
 
     VALUES = "values"
@@ -123,14 +123,8 @@ class CompiledGraph:
         return {
             "version": "1.0",
             "name": self.name,
-            "state": {
-                k: {"type": v.type.value, "default": v.default}
-                for k, v in self.channels.items()
-            },
-            "nodes": {
-                k: {"type": v.type.value, "config": v.config}
-                for k, v in self.nodes.items()
-            },
+            "state": {k: {"type": v.type.value, "default": v.default} for k, v in self.channels.items()},
+            "nodes": {k: {"type": v.type.value, "config": v.config} for k, v in self.nodes.items()},
             "edges": [
                 {
                     "source": e.source,

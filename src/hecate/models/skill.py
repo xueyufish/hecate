@@ -6,8 +6,8 @@ from datetime import datetime
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
 from sqlalchemy import Boolean, Index, Integer, String
-from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
 
 from hecate.models.base import BaseModel
 
@@ -66,7 +66,7 @@ class SkillReadSchema(PydanticBase):
     source: str
     instructions: str
     allowed_tools: list
-    metadata: dict
+    metadata: dict = Field(validation_alias="metadata_")
     scripts: list
     references: list
     max_tokens: int

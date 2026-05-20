@@ -6,8 +6,8 @@ from datetime import datetime
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
 from sqlalchemy import Index, Integer, String
-from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
 
 from hecate.core.database import Base
 
@@ -17,9 +17,7 @@ class CheckpointModel(Base):
 
     __tablename__ = "checkpoints"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     superstep: Mapped[int] = mapped_column(Integer, nullable=False)
     node_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -31,9 +29,7 @@ class CheckpointModel(Base):
         default=datetime.now,
     )
 
-    __table_args__ = (
-        Index("idx_checkpoints_session", "session_id", "superstep"),
-    )
+    __table_args__ = (Index("idx_checkpoints_session", "session_id", "superstep"),)
 
 
 class CheckpointCreateSchema(PydanticBase):
@@ -60,5 +56,5 @@ class CheckpointReadSchema(PydanticBase):
     node_id: str | None
     channel_state: dict
     pending_writes: list
-    metadata: dict
+    metadata: dict = Field(validation_alias="metadata_")
     created_at: datetime

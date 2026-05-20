@@ -6,8 +6,8 @@ from datetime import datetime
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
 from sqlalchemy import Index, String
-from sqlalchemy.types import JSON
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.types import JSON
 
 from hecate.models.base import BaseModel
 
@@ -23,9 +23,7 @@ class AgentModel(BaseModel):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     persona: Mapped[str | None] = mapped_column(nullable=True)
-    model_config_db: Mapped[dict] = mapped_column(
-        "model_config", JSON, nullable=False, default=dict
-    )
+    model_config_db: Mapped[dict] = mapped_column("model_config", JSON, nullable=False, default=dict)
     mode: Mapped[str] = mapped_column(String(50), nullable=False, default="chat")
     workflow_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     tools: Mapped[list] = mapped_column(JSON, default=list)
@@ -33,9 +31,7 @@ class AgentModel(BaseModel):
     knowledge_base_ids: Mapped[list] = mapped_column(JSON, default=list)
     risk_level: Mapped[str] = mapped_column(String(20), default="LOW")
 
-    __table_args__ = (
-        Index("idx_agents_workspace", "workspace_id", postgresql_where=BaseModel.deleted_at.is_(None)),
-    )
+    __table_args__ = (Index("idx_agents_workspace", "workspace_id", postgresql_where=BaseModel.deleted_at.is_(None)),)
 
 
 class AgentCreateSchema(PydanticBase):
@@ -45,7 +41,11 @@ class AgentCreateSchema(PydanticBase):
 
     name: str = Field(..., min_length=1, max_length=255)
     persona: str | None = None
-    llm_config: dict = Field(..., alias="model_config", description="LLM model config with model name, temperature, etc.")
+    llm_config: dict = Field(
+        ...,
+        alias="model_config",
+        description="LLM model config with model name, temperature, etc.",
+    )
     mode: str = Field(default="chat", pattern="^(chat|three_layer|workflow)$")
     workflow_id: uuid.UUID | None = None
     tools: list = Field(default_factory=list)

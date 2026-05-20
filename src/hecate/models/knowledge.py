@@ -5,7 +5,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Index, Integer, String
+from sqlalchemy import Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hecate.models.base import BaseModel
@@ -22,12 +22,8 @@ class KnowledgeBaseModel(BaseModel):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(nullable=True)
-    embedding_model: Mapped[str] = mapped_column(
-        String(100), nullable=False, default="BAAI/bge-m3"
-    )
-    chunk_strategy: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="fixed"
-    )
+    embedding_model: Mapped[str] = mapped_column(String(100), nullable=False, default="BAAI/bge-m3")
+    chunk_strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="fixed")
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     qdrant_collection: Mapped[str] = mapped_column(String(255), nullable=False)

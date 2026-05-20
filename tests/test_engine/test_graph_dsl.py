@@ -6,7 +6,6 @@ from hecate.engine.compiler import GraphCompiler
 from hecate.engine.graph_dsl import GraphValidationError, parse_graph
 from hecate.engine.templates import build_three_layer_graph
 
-
 SIMPLE_LINEAR = """
 {
     "version": "1.0",
