@@ -103,8 +103,8 @@ hecate/
 ### Architecture layers
 
 ```
-engine/     → Zero external dependencies (no imports from services/, api/, models/)
-services/   → Depends only on models/ and external libraries
+engine/     → Zero external dependencies (no imports from services/, api/, models/); jsonschema for DSL validation is the sole exception
+services/   → Depends on models/, engine/ports (abstract interfaces only), and external libraries
 api/        → Depends on services/ and models/; never imports engine/ directly
 models/     → Pure data definitions; no business logic
 core/       → Infrastructure: config, database, dependency injection

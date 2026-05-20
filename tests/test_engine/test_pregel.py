@@ -91,10 +91,16 @@ def _make_linear_graph() -> CompiledGraph:
 def _make_conditional_graph() -> CompiledGraph:
     return CompiledGraph(
         nodes={
-            "start": NodeConfig(id="start", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "Start"}),
+            "start": NodeConfig(
+                id="start", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "Start"}
+            ),
             "check": NodeConfig(id="check", type=NodeType.CONDITION, config={"expression": "route"}),
-            "branch_a": NodeConfig(id="branch_a", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
-            "branch_b": NodeConfig(id="branch_b", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}),
+            "branch_a": NodeConfig(
+                id="branch_a", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}
+            ),
+            "branch_b": NodeConfig(
+                id="branch_b", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}
+            ),
         },
         edges=[
             Edge(source="start", target="check"),

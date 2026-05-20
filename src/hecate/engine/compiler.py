@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+
 from hecate.engine.graph_dsl import GraphValidationError
 from hecate.engine.types import (
     CompiledGraph,
     GraphConfig,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class GraphCompiler:
@@ -14,7 +18,9 @@ class GraphCompiler:
         """Validate the graph structure and return a compiled graph."""
         self._validate_entry(config)
         self._validate_edges(config)
-        self._detect_unreachable(config)
+        unreachable = self._detect_unreachable(config)
+        if unreachable:
+            logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
         return CompiledGraph(
             nodes=config.nodes,
             edges=config.edges,
@@ -55,20 +61,29 @@ class GraphCompiler:
                         )
 
     def _detect_unreachable(self, config: GraphConfig) -> list[str]:
-        """Return a list of node IDs that are not reachable from the entry point."""
-        reachable = {config.entry} if config.entry else set()
-        for node_id in config.nodes:
-            for edge in config.edges:
-                src = edge.source
-                tgt = edge.target if isinstance(edge.target, str) else ""
-                if src == node_id:
-                    reachable.add(node_id)
-                if isinstance(edge.target, dict):
-                    for t in edge.target.values():
-                        if t == node_id:
-                            reachable.add(node_id)
-                elif tgt == node_id:
-                    reachable.add(node_id)
+        """Return node IDs not reachable from the entry point via BFS."""
+        if not config.entry:
+            return []
 
-        unreachable = [nid for nid in config.nodes if nid not in reachable]
-        return unreachable
+        adjacency: dict[str, list[str]] = {nid: [] for nid in config.nodes}
+        for edge in config.edges:
+            if isinstance(edge.target, str):
+                if edge.source in adjacency and edge.target in config.nodes:
+                    adjacency[edge.source].append(edge.target)
+            elif isinstance(edge.target, dict):
+                for target_id in edge.target.values():
+                    if edge.source in adjacency and target_id in config.nodes:
+                        adjacency[edge.source].append(target_id)
+
+        visited: set[str] = set()
+        queue = [config.entry]
+        while queue:
+            node = queue.pop(0)
+            if node in visited:
+                continue
+            visited.add(node)
+            for neighbor in adjacency.get(node, []):
+                if neighbor not in visited:
+                    queue.append(neighbor)
+
+        return [nid for nid in config.nodes if nid not in visited]

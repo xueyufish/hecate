@@ -61,6 +61,7 @@ class TestGraphParser:
 
     def test_parse_dict_input(self):
         import json
+
         data = json.loads(SIMPLE_LINEAR)
         config = parse_graph(data)
         assert config.name == "test-linear"
@@ -120,6 +121,7 @@ class TestGraphCompiler:
 
     def test_dangling_edge_target_raises(self):
         from hecate.engine.types import ChannelDef, ChannelType, Edge, GraphConfig, NodeConfig, NodeType
+
         config = GraphConfig(
             name="bad",
             state={"messages": ChannelDef(type=ChannelType.TOPIC)},
@@ -132,18 +134,48 @@ class TestGraphCompiler:
 
     def test_unreachable_node_warning(self):
         from hecate.engine.types import ChannelDef, ChannelType, Edge, GraphConfig, NodeConfig, NodeType
+
         config = GraphConfig(
             name="orphan",
             state={"messages": ChannelDef(type=ChannelType.TOPIC)},
             nodes={
                 "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "x", "system_prompt": "x"}),
-                "orphan": NodeConfig(id="orphan", type=NodeType.CONVERSATION, config={"model": "x", "system_prompt": "x"}),
+                "orphan": NodeConfig(
+                    id="orphan", type=NodeType.CONVERSATION, config={"model": "x", "system_prompt": "x"}
+                ),
             },
             edges=[Edge(source="A", target="__end__")],
             entry="A",
         )
-        warnings = self.compiler._detect_unreachable(config)
-        assert "orphan" in warnings
+        unreachable = self.compiler._detect_unreachable(config)
+        assert "orphan" in unreachable
+
+    def test_disconnected_subgraph_detected(self, caplog):
+        import logging
+
+        from hecate.engine.types import ChannelDef, ChannelType, Edge, GraphConfig, NodeConfig, NodeType
+
+        config = GraphConfig(
+            name="disconnected",
+            state={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            nodes={
+                "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "x", "system_prompt": "x"}),
+                "B": NodeConfig(id="B", type=NodeType.CONVERSATION, config={"model": "x", "system_prompt": "x"}),
+                "C": NodeConfig(id="C", type=NodeType.CONVERSATION, config={"model": "x", "system_prompt": "x"}),
+                "D": NodeConfig(id="D", type=NodeType.CONVERSATION, config={"model": "x", "system_prompt": "x"}),
+            },
+            edges=[
+                Edge(source="A", target="B"),
+                Edge(source="C", target="D"),
+            ],
+            entry="A",
+        )
+        unreachable = self.compiler._detect_unreachable(config)
+        assert sorted(unreachable) == ["C", "D"]
+
+        with caplog.at_level(logging.WARNING):
+            self.compiler.compile(config)
+        assert any("C" in rec.message for rec in caplog.records)
 
     def test_compiled_graph_to_json_roundtrip(self):
         config = parse_graph(SIMPLE_LINEAR)
@@ -173,4 +205,3 @@ class TestThreeLayerTemplate:
         compiler = GraphCompiler()
         compiled = compiler.compile(config)
         assert compiled.entry_point == "guard"
-
