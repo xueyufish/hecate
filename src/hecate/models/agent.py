@@ -1,3 +1,10 @@
+"""Agent ORM model and Pydantic schemas.
+
+Defines the persistence layer (SQLAlchemy) and API schemas (Pydantic) for
+agents — the central entity that configures an AI assistant's behaviour,
+LLM settings, tools, skills, and knowledge bases.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -13,7 +20,25 @@ from hecate.models.base import BaseModel
 
 
 class AgentModel(BaseModel):
-    """ORM model for agents — the core entity representing an AI agent configuration."""
+    """ORM model for agents — the core entity representing an AI agent configuration.
+
+    Key fields:
+
+    - **workspace_id** — tenant scope. Defaults to the zero UUID for P1
+      single-workspace mode; reserved for P3 multi-tenancy support.
+    - **model_config_db** — JSONB column (column name ``model_config``)
+      storing the LLM configuration such as model name, temperature,
+      max tokens, etc.
+    - **mode** — execution mode: ``"chat"`` for a single LLM,
+      ``"three_layer"`` for the Guard → Planner → Sub-Agent pipeline,
+      ``"workflow"`` for a custom directed graph.
+    - **workflow_id** — references the graph definition when mode is
+      ``"workflow"``; ``None`` otherwise.
+    - **tools** / **skills** / **knowledge_base_ids** — lists of associated
+      resource IDs that the agent can access at runtime.
+    - **risk_level** — qualitative risk classification (e.g. ``"LOW"``,
+      ``"MEDIUM"``, ``"HIGH"``) used by the guard layer.
+    """
 
     __tablename__ = "agents"
 

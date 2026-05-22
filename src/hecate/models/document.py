@@ -1,3 +1,10 @@
+"""Document ORM model and Pydantic schemas.
+
+Defines the persistence layer and API schemas for documents — uploaded files
+that undergo parsing and chunking before being indexed into a knowledge base
+for retrieval-augmented generation.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -12,7 +19,22 @@ from hecate.models.base import BaseModel
 
 
 class DocumentModel(BaseModel):
-    """ORM model for documents — tracks uploaded files and their parsing status."""
+    """ORM model for documents — tracks uploaded files and their parsing status.
+
+    Key fields:
+
+    - **knowledge_base_id** — the knowledge base this document belongs to.
+    - **file_path** — object storage path within MinIO where the original
+      file is stored.
+    - **parsing_status** — state machine tracking document processing:
+      ``"pending"`` (uploaded, waiting) → ``"parsing"`` (in progress) →
+      ``"completed"`` (successfully parsed and indexed) or ``"failed"``
+      (error during parsing; see ``parsing_error`` for details).
+    - **parsing_error** — human-readable error message when
+      ``parsing_status`` is ``"failed"``; ``None`` otherwise.
+    - **chunk_count** — number of text chunks produced after successful
+      parsing. Set to ``0`` initially and updated once parsing completes.
+    """
 
     __tablename__ = "documents"
 

@@ -1,3 +1,12 @@
+"""Sub-graph execution with parent-child channel mapping.
+
+Provides the ``execute_subgraph`` helper that bridges a parent graph's channels
+to a child graph's channels, runs the child graph to completion in its own
+PregelRuntime, and propagates the final state back to the parent. This enables
+hierarchical graph composition where an AGENT-type node delegates to a nested
+graph definition.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -21,8 +30,37 @@ async def execute_subgraph(
 ) -> dict[str, Any]:
     """Execute a sub-graph and map its final state back to the parent channels.
 
-    Reads input from parent channels via channel_mapping, runs the sub-graph
-    to completion, then writes the final state back to parent channels.
+    **Channel mapping:** ``channel_mapping`` is a dict of ``{parent_channel_name:
+    child_channel_name}`` pairs that controls how data flows between the two
+    graphs. Before execution, each mapped parent channel is read and its value
+    is written to the corresponding child channel as initial input. After the
+    sub-graph completes, each mapped child channel's final value is written back
+    to the parent channel.
+
+    **Sub-runtime lifecycle:** A new PregelRuntime is created for the sub-graph
+    with its own ChannelManager, so the sub-graph executes in complete isolation
+    from the parent. The sub-graph runs to completion (no interrupt/resume is
+    propagated to the parent).
+
+    **State propagation:** Only the final state of the sub-graph (the last
+    VALUES event) is propagated back to the parent channels.
+
+    Args:
+        parent_graph: The parent graph definition (unused directly, kept for
+            future extensibility).
+        sub_graph: The compiled sub-graph to execute.
+        parent_channels: The parent graph's ChannelManager to read inputs from
+            and write outputs to.
+        worker: The Worker instance to use for node execution within the sub-graph.
+        checkpoint_store: Shared checkpoint store (sub-graph checkpoints are
+            stored under the same session_id).
+        session_id: The parent session ID, reused for the sub-graph.
+        channel_mapping: Optional dict mapping parent channel names to child
+            channel names. Defaults to ``{"messages": "messages", "context":
+            "context"}``.
+
+    Returns:
+        The final channel state dict of the sub-graph.
     """
     mapping = channel_mapping or {"messages": "messages", "context": "context"}
 

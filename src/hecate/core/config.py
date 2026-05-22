@@ -1,10 +1,33 @@
+"""Central application configuration powered by pydantic-settings.
+
+Loads settings from environment variables and an optional ``.env`` file,
+providing typed access to database, vector store, object storage, LLM, and
+security configuration across the entire application.
+"""
+
 from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables and .env file."""
+    """Application-wide settings loaded from environment variables and ``.env``.
+
+    Configuration groups:
+
+    - **Database**: ``DATABASE_URL`` — async PostgreSQL connection string.
+    - **Vector Store**: ``QDRANT_URL`` — Qdrant vector database endpoint used
+      for embedding search.
+    - **Object Storage**: ``MINIO_URL``, ``MINIO_ACCESS_KEY``,
+      ``MINIO_SECRET_KEY``, ``MINIO_BUCKET`` — MinIO/S3-compatible storage
+      for uploaded files and parsed documents.
+    - **LLM**: ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY`` — API keys for LLM
+      providers.
+    - **Security**: ``HECATE_API_KEYS`` — comma-separated API keys for
+      authenticating requests; ``LLM_GUARD_ENABLED`` — toggle input/output
+      guardrails; ``RATE_LIMIT_RPM`` — per-key rate limit (requests per
+      minute).
+    """
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -28,6 +51,11 @@ class Settings(BaseSettings):
 
     @property
     def api_keys_list(self) -> list[str]:
+        """Split the comma-separated ``HECATE_API_KEYS`` string into a list.
+
+        Whitespace around each key is stripped and empty entries are
+        discarded, so ``"key1, key2,"`` yields ``["key1", "key2"]``.
+        """
         return [k.strip() for k in self.HECATE_API_KEYS.split(",") if k.strip()]
 
 

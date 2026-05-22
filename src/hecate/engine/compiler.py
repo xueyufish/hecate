@@ -1,3 +1,11 @@
+"""Graph compilation pipeline: GraphConfig -> validation -> CompiledGraph.
+
+The compiler takes a parsed GraphConfig and performs structural validation
+(entry point existence, edge reference integrity, and reachability analysis)
+before producing a CompiledGraph that is ready for execution by the Pregel runtime.
+Unreachable nodes are logged as warnings but do not prevent compilation.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -12,10 +20,33 @@ logger = logging.getLogger(__name__)
 
 
 class GraphCompiler:
-    """Compiles a GraphConfig into a validated CompiledGraph ready for execution."""
+    """Compiles a GraphConfig into a validated CompiledGraph ready for execution.
+
+    The compilation pipeline consists of three validation stages followed by
+    CompiledGraph construction:
+
+    1. **Entry validation** -- ensures the declared entry point references a real node.
+    2. **Edge validation** -- ensures every edge source and target references a
+       real node or a sentinel (``__start__``, ``__end__``).
+    3. **Reachability analysis** -- performs a BFS from the entry point and warns
+       about any nodes that cannot be reached.
+
+    The compiler intentionally does **not** reject graphs with unreachable nodes.
+    This allows graphs to be incrementally built and tested during development.
+    """
 
     def compile(self, config: GraphConfig) -> CompiledGraph:
-        """Validate the graph structure and return a compiled graph."""
+        """Validate the graph structure and return a compiled graph.
+
+        Args:
+            config: The parsed graph configuration to compile.
+
+        Returns:
+            A CompiledGraph ready for execution.
+
+        Raises:
+            GraphValidationError: if entry or edge validation fails.
+        """
         self._validate_entry(config)
         self._validate_edges(config)
         unreachable = self._detect_unreachable(config)
@@ -30,6 +61,14 @@ class GraphCompiler:
         )
 
     def _validate_entry(self, config: GraphConfig) -> None:
+        """Ensure the declared entry point references an existing node.
+
+        Silently returns if no entry point is declared (empty-string entry is
+        allowed for graphs that are started via explicit node selection).
+
+        Raises:
+            GraphValidationError: if the entry point is declared but not found.
+        """
         if not config.entry:
             return
         if config.entry not in config.nodes:
@@ -39,6 +78,15 @@ class GraphCompiler:
             )
 
     def _validate_edges(self, config: GraphConfig) -> None:
+        """Ensure every edge source and target references a valid node ID.
+
+        Sentinel node IDs ``__start__`` and ``__end__`` are treated as valid
+        targets/sources in addition to declared node IDs. Conditional edges
+        (dict-valued targets) have each branch validated independently.
+
+        Raises:
+            GraphValidationError: if any edge source or target is invalid.
+        """
         node_ids = set(config.nodes.keys()) | {"__start__", "__end__"}
         for edge in config.edges:
             if edge.source not in node_ids:
@@ -61,7 +109,18 @@ class GraphCompiler:
                         )
 
     def _detect_unreachable(self, config: GraphConfig) -> list[str]:
-        """Return node IDs not reachable from the entry point via BFS."""
+        """Return node IDs not reachable from the entry point via BFS.
+
+        Performs a breadth-first traversal over the edge graph starting from
+        the declared entry point. A node is considered "unreachable" if there
+        is no path of edges from the entry point to that node. Conditional
+        edges (dict-valued targets) are conservatively treated as if all
+        branches are taken, so all dict values are included as neighbors.
+
+        Returns:
+            A list of node IDs that cannot be reached. Empty if the graph
+            is fully connected or has no entry point.
+        """
         if not config.entry:
             return []
 

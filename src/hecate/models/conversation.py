@@ -1,3 +1,13 @@
+"""Conversation ORM model and Pydantic schemas.
+
+Defines the persistence layer and API schemas for conversations, which group
+messages under an agent. Each session has a 1:1 relationship with a
+conversation via ``session.conversation_id → conversation.id``.
+
+When a session is created with ``conversation_id = None``, a conversation is
+created automatically and linked back to the session.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -12,7 +22,20 @@ from hecate.models.base import BaseModel
 
 
 class ConversationModel(BaseModel):
-    """ORM model for conversations — groups messages under an agent."""
+    """ORM model for conversations — groups messages under an agent.
+
+    A conversation represents a single dialogue thread between a user and an
+    agent. It has a 1:1 relationship with a session
+    (``session.conversation_id → conversation.id``).
+
+    When a session is created without an existing ``conversation_id``, a new
+    conversation is created automatically and linked to the session.
+
+    Key fields:
+
+    - **agent_id** — the agent this conversation belongs to.
+    - **title** — optional human-readable title for display in UIs.
+    """
 
     __tablename__ = "conversations"
 

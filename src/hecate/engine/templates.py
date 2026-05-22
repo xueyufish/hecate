@@ -1,3 +1,10 @@
+"""Preset graph templates for common agent architectures.
+
+This module provides factory functions that return pre-built GraphConfig instances.
+These templates encode proven patterns and can be used as-is or as starting points
+for customization via the Graph DSL.
+"""
+
 from __future__ import annotations
 
 from hecate.engine.types import (
@@ -20,9 +27,35 @@ def build_three_layer_graph(
 ) -> GraphConfig:
     """Build the preset three-layer Agent graph: Guard -> Planner -> Sub-Agent.
 
-    The planner checks for tool calls after each step. If a tool call is present,
-    execution goes to the tool_call node and loops back to the planner. Otherwise,
-    the sub_agent node handles the task and the graph ends.
+    **Architecture pattern:**
+
+    1. **Guard** (CONVERSATION) -- inspects user input for safety/policy violations
+       and passes safe messages to the planner.
+    2. **Planner** (CONVERSATION) -- decides the next action. After each step, the
+       ``check_tools`` condition node inspects the planner's output:
+       - If a tool call is present (``has_tool_call`` is true), execution routes to
+         the ``tool_call`` node which executes the tool and loops back to the planner.
+       - If no tool call is present, execution routes to the sub-agent.
+    3. **Sub-Agent** (AGENT) -- handles the actual task and the graph ends.
+
+    **State channels:**
+    - ``messages`` (TOPIC): accumulates all conversation turns and tool results.
+    - ``context`` (LAST_VALUE): holds the latest planning context (overwritten each step).
+
+    Use this template when you need a standard input-safety-check -> plan -> execute
+    workflow. For custom control flows, build a GraphConfig directly or modify the
+    one returned here.
+
+    Args:
+        guard_model: LLM model identifier for the guard node.
+        planner_model: LLM model identifier for the planner node.
+        sub_agent_model: Model or agent reference for the sub-agent node.
+        guard_prompt: System prompt for the guard node.
+        planner_prompt: System prompt for the planner node.
+        sub_agent_prompt: System prompt for the sub-agent node.
+
+    Returns:
+        A complete GraphConfig ready for compilation and execution.
     """
     nodes = {
         "guard": NodeConfig(

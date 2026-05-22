@@ -1,3 +1,17 @@
+"""JSON-to-GraphConfig parsing pipeline with schema validation.
+
+This module implements the first stage of the graph lifecycle: converting a raw
+JSON definition (string or dict) into a typed GraphConfig dataclass. The pipeline
+has two stages:
+
+1. **JSON Schema validation** -- the raw data is validated against the Graph DSL
+   JSON Schema (``schemas/graph-dsl.schema.json``) using jsonschema. Validation
+   errors are wrapped in GraphValidationError with a ``field`` attribute that
+   carries the dotted JSON path for error localization in user-facing messages.
+2. **Typed construction** -- the validated dict is converted into ChannelDef,
+   NodeConfig, Edge, and GraphConfig dataclasses.
+"""
+
 from __future__ import annotations
 
 import json
@@ -18,7 +32,14 @@ SCHEMA_PATH = Path(__file__).parent.parent.parent.parent / "schemas" / "graph-ds
 
 
 class GraphValidationError(Exception):
-    """Raised when a graph definition fails schema or structural validation."""
+    """Raised when a graph definition fails schema or structural validation.
+
+    Attributes:
+        field: Dotted JSON path pointing to the invalid element (e.g.
+            ``"nodes.guard.config.model"``). Carried from jsonschema's
+            ``absolute_path`` for user-facing error localization. None when
+            the error applies to the entire document.
+    """
 
     def __init__(self, message: str, field: str | None = None):
         self.field = field
@@ -26,6 +47,11 @@ class GraphValidationError(Exception):
 
 
 def _load_schema() -> dict:
+    """Load the Graph DSL JSON Schema from disk.
+
+    The schema file is located at ``schemas/graph-dsl.schema.json`` relative
+    to the project root (computed from this module's file path).
+    """
     with open(SCHEMA_PATH) as f:
         return json.load(f)
 
@@ -33,8 +59,22 @@ def _load_schema() -> dict:
 def parse_graph(raw: str | dict) -> GraphConfig:
     """Parse and validate a JSON graph definition into a GraphConfig.
 
-    Accepts a JSON string or a pre-parsed dict. Validates against the
-    Graph DSL JSON Schema and converts the result into typed dataclasses.
+    The pipeline proceeds through two stages:
+
+    1. **Deserialization** -- if ``raw`` is a string, it is parsed as JSON.
+       Pre-parsed dicts are accepted directly.
+    2. **Schema validation** -- the data is validated against the Graph DSL
+       JSON Schema. On failure, a GraphValidationError is raised with the
+       ``field`` attribute set to the dotted path of the offending element.
+
+    Args:
+        raw: A JSON string or a pre-parsed dict representing a graph definition.
+
+    Returns:
+        A fully typed GraphConfig.
+
+    Raises:
+        GraphValidationError: if the input is malformed or fails schema validation.
     """
     if isinstance(raw, str):
         try:
@@ -73,7 +113,7 @@ def parse_graph(raw: str | dict) -> GraphConfig:
         edges.append(
             Edge(
                 source=edge_data["source"],
-                target=edge_data["target"],
+                target=edge_data.get("target"),
                 trigger=edge_data.get("trigger"),
             )
         )

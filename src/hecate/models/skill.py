@@ -1,3 +1,10 @@
+"""Skill ORM model and Pydantic schemas.
+
+Defines the persistence layer and API schemas for skills — reusable
+instruction sets that extend an agent's capabilities. Each skill stores
+the content of a SKILL.md file along with associated tools and metadata.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -13,7 +20,28 @@ from hecate.models.base import BaseModel
 
 
 class SkillModel(BaseModel):
-    """ORM model for skills — stores SKILL.md instructions and associated resources."""
+    """ORM model for skills — stores SKILL.md instructions and associated resources.
+
+    Key fields:
+
+    - **source** — origin of the skill: ``"system"`` (built-in, shipped with
+      Hecate), ``"user"`` (created by an end-user), or ``"project"``
+      (project-level, shared across agents in a workspace).
+    - **instructions** — the main skill content, typically the full text of
+      a ``SKILL.md`` file that defines the skill's behaviour and prompts.
+    - **allowed_tools** — list of tool names this skill is permitted to
+      invoke at runtime.
+    - **metadata_** — SQLAlchemy attribute ``metadata_`` mapping to column
+      ``metadata`` (see :class:`SessionModel` for the alias rationale).
+    - **scripts** — associated executable scripts referenced by the skill.
+    - **references** — supplementary reference materials (URLs, document
+      IDs, etc.).
+    - **max_tokens** — token budget for the skill's instructions when
+      injected into the agent context.
+    - **auto_load** — if ``True``, the skill is automatically injected into
+      the agent's system prompt at session start, without requiring
+      explicit user selection.
+    """
 
     __tablename__ = "skills"
 

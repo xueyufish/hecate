@@ -1,3 +1,11 @@
+"""Tool ORM model and Pydantic schemas.
+
+Defines the persistence layer and API schemas for tools — callable functions
+that agents can invoke at runtime. Tools originate from built-in
+definitions, custom user code, or MCP (Model Context Protocol) server
+discovery.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -13,7 +21,24 @@ from hecate.models.base import BaseModel
 
 
 class ToolModel(BaseModel):
-    """ORM model for tools — defines callable tools from builtin, custom, or MCP sources."""
+    """ORM model for tools — defines callable tools from builtin, custom, or MCP sources.
+
+    Key fields:
+
+    - **source** — origin of the tool: ``"builtin"`` (shipped with Hecate,
+      e.g. file search, web search), ``"custom"`` (user-defined via the
+      API), or ``"mcp"`` (discovered from an MCP server at runtime).
+    - **parameters** — JSON Schema describing the tool's input parameters.
+    - **returns** — optional JSON Schema describing the tool's return value.
+    - **risk_level** — qualitative risk classification used by the guard
+      layer to evaluate whether the tool call should proceed.
+    - **approval_required** — if ``True``, executing this tool triggers a
+      human-in-the-loop interrupt: the agent pauses and waits for explicit
+      user approval before the tool is invoked.
+    - **mcp_server** / **mcp_tool_name** — for ``"mcp"`` source tools,
+      these fields identify the originating MCP server and the tool name on
+      that server. ``None`` for non-MCP tools.
+    """
 
     __tablename__ = "tools"
 

@@ -1,3 +1,11 @@
+"""Worker interfaces for graph node execution.
+
+Defines the contract for executing individual graph nodes (Worker) and the
+dispatch mechanism for running them (WorkerPool). The execution engine dispatches
+one worker per node per superstep, passing a read-only channel snapshot and
+receiving a WorkerResult with channel updates and an optional Command.
+"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -6,25 +14,69 @@ from hecate.engine.types import WorkerResult
 
 
 class Worker(ABC):
-    """Abstract interface for executing a single graph node."""
+    """Abstract interface for executing a single graph node.
+
+    A Worker receives a node ID, its configuration, and a read-only snapshot
+    of all channels. It must return a WorkerResult containing channel updates
+    and an optional Command (interrupt, goto, or state update).
+    """
 
     @abstractmethod
     async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
-        """Execute a node and return the result with channel updates and optional command."""
+        """Execute a node and return the result.
+
+        The contract is:
+        1. **Read** -- extract needed values from ``channel_snapshot`` (read-only;
+           mutations to the dict will not affect engine state).
+        2. **Execute** -- perform the node's logic (LLM call, tool invocation,
+           condition evaluation, etc.).
+        3. **Return** -- produce a WorkerResult with ``channel_updates`` (a dict
+           of channel names to new values) and an optional ``command``.
+
+        Args:
+            node_id: The ID of the node to execute.
+            node_config: The node's configuration dict (model, prompts, channels, etc.).
+            channel_snapshot: A read-only deep copy of all channel values at the
+                start of this superstep.
+
+        Returns:
+            A WorkerResult with channel_updates, optional command, node_id, and
+            optional error.
+        """
         ...
 
 
 class WorkerPool(ABC):
-    """Abstract interface for dispatching worker execution."""
+    """Abstract interface for dispatching worker execution.
+
+    A WorkerPool controls how workers are scheduled and awaited. Implementations
+    may provide thread-based, process-based, or distributed dispatch.
+    """
 
     @abstractmethod
     async def dispatch(self, worker: Worker, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
-        """Dispatch a worker execution and await the result."""
+        """Dispatch a worker execution and await the result.
+
+        Args:
+            worker: The worker instance to execute.
+            node_id: The ID of the node being executed.
+            node_config: The node's configuration dict.
+            channel_snapshot: A read-only snapshot of all channel values.
+
+        Returns:
+            The WorkerResult produced by the worker.
+        """
         ...
 
 
 class DirectWorkerPool(WorkerPool):
-    """Direct async dispatch — runs worker in the current event loop (P1 default)."""
+    """Direct async dispatch -- runs worker in the current event loop.
+
+    This is the P1 default pool. It awaits each worker directly without
+    any parallelism, which simplifies debugging and avoids race conditions
+    in the initial implementation. For production workloads with I/O-bound
+    nodes, a thread or process-based pool can be substituted.
+    """
 
     async def dispatch(self, worker: Worker, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
         """Await the worker directly in the current event loop."""

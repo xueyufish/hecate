@@ -86,7 +86,8 @@ hecate/
 | No commented-out code | Delete unused code completely; do not comment it out |
 | Exception for errors | Use exceptions to indicate errors, not return `None` |
 | String formatting | Use f-strings (Python 3.12+); avoid `+` or `+=` for string concatenation in loops |
-| Docstrings | All public classes and methods MUST have docstrings in English; private methods (`_` prefix) and self-explanatory ones are exempt |
+| Docstrings | All modules, public classes, and public methods MUST have docstrings in English. Docstrings must explain: purpose, parameters (when not obvious from name/type), return value/shape, and important behavior or side effects. Module-level docstrings must explain the module's role in the architecture. Private methods (`_` prefix) are exempt only when truly self-explanatory |
+| Inline comments | Only for non-obvious logic; explain **why** not **what**. No comments that merely restate the code |
 
 ### Naming conventions
 

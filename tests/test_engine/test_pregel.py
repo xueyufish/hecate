@@ -1,3 +1,20 @@
+"""Tests for the Pregel runtime execution engine.
+
+Validates the core superstep-driven execution loop that drives graph-based
+agent workflows.  Covered behaviours:
+
+- Linear multi-node execution and checkpoint persistence.
+- Interrupt / resume semantics (pause at a node, restore state, continue).
+- Conditional branching via the ``_route`` channel.
+- ``Command.goto`` jumps that skip intermediate nodes.
+- Cycle detection via ``max_supersteps`` guard.
+- ``ChannelManager`` semantics for all channel types (LAST_VALUE, TOPIC,
+  ACCUMULATOR).
+
+The tests use lightweight **worker stubs** instead of real LLM calls, keeping
+them fast and deterministic.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -21,6 +38,12 @@ from hecate.engine.worker import Worker
 
 
 class SimpleWorker(Worker):
+    """Pass-through worker that echoes the node id as output.
+
+    Used as the baseline worker in tests that do not need interrupts,
+    routing, or goto commands.
+    """
+
     async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
         return WorkerResult(
             node_id=node_id,
@@ -29,6 +52,12 @@ class SimpleWorker(Worker):
 
 
 class InterruptWorker(Worker):
+    """Worker that emits an interrupt ``Command`` when reaching a target node.
+
+    All other nodes behave like ``SimpleWorker``.  The ``interrupt_at``
+    parameter controls which node triggers the interrupt, defaulting to ``B``.
+    """
+
     def __init__(self, interrupt_at: str = "B"):
         self._interrupt_at = interrupt_at
 
@@ -46,6 +75,13 @@ class InterruptWorker(Worker):
 
 
 class RoutingWorker(Worker):
+    """Worker that writes a route value on the ``_route`` channel at a condition node.
+
+    This simulates a conditional node deciding which branch to take.  The
+    ``route_value`` parameter (``"true"`` or ``"false"``) determines the edge
+    the engine will follow out of the condition node (``"check"``).
+    """
+
     def __init__(self, route_value: str = "true"):
         self._route_value = route_value
 
@@ -57,6 +93,12 @@ class RoutingWorker(Worker):
 
 
 class GotoWorker(Worker):
+    """Worker that issues a ``Command.goto("C")`` when executing node A.
+
+    Used to verify that the runtime can skip intermediate nodes (B) and jump
+    directly to a downstream node (C).
+    """
+
     async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
         if node_id == "A":
             return WorkerResult(
@@ -71,7 +113,13 @@ class GotoWorker(Worker):
 
 
 class InterruptRoutingWorker(Worker):
-    """Worker that interrupts at a condition node while setting a specific route."""
+    """Worker that interrupts at a condition node while setting a specific route.
+
+    Combines the behaviours of ``InterruptWorker`` and ``RoutingWorker``:
+    when the engine reaches the ``"check"`` node it writes ``_route`` and
+    raises an interrupt simultaneously.  On resume the engine must honour the
+    route that was set before the interrupt.
+    """
 
     def __init__(self, route_value: str = "false"):
         self._route_value = route_value
@@ -90,6 +138,11 @@ class InterruptRoutingWorker(Worker):
 
 
 def _make_linear_graph() -> CompiledGraph:
+    """Build a three-node linear graph: A -> B -> C -> END.
+
+    Each node is a ``CONVERSATION`` type.  The single ``messages`` TOPIC
+    channel collects output from every superstep.
+    """
     return CompiledGraph(
         nodes={
             "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
@@ -108,6 +161,12 @@ def _make_linear_graph() -> CompiledGraph:
 
 
 def _make_conditional_graph() -> CompiledGraph:
+    """Build a graph with a conditional branch: start -> check -> branch_a | branch_b.
+
+    The ``check`` node is a ``CONDITION`` type whose outgoing edge maps
+    ``{"true": "branch_a", "false": "branch_b"}``.  Both branches lead to
+    ``__end__``.
+    """
     return CompiledGraph(
         nodes={
             "start": NodeConfig(
@@ -134,6 +193,11 @@ def _make_conditional_graph() -> CompiledGraph:
 
 
 def _make_goto_graph() -> CompiledGraph:
+    """Build a linear graph (A -> B -> C) used to test Command.goto skips.
+
+    The topology is identical to ``_make_linear_graph``; the difference is
+    that tests pair it with ``GotoWorker`` which jumps from A directly to C.
+    """
     return CompiledGraph(
         nodes={
             "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
@@ -152,8 +216,11 @@ def _make_goto_graph() -> CompiledGraph:
 
 
 class TestLinearExecution:
+    """Verify that the engine processes a straight-line graph from entry to END."""
+
     @pytest.mark.asyncio
     async def test_linear_three_nodes(self):
+        """All three nodes execute in order and emit a final values event."""
         graph = _make_linear_graph()
         worker = SimpleWorker()
         store = InMemoryCheckpointStore()
@@ -169,6 +236,7 @@ class TestLinearExecution:
 
     @pytest.mark.asyncio
     async def test_checkpoints_saved(self):
+        """A checkpoint is persisted after each superstep so the session can be resumed."""
         graph = _make_linear_graph()
         worker = SimpleWorker()
         store = InMemoryCheckpointStore()
@@ -183,8 +251,13 @@ class TestLinearExecution:
 
 
 class TestInterruptResume:
+    """Validate interrupt-then-resume semantics: execution pauses at a node,
+    preserves channel state in a checkpoint, and continues correctly after the
+    caller supplies a resume value."""
+
     @pytest.mark.asyncio
     async def test_interrupt_stops_execution(self):
+        """When a worker raises an interrupt the runtime stops and reports the interrupt event."""
         graph = _make_linear_graph()
         worker = InterruptWorker(interrupt_at="B")
         store = InMemoryCheckpointStore()
@@ -200,6 +273,7 @@ class TestInterruptResume:
 
     @pytest.mark.asyncio
     async def test_resume_from_interrupt(self):
+        """Resuming with a fresh runtime instance replays from the checkpoint and runs the remaining nodes."""
         graph = _make_linear_graph()
         worker = InterruptWorker(interrupt_at="B")
         store = InMemoryCheckpointStore()
@@ -211,8 +285,10 @@ class TestInterruptResume:
             results.append(event)
 
         assert runtime.is_interrupted
+        # Only A and B executed before the interrupt; C is still pending.
         assert len(results) == 2
 
+        # Resume with a new runtime that uses a non-interrupting worker.
         runtime2 = PregelRuntime(graph, SimpleWorker(), store)
         resume_results = []
         async for event in runtime2.execute(session_id, resume_value="approved"):
@@ -226,6 +302,7 @@ class TestInterruptResume:
 
     @pytest.mark.asyncio
     async def test_interrupt_preserves_channel_state(self):
+        """Channel state written before the interrupt is captured in the checkpoint."""
         graph = _make_linear_graph()
         worker = InterruptWorker(interrupt_at="B")
         store = InMemoryCheckpointStore()
@@ -241,8 +318,12 @@ class TestInterruptResume:
 
 
 class TestConditionalExecution:
+    """Verify that the engine follows the correct branch when a condition node
+    writes a route value to the ``_route`` channel."""
+
     @pytest.mark.asyncio
     async def test_conditional_true_branch(self):
+        """When ``_route`` is ``"true"`` the engine executes branch_a and skips branch_b."""
         graph = _make_conditional_graph()
         worker = RoutingWorker(route_value="true")
         store = InMemoryCheckpointStore()
@@ -260,6 +341,7 @@ class TestConditionalExecution:
 
     @pytest.mark.asyncio
     async def test_conditional_false_branch(self):
+        """When ``_route`` is ``"false"`` the engine executes branch_b and skips branch_a."""
         graph = _make_conditional_graph()
         worker = RoutingWorker(route_value="false")
         store = InMemoryCheckpointStore()
@@ -277,8 +359,12 @@ class TestConditionalExecution:
 
 
 class TestCommandGoto:
+    """Validate that ``Command.goto`` causes the engine to jump to an arbitrary
+    downstream node, skipping any intermediate nodes."""
+
     @pytest.mark.asyncio
     async def test_goto_skips_intermediate_node(self):
+        """Node A issues goto(C); node B should never execute."""
         graph = _make_goto_graph()
         worker = GotoWorker()
         store = InMemoryCheckpointStore()
@@ -296,7 +382,11 @@ class TestCommandGoto:
 
 
 class TestChannelManager:
+    """Unit tests for ``ChannelManager`` write / read semantics across all
+    channel types, and for snapshot / restore round-tripping."""
+
     def test_last_value_overwrites(self):
+        """LAST_VALUE channel keeps only the most recent write."""
         mgr = ChannelManager()
         mgr.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
         mgr.write("val", "a")
@@ -304,6 +394,7 @@ class TestChannelManager:
         assert mgr.read("val") == "b"
 
     def test_topic_appends(self):
+        """TOPIC channel accumulates values into a list."""
         mgr = ChannelManager()
         mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
         mgr.write("msgs", "a")
@@ -311,6 +402,7 @@ class TestChannelManager:
         assert mgr.read("msgs") == ["a", "b"]
 
     def test_accumulator_adds(self):
+        """ACCUMULATOR channel reduces values using the configured function."""
         mgr = ChannelManager()
         mgr.register("count", ChannelDef(type=ChannelType.ACCUMULATOR, initial=0, reduce_fn="add"))
         mgr.write("count", 1)
@@ -319,6 +411,7 @@ class TestChannelManager:
         assert mgr.read("count") == 6
 
     def test_restore_rebuilds_state(self):
+        """A snapshot taken from one manager can fully restore another."""
         mgr = ChannelManager()
         mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
         mgr.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
@@ -335,6 +428,12 @@ class TestChannelManager:
 
 
 def _make_interrupt_conditional_graph() -> CompiledGraph:
+    """Build a conditional graph used for interrupt-then-resume routing tests.
+
+    Same topology as ``_make_conditional_graph`` but paired with
+    ``InterruptRoutingWorker`` so the engine interrupts at the ``check`` node
+    while simultaneously recording the chosen route.
+    """
     return CompiledGraph(
         nodes={
             "start": NodeConfig(
@@ -361,8 +460,12 @@ def _make_interrupt_conditional_graph() -> CompiledGraph:
 
 
 class TestInterruptResumeRouting:
+    """Verify that the route value recorded before an interrupt is honoured
+    after resume, so execution follows the correct branch."""
+
     @pytest.mark.asyncio
     async def test_resume_follows_false_branch(self):
+        """Interrupt at ``check`` with route=false; after resume, branch_b runs and branch_a does not."""
         graph = _make_interrupt_conditional_graph()
         worker = InterruptRoutingWorker(route_value="false")
         store = InMemoryCheckpointStore()
@@ -385,6 +488,7 @@ class TestInterruptResumeRouting:
 
     @pytest.mark.asyncio
     async def test_resume_follows_true_branch(self):
+        """Interrupt at ``check`` with route=true; after resume, branch_a runs and branch_b does not."""
         graph = _make_interrupt_conditional_graph()
         worker = InterruptRoutingWorker(route_value="true")
         store = InMemoryCheckpointStore()
@@ -407,8 +511,12 @@ class TestInterruptResumeRouting:
 
 
 class TestMaxSupersteps:
+    """Verify that the runtime raises an error when a graph cycles beyond the
+    configured superstep limit, preventing infinite loops."""
+
     @pytest.mark.asyncio
     async def test_cyclic_graph_raises(self):
+        """An A <-> B cycle should exhaust max_supersteps and raise RuntimeError."""
         graph = CompiledGraph(
             nodes={
                 "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
@@ -433,6 +541,7 @@ class TestMaxSupersteps:
 
     @pytest.mark.asyncio
     async def test_default_max_supersteps(self):
+        """When not explicitly set the runtime defaults to 100 supersteps."""
         graph = _make_linear_graph()
         worker = SimpleWorker()
         store = InMemoryCheckpointStore()

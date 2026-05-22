@@ -1,3 +1,10 @@
+"""Knowledge base ORM model and Pydantic schemas.
+
+Defines the persistence layer and API schemas for knowledge bases — the
+configuration layer that controls embedding model selection, chunking
+strategy, and the target Qdrant collection for document retrieval.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -12,7 +19,22 @@ from hecate.models.base import BaseModel
 
 
 class KnowledgeBaseModel(BaseModel):
-    """ORM model for knowledge bases — configures embedding and chunking for document retrieval."""
+    """ORM model for knowledge bases — configures embedding and chunking for document retrieval.
+
+    Key fields:
+
+    - **embedding_model** — the sentence-transformer model used to generate
+      embeddings. Defaults to ``"BAAI/bge-m3"`` per the AD-6 architecture
+      decision.
+    - **chunk_strategy** — text splitting approach: ``"fixed"`` (fixed-size
+      chunks with overlap), ``"auto"`` (adaptive based on document
+      structure), or ``"semantic"`` (semantic boundary detection).
+    - **chunk_size** / **chunk_overlap** — parameters controlling the chunker
+      behaviour (in tokens).
+    - **qdrant_collection** — the Qdrant collection name where this
+      knowledge base's document embeddings are stored. Set at creation time
+      and used for all vector similarity queries.
+    """
 
     __tablename__ = "knowledge_bases"
 

@@ -103,8 +103,10 @@ All 10 decisions finalized: self-built engine, five-layer architecture, checkpoi
 - DI via FastAPI `Depends()` in `core/deps.py`; never import sessions directly
 - `assert` is prohibited in production code; use proper validation
 - No commented-out code — delete unused code entirely
-- No comments unless the logic is non-obvious
-- Docstrings required on public classes and methods; private (`_` prefix) and self-explanatory ones exempt
+- Docstrings required on **all** modules, public classes, and public methods — private (`_` prefix) methods are exempt only when truly self-explanatory
+- Inline comments only for non-obvious logic — explain **why**, not **what**
+- Docstrings must explain: purpose, parameters (when not obvious from name/type), return value/shape, and important behavior or side effects
+- Module-level docstrings must explain the module's role in the architecture
 - f-strings for formatting; no `+`/`+=` string concatenation in loops
 
 ### Security Coding

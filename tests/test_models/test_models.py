@@ -1,3 +1,16 @@
+"""Tests for ORM models and Pydantic schemas.
+
+Covers two concerns:
+
+1. **ORM models** — verify that every SQLAlchemy model can be persisted,
+   flushed, and queried through an async session, including JSONB columns,
+   nullable foreign keys, default values, and status transitions.
+2. **Pydantic schemas** — verify that create/read schemas validate correctly,
+   reject invalid input, and can be built from ORM instances via
+   ``model_validate`` (including the ``metadata_`` -> ``metadata`` column alias
+   used to avoid colliding with SQLAlchemy's reserved ``metadata`` attribute).
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -47,8 +60,11 @@ from hecate.models.tool import (
 
 
 class TestAgentModel:
+    """Verify Agent ORM persistence: creation with defaults, soft delete, and JSONB fields."""
+
     @pytest.mark.asyncio
     async def test_create_agent(self, db_session: AsyncSession) -> None:
+        """A newly created agent gets server-generated defaults for mode and workspace_id."""
         agent = AgentModel(name="test-agent", model_config_db={"model": "gpt-4o", "temperature": 0.7})
         db_session.add(agent)
         await db_session.flush()
@@ -59,6 +75,7 @@ class TestAgentModel:
 
     @pytest.mark.asyncio
     async def test_soft_delete(self, db_session: AsyncSession) -> None:
+        """Setting deleted_at marks the agent as soft-deleted without removing the row."""
         agent = AgentModel(name="delete-me", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -68,6 +85,7 @@ class TestAgentModel:
 
     @pytest.mark.asyncio
     async def test_jsonb_fields(self, db_session: AsyncSession) -> None:
+        """JSONB columns (tools, knowledge_base_ids) round-trip lists and dicts correctly."""
         agent = AgentModel(
             name="jsonb-test",
             model_config_db={"model": "gpt-4o"},
@@ -81,20 +99,26 @@ class TestAgentModel:
 
 
 class TestAgentSchema:
+    """Validate AgentCreateSchema and AgentReadSchema Pydantic validation rules."""
+
     def test_create_schema_valid(self) -> None:
+        """A minimal valid payload fills in the default mode."""
         schema = AgentCreateSchema(name="test", model_config={"model": "gpt-4o"})
         assert schema.name == "test"
         assert schema.mode == "chat"
 
     def test_create_schema_missing_model_config(self) -> None:
+        """Omitting the required model_config field raises a validation error."""
         with pytest.raises(ValidationError):
             AgentCreateSchema(name="test")
 
     def test_create_schema_invalid_mode(self) -> None:
+        """An unsupported mode value is rejected."""
         with pytest.raises(ValidationError):
             AgentCreateSchema(name="test", model_config={}, mode="invalid")
 
     def test_read_schema_from_attributes(self) -> None:
+        """AgentReadSchema can be built from an ORM instance with all fields populated."""
         now = datetime.now()
         agent = AgentModel(
             name="read-test",
@@ -115,8 +139,11 @@ class TestAgentSchema:
 
 
 class TestConversationModel:
+    """Verify Conversation ORM creation and its one-to-one link with Session."""
+
     @pytest.mark.asyncio
     async def test_create_conversation(self, db_session: AsyncSession) -> None:
+        """A conversation linked to an agent persists with the correct foreign key."""
         agent = AgentModel(name="conv-agent", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -128,6 +155,7 @@ class TestConversationModel:
 
     @pytest.mark.asyncio
     async def test_conversation_auto_create_with_session(self, db_session: AsyncSession) -> None:
+        """A session can be created first with a null conversation_id and linked later."""
         agent = AgentModel(name="auto-conv", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -144,8 +172,11 @@ class TestConversationModel:
 
 
 class TestSessionModel:
+    """Verify Session ORM creation, default status, and status transitions."""
+
     @pytest.mark.asyncio
     async def test_create_session(self, db_session: AsyncSession) -> None:
+        """A new session defaults to ``active`` status."""
         agent = AgentModel(name="session-agent", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -157,6 +188,7 @@ class TestSessionModel:
 
     @pytest.mark.asyncio
     async def test_session_status_transition(self, db_session: AsyncSession) -> None:
+        """Session status and current_node can be updated after initial creation."""
         agent = AgentModel(name="status-agent", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -171,8 +203,12 @@ class TestSessionModel:
 
 
 class TestMessageModel:
+    """Verify Message ORM creation for user, assistant (with tool calls), and
+    tool-result messages."""
+
     @pytest.mark.asyncio
     async def test_create_message(self, db_session: AsyncSession) -> None:
+        """A basic user message persists with the correct role and content."""
         agent = AgentModel(name="msg-agent", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -191,6 +227,7 @@ class TestMessageModel:
 
     @pytest.mark.asyncio
     async def test_message_with_tool_calls(self, db_session: AsyncSession) -> None:
+        """An assistant message can store structured tool call data in a JSONB column."""
         agent = AgentModel(name="tc-agent", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -210,6 +247,7 @@ class TestMessageModel:
 
     @pytest.mark.asyncio
     async def test_tool_result_message(self, db_session: AsyncSession) -> None:
+        """A tool-result message links back to its originating tool call via tool_call_id."""
         agent = AgentModel(name="tr-agent", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -229,8 +267,11 @@ class TestMessageModel:
 
 
 class TestToolModel:
+    """Verify Tool ORM creation for builtin and MCP tools, plus schema validation."""
+
     @pytest.mark.asyncio
     async def test_create_builtin_tool(self, db_session: AsyncSession) -> None:
+        """A builtin tool defaults to ``approval_required=False``."""
         tool = ToolModel(
             name="search",
             description="Web search",
@@ -244,6 +285,7 @@ class TestToolModel:
 
     @pytest.mark.asyncio
     async def test_create_mcp_tool(self, db_session: AsyncSession) -> None:
+        """An MCP tool stores its server URL and tool name for runtime discovery."""
         tool = ToolModel(
             name="mcp_tool",
             description="MCP tool",
@@ -257,6 +299,7 @@ class TestToolModel:
         assert tool.mcp_server == "http://mcp-server:8080"
 
     def test_tool_create_schema(self) -> None:
+        """ToolCreateSchema accepts a valid builtin tool definition."""
         schema = ToolCreateSchema(
             name="test",
             description="desc",
@@ -266,6 +309,7 @@ class TestToolModel:
         assert schema.source == "builtin"
 
     def test_tool_invalid_source(self) -> None:
+        """An unrecognised tool source is rejected by the schema."""
         with pytest.raises(ValidationError):
             ToolCreateSchema(
                 name="test",
@@ -276,8 +320,11 @@ class TestToolModel:
 
 
 class TestKnowledgeBaseModel:
+    """Verify KnowledgeBase ORM creation with defaults and schema defaults."""
+
     @pytest.mark.asyncio
     async def test_create_knowledge_base(self, db_session: AsyncSession) -> None:
+        """A new knowledge base gets server defaults for embedding model and chunk settings."""
         kb = KnowledgeBaseModel(
             name="test-kb",
             qdrant_collection="kb_test",
@@ -289,14 +336,19 @@ class TestKnowledgeBaseModel:
         assert kb.chunk_overlap == 100
 
     def test_kb_create_schema_defaults(self) -> None:
+        """KnowledgeBaseCreateSchema provides defaults for embedding_model and chunk_strategy."""
         schema = KnowledgeBaseCreateSchema(name="test")
         assert schema.embedding_model == "BAAI/bge-m3"
         assert schema.chunk_strategy == "fixed"
 
 
 class TestDocumentModel:
+    """Verify Document ORM creation, initial status, and status transitions
+    through the parsing lifecycle."""
+
     @pytest.mark.asyncio
     async def test_create_document(self, db_session: AsyncSession) -> None:
+        """A new document defaults to ``pending`` parsing status with zero chunks."""
         kb = KnowledgeBaseModel(name="doc-kb", qdrant_collection="kb_doc")
         db_session.add(kb)
         await db_session.flush()
@@ -314,6 +366,7 @@ class TestDocumentModel:
 
     @pytest.mark.asyncio
     async def test_document_status_transition(self, db_session: AsyncSession) -> None:
+        """A document can transition from pending to parsing to completed with a chunk count."""
         kb = KnowledgeBaseModel(name="status-kb", qdrant_collection="kb_status")
         db_session.add(kb)
         await db_session.flush()
@@ -334,6 +387,7 @@ class TestDocumentModel:
 
     @pytest.mark.asyncio
     async def test_document_parsing_failed(self, db_session: AsyncSession) -> None:
+        """A failed document stores an error message alongside the failed status."""
         kb = KnowledgeBaseModel(name="fail-kb", qdrant_collection="kb_fail")
         db_session.add(kb)
         await db_session.flush()
@@ -352,8 +406,11 @@ class TestDocumentModel:
 
 
 class TestSkillModel:
+    """Verify Skill ORM creation with defaults and schema name-pattern validation."""
+
     @pytest.mark.asyncio
     async def test_create_skill(self, db_session: AsyncSession) -> None:
+        """A new skill gets server defaults for max_tokens and auto_load."""
         skill = SkillModel(
             name="developer",
             description="Development skill",
@@ -366,6 +423,7 @@ class TestSkillModel:
         assert skill.auto_load is False
 
     def test_skill_name_pattern(self) -> None:
+        """SkillCreateSchema accepts kebab-case names matching the allowed pattern."""
         schema = SkillCreateSchema(
             name="web-search",
             description="desc",
@@ -375,6 +433,7 @@ class TestSkillModel:
         assert schema.name == "web-search"
 
     def test_skill_invalid_name(self) -> None:
+        """Names with spaces or special characters are rejected by the schema."""
         with pytest.raises(ValidationError):
             SkillCreateSchema(
                 name="Invalid Name!",
@@ -385,8 +444,11 @@ class TestSkillModel:
 
 
 class TestCheckpointModel:
+    """Verify Checkpoint ORM creation, sequential superstep ordering, and schema defaults."""
+
     @pytest.mark.asyncio
     async def test_create_checkpoint(self, db_session: AsyncSession) -> None:
+        """A checkpoint stores channel_state as JSONB alongside its superstep index."""
         agent = AgentModel(name="cp-agent", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -406,6 +468,7 @@ class TestCheckpointModel:
 
     @pytest.mark.asyncio
     async def test_checkpoint_sequential_supersteps(self, db_session: AsyncSession) -> None:
+        """Multiple checkpoints can be persisted for the same session with increasing superstep numbers."""
         agent = AgentModel(name="seq-agent", model_config_db={})
         db_session.add(agent)
         await db_session.flush()
@@ -424,6 +487,7 @@ class TestCheckpointModel:
         assert len([c for c in db_session.new]) == 0
 
     def test_checkpoint_create_schema_defaults(self) -> None:
+        """CheckpointCreateSchema fills empty defaults for channel_state, pending_writes, and metadata."""
         schema = CheckpointCreateSchema(
             session_id=uuid.uuid4(),
             superstep=1,
@@ -434,9 +498,17 @@ class TestCheckpointModel:
 
 
 class TestReadSchemaFromAttributes:
-    """Verify that ReadSchema.model_validate(orm_instance) works for all models with metadata_ columns."""
+    """Verify that ``ReadSchema.model_validate(orm_instance)`` works for all
+    models that have a ``metadata_`` column.
+
+    Because ``metadata`` is a reserved attribute on SQLAlchemy's declarative
+    base, the ORM column is named ``metadata_`` while the Pydantic schema
+    exposes it as ``metadata``.  These tests confirm that the alias mapping
+    works correctly when building a read schema directly from an ORM object.
+    """
 
     def _make_base_attrs(self) -> dict:
+        """Return common attributes (id, timestamps) shared by all models."""
         now = datetime.now()
         return {"id": uuid.uuid4(), "created_at": now, "updated_at": now}
 

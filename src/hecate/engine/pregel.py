@@ -1,3 +1,25 @@
+"""Pregel/BSP execution engine for compiled graphs.
+
+This module implements the core graph execution runtime based on the Bulk
+Synchronous Parallel (BSP) model, inspired by Google's Pregel framework.
+Execution proceeds in discrete **supersteps**:
+
+1. **Snapshot** -- capture the current channel state.
+2. **Dispatch** -- send the snapshot to all workers scheduled for this superstep.
+3. **Collect** -- gather WorkerResults; apply channel writes; handle interrupts.
+4. **Checkpoint** -- persist the updated state.
+5. **Resolve** -- determine the next set of nodes from the edge graph.
+6. **Yield** -- emit streaming events based on the configured StreamMode.
+
+The loop terminates when there are no more nodes to execute, the graph reaches
+the ``__end__`` sentinel, a worker raises an error, or a worker returns a
+``Command(interrupt=...)`` to pause execution for human-in-the-loop workflows.
+
+Interrupt/resume is checkpoint-based: on interrupt the full state is persisted.
+On resume, the state is restored and execution continues from the node that
+follows the interrupted node in the edge graph.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -24,6 +46,13 @@ class PregelRuntime:
     Command(interrupt=...), execution pauses and checkpoint is saved. Calling
     execute() again with resume_value restores state from the last checkpoint
     and continues from the node following the interrupt.
+
+    Key fields:
+        _interrupt_updates: Stores the channel_updates dict from the worker that
+            triggered the interrupt. This is needed on resume to re-evaluate
+            conditional edges (dict-valued targets) using the ``_route`` key that
+            the interrupted worker may have written, ensuring correct routing to
+            the next node after the interrupt point.
     """
 
     def __init__(
@@ -58,8 +87,34 @@ class PregelRuntime:
     ) -> AsyncGenerator[dict, None]:
         """Execute the graph and yield events based on the stream mode.
 
-        If resume_value is provided, restores state from the last checkpoint
-        and continues execution from the node after the interrupt point.
+        **Initialization phase:**
+        - If ``resume_value`` is provided, the runtime restores state from the
+          last checkpoint and resolves the next nodes after the interrupt point.
+        - Otherwise, ``initial_input`` is written to channels and execution
+          starts from the graph's entry point.
+
+        **Superstep loop** (repeats until no more nodes, __end__ reached, or interrupt):
+
+        1. Increment superstep counter; raise RuntimeError if ``max_supersteps`` is
+           exceeded (guards against infinite loops in cyclic graphs).
+        2. Snapshot all channels and dispatch each scheduled node to the worker pool.
+        3. Process results: raise on error, apply channel writes, handle commands
+           (interrupt causes an immediate checkpoint save and yield).
+        4. Save a regular checkpoint for the completed superstep.
+        5. Yield streaming events based on ``stream_mode``:
+           - UPDATES: one event per worker with its channel_updates.
+           - VALUES: one event with the full channel state snapshot.
+        6. Resolve the next set of nodes from the edge graph.
+
+        Args:
+            session_id: Identifies the execution session for checkpoint scoping.
+            initial_input: Optional dict of channel values to write before execution starts.
+            stream_mode: Controls what events are yielded (UPDATES or VALUES).
+            resume_value: If provided, restores from the last checkpoint and injects
+                this value as the ``_resume_value`` channel, then continues execution.
+
+        Yields:
+            Dicts with ``"type"`` key: ``"interrupt"``, ``"update"``, or ``"values"``.
         """
         if resume_value is not None:
             await self._restore_from_checkpoint(session_id, resume_value)
@@ -143,7 +198,16 @@ class PregelRuntime:
             current_nodes = self._resolve_next_nodes(results)
 
     async def _restore_from_checkpoint(self, session_id: uuid.UUID, resume_value: Any) -> None:
-        """Restore channel state and execution context from the last checkpoint."""
+        """Restore channel state and execution context from the last checkpoint.
+
+        After restoring, clears the interrupted flag and injects ``resume_value``
+        into the ``_resume_value`` channel so that the resumed worker can access
+        the human-provided input.
+
+        Args:
+            session_id: The session whose latest checkpoint to load.
+            resume_value: Value to write to the ``_resume_value`` channel after restore.
+        """
         checkpoint = await self._checkpoint_store.load(session_id)
         if checkpoint is None:
             return
@@ -157,7 +221,17 @@ class PregelRuntime:
             self._channel_manager.write("_resume_value", resume_value)
 
     def _resolve_next_nodes_after_interrupt(self) -> list[str]:
-        """Determine the next nodes to execute after restoring from an interrupt checkpoint."""
+        """Determine the next nodes to execute after restoring from an interrupt checkpoint.
+
+        Looks up all edges whose source is the interrupted node. For conditional
+        edges (dict-valued targets), uses the ``_route`` key from ``_interrupt_updates``
+        to select the correct branch. Falls back to the entry point if no edges
+        are found and one is defined.
+
+        Returns:
+            A deduplicated list of node IDs to execute next, or an empty list
+            if the edge leads to ``__end__``.
+        """
         if self._interrupted_node is None:
             return [self._graph.entry_point] if self._graph.entry_point else []
         next_nodes: list[str] = []
@@ -179,7 +253,17 @@ class PregelRuntime:
         return []
 
     def _resolve_next_nodes(self, results: list[WorkerResult]) -> list[str]:
-        """Determine the next set of nodes to execute based on edges and commands."""
+        """Determine the next set of nodes to execute based on edges and commands.
+
+        For each worker result, checks if a ``Command(goto=...)`` was returned
+        (explicit routing). If not, looks up all edges whose source matches the
+        completed node. For conditional edges, reads the ``_route`` key from the
+        worker's channel_updates to select the correct branch.
+
+        Returns:
+            A deduplicated list of node IDs to execute next, or an empty list
+            if any edge leads to ``__end__``.
+        """
         next_nodes: list[str] = []
         for result in results:
             if result.command and result.command.is_goto():

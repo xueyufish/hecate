@@ -1,3 +1,10 @@
+"""Message ORM model and Pydantic schemas.
+
+Defines the persistence layer and API schemas for messages — individual
+turns within a conversation, including assistant responses with tool calls
+and the corresponding tool results.
+"""
+
 from __future__ import annotations
 
 import uuid
@@ -13,7 +20,23 @@ from hecate.models.base import BaseModel
 
 
 class MessageModel(BaseModel):
-    """ORM model for messages — stores conversation messages with optional tool calls."""
+    """ORM model for messages — stores conversation messages with optional tool calls.
+
+    Key fields:
+
+    - **role** — message origin: ``"system"``, ``"user"``, ``"assistant"``,
+      or ``"tool"``.
+    - **tool_calls** — when the assistant invokes tools, this JSONB column
+      stores a list of call descriptors with the shape:
+      ``[{"id": "call_xxx", "function": {"name": "...", "arguments": "..."}}]``.
+      ``None`` for non-assistant messages or assistant messages without tool
+      use.
+    - **tool_call_id** — for ``"tool"`` role messages, this field links the
+      tool result back to the corresponding ``tool_calls[].id`` from the
+      preceding assistant message.
+    - **metadata_** — SQLAlchemy attribute ``metadata_`` mapping to column
+      ``metadata`` (see :class:`SessionModel` for the alias rationale).
+    """
 
     __tablename__ = "messages"
 
