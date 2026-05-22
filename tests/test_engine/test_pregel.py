@@ -70,6 +70,25 @@ class GotoWorker(Worker):
         )
 
 
+class InterruptRoutingWorker(Worker):
+    """Worker that interrupts at a condition node while setting a specific route."""
+
+    def __init__(self, route_value: str = "false"):
+        self._route_value = route_value
+
+    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+        if node_id == "check":
+            return WorkerResult(
+                node_id=node_id,
+                channel_updates={"messages": ["checking"], "_route": self._route_value},
+                command=Command(interrupt={"type": "approval", "message": "Confirm route?"}),
+            )
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"messages": [f"{node_id}_output"]},
+        )
+
+
 def _make_linear_graph() -> CompiledGraph:
     return CompiledGraph(
         nodes={
@@ -313,3 +332,110 @@ class TestChannelManager:
         mgr2.restore(snapshot)
         assert mgr2.read("msgs") == ["a"]
         assert mgr2.read("val") == 42
+
+
+def _make_interrupt_conditional_graph() -> CompiledGraph:
+    return CompiledGraph(
+        nodes={
+            "start": NodeConfig(
+                id="start", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "Start"}
+            ),
+            "check": NodeConfig(id="check", type=NodeType.CONDITION, config={"expression": "route"}),
+            "branch_a": NodeConfig(
+                id="branch_a", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}
+            ),
+            "branch_b": NodeConfig(
+                id="branch_b", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}
+            ),
+        },
+        edges=[
+            Edge(source="start", target="check"),
+            Edge(source="check", target={"true": "branch_a", "false": "branch_b"}),
+            Edge(source="branch_a", target="__end__"),
+            Edge(source="branch_b", target="__end__"),
+        ],
+        channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+        entry_point="start",
+        name="test-interrupt-conditional",
+    )
+
+
+class TestInterruptResumeRouting:
+    @pytest.mark.asyncio
+    async def test_resume_follows_false_branch(self):
+        graph = _make_interrupt_conditional_graph()
+        worker = InterruptRoutingWorker(route_value="false")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id, initial_input={"messages": ["init"]}):
+            pass
+
+        assert runtime.is_interrupted
+
+        runtime2 = PregelRuntime(graph, SimpleWorker(), store)
+        resume_results = []
+        async for event in runtime2.execute(session_id, resume_value="approved"):
+            resume_results.append(event)
+
+        final_messages = resume_results[-1]["state"]["messages"]
+        assert "branch_b_output" in final_messages
+        assert "branch_a_output" not in final_messages
+
+    @pytest.mark.asyncio
+    async def test_resume_follows_true_branch(self):
+        graph = _make_interrupt_conditional_graph()
+        worker = InterruptRoutingWorker(route_value="true")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id, initial_input={"messages": ["init"]}):
+            pass
+
+        assert runtime.is_interrupted
+
+        runtime2 = PregelRuntime(graph, SimpleWorker(), store)
+        resume_results = []
+        async for event in runtime2.execute(session_id, resume_value="approved"):
+            resume_results.append(event)
+
+        final_messages = resume_results[-1]["state"]["messages"]
+        assert "branch_a_output" in final_messages
+        assert "branch_b_output" not in final_messages
+
+
+class TestMaxSupersteps:
+    @pytest.mark.asyncio
+    async def test_cyclic_graph_raises(self):
+        graph = CompiledGraph(
+            nodes={
+                "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
+                "B": NodeConfig(id="B", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}),
+            },
+            edges=[
+                Edge(source="A", target="B"),
+                Edge(source="B", target="A"),
+            ],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+            entry_point="A",
+            name="test-cyclic",
+        )
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store, max_supersteps=10)
+
+        session_id = uuid.uuid4()
+        with pytest.raises(RuntimeError, match="max supersteps"):
+            async for _ in runtime.execute(session_id):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_default_max_supersteps(self):
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        assert runtime._max_supersteps == 100

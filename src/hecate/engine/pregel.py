@@ -32,16 +32,19 @@ class PregelRuntime:
         worker: Worker,
         checkpoint_store: CheckpointStore,
         pool: WorkerPool | None = None,
+        max_supersteps: int = 100,
     ) -> None:
         self._graph = graph
         self._worker = worker
         self._checkpoint_store = checkpoint_store
         self._pool = pool or DirectWorkerPool()
+        self._max_supersteps = max_supersteps
         self._channel_manager = ChannelManager()
         self._superstep = 0
         self._interrupted = False
         self._interrupt_value: Any = None
         self._interrupted_node: str | None = None
+        self._interrupt_updates: dict = {}
 
         for name, defn in graph.channels.items():
             self._channel_manager.register(name, defn)
@@ -69,6 +72,11 @@ class PregelRuntime:
 
         while current_nodes and not self._interrupted:
             self._superstep += 1
+            if self._superstep > self._max_supersteps:
+                raise RuntimeError(
+                    f"Graph execution exceeded max supersteps ({self._max_supersteps}). "
+                    f"Possible infinite loop in graph '{self._graph.name}'."
+                )
             snapshot = self._channel_manager.snapshot()
 
             results: list[WorkerResult] = []
@@ -100,7 +108,11 @@ class PregelRuntime:
                             superstep=self._superstep,
                             node_id=result.node_id,
                             channel_state=self._channel_manager.snapshot(),
-                            metadata={"interrupted": True, "interrupt_value": self._interrupt_value},
+                            metadata={
+                                "interrupted": True,
+                                "interrupt_value": self._interrupt_value,
+                                "interrupt_updates": result.channel_updates,
+                            },
                         )
                         yield {"type": "interrupt", "value": self._interrupt_value}
                         interrupted = True
@@ -140,6 +152,7 @@ class PregelRuntime:
         self._interrupted_node = checkpoint.get("node_id")
         self._interrupted = False
         self._interrupt_value = None
+        self._interrupt_updates = checkpoint.get("metadata", {}).get("interrupt_updates", {})
         if resume_value is not None:
             self._channel_manager.write("_resume_value", resume_value)
 
@@ -153,7 +166,8 @@ class PregelRuntime:
                 if isinstance(edge.target, str):
                     next_nodes.append(edge.target)
                 elif isinstance(edge.target, dict):
-                    target = edge.target.get("true")
+                    route_key = str(self._interrupt_updates.get("_route", "true"))
+                    target = edge.target.get(route_key, edge.target.get("false"))
                     if target:
                         next_nodes.append(target)
         if "__end__" in next_nodes:
