@@ -2,155 +2,131 @@
 
 ## What this repo is
 
-Hecate is an **enterprise-grade, open-source, self-hosted, model-agnostic, MCP-first Agent platform**. The repo contains design documentation and the P1 implementation (execution engine core).
+Hecate is an **enterprise-grade, open-source, self-hosted, model-agnostic, MCP-first Agent platform** built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. Currently in P1 implementation — engine core and data models are done (§1-§4); API layer, services, and app wiring are next (§5-§11).
+
+## Commands
+
+```bash
+# Install (uses uv + venv at .venv/)
+source .venv/bin/activate && uv pip install -e ".[dev]"
+
+# Run all tests
+python -m pytest tests/ -v
+
+# Run a single test file or function
+python -m pytest tests/test_engine/test_pregel.py -v
+python -m pytest tests/test_engine/test_pregel.py::test_linear_execution -v
+
+# Lint → format → typecheck (run all before committing)
+ruff check src/hecate/ tests/
+ruff format src/hecate/ tests/
+mypy src/
+
+# Start infrastructure (PostgreSQL 16, Qdrant, MinIO)
+docker compose -f docker/docker-compose.yml up -d
+
+# Run database migrations (requires PostgreSQL running)
+alembic upgrade head
+
+# Run the application (requires main.py — not yet implemented)
+uvicorn hecate.main:app --reload
+```
 
 ## Key files (read these first on any new session)
 
 | File | Purpose |
 |------|---------|
-| `docs/features/feature-catalog.md` | **Authoritative feature list** — 156 features across 14 capability domains, prioritized P1→P4 |
-| `docs/research/research-tracker.md` | **Single source of truth for research progress** — 5 phases, 80 research items |
-| `docs/research/reports/00-architecture-decisions.md` | 10 core architecture decisions (AD-1~AD-10) + tech stack overview |
-| `docs/design/architecture.md` | Top-level architecture v0.2, 4 chapters + ADR section |
-| `openspec/changes/p1-execution-engine-core/` | **P1 OpenSpec change** — proposal, design, specs, tasks (56 tasks, 11 groups) |
+| `openspec/changes/p1-execution-engine-core/tasks.md` | **P1 task list** — 120 tasks in 11 groups, §1-§4 done |
+| `docs/features/feature-catalog.md` | 156 features across 14 domains, P1→P4 |
+| `docs/research/reports/00-architecture-decisions.md` | 10 architecture decisions (AD-1~AD-10) |
+| `docs/design/architecture.md` | Top-level architecture v0.2 |
+| `schemas/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) |
 
-## Directory structure
+## Architecture layers
 
 ```
-hecate/
-├── src/hecate/
-│   ├── main.py                    # FastAPI app entry
-│   ├── api/                       # API layer (v1/ OpenAI compat + management/)
-│   ├── engine/                    # Execution engine core (~5900 LOC)
-│   ├── models/                    # ORM models + Pydantic schemas (9 tables)
-│   ├── services/                  # Capability services (llm/, rag/, security/, mcp/)
-│   └── core/                      # Config, database, dependency injection
-├── tests/                         # Mirror src/hecate/ structure
-├── docs/                          # Design documentation
-│   ├── features/                  # Feature catalog
-│   ├── research/                  # Research notes + reports
-│   ├── design/                    # Architecture docs
-│   └── refs/                      # Reference materials
-├── openspec/changes/              # OpenSpec change artifacts
-├── schemas/                       # JSON Schema definitions
-├── docker/                        # Docker Compose config
-├── alembic/                       # Database migrations
-└── pyproject.toml                 # Project config + dependencies
+engine/     → Zero external deps (no imports from services/, api/, models/); jsonschema is sole exception
+services/   → Depends on models/, engine/ports (abstract interfaces only), and external libraries
+api/        → Depends on services/ and models/; never imports engine/ directly
+models/     → Pure data definitions (ORM + Pydantic); no business logic
+core/       → Infrastructure: config (pydantic-settings), database (async SQLAlchemy), DI
 ```
+
+- Engine `__init__.py` is empty — import directly from submodules (e.g., `from hecate.engine.pregel import PregelRuntime`).
+- All I/O MUST be async. Engine communicates with services through `EnginePort` ABC only.
+- `get_db()` in `core/database.py` is the FastAPI dependency — auto-commits on success, auto-rolls back on error.
+
+## Implementation status
+
+**Done (§1-§4)**: Engine core (12 modules), data models (9 ORM + Pydantic schemas), core config/database, `PostgresCheckpointStore`, tests (64 cases). `main.py` and `core/deps.py` not yet created.
+
+**Next (§5-§11)**: FastAPI app, DI, CRUD APIs, OpenAI compat, LLM/RAG/security/MCP services, E2E integration, CI.
+
+## Gotchas and non-obvious facts
+
+- **Python env**: uv + Python 3.12, venv at `.venv/`. Use `uv pip install`, not bare `pip install`.
+- **Git**: development on `f_dev` branch.
+- **CheckpointModel** inherits `Base` (not `BaseModel`) — intentionally immutable, no `updated_at`/`deleted_at`.
+- **AgentModel.model_config_db** — ORM column named `model_config` via `mapped_column("model_config", JSON)` to avoid Pydantic's `model_config` collision. CreateSchema uses `alias="model_config"`, ReadSchema uses `serialization_alias="model_config"`.
+- **metadata_ alias** — 5 models use `metadata_` (Python) → `metadata` (SQL) to avoid SQLAlchemy's reserved `metadata` attribute. ReadSchema uses `Field(validation_alias="metadata_")`.
+- **graph_dsl.py** loads JSON Schema from disk on every `parse_graph()` call — not cached. Path uses `Path(__file__).parent.parent.parent.parent / "schemas"` which is fragile in installed packages.
+- **compiler._detect_unreachable()** uses BFS from entry point; logs WARNING for unreachable nodes (does not raise).
+- **engine/command.py** is a re-export of `Command` from `types.py` — currently unused (dead code).
+- **PERSISTENT_TOPIC** has identical behavior to TOPIC — persistence semantic not yet implemented (P2).
+- **StreamMode.MESSAGES / DEBUG** defined but not yielded in PregelRuntime (P2).
+- **conftest.py `client` fixture** imports `from hecate.main import app` — will fail until `main.py` is created.
+- **`_resolve_next_nodes_after_interrupt()`** hardcodes `edge.target.get("true")` for dict targets — assumes conditional edges always follow interrupts.
 
 ## Conventions
 
-### Project conventions
+### Project workflow
 
-- Feature IDs use the pattern `X.Y.Z` (e.g., `1.3.1`, `9.4a`). New features appended to existing IDs use letter suffixes.
-- Research notes follow: overview → architecture → key findings → conclusion.
-- Reports are numbered `00`–`05`. `00` is the master decision summary.
-- OpenSpec changes follow spec-driven schema: proposal → design → specs → tasks.
+- Feature IDs: `X.Y.Z` pattern (e.g., `1.3.1`, `9.4a`). Append letter suffixes — never renumber.
+- OpenSpec changes: proposal → design → specs → tasks. Mark tasks complete in `tasks.md` immediately.
+- Research notes: overview → architecture → key findings → conclusion.
+- Reports numbered `00`–`05`. `00` is the master decision summary.
+- Update `research-tracker.md` when research items change status.
+- Maintain P1→P4 priority ordering and update counts when features change.
+- Run `ruff check` + `ruff format` + `mypy` before committing.
 
-### Critical context
+### Coding rules (enforced by ruff E/F/I/N/W/UP/B/S/SIM)
 
-- **AD-1 to AD-10 all decided**: Self-built engine, five-layer architecture, Checkpoint+memory cache, SKILL.md+multi-source, thread pool→process pool, BGE-M3 RAG, unified graph templates, LLM Guard+NeMo Guardrails, OpenAI compat + Hecate management API, React Flow (P2).
-- **Tech stack**: Python 3.12+, FastAPI, Pydantic v2, SQLAlchemy 2.0 async, PostgreSQL 16, Qdrant, MinIO, LiteLLM, BGE-M3, Docling, LangFuse, MCP, Docker Compose.
-- **Product positioning**: Open-source, self-hosted, model-agnostic, MCP-first. "拒绝供应商锁定".
-- **OpenSpec change**: `openspec/changes/p1-execution-engine-core/` (4/4 artifacts complete, implementation in progress).
+- `from __future__ import annotations` at top of every file.
+- All public functions/methods require type annotations.
+- Mutable defaults: use `None`, never `[]` or `{}`.
+- `except:` without exception type prohibited. Always `except X as x`.
+- `assert` prohibited in production code.
+- No commented-out code — delete entirely.
+- f-strings only; no `+`/`+=` for string concatenation in loops.
+- Docstrings in English on all modules, public classes, and public methods. Private (`_` prefix) exempt when self-explanatory.
+- Inline comments: only for non-obvious logic, explain **why** not **what**.
 
-### What to do vs. what not to do
-
-- **Do** update `research-tracker.md` whenever research items change status.
-- **Do** maintain the P1→P4 priority ordering and update counts when features change.
-- **Do** run `ruff check` + `ruff format` + `mypy` before committing code changes.
-- **Do** mark tasks complete in `tasks.md` immediately after implementing each task.
-- **Don't** renumber existing feature IDs — use letter suffixes for additions.
-- **Don't** commit PDF files or large binary assets.
-- **Don't** add comments to code unless the logic is non-obvious.
-
-## Coding Conventions
-
-### Python style
-
-| Rule | Description |
-|------|-------------|
-| PEP 8 | All Python code MUST comply with [PEP 8](https://peps.python.org/pep-0008/); enforced by ruff (E, W, I, N rules) |
-| Type hints | All public functions and methods MUST have type annotations |
-| Future annotations | All files MUST start with `from __future__ import annotations` |
-| Mutable defaults | Function parameters with mutable defaults MUST use `None` instead of `[]` or `{}` |
-| Bare except | `except:` without exception type is PROHIBITED; always specify the exception class |
-| Raise with exception | All `raise` statements MUST include an exception instance |
-| Except syntax | MUST use `except X as x` syntax |
-| Finally restrictions | `return` and `break` MUST NOT appear in `finally` blocks |
-| Assert | `assert` MUST NOT be used in production code; use proper validation |
-| For-in iteration | Use `for x in iterable` instead of `for i in range(len(x))`; use `enumerate()` when index needed |
-| Resource management | Use `with` statement for files, database sessions, and other resources |
-| Path handling | Use `os.path` or `pathlib` instead of string concatenation for file paths |
-| Generators | Prefer generator comprehensions over list comprehensions for large data |
-| No commented-out code | Delete unused code completely; do not comment it out |
-| Exception for errors | Use exceptions to indicate errors, not return `None` |
-| String formatting | Use f-strings (Python 3.12+); avoid `+` or `+=` for string concatenation in loops |
-| Docstrings | All modules, public classes, and public methods MUST have docstrings in English. Docstrings must explain: purpose, parameters (when not obvious from name/type), return value/shape, and important behavior or side effects. Module-level docstrings must explain the module's role in the architecture. Private methods (`_` prefix) are exempt only when truly self-explanatory |
-| Inline comments | Only for non-obvious logic; explain **why** not **what**. No comments that merely restate the code |
-
-### Naming conventions
+### Naming
 
 | Category | Convention | Example |
 |----------|-----------|---------|
-| Modules | `snake_case` | `graph_dsl.py`, `checkpoint.py` |
-| Classes | `PascalCase` | `PregelRuntime`, `ChannelManager` |
-| Functions/methods | `snake_case` | `execute_graph()`, `save_checkpoint()` |
-| Constants | `UPPER_SNAKE` | `DEFAULT_TIMEOUT`, `MAX_WORKERS` |
-| Private members | `_prefix` | `_internal_state`, `_validate()` |
-| Pydantic models | `XxxCreateSchema` / `XxxUpdateSchema` / `XxxReadSchema` | `AgentCreateSchema` |
-| SQLAlchemy models | `XxxModel` | `AgentModel`, `SessionModel` |
+| SQLAlchemy models | `XxxModel` | `AgentModel` |
+| Pydantic schemas | `XxxCreateSchema` / `XxxUpdateSchema` / `XxxReadSchema` | `AgentCreateSchema` |
 
-### Architecture layers
+Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCase` for classes, `UPPER_SNAKE` for constants.
 
-```
-engine/     → Zero external dependencies (no imports from services/, api/, models/); jsonschema for DSL validation is the sole exception
-services/   → Depends on models/, engine/ports (abstract interfaces only), and external libraries
-api/        → Depends on services/ and models/; never imports engine/ directly
-models/     → Pure data definitions; no business logic
-core/       → Infrastructure: config, database, dependency injection
-```
+## Testing
 
-- All I/O operations MUST be async (database, HTTP, file operations).
-- Dependency injection through FastAPI `Depends()` in `core/deps.py`; never import session directly.
-- Engine communicates with services through `EnginePort` interface only.
+- `tests/` mirrors `src/hecate/` structure (`test_engine/`, `test_models/`, `test_api/`, `test_services/`).
+- Single `conftest.py` at root: `db_session` (AsyncSession + auto-rollback), `setup_database` (autouse, create_all/drop_all per test).
+- **Do NOT create separate engines in test files** — use `db_session` from conftest.
+- `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` decorator needed.
+- Database: in-memory SQLite (`sqlite+aiosqlite://`). Never connect to real PostgreSQL in unit tests.
+- Engine tests use lightweight stub classes (`SimpleWorker`, `InterruptWorker`) instead of mocking frameworks.
+- No factories — create models inline with `db_session.add()` + `await db_session.flush()`.
+- ruff S101 (assert in tests) is expected — only run `ruff check src/hecate/`, not tests.
 
-### Security coding
+## What to do / What not to do
 
-| Rule | Description |
-|------|-------------|
-| Input validation | All external input MUST be validated before use |
-| SQL injection | Use SQLAlchemy ORM only; raw SQL string concatenation is PROHIBITED |
-| Secrets management | API keys and passwords MUST come from environment variables, never hardcoded |
-| Logging | Sensitive data (passwords, tokens, PII) MUST NOT appear in logs |
-| Error responses | Error responses MUST NOT expose internal stack traces or implementation details |
-| HTTP security headers | Set `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` on API responses |
-| CORS | Configure explicit origin whitelist; avoid `Access-Control-Allow-Origin: *` |
-| Rate limiting | All public endpoints MUST have rate limiting |
-| LLM I/O scanning | All LLM input/output MUST pass through LLM Guard scanners |
-
-### Concurrency
-
-- Prefer `async`/`await` for all I/O-bound work.
-- Use `asyncio.Queue` for coordinating coroutines.
-- Use `concurrent.futures.ProcessPoolExecutor` for CPU-bound parallel computation.
-- Protect shared mutable state with `asyncio.Lock`.
-
-### Testing
-
-| Convention | Description |
-|-----------|-------------|
-| Directory | `tests/` mirrors `src/hecate/` structure (`test_engine/`, `test_api/`, `test_services/`) |
-| Naming | Test files named `test_<module>.py`; test functions named `test_<scenario>` |
-| Fixtures | Common fixtures in `conftest.py` (`db_session`, `client`) |
-| Mocking | External services (LLM, Qdrant, MinIO) MUST be mocked in tests |
-| Async | Use `@pytest.mark.asyncio` for all async test functions |
-| Database | Tests use in-memory SQLite; never connect to real PostgreSQL in unit tests |
-
-### Frontend (future, TypeScript)
-
-- Use `const` by default, `let` when mutation needed; `var` is PROHIBITED.
-- Use `camelCase` for functions and variables; `PascalCase` for components and classes.
-- `eval()` is PROHIBITED with untrusted data.
-- Do not modify built-in prototypes.
-- Details to be expanded when frontend implementation begins.
+- **Do** run `ruff check src/hecate/ && ruff format --check src/hecate/ tests/ && python -m pytest tests/ -q` before committing.
+- **Do** use `conftest.py`'s `db_session` fixture in all test files.
+- **Don't** renumber feature IDs — use letter suffixes.
+- **Don't** commit PDF files or large binary assets.
+- **Don't** add comments to code unless the logic is non-obvious.
+- **Don't** use `as any`, `@ts-ignore` or equivalent type suppression.
+- **Don't** import from `engine/` in `api/` — route through `services/` + `EnginePort`.
