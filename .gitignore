@@ -36,3 +36,4 @@ coverage.xml
 Thumbs.db
 
 alembic/versions/__pycache__/
+!/.omo/
