@@ -8,6 +8,7 @@ the Pregel runtime, and the worker pool.
 Design principle: all types are plain dataclasses/enums with no business logic,
 so they can be freely serialized and passed between engine components.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

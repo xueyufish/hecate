@@ -2,7 +2,7 @@
 
 ## What this repo is
 
-Hecate is an **enterprise-grade, open-source, self-hosted, model-agnostic, MCP-first Agent platform** built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. Currently in P1 implementation — engine core and data models are done (§1-§4); API layer, services, and app wiring are next (§5-§11).
+Hecate is an **enterprise-grade, open-source, self-hosted, model-agnostic, MCP-first Agent platform** built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. P1 implementation is complete (§1-§11, 88 tasks) — ready for P2 work.
 
 ## Commands
 
@@ -28,7 +28,7 @@ docker compose -f docker/docker-compose.yml up -d
 # Run database migrations (requires PostgreSQL running)
 alembic upgrade head
 
-# Run the application (requires main.py — not yet implemented)
+# Run the application
 uvicorn hecate.main:app --reload
 ```
 
@@ -36,7 +36,7 @@ uvicorn hecate.main:app --reload
 
 | File | Purpose |
 |------|---------|
-| `openspec/changes/p1-execution-engine-core/tasks.md` | **P1 task list** — 120 tasks in 11 groups, §1-§4 done |
+| `openspec/changes/p1-execution-engine-core/tasks.md` | **P1 task list** — 88 tasks in 11 groups, all complete |
 | `docs/features/feature-catalog.md` | 156 features across 14 domains, P1→P4 |
 | `docs/research/reports/00-architecture-decisions.md` | 10 architecture decisions (AD-1~AD-10) |
 | `docs/design/architecture.md` | Top-level architecture v0.2 |
@@ -58,9 +58,20 @@ core/       → Infrastructure: config (pydantic-settings), database (async SQLA
 
 ## Implementation status
 
-**Done (§1-§4)**: Engine core (12 modules), data models (9 ORM + Pydantic schemas), core config/database, `PostgresCheckpointStore`, tests (64 cases). `main.py` and `core/deps.py` not yet created.
+**Done (§1-§11)**: All P1 tasks completed:
+- §1: Project skeleton (pyproject.toml, Docker, .env)
+- §2: Data models (9 ORM + Pydantic schemas + Alembic)
+- §3: Graph DSL + Compiler
+- §4: Execution engine (Channel, Checkpoint, Pregel, interrupt, subgraph, ports)
+- §5: API layer (FastAPI app, DI, CRUD, OpenAI compat, SSE streaming, rate limiting)
+- §6: LLM routing (LiteLLM, streaming, tool calling, fallback)
+- §7: RAG pipeline (embedding, parser, chunker, indexer, searcher, MinIO)
+- §8: Security layer (LLM Guard, PII anonymization, NeMo Guardrails)
+- §9: MCP integration (client, tool sync, tool calling)
+- §10: End-to-end integration (conversation service, tests)
+- §11: Documentation (README, AGENTS.md)
 
-**Next (§5-§11)**: FastAPI app, DI, CRUD APIs, OpenAI compat, LLM/RAG/security/MCP services, E2E integration, CI.
+**Next (P2)**: Frontend canvas, multi-agent orchestration, Temporal integration.
 
 ## Gotchas and non-obvious facts
 
@@ -74,7 +85,7 @@ core/       → Infrastructure: config (pydantic-settings), database (async SQLA
 - **engine/command.py** is a re-export of `Command` from `types.py` — currently unused (dead code).
 - **PERSISTENT_TOPIC** has identical behavior to TOPIC — persistence semantic not yet implemented (P2).
 - **StreamMode.MESSAGES / DEBUG** defined but not yielded in PregelRuntime (P2).
-- **conftest.py `client` fixture** imports `from hecate.main import app` — will fail until `main.py` is created.
+- **conftest.py `client` fixture** imports `from hecate.main import app` — now works since `main.py` exists.
 - **`_resolve_next_nodes_after_interrupt()`** hardcodes `edge.target.get("true")` for dict targets — assumes conditional edges always follow interrupts.
 
 ## Conventions

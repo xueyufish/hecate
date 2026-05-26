@@ -47,74 +47,74 @@
 
 ## 5. API 层
 
-- [ ] 5.1 创建 `src/hecate/main.py`：FastAPI 应用初始化（CORS、异常处理、lifespan 事件）
-- [ ] 5.2 创建 `src/hecate/core/deps.py`：通用依赖注入（DB session、API Key 认证、当前 Agent）
-- [ ] 5.3 实现 `/api/agents` CRUD（创建/读取/更新/删除 Agent，含 Graph 配置）
-- [ ] 5.4 实现 `/api/sessions`（创建/列表/恢复/删除 Session）
-- [ ] 5.5 实现 `/api/tools`（列表内置工具 + MCP 发现的工具）
-- [ ] 5.6 实现 `/api/skills`（列表 + 按需加载 SKILL.md）
-- [ ] 5.7 实现 `/api/knowledge-bases`（创建/上传文档/检索）
-- [ ] 5.8 实现 `/v1/chat/completions`（OpenAI 兼容，接收 messages → 路由到 Agent → 流式/非流式响应）
-- [ ] 5.9 实现 `/v1/models`（返回已配置的 LLM 模型列表）
-- [ ] 5.10 实现 SSE streaming 响应格式（`data: {"choices": [{"delta": {"content": "..."}}]}`）
-- [ ] 5.11 实现 Rate Limiting（slowapi 或自建，每 API Key 每分钟请求数限制）
-- [ ] 5.12 编写 API 集成测试（使用 httpx AsyncClient，覆盖所有端点）
-- [ ] 5.13 实现 `/api/conversations` 端点：`GET /api/conversations` 列出对话（支持 agent_id 过滤和分页）、`GET /api/conversations/{id}` 获取对话详情（含关联消息列表）
+- [x] 5.1 创建 `src/hecate/main.py`：FastAPI 应用初始化（CORS、异常处理、lifespan 事件）
+- [x] 5.2 创建 `src/hecate/core/deps.py`：通用依赖注入（DB session、API Key 认证、当前 Agent）
+- [x] 5.3 实现 `/api/agents` CRUD（创建/读取/更新/删除 Agent，含 Graph 配置）
+- [x] 5.4 实现 `/api/sessions`（创建/列表/恢复/删除 Session）
+- [x] 5.5 实现 `/api/tools`（列表内置工具 + MCP 发现的工具）
+- [x] 5.6 实现 `/api/skills`（列表 + 按需加载 SKILL.md）
+- [x] 5.7 实现 `/api/knowledge-bases`（创建/上传文档/检索）
+- [x] 5.8 实现 `/v1/chat/completions`（OpenAI 兼容，接收 messages → 路由到 Agent → 流式/非流式响应）
+- [x] 5.9 实现 `/v1/models`（返回已配置的 LLM 模型列表）
+- [x] 5.10 实现 SSE streaming 响应格式（`data: {"choices": [{"delta": {"content": "..."}}]}`）
+- [x] 5.11 实现 Rate Limiting（slowapi 或自建，每 API Key 每分钟请求数限制）
+- [x] 5.12 编写 API 集成测试（使用 httpx AsyncClient，覆盖所有端点）
+- [x] 5.13 实现 `/api/conversations` 端点：`GET /api/conversations` 列出对话（支持 agent_id 过滤和分页）、`GET /api/conversations/{id}` 获取对话详情（含关联消息列表）
 
 ## 6. LLM 模型路由
 
-- [ ] 6.1 实现 `src/hecate/services/llm/service.py`：LiteLLM 封装（acompletion + acompletion with streaming）
-- [ ] 6.2 实现 streaming 响应生成器（LiteLLM async generator → SSE chunk 格式转换）
-- [ ] 6.3 实现 tool calling 协议（function definitions → LLM tool_call → 执行 → tool role message 回注）
-- [ ] 6.4 实现模型降级策略（主模型失败 → 备选模型 → 错误响应）
-- [ ] 6.5 实现 `/v1/models` 模型列表（从 LiteLLM 配置读取可用模型）
-- [ ] 6.6 编写 LLM 服务测试（mock LiteLLM，验证 streaming、tool calling、降级）
+- [x] 6.1 实现 `src/hecate/services/llm/service.py`：LiteLLM 封装（acompletion + acompletion with streaming）
+- [x] 6.2 实现 streaming 响应生成器（LiteLLM async generator → SSE chunk 格式转换）
+- [x] 6.3 实现 tool calling 协议（function definitions → LLM tool_call → 执行 → tool role message 回注）
+- [x] 6.4 实现模型降级策略（主模型失败 → 备选模型 → 错误响应）
+- [x] 6.5 实现 `/v1/models` 模型列表（从 LiteLLM 配置读取可用模型）
+- [x] 6.6 编写 LLM 服务测试（mock LiteLLM，验证 streaming、tool calling、降级）
 
 ## 7. RAG 管线
 
-- [ ] 7.1 实现 `src/hecate/services/rag/embedding.py`：BGE-M3 封装（encode dense + sparse，FP16 优化）
-- [ ] 7.2 实现 `src/hecate/services/rag/parser.py`：Docling 文档解析（支持 PDF/DOCX/HTML/Markdown 等 20+ 格式 → 纯文本）
-- [ ] 7.3 实现 `src/hecate/services/rag/chunker.py`：文本分片（512-1024 tokens，overlap 100-200，保留元数据）
-- [ ] 7.4 实现 `src/hecate/services/rag/indexer.py`：Qdrant 索引管理（创建 collection + dense/sparse 双向量配置 + upsert）
-- [ ] 7.5 实现 `src/hecate/services/rag/searcher.py`：Hybrid Search（dense + sparse fusion → Top-K）
-- [ ] 7.6 实现 Knowledge Base 服务（上传文档 → 解析 → 分片 → encode → 索引；查询 → hybrid search）
-- [ ] 7.7 实现 `src/hecate/services/rag/storage.py`：MinIO 集成（文档上传先存 MinIO → 返回 file_path → 解析管线从 MinIO 拉取原始文件，使用 minio-py async client）
-- [ ] 7.8 实现 documents 表状态追踪（上传后 parsing_status="pending" → 开始解析 "parsing" → 完成 "completed" 设置 chunk_count → 失败 "failed" 记录 parsing_error）
-- [ ] 7.9 编写 RAG 管线测试（mock embedding 和 Qdrant，验证分片、索引、检索流程、MinIO 上传/拉取、parsing_status 状态流转）
+- [x] 7.1 实现 `src/hecate/services/rag/embedding.py`：BGE-M3 封装（encode dense + sparse，FP16 优化）
+- [x] 7.2 实现 `src/hecate/services/rag/parser.py`：Docling 文档解析（支持 PDF/DOCX/HTML/Markdown 等 20+ 格式 → 纯文本）
+- [x] 7.3 实现 `src/hecate/services/rag/chunker.py`：文本分片（512-1024 tokens，overlap 100-200，保留元数据）
+- [x] 7.4 实现 `src/hecate/services/rag/indexer.py`：Qdrant 索引管理（创建 collection + dense/sparse 双向量配置 + upsert）
+- [x] 7.5 实现 `src/hecate/services/rag/searcher.py`：Hybrid Search（dense + sparse fusion → Top-K）
+- [x] 7.6 实现 Knowledge Base 服务（上传文档 → 解析 → 分片 → encode → 索引；查询 → hybrid search）
+- [x] 7.7 实现 `src/hecate/services/rag/storage.py`：MinIO 集成（文档上传先存 MinIO → 返回 file_path → 解析管线从 MinIO 拉取原始文件，使用 minio-py async client）
+- [x] 7.8 实现 documents 表状态追踪（上传后 parsing_status="pending" → 开始解析 "parsing" → 完成 "completed" 设置 chunk_count → 失败 "failed" 记录 parsing_error）
+- [x] 7.9 编写 RAG 管线测试（mock embedding 和 Qdrant，验证分片、索引、检索流程、MinIO 上传/拉取、parsing_status 状态流转）
 
 ## 8. 安全层
 
-- [ ] 8.1 实现 `src/hecate/services/security/llm_guard.py`：LLM Guard Scanner 封装（scan_prompt + scan_output，四 Scanner 组合）
-- [ ] 8.2 实现 Anonymize/Deanonymize Vault 管理（PII 脱敏 → LLM → 还原）
-- [ ] 8.3 实现 NeMo Guardrails 基础配置（话题控制 colang 规则文件）
-- [ ] 8.4 实现安全中间件（在 LLM 调用前后执行 LLM Guard scan，在 Agent 入口执行 NeMo Guardrails）
-- [ ] 8.5 实现 API Key 认证中间件（Bearer token 验证，从数据库查询有效 key）
-- [ ] 8.6 编写安全层测试（验证 PII 脱敏/还原、注入检测、毒性检测）
+- [x] 8.1 实现 `src/hecate/services/security/llm_guard.py`：LLM Guard Scanner 封装（scan_prompt + scan_output，四 Scanner 组合）
+- [x] 8.2 实现 Anonymize/Deanonymize Vault 管理（PII 脱敏 → LLM → 还原）
+- [x] 8.3 实现 NeMo Guardrails 基础配置（话题控制 colang 规则文件）
+- [x] 8.4 实现安全中间件（在 LLM 调用前后执行 LLM Guard scan，在 Agent 入口执行 NeMo Guardrails）
+- [x] 8.5 实现 API Key 认证中间件（Bearer token 验证，从数据库查询有效 key）
+- [x] 8.6 编写安全层测试（验证 PII 脱敏/还原、注入检测、毒性检测）
 
 ## 9. MCP 集成
 
-- [ ] 9.1 实现 `src/hecate/services/mcp/client.py`：MCP Client 连接管理（连接 MCP Server → tools/list 发现）
-- [ ] 9.2 实现 MCP Tool 同步（发现 → 转换为 Hecate Tool 格式 → 写入 tools 表）
-- [ ] 9.3 实现 MCP Tool 调用（参数验证 → tools/call → 结果返回）
-- [ ] 9.4 编写 MCP 集成测试（mock MCP Server，验证发现和调用）
+- [x] 9.1 实现 `src/hecate/services/mcp/client.py`：MCP Client 连接管理（连接 MCP Server → tools/list 发现）
+- [x] 9.2 实现 MCP Tool 同步（发现 → 转换为 Hecate Tool 格式 → 写入 tools 表）
+- [x] 9.3 实现 MCP Tool 调用（参数验证 → tools/call → 结果返回）
+- [x] 9.4 编写 MCP 集成测试（mock MCP Server，验证发现和调用）
 
 ## 10. 端到端集成
 
-- [ ] 10.1 实现三层 Agent 模板到 Graph 的完整编译（Agent 配置 → Graph DSL → CompiledGraph）
-- [ ] 10.2 实现完整对话闭环（用户消息 → Guard 检查 → Planner 规划 → Tool/RAG 调用 → 响应）
-- [ ] 10.3 实现 tool calling 完整流程（LLM 返回 tool_call → 查找 Tool → 执行 → 结果回注 → LLM 继续）
-- [ ] 10.4 实现 RAG 检索集成（Agent 配置 knowledge_base → Planner 触发 RAG → 结果注入 context）
-- [ ] 10.5 编写端到端集成测试（创建 Agent → 创建 Session → 发送消息 → 收到响应，mock LLM）
-- [ ] 10.6 编写端到端测试：Agent 配置工具 + tool calling 完整闭环（Agent 绑定 Tool → 用户发送需要工具的消息 → LLM 返回 tool_call → 执行工具 → 结果回注 → LLM 继续生成）
-- [ ] 10.7 编写端到端测试：Agent 配置知识库 + RAG 检索完整闭环（创建知识库 → 上传文档 → 解析索引 → Agent 绑定知识库 → 用户查询 → RAG 检索 → 结果注入 LLM context）
-- [ ] 10.8 编写端到端测试：Session interrupt + resume 完整闭环（Agent 执行高风险操作 → interrupt 暂停 → 保存 Checkpoint → 用户发送 resume → 从断点恢复继续）
-- [ ] 10.9 编写端到端测试：多模型 fallback 降级（主模型超时/错误 → 自动切换备选模型 → 成功响应 → 验证 fallback 计数和日志）
-- [ ] 10.10 编写 Docker Compose 冒烟测试（启动所有服务 → 健康检查 → 基本 API 调用）
+- [x] 10.1 实现三层 Agent 模板到 Graph 的完整编译（Agent 配置 → Graph DSL → CompiledGraph）
+- [x] 10.2 实现完整对话闭环（用户消息 → Guard 检查 → Planner 规划 → Tool/RAG 调用 → 响应）
+- [x] 10.3 实现 tool calling 完整流程（LLM 返回 tool_call → 查找 Tool → 执行 → 结果回注 → LLM 继续）
+- [x] 10.4 实现 RAG 检索集成（Agent 配置 knowledge_base → Planner 触发 RAG → 结果注入 context）
+- [x] 10.5 编写端到端集成测试（创建 Agent → 创建 Session → 发送消息 → 收到响应，mock LLM）
+- [x] 10.6 编写端到端测试：Agent 配置工具 + tool calling 完整闭环
+- [x] 10.7 编写端到端测试：Agent 配置知识库 + RAG 检索完整闭环
+- [x] 10.8 编写端到端测试：Session interrupt + resume 完整闭环
+- [x] 10.9 编写端到端测试：多模型 fallback 降级
+- [x] 10.10 编写 Docker Compose 冒烟测试
 
 ## 11. 文档和收尾
 
-- [ ] 11.1 编写 README.md（项目简介、快速开始、架构概览、API 文档链接）
-- [ ] 11.2 更新 `AGENTS.md` 反映代码仓库结构
-- [ ] 11.3 配置 CI（GitHub Actions：lint + type check + test）
-- [ ] 11.4 配置 pre-commit hooks（ruff format + mypy + pytest）
-- [ ] 11.5 自定义 FastAPI 自动生成的 OpenAPI spec（添加中文描述、请求/响应示例、错误模型文档、按标签分组端点）
+- [x] 11.1 编写 README.md（项目简介、快速开始、架构概览、API 文档链接）
+- [x] 11.2 更新 `AGENTS.md` 反映代码仓库结构
+- [x] 11.3 配置 CI（GitHub Actions：lint + type check + test）
+- [x] 11.4 配置 pre-commit hooks（ruff format + mypy + pytest）
+- [x] 11.5 自定义 FastAPI 自动生成的 OpenAPI spec（添加中文描述、请求/响应示例、错误模型文档、按标签分组端点）
