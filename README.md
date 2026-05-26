@@ -28,12 +28,13 @@ Enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform.
 git clone https://github.com/your-org/hecate.git
 cd hecate
 
-# Create virtual environment
-python -m venv .venv
+# Create virtual environment and install dependencies
+uv venv
 source .venv/bin/activate
+uv pip install -e ".[dev]"
 
-# Install dependencies
-pip install -e ".[dev]"
+# Or use the lock file for exact versions
+uv pip sync uv.lock
 
 # Set up environment
 cp .env.example .env

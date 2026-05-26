@@ -10,6 +10,9 @@ Hecate is an **enterprise-grade, open-source, self-hosted, model-agnostic, MCP-f
 # Install (uses uv + venv at .venv/)
 source .venv/bin/activate && uv pip install -e ".[dev]"
 
+# Or use lock file for exact versions
+uv pip sync uv.lock
+
 # Run all tests
 python -m pytest tests/ -v
 

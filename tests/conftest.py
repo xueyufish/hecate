@@ -90,6 +90,9 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     from hecate.core.deps import verify_api_key
     from hecate.main import app
 
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with test_session_factory() as session:
             try:
@@ -110,3 +113,6 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
         yield ac
 
     app.dependency_overrides.clear()
+
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
