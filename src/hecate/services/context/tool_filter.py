@@ -100,9 +100,9 @@ class ToolFilter:
             Tool name string.
         """
         # OpenAI format: {"type": "function", "function": {"name": "..."}}
-        func = tool.get("function", {})
+        func: dict[str, Any] | Any = tool.get("function", {})
         if isinstance(func, dict):
-            return func.get("name", "")
+            return str(func.get("name", ""))
         return ""
 
     def _matches_categories(

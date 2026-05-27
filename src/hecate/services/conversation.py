@@ -76,7 +76,7 @@ class ConversationService:
         stream: bool = False,
         max_iterations: int = 10,
         session_id: str | None = None,
-    ) -> dict[str, Any] | AsyncGenerator:
+    ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute a conversation turn with context engineering.
 
         Args:
@@ -272,7 +272,7 @@ class ConversationService:
                         tool_name=tc["name"],
                         tool_arguments=tc["arguments"],
                         result=result,
-                        session_id=UUID(session_id) if session_id else None,
+                        session_id=UUID(session_id),
                         turn_index=self._turn_index,
                     )
 
@@ -289,7 +289,7 @@ class ConversationService:
                         tool_name=tc["name"],
                         tool_arguments=tc["arguments"],
                         result=str(e),
-                        session_id=UUID(session_id) if session_id else None,
+                        session_id=UUID(session_id),
                         turn_index=self._turn_index,
                         is_error=True,
                     )

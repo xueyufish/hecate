@@ -169,7 +169,7 @@ class EvidenceTracker:
         Returns:
             List of matching EvidenceModel records.
         """
-        conditions = [EvidenceModel.deleted_at.is_(None)]
+        conditions: list[Any] = [EvidenceModel.deleted_at.is_(None)]
 
         if session_id is not None:
             conditions.append(EvidenceModel.session_id == session_id)

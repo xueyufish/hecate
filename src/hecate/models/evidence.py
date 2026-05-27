@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
@@ -43,13 +44,13 @@ class EvidenceModel(BaseModel):
     conversation_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     message_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     tool_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    tool_arguments: Mapped[dict] = mapped_column(JSON, default=dict)
+    tool_arguments: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     raw_content: Mapped[str | None] = mapped_column(Text, nullable=True)
-    normalized_content: Mapped[dict] = mapped_column(JSON, default=dict)
+    normalized_content: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     is_error: Mapped[bool] = mapped_column(Boolean, default=False)
     importance: Mapped[float] = mapped_column(Float, default=0.5)
     source_type: Mapped[str] = mapped_column(String(50), default="tool")
-    provenance: Mapped[dict] = mapped_column(JSON, default=dict)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
 
     __table_args__ = (
         Index("idx_evidences_session", "session_id"),
@@ -67,13 +68,13 @@ class EvidenceCreateSchema(PydanticBase):
     conversation_id: uuid.UUID | None = None
     message_id: uuid.UUID | None = None
     tool_name: str = Field(..., min_length=1, max_length=255)
-    tool_arguments: dict = Field(default_factory=dict)
+    tool_arguments: dict[str, Any] = Field(default_factory=dict)
     raw_content: str | None = None
-    normalized_content: dict = Field(default_factory=dict)
+    normalized_content: dict[str, Any] = Field(default_factory=dict)
     is_error: bool = False
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     source_type: str = Field(default="tool", max_length=50)
-    provenance: dict = Field(default_factory=dict)
+    provenance: dict[str, Any] = Field(default_factory=dict)
 
 
 class EvidenceReadSchema(PydanticBase):
@@ -86,13 +87,13 @@ class EvidenceReadSchema(PydanticBase):
     conversation_id: uuid.UUID | None
     message_id: uuid.UUID | None
     tool_name: str
-    tool_arguments: dict
+    tool_arguments: dict[str, Any]
     raw_content: str | None
-    normalized_content: dict
+    normalized_content: dict[str, Any]
     is_error: bool
     importance: float
     source_type: str
-    provenance: dict
+    provenance: dict[str, Any]
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
