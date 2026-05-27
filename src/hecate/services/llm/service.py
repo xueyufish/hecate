@@ -13,9 +13,19 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
-import litellm
-
 logger = logging.getLogger(__name__)
+
+
+def _get_litellm() -> Any:
+    """Lazy import of litellm to avoid import errors when not installed."""
+    try:
+        import litellm
+
+        return litellm
+    except ImportError:
+        raise ImportError(
+            "litellm is required for LLM service. Install with: pip install hecate[llm]"
+        )
 
 
 @dataclass
@@ -63,7 +73,7 @@ class LLMService:
             LLMResponse with content, tool_calls, and usage.
         """
         try:
-            response = await litellm.acompletion(
+            response = await _get_litellm().acompletion(
                 model=model,
                 messages=messages,
                 tools=tools,
@@ -111,7 +121,7 @@ class LLMService:
             dict with chunk data (content delta, tool_calls, etc.).
         """
         try:
-            response = await litellm.acompletion(
+            response = await _get_litellm().acompletion(
                 model=model,
                 messages=messages,
                 tools=tools,
