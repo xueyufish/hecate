@@ -170,9 +170,7 @@ class ConversationService:
 
             # Execute tools and capture evidence
             tool_calls = parse_tool_calls(response.tool_calls)
-            tool_results = await self._execute_tools_with_evidence(
-                tool_calls, tools or [], session_id
-            )
+            tool_results = await self._execute_tools_with_evidence(tool_calls, tools or [], session_id)
 
             current_messages = inject_tool_results(
                 current_messages,
@@ -236,9 +234,7 @@ class ConversationService:
             if tool_calls_buffer:
                 # Execute tools and capture evidence
                 tool_calls = parse_tool_calls(tool_calls_buffer)
-                tool_results = await self._execute_tools_with_evidence(
-                    tool_calls, tools or [], session_id
-                )
+                tool_results = await self._execute_tools_with_evidence(tool_calls, tools or [], session_id)
                 current_messages = inject_tool_results(
                     current_messages,
                     tool_calls_buffer,

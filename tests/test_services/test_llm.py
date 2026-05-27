@@ -101,12 +101,8 @@ def test_inject_tool_results() -> None:
         {"role": "user", "content": "What's the weather?"},
         {"role": "assistant", "content": "I'll check the weather."},
     ]
-    tool_calls = [
-        {"id": "call_789", "function": {"name": "get_weather", "arguments": '{"location": "NYC"}'}}
-    ]
-    results = [
-        {"tool_call_id": "call_789", "result": {"temp": 20, "condition": "sunny"}}
-    ]
+    tool_calls = [{"id": "call_789", "function": {"name": "get_weather", "arguments": '{"location": "NYC"}'}}]
+    results = [{"tool_call_id": "call_789", "result": {"temp": 20, "condition": "sunny"}}]
 
     updated = inject_tool_results(messages, tool_calls, results)
     assert len(updated) == 3

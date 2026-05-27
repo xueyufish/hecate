@@ -189,6 +189,7 @@ class TestStrategyRegistry:
 
     def test_register_custom_strategy(self) -> None:
         """Test registering a custom strategy."""
+
         class CustomStrategy(DefaultStrategy):
             pass
 
