@@ -113,3 +113,51 @@ class EnginePort(ABC):
             messages: The list of message dicts to persist.
         """
         ...
+
+    async def context_assemble(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None,
+        session_id: UUID,
+        model: str = "gpt-4o",
+    ) -> dict:
+        """Assemble optimized context for an LLM invocation (optional).
+
+        Context Engineering capability — dynamically assembles messages and tools
+        based on task phase, budget, and provider requirements.
+
+        Default implementation returns messages and tools unchanged (pass-through).
+
+        Args:
+            messages: Raw conversation messages.
+            tools: Available tool definitions.
+            session_id: Current session identifier.
+            model: Target LLM model.
+
+        Returns:
+            Dict with 'messages', 'tools', 'metadata' keys.
+        """
+        return {"messages": messages, "tools": tools, "metadata": {}}
+
+    async def evidence_query(
+        self,
+        session_id: UUID,
+        min_importance: float | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Query evidence records for a session (optional).
+
+        Context Engineering capability — retrieves structured tool execution
+        results with provenance tracking.
+
+        Default implementation returns empty list.
+
+        Args:
+            session_id: Session to query evidence for.
+            min_importance: Minimum importance score filter.
+            limit: Maximum results to return.
+
+        Returns:
+            List of evidence record dicts.
+        """
+        return []

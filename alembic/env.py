@@ -8,7 +8,19 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from hecate.core.database import Base
-from hecate.models import agent, checkpoint, conversation, document, knowledge, message, session, skill, tool
+from hecate.models import (
+    agent,
+    budget,
+    checkpoint,
+    conversation,
+    document,
+    evidence,
+    knowledge,
+    message,
+    session,
+    skill,
+    tool,
+)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url")))

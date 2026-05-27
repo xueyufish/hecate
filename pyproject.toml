@@ -28,6 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 llm = [
     "litellm>=1.50.0",
+    "tiktoken>=0.7.0",
 ]
 rag = [
     "qdrant-client>=1.12.0",
