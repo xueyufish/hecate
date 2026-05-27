@@ -22,10 +22,10 @@ def _get_litellm() -> Any:
         import litellm
 
         return litellm
-    except ImportError:
+    except ImportError as err:
         raise ImportError(
             "litellm is required for LLM service. Install with: pip install hecate[llm]"
-        )
+        ) from err
 
 
 @dataclass
