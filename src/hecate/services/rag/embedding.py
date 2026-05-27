@@ -98,7 +98,7 @@ class EmbeddingService:
         """
         import hashlib
 
-        hash_bytes = hashlib.md5(text.encode()).digest()
+        hash_bytes = hashlib.md5(text.encode()).digest()  # noqa: S324
         dense = [b / 255.0 for b in hash_bytes]
         dense = dense + [0.0] * (1024 - len(dense))
         return EmbeddingResult(dense=dense[:1024], sparse={})

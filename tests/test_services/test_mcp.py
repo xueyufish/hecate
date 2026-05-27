@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.mcp.client import MCPClient, MCPManager, mcp_manager
+from hecate.services.mcp.client import MCPClient, MCPManager
 from hecate.services.mcp.sync import mcp_tool_sync
 
 

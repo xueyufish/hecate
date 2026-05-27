@@ -7,7 +7,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.models.budget import BudgetSnapshotModel
 from hecate.services.context.budget_snapshot_service import BudgetSnapshotService
 
 

@@ -6,7 +6,6 @@ from uuid import uuid4
 
 from hecate.services.context.assembler import ContextAssembler
 from hecate.services.context.budget import BudgetManager, DegradationLevel
-from hecate.services.context.token_counter import TokenCounter
 from hecate.services.context.types import AssembledContext, SessionMeta, TaskPhase
 
 

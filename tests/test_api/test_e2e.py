@@ -94,7 +94,7 @@ async def test_e2e_conversation_with_messages(client: AsyncClient) -> None:
     agent_id = agent_resp.json()["id"]
 
     conv_data = {"agent_id": agent_id, "title": "Test Conversation"}
-    conv_resp = await client.post("/api/conversations", json=conv_data)
+    await client.post("/api/conversations", json=conv_data)
 
     convs_resp = await client.get(f"/api/conversations?agent_id={agent_id}")
     assert convs_resp.status_code == 200

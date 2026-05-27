@@ -7,7 +7,6 @@ Tests the complete flow:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -17,7 +16,6 @@ from hecate.services.context.assembler import ContextAssembler
 from hecate.services.context.budget import BudgetManager, DegradationLevel
 from hecate.services.context.evidence_tracker import EvidenceTracker
 from hecate.services.context.provider_shaping import get_strategy
-from hecate.services.context.token_counter import TokenCounter
 from hecate.services.context.types import AssembledContext, SessionMeta, TaskPhase
 from hecate.services.conversation import ConversationService
 

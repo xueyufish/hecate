@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.models.evidence import EvidenceModel
 from hecate.services.context.evidence_tracker import EvidenceTracker
 
 

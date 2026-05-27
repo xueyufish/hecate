@@ -87,10 +87,7 @@ def create_tool_result_message(
     Returns:
         dict: A tool role message with the result content.
     """
-    if is_error:
-        content = f"Error: {result}"
-    else:
-        content = json.dumps(result) if not isinstance(result, str) else result
+    content = f"Error: {result}" if is_error else json.dumps(result) if not isinstance(result, str) else result
 
     return {
         "role": "tool",
