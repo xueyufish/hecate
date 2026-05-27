@@ -3,24 +3,11 @@ from __future__ import annotations
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from alembic import context
 from hecate.core.database import Base
-from hecate.models import (
-    agent,
-    budget,
-    checkpoint,
-    conversation,
-    document,
-    evidence,
-    knowledge,
-    message,
-    session,
-    skill,
-    tool,
-)
 
 config = context.config
 config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url")))
@@ -57,6 +44,7 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     import asyncio
+
     asyncio.run(run_async_migrations())
 
 

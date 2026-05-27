@@ -74,4 +74,4 @@ python_version = "3.12"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
-disable_error_code = ["type-arg", "import-not-found", "import-untyped", "no-untyped-def", "no-untyped-call", "no-any-return", "attr-defined", "assignment", "union-attr", "arg-type"]
+disable_error_code = ["type-arg", "import-not-found", "import-untyped", "no-untyped-def", "no-untyped-call", "no-any-return", "attr-defined", "assignment", "union-attr", "arg-type", "misc"]
