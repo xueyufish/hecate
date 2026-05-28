@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     LLM_GUARD_ENABLED: bool = True
     RATE_LIMIT_RPM: int = 60
 
+    TEMPORAL_SERVER_URL: str = "localhost:7233"
+    TEMPORAL_TASK_QUEUE: str = "hecate-workers"
+    TEMPORAL_HEARTBEAT_TIMEOUT: int = 30
+    TEMPORAL_START_TO_CLOSE_TIMEOUT: int = 300
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list.
