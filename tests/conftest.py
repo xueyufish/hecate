@@ -25,6 +25,20 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from hecate.core.database import Base
+from hecate.models import (  # noqa: F401
+    agent,
+    budget,
+    checkpoint,
+    conversation,
+    document,
+    evidence,
+    knowledge,
+    memory,
+    message,
+    skill,
+    tool,
+    workflow,
+)
 
 # In-memory SQLite — every test process gets its own private database.
 TEST_DATABASE_URL = "sqlite+aiosqlite://"

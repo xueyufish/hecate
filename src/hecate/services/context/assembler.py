@@ -1,8 +1,8 @@
 """Context assembler orchestrating all context engineering components.
 
 The main entry point for context engineering - coordinates prioritization,
-phase detection, tool filtering, work panel construction, and budget checking
-to produce an optimized context for LLM invocations.
+phase detection, tool filtering, work panel construction, memory injection,
+and budget checking to produce an optimized context for LLM invocations.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from hecate.models.memory import MemoryBlockReadSchema, MemoryReadSchema
 from hecate.services.context.budget import BudgetCheck, BudgetManager, DegradationLevel
 from hecate.services.context.degradation import DegradationEngine
 from hecate.services.context.phase_detector import PhaseDetector
@@ -19,6 +20,7 @@ from hecate.services.context.token_counter import TokenCounter
 from hecate.services.context.tool_filter import ToolFilter
 from hecate.services.context.types import AssembledContext, SessionMeta
 from hecate.services.context.work_panel import WorkPanelBuilder
+from hecate.services.memory.compression import CompressionPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +61,7 @@ class ContextAssembler:
         self.tool_filter = ToolFilter()
         self.work_panel_builder = WorkPanelBuilder()
         self.degradation_engine = DegradationEngine(self.token_counter)
+        self.compression_pipeline = CompressionPipeline(self.token_counter)
 
     def assemble(
         self,
@@ -66,6 +69,8 @@ class ContextAssembler:
         tools: list[dict[str, Any]] | None,
         session_meta: SessionMeta,
         knowledge: list[dict[str, Any]] | None = None,
+        memory_blocks: list[MemoryBlockReadSchema] | None = None,
+        user_memories: list[MemoryReadSchema] | None = None,
     ) -> AssembledContext:
         """Assemble optimized context for an LLM invocation.
 
@@ -74,6 +79,8 @@ class ContextAssembler:
             tools: Available tool definitions.
             session_meta: Session metadata (session_id, model, etc.).
             knowledge: Optional knowledge chunks from RAG.
+            memory_blocks: Optional L1 memory blocks to inject.
+            user_memories: Optional L3 user memories to inject.
 
         Returns:
             AssembledContext with optimized messages, tools, and metadata.
@@ -85,16 +92,24 @@ class ContextAssembler:
                 knowledge=knowledge or [],
             )
 
-        # Step 1: Assign priorities
+        # Step 1: Inject L1 memory blocks
+        if memory_blocks:
+            messages = self._inject_memory_blocks(messages, memory_blocks)
+
+        # Step 2: Inject L3 user memories
+        if user_memories:
+            messages = self._inject_user_memories(messages, user_memories)
+
+        # Step 3: Assign priorities
         priorities = self.prioritizer.assign_priorities(messages)
 
-        # Step 2: Detect task phase
+        # Step 4: Detect task phase
         phase = self.phase_detector.detect_phase(messages)
 
-        # Step 3: Filter tools by phase
+        # Step 5: Filter tools by phase
         filtered_tools = self.tool_filter.filter_tools(tools or [], phase)
 
-        # Step 4: Build work panel for long conversations
+        # Step 6: Build work panel for long conversations
         if self.work_panel_builder.should_build_panel(messages):
             panel_messages = self.work_panel_builder.build_panel(messages, priorities)
             # Recalculate priorities for the panel
@@ -103,12 +118,12 @@ class ContextAssembler:
             panel_messages = messages
             panel_priorities = priorities
 
-        # Step 5: Count tokens
+        # Step 7: Count tokens
         message_tokens = self.token_counter.count_messages(panel_messages)
         tool_tokens = self.token_counter.count_tool_definitions(filtered_tools)
         total_tokens = message_tokens + tool_tokens
 
-        # Step 6: Check budget and apply degradation if needed
+        # Step 8: Check budget and apply degradation if needed
         session_id = UUID(session_meta.session_id) if session_meta.session_id else None
         final_messages = panel_messages
         final_priorities = panel_priorities
@@ -149,6 +164,8 @@ class ContextAssembler:
             metadata={
                 "original_message_count": len(messages),
                 "filtered_tool_count": len(filtered_tools),
+                "memory_blocks_count": len(memory_blocks) if memory_blocks else 0,
+                "user_memories_count": len(user_memories) if user_memories else 0,
                 "degradation_level": degradation_level.value,
                 "budget_check": {
                     "within_budget": True,  # After degradation
@@ -156,6 +173,78 @@ class ContextAssembler:
                 },
             },
         )
+
+    def _inject_memory_blocks(
+        self,
+        messages: list[dict[str, Any]],
+        blocks: list[MemoryBlockReadSchema],
+    ) -> list[dict[str, Any]]:
+        """Inject memory blocks into message context.
+
+        Args:
+            messages: Original messages.
+            blocks: Memory blocks to inject.
+
+        Returns:
+            Messages with blocks injected.
+        """
+        block_messages = []
+        for block in blocks:
+            if block.content:
+                block_messages.append(
+                    {
+                        "role": "system",
+                        "content": f"[{block.label}]: {block.content}",
+                    }
+                )
+
+        if not block_messages:
+            return messages
+
+        # Insert after existing system messages
+        insert_idx = 0
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                insert_idx = i + 1
+            else:
+                break
+
+        return messages[:insert_idx] + block_messages + messages[insert_idx:]
+
+    def _inject_user_memories(
+        self,
+        messages: list[dict[str, Any]],
+        memories: list[MemoryReadSchema],
+    ) -> list[dict[str, Any]]:
+        """Inject user memories into message context.
+
+        Args:
+            messages: Original messages.
+            memories: User memories to inject.
+
+        Returns:
+            Messages with memories injected as system message.
+        """
+        if not memories:
+            return messages
+
+        # Create memory context
+        memory_lines = []
+        for mem in memories[:5]:  # Limit to top 5 memories
+            memory_lines.append(f"- {mem.content}")
+
+        memory_context = "[User memories]:\n" + "\n".join(memory_lines)
+        memory_message = {"role": "system", "content": memory_context}
+
+        # Insert after existing system messages
+        insert_idx = 0
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                insert_idx = i + 1
+            else:
+                break
+
+        return messages[:insert_idx] + [memory_message] + messages[insert_idx:]
 
     def _apply_degradation(
         self,
