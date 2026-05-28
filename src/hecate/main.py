@@ -23,6 +23,7 @@ from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.sessions import router as sessions_router
 from hecate.api.management.skills import router as skills_router
 from hecate.api.management.tools import router as tools_router
+from hecate.api.management.workflows import router as workflows_router
 from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
 from hecate.core.database import engine
@@ -104,3 +105,4 @@ app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(skills_router, prefix="/api", tags=["skills"])
 app.include_router(knowledge_router, prefix="/api", tags=["knowledge-bases"])
 app.include_router(conversations_router, prefix="/api", tags=["conversations"])
+app.include_router(workflows_router, prefix="/api", tags=["workflows"])
