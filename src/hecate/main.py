@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from hecate.api.management.agents import router as agents_router
 from hecate.api.management.conversations import router as conversations_router
@@ -97,6 +97,22 @@ async def health_check() -> dict[str, str]:
         dict: ``{"status": "ok"}`` indicating the service is running.
     """
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+async def metrics() -> PlainTextResponse:
+    """Prometheus metrics endpoint.
+
+    Returns:
+        PlainTextResponse: Metrics in Prometheus text format.
+    """
+    from hecate.services.observability.metrics import MetricsCollector
+
+    collector = MetricsCollector()
+    return PlainTextResponse(
+        content=collector.export_prometheus(),
+        media_type="text/plain",
+    )
 
 
 app.include_router(chat_router, prefix="/v1", tags=["chat"])
