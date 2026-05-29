@@ -17,6 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from hecate.api.auth import router as auth_router
 from hecate.api.management.agents import router as agents_router
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.knowledge import router as knowledge_router
@@ -115,6 +116,7 @@ async def metrics() -> PlainTextResponse:
     )
 
 
+app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(chat_router, prefix="/v1", tags=["chat"])
 app.include_router(models_router, prefix="/v1", tags=["models"])
 app.include_router(agents_router, prefix="/api", tags=["agents"])
