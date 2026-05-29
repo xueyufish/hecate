@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import { Bot, Database, LogOut, Settings } from "lucide-react";
+import { Bot, Database, LogOut, Settings, Share2 } from "lucide-react";
 
 export function Sidebar() {
   const { userEmail, logout } = useAuth();
@@ -20,6 +20,13 @@ export function Sidebar() {
         >
           <Bot className="h-4 w-4" />
           Agent 管理
+        </Link>
+        <Link
+          href="/workflows"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <Share2 className="h-4 w-4" />
+          工作流
         </Link>
         <Link
           href="/knowledge"

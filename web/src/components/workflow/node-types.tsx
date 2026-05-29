@@ -1,0 +1,128 @@
+"use client";
+
+import { memo } from "react";
+import {
+  Bot,
+  GitBranch,
+  Wrench,
+  Users,
+  Search,
+  Variable,
+  Play,
+  Square,
+} from "lucide-react";
+
+interface NodeProps {
+  data: {
+    label: string;
+    type: string;
+    config: Record<string, unknown>;
+  };
+}
+
+const TYPE_STYLES: Record<
+  string,
+  { bg: string; border: string; icon: React.ReactNode }
+> = {
+  conversation: {
+    bg: "bg-blue-50",
+    border: "border-blue-300",
+    icon: <Bot className="h-4 w-4 text-blue-600" />,
+  },
+  condition: {
+    bg: "bg-yellow-50",
+    border: "border-yellow-300",
+    icon: <GitBranch className="h-4 w-4 text-yellow-600" />,
+  },
+  "tool-call": {
+    bg: "bg-purple-50",
+    border: "border-purple-300",
+    icon: <Wrench className="h-4 w-4 text-purple-600" />,
+  },
+  agent: {
+    bg: "bg-green-50",
+    border: "border-green-300",
+    icon: <Users className="h-4 w-4 text-green-600" />,
+  },
+  "knowledge-retrieval": {
+    bg: "bg-cyan-50",
+    border: "border-cyan-300",
+    icon: <Search className="h-4 w-4 text-cyan-600" />,
+  },
+  "variable-set": {
+    bg: "bg-orange-50",
+    border: "border-orange-300",
+    icon: <Variable className="h-4 w-4 text-orange-600" />,
+  },
+};
+
+export const ConversationNode = memo(function ConversationNode(props: NodeProps) {
+  return <WorkflowNodeBase {...props} typeKey="conversation" />;
+});
+export const ConditionNode = memo(function ConditionNode(props: NodeProps) {
+  return <WorkflowNodeBase {...props} typeKey="condition" />;
+});
+export const ToolCallNode = memo(function ToolCallNode(props: NodeProps) {
+  return <WorkflowNodeBase {...props} typeKey="tool-call" />;
+});
+export const AgentNode = memo(function AgentNode(props: NodeProps) {
+  return <WorkflowNodeBase {...props} typeKey="agent" />;
+});
+export const KnowledgeRetrievalNode = memo(function KnowledgeRetrievalNode(
+  props: NodeProps
+) {
+  return <WorkflowNodeBase {...props} typeKey="knowledge-retrieval" />;
+});
+export const VariableSetNode = memo(function VariableSetNode(props: NodeProps) {
+  return <WorkflowNodeBase {...props} typeKey="variable-set" />;
+});
+
+export const StartNode = memo(function StartNode() {
+  return (
+    <div className="flex flex-col items-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-green-400 bg-green-100">
+        <Play className="h-4 w-4 text-green-600" />
+      </div>
+      <span className="mt-1 text-xs text-muted-foreground">开始</span>
+    </div>
+  );
+});
+
+export const EndNode = memo(function EndNode() {
+  return (
+    <div className="flex flex-col items-center">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-red-400 bg-red-100">
+        <Square className="h-4 w-4 text-red-600" />
+      </div>
+      <span className="mt-1 text-xs text-muted-foreground">结束</span>
+    </div>
+  );
+});
+
+function WorkflowNodeBase({
+  data,
+  typeKey,
+}: NodeProps & { typeKey: string }) {
+  const style = TYPE_STYLES[typeKey] || TYPE_STYLES["conversation"];
+  return (
+    <div
+      className={`min-w-[140px] rounded-md border px-3 py-2 shadow-sm ${style.bg} ${style.border}`}
+    >
+      <div className="flex items-center gap-2">
+        {style.icon}
+        <span className="text-sm font-medium">{data.label}</span>
+      </div>
+    </div>
+  );
+}
+
+export const nodeTypeComponents = {
+  conversation: ConversationNode,
+  condition: ConditionNode,
+  "tool-call": ToolCallNode,
+  agent: AgentNode,
+  "knowledge-retrieval": KnowledgeRetrievalNode,
+  "variable-set": VariableSetNode,
+  start: StartNode,
+  end: EndNode,
+};
