@@ -54,6 +54,13 @@ class ModelRegistryModel(BaseModel):
 
     __table_args__ = (
         Index(
+            "uq_model_registry_provider_model",
+            "provider_id",
+            "model_id",
+            unique=True,
+            postgresql_where=BaseModel.deleted_at.is_(None),
+        ),
+        Index(
             "idx_model_registry_provider",
             "provider_id",
             postgresql_where=BaseModel.deleted_at.is_(None),
@@ -122,6 +129,25 @@ class ModelRegistryReadSchema(PydanticBase):
     is_custom: bool
     is_enabled: bool
     created_at: datetime
+
+
+class ModelUpdateSchema(PydanticBase):
+    """Schema for updating a registered model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    is_enabled: bool | None = None
+    display_name: str | None = None
+
+
+class CustomModelCreateSchema(PydanticBase):
+    """Schema for manually adding a custom model to a provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider_id: uuid.UUID
+    model_id: str = Field(..., min_length=1, max_length=255)
+    display_name: str = Field(..., min_length=1, max_length=255)
 
 
 class ModelTestRequestSchema(PydanticBase):

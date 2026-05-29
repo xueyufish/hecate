@@ -3,23 +3,12 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
+import { groupModelsByProvider, ModelGroup, ModelOption } from "@/lib/model-grouping";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-interface Model {
-  id: string;
-  provider?: string;
-  provider_display_name?: string;
-}
-
-interface ModelGroup {
-  provider_name: string;
-  provider_display_name: string;
-  models: Model[];
-}
 
 export default function NewAgentPage() {
   const [name, setName] = useState("");
@@ -32,23 +21,8 @@ export default function NewAgentPage() {
 
   useEffect(() => {
     api
-      .get<{ data: Model[] }>("/v1/models")
-      .then((res) => {
-        const models = res.data || [];
-        const grouped: Record<string, ModelGroup> = {};
-        for (const m of models) {
-          const key = m.provider || "unknown";
-          if (!grouped[key]) {
-            grouped[key] = {
-              provider_name: key,
-              provider_display_name: m.provider_display_name || key,
-              models: [],
-            };
-          }
-          grouped[key].models.push(m);
-        }
-        setModelGroups(Object.values(grouped));
-      })
+      .get<{ data: ModelOption[] }>("/v1/models")
+      .then((res) => setModelGroups(groupModelsByProvider(res.data || [])))
       .catch(() => setModelGroups([]));
   }, []);
 

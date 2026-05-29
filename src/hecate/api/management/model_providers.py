@@ -11,7 +11,9 @@ Provides CRUD operations for model providers:
 from __future__ import annotations
 
 import logging
+import time
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.deps import get_db, verify_api_key
 from hecate.models.model_provider import (
+    CustomModelCreateSchema,
     ModelProviderCreateSchema,
     ModelProviderModel,
     ModelProviderReadSchema,
@@ -27,8 +30,9 @@ from hecate.models.model_provider import (
     ModelRegistryModel,
     ModelRegistryReadSchema,
     ModelTestRequestSchema,
+    ModelUpdateSchema,
 )
-from hecate.services.model_provider.crypto import encrypt_api_key
+from hecate.services.model_provider.crypto import decrypt_api_key, encrypt_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +108,7 @@ async def create_provider(
         base_url=data.base_url,
         config=merged_config,
         is_enabled=data.is_enabled,
-        status="active",
+        status="pending",
     )
     db.add(provider)
     await db.flush()
@@ -137,24 +141,24 @@ async def list_providers(
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
     """List all model providers with status and model count."""
-    result = await db.execute(select(ModelProviderModel).where(ModelProviderModel.deleted_at.is_(None)))
-    providers = result.scalars().all()
+    stmt = (
+        select(ModelProviderModel, func.count(ModelRegistryModel.id).label("model_count"))
+        .outerjoin(
+            ModelRegistryModel,
+            (ModelRegistryModel.provider_id == ModelProviderModel.id) & (ModelRegistryModel.deleted_at.is_(None)),
+        )
+        .where(ModelProviderModel.deleted_at.is_(None))
+        .group_by(ModelProviderModel.id)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
 
     items = []
-    for p in providers:
-        count_stmt = (
-            select(func.count())
-            .select_from(ModelRegistryModel)
-            .where(
-                ModelRegistryModel.provider_id == p.id,
-                ModelRegistryModel.deleted_at.is_(None),
-            )
-        )
-        model_count = (await db.execute(count_stmt)).scalar_one() or 0
+    for provider, model_count in rows:
         items.append(
             {
-                **ModelProviderReadSchema.model_validate(p).model_dump(),
-                "model_count": model_count,
+                **ModelProviderReadSchema.model_validate(provider).model_dump(),
+                "model_count": model_count or 0,
             }
         )
 
@@ -205,8 +209,6 @@ async def delete_provider(
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> None:
     """Soft delete a provider and cascade soft-delete its models."""
-    from datetime import UTC, datetime
-
     result = await db.execute(
         select(ModelProviderModel).where(
             ModelProviderModel.id == provider_id,
@@ -238,10 +240,11 @@ async def test_provider(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
-    """Test provider connectivity with a lightweight LLM call."""
+    """Test provider connectivity with a lightweight LLM call.
 
-    from hecate.services.llm.service import llm_service
-
+    Uses the provider's own decrypted API key and picks the first
+    enabled model from the registry (instead of a hardcoded model).
+    """
     result = await db.execute(
         select(ModelProviderModel).where(
             ModelProviderModel.id == provider_id,
@@ -252,21 +255,49 @@ async def test_provider(
     if provider is None:
         raise HTTPException(status_code=404, detail="Provider not found")
 
-    try:
-        import time
+    decrypted_key = decrypt_api_key(provider.api_key_encrypted)
 
-        start = time.monotonic()
-        await llm_service.chat(
-            messages=[{"role": "user", "content": "Hi"}],
-            model=f"{provider.name}/glm-4.5-flash",
-            max_tokens=5,
+    first_model_result = await db.execute(
+        select(ModelRegistryModel)
+        .where(
+            ModelRegistryModel.provider_id == provider.id,
+            ModelRegistryModel.deleted_at.is_(None),
+            ModelRegistryModel.is_enabled.is_(True),
         )
+        .limit(1)
+    )
+    first_model = first_model_result.scalar_one_or_none()
+    test_model_id = first_model.model_id if first_model else f"{provider.name}/default"
+
+    try:
+        start = time.monotonic()
+
+        try:
+            from litellm import acompletion as litellm_completion
+        except ImportError as err:
+            raise HTTPException(
+                status_code=503,
+                detail="litellm is required for provider testing",
+            ) from err
+
+        litellm_kwargs: dict = {
+            "model": test_model_id,
+            "messages": [{"role": "user", "content": "Hi"}],
+            "api_key": decrypted_key,
+            "max_tokens": 5,
+        }
+        if provider.base_url:
+            litellm_kwargs["api_base"] = provider.base_url
+
+        await litellm_completion(**litellm_kwargs)
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
         provider.status = "active"
         await db.flush()
 
         return {"status": "active", "response_time_ms": elapsed_ms}
+    except HTTPException:
+        raise
     except Exception as e:
         provider.status = "error"
         await db.flush()
@@ -306,10 +337,9 @@ async def list_models(
 @router.put("/models/{model_id}")
 async def update_model(
     model_id: uuid.UUID,
+    data: ModelUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
-    is_enabled: bool | None = None,
-    display_name: str | None = None,
 ) -> dict:
     """Update a registered model (enable/disable, display name)."""
     result = await db.execute(
@@ -322,10 +352,11 @@ async def update_model(
     if model is None:
         raise HTTPException(status_code=404, detail="Model not found")
 
-    if is_enabled is not None:
-        model.is_enabled = is_enabled
-    if display_name is not None:
-        model.display_name = display_name
+    update_data = data.model_dump(exclude_unset=True)
+    if "is_enabled" in update_data:
+        model.is_enabled = update_data["is_enabled"]
+    if "display_name" in update_data:
+        model.display_name = update_data["display_name"]
 
     await db.flush()
     await db.refresh(model)
@@ -335,16 +366,14 @@ async def update_model(
 
 @router.post("/models", status_code=status.HTTP_201_CREATED)
 async def add_custom_model(
-    provider_id: uuid.UUID,
-    model_id: str,
-    display_name: str,
+    data: CustomModelCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
     """Manually add a custom model to a provider."""
     provider_result = await db.execute(
         select(ModelProviderModel).where(
-            ModelProviderModel.id == provider_id,
+            ModelProviderModel.id == data.provider_id,
             ModelProviderModel.deleted_at.is_(None),
         )
     )
@@ -352,9 +381,9 @@ async def add_custom_model(
         raise HTTPException(status_code=404, detail="Provider not found")
 
     model = ModelRegistryModel(
-        provider_id=provider_id,
-        model_id=model_id,
-        display_name=display_name,
+        provider_id=data.provider_id,
+        model_id=data.model_id,
+        display_name=data.display_name,
         model_type="chat",
         capabilities={},
         is_custom=True,
@@ -370,24 +399,57 @@ async def add_custom_model(
 @router.post("/models/test")
 async def test_model(
     data: ModelTestRequestSchema,
+    db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
-    """Test a model with a custom prompt."""
-    from hecate.services.llm.service import llm_service
+    """Test a model with a custom prompt using its provider's credentials."""
+    provider_result = await db.execute(
+        select(ModelProviderModel)
+        .join(ModelRegistryModel, ModelRegistryModel.provider_id == ModelProviderModel.id)
+        .where(
+            ModelRegistryModel.model_id == data.model_id,
+            ModelRegistryModel.deleted_at.is_(None),
+            ModelProviderModel.deleted_at.is_(None),
+        )
+    )
+    provider = provider_result.scalar_one_or_none()
 
     try:
-        response = await llm_service.chat(
-            messages=[{"role": "user", "content": data.prompt}],
-            model=data.model_id,
-            temperature=data.temperature,
-            max_tokens=data.max_tokens,
-        )
+        try:
+            from litellm import acompletion as litellm_completion
+        except ImportError as err:
+            raise HTTPException(
+                status_code=503,
+                detail="litellm is required for model testing",
+            ) from err
+
+        litellm_kwargs: dict = {
+            "model": data.model_id,
+            "messages": [{"role": "user", "content": data.prompt}],
+            "temperature": data.temperature,
+            "max_tokens": data.max_tokens,
+        }
+
+        if provider is not None:
+            decrypted_key = decrypt_api_key(provider.api_key_encrypted)
+            litellm_kwargs["api_key"] = decrypted_key
+            if provider.base_url:
+                litellm_kwargs["api_base"] = provider.base_url
+
+        response = await litellm_completion(**litellm_kwargs)
+        choice = response.choices[0]
 
         return {
-            "content": response.content,
+            "content": choice.message.content,
             "model": response.model,
-            "usage": response.usage,
-            "finish_reason": response.finish_reason,
+            "usage": {
+                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
+                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
+                "total_tokens": response.usage.total_tokens if response.usage else 0,
+            },
+            "finish_reason": choice.finish_reason,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

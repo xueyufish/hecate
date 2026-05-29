@@ -6,12 +6,12 @@ When FERNET_KEY is not configured, operates in plaintext mode for development.
 
 from __future__ import annotations
 
-import os
+from hecate.core.config import settings
 
 
 def _get_fernet():
     """Create a Fernet instance from FERNET_KEY. Returns None if not set."""
-    key = os.environ.get("FERNET_KEY", "")
+    key = settings.FERNET_KEY
     if not key:
         return None
 
