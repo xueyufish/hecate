@@ -15,13 +15,13 @@
 
 ## 3. Provider CRUD API
 
-- [ ] 3.1 创建 api/management/model_providers.py 路由文件
-- [ ] 3.2 POST /api/model-providers — 创建 Provider（加密 API Key，调用 LiteLLM 发现模型，写入 model_registry）
-- [ ] 3.3 GET /api/model-providers — 列出所有 Provider（含状态、模型数量）
-- [ ] 3.4 PUT /api/model-providers/{id} — 更新 Provider（API Key 变更时重新发现模型）
-- [ ] 3.5 DELETE /api/model-providers/{id} — 删除 Provider（级联删除 model_registry）
-- [ ] 3.6 POST /api/model-providers/{id}/test — 测试连通性（轻量 LLM 调用，更新状态）
-- [ ] 3.7 在 main.py 注册路由
+- [x] 3.1 创建 api/management/model_providers.py 路由文件
+- [x] 3.2 POST /api/model-providers — 创建 Provider（加密 API Key，调用 LiteLLM 发现模型，写入 model_registry）
+- [x] 3.3 GET /api/model-providers — 列出所有 Provider（含状态、模型数量）
+- [x] 3.4 PUT /api/model-providers/{id} — 更新 Provider（API Key 变更时重新发现模型）
+- [x] 3.5 DELETE /api/model-providers/{id} — 删除 Provider（级联删除 model_registry）
+- [x] 3.6 POST /api/model-providers/{id}/test — 测试连通性（轻量 LLM 调用，更新状态）
+- [x] 3.7 在 main.py 注册路由
 - [ ] 3.8 编写 Provider CRUD + 测试连通性单元测试
 
 ## 4. 模型注册表 API

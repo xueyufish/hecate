@@ -22,6 +22,7 @@ from hecate.api.management.agents import router as agents_router
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.memory import router as memory_router
+from hecate.api.management.model_providers import router as model_providers_router
 from hecate.api.management.prompts import router as prompts_router
 from hecate.api.management.sessions import router as sessions_router
 from hecate.api.management.skills import router as skills_router
@@ -128,3 +129,4 @@ app.include_router(conversations_router, prefix="/api", tags=["conversations"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])
 app.include_router(memory_router, prefix="/api", tags=["memory"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
+app.include_router(model_providers_router, prefix="/api", tags=["model-providers"])
