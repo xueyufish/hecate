@@ -25,6 +25,8 @@ from hecate.models.model_provider import (
     ModelProviderReadSchema,
     ModelProviderUpdateSchema,
     ModelRegistryModel,
+    ModelRegistryReadSchema,
+    ModelTestRequestSchema,
 )
 from hecate.services.model_provider.crypto import encrypt_api_key
 
@@ -270,3 +272,122 @@ async def test_provider(
         await db.flush()
 
         return {"status": "error", "error_message": str(e)}
+
+
+@router.get("/models")
+async def list_models(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """List all registered models grouped by provider."""
+    providers_result = await db.execute(select(ModelProviderModel).where(ModelProviderModel.deleted_at.is_(None)))
+    providers = {p.id: p for p in providers_result.scalars().all()}
+
+    models_result = await db.execute(select(ModelRegistryModel).where(ModelRegistryModel.deleted_at.is_(None)))
+    models = models_result.scalars().all()
+
+    grouped: dict[str, dict] = {}
+    for m in models:
+        provider = providers.get(m.provider_id)
+        if provider is None:
+            continue
+        if provider.name not in grouped:
+            grouped[provider.name] = {
+                "provider_id": str(provider.id),
+                "provider_name": provider.name,
+                "provider_display_name": provider.display_name,
+                "models": [],
+            }
+        grouped[provider.name]["models"].append(ModelRegistryReadSchema.model_validate(m).model_dump())
+
+    return {"items": list(grouped.values()), "total": sum(len(g["models"]) for g in grouped.values())}
+
+
+@router.put("/models/{model_id}")
+async def update_model(
+    model_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+    is_enabled: bool | None = None,
+    display_name: str | None = None,
+) -> dict:
+    """Update a registered model (enable/disable, display name)."""
+    result = await db.execute(
+        select(ModelRegistryModel).where(
+            ModelRegistryModel.id == model_id,
+            ModelRegistryModel.deleted_at.is_(None),
+        )
+    )
+    model = result.scalar_one_or_none()
+    if model is None:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    if is_enabled is not None:
+        model.is_enabled = is_enabled
+    if display_name is not None:
+        model.display_name = display_name
+
+    await db.flush()
+    await db.refresh(model)
+
+    return ModelRegistryReadSchema.model_validate(model).model_dump()
+
+
+@router.post("/models", status_code=status.HTTP_201_CREATED)
+async def add_custom_model(
+    provider_id: uuid.UUID,
+    model_id: str,
+    display_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Manually add a custom model to a provider."""
+    provider_result = await db.execute(
+        select(ModelProviderModel).where(
+            ModelProviderModel.id == provider_id,
+            ModelProviderModel.deleted_at.is_(None),
+        )
+    )
+    if provider_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Provider not found")
+
+    model = ModelRegistryModel(
+        provider_id=provider_id,
+        model_id=model_id,
+        display_name=display_name,
+        model_type="chat",
+        capabilities={},
+        is_custom=True,
+        is_enabled=True,
+    )
+    db.add(model)
+    await db.flush()
+    await db.refresh(model)
+
+    return ModelRegistryReadSchema.model_validate(model).model_dump()
+
+
+@router.post("/models/test")
+async def test_model(
+    data: ModelTestRequestSchema,
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Test a model with a custom prompt."""
+    from hecate.services.llm.service import llm_service
+
+    try:
+        response = await llm_service.chat(
+            messages=[{"role": "user", "content": data.prompt}],
+            model=data.model_id,
+            temperature=data.temperature,
+            max_tokens=data.max_tokens,
+        )
+
+        return {
+            "content": response.content,
+            "model": response.model,
+            "usage": response.usage,
+            "finish_reason": response.finish_reason,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
