@@ -54,7 +54,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["conversation", "tool-call", "condition", "agent"]
+            "enum": ["conversation", "tool-call", "condition", "agent", "knowledge-retrieval", "variable-set"]
           },
           "config": {
             "type": "object",
@@ -65,6 +65,11 @@
               "expression": { "type": "string" },
               "agent_ref": { "type": "string" },
               "skill_ref": { "type": "string" },
+              "kb_ids": { "type": "array", "items": { "type": "string" } },
+              "query_template": { "type": "string" },
+              "top_k": { "type": "integer" },
+              "variable_name": { "type": "string" },
+              "value": {},
               "channels": {
                 "type": "object",
                 "properties": {

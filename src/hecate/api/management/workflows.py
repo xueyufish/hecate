@@ -9,6 +9,9 @@ Provides CRUD operations for workflows and version management:
 - ``GET /api/workflows/{id}/versions`` — List versions
 - ``GET /api/workflows/{id}/versions/{version}`` — Get specific version
 - ``POST /api/workflows/{id}/rollback/{version}`` — Rollback to version
+- ``POST /api/workflows/{id}/validate`` — Validate graph DSL (dry-run)
+- ``POST /api/workflows/{id}/test-run`` — Execute a test run
+- ``GET /api/workflows/{id}/runs`` — List test run history
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel as PydanticBase
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.deps import get_db, verify_api_key
@@ -25,6 +29,7 @@ from hecate.models.workflow import (
     WorkflowCreateSchema,
     WorkflowUpdateSchema,
 )
+from hecate.services.workflow.test_runner import WorkflowTestRunner
 from hecate.services.workflow_service import WorkflowService
 
 router = APIRouter()
@@ -232,6 +237,32 @@ async def get_workflow_version(
         ) from e
 
 
+class ValidateRequest(PydanticBase):
+    graph_dsl: dict
+
+
+@router.post("/workflows/{workflow_id}/validate")
+async def validate_workflow(
+    workflow_id: uuid.UUID,
+    data: ValidateRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Validate a graph DSL without persisting (dry-run compile).
+
+    Args:
+        workflow_id: The UUID of the workflow.
+        data: Request body containing graph_dsl to validate.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: ``{"valid": bool, "errors": [...]}``
+    """
+    service = WorkflowService(db)
+    return await service.validate_dsl(data.graph_dsl)
+
+
 @router.post("/workflows/{workflow_id}/rollback/{version}")
 async def rollback_workflow(
     workflow_id: uuid.UUID,
@@ -257,6 +288,65 @@ async def rollback_workflow(
     try:
         result = await service.rollback_to_version(workflow_id, version)
         return result.model_dump()
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
+        ) from e
+
+
+class TestRunRequest(PydanticBase):
+    """Request body for triggering a workflow test run."""
+
+    input_data: dict = {}
+    mock: bool = True
+
+
+@router.post("/workflows/{workflow_id}/test-run")
+async def test_run_workflow(
+    workflow_id: uuid.UUID,
+    data: TestRunRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Execute a workflow test run and return per-node results.
+
+    Args:
+        workflow_id: The UUID of the workflow to test.
+        data: Request body with input_data and mock flag.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: ``{"run_id": str, "status": str, "nodes": [...], "total_duration_ms": int}``
+
+    Raises:
+        HTTPException: 404 if workflow has no compiled version.
+    """
+    runner = WorkflowTestRunner(db)
+    try:
+        result = await runner.run_test(
+            workflow_id=workflow_id,
+            input_data=data.input_data,
+            mock=data.mock,
+        )
+        return {
+            "run_id": str(result.run_id),
+            "status": result.status,
+            "nodes": [
+                {
+                    "node_id": n.node_id,
+                    "node_type": n.node_type,
+                    "status": n.status,
+                    "output": n.output,
+                    "error_message": n.error_message,
+                    "duration_ms": n.duration_ms,
+                }
+                for n in result.nodes
+            ],
+            "total_duration_ms": result.total_duration_ms,
+            "error": result.error,
+        }
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

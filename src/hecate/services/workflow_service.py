@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.engine.compiler import GraphCompiler
-from hecate.engine.graph_dsl import parse_graph
+from hecate.engine.graph_dsl import GraphValidationError, parse_graph
 from hecate.models.workflow import (
     WorkflowCreateSchema,
     WorkflowDetailSchema,
@@ -351,6 +351,25 @@ class WorkflowService:
         logger.info(f"Rolled back workflow {workflow_id} to version {target_version} (new version {new_version_num})")
 
         return await self.get_workflow(workflow_id)
+
+    async def validate_dsl(
+        self,
+        graph_dsl: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Validate a graph DSL without persisting (dry-run compile).
+
+        Args:
+            graph_dsl: The graph DSL definition to validate.
+
+        Returns:
+            Dict with ``valid`` (bool) and optional ``errors`` (list[str]).
+        """
+        try:
+            graph_config = parse_graph(graph_dsl)
+            self.compiler.compile(graph_config)
+            return {"valid": True, "errors": []}
+        except GraphValidationError as e:
+            return {"valid": False, "errors": [str(e)]}
 
     async def _get_version(
         self,

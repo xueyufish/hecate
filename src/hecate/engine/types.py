@@ -25,12 +25,16 @@ class NodeType(StrEnum):
     - CONDITION: evaluates an expression against channel state to determine which
       outgoing edge to follow (branching node).
     - AGENT: delegates execution to a sub-graph representing another agent.
+    - KNOWLEDGE_RETRIEVAL: queries knowledge bases via EnginePort.knowledge_query().
+    - VARIABLE_SET: sets/updates channel variables based on expressions.
     """
 
     CONVERSATION = "conversation"
     TOOL_CALL = "tool-call"
     CONDITION = "condition"
     AGENT = "agent"
+    KNOWLEDGE_RETRIEVAL = "knowledge-retrieval"
+    VARIABLE_SET = "variable-set"
 
 
 class ChannelType(StrEnum):
