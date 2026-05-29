@@ -37,6 +37,7 @@ from hecate.models import (  # noqa: F401
     message,
     skill,
     tool,
+    user,
     workflow,
 )
 
