@@ -13,18 +13,18 @@
 - [x] 2.1 Create `engine/temporal/conflict.py` with ConflictResolver class
 - [x] 2.2 Implement optimistic locking — version check before channel update
 - [x] 2.3 Implement merge strategies — list append, map merge, last-write-wins
-- [ ] 2.4 Implement human approval — Temporal Signal for critical conflicts
-- [ ] 2.5 Integrate with PregelRuntime — apply conflict resolution on channel updates
+- [x] 2.4 Implement human approval — Temporal Signal for critical conflicts
+- [x] 2.5 Integrate with PregelRuntime — apply conflict resolution on channel updates
 
 ## 3. Configuration
 
 - [x] 3.1 Add Temporal configuration to Settings — server URL, task queue, timeouts
-- [ ] 3.2 Create Temporal Worker startup script
-- [ ] 3.3 Add Docker Compose configuration for Temporal server
+- [x] 3.2 Create Temporal Worker startup script
+- [x] 3.3 Add Docker Compose configuration for Temporal server
 
 ## 4. Testing
 
 - [x] 4.1 Unit tests for TemporalWorkerPool — dispatch, timeout, heartbeat
-- [ ] 4.2 Unit tests for DistributedPregelWorkflow — execution, Continue-As-New
+- [x] 4.2 Unit tests for DistributedPregelWorkflow — execution, Continue-As-New
 - [x] 4.3 Unit tests for ConflictResolver — optimistic locking, merge, approval
-- [ ] 4.4 Integration test with Temporal test environment
+- [x] 4.4 Integration test with Temporal test environment

@@ -19,8 +19,8 @@
 
 ## 4. Integration
 
-- [ ] 4.1 Integrate with ContextAssembler — inject constraints during assembly
-- [ ] 4.2 Integrate with EvidenceTracker — trigger analysis on failures
+- [x] 4.1 Integrate with ContextAssembler — inject constraints during assembly
+- [x] 4.2 Integrate with EvidenceTracker — trigger analysis on failures
 
 ## 5. Testing
 

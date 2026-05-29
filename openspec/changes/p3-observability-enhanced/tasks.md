@@ -2,7 +2,7 @@
 
 - [x] 1.1 Enhance LangFuse integration — Trace→Span→Generation hierarchy
 - [x] 1.2 Implement cost attribution — per user, agent, session
-- [ ] 1.3 Associate EvidenceTracker with LangFuse traces
+- [x] 1.3 Associate EvidenceTracker with LangFuse traces
 
 ## 2. Structured Logging
 
