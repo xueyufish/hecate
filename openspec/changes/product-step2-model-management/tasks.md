@@ -22,35 +22,35 @@
 - [x] 3.5 DELETE /api/model-providers/{id} — 删除 Provider（级联删除 model_registry）
 - [x] 3.6 POST /api/model-providers/{id}/test — 测试连通性（轻量 LLM 调用，更新状态）
 - [x] 3.7 在 main.py 注册路由
-- [ ] 3.8 编写 Provider CRUD + 测试连通性单元测试
+- [x] 3.8 编写 Provider CRUD + 测试连通性单元测试
 
 ## 4. 模型注册表 API
 
 - [x] 4.1 GET /api/models — 列出所有注册模型（按 Provider 分组）
 - [x] 4.2 PUT /api/models/{id} — 更新模型（启用/禁用、显示名）
 - [x] 4.3 POST /api/models — 手动添加自定义模型（is_custom=true）
-- [ ] 4.4 编写模型注册表 API 单元测试
+- [x] 4.4 编写模型注册表 API 单元测试
 
 ## 5. 模型调试 API
 
 - [x] 5.1 POST /api/models/test — 接收 model_id + prompt + 参数，调用 llm_service.chat()，返回响应
 - [x] 5.2 参数校验：temperature 0-2，max_tokens >= 1
 - [x] 5.3 错误处理：模型不可用时返回 400 + LiteLLM 错误信息
-- [ ] 5.4 编写模型调试 API 单元测试
+- [x] 5.4 编写模型调试 API 单元测试
 
 ## 6. 改造 /v1/models 端点
 
 - [x] 6.1 修改 _discover_models() 优先从 model_registry 读取（只返回 enabled + chat 类型）
 - [x] 6.2 无数据库 Provider 时 fallback 到 LiteLLM get_valid_models()
 - [x] 6.3 返回格式改为按 Provider 分组（provider_display_name + models）
-- [ ] 6.4 编写改造后的 /v1/models 单元测试
+- [x] 6.4 编写改造后的 /v1/models 单元测试
 
 ## 7. Provider 级配置
 
 - [x] 7.1 Provider config JSON 校验：timeout (1-300), max_retries (0-10), rate_limit_rpm (1-10000)
 - [x] 7.2 默认值处理：timeout=30, max_retries=3, rate_limit_rpm=60
 - [ ] 7.3 LLM 调用时应用 Provider 级 timeout/retry 配置
-- [ ] 7.4 编写配置校验单元测试
+- [x] 7.4 编写配置校验单元测试
 
 ## 8. Fallback 集成
 
