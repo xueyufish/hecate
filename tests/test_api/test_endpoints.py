@@ -13,6 +13,8 @@ Tests cover:
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import AsyncClient
 
@@ -177,15 +179,24 @@ async def test_create_knowledge_base(client: AsyncClient, auth_headers: dict) ->
 @pytest.mark.asyncio
 async def test_chat_completions(client: AsyncClient, auth_headers: dict) -> None:
     """Test chat completions endpoint."""
-    chat_data = {
-        "model": "gpt-4o",
-        "messages": [{"role": "user", "content": "Hello"}],
-    }
-    response = await client.post("/v1/chat/completions", json=chat_data, headers=auth_headers)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["object"] == "chat.completion"
-    assert len(data["choices"]) > 0
+    mock_response = AsyncMock()
+    mock_response.content = "Hi there!"
+    mock_response.tool_calls = None
+    mock_response.model = "gpt-4o"
+    mock_response.usage = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+    mock_response.finish_reason = "stop"
+
+    with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        mock_llm.chat = AsyncMock(return_value=mock_response)
+        chat_data = {
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        response = await client.post("/v1/chat/completions", json=chat_data, headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["object"] == "chat.completion"
+        assert len(data["choices"]) > 0
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,8 @@ Tests cover:
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from httpx import AsyncClient
 
@@ -30,13 +32,26 @@ async def test_e2e_create_agent_and_chat(client: AsyncClient) -> None:
     session_resp = await client.post("/api/sessions", json=session_data)
     assert session_resp.status_code == 201
 
-    chat_data = {
-        "model": "gpt-4o",
-        "messages": [{"role": "user", "content": "Hello"}],
-    }
-    chat_resp = await client.post("/v1/chat/completions", json=chat_data)
-    assert chat_resp.status_code == 200
-    assert chat_resp.json()["object"] == "chat.completion"
+    mock_response = AsyncMock()
+    mock_response.content = "Hello! How can I help you?"
+    mock_response.tool_calls = None
+    mock_response.model = "gpt-4o"
+    mock_response.usage = {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18}
+    mock_response.finish_reason = "stop"
+
+    with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        mock_llm.chat = AsyncMock(return_value=mock_response)
+        chat_data = {
+            "model": "gpt-4o",
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+        chat_resp = await client.post(
+            "/v1/chat/completions",
+            json=chat_data,
+            headers={"Authorization": "Bearer test-api-key-123"},
+        )
+        assert chat_resp.status_code == 200
+        assert chat_resp.json()["object"] == "chat.completion"
 
 
 @pytest.mark.asyncio

@@ -69,10 +69,9 @@ async def verify_api_key(
 async def get_current_user_id(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
 ) -> uuid.UUID:
-    """Extract the user ID from a JWT Bearer access token.
+    """Extract the user ID from a JWT Bearer access token or API key.
 
-    Tries JWT first; falls back to returning a placeholder if the token
-    is an API key (for backward compatibility with API Key auth).
+    Tries JWT first; falls back to a placeholder UUID for API key auth.
 
     Returns:
         UUID: The authenticated user's ID.
@@ -89,18 +88,9 @@ async def get_current_user_id(
     except (JWTError, ValueError, KeyError):
         pass
 
-    # Fallback to API Key
+    # Fallback to API Key — return a system placeholder
     if token in settings.api_keys_list:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": {
-                    "code": "UNAUTHORIZED",
-                    "message": "API Key auth not supported for user endpoints — use JWT",
-                    "details": None,
-                }
-            },
-        )
+        return uuid.UUID("00000000-0000-0000-0000-000000000000")
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

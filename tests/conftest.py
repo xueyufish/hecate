@@ -100,6 +100,7 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
     process, so the full middleware / dependency-injection stack is exercised
     without binding a real TCP port.
     """
+    from hecate.core.config import settings
     from hecate.core.database import get_db
     from hecate.core.deps import verify_api_key
     from hecate.main import app
@@ -118,6 +119,9 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
     async def override_verify_api_key() -> str:
         return "test-api-key-123"
+
+    settings.HECATE_API_KEYS = "test-api-key-123"
+    settings.JWT_SECRET = "test-jwt-secret-for-ci"
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[verify_api_key] = override_verify_api_key
