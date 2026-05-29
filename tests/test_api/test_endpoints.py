@@ -202,11 +202,12 @@ async def test_chat_completions(client: AsyncClient, auth_headers: dict) -> None
 @pytest.mark.asyncio
 async def test_list_models(client: AsyncClient, auth_headers: dict) -> None:
     """Test listing models."""
-    response = await client.get("/v1/models", headers=auth_headers)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["object"] == "list"
-    assert len(data["data"]) > 0
+    with patch("hecate.api.v1.models._discover_models", return_value=["gpt-4o"]):
+        response = await client.get("/v1/models", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["object"] == "list"
+        assert len(data["data"]) > 0
 
 
 @pytest.mark.asyncio
