@@ -51,7 +51,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.create_index("idx_memories_scope", "memories", ["scope"])
+    # scope is JSON type — skip index (btree/gin require JSONB or operator class)
     op.create_index("idx_memories_type", "memories", ["memory_type"])
     op.create_index("idx_memories_importance", "memories", ["importance"])
 

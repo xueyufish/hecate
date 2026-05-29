@@ -15,7 +15,7 @@ from alembic import op
 
 # revision identifiers
 revision = "001_context_engineering"
-down_revision = None
+down_revision = "000_base"
 branch_labels = None
 depends_on = None
 
