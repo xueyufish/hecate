@@ -12,13 +12,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Bot, Plus } from "lucide-react";
+import { Bot, Plus, AlertTriangle } from "lucide-react";
 
 interface Agent {
   id: string;
   name: string;
   mode: string;
   model_config: { model?: string };
+  model_available?: boolean | null;
   created_at: string;
 }
 
@@ -80,7 +81,16 @@ export default function AgentsPage() {
                     {agent.name}
                   </Link>
                 </TableCell>
-                <TableCell>{agent.model_config?.model || "-"}</TableCell>
+                <TableCell>
+                  <span className="flex items-center gap-1.5">
+                    {agent.model_config?.model || "-"}
+                    {agent.model_available === false && (
+                      <span title="模型不可用：Provider 已停用或模型已禁用" className="text-yellow-500">
+                        <AlertTriangle className="h-4 w-4" />
+                      </span>
+                    )}
+                  </span>
+                </TableCell>
                 <TableCell>
                   {new Date(agent.created_at).toLocaleDateString("zh-CN")}
                 </TableCell>

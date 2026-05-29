@@ -113,3 +113,4 @@ class AgentReadSchema(PydanticBase):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None
+    model_available: bool | None = None

@@ -14,8 +14,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.database import get_db
 from hecate.core.deps import get_current_user_id
+from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 from hecate.services.llm.service import llm_service
 
 logger = logging.getLogger(__name__)
@@ -112,25 +116,79 @@ def _messages_to_dicts(messages: list[ChatMessage]) -> list[dict[str, Any]]:
     return result
 
 
+_DEFAULT_PROVIDER_CONFIG = {"timeout": 30, "max_retries": 3}
+
+
+async def _get_provider_config(db: AsyncSession, model: str) -> dict[str, Any]:
+    """Look up provider-level timeout/retry config for a model.
+
+    Queries model_registry → model_providers to find the provider config.
+    Returns empty dict if model not in registry (let litellm use its defaults).
+
+    Args:
+        db: The async database session.
+        model: The model identifier (e.g., "gpt-4o").
+
+    Returns:
+        Dict with optional ``timeout`` and ``num_retries`` keys.
+    """
+    stmt = (
+        select(ModelProviderModel.config)
+        .join(ModelRegistryModel, ModelRegistryModel.provider_id == ModelProviderModel.id)
+        .where(
+            ModelRegistryModel.model_id == model,
+            ModelRegistryModel.deleted_at.is_(None),
+            ModelRegistryModel.is_enabled.is_(True),
+            ModelProviderModel.deleted_at.is_(None),
+            ModelProviderModel.is_enabled.is_(True),
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    config = result.scalar_one_or_none()
+    if config is None:
+        return {}
+
+    resolved = {**_DEFAULT_PROVIDER_CONFIG, **config}
+    return {
+        "timeout": resolved["timeout"],
+        "num_retries": resolved["max_retries"],
+    }
+
+
 @router.post("/chat/completions", response_model=None)
 async def create_chat_completion(
     request: ChatCompletionRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Create a chat completion via LiteLLM.
+
+    Applies provider-level timeout/retry config when the model is found
+    in the model registry.
 
     Args:
         request: The chat completion request.
         user_id: The authenticated user ID.
+        db: The async database session.
 
     Returns:
         StreamingResponse if stream=True, otherwise ChatCompletionResponse dict.
     """
     msg_dicts = _messages_to_dicts(request.messages)
+    provider_cfg = await _get_provider_config(db, request.model)
 
     if request.stream:
         return StreamingResponse(
-            _stream_chat(request.model, msg_dicts, request.temperature, request.max_tokens, request.tools),
+            _stream_chat(
+                request.model,
+                msg_dicts,
+                request.temperature,
+                request.max_tokens,
+                request.tools,
+                timeout=provider_cfg.get("timeout"),
+                num_retries=provider_cfg.get("num_retries"),
+            ),
             media_type="text/event-stream",
         )
 
@@ -140,6 +198,8 @@ async def create_chat_completion(
         tools=request.tools,
         temperature=request.temperature,
         max_tokens=request.max_tokens,
+        timeout=provider_cfg.get("timeout"),
+        num_retries=provider_cfg.get("num_retries"),
     )
 
     return ChatCompletionResponse(
@@ -168,6 +228,8 @@ async def _stream_chat(
     temperature: float | None,
     max_tokens: int | None,
     tools: list | None,
+    timeout: float | None = None,
+    num_retries: int | None = None,
 ):
     """Stream chat completion chunks via LiteLLM.
 
@@ -180,6 +242,8 @@ async def _stream_chat(
         tools=tools,
         temperature=temperature,
         max_tokens=max_tokens,
+        timeout=timeout,
+        num_retries=num_retries,
     ):
         sse_chunk = ChatCompletionChunk(
             model=model,

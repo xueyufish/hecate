@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AlertTriangle } from "lucide-react";
 
 interface Agent {
   id: string;
@@ -15,6 +16,7 @@ interface Agent {
   persona: string | null;
   mode: string;
   model_config: { model?: string };
+  model_available?: boolean | null;
 }
 
 export default function AgentDetailPage() {
@@ -50,10 +52,24 @@ export default function AgentDetailPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{agent.name}</h1>
-        <Button onClick={startChat} disabled={chatLoading}>
-          {chatLoading ? "创建中..." : "开始对话"}
+        <Button onClick={startChat} disabled={chatLoading || agent.model_available === false}>
+          {agent.model_available === false
+            ? "模型不可用"
+            : chatLoading
+              ? "创建中..."
+              : "开始对话"}
         </Button>
       </div>
+
+      {agent.model_available === false && (
+        <div className="flex items-center gap-2 rounded-md border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>
+            该 Agent 使用的模型「{agent.model_config?.model}」当前不可用，
+            可能是 Provider 已停用或模型已禁用。请前往设置检查模型配置。
+          </span>
+        </div>
+      )}
 
       <Card>
         <CardHeader>

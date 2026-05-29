@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -25,8 +25,41 @@ from hecate.models.agent import (
     AgentReadSchema,
     AgentUpdateSchema,
 )
+from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 
 router = APIRouter()
+
+
+async def _check_models_availability(
+    db: AsyncSession,
+    model_names: set[str],
+) -> dict[str, bool]:
+    """Check which models are available (enabled registry entry + active provider).
+
+    Args:
+        db: The async database session.
+        model_names: Set of model identifiers to check.
+
+    Returns:
+        Dict mapping model_id → availability (True if available).
+    """
+    if not model_names:
+        return {}
+    stmt = (
+        select(ModelRegistryModel.model_id)
+        .join(ModelProviderModel, ModelProviderModel.id == ModelRegistryModel.provider_id)
+        .where(
+            ModelRegistryModel.model_id.in_(model_names),
+            ModelRegistryModel.deleted_at.is_(None),
+            ModelRegistryModel.is_enabled.is_(True),
+            ModelProviderModel.deleted_at.is_(None),
+            ModelProviderModel.is_enabled.is_(True),
+            ModelProviderModel.status == "active",
+        )
+    )
+    result = await db.execute(stmt)
+    available_models = {row[0] for row in result.all()}
+    return {name: (name in available_models) for name in model_names}
 
 
 @router.post("/agents", status_code=status.HTTP_201_CREATED)
@@ -96,8 +129,22 @@ async def list_agents(
     result = await db.execute(stmt)
     agents = result.scalars().all()
 
+    model_names: set[str] = set()
+    for a in agents:
+        model_name = a.model_config_db.get("model") if isinstance(a.model_config_db, dict) else None
+        if model_name:
+            model_names.add(model_name)
+    availability = await _check_models_availability(db, model_names)
+
+    items: list[dict[str, Any]] = []
+    for a in agents:
+        schema = AgentReadSchema.model_validate(a)
+        model_name = a.model_config_db.get("model") if isinstance(a.model_config_db, dict) else None
+        schema.model_available = availability.get(model_name, None) if model_name else None
+        items.append(schema.model_dump(by_alias=True))
+
     return {
-        "items": [AgentReadSchema.model_validate(a).model_dump(by_alias=True) for a in agents],
+        "items": items,
         "total": total,
     }
 
@@ -133,7 +180,14 @@ async def get_agent(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": {"code": "NOT_FOUND", "message": "Agent not found", "details": None}},
         )
-    return AgentReadSchema.model_validate(agent).model_dump(by_alias=True)
+
+    schema = AgentReadSchema.model_validate(agent)
+    model_name = agent.model_config_db.get("model") if isinstance(agent.model_config_db, dict) else None
+    if model_name:
+        availability = await _check_models_availability(db, {model_name})
+        schema.model_available = availability.get(model_name, False)
+
+    return schema.model_dump(by_alias=True)
 
 
 @router.put("/agents/{agent_id}")

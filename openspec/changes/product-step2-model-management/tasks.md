@@ -49,15 +49,15 @@
 
 - [x] 7.1 Provider config JSON 校验：timeout (1-300), max_retries (0-10), rate_limit_rpm (1-10000)
 - [x] 7.2 默认值处理：timeout=30, max_retries=3, rate_limit_rpm=60
-- [ ] 7.3 LLM 调用时应用 Provider 级 timeout/retry 配置
+- [x] 7.3 LLM 调用时应用 Provider 级 timeout/retry 配置
 - [x] 7.4 编写配置校验单元测试
 
 ## 8. Fallback 集成
 
-- [ ] 8.1 Provider 状态变化时，查询使用该 Provider 模型的 Agent 列表
-- [ ] 8.2 Agent 列表 API 返回时，附加 model_available 字段（检查 Provider 状态）
-- [ ] 8.3 前端 Agent 列表显示"模型不可用"警告标记
-- [ ] 8.4 编写 fallback 集成单元测试
+- [x] 8.1 Provider 状态变化时，查询使用该 Provider 模型的 Agent 列表
+- [x] 8.2 Agent 列表 API 返回时，附加 model_available 字段（检查 Provider 状态）
+- [x] 8.3 前端 Agent 列表显示"模型不可用"警告标记
+- [x] 8.4 编写 fallback 集成单元测试
 
 ## 9. 前端 — 设置页面
 
@@ -77,7 +77,7 @@
 
 ## 11. 集成测试与验证
 
-- [ ] 11.1 端到端测试：创建 Provider → 自动发现模型 → 模型出现在 /v1/models
-- [ ] 11.2 端到端测试：创建 Agent 选择分组模型 → 对话成功
-- [ ] 11.3 端到端测试：Provider 状态变化 → Agent 列表显示警告
+- [x] 11.1 端到端测试：创建 Provider → 自动发现模型 → 模型出现在 /v1/models
+- [x] 11.2 端到端测试：创建 Agent 选择分组模型 → 对话成功
+- [x] 11.3 端到端测试：Provider 状态变化 → Agent 列表显示警告
 - [ ] 11.4 运行 ruff check + ruff format + mypy + pytest 全量验证

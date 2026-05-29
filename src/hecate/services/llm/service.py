@@ -106,6 +106,8 @@ class LLMService:
         temperature: float | None = None,
         max_tokens: int | None = None,
         routing_config: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        num_retries: int | None = None,
     ) -> LLMResponse:
         """Invoke a chat completion.
 
@@ -116,11 +118,18 @@ class LLMService:
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
             routing_config: Optional routing configuration for model selection.
+            timeout: Request timeout in seconds (provider-level override).
+            num_retries: Number of retries on failure (provider-level override).
 
         Returns:
             LLMResponse with content, tool_calls, and usage.
         """
         resolved_model = self._resolve_model(model, routing_config)
+        litellm_kwargs: dict[str, Any] = {}
+        if timeout is not None:
+            litellm_kwargs["timeout"] = timeout
+        if num_retries is not None:
+            litellm_kwargs["num_retries"] = num_retries
         try:
             response = await _get_litellm().acompletion(
                 model=resolved_model,
@@ -128,6 +137,7 @@ class LLMService:
                 tools=tools,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                **litellm_kwargs,
             )
             choice = response.choices[0]
             return LLMResponse(
@@ -146,7 +156,7 @@ class LLMService:
         except Exception as e:
             logger.warning(f"LLM call failed for model {resolved_model}: {e}")
             if self.fallback_models:
-                return await self._try_fallback(messages, tools, temperature, max_tokens)
+                return await self._try_fallback(messages, tools, temperature, max_tokens, timeout, num_retries)
             raise
 
     async def chat_stream(
@@ -157,6 +167,8 @@ class LLMService:
         temperature: float | None = None,
         max_tokens: int | None = None,
         routing_config: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        num_retries: int | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream chat completion chunks.
 
@@ -167,11 +179,18 @@ class LLMService:
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
             routing_config: Optional routing configuration for model selection.
+            timeout: Request timeout in seconds (provider-level override).
+            num_retries: Number of retries on failure (provider-level override).
 
         Yields:
             dict with chunk data (content delta, tool_calls, etc.).
         """
         resolved_model = self._resolve_model(model, routing_config)
+        litellm_kwargs: dict[str, Any] = {}
+        if timeout is not None:
+            litellm_kwargs["timeout"] = timeout
+        if num_retries is not None:
+            litellm_kwargs["num_retries"] = num_retries
         try:
             response = await _get_litellm().acompletion(
                 model=resolved_model,
@@ -180,6 +199,7 @@ class LLMService:
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,
+                **litellm_kwargs,
             )
             async for chunk in response:
                 if chunk.choices:
@@ -192,7 +212,14 @@ class LLMService:
         except Exception as e:
             logger.warning(f"LLM streaming failed for model {resolved_model}: {e}")
             if self.fallback_models:
-                async for chunk in self._try_fallback_stream(messages, tools, temperature, max_tokens):
+                async for chunk in self._try_fallback_stream(
+                    messages,
+                    tools,
+                    temperature,
+                    max_tokens,
+                    timeout,
+                    num_retries,
+                ):
                     yield chunk
             else:
                 raise
@@ -203,12 +230,22 @@ class LLMService:
         tools: list[dict[str, Any]] | None,
         temperature: float | None,
         max_tokens: int | None,
+        timeout: float | None = None,
+        num_retries: int | None = None,
     ) -> LLMResponse:
         """Try fallback models in order."""
         for fallback_model in self.fallback_models:
             try:
                 logger.info(f"Trying fallback model: {fallback_model}")
-                return await self.chat(messages, fallback_model, tools, temperature, max_tokens)
+                return await self.chat(
+                    messages,
+                    fallback_model,
+                    tools,
+                    temperature,
+                    max_tokens,
+                    timeout=timeout,
+                    num_retries=num_retries,
+                )
             except Exception as e:
                 logger.warning(f"Fallback model {fallback_model} also failed: {e}")
                 continue
@@ -220,12 +257,22 @@ class LLMService:
         tools: list[dict[str, Any]] | None,
         temperature: float | None,
         max_tokens: int | None,
+        timeout: float | None = None,
+        num_retries: int | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Try fallback models for streaming."""
         for fallback_model in self.fallback_models:
             try:
                 logger.info(f"Trying fallback model for streaming: {fallback_model}")
-                async for chunk in self.chat_stream(messages, fallback_model, tools, temperature, max_tokens):
+                async for chunk in self.chat_stream(
+                    messages,
+                    fallback_model,
+                    tools,
+                    temperature,
+                    max_tokens,
+                    timeout=timeout,
+                    num_retries=num_retries,
+                ):
                     yield chunk
                 return
             except Exception as e:
