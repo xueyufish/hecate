@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     TEMPORAL_HEARTBEAT_TIMEOUT: int = 30
     TEMPORAL_START_TO_CLOSE_TIMEOUT: int = 300
 
+    FERNET_KEY: str = ""
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""

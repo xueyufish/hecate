@@ -1,17 +1,17 @@
 ## 1. 数据模型与迁移
 
-- [ ] 1.1 创建 ModelProviderModel ORM 模型（id, name, display_name, api_key_encrypted, base_url, config JSON, is_enabled, status, timestamps）
-- [ ] 1.2 创建 ModelRegistryModel ORM 模型（id, provider_id FK, model_id, display_name, model_type, capabilities JSON, max_context, is_custom, is_enabled, timestamps）
-- [ ] 1.3 创建 Pydantic schemas：ModelProviderCreateSchema, ModelProviderUpdateSchema, ModelProviderReadSchema, ModelRegistryReadSchema
-- [ ] 1.4 生成 Alembic 迁移 006_model_providers.py，创建 model_providers 和 model_registry 表
-- [ ] 1.5 在 conftest.py 导入新模型，确保测试数据库自动建表
+- [x] 1.1 创建 ModelProviderModel ORM 模型（id, name, display_name, api_key_encrypted, base_url, config JSON, is_enabled, status, timestamps）
+- [x] 1.2 创建 ModelRegistryModel ORM 模型（id, provider_id FK, model_id, display_name, model_type, capabilities JSON, max_context, is_custom, is_enabled, timestamps）
+- [x] 1.3 创建 Pydantic schemas：ModelProviderCreateSchema, ModelProviderUpdateSchema, ModelProviderReadSchema, ModelRegistryReadSchema
+- [x] 1.4 生成 Alembic 迁移 006_model_providers.py，创建 model_providers 和 model_registry 表
+- [x] 1.5 在 conftest.py 导入新模型，确保测试数据库自动建表
 
 ## 2. API Key 加密层
 
-- [ ] 2.1 在 config.py 添加 FERNET_KEY 配置项
-- [ ] 2.2 创建 services/model_provider/crypto.py，实现 Fernet 加密/解密函数
-- [ ] 2.3 FERNET_KEY 未设置时 fallback 到明文存储
-- [ ] 2.4 编写加密/解密单元测试
+- [x] 2.1 在 config.py 添加 FERNET_KEY 配置项
+- [x] 2.2 创建 services/model_provider/crypto.py，实现 Fernet 加密/解密函数
+- [x] 2.3 FERNET_KEY 未设置时 fallback 到明文存储
+- [x] 2.4 编写加密/解密单元测试
 
 ## 3. Provider CRUD API
 

@@ -35,6 +35,7 @@ from hecate.models import (  # noqa: F401
     knowledge,
     memory,
     message,
+    model_provider,
     skill,
     tool,
     user,
