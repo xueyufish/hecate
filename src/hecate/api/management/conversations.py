@@ -1,6 +1,7 @@
 """Conversation management API endpoints.
 
 Provides operations for conversations:
+- ``POST /api/conversations`` — Create a new conversation
 - ``GET /api/conversations`` — List conversations (paginated, filterable by agent_id)
 - ``GET /api/conversations/{id}`` — Get conversation with messages
 """
@@ -13,13 +14,39 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from hecate.core.deps import get_db, verify_api_key
-from hecate.models.conversation import ConversationModel, ConversationReadSchema
+from hecate.models.conversation import (
+    ConversationCreateSchema,
+    ConversationModel,
+    ConversationReadSchema,
+)
 from hecate.models.message import MessageModel, MessageReadSchema
 
 router = APIRouter()
+
+
+@router.post("/conversations", status_code=status.HTTP_201_CREATED)
+async def create_conversation(
+    data: ConversationCreateSchema,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Create a new conversation for an agent.
+
+    Args:
+        data: The conversation creation data (agent_id required, title optional).
+        db: The async database session.
+        api_key: The validated API key or JWT token.
+
+    Returns:
+        dict: The created conversation data.
+    """
+    conversation = ConversationModel(agent_id=data.agent_id, title=data.title)
+    db.add(conversation)
+    await db.flush()
+    await db.refresh(conversation)
+    return ConversationReadSchema.model_validate(conversation).model_dump()
 
 
 @router.get("/conversations")
@@ -85,7 +112,6 @@ async def get_conversation(
             ConversationModel.id == conversation_id,
             ConversationModel.deleted_at.is_(None),
         )
-        .options(selectinload(ConversationModel.messages))
     )
     conversation = result.scalar_one_or_none()
     if conversation is None:
