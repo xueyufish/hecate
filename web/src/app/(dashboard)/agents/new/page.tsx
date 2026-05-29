@@ -11,7 +11,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface Model {
   id: string;
-  name?: string;
+  provider?: string;
+  provider_display_name?: string;
+}
+
+interface ModelGroup {
+  provider_name: string;
+  provider_display_name: string;
+  models: Model[];
 }
 
 export default function NewAgentPage() {
@@ -19,15 +26,30 @@ export default function NewAgentPage() {
   const [description, setDescription] = useState("");
   const [model, setModel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [models, setModels] = useState<Model[]>([]);
+  const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
     api
       .get<{ data: Model[] }>("/v1/models")
-      .then((res) => setModels(res.data || []))
-      .catch(() => setModels([]));
+      .then((res) => {
+        const models = res.data || [];
+        const grouped: Record<string, ModelGroup> = {};
+        for (const m of models) {
+          const key = m.provider || "unknown";
+          if (!grouped[key]) {
+            grouped[key] = {
+              provider_name: key,
+              provider_display_name: m.provider_display_name || key,
+              models: [],
+            };
+          }
+          grouped[key].models.push(m);
+        }
+        setModelGroups(Object.values(grouped));
+      })
+      .catch(() => setModelGroups([]));
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -86,11 +108,24 @@ export default function NewAgentPage() {
                 className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
               >
                 <option value="">选择模型</option>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name || m.id}
+                {modelGroups.length === 0 ? (
+                  <option value="" disabled>
+                    暂无可用模型，请先配置服务商
                   </option>
-                ))}
+                ) : (
+                  modelGroups.map((group) => (
+                    <optgroup
+                      key={group.provider_name}
+                      label={group.provider_display_name}
+                    >
+                      {group.models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.id}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))
+                )}
               </select>
             </div>
             <div className="space-y-2">

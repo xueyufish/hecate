@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import { Bot, Database, LogOut } from "lucide-react";
+import { Bot, Database, LogOut, Settings } from "lucide-react";
 
 export function Sidebar() {
   const { userEmail, logout } = useAuth();
@@ -27,6 +27,13 @@ export function Sidebar() {
         >
           <Database className="h-4 w-4" />
           知识库
+        </Link>
+        <Link
+          href="/settings/models"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <Settings className="h-4 w-4" />
+          设置
         </Link>
       </nav>
       <div className="border-t p-3">

@@ -47,8 +47,8 @@
 
 ## 7. Provider 级配置
 
-- [ ] 7.1 Provider config JSON 校验：timeout (1-300), max_retries (0-10), rate_limit_rpm (1-10000)
-- [ ] 7.2 默认值处理：timeout=30, max_retries=3, rate_limit_rpm=60
+- [x] 7.1 Provider config JSON 校验：timeout (1-300), max_retries (0-10), rate_limit_rpm (1-10000)
+- [x] 7.2 默认值处理：timeout=30, max_retries=3, rate_limit_rpm=60
 - [ ] 7.3 LLM 调用时应用 Provider 级 timeout/retry 配置
 - [ ] 7.4 编写配置校验单元测试
 
@@ -61,19 +61,19 @@
 
 ## 9. 前端 — 设置页面
 
-- [ ] 9.1 创建 web/src/app/(dashboard)/settings/layout.tsx 设置页布局
-- [ ] 9.2 创建 web/src/app/(dashboard)/settings/models/page.tsx Provider 列表页（表格 + 状态徽章 + 操作按钮）
-- [ ] 9.3 创建 Provider 添加/编辑对话框（表单：name, display_name, api_key, base_url, config）
-- [ ] 9.4 创建 Provider 测试连通按钮（点击后显示状态和响应时间）
+- [x] 9.1 创建 web/src/app/(dashboard)/settings/layout.tsx 设置页布局
+- [x] 9.2 创建 web/src/app/(dashboard)/settings/models/page.tsx Provider 列表页（表格 + 状态徽章 + 操作按钮）
+- [x] 9.3 创建 Provider 添加/编辑对话框（表单：name, display_name, api_key, base_url, config）
+- [x] 9.4 创建 Provider 测试连通按钮（点击后显示状态和响应时间）
 - [ ] 9.5 创建模型管理子页面（按 Provider 分组的模型表格，启用/禁用开关）
 - [ ] 9.6 创建模型调试页面（模型下拉 + prompt 输入 + 参数滑块 + 测试按钮 + 响应区）
-- [ ] 9.7 侧边栏添加"设置"导航入口
+- [x] 9.7 侧边栏添加"设置"导航入口
 
 ## 10. 前端 — Agent 创建模型选择改造
 
-- [ ] 10.1 修改 web/src/app/(dashboard)/agents/new/page.tsx 的模型下拉组件
-- [ ] 10.2 改为按 Provider 分组的 `<optgroup>` 展示（provider display_name 为组名）
-- [ ] 10.3 处理空模型列表状态（显示引导用户配置 Provider 的提示）
+- [x] 10.1 修改 web/src/app/(dashboard)/agents/new/page.tsx 的模型下拉组件
+- [x] 10.2 改为按 Provider 分组的 `<optgroup>` 展示（provider display_name 为组名）
+- [x] 10.3 处理空模型列表状态（显示引导用户配置 Provider 的提示）
 
 ## 11. 集成测试与验证
 
