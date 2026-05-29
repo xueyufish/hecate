@@ -27,6 +27,19 @@ class ConflictStrategy(StrEnum):
 
 
 @dataclass
+class PendingApproval:
+    """A conflict resolution pending human approval."""
+
+    conflict_id: str
+    channel_key: str
+    current_value: Any
+    proposed_value: Any
+    agent_id: str | None = None
+    approved: bool | None = None
+    approver: str | None = None
+
+
+@dataclass
 class ConflictResult:
     """Result of a conflict resolution attempt."""
 
@@ -40,8 +53,13 @@ class ConflictResolver:
     """Resolves conflicts for concurrent channel updates.
 
     Provides multiple resolution strategies based on channel type
-    and conflict severity.
+    and conflict severity. Supports human approval for critical conflicts
+    via a pending-approval queue that external systems (e.g., Temporal Signals)
+    can resolve.
     """
+
+    def __init__(self) -> None:
+        self._pending_approvals: dict[str, PendingApproval] = {}
 
     def resolve(
         self,
@@ -50,6 +68,7 @@ class ConflictResolver:
         proposed_value: Any,
         channel_type: str = "last_value",
         agent_id: str | None = None,
+        require_approval: bool = False,
     ) -> ConflictResult:
         """Resolve a conflict between current and proposed values.
 
@@ -63,6 +82,9 @@ class ConflictResolver:
         Returns:
             ConflictResult with resolution outcome.
         """
+        if require_approval:
+            return self._request_approval(channel_key, current_value, proposed_value, agent_id)
+
         # Last-value channels: last write wins
         if channel_type == "last_value":
             return ConflictResult(
@@ -151,3 +173,90 @@ class ConflictResolver:
         merged = current.copy()
         merged.update(proposed)
         return merged
+
+    def _request_approval(
+        self,
+        channel_key: str,
+        current_value: Any,
+        proposed_value: Any,
+        agent_id: str | None = None,
+    ) -> ConflictResult:
+        """Request human approval for a critical conflict.
+
+        Creates a PendingApproval entry and returns an unresolved ConflictResult.
+        External systems (Temporal Signals) call resolve_approval() to complete.
+
+        Args:
+            channel_key: The channel being updated.
+            current_value: Current channel value.
+            proposed_value: Proposed new value.
+            agent_id: ID of the agent making the update.
+
+        Returns:
+            ConflictResult with requires_approval=True.
+        """
+        import uuid
+
+        conflict_id = str(uuid.uuid4())
+        self._pending_approvals[conflict_id] = PendingApproval(
+            conflict_id=conflict_id,
+            channel_key=channel_key,
+            current_value=current_value,
+            proposed_value=proposed_value,
+            agent_id=agent_id,
+        )
+
+        logger.info(f"Conflict on channel '{channel_key}' requires human approval: {conflict_id}")
+        return ConflictResult(
+            resolved=False,
+            strategy_used=ConflictStrategy.HUMAN_APPROVAL.value,
+            requires_approval=True,
+            final_value={"conflict_id": conflict_id, "status": "pending_approval"},
+        )
+
+    def resolve_approval(
+        self,
+        conflict_id: str,
+        approved: bool,
+        approver: str | None = None,
+    ) -> ConflictResult:
+        """Resolve a pending human approval.
+
+        Called by external systems (e.g., Temporal Signal handler) when
+        a human makes an approval decision.
+
+        Args:
+            conflict_id: The conflict to resolve.
+            approved: Whether the proposed value was approved.
+            approver: Identifier of the human approver.
+
+        Returns:
+            ConflictResult with final resolution.
+        """
+        pending = self._pending_approvals.pop(conflict_id, None)
+        if pending is None:
+            logger.warning(f"Approval request {conflict_id} not found")
+            return ConflictResult(resolved=False)
+
+        pending.approved = approved
+        pending.approver = approver
+
+        final_value = pending.proposed_value if approved else pending.current_value
+        logger.info(
+            f"Conflict {conflict_id} on '{pending.channel_key}' "
+            f"{'approved' if approved else 'rejected'} by {approver}"
+        )
+
+        return ConflictResult(
+            resolved=True,
+            final_value=final_value,
+            strategy_used=ConflictStrategy.HUMAN_APPROVAL.value,
+        )
+
+    def get_pending_approvals(self) -> list[PendingApproval]:
+        """Get all conflicts pending human approval.
+
+        Returns:
+            List of PendingApproval entries.
+        """
+        return list(self._pending_approvals.values())

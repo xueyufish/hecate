@@ -161,3 +161,26 @@ class EnginePort(ABC):
             List of evidence record dicts.
         """
         return []
+
+    async def tool_execute_sandbox(
+        self,
+        name: str,
+        args: dict,
+        context: dict | None = None,
+    ) -> Any:
+        """Execute a tool inside a sandboxed Docker container (optional).
+
+        Sandbox capability — isolates tool execution with resource limits
+        and timeout handling for untrusted or high-risk tools.
+
+        Default implementation falls back to regular tool_execute.
+
+        Args:
+            name: The registered tool name.
+            args: Keyword arguments to pass to the tool.
+            context: Optional execution context.
+
+        Returns:
+            The tool's return value.
+        """
+        return await self.tool_execute(name, args, context)

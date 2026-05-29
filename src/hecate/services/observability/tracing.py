@@ -161,6 +161,42 @@ class TracingService:
             context.metadata["cost"] = cost_data
             logger.debug(f"Recorded cost for trace {trace_id}: {cost_data}")
 
+    def record_evidence(
+        self,
+        trace_id: str,
+        span_id: str | None = None,
+        evidence_id: str | None = None,
+        tool_name: str | None = None,
+        is_error: bool = False,
+    ) -> None:
+        """Associate evidence capture with a trace.
+
+        Args:
+            trace_id: Trace to associate with.
+            span_id: Optional span within the trace.
+            evidence_id: Evidence record ID.
+            tool_name: Tool that produced the evidence.
+            is_error: Whether the evidence is an error.
+        """
+        context = self._active_traces.get(trace_id)
+        if not context:
+            return
+
+        evidence_key = f"evidence_{evidence_id}" if evidence_id else f"evidence_{tool_name}"
+        context.metadata[evidence_key] = {
+            "evidence_id": evidence_id,
+            "tool_name": tool_name,
+            "is_error": is_error,
+            "span_id": span_id,
+        }
+
+        if span_id:
+            span = self._active_spans.get(span_id)
+            if span:
+                span.metadata["evidence_id"] = evidence_id
+
+        logger.debug(f"Associated evidence {evidence_id} with trace {trace_id}")
+
     def get_active_traces(self) -> list[TraceContext]:
         """Get all active traces.
 

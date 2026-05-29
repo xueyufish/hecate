@@ -17,6 +17,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.evidence import EvidenceModel
+from hecate.services.harness.failure_analyzer import FailureAnalyzer
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class EvidenceTracker:
             db_session: Async SQLAlchemy session for database operations.
         """
         self.db = db_session
+        self.failure_analyzer = FailureAnalyzer()
 
     async def capture(
         self,
@@ -57,6 +59,7 @@ class EvidenceTracker:
         message_id: UUID | None = None,
         turn_index: int | None = None,
         is_error: bool = False,
+        trajectory: list[dict[str, Any]] | None = None,
     ) -> EvidenceModel:
         """Capture a tool execution result as evidence.
 
@@ -113,6 +116,10 @@ class EvidenceTracker:
         await self.db.flush()
 
         logger.debug(f"Captured evidence for tool '{tool_name}': importance={importance}, is_error={is_error}")
+
+        if is_error and trajectory:
+            await self._analyze_failure(evidence, trajectory)
+
         return evidence
 
     async def boost_importance(
@@ -200,6 +207,30 @@ class EvidenceTracker:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def _analyze_failure(
+        self,
+        evidence: EvidenceModel,
+        trajectory: list[dict[str, Any]],
+    ) -> None:
+        """Trigger failure analysis when error evidence is captured.
+
+        Args:
+            evidence: The error evidence record.
+            trajectory: Conversation trajectory for analysis.
+        """
+        analysis = self.failure_analyzer.classify_failure(trajectory)
+        evidence.provenance["failure_analysis"] = {
+            "failure_type": analysis.failure_type.value,
+            "confidence": analysis.confidence,
+            "root_cause": analysis.root_cause,
+            "suggested_constraints": analysis.suggested_constraints,
+        }
+        await self.db.flush()
+        logger.info(
+            f"Failure analysis for evidence {evidence.id}: "
+            f"type={analysis.failure_type.value}, confidence={analysis.confidence}"
+        )
 
     def _normalize_result(
         self,

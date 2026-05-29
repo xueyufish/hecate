@@ -20,6 +20,8 @@ from hecate.services.context.token_counter import TokenCounter
 from hecate.services.context.tool_filter import ToolFilter
 from hecate.services.context.types import AssembledContext, SessionMeta
 from hecate.services.context.work_panel import WorkPanelBuilder
+from hecate.services.harness.constraint_generator import ConstraintRule
+from hecate.services.harness.constraint_injector import ConstraintInjector
 from hecate.services.memory.compression import CompressionPipeline
 
 logger = logging.getLogger(__name__)
@@ -62,6 +64,7 @@ class ContextAssembler:
         self.work_panel_builder = WorkPanelBuilder()
         self.degradation_engine = DegradationEngine(self.token_counter)
         self.compression_pipeline = CompressionPipeline(self.token_counter)
+        self.constraint_injector = ConstraintInjector()
 
     def assemble(
         self,
@@ -71,6 +74,7 @@ class ContextAssembler:
         knowledge: list[dict[str, Any]] | None = None,
         memory_blocks: list[MemoryBlockReadSchema] | None = None,
         user_memories: list[MemoryReadSchema] | None = None,
+        constraints: list[ConstraintRule] | None = None,
     ) -> AssembledContext:
         """Assemble optimized context for an LLM invocation.
 
@@ -99,6 +103,10 @@ class ContextAssembler:
         # Step 2: Inject L3 user memories
         if user_memories:
             messages = self._inject_user_memories(messages, user_memories)
+
+        # Step 2.5: Inject constraint rules from harness
+        if constraints:
+            messages = self.constraint_injector.inject_constraints(messages, constraints)
 
         # Step 3: Assign priorities
         priorities = self.prioritizer.assign_priorities(messages)

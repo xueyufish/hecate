@@ -28,6 +28,7 @@ from typing import Any
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
+from hecate.engine.temporal.conflict import ConflictResolver
 from hecate.engine.types import (
     CompiledGraph,
     StreamMode,
@@ -62,12 +63,14 @@ class PregelRuntime:
         checkpoint_store: CheckpointStore,
         pool: WorkerPool | None = None,
         max_supersteps: int = 100,
+        conflict_resolver: ConflictResolver | None = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
         self._checkpoint_store = checkpoint_store
         self._pool = pool or DirectWorkerPool()
         self._max_supersteps = max_supersteps
+        self._conflict_resolver = conflict_resolver
         self._channel_manager = ChannelManager()
         self._superstep = 0
         self._interrupted = False
@@ -156,8 +159,7 @@ class PregelRuntime:
                         self._interrupted = True
                         self._interrupt_value = result.command.interrupt
                         self._interrupted_node = result.node_id
-                        for k, v in result.channel_updates.items():
-                            self._channel_manager.write(k, v)
+                        self._apply_writes(result.channel_updates)
                         await self._checkpoint_store.save(
                             session_id=session_id,
                             superstep=self._superstep,
@@ -173,11 +175,9 @@ class PregelRuntime:
                         interrupted = True
                         break
                     if result.command.update:
-                        for k, v in result.command.update.items():
-                            self._channel_manager.write(k, v)
+                        self._apply_writes(result.command.update)
                 if not self._interrupted:
-                    for k, v in result.channel_updates.items():
-                        self._channel_manager.write(k, v)
+                    self._apply_writes(result.channel_updates)
 
             if interrupted:
                 return
@@ -291,3 +291,27 @@ class PregelRuntime:
     def interrupt_value(self) -> Any:
         """Return the interrupt payload if execution is paused."""
         return self._interrupt_value
+
+    def _apply_writes(self, updates: dict[str, Any], channel_types: dict[str, str] | None = None) -> None:
+        """Write channel updates, applying conflict resolution if available.
+
+        Args:
+            updates: Channel key to value mapping.
+            channel_types: Optional channel type hints for conflict strategy.
+        """
+        if not self._conflict_resolver:
+            for k, v in updates.items():
+                self._channel_manager.write(k, v)
+            return
+
+        types = channel_types or {}
+        for k, v in updates.items():
+            current = self._channel_manager.snapshot().get(k)
+            result = self._conflict_resolver.resolve(
+                channel_key=k,
+                current_value=current,
+                proposed_value=v,
+                channel_type=types.get(k, "last_value"),
+            )
+            if result.resolved:
+                self._channel_manager.write(k, result.final_value)

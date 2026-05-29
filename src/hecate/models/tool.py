@@ -53,6 +53,8 @@ class ToolModel(BaseModel):
     returns: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     risk_level: Mapped[str] = mapped_column(String(20), default="LOW")
     approval_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    sandbox_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    sandbox_config: Mapped[dict] = mapped_column(JSON, default=dict)
     mcp_server: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mcp_tool_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
@@ -79,6 +81,8 @@ class ToolCreateSchema(PydanticBase):
     returns: dict | None = None
     risk_level: str = "LOW"
     approval_required: bool = False
+    sandbox_enabled: bool = False
+    sandbox_config: dict = Field(default_factory=dict)
     mcp_server: str | None = None
     mcp_tool_name: str | None = None
 
@@ -97,6 +101,8 @@ class ToolReadSchema(PydanticBase):
     returns: dict | None
     risk_level: str
     approval_required: bool
+    sandbox_enabled: bool
+    sandbox_config: dict
     mcp_server: str | None
     mcp_tool_name: str | None
     created_at: datetime
