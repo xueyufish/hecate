@@ -63,7 +63,9 @@ class TestConflictResolverHumanApproval:
     def test_request_approval(self) -> None:
         resolver = ConflictResolver()
         result = resolver.resolve(
-            "ch", "old", "new",
+            "ch",
+            "old",
+            "new",
             channel_type="last_value",
             require_approval=True,
         )
@@ -75,7 +77,9 @@ class TestConflictResolverHumanApproval:
     def test_resolve_approval_accept(self) -> None:
         resolver = ConflictResolver()
         conflict_result = resolver.resolve(
-            "ch", "old", "new",
+            "ch",
+            "old",
+            "new",
             require_approval=True,
         )
         conflict_id = conflict_result.final_value["conflict_id"]
@@ -89,7 +93,9 @@ class TestConflictResolverHumanApproval:
     def test_resolve_approval_reject(self) -> None:
         resolver = ConflictResolver()
         conflict_result = resolver.resolve(
-            "ch", "old", "new",
+            "ch",
+            "old",
+            "new",
             require_approval=True,
         )
         conflict_id = conflict_result.final_value["conflict_id"]

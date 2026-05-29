@@ -243,8 +243,7 @@ class ConflictResolver:
 
         final_value = pending.proposed_value if approved else pending.current_value
         logger.info(
-            f"Conflict {conflict_id} on '{pending.channel_key}' "
-            f"{'approved' if approved else 'rejected'} by {approver}"
+            f"Conflict {conflict_id} on '{pending.channel_key}' {'approved' if approved else 'rejected'} by {approver}"
         )
 
         return ConflictResult(

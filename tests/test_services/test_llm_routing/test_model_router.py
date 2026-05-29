@@ -74,20 +74,24 @@ class TestModelRouter:
 
     def test_select_balanced(self) -> None:
         router = ModelRouter()
-        router.register_model(_make_model(
-            "balanced",
-            cost_in=0.005,
-            cost_out=0.015,
-            latency=300.0,
-            capabilities=["search", "code"],
-        ))
-        router.register_model(_make_model(
-            "unbalanced",
-            cost_in=0.05,
-            cost_out=0.15,
-            latency=2000.0,
-            capabilities=["search"],
-        ))
+        router.register_model(
+            _make_model(
+                "balanced",
+                cost_in=0.005,
+                cost_out=0.015,
+                latency=300.0,
+                capabilities=["search", "code"],
+            )
+        )
+        router.register_model(
+            _make_model(
+                "unbalanced",
+                cost_in=0.05,
+                cost_out=0.15,
+                latency=2000.0,
+                capabilities=["search"],
+            )
+        )
 
         result = router.select_model(
             RoutingStrategy.BALANCED,

@@ -98,10 +98,7 @@ class SandboxPool:
         async with self._lock:
             if container.use_count >= self._max_uses:
                 await self._destroy_container(container)
-                logger.info(
-                    f"Retired container {container.container_id[:12]} "
-                    f"after {container.use_count} uses"
-                )
+                logger.info(f"Retired container {container.container_id[:12]} after {container.use_count} uses")
                 return
 
             try:
@@ -155,13 +152,18 @@ class SandboxPool:
         """
         cfg = self._executor.config
         docker_args = [
-            "docker", "run",
+            "docker",
+            "run",
             "--detach",
             "--rm",
-            "--cpu-period", str(cfg.cpu_period),
-            "--cpu-quota", str(cfg.cpu_quota),
-            "--memory", cfg.memory_limit,
-            "--network", cfg.network_mode,
+            "--cpu-period",
+            str(cfg.cpu_period),
+            "--cpu-quota",
+            str(cfg.cpu_quota),
+            "--memory",
+            cfg.memory_limit,
+            "--network",
+            cfg.network_mode,
         ]
         if cfg.read_only_fs:
             docker_args.append("--read-only")
@@ -189,8 +191,12 @@ class SandboxPool:
             container_id: Container to clean.
         """
         proc = await asyncio.create_subprocess_exec(
-            "docker", "exec", container_id,
-            "sh", "-c", "rm -rf /tmp/* 2>/dev/null || true",
+            "docker",
+            "exec",
+            container_id,
+            "sh",
+            "-c",
+            "rm -rf /tmp/* 2>/dev/null || true",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -204,7 +210,10 @@ class SandboxPool:
         """
         try:
             proc = await asyncio.create_subprocess_exec(
-                "docker", "rm", "-f", container.container_id,
+                "docker",
+                "rm",
+                "-f",
+                container.container_id,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

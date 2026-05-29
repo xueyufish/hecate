@@ -235,8 +235,6 @@ class GrayReleaseManager:
             return {k: 1.0 / count for k in weights} if count > 0 else {}
 
         if abs(total - 1.0) > 0.01:
-            logger.warning(
-                f"Release '{release_name}': weights sum to {total:.4f}, normalizing to 1.0"
-            )
+            logger.warning(f"Release '{release_name}': weights sum to {total:.4f}, normalizing to 1.0")
 
         return {k: v / total for k, v in weights.items()}

@@ -143,21 +143,14 @@ class ModelRouter:
 
         if constraints.required_capabilities:
             candidates = [
-                m for m in candidates
-                if all(cap in m.capabilities for cap in constraints.required_capabilities)
+                m for m in candidates if all(cap in m.capabilities for cap in constraints.required_capabilities)
             ]
 
         if constraints.max_cost_per_1k is not None:
-            candidates = [
-                m for m in candidates
-                if self._avg_cost(m) <= constraints.max_cost_per_1k
-            ]
+            candidates = [m for m in candidates if self._avg_cost(m) <= constraints.max_cost_per_1k]
 
         if constraints.max_latency_ms is not None:
-            candidates = [
-                m for m in candidates
-                if m.avg_latency_ms <= constraints.max_latency_ms
-            ]
+            candidates = [m for m in candidates if m.avg_latency_ms <= constraints.max_latency_ms]
 
         return candidates
 
@@ -247,9 +240,9 @@ class ModelRouter:
 
             # Capability bonus: fraction of required capabilities matched
             if constraints.required_capabilities:
-                cap_match = sum(
-                    1 for c in constraints.required_capabilities if c in m.capabilities
-                ) / len(constraints.required_capabilities)
+                cap_match = sum(1 for c in constraints.required_capabilities if c in m.capabilities) / len(
+                    constraints.required_capabilities
+                )
             else:
                 cap_match = 1.0
 

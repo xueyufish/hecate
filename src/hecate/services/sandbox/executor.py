@@ -110,14 +110,20 @@ class SandboxExecutor:
         cmd_args = json.dumps({"tool": tool_name, "args": args})
 
         docker_args = [
-            "docker", "run",
+            "docker",
+            "run",
             "--detach",
             "--rm",
-            "--cpu-period", str(cfg.cpu_period),
-            "--cpu-quota", str(cfg.cpu_quota),
-            "--memory", cfg.memory_limit,
-            "--network", cfg.network_mode,
-            "--env", f"TOOL_INPUT={cmd_args}",
+            "--cpu-period",
+            str(cfg.cpu_period),
+            "--cpu-quota",
+            str(cfg.cpu_quota),
+            "--memory",
+            cfg.memory_limit,
+            "--network",
+            cfg.network_mode,
+            "--env",
+            f"TOOL_INPUT={cmd_args}",
         ]
 
         if cfg.read_only_fs:
@@ -156,7 +162,9 @@ class SandboxExecutor:
             TimeoutError: If execution exceeds timeout.
         """
         wait_proc = await asyncio.create_subprocess_exec(
-            "docker", "wait", container_id,
+            "docker",
+            "wait",
+            container_id,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -169,7 +177,9 @@ class SandboxExecutor:
         exit_code = int(stdout.decode().strip()) if stdout else -1
 
         logs_proc = await asyncio.create_subprocess_exec(
-            "docker", "logs", container_id,
+            "docker",
+            "logs",
+            container_id,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -188,7 +198,10 @@ class SandboxExecutor:
             container_id: Container to destroy.
         """
         proc = await asyncio.create_subprocess_exec(
-            "docker", "rm", "-f", container_id,
+            "docker",
+            "rm",
+            "-f",
+            container_id,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

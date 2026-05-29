@@ -39,10 +39,11 @@ class TestSandboxExecutor:
     async def test_execute_success(self) -> None:
         executor = SandboxExecutor()
 
-        with patch.object(executor, "_create_container", new_callable=AsyncMock) as mock_create, \
-             patch.object(executor, "_wait_container", new_callable=AsyncMock) as mock_wait, \
-             patch.object(executor, "_destroy_container", new_callable=AsyncMock):
-
+        with (
+            patch.object(executor, "_create_container", new_callable=AsyncMock) as mock_create,
+            patch.object(executor, "_wait_container", new_callable=AsyncMock) as mock_wait,
+            patch.object(executor, "_destroy_container", new_callable=AsyncMock),
+        ):
             mock_create.return_value = "container-abc"
             mock_wait.return_value = SandboxResult(exit_code=0, stdout='{"result": 42}', stderr="")
 
@@ -55,9 +56,10 @@ class TestSandboxExecutor:
     async def test_execute_timeout(self) -> None:
         executor = SandboxExecutor(config=SandboxConfig(timeout_seconds=5))
 
-        with patch.object(executor, "_create_container", new_callable=AsyncMock) as mock_create, \
-             patch.object(executor, "_destroy_container", new_callable=AsyncMock):
-
+        with (
+            patch.object(executor, "_create_container", new_callable=AsyncMock) as mock_create,
+            patch.object(executor, "_destroy_container", new_callable=AsyncMock),
+        ):
             mock_create.return_value = "container-timeout"
 
             with patch.object(executor, "_wait_container", new_callable=AsyncMock) as mock_wait:
@@ -84,10 +86,11 @@ class TestSandboxExecutor:
         executor = SandboxExecutor()
         custom_cfg = SandboxConfig(timeout_seconds=120, memory_limit="512m")
 
-        with patch.object(executor, "_create_container", new_callable=AsyncMock) as mock_create, \
-             patch.object(executor, "_wait_container", new_callable=AsyncMock) as mock_wait, \
-             patch.object(executor, "_destroy_container", new_callable=AsyncMock):
-
+        with (
+            patch.object(executor, "_create_container", new_callable=AsyncMock) as mock_create,
+            patch.object(executor, "_wait_container", new_callable=AsyncMock) as mock_wait,
+            patch.object(executor, "_destroy_container", new_callable=AsyncMock),
+        ):
             mock_create.return_value = "container-xyz"
             mock_wait.return_value = SandboxResult(exit_code=0, stdout="ok", stderr="")
 

@@ -62,15 +62,19 @@ async def test_check_security_config_all_set(agent: ComplianceCheckerAgent) -> N
 
 
 async def test_generate_compliance_report(agent: ComplianceCheckerAgent) -> None:
-    with patch.dict("os.environ", {"HECATE_API_KEYS": "key1"}, clear=True), \
-         patch.object(agent, "check_code_style", return_value=[]):
+    with (
+        patch.dict("os.environ", {"HECATE_API_KEYS": "key1"}, clear=True),
+        patch.object(agent, "check_code_style", return_value=[]),
+    ):
         report = await agent.generate_compliance_report()
     assert isinstance(report, ComplianceReport)
     assert report.checked_at is not None
 
 
 async def test_run_convenience(agent: ComplianceCheckerAgent) -> None:
-    with patch.dict("os.environ", {"HECATE_API_KEYS": "key1"}, clear=True), \
-         patch.object(agent, "check_code_style", return_value=[]):
+    with (
+        patch.dict("os.environ", {"HECATE_API_KEYS": "key1"}, clear=True),
+        patch.object(agent, "check_code_style", return_value=[]),
+    ):
         report = await agent.run()
     assert isinstance(report, ComplianceReport)

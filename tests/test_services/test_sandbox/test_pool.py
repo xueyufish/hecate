@@ -75,8 +75,10 @@ class TestSandboxPool:
     async def test_recycle_returns_to_pool(self) -> None:
         pool = SandboxPool(pool_size=1)
 
-        with patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create, \
-             patch.object(pool, "_clean_container", new_callable=AsyncMock):
+        with (
+            patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create,
+            patch.object(pool, "_clean_container", new_callable=AsyncMock),
+        ):
             mock_create.return_value = "c1"
             await pool.prewarm()
             container = await pool.allocate()
@@ -91,8 +93,10 @@ class TestSandboxPool:
     async def test_recycle_destroys_at_max_uses(self) -> None:
         pool = SandboxPool(pool_size=1, max_uses=2)
 
-        with patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create, \
-             patch("hecate.services.sandbox.pool.asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec:
+        with (
+            patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create,
+            patch("hecate.services.sandbox.pool.asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+        ):
             mock_create.return_value = "c1"
             await pool.prewarm()
             container = await pool.allocate()
@@ -110,12 +114,12 @@ class TestSandboxPool:
         pool = SandboxPool(pool_size=1)
         pool._executor = AsyncMock()
 
-        with patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create, \
-             patch.object(pool, "_clean_container", new_callable=AsyncMock):
+        with (
+            patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create,
+            patch.object(pool, "_clean_container", new_callable=AsyncMock),
+        ):
             mock_create.return_value = "c1"
-            pool._executor.execute = AsyncMock(
-                return_value=SandboxResult(exit_code=0, stdout="result", stderr="")
-            )
+            pool._executor.execute = AsyncMock(return_value=SandboxResult(exit_code=0, stdout="result", stderr=""))
             pool._executor.config = SandboxConfig()
 
             result = await pool.execute("tool", {"arg": "val"})
@@ -126,8 +130,10 @@ class TestSandboxPool:
     async def test_shutdown(self) -> None:
         pool = SandboxPool(pool_size=2)
 
-        with patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create, \
-             patch.object(pool, "_destroy_container", new_callable=AsyncMock) as mock_destroy:
+        with (
+            patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create,
+            patch.object(pool, "_destroy_container", new_callable=AsyncMock) as mock_destroy,
+        ):
             mock_create.side_effect = ["c1", "c2"]
             await pool.prewarm()
 

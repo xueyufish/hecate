@@ -107,8 +107,7 @@ async def get_conversation(
         HTTPException: 404 if conversation not found or deleted.
     """
     result = await db.execute(
-        select(ConversationModel)
-        .where(
+        select(ConversationModel).where(
             ConversationModel.id == conversation_id,
             ConversationModel.deleted_at.is_(None),
         )
