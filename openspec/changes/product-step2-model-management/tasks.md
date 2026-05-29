@@ -80,4 +80,4 @@
 - [x] 11.1 端到端测试：创建 Provider → 自动发现模型 → 模型出现在 /v1/models
 - [x] 11.2 端到端测试：创建 Agent 选择分组模型 → 对话成功
 - [x] 11.3 端到端测试：Provider 状态变化 → Agent 列表显示警告
-- [ ] 11.4 运行 ruff check + ruff format + mypy + pytest 全量验证
+- [x] 11.4 运行 ruff check + ruff format + mypy + pytest 全量验证
