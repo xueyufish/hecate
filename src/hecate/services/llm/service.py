@@ -4,6 +4,7 @@ Wraps LiteLLM for model-agnostic LLM invocations with support for:
 - Streaming and non-streaming responses
 - Tool calling (function definitions → tool_call → execution → result injection)
 - Model fallback strategy
+- Intelligent model routing via ModelRouter
 """
 
 from __future__ import annotations
@@ -12,6 +13,8 @@ import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
+
+from hecate.services.llm.routing import ModelRouter, RoutingStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -45,34 +48,82 @@ class LLMService:
     - Streaming and non-streaming responses
     - Tool calling with automatic result injection
     - Model fallback on failure
+    - Intelligent model routing via ModelRouter
     """
 
-    def __init__(self, fallback_models: list[str] | None = None):
+    def __init__(
+        self,
+        fallback_models: list[str] | None = None,
+        router: ModelRouter | None = None,
+    ):
         self.fallback_models = fallback_models or []
+        self.router = router
+
+    def _resolve_model(
+        self,
+        model: str | None = None,
+        routing_config: dict[str, Any] | None = None,
+    ) -> str:
+        """Resolve the model name using routing config or explicit model.
+
+        Args:
+            model: Explicit model name (takes priority).
+            routing_config: Optional routing configuration with strategy and constraints.
+
+        Returns:
+            Resolved model name.
+        """
+        if model:
+            return model
+
+        if routing_config and self.router:
+            strategy_name = routing_config.get("strategy", "balanced")
+            try:
+                strategy = RoutingStrategy(strategy_name)
+            except ValueError:
+                strategy = RoutingStrategy.BALANCED
+
+            selected = self.router.select_model(
+                strategy=strategy,
+                required_capabilities=routing_config.get("required_capabilities"),
+                max_cost_per_1k=routing_config.get("max_cost_per_1k"),
+                max_latency_ms=routing_config.get("max_latency_ms"),
+            )
+            if selected:
+                return selected.name
+
+        # Fallback to first fallback model or default
+        if self.fallback_models:
+            return self.fallback_models[0]
+
+        return "gpt-4o"
 
     async def chat(
         self,
         messages: list[dict[str, Any]],
-        model: str,
+        model: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        routing_config: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """Invoke a chat completion.
 
         Args:
             messages: Conversation messages.
-            model: Model identifier (e.g., "gpt-4o", "claude-3-5-sonnet").
+            model: Model identifier (e.g., "gpt-4o"). Falls back to routing if None.
             tools: Optional tool definitions for function calling.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
+            routing_config: Optional routing configuration for model selection.
 
         Returns:
             LLMResponse with content, tool_calls, and usage.
         """
+        resolved_model = self._resolve_model(model, routing_config)
         try:
             response = await _get_litellm().acompletion(
-                model=model,
+                model=resolved_model,
                 messages=messages,
                 tools=tools,
                 temperature=temperature,
@@ -93,7 +144,7 @@ class LLMService:
                 finish_reason=choice.finish_reason,
             )
         except Exception as e:
-            logger.warning(f"LLM call failed for model {model}: {e}")
+            logger.warning(f"LLM call failed for model {resolved_model}: {e}")
             if self.fallback_models:
                 return await self._try_fallback(messages, tools, temperature, max_tokens)
             raise
@@ -101,26 +152,29 @@ class LLMService:
     async def chat_stream(
         self,
         messages: list[dict[str, Any]],
-        model: str,
+        model: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        routing_config: dict[str, Any] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Stream chat completion chunks.
 
         Args:
             messages: Conversation messages.
-            model: Model identifier.
+            model: Model identifier. Falls back to routing if None.
             tools: Optional tool definitions.
             temperature: Sampling temperature.
             max_tokens: Maximum tokens to generate.
+            routing_config: Optional routing configuration for model selection.
 
         Yields:
             dict with chunk data (content delta, tool_calls, etc.).
         """
+        resolved_model = self._resolve_model(model, routing_config)
         try:
             response = await _get_litellm().acompletion(
-                model=model,
+                model=resolved_model,
                 messages=messages,
                 tools=tools,
                 temperature=temperature,
@@ -136,7 +190,7 @@ class LLMService:
                         "finish_reason": chunk.choices[0].finish_reason,
                     }
         except Exception as e:
-            logger.warning(f"LLM streaming failed for model {model}: {e}")
+            logger.warning(f"LLM streaming failed for model {resolved_model}: {e}")
             if self.fallback_models:
                 async for chunk in self._try_fallback_stream(messages, tools, temperature, max_tokens):
                     yield chunk
@@ -180,4 +234,4 @@ class LLMService:
         raise RuntimeError("All models failed")
 
 
-llm_service = LLMService(fallback_models=["gpt-3.5-turbo"])
+llm_service = LLMService()

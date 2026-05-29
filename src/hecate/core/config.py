@@ -42,10 +42,8 @@ class Settings(BaseSettings):
     MINIO_SECRET_KEY: str = ""
     MINIO_BUCKET: str = "hecate"
 
-    OPENAI_API_KEY: str = ""
-    ANTHROPIC_API_KEY: str = ""
-
     HECATE_API_KEYS: str = ""
+    JWT_SECRET: str = ""
     LLM_GUARD_ENABLED: bool = True
     RATE_LIMIT_RPM: int = 60
 
@@ -56,11 +54,7 @@ class Settings(BaseSettings):
 
     @property
     def api_keys_list(self) -> list[str]:
-        """Split the comma-separated ``HECATE_API_KEYS`` string into a list.
-
-        Whitespace around each key is stripped and empty entries are
-        discarded, so ``"key1, key2,"`` yields ``["key1", "key2"]``.
-        """
+        """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""
         return [k.strip() for k in self.HECATE_API_KEYS.split(",") if k.strip()]
 
 

@@ -1,29 +1,23 @@
 """OpenAI-compatible models endpoint.
 
 Implements ``GET /v1/models`` following the OpenAI Models API format.
-Returns a list of available LLM models.
+Returns models discovered automatically from configured API keys via LiteLLM.
 """
 
 from __future__ import annotations
 
+import logging
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from hecate.core.deps import verify_api_key
+from hecate.core.deps import get_current_user_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-AVAILABLE_MODELS = [
-    "gpt-4o",
-    "gpt-4o-mini",
-    "gpt-4-turbo",
-    "gpt-3.5-turbo",
-    "claude-3-5-sonnet-20241022",
-    "claude-3-opus-20240229",
-    "claude-3-haiku-20240307",
-]
 
 
 class ModelObject(BaseModel):
@@ -42,18 +36,30 @@ class ModelListResponse(BaseModel):
     data: list[ModelObject]
 
 
+def _discover_models() -> list[str]:
+    """Discover available models from configured API keys via LiteLLM."""
+    try:
+        from litellm import get_valid_models
+
+        return get_valid_models()
+    except Exception as e:
+        logger.warning(f"Failed to discover models via LiteLLM: {e}")
+        return []
+
+
 @router.get("/models")
 async def list_models(
-    api_key: Annotated[str, Depends(verify_api_key)],
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
 ) -> dict:
     """List available models.
 
     Args:
-        api_key: The validated API key.
+        user_id: The authenticated user ID.
 
     Returns:
         dict: Model list in OpenAI format.
     """
+    models = _discover_models()
     return ModelListResponse(
-        data=[ModelObject(id=model) for model in AVAILABLE_MODELS],
+        data=[ModelObject(id=m) for m in models],
     ).model_dump()

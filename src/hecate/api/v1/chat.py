@@ -1,21 +1,24 @@
 """OpenAI-compatible chat completions endpoint.
 
 Implements ``POST /v1/chat/completions`` following the OpenAI Chat Completions API format.
-Supports both streaming (SSE) and non-streaming responses.
+Supports both streaming (SSE) and non-streaming responses via LiteLLM.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.deps import get_current_user_id
+from hecate.services.llm.service import llm_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -94,74 +97,103 @@ class ChatCompletionChunk(BaseModel):
     choices: list[ChatCompletionChunkChoice]
 
 
+def _messages_to_dicts(messages: list[ChatMessage]) -> list[dict[str, Any]]:
+    """Convert Pydantic ChatMessage list to dicts for LiteLLM."""
+    result: list[dict[str, Any]] = []
+    for m in messages:
+        d: dict[str, Any] = {"role": m.role, "content": m.content or ""}
+        if m.name:
+            d["name"] = m.name
+        if m.tool_calls:
+            d["tool_calls"] = m.tool_calls
+        if m.tool_call_id:
+            d["tool_call_id"] = m.tool_call_id
+        result.append(d)
+    return result
+
+
 @router.post("/chat/completions", response_model=None)
 async def create_chat_completion(
     request: ChatCompletionRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
 ):
-    """Create a chat completion.
+    """Create a chat completion via LiteLLM.
 
     Args:
         request: The chat completion request.
-        db: The async database session.
-        api_key: The validated API key.
+        user_id: The authenticated user ID.
 
     Returns:
         StreamingResponse if stream=True, otherwise ChatCompletionResponse dict.
-
-    Raises:
-        HTTPException: 404 if model/agent not found.
     """
+    msg_dicts = _messages_to_dicts(request.messages)
+
     if request.stream:
         return StreamingResponse(
-            _stream_chat_completion(request, db),
+            _stream_chat(request.model, msg_dicts, request.temperature, request.max_tokens, request.tools),
             media_type="text/event-stream",
         )
 
-    response_text = "Hello! I'm a placeholder response. The LLM service will be integrated in §6."
+    response = await llm_service.chat(
+        messages=msg_dicts,
+        model=request.model,
+        tools=request.tools,
+        temperature=request.temperature,
+        max_tokens=request.max_tokens,
+    )
 
     return ChatCompletionResponse(
-        model=request.model,
+        model=response.model or request.model,
         choices=[
             ChatCompletionChoice(
-                message=ChatMessage(role="assistant", content=response_text),
-                finish_reason="stop",
+                message=ChatMessage(
+                    role="assistant",
+                    content=response.content,
+                    tool_calls=response.tool_calls,
+                ),
+                finish_reason=response.finish_reason or "stop",
             )
         ],
-        usage=ChatCompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+        usage=ChatCompletionUsage(
+            prompt_tokens=response.usage.get("prompt_tokens", 0),
+            completion_tokens=response.usage.get("completion_tokens", 0),
+            total_tokens=response.usage.get("total_tokens", 0),
+        ),
     ).model_dump()
 
 
-async def _stream_chat_completion(
-    request: ChatCompletionRequest,
-    db: AsyncSession,
+async def _stream_chat(
+    model: str,
+    messages: list[dict[str, Any]],
+    temperature: float | None,
+    max_tokens: int | None,
+    tools: list | None,
 ):
-    """Generate streaming chat completion chunks.
-
-    Args:
-        request: The chat completion request.
-        db: The async database session.
+    """Stream chat completion chunks via LiteLLM.
 
     Yields:
         str: SSE-formatted chunks.
     """
-    response_text = "Hello! I'm a placeholder streaming response. The LLM service will be integrated in §6."
-
-    for _i, char in enumerate(response_text):
-        chunk = ChatCompletionChunk(
-            model=request.model,
+    async for chunk in llm_service.chat_stream(
+        messages=messages,
+        model=model,
+        tools=tools,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    ):
+        sse_chunk = ChatCompletionChunk(
+            model=model,
             choices=[
                 ChatCompletionChunkChoice(
-                    delta=ChatCompletionChunkDelta(content=char),
-                    finish_reason=None,
+                    delta=ChatCompletionChunkDelta(content=chunk.get("content")),
+                    finish_reason=chunk.get("finish_reason"),
                 )
             ],
         )
-        yield f"data: {json.dumps(chunk.model_dump())}\n\n"
+        yield f"data: {json.dumps(sse_chunk.model_dump())}\n\n"
 
     final_chunk = ChatCompletionChunk(
-        model=request.model,
+        model=model,
         choices=[
             ChatCompletionChunkChoice(
                 delta=ChatCompletionChunkDelta(),
