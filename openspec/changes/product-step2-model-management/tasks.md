@@ -65,8 +65,8 @@
 - [x] 9.2 创建 web/src/app/(dashboard)/settings/models/page.tsx Provider 列表页（表格 + 状态徽章 + 操作按钮）
 - [x] 9.3 创建 Provider 添加/编辑对话框（表单：name, display_name, api_key, base_url, config）
 - [x] 9.4 创建 Provider 测试连通按钮（点击后显示状态和响应时间）
-- [ ] 9.5 创建模型管理子页面（按 Provider 分组的模型表格，启用/禁用开关）
-- [ ] 9.6 创建模型调试页面（模型下拉 + prompt 输入 + 参数滑块 + 测试按钮 + 响应区）
+- [x] 9.5 创建模型管理子页面（按 Provider 分组的模型表格，启用/禁用开关）
+- [x] 9.6 创建模型调试页面（模型下拉 + prompt 输入 + 参数滑块 + 测试按钮 + 响应区）
 - [x] 9.7 侧边栏添加"设置"导航入口
 
 ## 10. 前端 — Agent 创建模型选择改造
