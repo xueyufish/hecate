@@ -19,7 +19,7 @@ def test_mock_embedding_has_sparse() -> None:
     result = service._mock_embedding("test text for sparse")
     assert len(result.dense) == 1024
     assert len(result.sparse) > 0
-    assert all(isinstance(k, int) for k in result.sparse.keys())
+    assert all(isinstance(k, int) for k in result.sparse)
     assert all(isinstance(v, float) for v in result.sparse.values())
 
 
