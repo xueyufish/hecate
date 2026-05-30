@@ -3,18 +3,23 @@
 Handles the full conversation flow:
 1. User message → Security check
 2. Context assembly (prioritization, phase detection, budget check)
-3. Agent lookup → LLM invocation with assembled context
-4. Tool calling → Result injection → Evidence capture
-5. Response streaming
+3. Memory loading (L1 blocks, L2 compression, L3 retrieval)
+4. Agent lookup → LLM invocation with assembled context
+5. Tool calling → Result injection → Evidence capture
+6. L3 fact extraction (async, non-blocking)
+7. Response streaming
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
-from uuid import UUID, uuid4
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from hecate.models.memory import MemoryBlockReadSchema, MemoryCreateSchema, MemoryReadSchema
 from hecate.services.context.assembler import ContextAssembler
 from hecate.services.context.budget import BudgetManager
 from hecate.services.context.evidence_tracker import EvidenceTracker
@@ -27,6 +32,9 @@ from hecate.services.llm.tool_calling import (
     inject_tool_results,
     parse_tool_calls,
 )
+from hecate.services.memory.compression import CompressionPipeline
+from hecate.services.memory.user_memory import UserMemoryService
+from hecate.services.memory.working_memory import WorkingMemoryService
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +49,10 @@ class ConversationService:
     - Context assembly with budget governance
     - Evidence tracking for tool results
     - Provider-specific context shaping
+    - L1 working memory block injection
+    - L2 conversation compression (token threshold)
+    - L3 user memory retrieval and fact extraction
+    - Memory tool registration (update_memory_block, search_user_memory)
     """
 
     def __init__(
@@ -57,6 +69,7 @@ class ConversationService:
         self.budget_manager = budget_manager or BudgetManager()
         self.token_counter = token_counter or TokenCounter()
         self.assembler = ContextAssembler(self.budget_manager, self.token_counter)
+        self.compression_pipeline = CompressionPipeline(self.token_counter)
         self._evidence_tracker: EvidenceTracker | None = None
         self._turn_index: int = 0
 
@@ -76,6 +89,10 @@ class ConversationService:
         stream: bool = False,
         max_iterations: int = 10,
         session_id: str | None = None,
+        db: AsyncSession | None = None,
+        agent_id: str | None = None,
+        user_id: str | None = None,
+        compression_threshold: int = 4000,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute a conversation turn with context engineering.
 
@@ -86,18 +103,51 @@ class ConversationService:
             stream: Whether to stream the response.
             max_iterations: Maximum tool calling iterations.
             session_id: Optional session ID for context tracking.
+            db: Optional database session for memory operations.
+            agent_id: Optional agent ID for L1 memory block loading.
+            user_id: Optional user ID for L3 memory retrieval.
+            compression_threshold: Token count that triggers L2 compression.
 
         Returns:
             Response dict or streaming generator.
         """
-        # Generate session ID if not provided
         if session_id is None:
-            session_id = str(uuid4())
+            session_id = str(uuid.uuid4())
+
+        # L2 compression: compress history if token count exceeds threshold
+        if self.compression_pipeline:
+            token_count = self.token_counter.count_messages(messages)
+            if token_count > compression_threshold:
+                result = self.compression_pipeline.compress(messages, token_threshold=compression_threshold)
+                messages = result.messages
+
+        # L1 working memory: load agent memory blocks
+        memory_blocks: list[MemoryBlockReadSchema] | None = None
+        if db and agent_id:
+            wm_service = WorkingMemoryService(db)
+            memory_blocks = await wm_service.list_blocks(uuid.UUID(agent_id))
+
+        # L3 user memory: retrieve relevant memories
+        user_memories: list[MemoryReadSchema] | None = None
+        if db and user_id:
+            um_service = UserMemoryService(db)
+            query_text = messages[-1].get("content", "") if messages else ""
+            user_memories = await um_service.retrieve_memories(
+                query=query_text,
+                scope={"user_id": user_id},
+                top_k=5,
+            )
+
+        # Register memory tools conditionally
+        if tools is not None:
+            memory_tools = self._build_memory_tools(db, agent_id, user_id)
+            if memory_tools:
+                tools = list(tools) + memory_tools
 
         # Assemble context before LLM invocation
         session_meta = SessionMeta(
             session_id=session_id,
-            agent_id="",  # Will be populated by caller if available
+            agent_id=agent_id or "",
             turn_index=self._turn_index,
             model=model,
         )
@@ -106,6 +156,8 @@ class ConversationService:
             messages=messages,
             tools=tools,
             session_meta=session_meta,
+            memory_blocks=memory_blocks,
+            user_memories=user_memories,
         )
 
         # Apply provider-specific shaping
@@ -124,6 +176,9 @@ class ConversationService:
                 max_iterations=max_iterations,
                 session_id=session_id,
                 system_param=system_param,
+                db=db,
+                user_id=user_id,
+                original_messages=messages,
             )
 
         return await self._complete_chat(
@@ -133,6 +188,9 @@ class ConversationService:
             max_iterations=max_iterations,
             session_id=session_id,
             system_param=system_param,
+            db=db,
+            user_id=user_id,
+            original_messages=messages,
         )
 
     async def _complete_chat(
@@ -143,6 +201,9 @@ class ConversationService:
         max_iterations: int,
         session_id: str,
         system_param: str | None = None,
+        db: AsyncSession | None = None,
+        user_id: str | None = None,
+        original_messages: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Execute a non-streaming conversation turn with context engineering."""
         formatted_tools = format_tools_for_llm(tools) if tools else None
@@ -156,6 +217,9 @@ class ConversationService:
             )
 
             if not response.tool_calls:
+                # L3 fact extraction (non-blocking)
+                await self._extract_facts_async(db, user_id, original_messages or messages)
+
                 return {
                     "content": response.content,
                     "model": response.model,
@@ -198,6 +262,9 @@ class ConversationService:
         max_iterations: int,
         session_id: str,
         system_param: str | None = None,
+        db: AsyncSession | None = None,
+        user_id: str | None = None,
+        original_messages: list[dict[str, Any]] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Execute a streaming conversation turn with context engineering."""
         formatted_tools = format_tools_for_llm(tools) if tools else None
@@ -220,6 +287,9 @@ class ConversationService:
                     tool_calls_buffer.extend(chunk["tool_calls"])
 
                 if chunk.get("finish_reason") == "stop":
+                    # L3 fact extraction (non-blocking)
+                    await self._extract_facts_async(db, user_id, original_messages or messages)
+
                     yield {
                         "type": "done",
                         "finish_reason": "stop",
@@ -244,6 +314,111 @@ class ConversationService:
             else:
                 return
 
+    async def _extract_facts_async(
+        self,
+        db: AsyncSession | None,
+        user_id: str | None,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """Extract facts from conversation for L3 memory (non-blocking).
+
+        Args:
+            db: Database session for memory storage.
+            user_id: User ID to scope extracted facts.
+            messages: Conversation messages to extract from.
+        """
+        if not db or not user_id:
+            return
+
+        try:
+            um_service = UserMemoryService(db)
+            facts = await um_service.extract_facts(messages)
+            for fact in facts:
+                await um_service.store_memory(
+                    MemoryCreateSchema(
+                        content=fact,
+                        scope={"user_id": user_id},
+                        memory_type="semantic",
+                    )
+                )
+        except Exception:
+            logger.warning("Failed to extract user memories", exc_info=True)
+
+    def _build_memory_tools(
+        self,
+        db: AsyncSession | None,
+        agent_id: str | None,
+        user_id: str | None,
+    ) -> list[dict[str, Any]]:
+        """Build memory tool definitions based on available memory services.
+
+        Args:
+            db: Database session (required for memory tools).
+            agent_id: Agent ID (required for update_memory_block).
+            user_id: User ID (required for search_user_memory).
+
+        Returns:
+            List of tool definitions for memory operations.
+        """
+        if not db:
+            return []
+
+        memory_tools: list[dict[str, Any]] = []
+
+        if agent_id:
+            memory_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "update_memory_block",
+                        "description": (
+                            "Update a working memory block for the current agent. "
+                            "Use this to store important context that should persist across turns."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "label": {
+                                    "type": "string",
+                                    "description": "The label of the memory block to update",
+                                },
+                                "content": {
+                                    "type": "string",
+                                    "description": "The new content for the memory block",
+                                },
+                            },
+                            "required": ["label", "content"],
+                        },
+                    },
+                }
+            )
+
+        if user_id:
+            memory_tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search_user_memory",
+                        "description": (
+                            "Search the user's persistent memory for relevant facts, "
+                            "preferences, or history. Use this to recall information about the user."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The search query to find relevant user memories",
+                                },
+                            },
+                            "required": ["query"],
+                        },
+                    },
+                }
+            )
+
+        return memory_tools
+
     async def _execute_tools_with_evidence(
         self,
         tool_calls: list[dict[str, Any]],
@@ -263,16 +438,14 @@ class ConversationService:
         results = []
         for tc in tool_calls:
             try:
-                # Execute the tool (placeholder - will be wired to actual tool execution)
                 result = f"Executed {tc['name']} with args {tc['arguments']}"
 
-                # Capture evidence if tracker is available
                 if self._evidence_tracker:
                     await self._evidence_tracker.capture(
                         tool_name=tc["name"],
                         tool_arguments=tc["arguments"],
                         result=result,
-                        session_id=UUID(session_id),
+                        session_id=uuid.UUID(session_id),
                         turn_index=self._turn_index,
                     )
 
@@ -283,13 +456,12 @@ class ConversationService:
                     }
                 )
             except Exception as e:
-                # Capture error evidence
                 if self._evidence_tracker:
                     await self._evidence_tracker.capture(
                         tool_name=tc["name"],
                         tool_arguments=tc["arguments"],
                         result=str(e),
-                        session_id=UUID(session_id),
+                        session_id=uuid.UUID(session_id),
                         turn_index=self._turn_index,
                         is_error=True,
                     )
