@@ -8,8 +8,10 @@ import { Button } from "@/components/ui/button";
 import { dslToReactFlow, reactFlowToDsl } from "@/lib/dsl-bridge";
 import type { GraphDSL } from "@/lib/workflow-types";
 import { NodePalette } from "@/components/workflow/node-palette";
+import { AgentPalette } from "@/components/workflow/agent-palette";
 import { ConfigPanel } from "@/components/workflow/config-panel";
-import { ArrowLeft, Save, CheckCircle, Play } from "lucide-react";
+import { TemplatePicker } from "@/components/workflow/template-picker";
+import { ArrowLeft, Save, CheckCircle, Play, LayoutTemplate } from "lucide-react";
 import Link from "next/link";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -44,6 +46,7 @@ export default function WorkflowEditorPage() {
   const [saving, setSaving] = useState(false);
   const [testResult, setTestResult] = useState<TestRunData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -150,6 +153,32 @@ export default function WorkflowEditorPage() {
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault();
+
+      const agentData = e.dataTransfer.getData("application/reactflow-agent");
+      if (agentData) {
+        try {
+          const agent = JSON.parse(agentData);
+          const position = { x: e.clientX - 300, y: e.clientY - 100 };
+          const newNode = {
+            id: `agent-${agent.id}-${Date.now()}`,
+            type: "agent",
+            position,
+            data: {
+              label: agent.name,
+              type: "agent",
+              config: {
+                agent_id: agent.id,
+                invocation_mode: "standalone",
+              },
+            },
+          };
+          setNodes((prev: any[]) => [...prev, newNode]);
+        } catch {
+          // malformed agent data — ignore
+        }
+        return;
+      }
+
       const type = e.dataTransfer.getData("application/reactflow");
       if (!type) return;
 
@@ -168,6 +197,14 @@ export default function WorkflowEditorPage() {
     },
     []
   );
+
+  function handleTemplateSelect(dsl: Record<string, unknown>) {
+    const graphDsl = dsl as unknown as GraphDSL;
+    const { nodes: rfNodes, edges: rfEdges } = dslToReactFlow(graphDsl);
+    setNodes(rfNodes);
+    setEdges(rfEdges);
+    setShowTemplatePicker(false);
+  }
 
   if (loading) {
     return <div className="text-muted-foreground">加载中...</div>;
@@ -191,6 +228,14 @@ export default function WorkflowEditorPage() {
           <h1 className="text-lg font-semibold">{workflow.name}</h1>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowTemplatePicker(true)}
+          >
+            <LayoutTemplate className="mr-1 h-4 w-4" />
+            编排模板
+          </Button>
           <Button variant="outline" size="sm" onClick={handleValidate}>
             <CheckCircle className="mr-1 h-4 w-4" />
             验证
@@ -208,7 +253,12 @@ export default function WorkflowEditorPage() {
 
       {/* Canvas + Panels */}
       <div className="flex flex-1">
-        <NodePalette />
+        <div className="flex h-full w-[200px] flex-col border-r bg-muted/30">
+          <NodePalette />
+          <div className="border-t px-2 py-2">
+            <AgentPalette />
+          </div>
+        </div>
         <div
           className="flex-1"
           onDragOver={(e) => {
@@ -255,6 +305,13 @@ export default function WorkflowEditorPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {showTemplatePicker && (
+        <TemplatePicker
+          onSelect={handleTemplateSelect}
+          onClose={() => setShowTemplatePicker(false)}
+        />
       )}
     </div>
   );

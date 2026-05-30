@@ -20,6 +20,7 @@ interface DslEdgeDef {
   source: string;
   target: string | Record<string, string>;
   trigger?: string | null;
+  type?: "handoff" | null;
 }
 
 interface ParsedDsl {
@@ -67,13 +68,17 @@ export function dslToReactFlow(dsl: ParsedDsl): {
   const edges: Edge[] = dsl.edges.flatMap((edgeDef, index) => {
     const source = edgeDef.source;
     const target = edgeDef.target;
+    const isHandoff = edgeDef.trigger === "handoff" || edgeDef.type === "handoff";
 
     if (typeof target === "string") {
       return {
         id: `e-${index}`,
         source,
         target,
-        animated: true,
+        animated: !isHandoff,
+        style: isHandoff ? { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5 5" } : undefined,
+        label: isHandoff ? "移交" : undefined,
+        data: { edgeType: isHandoff ? "handoff" : "default" },
       };
     }
 
@@ -110,7 +115,7 @@ export function reactFlowToDsl(
   const simpleEdges: { source: string; target: string }[] = [];
 
   for (const edge of edges) {
-    if (edge.label && typeof edge.label === "string") {
+    if (edge.label && typeof edge.label === "string" && edge.label !== "移交") {
       if (!edgeGroups.has(edge.source)) {
         edgeGroups.set(edge.source, new Map());
       }
@@ -124,7 +129,17 @@ export function reactFlowToDsl(
 
   for (const { source, target } of simpleEdges) {
     if (edgeGroups.has(source)) continue;
-    dslEdges.push({ source, target });
+    const flowEdge = edges.find(
+      (e) => e.source === source && e.target === target
+    );
+    const isHandoff =
+      (flowEdge?.data as Record<string, unknown> | undefined)?.edgeType === "handoff" ||
+      (flowEdge?.label === "移交");
+    dslEdges.push({
+      source,
+      target,
+      ...(isHandoff ? { type: "handoff", trigger: "handoff" } : {}),
+    });
   }
 
   edgeGroups.forEach((routes, source) => {

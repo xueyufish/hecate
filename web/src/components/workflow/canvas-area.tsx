@@ -9,6 +9,7 @@ import {
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
+  type Edge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { nodeTypeComponents } from "./node-types";
@@ -21,6 +22,39 @@ interface CanvasAreaProps {
   onNodesChange: (nodes: any[]) => void;
   onEdgesChange: (edges: any[]) => void;
 }
+
+function HandoffEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+}: {
+  id: string;
+  sourceX: number;
+  sourceY: number;
+  targetX: number;
+  targetY: number;
+}) {
+  const edgePath = `M ${sourceX},${sourceY} L ${targetX},${targetY}`;
+  return (
+    <>
+      <path
+        id={id}
+        className="react-flow__edge-path"
+        d={edgePath}
+        strokeWidth={2}
+        stroke="#8b5cf6"
+        strokeDasharray="5 5"
+        fill="none"
+      />
+    </>
+  );
+}
+
+const edgeTypes = {
+  handoff: HandoffEdge,
+};
 
 export default function CanvasArea({
   nodes,
@@ -44,19 +78,40 @@ export default function CanvasArea({
 
   const handleConnect = useCallback(
     (params: any) => {
-      onEdgesChange(addEdge({ ...params, animated: true }, edges));
+      const isHandoff = params.sourceHandle === "handoff";
+      const newEdge: Edge = {
+        ...params,
+        animated: !isHandoff,
+        ...(isHandoff
+          ? {
+              type: "handoff",
+              style: { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5 5" },
+              label: "移交",
+              data: { edgeType: "handoff" },
+            }
+          : {}),
+      };
+      onEdgesChange(addEdge(newEdge, edges));
     },
     [edges, onEdgesChange]
   );
 
+  const typedEdges = edges.map((edge: any) => {
+    if (edge.data?.edgeType === "handoff" || edge.label === "移交") {
+      return { ...edge, type: "handoff", animated: false };
+    }
+    return edge;
+  });
+
   return (
     <ReactFlow
       nodes={nodes}
-      edges={edges}
+      edges={typedEdges}
       onNodesChange={handleNodesChange}
       onEdgesChange={handleEdgesChange}
       onConnect={handleConnect}
       nodeTypes={nodeTypeComponents}
+      edgeTypes={edgeTypes}
       fitView
       style={{ width: "100%", height: "100%" }}
     >

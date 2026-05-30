@@ -35,7 +35,7 @@ export function NodePalette() {
   }
 
   return (
-    <div className="flex h-full w-[200px] flex-col border-r bg-muted/30">
+    <>
       <div className="border-b px-3 py-2">
         <span className="text-xs font-semibold text-muted-foreground">
           节点类型
@@ -57,6 +57,6 @@ export function NodePalette() {
           );
         })}
       </div>
-    </div>
+    </>
   );
 }

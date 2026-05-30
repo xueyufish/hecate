@@ -66,7 +66,24 @@ export const ToolCallNode = memo(function ToolCallNode(props: NodeProps) {
   return <WorkflowNodeBase {...props} typeKey="tool-call" />;
 });
 export const AgentNode = memo(function AgentNode(props: NodeProps) {
-  return <WorkflowNodeBase {...props} typeKey="agent" />;
+  const invocationMode = props.data.config?.invocation_mode as string | undefined;
+  const agentId = props.data.config?.agent_id as string | undefined;
+  return (
+    <WorkflowNodeBase {...props} typeKey="agent">
+      <div className="flex flex-col gap-0.5 mt-1">
+        {agentId && (
+          <span className="text-[10px] text-muted-foreground font-mono truncate">
+            ID: {agentId.slice(0, 8)}...
+          </span>
+        )}
+        {invocationMode && invocationMode !== "direct" && (
+          <span className="inline-flex self-start rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
+            {invocationMode === "tool" ? "工具模式" : invocationMode}
+          </span>
+        )}
+      </div>
+    </WorkflowNodeBase>
+  );
 });
 export const KnowledgeRetrievalNode = memo(function KnowledgeRetrievalNode(
   props: NodeProps
@@ -102,7 +119,8 @@ export const EndNode = memo(function EndNode() {
 function WorkflowNodeBase({
   data,
   typeKey,
-}: NodeProps & { typeKey: string }) {
+  children,
+}: NodeProps & { typeKey: string; children?: React.ReactNode }) {
   const style = TYPE_STYLES[typeKey] || TYPE_STYLES["conversation"];
   return (
     <div
@@ -112,6 +130,7 @@ function WorkflowNodeBase({
         {style.icon}
         <span className="text-sm font-medium">{data.label}</span>
       </div>
+      {children}
     </div>
   );
 }
