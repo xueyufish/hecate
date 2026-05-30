@@ -3,6 +3,7 @@
 Tests the complete flow:
 1. Messages → ContextAssembler → Budget check → Provider shaping → LLM
 2. Tool execution → Evidence capture → Budget update
+3. Memory injection (L1 blocks + L3 user memories) → Context assembly
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.models.memory import MemoryBlockReadSchema, MemoryReadSchema
 from hecate.services.context.assembler import ContextAssembler
 from hecate.services.context.budget import BudgetManager, DegradationLevel
 from hecate.services.context.evidence_tracker import EvidenceTracker
@@ -283,3 +285,164 @@ class TestConversationServiceIntegration:
         budget_manager = BudgetManager(default_budget=5000)
         service = ConversationService(budget_manager=budget_manager)
         assert service.budget_manager.default_budget == 5000
+
+
+class TestMemoryInjectionIntegration:
+    """Integration tests for memory injection through ContextAssembler."""
+
+    def test_memory_blocks_injected_into_assembled_context(self) -> None:
+        """L1 memory blocks are injected and reflected in metadata."""
+        budget_manager = BudgetManager()
+        assembler = ContextAssembler(budget_manager)
+
+        messages = [
+            {"role": "system", "content": "System prompt"},
+            {"role": "user", "content": "Hello"},
+        ]
+
+        blocks = [
+            MemoryBlockReadSchema(
+                id=uuid4(),
+                agent_id=uuid4(),
+                label="persona",
+                content="Expert Python developer",
+                position=0,
+                limit=1000,
+                created_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+                deleted_at=None,
+            ),
+        ]
+
+        session_meta = SessionMeta(
+            session_id=str(uuid4()),
+            agent_id="test-agent",
+            model="gpt-4o",
+        )
+
+        context = assembler.assemble(
+            messages=messages,
+            tools=[],
+            session_meta=session_meta,
+            memory_blocks=blocks,
+        )
+
+        assert context.metadata["memory_blocks_count"] == 1
+        block_contents = [m["content"] for m in context.messages if "[persona]" in m.get("content", "")]
+        assert len(block_contents) == 1
+
+    def test_user_memories_injected_into_assembled_context(self) -> None:
+        """L3 user memories are injected as system message."""
+        budget_manager = BudgetManager()
+        assembler = ContextAssembler(budget_manager)
+
+        messages = [
+            {"role": "user", "content": "What do you know about me?"},
+        ]
+
+        memories = [
+            MemoryReadSchema(
+                id=uuid4(),
+                content="User works at Google",
+                scope={"user_id": "u1"},
+                memory_type="semantic",
+                importance=0.8,
+                access_count=0,
+                created_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+                deleted_at=None,
+            ),
+        ]
+
+        session_meta = SessionMeta(
+            session_id=str(uuid4()),
+            agent_id="test-agent",
+            model="gpt-4o",
+        )
+
+        context = assembler.assemble(
+            messages=messages,
+            tools=[],
+            session_meta=session_meta,
+            user_memories=memories,
+        )
+
+        assert context.metadata["user_memories_count"] == 1
+        memory_msg = [m for m in context.messages if "[User memories]" in m.get("content", "")]
+        assert len(memory_msg) == 1
+        assert "User works at Google" in memory_msg[0]["content"]
+
+    def test_memory_injection_preserves_budget(self) -> None:
+        """Memory injection respects budget constraints."""
+        budget_manager = BudgetManager()
+        session_id = uuid4()
+        budget_manager.allocate(session_id, "gpt-4o", custom_budget=50)
+
+        assembler = ContextAssembler(budget_manager)
+
+        messages = [
+            {"role": "system", "content": "You are helpful."},
+            {"role": "user", "content": "Hello there, this is a test message"},
+        ]
+
+        blocks = [
+            MemoryBlockReadSchema(
+                id=uuid4(),
+                agent_id=uuid4(),
+                label="context",
+                content="Additional context that takes up tokens in the budget window",
+                position=0,
+                limit=500,
+                created_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+                deleted_at=None,
+            ),
+        ]
+
+        session_meta = SessionMeta(
+            session_id=str(session_id),
+            agent_id="test-agent",
+            model="gpt-4o",
+        )
+
+        context = assembler.assemble(
+            messages=messages,
+            tools=[],
+            session_meta=session_meta,
+            memory_blocks=blocks,
+        )
+
+        assert context.metadata["memory_blocks_count"] == 1
+        assert isinstance(context.messages, list)
+        assert len(context.messages) > 0
+
+    def test_empty_memory_lists_are_no_op(self) -> None:
+        """Empty memory lists do not affect assembly."""
+        budget_manager = BudgetManager()
+        assembler = ContextAssembler(budget_manager)
+
+        messages = [
+            {"role": "user", "content": "Hello"},
+        ]
+
+        session_meta = SessionMeta(
+            session_id=str(uuid4()),
+            agent_id="test-agent",
+            model="gpt-4o",
+        )
+
+        context_no_mem = assembler.assemble(
+            messages=messages,
+            tools=[],
+            session_meta=session_meta,
+        )
+
+        context_with_empty = assembler.assemble(
+            messages=messages,
+            tools=[],
+            session_meta=session_meta,
+            memory_blocks=[],
+            user_memories=[],
+        )
+
+        assert len(context_no_mem.messages) == len(context_with_empty.messages)

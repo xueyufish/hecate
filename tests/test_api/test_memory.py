@@ -176,3 +176,109 @@ async def test_delete_memory(client: AsyncClient) -> None:
 
     response = await client.delete(f"/api/memory/{memory_id}")
     assert response.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_list_user_memories(client: AsyncClient) -> None:
+    """Test GET /api/users/{user_id}/memories lists user-scoped memories."""
+    user_id = str(uuid.uuid4())
+
+    await client.post(
+        "/api/memory",
+        json={
+            "content": "User fact 1",
+            "scope": {"user_id": user_id},
+            "memory_type": "semantic",
+        },
+    )
+    await client.post(
+        "/api/memory",
+        json={
+            "content": "User fact 2",
+            "scope": {"user_id": user_id},
+            "memory_type": "semantic",
+        },
+    )
+
+    response = await client.get(f"/api/users/{user_id}/memories")
+    assert response.status_code == 200
+
+    result = response.json()
+    assert "items" in result
+    assert "total" in result
+    assert result["total"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_list_user_memories_with_filters(client: AsyncClient) -> None:
+    """Test GET /api/users/{user_id}/memories with query filters."""
+    user_id = str(uuid.uuid4())
+
+    await client.post(
+        "/api/memory",
+        json={
+            "content": "Semantic fact",
+            "scope": {"user_id": user_id},
+            "memory_type": "semantic",
+        },
+    )
+    await client.post(
+        "/api/memory",
+        json={
+            "content": "Procedural fact",
+            "scope": {"user_id": user_id},
+            "memory_type": "procedural",
+        },
+    )
+
+    response = await client.get(f"/api/users/{user_id}/memories", params={"memory_type": "semantic"})
+    assert response.status_code == 200
+
+    result = response.json()
+    assert all(m["memory_type"] == "semantic" for m in result["items"])
+
+
+@pytest.mark.asyncio
+async def test_search_user_memories(client: AsyncClient) -> None:
+    """Test GET /api/users/{user_id}/memories/search?q={query}."""
+    user_id = str(uuid.uuid4())
+
+    await client.post(
+        "/api/memory",
+        json={
+            "content": "User loves Python programming",
+            "scope": {"user_id": user_id},
+            "memory_type": "semantic",
+            "importance": 0.9,
+        },
+    )
+
+    response = await client.get(f"/api/users/{user_id}/memories/search", params={"q": "Python"})
+    assert response.status_code == 200
+
+    result = response.json()
+    assert "items" in result
+    assert result["query"] == "Python"
+
+
+@pytest.mark.asyncio
+async def test_search_user_memories_missing_query(client: AsyncClient) -> None:
+    """Test GET /api/users/{user_id}/memories/search without q returns 422."""
+    user_id = str(uuid.uuid4())
+
+    response = await client.get(f"/api/users/{user_id}/memories/search")
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_compression_status(client: AsyncClient) -> None:
+    """Test GET /api/sessions/{session_id}/compression returns status."""
+    session_id = str(uuid.uuid4())
+
+    response = await client.get(f"/api/sessions/{session_id}/compression")
+    assert response.status_code == 200
+
+    result = response.json()
+    assert result["session_id"] == session_id
+    assert "levels_available" in result
+    assert "snip" in result["levels_available"]
