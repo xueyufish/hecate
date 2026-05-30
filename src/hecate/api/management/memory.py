@@ -259,3 +259,110 @@ async def delete_memory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
         ) from e
+
+
+# --- User-Scoped Memory Endpoints ---
+
+
+@router.get("/users/{user_id}/memories/search")
+async def search_user_memories(
+    user_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+    q: str = Query(..., min_length=1, description="Search query"),
+    top_k: int = Query(5, ge=1, le=20, description="Max results"),
+    min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
+) -> dict:
+    """Semantic search for user memories.
+
+    Args:
+        user_id: The user to search memories for.
+        q: Search query string.
+        db: The async database session.
+        api_key: The validated API key.
+        top_k: Maximum number of results.
+        min_importance: Minimum importance threshold.
+
+    Returns:
+        dict with items list of matching memories.
+    """
+    service = UserMemoryService(db)
+    memories = await service.retrieve_memories(
+        query=q,
+        scope={"user_id": str(user_id)},
+        top_k=top_k,
+        min_importance=min_importance,
+    )
+    return {
+        "items": [m.model_dump() for m in memories],
+        "query": q,
+        "total": len(memories),
+    }
+
+
+@router.get("/users/{user_id}/memories")
+async def list_user_memories(
+    user_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+    memory_type: str | None = Query(None, description="Filter by memory type"),
+    min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
+    limit: int = Query(50, ge=1, le=200, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+) -> dict:
+    """List memories for a specific user.
+
+    Args:
+        user_id: The user to list memories for.
+        db: The async database session.
+        api_key: The validated API key.
+        memory_type: Optional type filter.
+        min_importance: Minimum importance threshold.
+        limit: Maximum results.
+        offset: Pagination offset.
+
+    Returns:
+        dict with items list and total count.
+    """
+    service = UserMemoryService(db)
+    memories = await service.list_memories(
+        scope={"user_id": str(user_id)},
+        memory_type=memory_type,
+        min_importance=min_importance,
+        limit=limit,
+    )
+    return {
+        "items": [m.model_dump() for m in memories],
+        "total": len(memories),
+        "offset": offset,
+        "limit": limit,
+    }
+
+
+# --- Session Compression Endpoint ---
+
+
+@router.get("/sessions/{session_id}/compression")
+async def get_compression_status(
+    session_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Get compression status for a session.
+
+    Returns metadata about compression operations applied to this session.
+
+    Args:
+        session_id: The session to check.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict with compression metadata.
+    """
+    return {
+        "session_id": str(session_id),
+        "compression_applied": False,
+        "levels_available": ["snip", "microcompact", "autocompact"],
+        "message": "Compression status tracking will be implemented with session persistence.",
+    }
