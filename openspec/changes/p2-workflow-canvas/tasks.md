@@ -4,7 +4,7 @@
 - [x] 1.2 创建 `web/src/lib/workflow-types.ts` — Zod schema 镜像 `graph-dsl.schema.json`（version, name, state, nodes, edges, entry）
 - [x] 1.3 创建 `web/src/lib/dsl-bridge.ts` — `dslToReactFlow()` 和 `reactFlowToDsl()` 双向转换函数 + validateDsl()
 - [x] 1.4 `validateDsl()` integrated into workflow-types.ts — 校验是否符合 Zod schema，返回错误列表
-- [ ] 1.5 编写 dsl-bridge 和 dsl-validator 单元测试（round-trip、条件分支、unreachable 警告）
+- [x] 1.5 编写 dsl-bridge 和 dsl-validator 单元测试（round-trip、条件分支、unreachable 警告）
 
 ## 2. 节点类型定义
 
@@ -61,7 +61,7 @@
 - [x] 7.1 创建 `src/hecate/services/workflow/test_runner.py` — 封装 PregelRuntime 执行 + 每节点状态收集
 - [x] 7.2 实现 POST /api/workflows/{id}/test-run — 接受 input payload，调用 test_runner，返回节点执行结果
 - [x] 7.3 实现 mock 模式（body.mock=true）— 替换 LLM 调用为 canned response
-- [ ] 7.4 实现 GET /api/workflows/{id}/runs — 测试运行历史列表（需要持久化模型，P2+）
+- [x] 7.4 实现 GET /api/workflows/{id}/runs — 测试运行历史列表（需要持久化模型，P2+）
 - [x] 7.5 前端测试运行面板：运行按钮 + 结果显示（嵌入画布编辑器页面）
 - [x] 7.6 编写 test-runner 和 test-run API 单元测试 — 5 service tests + covered by E2E
 

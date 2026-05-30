@@ -78,6 +78,41 @@ class WorkflowVersionModel(BaseModel):
     )
 
 
+class WorkflowRunModel(BaseModel):
+    """ORM model for workflow test run history.
+
+    Persists test run results so users can review past execution outcomes,
+    including per-node status, timing, and errors.
+
+    Key fields:
+
+    - **workflow_id** — references the parent WorkflowModel.
+    - **run_id** — unique identifier for this test run (generated at execution time).
+    - **status** — execution status: ``completed`` or ``error``.
+    - **mock** — whether the run used mock LLM responses.
+    - **input_data** — the input payload used for the run.
+    - **node_results** — JSON array of per-node execution results.
+    - **total_duration_ms** — total wall-clock time in milliseconds.
+    - **error** — error message if the run failed.
+    """
+
+    __tablename__ = "workflow_runs"
+
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workflows.id"),
+        nullable=False,
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    mock: Mapped[bool] = mapped_column(nullable=False, default=True)
+    input_data: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    node_results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    total_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (Index("idx_workflow_runs_workflow", "workflow_id"),)
+
+
 # --- Pydantic Schemas ---
 
 
@@ -142,3 +177,20 @@ class WorkflowDetailSchema(PydanticBase):
     updated_at: datetime
     deleted_at: datetime | None
     version: WorkflowVersionReadSchema | None = None
+
+
+class WorkflowRunReadSchema(PydanticBase):
+    """Schema for reading workflow test run data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workflow_id: uuid.UUID
+    run_id: uuid.UUID
+    status: str
+    mock: bool
+    input_data: dict[str, Any]
+    node_results: list[dict[str, Any]]
+    total_duration_ms: int
+    error: str | None
+    created_at: datetime

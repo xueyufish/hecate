@@ -27,6 +27,7 @@ from hecate.core.deps import get_db, verify_api_key
 from hecate.engine.graph_dsl import GraphValidationError
 from hecate.models.workflow import (
     WorkflowCreateSchema,
+    WorkflowRunReadSchema,
     WorkflowUpdateSchema,
 )
 from hecate.services.workflow.test_runner import WorkflowTestRunner
@@ -352,3 +353,31 @@ async def test_run_workflow(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
         ) from e
+
+
+@router.get("/workflows/{workflow_id}/runs")
+async def list_workflow_runs(
+    workflow_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict:
+    """List test run history for a workflow with pagination.
+
+    Args:
+        workflow_id: The UUID of the workflow.
+        db: The async database session.
+        api_key: The validated API key.
+        page: Page number (1-indexed).
+        page_size: Number of items per page.
+
+    Returns:
+        dict: ``{"items": [...], "total": int}`` with run history list.
+    """
+    runner = WorkflowTestRunner(db)
+    result = await runner.list_runs(workflow_id, page=page, page_size=page_size)
+    return {
+        "items": [WorkflowRunReadSchema.model_validate(item).model_dump() for item in result["items"]],
+        "total": result["total"],
+    }

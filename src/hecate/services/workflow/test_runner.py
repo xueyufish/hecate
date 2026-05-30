@@ -2,6 +2,7 @@
 
 Executes compiled workflow graphs in test mode with per-node status tracking.
 Supports mock mode for testing without LLM API consumption.
+Persists run results to the database for history retrieval.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.engine.checkpoint import InMemoryCheckpointStore
@@ -21,7 +22,7 @@ from hecate.engine.graph_dsl import parse_graph
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.types import NodeType, StreamMode, WorkerResult
 from hecate.engine.worker import Worker
-from hecate.models.workflow import WorkflowVersionModel
+from hecate.models.workflow import WorkflowRunModel, WorkflowVersionModel
 
 logger = logging.getLogger(__name__)
 
@@ -221,21 +222,25 @@ class WorkflowTestRunner:
                     )
 
             total_ms = int((time.monotonic() - start) * 1000)
-            return TestRunResult(
+            result = TestRunResult(
                 run_id=run_id,
                 status="completed",
                 nodes=node_results,
                 total_duration_ms=total_ms,
             )
+            await self._persist_run(workflow_id, result, input_data, mock)
+            return result
         except Exception as e:
             total_ms = int((time.monotonic() - start) * 1000)
             logger.warning(f"Test run failed for workflow {workflow_id}: {e}")
-            return TestRunResult(
+            result = TestRunResult(
                 run_id=run_id,
                 status="error",
                 total_duration_ms=total_ms,
                 error=str(e),
             )
+            await self._persist_run(workflow_id, result, input_data, mock)
+            return result
 
     async def _get_current_version(self, workflow_id: uuid.UUID) -> WorkflowVersionModel | None:
         result = await self.db.execute(
@@ -248,3 +253,71 @@ class WorkflowTestRunner:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+    async def _persist_run(
+        self,
+        workflow_id: uuid.UUID,
+        result: TestRunResult,
+        input_data: dict[str, Any],
+        mock: bool,
+    ) -> None:
+        """Persist test run results to the database."""
+        node_results_data = [
+            {
+                "node_id": n.node_id,
+                "node_type": n.node_type,
+                "status": n.status,
+                "output": n.output,
+                "error_message": n.error_message,
+                "duration_ms": n.duration_ms,
+            }
+            for n in result.nodes
+        ]
+        run = WorkflowRunModel(
+            workflow_id=workflow_id,
+            run_id=result.run_id,
+            status=result.status,
+            mock=mock,
+            input_data=input_data,
+            node_results=node_results_data,
+            total_duration_ms=result.total_duration_ms,
+            error=result.error,
+        )
+        self.db.add(run)
+        await self.db.flush()
+
+    async def list_runs(
+        self,
+        workflow_id: uuid.UUID,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """List test run history for a workflow with pagination.
+
+        Args:
+            workflow_id: The workflow to query runs for.
+            page: Page number (1-indexed).
+            page_size: Number of items per page.
+
+        Returns:
+            Dict with ``items`` (list of WorkflowRunModel) and ``total`` count.
+        """
+        base_query = (
+            select(WorkflowRunModel)
+            .where(
+                WorkflowRunModel.workflow_id == workflow_id,
+                WorkflowRunModel.deleted_at.is_(None),
+            )
+            .order_by(WorkflowRunModel.created_at.desc())
+        )
+
+        total_result = await self.db.execute(
+            select(func.count()).select_from(base_query.with_only_columns(WorkflowRunModel.id).subquery())
+        )
+        total = total_result.scalar() or 0
+
+        offset = (page - 1) * page_size
+        items_result = await self.db.execute(base_query.offset(offset).limit(page_size))
+        items = list(items_result.scalars().all())
+
+        return {"items": items, "total": total}
