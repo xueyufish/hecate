@@ -114,7 +114,7 @@ def parse_graph(raw: str | dict) -> GraphConfig:
             Edge(
                 source=edge_data["source"],
                 target=edge_data.get("target"),
-                trigger=edge_data.get("trigger"),
+                trigger=edge_data.get("trigger") or edge_data.get("type"),
             )
         )
 

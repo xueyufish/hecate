@@ -70,6 +70,8 @@
               "top_k": { "type": "integer" },
               "variable_name": { "type": "string" },
               "value": {},
+              "agent_id": { "type": "string", "description": "UUID of the agent to invoke (agent node type)" },
+              "invocation_mode": { "type": "string", "enum": ["direct", "tool"], "description": "How the agent is invoked: direct (execute inline) or tool (expose as callable tool)" },
               "channels": {
                 "type": "object",
                 "properties": {
@@ -103,6 +105,11 @@
           },
           "trigger": {
             "type": ["string", "null"]
+          },
+          "type": {
+            "type": "string",
+            "enum": ["handoff"],
+            "description": "Edge type: handoff indicates control transfer between agents"
           }
         }
       }

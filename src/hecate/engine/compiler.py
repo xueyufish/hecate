@@ -45,10 +45,11 @@ class GraphCompiler:
             A CompiledGraph ready for execution.
 
         Raises:
-            GraphValidationError: if entry or edge validation fails.
+            GraphValidationError: if entry, edge, or handoff cycle validation fails.
         """
         self._validate_entry(config)
         self._validate_edges(config)
+        self._validate_handoff_edges(config)
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
@@ -146,3 +147,70 @@ class GraphCompiler:
                     queue.append(neighbor)
 
         return [nid for nid in config.nodes if nid not in visited]
+
+    def _validate_handoff_edges(self, config: GraphConfig) -> None:
+        """Validate handoff edges: source and target must be agent nodes, no cycles.
+
+        Handoff edges (trigger="handoff") represent control transfer between
+        agents. This method validates two constraints:
+
+        1. Both source and target of a handoff edge must be agent-type nodes.
+        2. The handoff subgraph must not contain cycles (A→B→C→A is rejected).
+
+        Raises:
+            GraphValidationError: if a handoff edge violates these constraints.
+        """
+        from hecate.engine.types import NodeType
+
+        handoff_edges = [e for e in config.edges if e.trigger == "handoff"]
+        if not handoff_edges:
+            return
+
+        for edge in handoff_edges:
+            source_node = config.nodes.get(edge.source)
+            if source_node and source_node.type != NodeType.AGENT:
+                raise GraphValidationError(
+                    f"Handoff edge source '{edge.source}' must be an agent node, got '{source_node.type.value}'",
+                    field=f"edges[{edge.source}]",
+                )
+
+            targets = [edge.target] if isinstance(edge.target, str) else list(edge.target.values())
+            for target_id in targets:
+                if target_id in ("__start__", "__end__"):
+                    continue
+                target_node = config.nodes.get(target_id)
+                if target_node and target_node.type != NodeType.AGENT:
+                    raise GraphValidationError(
+                        f"Handoff edge target '{target_id}' must be an agent node, got '{target_node.type.value}'",
+                        field=f"edges[{edge.source}].target",
+                    )
+
+        adjacency: dict[str, list[str]] = {}
+        for edge in handoff_edges:
+            if edge.source not in adjacency:
+                adjacency[edge.source] = []
+            targets = [edge.target] if isinstance(edge.target, str) else list(edge.target.values())
+            for target_id in targets:
+                if target_id not in ("__start__", "__end__"):
+                    adjacency[edge.source].append(target_id)
+
+        visited: set[str] = set()
+        path: set[str] = set()
+
+        def has_cycle(node: str) -> bool:
+            visited.add(node)
+            path.add(node)
+            for neighbor in adjacency.get(node, []):
+                if neighbor in path:
+                    return True
+                if neighbor not in visited and has_cycle(neighbor):
+                    return True
+            path.discard(node)
+            return False
+
+        for node in adjacency:
+            if node not in visited and has_cycle(node):
+                raise GraphValidationError(
+                    "Circular handoff chain detected in graph. Handoff edges must not form cycles.",
+                    field="edges",
+                )

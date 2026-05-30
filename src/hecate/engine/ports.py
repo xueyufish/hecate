@@ -162,6 +162,37 @@ class EnginePort(ABC):
         """
         return []
 
+    async def agent_execute(
+        self,
+        agent_id: UUID,
+        messages: list[dict],
+        channel_snapshot: dict,
+        context: dict | None = None,
+    ) -> dict:
+        """Execute an agent by ID with isolated context (optional).
+
+        Multi-Agent capability — resolves the AgentModel, builds an isolated
+        execution context (system prompt, tools, knowledge bases from the
+        agent definition), invokes the LLM, and returns the response.
+
+        Default implementation raises NotImplementedError. Concrete adapters
+        MUST override this method in production deployments.
+
+        Args:
+            agent_id: UUID of the agent to execute.
+            messages: Conversation messages to pass as input.
+            channel_snapshot: Read-only snapshot of current channel state.
+            context: Optional execution context (session, parent agent, etc.).
+
+        Returns:
+            Dict with keys: ``response`` (str), ``usage`` (dict), and
+            optionally ``tool_calls`` (list).
+
+        Raises:
+            ValueError: If the agent_id does not resolve to a valid agent.
+        """
+        raise NotImplementedError("agent_execute requires a concrete EnginePort adapter")
+
     async def tool_execute_sandbox(
         self,
         name: str,
