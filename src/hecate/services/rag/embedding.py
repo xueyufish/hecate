@@ -1,8 +1,8 @@
 """Embedding service for text vectorization.
 
 Provides a unified interface for generating text embeddings.
-Uses sentence-transformers with BGE-M3 by default, with support
-for dense and sparse vectors for hybrid search.
+Uses FlagEmbedding BGE-M3 by default, with support for dense and
+sparse vectors for hybrid search.
 """
 
 from __future__ import annotations
@@ -37,12 +37,12 @@ class EmbeddingService:
         """Lazy load the embedding model."""
         if self._model is None:
             try:
-                from sentence_transformers import SentenceTransformer
+                from FlagEmbedding import BGEM3FlagModel
 
-                self._model = SentenceTransformer(self.model_name)
+                self._model = BGEM3FlagModel(self.model_name, use_fp16=False)
                 logger.info(f"Loaded embedding model: {self.model_name}")
             except ImportError:
-                logger.warning("sentence-transformers not installed. Using mock embeddings.")
+                logger.warning("FlagEmbedding not installed. Using mock embeddings.")
                 self._model = "mock"
         return self._model
 
@@ -61,15 +61,22 @@ class EmbeddingService:
             return [self._mock_embedding(text) for text in texts]
 
         try:
-            embeddings = model.encode(texts, show_progress_bar=False)
+            output = model.encode(
+                texts,
+                batch_size=32,
+                max_length=512,
+                return_dense=True,
+                return_sparse=True,
+                return_colbert_vecs=False,
+            )
+            dense_vecs = output["dense_vecs"]
+            sparse_weights = output["lexical_weights"]
+
             results = []
-            for emb in embeddings:
-                results.append(
-                    EmbeddingResult(
-                        dense=emb.tolist() if hasattr(emb, "tolist") else list(emb),
-                        sparse={},
-                    )
-                )
+            for dense, sparse in zip(dense_vecs, sparse_weights, strict=True):
+                dense_list = dense.tolist() if hasattr(dense, "tolist") else list(dense)
+                sparse_dict = {int(k): float(v) for k, v in sparse.items()}
+                results.append(EmbeddingResult(dense=dense_list, sparse=sparse_dict))
             return results
         except Exception as e:
             logger.error(f"Embedding generation failed: {e}")
@@ -101,7 +108,14 @@ class EmbeddingService:
         hash_bytes = hashlib.md5(text.encode()).digest()  # noqa: S324
         dense = [b / 255.0 for b in hash_bytes]
         dense = dense + [0.0] * (1024 - len(dense))
-        return EmbeddingResult(dense=dense[:1024], sparse={})
+
+        sparse: dict[int, float] = {}
+        words = text.lower().split()
+        for _i, word in enumerate(words):
+            token_id = hash(word) % 10000
+            sparse[token_id] = sparse.get(token_id, 0.0) + 1.0
+
+        return EmbeddingResult(dense=dense[:1024], sparse=sparse)
 
 
 embedding_service = EmbeddingService()

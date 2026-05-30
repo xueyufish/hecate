@@ -18,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.engine.ports import EnginePort
 from hecate.models.agent import AgentModel
+from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.services.conversation import ConversationService
+from hecate.services.rag.service import knowledge_base_service
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +35,8 @@ class AgentExecutionPort(EnginePort):
     3. Invoking the LLM via ConversationService.
     4. Returning the response.
 
-    Other EnginePort methods are intentionally left as NotImplementedError
-    because this adapter is only used for agent execution, not as a general
-    engine port. The full port implementation lives elsewhere.
+    Also implements ``knowledge_query`` by delegating to the KnowledgeBaseService
+    for hybrid search (dense + sparse vectors).
     """
 
     def __init__(self, db: AsyncSession) -> None:
@@ -90,6 +91,64 @@ class AgentExecutionPort(EnginePort):
             "model": result.get("model", model_name),
         }
 
+    async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
+        """Query knowledge bases and return relevant document chunks.
+
+        Looks up the Qdrant collection names for the given kb_ids and performs
+        hybrid search (dense + sparse) on each, aggregating results.
+
+        Args:
+            query: The search query string.
+            kb_ids: UUIDs of the knowledge bases to search.
+
+        Returns:
+            A list of document chunk dicts with content and metadata.
+        """
+        if not kb_ids:
+            return []
+
+        all_chunks: list[dict] = []
+
+        for kb_id in kb_ids:
+            result = await self._db.execute(
+                select(KnowledgeBaseModel).where(
+                    KnowledgeBaseModel.id == kb_id,
+                    KnowledgeBaseModel.deleted_at.is_(None),
+                )
+            )
+            kb = result.scalar_one_or_none()
+
+            if kb is None:
+                logger.warning(f"Knowledge base {kb_id} not found. Skipping.")
+                continue
+
+            try:
+                search_results = await knowledge_base_service.search(
+                    collection_name=kb.qdrant_collection,
+                    query=query,
+                    limit=10,
+                    mode="hybrid",
+                )
+
+                for r in search_results:
+                    all_chunks.append(
+                        {
+                            "content": r.content,
+                            "metadata": {
+                                **r.metadata,
+                                "score": r.score,
+                                "kb_id": str(kb_id),
+                                "kb_name": kb.name,
+                            },
+                        }
+                    )
+            except Exception as e:
+                logger.error(f"Knowledge search failed for kb {kb_id}: {e}")
+                continue
+
+        all_chunks.sort(key=lambda x: x["metadata"].get("score", 0), reverse=True)
+        return all_chunks[:20]
+
     async def _load_agent(self, agent_id: UUID) -> AgentModel | None:
         """Load an agent from the database by ID.
 
@@ -115,9 +174,6 @@ class AgentExecutionPort(EnginePort):
 
     async def tool_execute(self, name: str, args: dict, context: dict | None = None) -> Any:
         raise NotImplementedError("Use tool execution service directly")
-
-    async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
-        raise NotImplementedError("Use knowledge service directly for queries")
 
     async def checkpoint_save(self, state: dict) -> UUID:
         raise NotImplementedError("Use CheckpointStore directly")

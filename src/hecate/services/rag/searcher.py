@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from hecate.services.rag.embedding import embedding_service
 from hecate.services.rag.indexer import qdrant_indexer
 
 logger = logging.getLogger(__name__)
+
+SearchMode = Literal["hybrid", "dense", "sparse"]
 
 
 @dataclass
@@ -24,6 +26,7 @@ class HybridSearchResult:
     score: float
     content: str
     metadata: dict[str, Any]
+    sparse_score: float = 0.0
 
 
 class HybridSearcher:
@@ -31,8 +34,8 @@ class HybridSearcher:
 
     Uses:
     - Dense vectors for semantic similarity
-    - Optional sparse vectors for keyword matching
-    - Score fusion for final ranking
+    - Sparse vectors for keyword matching (BM25-style)
+    - Score fusion (RRF) for final ranking in hybrid mode
     """
 
     def __init__(
@@ -48,6 +51,7 @@ class HybridSearcher:
         collection_name: str,
         query: str,
         limit: int = 10,
+        mode: SearchMode = "hybrid",
     ) -> list[HybridSearchResult]:
         """Search for relevant documents.
 
@@ -55,34 +59,105 @@ class HybridSearcher:
             collection_name: Qdrant collection name.
             query: The search query.
             limit: Maximum number of results.
+            mode: Search mode - "hybrid" (default), "dense", or "sparse".
 
         Returns:
             List of HybridSearchResult ordered by relevance.
         """
         query_embedding = await embedding_service.encode_query(query)
 
-        dense_results = await qdrant_indexer.search(
+        if mode == "sparse" and not query_embedding.sparse:
+            logger.warning("Sparse mode requested but no sparse vector generated. Falling back to dense.")
+            mode = "dense"
+
+        if mode == "hybrid":
+            return await self._search_hybrid(collection_name, query_embedding, limit)
+        elif mode == "sparse":
+            return await self._search_sparse(collection_name, query_embedding, limit)
+        else:
+            return await self._search_dense(collection_name, query_embedding, limit)
+
+    async def _search_hybrid(
+        self,
+        collection_name: str,
+        query_embedding: Any,
+        limit: int,
+    ) -> list[HybridSearchResult]:
+        """Perform hybrid search with fallback to dense-only."""
+        if not query_embedding.sparse:
+            logger.warning("No sparse vector available. Falling back to dense-only search.")
+            return await self._search_dense(collection_name, query_embedding, limit)
+
+        has_sparse = await qdrant_indexer.has_sparse_vectors(collection_name)
+        if not has_sparse:
+            logger.warning(f"Collection {collection_name} has no sparse vectors. Falling back to dense-only.")
+            return await self._search_dense(collection_name, query_embedding, limit)
+
+        results = await qdrant_indexer.search_hybrid(
+            collection_name=collection_name,
+            query_dense=query_embedding.dense,
+            query_sparse=query_embedding.sparse,
+            limit=limit,
+        )
+
+        return [
+            HybridSearchResult(
+                id=r.id,
+                score=r.score,
+                content=r.payload.get("text", ""),
+                metadata=r.payload.get("metadata", {}),
+                sparse_score=0.0,
+            )
+            for r in results
+        ]
+
+    async def _search_dense(
+        self,
+        collection_name: str,
+        query_embedding: Any,
+        limit: int,
+    ) -> list[HybridSearchResult]:
+        """Perform dense-only search."""
+        results = await qdrant_indexer.search(
             collection_name=collection_name,
             query_vector=query_embedding.dense,
             limit=limit,
         )
 
-        results = []
-        for r in dense_results:
-            content = r.payload.get("text", "")
-            metadata = r.payload.get("metadata", {})
-
-            results.append(
-                HybridSearchResult(
-                    id=r.id,
-                    score=r.score,
-                    content=content,
-                    metadata=metadata,
-                )
+        return [
+            HybridSearchResult(
+                id=r.id,
+                score=r.score,
+                content=r.payload.get("text", ""),
+                metadata=r.payload.get("metadata", {}),
+                sparse_score=0.0,
             )
+            for r in results
+        ]
 
-        results.sort(key=lambda x: x.score, reverse=True)
-        return results[:limit]
+    async def _search_sparse(
+        self,
+        collection_name: str,
+        query_embedding: Any,
+        limit: int,
+    ) -> list[HybridSearchResult]:
+        """Perform sparse-only search."""
+        results = await qdrant_indexer.search_sparse(
+            collection_name=collection_name,
+            query_sparse=query_embedding.sparse,
+            limit=limit,
+        )
+
+        return [
+            HybridSearchResult(
+                id=r.id,
+                score=r.score,
+                content=r.payload.get("text", ""),
+                metadata=r.payload.get("metadata", {}),
+                sparse_score=r.score,
+            )
+            for r in results
+        ]
 
 
 hybrid_searcher = HybridSearcher()

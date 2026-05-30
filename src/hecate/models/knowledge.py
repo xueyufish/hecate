@@ -12,7 +12,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Integer, String
+from sqlalchemy import Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hecate.models.base import BaseModel
@@ -34,6 +34,9 @@ class KnowledgeBaseModel(BaseModel):
     - **qdrant_collection** — the Qdrant collection name where this
       knowledge base's document embeddings are stored. Set at creation time
       and used for all vector similarity queries.
+    - **search_mode** — retrieval strategy: ``"hybrid"`` (dense + sparse),
+      ``"dense"`` (vector only), or ``"sparse"`` (keyword only).
+    - **sparse_weight** — weight for sparse vector in hybrid fusion (0.0-1.0).
     """
 
     __tablename__ = "knowledge_bases"
@@ -49,6 +52,8 @@ class KnowledgeBaseModel(BaseModel):
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     qdrant_collection: Mapped[str] = mapped_column(String(255), nullable=False)
+    search_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="hybrid")
+    sparse_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.3)
 
 
 class KnowledgeBaseCreateSchema(PydanticBase):
@@ -62,6 +67,8 @@ class KnowledgeBaseCreateSchema(PydanticBase):
     chunk_strategy: str = Field(default="fixed", pattern="^(auto|fixed|semantic)$")
     chunk_size: int = Field(default=512, ge=128, le=2048)
     chunk_overlap: int = Field(default=100, ge=0, le=512)
+    search_mode: str = Field(default="hybrid", pattern="^(hybrid|dense|sparse)$")
+    sparse_weight: float = Field(default=0.3, ge=0.0, le=1.0)
 
 
 class KnowledgeBaseReadSchema(PydanticBase):
@@ -78,6 +85,8 @@ class KnowledgeBaseReadSchema(PydanticBase):
     chunk_size: int
     chunk_overlap: int
     qdrant_collection: str
+    search_mode: str
+    sparse_weight: float
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None

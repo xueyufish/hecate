@@ -1,7 +1,8 @@
 """Qdrant vector store indexer for managing document embeddings.
 
 Provides collection management and vector upsert operations
-for the Qdrant vector database.
+for the Qdrant vector database, supporting both dense and sparse vectors
+for hybrid search.
 """
 
 from __future__ import annotations
@@ -27,8 +28,8 @@ class QdrantIndexer:
 
     Supports:
     - Collection creation with dense/sparse vector configs
-    - Vector upsert with metadata
-    - Similarity search
+    - Vector upsert with metadata (dense and sparse)
+    - Similarity search (dense, sparse, and hybrid)
     """
 
     def __init__(self, url: str = "http://localhost:6333"):
@@ -52,12 +53,14 @@ class QdrantIndexer:
         self,
         collection_name: str,
         vector_size: int = 1024,
+        with_sparse: bool = True,
     ) -> bool:
         """Create a Qdrant collection.
 
         Args:
             collection_name: Name of the collection.
             vector_size: Dimension of the dense vectors.
+            with_sparse: Whether to add sparse vector configuration.
 
         Returns:
             bool: True if collection was created or already exists.
@@ -69,21 +72,27 @@ class QdrantIndexer:
             return True
 
         try:
-            from qdrant_client.models import Distance, VectorParams
+            from qdrant_client.models import Distance, SparseVectorParams, VectorParams
 
             collections = client.get_collections().collections
             if any(c.name == collection_name for c in collections):
                 logger.info(f"Collection {collection_name} already exists")
                 return True
 
-            client.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(
+            kwargs: dict[str, Any] = {
+                "collection_name": collection_name,
+                "vectors_config": VectorParams(
                     size=vector_size,
                     distance=Distance.COSINE,
                 ),
-            )
-            logger.info(f"Created collection {collection_name}")
+            }
+            if with_sparse:
+                kwargs["sparse_vectors_config"] = {
+                    "sparse": SparseVectorParams(),
+                }
+
+            client.create_collection(**kwargs)
+            logger.info(f"Created collection {collection_name} (sparse={with_sparse})")
             return True
         except Exception as e:
             logger.error(f"Failed to create collection: {e}")
@@ -95,6 +104,7 @@ class QdrantIndexer:
         ids: list[str],
         vectors: list[list[float]],
         payloads: list[dict[str, Any]],
+        sparse_vectors: list[dict[int, float]] | None = None,
     ) -> bool:
         """Upsert vectors into a collection.
 
@@ -103,6 +113,7 @@ class QdrantIndexer:
             ids: List of point IDs.
             vectors: List of dense vectors.
             payloads: List of metadata payloads.
+            sparse_vectors: Optional list of sparse vectors (token_id -> weight).
 
         Returns:
             bool: True if upsert was successful.
@@ -114,12 +125,19 @@ class QdrantIndexer:
             return True
 
         try:
-            from qdrant_client.models import PointStruct
+            from qdrant_client.models import PointStruct, SparseVector
 
-            points = [
-                PointStruct(id=id_, vector=vector, payload=payload)
-                for id_, vector, payload in zip(ids, vectors, payloads, strict=False)
-            ]
+            points = []
+            for i, (id_, vector, payload) in enumerate(zip(ids, vectors, payloads, strict=False)):
+                point_vectors: dict[str, Any] = {"dense": vector}
+                if sparse_vectors and i < len(sparse_vectors):
+                    sparse = sparse_vectors[i]
+                    if sparse:
+                        point_vectors["sparse"] = SparseVector(
+                            indices=list(sparse.keys()),
+                            values=list(sparse.values()),
+                        )
+                points.append(PointStruct(id=id_, vector=point_vectors, payload=payload))
 
             client.upsert(
                 collection_name=collection_name,
@@ -137,11 +155,11 @@ class QdrantIndexer:
         query_vector: list[float],
         limit: int = 10,
     ) -> list[SearchResult]:
-        """Search for similar vectors.
+        """Search for similar vectors (dense only).
 
         Args:
             collection_name: Name of the collection.
-            query_vector: The query vector.
+            query_vector: The dense query vector.
             limit: Maximum number of results.
 
         Returns:
@@ -160,10 +178,12 @@ class QdrantIndexer:
             ]
 
         try:
-            results = client.search(
+            results = client.query_points(
                 collection_name=collection_name,
-                query_vector=query_vector,
+                query=query_vector,
+                using="dense",
                 limit=limit,
+                with_payload=True,
             )
             return [
                 SearchResult(
@@ -171,11 +191,144 @@ class QdrantIndexer:
                     score=r.score,
                     payload=r.payload or {},
                 )
-                for r in results
+                for r in results.points
             ]
         except Exception as e:
             logger.error(f"Search failed: {e}")
             return []
+
+    async def search_sparse(
+        self,
+        collection_name: str,
+        query_sparse: dict[int, float],
+        limit: int = 10,
+    ) -> list[SearchResult]:
+        """Search using sparse vectors only.
+
+        Args:
+            collection_name: Name of the collection.
+            query_sparse: The sparse query vector (token_id -> weight).
+            limit: Maximum number of results.
+
+        Returns:
+            List of SearchResult objects.
+        """
+        client = self._get_client()
+
+        if client == "mock":
+            return [
+                SearchResult(
+                    id=f"mock_sparse_{i}",
+                    score=0.85 - i * 0.1,
+                    payload={"text": f"Mock sparse result {i}", "metadata": {}},
+                )
+                for i in range(min(limit, 3))
+            ]
+
+        try:
+            from qdrant_client.models import SparseVector
+
+            sparse_vec = SparseVector(
+                indices=list(query_sparse.keys()),
+                values=list(query_sparse.values()),
+            )
+            results = client.query_points(
+                collection_name=collection_name,
+                query=sparse_vec,
+                using="sparse",
+                limit=limit,
+                with_payload=True,
+            )
+            return [
+                SearchResult(
+                    id=str(r.id),
+                    score=r.score,
+                    payload=r.payload or {},
+                )
+                for r in results.points
+            ]
+        except Exception as e:
+            logger.error(f"Sparse search failed: {e}")
+            return []
+
+    async def search_hybrid(
+        self,
+        collection_name: str,
+        query_dense: list[float],
+        query_sparse: dict[int, float],
+        limit: int = 10,
+    ) -> list[SearchResult]:
+        """Search using hybrid (dense + sparse) with RRF fusion.
+
+        Args:
+            collection_name: Name of the collection.
+            query_dense: The dense query vector.
+            query_sparse: The sparse query vector (token_id -> weight).
+            limit: Maximum number of results.
+
+        Returns:
+            List of SearchResult objects ordered by fused score.
+        """
+        client = self._get_client()
+
+        if client == "mock":
+            return [
+                SearchResult(
+                    id=f"mock_hybrid_{i}",
+                    score=0.95 - i * 0.05,
+                    payload={"text": f"Mock hybrid result {i}", "metadata": {}},
+                )
+                for i in range(min(limit, 3))
+            ]
+
+        try:
+            from qdrant_client.models import Fusion, FusionQuery, Prefetch, SparseVector
+
+            sparse_vec = SparseVector(
+                indices=list(query_sparse.keys()),
+                values=list(query_sparse.values()),
+            )
+            results = client.query_points(
+                collection_name=collection_name,
+                prefetch=[
+                    Prefetch(query=query_dense, using="dense", limit=limit * 2),
+                    Prefetch(query=sparse_vec, using="sparse", limit=limit * 2),
+                ],
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=limit,
+                with_payload=True,
+            )
+            return [
+                SearchResult(
+                    id=str(r.id),
+                    score=r.score,
+                    payload=r.payload or {},
+                )
+                for r in results.points
+            ]
+        except Exception as e:
+            logger.error(f"Hybrid search failed: {e}")
+            return []
+
+    async def has_sparse_vectors(self, collection_name: str) -> bool:
+        """Check if a collection has sparse vector configuration.
+
+        Args:
+            collection_name: Name of the collection.
+
+        Returns:
+            bool: True if collection has sparse vectors configured.
+        """
+        client = self._get_client()
+
+        if client == "mock":
+            return True
+
+        try:
+            info = client.get_collection(collection_name)
+            return info.config.params.sparse_vectors is not None
+        except Exception:
+            return False
 
 
 qdrant_indexer = QdrantIndexer()
