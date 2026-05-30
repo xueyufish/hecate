@@ -124,6 +124,19 @@ core/       → Infrastructure: config (pydantic-settings), database (async SQLA
 
 Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCase` for classes, `UPPER_SNAKE` for constants.
 
+### Language
+
+| Artifact | Language | Reason |
+|----------|----------|--------|
+| Code, docstrings, comments | English | AGENTS.md mandates "Docstrings in English on all modules" |
+| `AGENTS.md`, `README.md` | English | Project docs are English by default |
+| `openspec/specs/*.md` | English | Follows established `SHALL`/`WHEN...THEN...` spec format |
+| `openspec/*/proposal.md` | Chinese | Team-internal planning, readers are Chinese-native |
+| `openspec/*/design.md` | Chinese | Same as proposal — internal design discussion |
+| `openspec/*/tasks.md` | Chinese | Same as above — task breakdown for the team |
+
+**Rule**: specs are always English; planning artifacts (proposal/design/tasks) are always Chinese. If in doubt, match the language of the nearest existing document in the same category.
+
 ## Testing
 
 - `tests/` mirrors `src/hecate/` structure (`test_engine/`, `test_models/`, `test_api/`, `test_services/`).
