@@ -1,57 +1,57 @@
-# Memory API — 记忆管理 REST API
+# Memory API — Memory Management REST API
 
 ## Overview
 
-提供工作记忆块 CRUD、用户记忆查看/搜索、压缩状态查询的 REST API 端点。
+Provides REST API endpoints for working memory block CRUD, user memory view/search, and compression status query.
 
 ## Requirements
 
-### REQ-1: 工作记忆块 CRUD
+### REQ-1: Working Memory Block CRUD
 
-- `GET /api/agents/{agent_id}/memory/blocks` — 列出 Agent 的所有工作记忆块
-- `POST /api/agents/{agent_id}/memory/blocks` — 创建或更新记忆块（label + content）
-- `PUT /api/agents/{agent_id}/memory/blocks/{block_id}` — 更新指定记忆块
-- `DELETE /api/agents/{agent_id}/memory/blocks/{block_id}` — 删除记忆块
+- `GET /api/agents/{agent_id}/memory/blocks` — List all working memory blocks for an Agent
+- `POST /api/agents/{agent_id}/memory/blocks` — Create or update a memory block (label + content)
+- `PUT /api/agents/{agent_id}/memory/blocks/{block_id}` — Update a specific memory block
+- `DELETE /api/agents/{agent_id}/memory/blocks/{block_id}` — Delete a memory block
 
-### REQ-2: 用户记忆查看与搜索
+### REQ-2: User Memory View and Search
 
-- `GET /api/users/{user_id}/memories` — 列出用户的所有记忆事实（支持分页）
-- `GET /api/users/{user_id}/memories/search?q={query}` — 语义搜索用户记忆
-- `DELETE /api/users/{user_id}/memories/{memory_id}` — 删除指定记忆
+- `GET /api/users/{user_id}/memories` — List all user memory facts (supports pagination)
+- `GET /api/users/{user_id}/memories/search?q={query}` — Semantic search user memories
+- `DELETE /api/users/{user_id}/memories/{memory_id}` — Delete a specific memory
 
-### REQ-3: 压缩状态查询
+### REQ-3: Compression Status Query
 
-- `GET /api/sessions/{session_id}/compression` — 返回会话压缩历史（级别、token 节省、时间戳）
+- `GET /api/sessions/{session_id}/compression` — Return session compression history (level, tokens saved, timestamp)
 
-### REQ-4: 认证与权限
+### REQ-4: Authentication & Authorization
 
-- 所有端点需要 API Key 认证（复用 `verify_api_key` 依赖）
-- Agent 记忆块只有拥有该 Agent 的用户可访问
-- 用户记忆只有该用户本人可访问
+- All endpoints require API Key authentication (reuse `verify_api_key` dependency)
+- Agent memory blocks are only accessible to the Agent's owner
+- User memories are only accessible to the user themselves
 
 ## Scenarios
 
-### Scenario 1: 管理工作记忆块
+### Scenario 1: Manage Working Memory Blocks
 
 ```
-Given 用户有 Agent "assistant" (agent_id=abc)
-When POST /api/agents/abc/memory/blocks {"label": "current_task", "content": "写周报"}
-Then 返回 201 + 创建的记忆块详情
-And Agent 下次对话时能读取到该块
+Given User has Agent "assistant" (agent_id=abc)
+When POST /api/agents/abc/memory/blocks {"label": "current_task", "content": "Write weekly report"}
+Then Return 201 + created memory block details
+And Agent can read this block in the next conversation turn
 ```
 
-### Scenario 2: 搜索用户记忆
+### Scenario 2: Search User Memories
 
 ```
-Given 用户有记忆 {fact: "喜欢 Python", category: "preference"}
-When GET /api/users/{user_id}/memories/search?q=编程语言
-Then 返回包含该记忆的结果列表
+Given User has a memory {fact: "likes Python", category: "preference"}
+When GET /api/users/{user_id}/memories/search?q=programming language
+Then Return result list containing that memory
 ```
 
-### Scenario 3: 查看压缩历史
+### Scenario 3: View Compression History
 
 ```
-Given 会话经过 3 次压缩
+Given Session has gone through 3 compressions
 When GET /api/sessions/{session_id}/compression
-Then 返回压缩记录列表 [{level: "snip", tokens_saved: 1200, timestamp: "..."}, ...]
+Then Return compression record list [{level: "snip", tokens_saved: 1200, timestamp: "..."}, ...]
 ```

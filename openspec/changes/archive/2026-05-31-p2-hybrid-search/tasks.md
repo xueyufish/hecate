@@ -1,43 +1,43 @@
-## 1. 稀疏向量生成（EmbeddingService）
+## 1. Sparse Vector Generation (EmbeddingService)
 
-- [x] 1.1 更新 `embedding.py` — `encode()` 使用 BGE-M3 的 `encode()` 方法带 `return_dense=True, return_sparse=True`，将 sparse 输出转为 `dict[int, float]`
-- [x] 1.2 更新 `encode_query()` — 调用 `encode([query])` 并返回同时包含 dense 和 sparse 的 `EmbeddingResult`
-- [x] 1.3 更新 `_mock_embedding()` — 生成确定性的 mock sparse 向量（基于 text hash 的 token_id → weight 映射）
+- [x] 1.1 Update `embedding.py` — `encode()` uses BGE-M3's `encode()` method with `return_dense=True, return_sparse=True`, converts sparse output to `dict[int, float]`
+- [x] 1.2 Update `encode_query()` — calls `encode([query])` and returns `EmbeddingResult` containing both dense and sparse
+- [x] 1.3 Update `_mock_embedding()` — generate deterministic mock sparse vectors (token_id → weight mapping based on text hash)
 
-## 2. Qdrant 稀疏向量支持（QdrantIndexer）
+## 2. Qdrant Sparse Vector Support (QdrantIndexer)
 
-- [x] 2.1 更新 `create_collection()` — 添加 `sparse_vectors_config={"sparse": SparseVectorParams(index=models.SparseIndexParams())}` 参数
-- [x] 2.2 更新 `upsert_vectors()` — 新增可选参数 `sparse_vectors: list[dict[int, float]] | None = None`，构建 PointStruct 时同时传入 dense 和 sparse 向量
-- [x] 2.3 添加 `search_sparse()` 方法 — 使用 Qdrant 的 `query_points()` 做稀疏向量搜索
-- [x] 2.4 添加集合配置检测方法 `has_sparse_vectors(collection_name)` — 检查集合是否已配置稀疏向量
+- [x] 2.1 Update `create_collection()` — add `sparse_vectors_config={"sparse": SparseVectorParams(index=models.SparseIndexParams())}` parameter
+- [x] 2.2 Update `upsert_vectors()` — add optional parameter `sparse_vectors: list[dict[int, float]] | None = None`, pass both dense and sparse vectors when constructing PointStruct
+- [x] 2.3 Add `search_sparse()` method — use Qdrant's `query_points()` for sparse vector search
+- [x] 2.4 Add collection config detection method `has_sparse_vectors(collection_name)` — check if collection has sparse vectors configured
 
-## 3. 混合检索实现（HybridSearcher）
+## 3. Hybrid Retrieval Implementation (HybridSearcher)
 
-- [x] 3.1 重写 `search()` 方法 — 使用 Qdrant `QueryRequest` 的 `prefetch` + `fusion=Models.Fusion.RRF` 实现真正的混合检索
-- [x] 3.2 添加 `mode` 参数支持 — `"hybrid"` (默认) / `"dense"` / `"sparse"` 三种模式
-- [x] 3.3 实现 fallback 逻辑 — 当集合无稀疏向量配置时，自动降级为 dense-only 并 log warning
-- [x] 3.4 更新 `HybridSearchResult` — 添加 `sparse_score` 字段记录稀疏检索分数
+- [x] 3.1 Rewrite `search()` method — implement true hybrid retrieval using Qdrant `QueryRequest` with `prefetch` + `fusion=Models.Fusion.RRF`
+- [x] 3.2 Add `mode` parameter support — `"hybrid"` (default) / `"dense"` / `"sparse"` three modes
+- [x] 3.3 Implement fallback logic — when collection has no sparse vector config, auto-degrade to dense-only and log warning
+- [x] 3.4 Update `HybridSearchResult` — add `sparse_score` field to record sparse retrieval score
 
-## 4. 知识库服务更新（KnowledgeBaseService）
+## 4. Knowledge Base Service Update (KnowledgeBaseService)
 
-- [x] 4.1 更新 `ingest_document()` — pipeline 中调用 `embedding_service.encode()` 获取 sparse 向量，传入 `qdrant_indexer.upsert_vectors()`
-- [x] 4.2 更新 `search()` — 添加 `mode: str = "hybrid"` 参数，委托给 `hybrid_searcher.search()` 时传入 mode
-- [x] 4.3 添加 `reindex_with_sparse(collection_name)` 方法 — 重新索引已有集合，为存量文档生成并存储稀疏向量
+- [x] 4.1 Update `ingest_document()` — call `embedding_service.encode()` in the pipeline to get sparse vectors, pass to `qdrant_indexer.upsert_vectors()`
+- [x] 4.2 Update `search()` — add `mode: str = "hybrid"` parameter, pass mode to `hybrid_searcher.search()`
+- [x] 4.3 Add `reindex_with_sparse(collection_name)` method — reindex existing collections, generate and store sparse vectors for existing documents
 
-## 5. EnginePort 对接
+## 5. EnginePort Integration
 
-- [x] 5.1 更新 `AgentExecutionPort.knowledge_query()` — 注入 `KnowledgeBaseService`，查找 kb_ids 对应的 Qdrant collection names，调用 `search()` 返回结果
-- [x] 5.2 添加 `kb_id → collection_name` 映射逻辑 — 查询 `KnowledgeBaseModel` 获取 `qdrant_collection` 字段
+- [x] 5.1 Update `AgentExecutionPort.knowledge_query()` — inject `KnowledgeBaseService`, look up Qdrant collection names for kb_ids, call `search()` to return results
+- [x] 5.2 Add `kb_id → collection_name` mapping logic — query `KnowledgeBaseModel` to get the `qdrant_collection` field
 
-## 6. 模型与配置
+## 6. Model & Configuration
 
-- [x] 6.1 更新 `KnowledgeBaseModel` — 添加 `search_mode` 字段（默认 `"hybrid"`）和 `sparse_weight` 字段（默认 `0.3`）
-- [x] 6.2 生成并执行 Alembic 迁移脚本
+- [x] 6.1 Update `KnowledgeBaseModel` — add `search_mode` field (default `"hybrid"`) and `sparse_weight` field (default `0.3`)
+- [x] 6.2 Generate and execute Alembic migration script
 
-## 7. 测试
+## 7. Tests
 
-- [x] 7.1 编写 `test_embedding_sparse.py` — 测试稀疏向量生成（encode/encode_query/mock）
-- [x] 7.2 编写 `test_hybrid_search.py` — 测试混合检索（hybrid/dense/sparse 模式、fallback）
-- [x] 7.3 编写 `test_knowledge_service.py` — 测试 ingest 带稀疏向量、search 多模式
-- [x] 7.4 编写 `test_engine_port_knowledge.py` — 测试 EnginePort.knowledge_query 真实调用
-- [x] 7.5 全量验证：`ruff check src/` + `mypy src/` + `pytest tests/ -q`
+- [x] 7.1 Write `test_embedding_sparse.py` — test sparse vector generation (encode/encode_query/mock)
+- [x] 7.2 Write `test_hybrid_search.py` — test hybrid search (hybrid/dense/sparse modes, fallback)
+- [x] 7.3 Write `test_knowledge_service.py` — test ingest with sparse vectors, search multi-mode
+- [x] 7.4 Write `test_engine_port_knowledge.py` — test EnginePort.knowledge_query real invocation
+- [x] 7.5 Full validation: `ruff check src/` + `mypy src/` + `pytest tests/ -q`

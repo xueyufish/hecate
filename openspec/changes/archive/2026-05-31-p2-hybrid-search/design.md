@@ -1,88 +1,88 @@
 ## Context
 
-Hecate 的 RAG 检索层目前只实现了 3.2.1（稠密向量检索）。核心代码在 `src/hecate/services/rag/` 下：
+Hecate's RAG retrieval layer currently only implements 3.2.1 (dense vector retrieval). The core code lives under `src/hecate/services/rag/`:
 
-- **`EmbeddingService`** — 使用 BAAI/bge-m3 模型，`EmbeddingResult` 已预留 `sparse` 字段但永远返回空 `{}`
-- **`QdrantIndexer`** — `create_collection()` 只配置稠密向量，`search()` 只做 ANN 搜索
-- **`HybridSearcher`** — 类名暗示混合检索，但 `search()` 只调稠密检索，`sparse_weight` 从未使用
-- **`KnowledgeBaseService`** — `search()` 委托给 `HybridSearcher`，`ingest_document()` 只存稠密向量
-- **`EnginePort.knowledge_query`** — 抽象接口已定义，但 `AgentExecutionPort` 实现直接 `raise NotImplementedError`
+- **`EmbeddingService`** — Uses BAAI/bge-m3 model; `EmbeddingResult` already has a `sparse` field but it always returns an empty `{}`
+- **`QdrantIndexer`** — `create_collection()` only configures dense vectors; `search()` only does ANN search
+- **`HybridSearcher`** — The class name suggests hybrid retrieval, but `search()` only calls dense retrieval; `sparse_weight` is never used
+- **`KnowledgeBaseService`** — `search()` delegates to `HybridSearcher`; `ingest_document()` only stores dense vectors
+- **`EnginePort.knowledge_query`** — Abstract interface defined, but `AgentExecutionPort` implementation directly raises `NotImplementedError`
 
-技术栈约束：
-- Qdrant 1.12+（已安装），原生支持稀疏向量 + `QueryRequest` fusion API
-- BGE-M3 模型（FlagEmbedding）可同时生成稠密和稀疏向量
+Tech stack constraints:
+- Qdrant 1.12+ (already installed), natively supports sparse vectors + `QueryRequest` fusion API
+- BGE-M3 model (FlagEmbedding) can generate both dense and sparse vectors simultaneously
 - Python 3.12+, SQLAlchemy 2.0 async, FastAPI
 
 ## Goals / Non-Goals
 
 **Goals:**
-- 实现 3.2.2 关键词检索：基于 Qdrant 稀疏向量的 BM25 风格检索
-- 实现 3.2.3 混合检索：稠密 + 稀疏分数融合，支持权重配置
-- 让 `EnginePort.knowledge_query` 真正可用
-- 保持向后兼容：已有知识库无需迁移即可使用新检索能力
+- Implement 3.2.2 keyword retrieval: BM25-style retrieval based on Qdrant sparse vectors
+- Implement 3.2.3 hybrid retrieval: dense + sparse score fusion with configurable weights
+- Make `EnginePort.knowledge_query` actually usable
+- Maintain backward compatibility: existing knowledge bases can use new retrieval without migration
 
 **Non-Goals:**
-- 不实现独立的 BM25 引擎（如 Elasticsearch），用 Qdrant 原生方案
-- 不实现重排序（Reranking）— 这是 P4 的 3.2.5
-- 不修改前端 UI — 检索能力变化对前端透明
-- 不实现增量稀疏向量更新 — 首次索引时生成全部向量
+- No standalone BM25 engine (e.g., Elasticsearch) — use Qdrant native approach
+- No reranking — this is P4 3.2.5
+- No frontend UI changes — retrieval capability changes are transparent to the frontend
+- No incremental sparse vector updates — all vectors generated at first index time
 
 ## Decisions
 
-### Decision 1: Qdrant 原生稀疏向量 vs 独立 BM25 库
+### Decision 1: Qdrant Native Sparse Vectors vs Standalone BM25 Library
 
-**选择：Qdrant 原生稀疏向量**
+**Choice: Qdrant native sparse vectors**
 
-理由：
-- 已有 `qdrant-client>=1.12.0`，零新增依赖
-- Qdrant 原生支持 `SparseVectorParams` + `QueryRequest` fusion，无需手动实现分数融合
-- 单一存储引擎，运维简单
-- 性能：Qdrant 内部用倒排索引处理稀疏向量，接近原生 BM25 性能
+Rationale:
+- Already have `qdrant-client>=1.12.0`, zero new dependencies
+- Qdrant natively supports `SparseVectorParams` + `QueryRequest` fusion, no need to manually implement score fusion
+- Single storage engine, simpler operations
+- Performance: Qdrant uses inverted index internally for sparse vectors, approaching native BM25 performance
 
-**备选方案（放弃）：**
-- `rank-bm25` 纯 Python 实现 — 需要自行维护内存倒排索引，无法持久化，大规模不可行
-- Elasticsearch — 重量级依赖，运维成本高，与 Qdrant 功能重叠
+**Alternative (rejected):**
+- `rank-bm25` pure Python — needs manual in-memory inverted index, not persistent, not scalable
+- Elasticsearch — heavyweight dependency, high operational cost, overlaps with Qdrant functionality
 
-### Decision 2: 稀疏向量生成方式
+### Decision 2: Sparse Vector Generation Method
 
-**选择：BGE-M3 原生稀疏输出**
+**Choice: BGE-M3 native sparse output**
 
-理由：
-- BGE-M3 本身就是多语言模型，同时支持稠密 + 稀疏 + ColBERT 三种向量
-- FlagEmbedding 库（已安装）的 `BGEM3FlagModel` 可以直接输出 sparse embedding
-- 稀疏向量格式：`dict[int, float]`（token_id → weight），可直接存入 Qdrant SparseVector
+Rationale:
+- BGE-M3 is a multilingual model supporting dense + sparse + ColBERT vectors simultaneously
+- FlagEmbedding library (already installed) `BGEM3FlagModel` can directly output sparse embeddings
+- Sparse vector format: `dict[int, float]` (token_id → weight), directly storable in Qdrant SparseVector
 
-**备选方案（放弃）：**
-- `fastembed` 的稀疏模型 — 需要额外依赖，且 BGE-M3 已够用
-- 手动 BM25 分词 — 复杂度高，效果不如 BGE-M3 稀疏输出
+**Alternative (rejected):**
+- `fastembed` sparse models — needs extra dependency, and BGE-M3 is already sufficient
+- Manual BM25 tokenization — high complexity, inferior to BGE-M3 sparse output
 
-### Decision 3: 分数融合策略
+### Decision 3: Score Fusion Strategy
 
-**选择：Qdrant 内置 Fusion（RRF）+ 可选加权**
+**Choice: Qdrant built-in Fusion (RRF) with optional weighting**
 
-理由：
-- Qdrant 的 `QueryRequest` 支持 `prefetch` + `fusion`，直接在数据库层完成融合
-- RRF（Reciprocal Rank Fusion）是业界标准，不需要归一化分数
-- 未来可通过 `QueryRequest` 的权重参数扩展为加权融合
+Rationale:
+- Qdrant's `QueryRequest` supports `prefetch` + `fusion`, doing fusion at the database layer
+- RRF (Reciprocal Rank Fusion) is an industry standard, no score normalization needed
+- Future extensibility via `QueryRequest` weight parameters for weighted fusion
 
-**备选方案（放弃）：**
-- 应用层手动 RRF — 增加代码复杂度，且无法利用 Qdrant 的优化
-- 简单加权求和 — 需要分数归一化，不同检索方式的分数分布不同
+**Alternative (rejected):**
+- Application-layer manual RRF — adds code complexity, can't leverage Qdrant optimizations
+- Simple weighted sum — needs score normalization; different retrieval methods have different score distributions
 
-### Decision 4: EnginePort 对接方式
+### Decision 4: EnginePort Integration Approach
 
-**选择：在 AgentExecutionPort 中注入 KnowledgeBaseService**
+**Choice: Inject KnowledgeBaseService into AgentExecutionPort**
 
-理由：
-- `AgentExecutionPort` 已经是 `EnginePort` 的具体实现
-- `KnowledgeBaseService` 是 RAG 的入口服务，包含 search 方法
-- 注入后，`knowledge_query` 直接委托给 `KnowledgeBaseService.search`
+Rationale:
+- `AgentExecutionPort` is already the concrete implementation of `EnginePort`
+- `KnowledgeBaseService` is the RAG entry point service, includes the search method
+- After injection, `knowledge_query` directly delegates to `KnowledgeBaseService.search`
 
 ## Risks / Trade-offs
 
-| 风险 | 影响 | 缓解措施 |
-|------|------|---------|
-| BGE-M3 稀疏向量内存占用 | 每个文档同时存稠密(4KB) + 稀疏(1KB) 向量 | 监控内存使用，必要时分批索引 |
-| Qdrant fusion API 稳定性 | 较新特性，可能有 bug | 做好 fallback：应用层 RRF |
-| 已有知识库迁移 | 旧集合没有稀疏向量 | 新建集合并重新索引，或惰性迁移 |
-| BGE-M3 加载时间 | 首次加载模型较慢 | 保持现有的懒加载 + 模型缓存 |
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| BGE-M3 sparse vector memory usage | Each document stores both dense (4KB) + sparse (1KB) vectors | Monitor memory, batch indexing if needed |
+| Qdrant fusion API stability | Relatively new feature, may have bugs | Prepare fallback: application-layer RRF |
+| Existing knowledge base migration | Old collections have no sparse vectors | Create new collections and reindex, or lazy migration |
+| BGE-M3 load time | First model load is slow | Keep existing lazy loading + model caching |
