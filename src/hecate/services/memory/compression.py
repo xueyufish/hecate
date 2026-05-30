@@ -238,6 +238,61 @@ class CompressionPipeline:
             tokens_saved=original_tokens - compressed_tokens,
         )
 
+    def compress(
+        self,
+        messages: list[dict[str, Any]],
+        token_threshold: int = 4000,
+        recent_window: int = 6,
+    ) -> CompressionResult:
+        """High-level compression chaining snip → microcompact → autocompact.
+
+        Only compresses if token count exceeds the threshold. Applies
+        strategies progressively until the result fits within budget.
+
+        Args:
+            messages: Full message history.
+            token_threshold: Token count that triggers compression.
+            recent_window: Messages to preserve unconditionally.
+
+        Returns:
+            CompressionResult with final compressed messages.
+        """
+        token_count = self.token_counter.count_messages(messages)
+        if token_count <= token_threshold:
+            return CompressionResult(
+                messages=messages,
+                original_count=len(messages),
+                compressed_count=len(messages),
+                level_applied="none",
+                tokens_saved=0,
+            )
+
+        level_parts: list[str] = []
+        current = messages
+
+        result = self.snip(current, recent_window=recent_window)
+        current = result.messages
+        level_parts.append("snip")
+
+        if self.token_counter.count_messages(current) > token_threshold:
+            result = self.microcompact(current)
+            current = result.messages
+            level_parts.append("microcompact")
+
+        if self.token_counter.count_messages(current) > token_threshold:
+            result = self.autocompact(current, recent_window=recent_window)
+            current = result.messages
+            level_parts.append("autocompact")
+
+        compressed_tokens = self.token_counter.count_messages(current)
+        return CompressionResult(
+            messages=current,
+            original_count=len(messages),
+            compressed_count=len(current),
+            level_applied="+".join(level_parts),
+            tokens_saved=token_count - compressed_tokens,
+        )
+
     def _create_summary(self, messages: list[dict[str, Any]]) -> str:
         """Create a concise summary of messages.
 
