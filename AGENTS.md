@@ -96,7 +96,7 @@ core/       → Infrastructure: config (pydantic-settings), database (async SQLA
 ### Project workflow
 
 - Feature IDs: `X.Y.Z` pattern (e.g., `1.3.1`, `9.4a`). Append letter suffixes — never renumber.
-- **OpenSpec workflow is MANDATORY for ALL changes** — no exceptions. Every change MUST follow: `proposal → design → specs → tasks → implement → verify → archive`. Use `/opsx-propose` to create a change, then `/opsx-apply` to implement tasks, then run `ruff check src/` + `ruff format --check src/ tests/` + `mypy src/` + `python -m pytest tests/ -q` to verify, then `/opsx-archive` to close. Never skip the propose step or implement outside an OpenSpec change directory. Mark tasks complete in `tasks.md` immediately.
+- **OpenSpec workflow is MANDATORY for ALL changes** — no exceptions. Every change MUST follow: `proposal → design → specs → tasks → implement → verify → archive`. Use `/opsx-propose` to create a change, then `/opsx-apply` to implement tasks, then run `ruff check src/hecate/ tests/` + `ruff format --check src/ tests/` + `mypy src/` + `python -m pytest tests/ -q` to verify, then `/opsx-archive` to close. Never skip the propose step or implement outside an OpenSpec change directory. Mark tasks complete in `tasks.md` immediately.
 - Research notes: overview → architecture → key findings → conclusion.
 - Reports numbered `00`–`05`. `00` is the master decision summary.
 - Update `research-tracker.md` when research items change status.
@@ -133,11 +133,11 @@ Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCas
 - Database: in-memory SQLite (`sqlite+aiosqlite://`). Never connect to real PostgreSQL in unit tests.
 - Engine tests use lightweight stub classes (`SimpleWorker`, `InterruptWorker`) instead of mocking frameworks.
 - No factories — create models inline with `db_session.add()` + `await db_session.flush()`.
-- ruff S101 (assert in tests) is expected — only run `ruff check src/hecate/`, not tests.
+- ruff S101 (assert in tests) is expected — per-file-ignores in pyproject.toml handle it. Always run `ruff check src/hecate/ tests/` (both directories).
 
 ## What to do / What not to do
 
-- **Do** run `ruff check src/hecate/ && ruff format --check src/hecate/ tests/ && python -m pytest tests/ -q` before committing.
+- **Do** run `ruff check src/hecate/ tests/ && ruff format --check src/ tests/ && python -m pytest tests/ -q` before committing.
 - **Do** use `conftest.py`'s `db_session` fixture in all test files.
 - **Don't** renumber feature IDs — use letter suffixes.
 - **Don't** commit PDF files or large binary assets.
