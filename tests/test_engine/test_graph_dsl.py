@@ -254,3 +254,92 @@ class TestThreeLayerTemplate:
         compiler = GraphCompiler()
         compiled = compiler.compile(config)
         assert compiled.entry_point == "guard"
+
+
+class TestHandoffEdgeParsing:
+    """Validate parsing and compilation of handoff edge triggers."""
+
+    HANDOFF_GRAPH = """
+    {
+        "version": "1.0",
+        "name": "handoff-test",
+        "state": {"messages": {"type": "topic"}},
+        "nodes": {
+            "router": {"type": "agent", "config": {"agent_id": "00000000-0000-0000-0000-000000000001"}},
+            "specialist": {"type": "agent", "config": {"agent_id": "00000000-0000-0000-0000-000000000002"}}
+        },
+        "edges": [
+            {"source": "__start__", "target": "router"},
+            {"source": "router", "target": "specialist", "type": "handoff"},
+            {"source": "specialist", "target": "__end__"}
+        ],
+        "entry": "router"
+    }
+    """
+
+    def test_parse_handoff_edge_type(self):
+        """Edge with type: 'handoff' is parsed with trigger='handoff'."""
+        config = parse_graph(self.HANDOFF_GRAPH)
+        handoff_edges = [e for e in config.edges if e.trigger == "handoff"]
+        assert len(handoff_edges) == 1
+        assert handoff_edges[0].source == "router"
+        assert handoff_edges[0].target == "specialist"
+
+    def test_parse_trigger_field_still_works(self):
+        """Edge with trigger: 'handoff' (legacy field) is still parsed correctly."""
+        dsl = {
+            "version": "1.0",
+            "name": "trigger-legacy",
+            "state": {"messages": {"type": "topic"}},
+            "nodes": {
+                "a": {"type": "agent", "config": {"agent_id": "00000000-0000-0000-0000-000000000001"}},
+                "b": {"type": "agent", "config": {"agent_id": "00000000-0000-0000-0000-000000000002"}},
+            },
+            "edges": [
+                {"source": "a", "target": "b", "trigger": "handoff"},
+            ],
+            "entry": "a",
+        }
+        config = parse_graph(dsl)
+        assert config.edges[0].trigger == "handoff"
+
+    def test_handoff_edge_validates_agent_nodes(self):
+        """Handoff edges between agent nodes compile successfully."""
+        config = parse_graph(self.HANDOFF_GRAPH)
+        compiled = GraphCompiler().compile(config)
+        assert compiled is not None
+        assert len(compiled.edges) == 3
+
+    def test_standard_edge_has_no_trigger(self):
+        """Standard edges (no type/trigger) have None trigger."""
+        config = parse_graph(SIMPLE_LINEAR)
+        for edge in config.edges:
+            assert edge.trigger is None
+
+    def test_invocation_mode_in_config(self):
+        """Agent node config accepts invocation_mode field."""
+        dsl = {
+            "version": "1.0",
+            "name": "tool-mode",
+            "state": {"messages": {"type": "topic"}},
+            "nodes": {
+                "supervisor": {
+                    "type": "agent",
+                    "config": {
+                        "agent_id": "00000000-0000-0000-0000-000000000001",
+                        "invocation_mode": "tool",
+                    },
+                },
+                "worker": {
+                    "type": "agent",
+                    "config": {"agent_id": "00000000-0000-0000-0000-000000000002"},
+                },
+            },
+            "edges": [
+                {"source": "supervisor", "target": "worker"},
+                {"source": "worker", "target": "__end__"},
+            ],
+            "entry": "supervisor",
+        }
+        config = parse_graph(dsl)
+        assert config.nodes["supervisor"].config.get("invocation_mode") == "tool"
