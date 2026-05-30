@@ -126,16 +126,9 @@ Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCas
 
 ### Language
 
-| Artifact | Language | Reason |
-|----------|----------|--------|
-| Code, docstrings, comments | English | AGENTS.md mandates "Docstrings in English on all modules" |
-| `AGENTS.md`, `README.md` | English | Project docs are English by default |
-| `openspec/specs/*.md` | English | Follows established `SHALL`/`WHEN...THEN...` spec format |
-| `openspec/*/proposal.md` | Chinese | Team-internal planning, readers are Chinese-native |
-| `openspec/*/design.md` | Chinese | Same as proposal — internal design discussion |
-| `openspec/*/tasks.md` | Chinese | Same as above — task breakdown for the team |
+All project artifacts — code, docstrings, comments, specs, design docs, proposals, tasks, AGENTS.md, README.md — **SHALL be written in English**. International project, single language.
 
-**Rule**: specs are always English; planning artifacts (proposal/design/tasks) are always Chinese. If in doubt, match the language of the nearest existing document in the same category.
+We may converse in Chinese, but everything committed to the repository is English.
 
 ## Testing
 
