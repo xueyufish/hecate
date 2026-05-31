@@ -10,6 +10,7 @@ Provides operations for knowledge bases:
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -19,6 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.deps import get_db, verify_api_key
+from hecate.models.agent import AgentModel, AgentReadSchema
 from hecate.models.document import DocumentModel, DocumentReadSchema
 from hecate.models.knowledge import (
     KnowledgeBaseCreateSchema,
@@ -322,3 +324,90 @@ async def compare_search_modes(
         query=data.query,
         limit=data.limit,
     )
+
+
+async def _cleanup_kb_references(db: AsyncSession, kb_id: uuid.UUID) -> None:
+    """Remove a KB ID from all agents' knowledge_base_ids arrays.
+
+    Args:
+        db: The async database session.
+        kb_id: The UUID of the knowledge base being deleted.
+    """
+    stmt = select(AgentModel).where(
+        AgentModel.deleted_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    agents = result.scalars().all()
+
+    kb_id_str = str(kb_id)
+    for agent in agents:
+        if isinstance(agent.knowledge_base_ids, list) and kb_id_str in agent.knowledge_base_ids:
+            agent.knowledge_base_ids = [kid for kid in agent.knowledge_base_ids if kid != kb_id_str]
+            db.add(agent)
+
+    await db.flush()
+
+
+@router.delete("/knowledge-bases/{kb_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_knowledge_base(
+    kb_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> None:
+    """Soft delete a knowledge base and cascade cleanup agent references.
+
+    Args:
+        kb_id: The UUID of the knowledge base to delete.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Raises:
+        HTTPException: 404 if knowledge base not found or already deleted.
+    """
+    kb = await _get_kb_or_404(kb_id, db)
+    kb.deleted_at = datetime.now(UTC)
+    await _cleanup_kb_references(db, kb_id)
+
+
+@router.get("/knowledge-bases/{kb_id}/agents")
+async def list_agents_for_knowledge_base(
+    kb_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> dict:
+    """List agents that reference a specific knowledge base.
+
+    Args:
+        kb_id: The UUID of the knowledge base.
+        db: The async database session.
+        api_key: The validated API key.
+        page: Page number (1-indexed).
+        page_size: Number of items per page.
+
+    Returns:
+        dict: ``{"items": [...], "total": int}`` with agent list and total count.
+
+    Raises:
+        HTTPException: 404 if knowledge base not found or deleted.
+    """
+    await _get_kb_or_404(kb_id, db)
+
+    kb_id_str = str(kb_id)
+    stmt = select(AgentModel).where(AgentModel.deleted_at.is_(None))
+    result = await db.execute(stmt)
+    all_agents = result.scalars().all()
+
+    matching_agents = [
+        a for a in all_agents if isinstance(a.knowledge_base_ids, list) and kb_id_str in a.knowledge_base_ids
+    ]
+
+    total = len(matching_agents)
+    offset = (page - 1) * page_size
+    page_agents = matching_agents[offset : offset + page_size]
+
+    return {
+        "items": [AgentReadSchema.model_validate(a).model_dump(by_alias=True) for a in page_agents],
+        "total": total,
+    }

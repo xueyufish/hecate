@@ -8,6 +8,7 @@ bases), and invoking the LLM via ConversationService.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -92,10 +93,10 @@ class AgentExecutionPort(EnginePort):
         }
 
     async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
-        """Query knowledge bases and return relevant document chunks.
+        """Query knowledge bases in parallel and return relevant document chunks.
 
         Looks up the Qdrant collection names for the given kb_ids and performs
-        hybrid search (dense + sparse) on each, aggregating results.
+        hybrid search (dense + sparse) on each in parallel, aggregating results.
 
         Args:
             query: The search query string.
@@ -107,45 +108,44 @@ class AgentExecutionPort(EnginePort):
         if not kb_ids:
             return []
 
-        all_chunks: list[dict] = []
-
-        for kb_id in kb_ids:
-            result = await self._db.execute(
-                select(KnowledgeBaseModel).where(
-                    KnowledgeBaseModel.id == kb_id,
-                    KnowledgeBaseModel.deleted_at.is_(None),
-                )
-            )
-            kb = result.scalar_one_or_none()
-
-            if kb is None:
-                logger.warning(f"Knowledge base {kb_id} not found. Skipping.")
-                continue
-
+        async def _search_one_kb(kb_id: UUID) -> list[dict]:
+            """Search a single KB and return chunk dicts. Returns [] on failure."""
             try:
+                result = await self._db.execute(
+                    select(KnowledgeBaseModel).where(
+                        KnowledgeBaseModel.id == kb_id,
+                        KnowledgeBaseModel.deleted_at.is_(None),
+                    )
+                )
+                kb = result.scalar_one_or_none()
+                if kb is None:
+                    logger.warning(f"Knowledge base {kb_id} not found. Skipping.")
+                    return []
+
                 search_results = await knowledge_base_service.search(
                     collection_name=kb.qdrant_collection,
                     query=query,
                     limit=10,
                     mode="hybrid",
                 )
-
-                for r in search_results:
-                    all_chunks.append(
-                        {
-                            "content": r.content,
-                            "metadata": {
-                                **r.metadata,
-                                "score": r.score,
-                                "kb_id": str(kb_id),
-                                "kb_name": kb.name,
-                            },
-                        }
-                    )
+                return [
+                    {
+                        "content": r.content,
+                        "metadata": {
+                            **r.metadata,
+                            "score": r.score,
+                            "kb_id": str(kb_id),
+                            "kb_name": kb.name,
+                        },
+                    }
+                    for r in search_results
+                ]
             except Exception as e:
                 logger.error(f"Knowledge search failed for kb {kb_id}: {e}")
-                continue
+                return []
 
+        results = await asyncio.gather(*[_search_one_kb(kb_id) for kb_id in kb_ids])
+        all_chunks = [chunk for sublist in results for chunk in sublist]
         all_chunks.sort(key=lambda x: x["metadata"].get("score", 0), reverse=True)
         return all_chunks[:20]
 

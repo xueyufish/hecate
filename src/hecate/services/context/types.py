@@ -84,6 +84,8 @@ class SessionMeta:
         turn_index: Current turn number in the conversation.
         model: Target LLM model identifier.
         custom_budget: Optional custom token budget override.
+        agent_name: Agent display name for suggestion prompts.
+        agent_persona: Agent persona description for suggestion prompts.
     """
 
     session_id: str
@@ -91,6 +93,8 @@ class SessionMeta:
     turn_index: int = 0
     model: str = "gpt-4o"
     custom_budget: int | None = None
+    agent_name: str = "Assistant"
+    agent_persona: str | None = None
 
 
 @dataclass

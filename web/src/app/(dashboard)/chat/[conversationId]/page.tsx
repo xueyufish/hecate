@@ -23,6 +23,11 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [agentModel, setAgentModel] = useState("gpt-4o");
+  const [kbIds, setKbIds] = useState<string[]>([]);
+  const [kbNames, setKbNames] = useState<string[]>([]);
+  const [kbLoading, setKbLoading] = useState(false);
+  const [memoryBlockLabels, setMemoryBlockLabels] = useState<string[]>([]);
+  const [queuePosition, setQueuePosition] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,10 +39,29 @@ export default function ChatPage() {
         if (conv.messages) setMessages(conv.messages);
         if (conv.agent_id) {
           api
-            .get<{ model_config: { model?: string } }>(
+            .get<{ model_config: { model?: string }; knowledge_base_ids?: string[] }>(
               `/api/agents/${conv.agent_id}`
             )
-            .then((a) => setAgentModel(a.model_config?.model || "gpt-4o"))
+            .then((a) => {
+              setAgentModel(a.model_config?.model || "gpt-4o");
+              const ids = a.knowledge_base_ids || [];
+              setKbIds(ids);
+              if (ids.length > 0) {
+                setKbLoading(true);
+                api
+                  .get<{ items: { id: string; name: string }[] }>("/api/knowledge-bases")
+                  .then((res) => {
+                    const nameMap = new Map(res.items.map((kb) => [kb.id, kb.name]));
+                    setKbNames(ids.map((id) => nameMap.get(id) || id).filter(Boolean));
+                  })
+                  .catch(() => {})
+                  .finally(() => setKbLoading(false));
+              }
+              api
+                .get<{ label: string }[]>(`/api/agents/${conv.agent_id}/memory-blocks`)
+                .then((blocks) => setMemoryBlockLabels(blocks.map((b) => b.label)))
+                .catch(() => {});
+            })
             .catch(() => {});
         }
       })
@@ -55,15 +79,23 @@ export default function ChatPage() {
     setMessages(updated);
     setInput("");
     setStreaming(true);
+    setQueuePosition(1);
 
     const assistantMsg: Message = { role: "assistant", content: "" };
     setMessages([...updated, assistantMsg]);
 
     try {
+      let firstChunk = false;
       for await (const token of api.stream("/v1/chat/completions", {
         model: agentModel,
         messages: updated.map((m) => ({ role: m.role, content: m.content })),
+        session_id: conversationId,
+        ...(kbIds.length > 0 ? { kb_ids: kbIds } : {}),
       })) {
+        if (!firstChunk) {
+          firstChunk = true;
+          setQueuePosition(0);
+        }
         assistantMsg.content += token;
         setMessages([...updated, { ...assistantMsg }]);
       }
@@ -72,6 +104,7 @@ export default function ChatPage() {
       setMessages([...updated, { ...assistantMsg }]);
     } finally {
       setStreaming(false);
+      setQueuePosition(0);
     }
   };
 
@@ -89,7 +122,41 @@ export default function ChatPage() {
   return (
     <div className="flex h-[calc(100vh-3rem)] flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-lg font-medium">对话</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-medium">对话</h2>
+          {kbLoading && (
+            <span className="text-xs text-muted-foreground">加载知识库...</span>
+          )}
+          {!kbLoading && kbNames.length > 0 && (
+            <div className="flex items-center gap-1">
+              {kbNames.map((name, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-xs"
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          )}
+          {memoryBlockLabels.length > 0 && (
+            <div className="flex items-center gap-1">
+              {memoryBlockLabels.map((label, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-800"
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          )}
+          {queuePosition > 0 && (
+            <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">
+              排队中...
+            </span>
+          )}
+        </div>
         <Button variant="outline" size="sm" onClick={newChat}>
           <Plus className="mr-1 h-4 w-4" />
           新对话

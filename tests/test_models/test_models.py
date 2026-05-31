@@ -97,6 +97,29 @@ class TestAgentModel:
         assert agent.tools == [{"name": "search"}]
         assert len(agent.knowledge_base_ids) == 1
 
+    @pytest.mark.asyncio
+    async def test_opening_remarks_default(self, db_session: AsyncSession) -> None:
+        """An agent without explicit opening_remarks defaults to None and enable_suggestions to True."""
+        agent = AgentModel(name="default-remarks", model_config_db={})
+        db_session.add(agent)
+        await db_session.flush()
+        assert agent.opening_remarks is None
+        assert agent.enable_suggestions is True
+
+    @pytest.mark.asyncio
+    async def test_opening_remarks_set(self, db_session: AsyncSession) -> None:
+        """An agent can store opening_remarks text and disable suggestions."""
+        agent = AgentModel(
+            name="with-remarks",
+            model_config_db={},
+            opening_remarks="Hello! How can I help?",
+            enable_suggestions=False,
+        )
+        db_session.add(agent)
+        await db_session.flush()
+        assert agent.opening_remarks == "Hello! How can I help?"
+        assert agent.enable_suggestions is False
+
 
 class TestAgentSchema:
     """Validate AgentCreateSchema and AgentReadSchema Pydantic validation rules."""
@@ -133,9 +156,58 @@ class TestAgentSchema:
         agent.skills = []
         agent.knowledge_base_ids = []
         agent.risk_level = "LOW"
+        agent.opening_remarks = None
+        agent.enable_suggestions = True
         schema = AgentReadSchema.model_validate(agent)
         assert schema.name == "read-test"
         assert schema.model_config_db == {"model": "gpt-4"}
+
+    def test_create_schema_with_opening_remarks(self) -> None:
+        """AgentCreateSchema accepts opening_remarks and enable_suggestions fields."""
+        schema = AgentCreateSchema(
+            name="test",
+            model_config={"model": "gpt-4o"},
+            opening_remarks="Hello! How can I help you?",
+            enable_suggestions=False,
+        )
+        assert schema.opening_remarks == "Hello! How can I help you?"
+        assert schema.enable_suggestions is False
+
+    def test_create_schema_defaults_for_suggestion_fields(self) -> None:
+        """AgentCreateSchema defaults opening_remarks to None and enable_suggestions to True."""
+        schema = AgentCreateSchema(name="test", model_config={"model": "gpt-4o"})
+        assert schema.opening_remarks is None
+        assert schema.enable_suggestions is True
+
+    def test_update_schema_with_opening_remarks(self) -> None:
+        """AgentUpdateSchema accepts opening_remarks and enable_suggestions fields."""
+        from hecate.models.agent import AgentUpdateSchema
+
+        schema = AgentUpdateSchema(opening_remarks="Updated remarks", enable_suggestions=False)
+        assert schema.opening_remarks == "Updated remarks"
+        assert schema.enable_suggestions is False
+
+    def test_read_schema_with_opening_remarks(self) -> None:
+        """AgentReadSchema exposes opening_remarks and enable_suggestions from ORM instance."""
+        now = datetime.now()
+        agent = AgentModel(
+            name="remarks-test",
+            model_config_db={"model": "gpt-4"},
+            opening_remarks="Welcome!",
+            enable_suggestions=False,
+            created_at=now,
+            updated_at=now,
+        )
+        agent.id = uuid.uuid4()
+        agent.workspace_id = uuid.uuid4()
+        agent.mode = "chat"
+        agent.tools = []
+        agent.skills = []
+        agent.knowledge_base_ids = []
+        agent.risk_level = "LOW"
+        schema = AgentReadSchema.model_validate(agent)
+        assert schema.opening_remarks == "Welcome!"
+        assert schema.enable_suggestions is False
 
 
 class TestConversationModel:

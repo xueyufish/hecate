@@ -71,15 +71,15 @@ export function dslToReactFlow(dsl: ParsedDsl): {
     const isHandoff = edgeDef.trigger === "handoff" || edgeDef.type === "handoff";
 
     if (typeof target === "string") {
-      return {
+      return [{
         id: `e-${index}`,
         source,
         target,
-        animated: !isHandoff,
+        animated: true as const,
         style: isHandoff ? { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5 5" } : undefined,
-        label: isHandoff ? "移交" : undefined,
+        label: isHandoff ? "移交" : "",
         data: { edgeType: isHandoff ? "handoff" : "default" },
-      };
+      }];
     }
 
     // Conditional edge: create one edge per route

@@ -75,6 +75,7 @@ class ContextAssembler:
         memory_blocks: list[MemoryBlockReadSchema] | None = None,
         user_memories: list[MemoryReadSchema] | None = None,
         constraints: list[ConstraintRule] | None = None,
+        suggestion_mode: str | None = None,
     ) -> AssembledContext:
         """Assemble optimized context for an LLM invocation.
 
@@ -85,6 +86,12 @@ class ContextAssembler:
             knowledge: Optional knowledge chunks from RAG.
             memory_blocks: Optional L1 memory blocks to inject.
             user_memories: Optional L3 user memories to inject.
+            constraints: Optional constraint rules from harness.
+            suggestion_mode: Optional suggestion mode ("opening" or "followup").
+                When "opening", builds a system prompt with agent metadata for
+                generating opening remarks. When "followup", builds a system
+                prompt with the last 2 turns for generating follow-up questions.
+                When None, proceeds with standard assembly.
 
         Returns:
             AssembledContext with optimized messages, tools, and metadata.
@@ -96,7 +103,18 @@ class ContextAssembler:
                 knowledge=knowledge or [],
             )
 
-        # Step 1: Inject L1 memory blocks
+        # Handle suggestion modes — return lightweight context for suggestion generation
+        if suggestion_mode == "opening":
+            return self._build_opening_suggestion_context(session_meta, tools)
+        if suggestion_mode == "followup":
+            return self._build_followup_suggestion_context(messages, session_meta, tools)
+
+        # Step 1: Inject knowledge chunks with citation mapping
+        citation_map: dict[int, dict[str, Any]] = {}
+        if knowledge:
+            messages, citation_map = self._inject_knowledge(messages, knowledge)
+
+        # Step 2: Inject L1 memory blocks
         if memory_blocks:
             messages = self._inject_memory_blocks(messages, memory_blocks)
 
@@ -175,6 +193,7 @@ class ContextAssembler:
                 "memory_blocks_count": len(memory_blocks) if memory_blocks else 0,
                 "user_memories_count": len(user_memories) if user_memories else 0,
                 "degradation_level": degradation_level.value,
+                "citation_map": citation_map,
                 "budget_check": {
                     "within_budget": True,  # After degradation
                     "total_tokens": total_tokens,
@@ -254,6 +273,48 @@ class ContextAssembler:
 
         return messages[:insert_idx] + [memory_message] + messages[insert_idx:]
 
+    def _inject_knowledge(
+        self,
+        messages: list[dict[str, Any]],
+        knowledge: list[dict[str, Any]],
+    ) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
+        if not knowledge:
+            return messages, {}
+
+        lines: list[str] = ["The following reference documents are available:"]
+        citation_map: dict[int, dict[str, Any]] = {}
+        max_content_length = 500
+
+        for idx, chunk in enumerate(knowledge, start=1):
+            content = chunk.get("content", "")
+            metadata = chunk.get("metadata", {})
+
+            content_snippet = content[:max_content_length] + "..." if len(content) > max_content_length else content
+
+            citation_map[idx] = {
+                "chunk_id": str(chunk.get("id", "")),
+                "kb_id": metadata.get("kb_id", ""),
+                "kb_name": metadata.get("kb_name", ""),
+                "document_name": metadata.get("source_file", "unknown"),
+                "score": metadata.get("score", 0.0),
+                "content_snippet": content_snippet[:150],
+            }
+
+            source = metadata.get("source_file", "unknown")
+            lines.append(f'[{idx}] "{content_snippet}" (Source: {source})')
+
+        knowledge_text = "\n".join(lines)
+        knowledge_message = {"role": "system", "content": knowledge_text}
+
+        insert_idx = 0
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                insert_idx = i + 1
+            else:
+                break
+
+        return messages[:insert_idx] + [knowledge_message] + messages[insert_idx:], citation_map
+
     def _apply_degradation(
         self,
         messages: list[dict[str, Any]],
@@ -293,3 +354,47 @@ class ContextAssembler:
         emergency_tokens = self.token_counter.count_messages(emergency)
         logger.warning(f"Level 3 (EMERGENCY) degradation applied: {compressed_tokens} → {emergency_tokens}")
         return emergency, DegradationLevel.EMERGENCY
+
+    def _build_opening_suggestion_context(
+        self,
+        session_meta: SessionMeta,
+        tools: list[dict[str, Any]] | None,
+    ) -> AssembledContext:
+        persona_section = f"\nPersona: {session_meta.agent_persona}" if session_meta.agent_persona else ""
+        system_content = (
+            f"You are {session_meta.agent_name},{persona_section}\n\n"
+            "Generate 3 concise suggested questions that a user might ask to start a conversation with this agent. "
+            'Return ONLY a JSON array of strings, e.g. ["question1", "question2", "question3"].'
+        )
+        messages = [{"role": "system", "content": system_content}]
+        return AssembledContext(
+            messages=messages,
+            tools=[],
+            metadata={"suggestion_mode": "opening"},
+        )
+
+    def _build_followup_suggestion_context(
+        self,
+        messages: list[dict[str, Any]],
+        session_meta: SessionMeta,
+        tools: list[dict[str, Any]] | None,
+    ) -> AssembledContext:
+        history_lines: list[str] = []
+        user_assistant_turns = [m for m in messages if m.get("role") in ("user", "assistant")]
+        for turn in user_assistant_turns[-4:]:
+            role = turn.get("role", "unknown").capitalize()
+            content = turn.get("content", "")
+            history_lines.append(f"{role}: {content}")
+        history_text = "\n".join(history_lines) if history_lines else "(No conversation history yet)"
+        system_content = (
+            f"You are {session_meta.agent_name}.\n\n"
+            f"Recent conversation:\n{history_text}\n\n"
+            "Based on this conversation, generate 3 concise follow-up questions the user might want to ask next. "
+            'Return ONLY a JSON array of strings, e.g. ["question1", "question2", "question3"].'
+        )
+        context_messages = [{"role": "system", "content": system_content}]
+        return AssembledContext(
+            messages=context_messages,
+            tools=[],
+            metadata={"suggestion_mode": "followup"},
+        )

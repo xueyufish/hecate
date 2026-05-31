@@ -122,6 +122,8 @@ class ApiClient {
       model: string;
       messages: { role: string; content: string }[];
       stream?: boolean;
+      kb_ids?: string[];
+      session_id?: string;
     }
   ): AsyncGenerator<string> {
     const token = this.getToken();

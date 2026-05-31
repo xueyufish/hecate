@@ -25,9 +25,63 @@ from hecate.models.agent import (
     AgentReadSchema,
     AgentUpdateSchema,
 )
+from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 
 router = APIRouter()
+
+
+async def validate_knowledge_base_ids(
+    db: AsyncSession,
+    kb_ids: list[str],
+) -> None:
+    """Validate that all KB IDs reference existing, non-deleted knowledge bases.
+
+    Args:
+        db: The async database session.
+        kb_ids: List of knowledge base UUID strings to validate.
+
+    Raises:
+        HTTPException: 400 if any KB ID is invalid or references a deleted KB.
+    """
+    if not kb_ids:
+        return
+
+    kb_uuids = []
+    for kid in kb_ids:
+        try:
+            kb_uuids.append(uuid.UUID(kid))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": {
+                        "code": "INVALID_KB_ID",
+                        "message": f"Invalid knowledge_base_id format: {kid}",
+                        "details": None,
+                    }
+                },
+            ) from None
+
+    stmt = select(KnowledgeBaseModel.id).where(
+        KnowledgeBaseModel.id.in_(kb_uuids),
+        KnowledgeBaseModel.deleted_at.is_(None),
+    )
+    result = await db.execute(stmt)
+    found_ids = {str(row[0]) for row in result.all()}
+
+    invalid_ids = [kid for kid in kb_ids if kid not in found_ids]
+    if invalid_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "code": "INVALID_KB_IDS",
+                    "message": f"Knowledge bases not found: {', '.join(invalid_ids)}",
+                    "details": {"invalid_ids": invalid_ids},
+                }
+            },
+        )
 
 
 async def _check_models_availability(
@@ -78,6 +132,8 @@ async def create_agent(
     Returns:
         dict: The created agent data.
     """
+    await validate_knowledge_base_ids(db, data.knowledge_base_ids)
+
     agent = AgentModel(
         name=data.name,
         persona=data.persona,
@@ -225,6 +281,8 @@ async def update_agent(
         )
 
     update_data = data.model_dump(exclude_unset=True, by_alias=True)
+    if "knowledge_base_ids" in update_data:
+        await validate_knowledge_base_ids(db, update_data["knowledge_base_ids"])
     for field, value in update_data.items():
         if field == "model_config":
             agent.model_config_db = value

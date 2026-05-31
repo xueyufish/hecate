@@ -5,27 +5,39 @@ import { useParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import { dslToReactFlow, reactFlowToDsl } from "@/lib/dsl-bridge";
 import type { GraphDSL } from "@/lib/workflow-types";
 import { NodePalette } from "@/components/workflow/node-palette";
 import { AgentPalette } from "@/components/workflow/agent-palette";
-import { ConfigPanel } from "@/components/workflow/config-panel";
 import { TemplatePicker } from "@/components/workflow/template-picker";
-import { ArrowLeft, Save, CheckCircle, Play, LayoutTemplate } from "lucide-react";
+import { ArrowLeft, Save, CheckCircle, Play, LayoutTemplate, History, X, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// Dynamic import to avoid SSR issues with React Flow
 const CanvasArea = dynamic(
   () => import("@/components/workflow/canvas-area"),
   { ssr: false }
 );
 
+interface NodeResult {
+  node_id: string;
+  node_type: string;
+  status: string;
+  output?: unknown;
+  error_message?: string;
+  duration_ms?: number;
+}
+
 interface TestRunData {
   run_id: string;
   status: string;
-  nodes: { node_id: string; status: string }[];
+  nodes: NodeResult[];
+  total_duration_ms?: number;
+  error?: string;
+  timestamp?: number;
 }
 
 interface WorkflowData {
@@ -34,6 +46,8 @@ interface WorkflowData {
   description: string;
   graph_dsl: GraphDSL;
 }
+
+const MAX_HISTORY = 10;
 
 export default function WorkflowEditorPage() {
   const params = useParams();
@@ -49,15 +63,22 @@ export default function WorkflowEditorPage() {
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [showInputForm, setShowInputForm] = useState(false);
+  const [inputMessages, setInputMessages] = useState('[{"role": "user", "content": "test"}]');
+  const [inputError, setInputError] = useState("");
+  const [selectedNode, setSelectedNode] = useState<NodeResult | null>(null);
+  const [showLogs, setShowLogs] = useState(false);
+  const [runHistory, setRunHistory] = useState<TestRunData[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [running, setRunning] = useState(false);
+
   useEffect(() => {
     api
       .get<WorkflowData>(`/api/workflows/${workflowId}`)
       .then((data) => {
         setWorkflow(data);
         if (data.graph_dsl) {
-          const { nodes: rfNodes, edges: rfEdges } = dslToReactFlow(
-            data.graph_dsl
-          );
+          const { nodes: rfNodes, edges: rfEdges } = dslToReactFlow(data.graph_dsl);
           setNodes(rfNodes);
           setEdges(rfEdges);
         }
@@ -72,9 +93,7 @@ export default function WorkflowEditorPage() {
       saveTimerRef.current = setTimeout(() => {
         if (!workflow) return;
         const dsl = reactFlowToDsl(updatedNodes, updatedEdges, workflow.name);
-        api
-          .put(`/api/workflows/${workflowId}`, { graph_dsl: dsl })
-          .catch(() => {});
+        api.put(`/api/workflows/${workflowId}`, { graph_dsl: dsl }).catch(() => {});
       }, 2000);
     },
     [workflow, workflowId]
@@ -110,12 +129,10 @@ export default function WorkflowEditorPage() {
   async function handleValidate() {
     if (!workflow) return;
     try {
-      const result = await api.post<{
-        valid: boolean;
-        errors: string[];
-      }>(`/api/workflows/${workflowId}/validate`, {
-        graph_dsl: reactFlowToDsl(nodes, edges, workflow.name),
-      });
+      const result = await api.post<{ valid: boolean; errors: string[] }>(
+        `/api/workflows/${workflowId}/validate`,
+        { graph_dsl: reactFlowToDsl(nodes, edges, workflow.name) }
+      );
       if (result.valid) {
         alert("验证通过");
       } else {
@@ -129,25 +146,53 @@ export default function WorkflowEditorPage() {
 
   async function handleTestRun() {
     if (!workflow) return;
+
+    let parsedMessages;
+    try {
+      parsedMessages = JSON.parse(inputMessages);
+      if (!Array.isArray(parsedMessages)) {
+        setInputError("Messages must be a JSON array");
+        return;
+      }
+      setInputError("");
+    } catch {
+      setInputError("Invalid JSON");
+      return;
+    }
+
+    setRunning(true);
+    setSelectedNode(null);
     try {
       const result = await api.post<TestRunData>(
         `/api/workflows/${workflowId}/test-run`,
-        {
-          input_data: { messages: [{ role: "user", content: "test" }] },
-          mock: true,
-        }
+        { input_data: { messages: parsedMessages }, mock: true }
       );
-      setTestResult(result);
+      const withTimestamp = { ...result, timestamp: Date.now() };
+      setTestResult(withTimestamp);
+      setRunHistory((prev) => [withTimestamp, ...prev].slice(0, MAX_HISTORY));
     } catch (err: unknown) {
       const apiErr = err as { error?: { message?: string } };
       alert("测试运行错误: " + (apiErr.error?.message || "未知错误"));
+    } finally {
+      setRunning(false);
     }
   }
 
-  function handleNodeUpdate(nodeId: string, data: Record<string, unknown>) {
-    setNodes((prev: any[]) =>
-      prev.map((n: any) => (n.id === nodeId ? { ...n, data } : n))
-    );
+  function handleNodeClick(nodeId: string) {
+    if (!testResult) return;
+    const nodeResult = testResult.nodes.find((n) => n.node_id === nodeId);
+    if (nodeResult) setSelectedNode(nodeResult);
+  }
+
+  function clearResults() {
+    setTestResult(null);
+    setSelectedNode(null);
+  }
+
+  function loadHistoryEntry(entry: TestRunData) {
+    setTestResult(entry);
+    setSelectedNode(null);
+    setShowHistory(false);
   }
 
   const handleDrop = useCallback(
@@ -163,18 +208,11 @@ export default function WorkflowEditorPage() {
             id: `agent-${agent.id}-${Date.now()}`,
             type: "agent",
             position,
-            data: {
-              label: agent.name,
-              type: "agent",
-              config: {
-                agent_id: agent.id,
-                invocation_mode: "standalone",
-              },
-            },
+            data: { label: agent.name, type: "agent", config: { agent_id: agent.id, invocation_mode: "standalone" } },
           };
           setNodes((prev: any[]) => [...prev, newNode]);
         } catch {
-          // malformed agent data — ignore
+          // malformed agent data
         }
         return;
       }
@@ -187,11 +225,7 @@ export default function WorkflowEditorPage() {
         id: `${type}-${Date.now()}`,
         type,
         position,
-        data: {
-          label: type,
-          type,
-          config: {},
-        },
+        data: { label: type, type, config: {} },
       };
       setNodes((prev: any[]) => [...prev, newNode]);
     },
@@ -206,6 +240,17 @@ export default function WorkflowEditorPage() {
     setShowTemplatePicker(false);
   }
 
+  function getNodeStatusColor(status: string) {
+    if (status === "completed") return "bg-green-500";
+    if (status === "error" || status === "failed") return "bg-red-500";
+    if (status === "running") return "bg-yellow-500";
+    return "bg-gray-400";
+  }
+
+  function truncate(str: string, max: number) {
+    return str.length > max ? str.slice(0, max) + "..." : str;
+  }
+
   if (loading) {
     return <div className="text-muted-foreground">加载中...</div>;
   }
@@ -216,7 +261,6 @@ export default function WorkflowEditorPage() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
-      {/* Toolbar */}
       <div className="flex items-center justify-between border-b px-4 py-2">
         <div className="flex items-center gap-4">
           <Link href="/workflows">
@@ -228,11 +272,7 @@ export default function WorkflowEditorPage() {
           <h1 className="text-lg font-semibold">{workflow.name}</h1>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowTemplatePicker(true)}
-          >
+          <Button variant="outline" size="sm" onClick={() => setShowTemplatePicker(true)}>
             <LayoutTemplate className="mr-1 h-4 w-4" />
             编排模板
           </Button>
@@ -240,9 +280,16 @@ export default function WorkflowEditorPage() {
             <CheckCircle className="mr-1 h-4 w-4" />
             验证
           </Button>
-          <Button variant="outline" size="sm" onClick={handleTestRun}>
+          <Button variant="outline" size="sm" onClick={() => setShowInputForm(!showInputForm)}>
+            输入
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowHistory(!showHistory)}>
+            <History className="mr-1 h-4 w-4" />
+            历史 ({runHistory.length})
+          </Button>
+          <Button size="sm" onClick={handleTestRun} disabled={running}>
             <Play className="mr-1 h-4 w-4" />
-            测试运行
+            {running ? "运行中..." : "测试运行"}
           </Button>
           <Button size="sm" onClick={handleSave} disabled={saving}>
             <Save className="mr-1 h-4 w-4" />
@@ -251,61 +298,204 @@ export default function WorkflowEditorPage() {
         </div>
       </div>
 
-      {/* Canvas + Panels */}
-      <div className="flex flex-1">
+      <div className="flex flex-1 overflow-hidden">
         <div className="flex h-full w-[200px] flex-col border-r bg-muted/30">
           <NodePalette />
           <div className="border-t px-2 py-2">
             <AgentPalette />
           </div>
         </div>
-        <div
-          className="flex-1"
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-          }}
-          onDrop={handleDrop}
-        >
-          <CanvasArea
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={handleNodesChange}
-            onEdgesChange={handleEdgesChange}
-          />
-        </div>
-        <ConfigPanel
-          node={null}
-          onUpdate={handleNodeUpdate}
-          onClose={() => {}}
-        />
-      </div>
 
-      {/* Test Run Result */}
-      {testResult && (
-        <div className="border-t bg-muted/30 p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">
-              测试结果:{" "}
-              {testResult.status === "completed" ? "✅ 完成" : "❌ 失败"}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setTestResult(null)}
-            >
-              关闭
-            </Button>
+        <div className="flex flex-1 flex-col">
+          <div
+            className="flex-1"
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+            onDrop={handleDrop}
+          >
+            <CanvasArea
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={handleNodesChange}
+              onEdgesChange={handleEdgesChange}
+            />
           </div>
-          <div className="mt-1 flex gap-2 text-xs text-muted-foreground">
-            {testResult.nodes?.map((n) => (
-              <span key={n.node_id}>
-                {n.node_id}: {n.status}
-              </span>
-            ))}
-          </div>
+
+          {testResult && (
+            <div className="border-t bg-muted/30 p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium">
+                    测试结果: {testResult.status === "completed" ? "✅ 完成" : "❌ 失败"}
+                  </span>
+                  {testResult.total_duration_ms && (
+                    <span className="text-xs text-muted-foreground">
+                      {testResult.total_duration_ms}ms
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button variant="ghost" size="sm" onClick={() => setShowLogs(!showLogs)}>
+                    {showLogs ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    日志
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={clearResults}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="mt-2 flex flex-wrap gap-2">
+                {testResult.nodes.map((n) => (
+                  <button
+                    key={n.node_id}
+                    onClick={() => handleNodeClick(n.node_id)}
+                    className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
+                      selectedNode?.node_id === n.node_id ? "border-primary bg-primary/10" : "hover:bg-muted"
+                    }`}
+                  >
+                    <span className={`h-2 w-2 rounded-full ${getNodeStatusColor(n.status)}`} />
+                    <span className="font-medium">{n.node_id}</span>
+                    <span className="text-muted-foreground">{n.status}</span>
+                    {n.duration_ms && <span className="text-muted-foreground">({n.duration_ms}ms)</span>}
+                  </button>
+                ))}
+              </div>
+
+              {showLogs && (
+                <div className="mt-2 max-h-32 overflow-y-auto rounded border bg-background p-2 text-xs font-mono">
+                  {testResult.nodes.map((n, i) => (
+                    <div key={n.node_id} className="text-muted-foreground">
+                      [{i + 1}] {n.node_id} — {n.status}
+                      {n.duration_ms && ` (${n.duration_ms}ms)`}
+                      {n.error_message && ` — ERROR: ${n.error_message}`}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
-      )}
+
+        <div className="flex h-full w-[280px] flex-col border-l bg-muted/30">
+          {showInputForm && (
+            <div className="border-b p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium">输入数据</Label>
+                <Button variant="ghost" size="sm" onClick={() => setShowInputForm(false)}>
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Messages (JSON array)</Label>
+                <Textarea
+                  value={inputMessages}
+                  onChange={(e) => { setInputMessages(e.target.value); setInputError(""); }}
+                  rows={4}
+                  className="font-mono text-xs"
+                />
+                {inputError && <p className="text-xs text-red-500">{inputError}</p>}
+              </div>
+            </div>
+          )}
+
+          {selectedNode && (
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium">节点详情</Label>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedNode(null)}>
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+
+              <div className="space-y-2 text-xs">
+                <div>
+                  <span className="text-muted-foreground">Node ID:</span>{" "}
+                  <span className="font-medium">{selectedNode.node_id}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Type:</span>{" "}
+                  <span className="font-medium">{selectedNode.node_type}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Status:</span>{" "}
+                  <span className={`inline-flex items-center gap-1`}>
+                    <span className={`h-2 w-2 rounded-full ${getNodeStatusColor(selectedNode.status)}`} />
+                    {selectedNode.status}
+                  </span>
+                </div>
+                {selectedNode.duration_ms && (
+                  <div>
+                    <span className="text-muted-foreground">Duration:</span>{" "}
+                    <span className="font-medium">{selectedNode.duration_ms}ms</span>
+                  </div>
+                )}
+                {selectedNode.output !== undefined && selectedNode.output !== null && (
+                  <div>
+                    <span className="text-muted-foreground">Output:</span>
+                    <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap rounded border bg-background p-2 text-xs">
+                      {truncate(
+                        typeof selectedNode.output === "string"
+                          ? selectedNode.output
+                          : JSON.stringify(selectedNode.output, null, 2),
+                        1000
+                      )}
+                    </pre>
+                  </div>
+                )}
+                {selectedNode.error_message && (
+                  <div>
+                    <span className="text-muted-foreground">Error:</span>
+                    <p className="mt-1 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-600">
+                      {selectedNode.error_message}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {!showInputForm && !selectedNode && (
+            <div className="flex flex-1 items-center justify-center p-3">
+              <p className="text-xs text-muted-foreground text-center">
+                点击&quot;输入&quot;配置测试数据，<br />或点击节点查看执行结果
+              </p>
+            </div>
+          )}
+        </div>
+
+        {showHistory && (
+          <div className="absolute right-0 top-12 z-50 w-64 rounded-md border bg-background p-2 shadow-md">
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-xs font-medium">运行历史</Label>
+              <Button variant="ghost" size="sm" onClick={() => setShowHistory(false)}>
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+            {runHistory.length === 0 ? (
+              <p className="text-xs text-muted-foreground">暂无历史记录</p>
+            ) : (
+              <div className="max-h-60 overflow-y-auto space-y-1">
+                {runHistory.map((entry, i) => (
+                  <button
+                    key={entry.run_id + i}
+                    onClick={() => loadHistoryEntry(entry)}
+                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-xs hover:bg-muted"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`h-2 w-2 rounded-full ${getNodeStatusColor(entry.status)}`} />
+                      <span>{entry.status === "completed" ? "完成" : "失败"}</span>
+                    </div>
+                    <span className="text-muted-foreground">
+                      {entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : ""}
+                      {entry.total_duration_ms ? ` · ${entry.total_duration_ms}ms` : ""}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {showTemplatePicker && (
         <TemplatePicker

@@ -55,6 +55,8 @@ class AgentModel(BaseModel):
     skills: Mapped[list] = mapped_column(JSON, default=list)
     knowledge_base_ids: Mapped[list] = mapped_column(JSON, default=list)
     risk_level: Mapped[str] = mapped_column(String(20), default="LOW")
+    opening_remarks: Mapped[str | None] = mapped_column(nullable=True)
+    enable_suggestions: Mapped[bool] = mapped_column(default=True)
 
     __table_args__ = (Index("idx_agents_workspace", "workspace_id", postgresql_where=BaseModel.deleted_at.is_(None)),)
 
@@ -77,6 +79,8 @@ class AgentCreateSchema(PydanticBase):
     skills: list = Field(default_factory=list)
     knowledge_base_ids: list = Field(default_factory=list)
     risk_level: str = Field(default="LOW")
+    opening_remarks: str | None = None
+    enable_suggestions: bool = Field(default=True)
 
 
 class AgentUpdateSchema(PydanticBase):
@@ -92,6 +96,8 @@ class AgentUpdateSchema(PydanticBase):
     skills: list | None = None
     knowledge_base_ids: list | None = None
     risk_level: str | None = None
+    opening_remarks: str | None = None
+    enable_suggestions: bool | None = None
 
 
 class AgentReadSchema(PydanticBase):
@@ -110,6 +116,8 @@ class AgentReadSchema(PydanticBase):
     skills: list
     knowledge_base_ids: list
     risk_level: str
+    opening_remarks: str | None
+    enable_suggestions: bool
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None

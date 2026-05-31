@@ -20,7 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.database import get_db
 from hecate.core.deps import get_current_user_id
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
+from hecate.services.conversation import ConversationService
 from hecate.services.llm.service import llm_service
+from hecate.services.session_lock import session_lock_manager
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +37,8 @@ class ChatMessage(BaseModel):
     name: str | None = None
     tool_calls: list | None = None
     tool_call_id: str | None = None
+    annotations: list[dict[str, Any]] | None = None
+    suggested_questions: list[str] | None = None
 
 
 class ChatCompletionRequest(BaseModel):
@@ -47,6 +51,10 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int | None = Field(None, ge=1)
     tools: list | None = None
     tool_choice: str | dict | None = None
+    kb_ids: list[str] | None = None
+    session_id: str | None = Field(None, description="Session ID for sequential processing")
+    generate_opening: bool = Field(default=False, description="Generate opening remarks with starter questions")
+    generate_suggestions: bool = Field(default=False, description="Generate follow-up question suggestions")
 
 
 class ChatCompletionChoice(BaseModel):
@@ -175,8 +183,142 @@ async def create_chat_completion(
     Returns:
         StreamingResponse if stream=True, otherwise ChatCompletionResponse dict.
     """
+    from fastapi import HTTPException
+
+    session_id = request.session_id
+
+    if session_id:
+        try:
+            async with session_lock_manager.acquire(session_id) as lock_info:
+                result = await _process_chat(request, db, user_id)
+                if isinstance(result, StreamingResponse):
+                    result.headers["X-Queue-Position"] = str(lock_info["queue_position"])
+                    result.headers["X-Queue-Wait-Ms"] = str(lock_info["wait_ms"])
+                return result
+        except TimeoutError:
+            raise HTTPException(
+                status_code=408,
+                detail={
+                    "error": {
+                        "code": "QUEUE_TIMEOUT",
+                        "message": "Message timed out waiting in queue. Please try again.",
+                        "details": None,
+                    }
+                },
+            ) from None
+    else:
+        return await _process_chat(request, db, user_id)
+
+
+async def _process_chat(
+    request: ChatCompletionRequest,
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> dict | StreamingResponse:
+    """Process a chat completion request (core logic without locking)."""
+    from fastapi import HTTPException
+
     msg_dicts = _messages_to_dicts(request.messages)
     provider_cfg = await _get_provider_config(db, request.model)
+
+    # Parse kb_ids if provided
+    parsed_kb_ids: list[uuid.UUID] | None = None
+    if request.kb_ids:
+        try:
+            parsed_kb_ids = [uuid.UUID(kb_id) for kb_id in request.kb_ids]
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"Invalid kb_id format: {e}") from e
+
+    use_conversation_service = parsed_kb_ids or request.generate_opening or request.generate_suggestions
+    if use_conversation_service:
+        conversation_service = ConversationService()
+
+        if request.stream:
+
+            async def _stream_with_citations():
+                async for event in conversation_service.chat(
+                    messages=msg_dicts,
+                    model=request.model,
+                    tools=request.tools,
+                    stream=True,
+                    db=db,
+                    kb_ids=parsed_kb_ids,
+                    generate_opening=request.generate_opening,
+                    generate_suggestions=request.generate_suggestions,
+                ):
+                    if event.get("type") == "content":
+                        chunk = ChatCompletionChunk(
+                            model=request.model,
+                            choices=[
+                                ChatCompletionChunkChoice(
+                                    delta=ChatCompletionChunkDelta(content=event["content"]),
+                                    finish_reason=None,
+                                )
+                            ],
+                        )
+                        yield f"data: {json.dumps(chunk.model_dump())}\n\n"
+                    elif event.get("type") == "citations":
+                        yield f"data: {json.dumps({'type': 'citations', 'citations': event['citations']})}\n\n"
+                    elif event.get("type") == "suggestions":
+                        yield f"data: {json.dumps({'type': 'suggestions', 'questions': event['questions']})}\n\n"
+                    elif event.get("type") == "done":
+                        final_chunk = ChatCompletionChunk(
+                            model=request.model,
+                            choices=[
+                                ChatCompletionChunkChoice(
+                                    delta=ChatCompletionChunkDelta(),
+                                    finish_reason="stop",
+                                )
+                            ],
+                        )
+                        yield f"data: {json.dumps(final_chunk.model_dump())}\n\n"
+                        yield "data: [DONE]\n\n"
+
+            return StreamingResponse(
+                _stream_with_citations(),
+                media_type="text/event-stream",
+            )
+
+        result = await conversation_service.chat(
+            messages=msg_dicts,
+            model=request.model,
+            tools=request.tools,
+            stream=False,
+            db=db,
+            kb_ids=parsed_kb_ids,
+            generate_opening=request.generate_opening,
+            generate_suggestions=request.generate_suggestions,
+        )
+        assert isinstance(result, dict)
+        # Build response with annotations
+        annotations = None
+        if result.get("citations"):
+            from hecate.services.rag.types import Citation
+
+            citations = [Citation(**c) for c in result["citations"]]
+            annotations = [c.to_annotation() for c in citations]
+
+        suggested_questions = result.get("suggested_questions")
+
+        return ChatCompletionResponse(
+            model=result.get("model", request.model),
+            choices=[
+                ChatCompletionChoice(
+                    message=ChatMessage(
+                        role="assistant",
+                        content=result.get("content", ""),
+                        annotations=annotations,
+                        suggested_questions=suggested_questions,
+                    ),
+                    finish_reason=result.get("finish_reason", "stop"),
+                )
+            ],
+            usage=ChatCompletionUsage(
+                prompt_tokens=result.get("usage", {}).get("prompt_tokens", 0),
+                completion_tokens=result.get("usage", {}).get("completion_tokens", 0),
+                total_tokens=result.get("usage", {}).get("total_tokens", 0),
+            ),
+        ).model_dump()
 
     if request.stream:
         return StreamingResponse(

@@ -11,6 +11,7 @@ Wire the existing three-layer memory services (L1 working memory, L2 conversatio
 - ConversationService calls `WorkingMemoryService.list_blocks(agent_id)` before each `assemble()` to load all memory blocks for that Agent
 - Pass the block list to `ContextAssembler.assemble(memory_blocks=...)`
 - Agents can update memory blocks via the `update_memory_block(label, content)` tool
+- The frontend SHALL display active memory block labels as badges in the chat page header
 
 ### REQ-2: L2 Conversation Compression
 

@@ -12,13 +12,16 @@ Handles the full conversation flow:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.memory import MemoryBlockReadSchema, MemoryCreateSchema, MemoryReadSchema
 from hecate.services.context.assembler import ContextAssembler
 from hecate.services.context.budget import BudgetManager
@@ -35,6 +38,9 @@ from hecate.services.llm.tool_calling import (
 from hecate.services.memory.compression import CompressionPipeline
 from hecate.services.memory.user_memory import UserMemoryService
 from hecate.services.memory.working_memory import WorkingMemoryService
+from hecate.services.rag.service import knowledge_base_service
+from hecate.services.rag.types import Citation
+from hecate.services.suggestions.service import SuggestionService
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +76,7 @@ class ConversationService:
         self.token_counter = token_counter or TokenCounter()
         self.assembler = ContextAssembler(self.budget_manager, self.token_counter)
         self.compression_pipeline = CompressionPipeline(self.token_counter)
+        self.suggestion_service = SuggestionService(llm_service)
         self._evidence_tracker: EvidenceTracker | None = None
         self._turn_index: int = 0
 
@@ -93,6 +100,11 @@ class ConversationService:
         agent_id: str | None = None,
         user_id: str | None = None,
         compression_threshold: int = 4000,
+        kb_ids: list[uuid.UUID] | None = None,
+        generate_opening: bool = False,
+        generate_suggestions: bool = False,
+        agent_persona: str | None = None,
+        enable_suggestions: bool = True,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute a conversation turn with context engineering.
 
@@ -107,6 +119,10 @@ class ConversationService:
             agent_id: Optional agent ID for L1 memory block loading.
             user_id: Optional user ID for L3 memory retrieval.
             compression_threshold: Token count that triggers L2 compression.
+            generate_opening: Whether to generate opening remarks with suggestions.
+            generate_suggestions: Whether to generate follow-up suggestions.
+            agent_persona: Agent persona description for suggestion context.
+            enable_suggestions: Whether the agent has suggestions enabled.
 
         Returns:
             Response dict or streaming generator.
@@ -138,6 +154,11 @@ class ConversationService:
                 top_k=5,
             )
 
+        # Knowledge retrieval for RAG citations
+        knowledge_chunks: list[dict[str, Any]] = []
+        if db and kb_ids:
+            knowledge_chunks = await self._retrieve_knowledge(db, kb_ids, messages)
+
         # Register memory tools conditionally
         if tools is not None:
             memory_tools = self._build_memory_tools(db, agent_id, user_id)
@@ -156,6 +177,7 @@ class ConversationService:
             messages=messages,
             tools=tools,
             session_meta=session_meta,
+            knowledge=knowledge_chunks,
             memory_blocks=memory_blocks,
             user_memories=user_memories,
         )
@@ -164,6 +186,25 @@ class ConversationService:
         strategy = get_strategy(model)
         shaped_context = strategy.shape(assembled)
         system_param = strategy.get_system_param(assembled)
+
+        # Build citations from citation_map
+        citations: list[Citation] = []
+        citation_map = assembled.metadata.get("citation_map", {})
+        for pos, meta in citation_map.items():
+            try:
+                citations.append(
+                    Citation(
+                        position=pos,
+                        kb_id=uuid.UUID(meta["kb_id"]) if meta.get("kb_id") else uuid.UUID(int=0),
+                        kb_name=meta.get("kb_name", ""),
+                        document_name=meta.get("document_name", "unknown"),
+                        chunk_id=meta.get("chunk_id", ""),
+                        score=meta.get("score", 0.0),
+                        content_snippet=meta.get("content_snippet", ""),
+                    )
+                )
+            except (ValueError, KeyError):
+                logger.warning(f"Failed to build citation for position {pos}")
 
         # Increment turn index for next call
         self._turn_index += 1
@@ -179,6 +220,11 @@ class ConversationService:
                 db=db,
                 user_id=user_id,
                 original_messages=messages,
+                citations=citations,
+                generate_opening=generate_opening,
+                generate_suggestions=generate_suggestions,
+                agent_persona=agent_persona,
+                enable_suggestions=enable_suggestions,
             )
 
         return await self._complete_chat(
@@ -191,6 +237,11 @@ class ConversationService:
             db=db,
             user_id=user_id,
             original_messages=messages,
+            citations=citations,
+            generate_opening=generate_opening,
+            generate_suggestions=generate_suggestions,
+            agent_persona=agent_persona,
+            enable_suggestions=enable_suggestions,
         )
 
     async def _complete_chat(
@@ -204,8 +255,28 @@ class ConversationService:
         db: AsyncSession | None = None,
         user_id: str | None = None,
         original_messages: list[dict[str, Any]] | None = None,
+        citations: list[Citation] | None = None,
+        generate_opening: bool = False,
+        generate_suggestions: bool = False,
+        agent_persona: str | None = None,
+        enable_suggestions: bool = True,
     ) -> dict[str, Any]:
         """Execute a non-streaming conversation turn with context engineering."""
+        if generate_opening and self._turn_index <= 1:
+            opening = await self._generate_opening_remarks(agent_persona)
+            return {
+                "content": opening["content"],
+                "model": model,
+                "usage": {},
+                "finish_reason": "stop",
+                "suggested_questions": opening["suggested_questions"],
+                "context_metadata": {
+                    "session_id": session_id,
+                    "turn_index": self._turn_index - 1,
+                    "iteration": 0,
+                },
+            }
+
         formatted_tools = format_tools_for_llm(tools) if tools else None
         current_messages = list(messages)
 
@@ -217,10 +288,9 @@ class ConversationService:
             )
 
             if not response.tool_calls:
-                # L3 fact extraction (non-blocking)
                 await self._extract_facts_async(db, user_id, original_messages or messages)
 
-                return {
+                result = {
                     "content": response.content,
                     "model": response.model,
                     "usage": response.usage,
@@ -231,6 +301,18 @@ class ConversationService:
                         "iteration": iteration,
                     },
                 }
+                if citations:
+                    result["citations"] = [c.model_dump() for c in citations]
+
+                if generate_suggestions and enable_suggestions and response.content:
+                    suggestions = await self._generate_followup_suggestions(
+                        agent_persona,
+                        original_messages or messages,
+                        response.content,
+                    )
+                    result["suggested_questions"] = suggestions
+
+                return result
 
             # Execute tools and capture evidence
             tool_calls = parse_tool_calls(response.tool_calls)
@@ -265,8 +347,28 @@ class ConversationService:
         db: AsyncSession | None = None,
         user_id: str | None = None,
         original_messages: list[dict[str, Any]] | None = None,
+        citations: list[Citation] | None = None,
+        generate_opening: bool = False,
+        generate_suggestions: bool = False,
+        agent_persona: str | None = None,
+        enable_suggestions: bool = True,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Execute a streaming conversation turn with context engineering."""
+        if generate_opening and self._turn_index <= 1:
+            opening = await self._generate_opening_remarks(agent_persona)
+            yield {"type": "content", "content": opening["content"]}
+            yield {"type": "suggestions", "questions": opening["suggested_questions"]}
+            yield {
+                "type": "done",
+                "finish_reason": "stop",
+                "context_metadata": {
+                    "session_id": session_id,
+                    "turn_index": self._turn_index - 1,
+                    "iteration": 0,
+                },
+            }
+            return
+
         formatted_tools = format_tools_for_llm(tools) if tools else None
         current_messages = list(messages)
 
@@ -287,8 +389,23 @@ class ConversationService:
                     tool_calls_buffer.extend(chunk["tool_calls"])
 
                 if chunk.get("finish_reason") == "stop":
-                    # L3 fact extraction (non-blocking)
                     await self._extract_facts_async(db, user_id, original_messages or messages)
+
+                    if citations:
+                        yield {
+                            "type": "citations",
+                            "citations": [c.model_dump() for c in citations],
+                        }
+
+                    if generate_suggestions and enable_suggestions:
+                        full_content = "".join(content_buffer)
+                        if full_content:
+                            suggestions = await self._generate_followup_suggestions(
+                                agent_persona,
+                                original_messages or messages,
+                                full_content,
+                            )
+                            yield {"type": "suggestions", "questions": suggestions}
 
                     yield {
                         "type": "done",
@@ -313,6 +430,60 @@ class ConversationService:
                 yield {"type": "tool_results", "results": tool_results}
             else:
                 return
+
+    async def _generate_opening_remarks(
+        self,
+        agent_persona: str | None,
+    ) -> dict[str, Any]:
+        """Generate opening greeting and suggested questions.
+
+        Args:
+            agent_persona: Agent persona description for context.
+
+        Returns:
+            Dict with 'content' (greeting text) and 'suggested_questions' list.
+        """
+        result = await self.suggestion_service.generate_opening(
+            agent_persona=agent_persona,
+            agent_capabilities=[],
+        )
+        greeting = agent_persona or "Hello! How can I help you today?"
+        return {
+            "content": greeting,
+            "suggested_questions": result.questions,
+        }
+
+    async def _generate_followup_suggestions(
+        self,
+        agent_persona: str | None,
+        messages: list[dict[str, Any]],
+        current_response: str,
+    ) -> list[str]:
+        """Generate follow-up question suggestions after a response.
+
+        Args:
+            agent_persona: Agent persona description for context.
+            messages: Full conversation message history.
+            current_response: The agent's latest response content.
+
+        Returns:
+            List of suggested question strings.
+        """
+        recent = messages[-4:] if len(messages) > 4 else messages
+        history_parts: list[str] = []
+        for msg in recent:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if content:
+                history_parts.append(f"{role}: {content}")
+        history_str = "\n".join(history_parts)
+
+        result = await self.suggestion_service.generate_suggestions(
+            agent_persona=agent_persona,
+            conversation_history=history_str,
+            current_response=current_response,
+        )
+        return result.questions
 
     async def _extract_facts_async(
         self,
@@ -418,6 +589,68 @@ class ConversationService:
             )
 
         return memory_tools
+
+    async def _retrieve_knowledge(
+        self,
+        db: AsyncSession,
+        kb_ids: list[uuid.UUID],
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Retrieve knowledge chunks from specified knowledge bases in parallel.
+
+        Args:
+            db: Database session for KB model lookup.
+            kb_ids: UUIDs of knowledge bases to search.
+            messages: Conversation messages to extract query from.
+
+        Returns:
+            List of knowledge chunk dicts sorted by score, max 5.
+        """
+        query_text = messages[-1].get("content", "") if messages else ""
+        if not query_text:
+            return []
+
+        async def _search_one_kb(kb_id: uuid.UUID) -> list[dict[str, Any]]:
+            """Search a single KB and return chunk dicts. Returns [] on failure."""
+            try:
+                result = await db.execute(
+                    select(KnowledgeBaseModel).where(
+                        KnowledgeBaseModel.id == kb_id,
+                        KnowledgeBaseModel.deleted_at.is_(None),
+                    )
+                )
+                kb = result.scalar_one_or_none()
+                if kb is None:
+                    logger.warning(f"Knowledge base {kb_id} not found, skipping")
+                    return []
+
+                search_results = await knowledge_base_service.search(
+                    collection_name=kb.qdrant_collection,
+                    query=query_text,
+                    limit=10,
+                    mode="hybrid",
+                )
+                return [
+                    {
+                        "id": r.id,
+                        "content": r.content,
+                        "metadata": {
+                            **r.metadata,
+                            "score": r.score,
+                            "kb_id": str(kb_id),
+                            "kb_name": kb.name,
+                        },
+                    }
+                    for r in search_results
+                ]
+            except Exception as e:
+                logger.error(f"Knowledge retrieval failed for kb {kb_id}: {e}")
+                return []
+
+        results = await asyncio.gather(*[_search_one_kb(kb_id) for kb_id in kb_ids])
+        all_chunks = [chunk for sublist in results for chunk in sublist]
+        all_chunks.sort(key=lambda x: x["metadata"].get("score", 0), reverse=True)
+        return all_chunks[:5]
 
     async def _execute_tools_with_evidence(
         self,
