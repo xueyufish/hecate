@@ -28,6 +28,7 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "jinja2>=3.1.0",
     "email-validator>=2.0.0",
+    "beautifulsoup4>=4.12.0",
 ]
 
 [project.optional-dependencies]
@@ -42,7 +43,6 @@ rag = [
     "docling>=2.0",
     "FlagEmbedding>=1.2",
     "minio>=7.2",
-    "beautifulsoup4>=4.12.0",
 ]
 security = [
     "llm-guard>=0.3.0",

@@ -146,6 +146,7 @@ We may converse in Chinese, but everything committed to the repository is Englis
 - **Do** run `ruff check src/hecate/ tests/ && ruff format --check src/ tests/ && python -m pytest tests/ -q` before committing.
 - **Do** ensure **0 errors** locally before pushing to GitHub. If any check fails, fix it first — do not skip or ignore.
 - **Do** use `conftest.py`'s `db_session` fixture in all test files.
+- **Do** add new Python packages to `pyproject.toml` dependencies immediately when installing locally (`uv pip install <pkg>`). Never use a package in code without declaring it in `pyproject.toml`.
 - **Don't** renumber feature IDs — use letter suffixes.
 - **Don't** commit PDF files or large binary assets.
 - **Don't** add comments to code unless the logic is non-obvious.
