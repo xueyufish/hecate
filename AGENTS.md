@@ -150,3 +150,4 @@ We may converse in Chinese, but everything committed to the repository is Englis
 - **Don't** add comments to code unless the logic is non-obvious.
 - **Don't** use `as any`, `@ts-ignore` or equivalent type suppression.
 - **Don't** import from `engine/` in `api/` — route through `services/` + `EnginePort`.
+- **Don't** use `git commit --no-verify` to skip pre-commit hooks. If hooks fail, fix the underlying issue before committing.
