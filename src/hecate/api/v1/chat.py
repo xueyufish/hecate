@@ -289,8 +289,11 @@ async def _process_chat(
             generate_opening=request.generate_opening,
             generate_suggestions=request.generate_suggestions,
         )
-        assert isinstance(result, dict)
-        # Build response with annotations
+
+        if not isinstance(result, dict):
+            msg = f"Expected dict result for non-streaming chat, got {type(result)}"
+            raise TypeError(msg)
+
         annotations = None
         if result.get("citations"):
             from hecate.services.rag.types import Citation
