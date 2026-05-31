@@ -330,5 +330,76 @@ class QdrantIndexer:
         except Exception:
             return False
 
+    async def scroll(
+        self,
+        collection_name: str,
+        offset: str | None = None,
+        limit: int = 20,
+    ) -> tuple[list[SearchResult], str | None]:
+        """Scroll through collection points with cursor-based pagination.
+
+        Args:
+            collection_name: Name of the collection.
+            offset: Cursor offset from previous scroll (None for first page).
+            limit: Number of points to return.
+
+        Returns:
+            Tuple of (list of SearchResult, next_offset or None if no more).
+        """
+        client = self._get_client()
+
+        if client == "mock":
+            results = [
+                SearchResult(
+                    id=f"mock_chunk_{i}",
+                    score=1.0,
+                    payload={"text": f"Mock chunk content {i}", "metadata": {"source_file": f"doc_{i}.txt"}},
+                )
+                for i in range(min(limit, 3))
+            ]
+            return results, None
+
+        try:
+            points, next_offset = client.scroll(
+                collection_name=collection_name,
+                limit=limit,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            results = [
+                SearchResult(
+                    id=str(p.id),
+                    score=1.0,
+                    payload=p.payload or {},
+                )
+                for p in points
+            ]
+            return results, next_offset
+        except Exception as e:
+            logger.error(f"Scroll failed: {e}")
+            return [], None
+
+    async def count(self, collection_name: str) -> int:
+        """Get total point count in a collection.
+
+        Args:
+            collection_name: Name of the collection.
+
+        Returns:
+            int: Total number of points.
+        """
+        client = self._get_client()
+
+        if client == "mock":
+            return 42
+
+        try:
+            result = client.count(collection_name=collection_name)
+            return result.count
+        except Exception as e:
+            logger.error(f"Count failed: {e}")
+            return 0
+
 
 qdrant_indexer = QdrantIndexer()

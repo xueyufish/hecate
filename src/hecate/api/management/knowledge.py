@@ -10,9 +10,11 @@ Provides operations for knowledge bases:
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel as PydanticBase
+from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +25,7 @@ from hecate.models.knowledge import (
     KnowledgeBaseModel,
     KnowledgeBaseReadSchema,
 )
+from hecate.services.rag.service import knowledge_base_service
 
 router = APIRouter()
 
@@ -188,3 +191,134 @@ async def list_documents(
         "items": [DocumentReadSchema.model_validate(d).model_dump() for d in docs],
         "total": total,
     }
+
+
+async def _get_kb_or_404(kb_id: uuid.UUID, db: AsyncSession) -> KnowledgeBaseModel:
+    """Look up a knowledge base by ID or raise 404."""
+    result = await db.execute(
+        select(KnowledgeBaseModel).where(
+            KnowledgeBaseModel.id == kb_id,
+            KnowledgeBaseModel.deleted_at.is_(None),
+        )
+    )
+    kb = result.scalar_one_or_none()
+    if kb is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "Knowledge base not found", "details": None}},
+        )
+    return kb
+
+
+class KBSearchRequest(PydanticBase):
+    query: str = Field(..., min_length=1)
+    mode: str = "hybrid"
+    limit: int = 10
+
+
+class KBCompareRequest(PydanticBase):
+    query: str = Field(..., min_length=1)
+    limit: int = 5
+
+
+@router.post("/knowledge-bases/{kb_id}/search")
+async def search_knowledge_base(
+    kb_id: uuid.UUID,
+    data: KBSearchRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict[str, Any]:
+    """Search a knowledge base for hit testing.
+
+    Args:
+        kb_id: The UUID of the knowledge base.
+        data: Search request with query, mode, and limit.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: Search results with score breakdown.
+    """
+    kb = await _get_kb_or_404(kb_id, db)
+    mode = data.mode if data.mode in ("hybrid", "dense", "sparse") else "hybrid"
+
+    results = await knowledge_base_service.search_with_score_breakdown(
+        collection_name=kb.qdrant_collection,
+        query=data.query,
+        limit=data.limit,
+        mode=mode,
+    )
+
+    return {
+        "query": data.query,
+        "mode": mode,
+        "total": len(results),
+        "results": [
+            {
+                "id": r.id,
+                "score": r.score,
+                "content": r.content,
+                "metadata": r.metadata,
+                "dense_score": r.dense_score,
+                "sparse_score": r.sparse_score,
+            }
+            for r in results
+        ],
+    }
+
+
+@router.get("/knowledge-bases/{kb_id}/chunks")
+async def list_knowledge_base_chunks(
+    kb_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> dict:
+    """List stored chunks in a knowledge base.
+
+    Args:
+        kb_id: The UUID of the knowledge base.
+        db: The async database session.
+        api_key: The validated API key.
+        page: Page number (1-indexed).
+        page_size: Number of items per page.
+
+    Returns:
+        dict: ``{"items": [...], "total": int}`` with chunk list and total count.
+    """
+    kb = await _get_kb_or_404(kb_id, db)
+    return await knowledge_base_service.list_chunks(
+        collection_name=kb.qdrant_collection,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/knowledge-bases/{kb_id}/compare")
+async def compare_search_modes(
+    kb_id: uuid.UUID,
+    data: KBCompareRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict[str, Any]:
+    """Compare search modes for a query.
+
+    Runs the same query across dense, sparse, and hybrid modes
+    and returns side-by-side results.
+
+    Args:
+        kb_id: The UUID of the knowledge base.
+        data: Compare request with query and limit.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: Results per mode (dense, sparse, hybrid).
+    """
+    kb = await _get_kb_or_404(kb_id, db)
+    return await knowledge_base_service.compare_modes(
+        collection_name=kb.qdrant_collection,
+        query=data.query,
+        limit=data.limit,
+    )

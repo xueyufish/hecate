@@ -112,3 +112,46 @@ def test_hybrid_search_result_default_sparse_score() -> None:
         metadata={},
     )
     assert result.sparse_score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_populates_score_breakdown() -> None:
+    """Test hybrid search populates both dense_score and sparse_score."""
+    searcher = HybridSearcher()
+    results = await searcher.search(
+        collection_name="test_collection",
+        query="test query",
+        limit=5,
+        mode="hybrid",
+    )
+    for r in results:
+        assert hasattr(r, "dense_score")
+        assert hasattr(r, "sparse_score")
+        assert r.dense_score >= 0.0
+        assert r.sparse_score >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_dense_search_populates_dense_score() -> None:
+    """Test dense search populates dense_score on results."""
+    searcher = HybridSearcher()
+    results = await searcher.search(
+        collection_name="test_collection",
+        query="test query",
+        limit=5,
+        mode="dense",
+    )
+    for r in results:
+        assert r.dense_score > 0
+        assert r.sparse_score == 0.0
+
+
+def test_hybrid_search_result_dense_score_default() -> None:
+    """Test HybridSearchResult default dense_score is 0.0."""
+    result = HybridSearchResult(
+        id="test_id",
+        score=0.95,
+        content="test content",
+        metadata={},
+    )
+    assert result.dense_score == 0.0

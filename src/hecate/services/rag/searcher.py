@@ -6,6 +6,7 @@ BM25-style sparse retrieval for improved relevance.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -26,6 +27,7 @@ class HybridSearchResult:
     score: float
     content: str
     metadata: dict[str, Any]
+    dense_score: float = 0.0
     sparse_score: float = 0.0
 
 
@@ -83,7 +85,11 @@ class HybridSearcher:
         query_embedding: Any,
         limit: int,
     ) -> list[HybridSearchResult]:
-        """Perform hybrid search with fallback to dense-only."""
+        """Perform hybrid search with fallback to dense-only.
+
+        Runs dense and sparse searches in parallel alongside the hybrid
+        search to populate per-mode score breakdown on each result.
+        """
         if not query_embedding.sparse:
             logger.warning("No sparse vector available. Falling back to dense-only search.")
             return await self._search_dense(collection_name, query_embedding, limit)
@@ -93,12 +99,27 @@ class HybridSearcher:
             logger.warning(f"Collection {collection_name} has no sparse vectors. Falling back to dense-only.")
             return await self._search_dense(collection_name, query_embedding, limit)
 
-        results = await qdrant_indexer.search_hybrid(
-            collection_name=collection_name,
-            query_dense=query_embedding.dense,
-            query_sparse=query_embedding.sparse,
-            limit=limit,
+        hybrid_results, dense_results, sparse_results = await asyncio.gather(
+            qdrant_indexer.search_hybrid(
+                collection_name=collection_name,
+                query_dense=query_embedding.dense,
+                query_sparse=query_embedding.sparse,
+                limit=limit,
+            ),
+            qdrant_indexer.search(
+                collection_name=collection_name,
+                query_vector=query_embedding.dense,
+                limit=limit,
+            ),
+            qdrant_indexer.search_sparse(
+                collection_name=collection_name,
+                query_sparse=query_embedding.sparse,
+                limit=limit,
+            ),
         )
+
+        dense_scores = {r.id: r.score for r in dense_results}
+        sparse_scores = {r.id: r.score for r in sparse_results}
 
         return [
             HybridSearchResult(
@@ -106,9 +127,10 @@ class HybridSearcher:
                 score=r.score,
                 content=r.payload.get("text", ""),
                 metadata=r.payload.get("metadata", {}),
-                sparse_score=0.0,
+                dense_score=dense_scores.get(r.id, 0.0),
+                sparse_score=sparse_scores.get(r.id, 0.0),
             )
-            for r in results
+            for r in hybrid_results
         ]
 
     async def _search_dense(
@@ -130,6 +152,7 @@ class HybridSearcher:
                 score=r.score,
                 content=r.payload.get("text", ""),
                 metadata=r.payload.get("metadata", {}),
+                dense_score=r.score,
                 sparse_score=0.0,
             )
             for r in results

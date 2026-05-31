@@ -7,6 +7,7 @@ search (dense + sparse vectors).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -208,6 +209,134 @@ class KnowledgeBaseService:
         except Exception as e:
             logger.error(f"Re-indexing failed: {e}")
             return {"updated_count": 0, "status": "error", "error": str(e)}
+
+    async def search_with_score_breakdown(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 10,
+        mode: SearchMode = "hybrid",
+    ) -> list[HybridSearchResult]:
+        """Search with per-mode score breakdown for hit testing.
+
+        Same as ``search()`` but ensures ``dense_score`` and ``sparse_score``
+        are populated on each result for transparency.
+
+        Args:
+            collection_name: Qdrant collection name.
+            query: The search query.
+            limit: Maximum number of results.
+            mode: Search mode — "hybrid" (default), "dense", or "sparse".
+
+        Returns:
+            List of HybridSearchResult with score breakdown.
+        """
+        return await hybrid_searcher.search(
+            collection_name=collection_name,
+            query=query,
+            limit=limit,
+            mode=mode,
+        )
+
+    async def list_chunks(
+        self,
+        collection_name: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> dict[str, Any]:
+        """List stored chunks in a collection with pagination.
+
+        Args:
+            collection_name: Qdrant collection name.
+            page: Page number (1-indexed).
+            page_size: Number of items per page.
+
+        Returns:
+            Dict with ``items`` (chunk list) and ``total`` count.
+        """
+        total = await qdrant_indexer.count(collection_name)
+        if total == 0:
+            return {"items": [], "total": 0}
+
+        # Use cursor-based scroll. For page > 1 we skip (page-1)*page_size items.
+        offset = None
+        items: list[dict[str, Any]] = []
+        remaining_skip = (page - 1) * page_size
+
+        while remaining_skip > 0:
+            batch_size = min(remaining_skip, 100)
+            results, next_offset = await qdrant_indexer.scroll(
+                collection_name=collection_name,
+                offset=offset,
+                limit=batch_size,
+            )
+            remaining_skip -= len(results)
+            offset = next_offset
+            if offset is None or not results:
+                break
+
+        results, _ = await qdrant_indexer.scroll(
+            collection_name=collection_name,
+            offset=offset,
+            limit=page_size,
+        )
+
+        for r in results:
+            content = r.payload.get("text", "")
+            items.append(
+                {
+                    "id": r.id,
+                    "content_preview": content[:200] + ("..." if len(content) > 200 else ""),
+                    "metadata": r.payload.get("metadata", {}),
+                }
+            )
+
+        return {"items": items, "total": total}
+
+    async def compare_modes(
+        self,
+        collection_name: str,
+        query: str,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """Run the same query across dense, sparse, and hybrid modes.
+
+        Executes all three searches in parallel and returns results
+        per mode for side-by-side comparison.
+
+        Args:
+            collection_name: Qdrant collection name.
+            query: The search query.
+            limit: Maximum results per mode.
+
+        Returns:
+            Dict with ``dense``, ``sparse``, ``hybrid`` keys, each
+            containing a list of results.
+        """
+        dense_results, sparse_results, hybrid_results = await asyncio.gather(
+            self.search(collection_name, query, limit, "dense"),
+            self.search(collection_name, query, limit, "sparse"),
+            self.search(collection_name, query, limit, "hybrid"),
+        )
+
+        def _format(results: list[HybridSearchResult]) -> list[dict[str, Any]]:
+            return [
+                {
+                    "id": r.id,
+                    "score": r.score,
+                    "content": r.content[:200],
+                    "dense_score": r.dense_score,
+                    "sparse_score": r.sparse_score,
+                }
+                for r in results
+            ]
+
+        return {
+            "dense": _format(dense_results),
+            "sparse": _format(sparse_results),
+            "hybrid": _format(hybrid_results),
+            "query": query,
+        }
 
 
 knowledge_base_service = KnowledgeBaseService()
