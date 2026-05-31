@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { Agent } from "@/lib/api-types";
 import { AgentConfigurator, AgentFormData } from "@/components/agent/agent-configurator";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Download } from "lucide-react";
 
 export default function AgentDetailPage() {
   const params = useParams();
@@ -40,6 +40,23 @@ export default function AgentDetailPage() {
     setTimeout(() => setSuccess(false), 3000);
   };
 
+  const handleExport = async () => {
+    try {
+      const data = await api.get<Record<string, unknown>>(`/api/agents/${agentId}/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${agent?.name || "agent"}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Export failed");
+    }
+  };
+
   if (loading) {
     return <div className="text-muted-foreground">Loading...</div>;
   }
@@ -52,12 +69,21 @@ export default function AgentDetailPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{agent.name}</h1>
-        <button
-          onClick={() => router.push(`/chat/${agentId}`)}
-          className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
-        >
-          Start Chat
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            className="rounded-md border px-4 py-2 text-sm hover:bg-muted"
+          >
+            <Download className="mr-1 inline h-4 w-4" />
+            Export
+          </button>
+          <button
+            onClick={() => router.push(`/chat/${agentId}`)}
+            className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
+          >
+            Start Chat
+          </button>
+        </div>
       </div>
 
       {agent.model_available === false && (

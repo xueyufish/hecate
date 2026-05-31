@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -13,7 +15,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Upload } from "lucide-react";
+import { Upload, Globe } from "lucide-react";
 
 interface Document {
   id: string;
@@ -43,6 +45,9 @@ export default function KnowledgeDetailPage() {
   const [kb, setKB] = useState<KB | null>(null);
   const [docs, setDocs] = useState<Document[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [urls, setUrls] = useState("");
+  const [crawling, setCrawling] = useState(false);
+  const [crawlResult, setCrawlResult] = useState<{ success: number; failed: number; total: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -82,6 +87,27 @@ export default function KnowledgeDetailPage() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const handleCrawl = async () => {
+    if (!urls.trim()) return;
+    setCrawling(true);
+    setCrawlResult(null);
+    try {
+      const urlList = urls.split("\n").map((u) => u.trim()).filter(Boolean);
+      const payload = urlList.length === 1 ? { url: urlList[0] } : { urls: urlList };
+      const result = await api.post<{ success: number; failed: number; total: number }>(
+        `/api/knowledge-bases/${kbId}/urls`,
+        payload,
+      );
+      setCrawlResult(result);
+      setUrls("");
+      await loadDocs();
+    } catch {
+      alert("爬取失败");
+    } finally {
+      setCrawling(false);
+    }
+  };
+
   if (!kb) {
     return <div className="text-muted-foreground">加载中...</div>;
   }
@@ -110,6 +136,36 @@ export default function KnowledgeDetailPage() {
           className="hidden"
           onChange={(e) => handleUpload(e.target.files)}
         />
+      </div>
+
+      <div className="rounded-lg border p-6 space-y-4">
+        <div className="flex items-center gap-2">
+          <Globe className="h-5 w-5 text-muted-foreground" />
+          <h2 className="text-lg font-medium">从网页抓取</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          输入 URL，系统将自动抓取网页内容并添加到知识库
+        </p>
+        <div className="space-y-2">
+          <Label htmlFor="urls">URL（每行一个，支持批量）</Label>
+          <Textarea
+            id="urls"
+            value={urls}
+            onChange={(e) => setUrls(e.target.value)}
+            rows={3}
+            placeholder="https://example.com/article&#10;https://example.com/docs"
+          />
+        </div>
+        <div className="flex items-center gap-4">
+          <Button onClick={handleCrawl} disabled={crawling || !urls.trim()}>
+            {crawling ? "抓取中..." : "开始抓取"}
+          </Button>
+          {crawlResult && (
+            <span className="text-sm text-muted-foreground">
+              成功 {crawlResult.success}，失败 {crawlResult.failed}，共 {crawlResult.total} 个
+            </span>
+          )}
+        </div>
       </div>
 
       {docs.length > 0 && (

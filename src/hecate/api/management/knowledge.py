@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated, Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel as PydanticBase
@@ -27,6 +28,7 @@ from hecate.models.knowledge import (
     KnowledgeBaseModel,
     KnowledgeBaseReadSchema,
 )
+from hecate.services.rag.crawler import web_crawler
 from hecate.services.rag.service import knowledge_base_service
 
 router = APIRouter()
@@ -410,4 +412,93 @@ async def list_agents_for_knowledge_base(
     return {
         "items": [AgentReadSchema.model_validate(a).model_dump(by_alias=True) for a in page_agents],
         "total": total,
+    }
+
+
+class URLIngestRequest(PydanticBase):
+    """Request body for URL ingestion."""
+
+    url: str | None = None
+    urls: list[str] | None = None
+
+
+@router.post("/knowledge-bases/{kb_id}/urls")
+async def ingest_urls(
+    kb_id: uuid.UUID,
+    data: URLIngestRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Crawl URLs and ingest content into the knowledge base.
+
+    Args:
+        kb_id: The UUID of the knowledge base.
+        data: Request with url (single) or urls (batch).
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: Ingestion results with document_id, chunk_count, metadata.
+    """
+    kb = await _get_kb_or_404(kb_id, db)
+
+    urls: list[str] = []
+    if data.url:
+        urls.append(data.url)
+    elif data.urls:
+        urls.extend(data.urls)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": {"code": "VALIDATION_ERROR", "message": "Provide url or urls", "details": None}},
+        )
+
+    results = await web_crawler.crawl_urls(urls)
+
+    ingested = []
+    errors = []
+    for result in results:
+        if not result.success:
+            errors.append({"url": result.url, "error": result.error})
+            continue
+
+        virtual_path = f"web://{urlparse(result.url).netloc}{urlparse(result.url).path}"
+        doc = DocumentModel(
+            knowledge_base_id=kb_id,
+            filename=result.title or result.url,
+            file_path=virtual_path,
+            file_size=len(result.text),
+            content_type="text/html",
+            parsing_status="completed",
+        )
+        db.add(doc)
+        await db.flush()
+
+        metadata = {
+            "source_url": result.url,
+            "title": result.title,
+            "description": result.description,
+        }
+
+        ingest_result = await knowledge_base_service.ingest_document_text(
+            text=result.text,
+            collection_name=kb.qdrant_collection,
+            metadata=metadata,
+        )
+
+        ingested.append(
+            {
+                "document_id": str(doc.id),
+                "url": result.url,
+                "title": result.title,
+                "chunk_count": ingest_result.get("chunk_count", 0),
+            }
+        )
+
+    return {
+        "ingested": ingested,
+        "errors": errors,
+        "total": len(urls),
+        "success": len(ingested),
+        "failed": len(errors),
     }

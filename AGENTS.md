@@ -144,6 +144,7 @@ We may converse in Chinese, but everything committed to the repository is Englis
 ## What to do / What not to do
 
 - **Do** run `ruff check src/hecate/ tests/ && ruff format --check src/ tests/ && python -m pytest tests/ -q` before committing.
+- **Do** ensure **0 errors** locally before pushing to GitHub. If any check fails, fix it first — do not skip or ignore.
 - **Do** use `conftest.py`'s `db_session` fixture in all test files.
 - **Don't** renumber feature IDs — use letter suffixes.
 - **Don't** commit PDF files or large binary assets.
@@ -151,3 +152,4 @@ We may converse in Chinese, but everything committed to the repository is Englis
 - **Don't** use `as any`, `@ts-ignore` or equivalent type suppression.
 - **Don't** import from `engine/` in `api/` — route through `services/` + `EnginePort`.
 - **Don't** use `git commit --no-verify` to skip pre-commit hooks. If hooks fail, fix the underlying issue before committing.
+- **Don't** assume test failures are "pre-existing" without investigating. Check the error message and fix it.

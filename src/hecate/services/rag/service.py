@@ -85,6 +85,58 @@ class KnowledgeBaseService:
 
         return {"chunk_count": len(chunks), "collection": collection_name}
 
+    async def ingest_document_text(
+        self,
+        text: str,
+        collection_name: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Ingest pre-extracted text into the knowledge base.
+
+        Used for web-crawled content where text is already extracted.
+
+        Args:
+            text: The text content to ingest.
+            collection_name: Qdrant collection name.
+            metadata: Optional metadata to attach to chunks.
+
+        Returns:
+            dict with ingestion results (chunk_count, etc.).
+        """
+        if not text:
+            return {"chunk_count": 0, "error": "No text provided"}
+
+        chunks = text_chunker.chunk_text(text, metadata or {})
+        if not chunks:
+            return {"chunk_count": 0, "error": "No chunks generated"}
+
+        chunk_texts = [c.content for c in chunks]
+        embeddings = await embedding_service.encode(chunk_texts)
+
+        ids = [f"text_{i}" for i in range(len(chunks))]
+        vectors = [e.dense for e in embeddings]
+        sparse_vectors = [e.sparse for e in embeddings]
+        payloads = [
+            {
+                "text": chunk.content,
+                "metadata": {
+                    **chunk.metadata,
+                    "chunk_index": chunk.index,
+                },
+            }
+            for chunk in chunks
+        ]
+
+        await qdrant_indexer.upsert_vectors(
+            collection_name=collection_name,
+            ids=ids,
+            vectors=vectors,
+            payloads=payloads,
+            sparse_vectors=sparse_vectors,
+        )
+
+        return {"chunk_count": len(chunks), "collection": collection_name}
+
     async def search(
         self,
         collection_name: str,

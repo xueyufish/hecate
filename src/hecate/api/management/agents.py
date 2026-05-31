@@ -15,6 +15,8 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel as PydanticBase
+from pydantic import ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -325,3 +327,195 @@ async def delete_agent(
 
     agent.deleted_at = datetime.now(UTC)
     await db.flush()
+
+
+@router.get("/agents/{agent_id}/export")
+async def export_agent(
+    agent_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Export agent configuration as portable JSON.
+
+    Args:
+        agent_id: The UUID of the agent to export.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: Export data with version, exported_at, agent config, workflow, memory_blocks.
+
+    Raises:
+        HTTPException: 404 if agent not found.
+    """
+    result = await db.execute(
+        select(AgentModel).where(
+            AgentModel.id == agent_id,
+            AgentModel.deleted_at.is_(None),
+        )
+    )
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "Agent not found", "details": None}},
+        )
+
+    export_data: dict[str, Any] = {
+        "version": "1.0",
+        "exported_at": datetime.now(UTC).isoformat(),
+        "agent": {
+            "name": agent.name,
+            "persona": agent.persona,
+            "model_config": agent.model_config_db,
+            "mode": agent.mode,
+            "tools": agent.tools,
+            "skills": agent.skills,
+            "knowledge_base_ids": agent.knowledge_base_ids,
+            "risk_level": agent.risk_level,
+            "opening_remarks": agent.opening_remarks,
+            "enable_suggestions": agent.enable_suggestions,
+        },
+    }
+
+    if agent.mode == "workflow" and agent.workflow_id:
+        from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
+
+        wf_result = await db.execute(
+            select(WorkflowModel).where(
+                WorkflowModel.id == agent.workflow_id,
+                WorkflowModel.deleted_at.is_(None),
+            )
+        )
+        workflow = wf_result.scalar_one_or_none()
+        if workflow:
+            version_result = await db.execute(
+                select(WorkflowVersionModel)
+                .where(WorkflowVersionModel.workflow_id == workflow.id)
+                .order_by(WorkflowVersionModel.version.desc())
+                .limit(1)
+            )
+            version = version_result.scalar_one_or_none()
+            if version:
+                export_data["workflow"] = {
+                    "name": workflow.name,
+                    "description": workflow.description,
+                    "graph_dsl": version.graph_dsl,
+                }
+
+    from hecate.models.memory import MemoryBlockModel
+
+    blocks_result = await db.execute(
+        select(MemoryBlockModel).where(
+            MemoryBlockModel.agent_id == agent_id,
+            MemoryBlockModel.deleted_at.is_(None),
+        )
+    )
+    blocks = blocks_result.scalars().all()
+    if blocks:
+        export_data["memory_blocks"] = [
+            {
+                "label": b.label,
+                "content": b.content,
+                "position": b.position,
+                "limit": b.limit,
+            }
+            for b in blocks
+        ]
+
+    return export_data
+
+
+class AgentImportSchema(PydanticBase):
+    """Schema for agent import data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: str
+    exported_at: str | None = None
+    agent: dict[str, Any]
+    workflow: dict[str, Any] | None = None
+    memory_blocks: list[dict[str, Any]] | None = None
+
+
+@router.post("/agents/import", status_code=status.HTTP_201_CREATED)
+async def import_agent(
+    data: AgentImportSchema,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Import agent from exported JSON.
+
+    Args:
+        data: The import data.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: The created agent data.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    agent_config = data.agent
+    kb_ids = agent_config.get("knowledge_base_ids", [])
+    if kb_ids:
+        try:
+            await validate_knowledge_base_ids(db, kb_ids)
+        except HTTPException:
+            logger.warning("Some KB IDs are invalid on import, clearing knowledge_base_ids")
+            agent_config["knowledge_base_ids"] = []
+
+    workflow_id = None
+    if data.workflow:
+        from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
+
+        workflow = WorkflowModel(
+            name=f"{data.workflow['name']} (imported)",
+            description=data.workflow.get("description", ""),
+        )
+        db.add(workflow)
+        await db.flush()
+
+        version = WorkflowVersionModel(
+            workflow_id=workflow.id,
+            version=1,
+            graph_dsl=data.workflow["graph_dsl"],
+        )
+        db.add(version)
+        await db.flush()
+        workflow_id = workflow.id
+
+    agent = AgentModel(
+        name=agent_config.get("name", "Imported Agent"),
+        persona=agent_config.get("persona"),
+        model_config_db=agent_config.get("model_config", {}),
+        mode=agent_config.get("mode", "chat"),
+        workflow_id=workflow_id,
+        tools=agent_config.get("tools", []),
+        skills=agent_config.get("skills", []),
+        knowledge_base_ids=agent_config.get("knowledge_base_ids", []),
+        risk_level=agent_config.get("risk_level", "LOW"),
+        opening_remarks=agent_config.get("opening_remarks"),
+        enable_suggestions=agent_config.get("enable_suggestions", True),
+    )
+    db.add(agent)
+    await db.flush()
+
+    if data.memory_blocks:
+        from hecate.models.memory import MemoryBlockModel
+
+        for block in data.memory_blocks:
+            memory_block = MemoryBlockModel(
+                agent_id=agent.id,
+                label=block.get("label", ""),
+                content=block.get("content", ""),
+                position=block.get("position", 0),
+                limit=block.get("limit", 2000),
+            )
+            db.add(memory_block)
+        await db.flush()
+
+    await db.refresh(agent)
+    return AgentReadSchema.model_validate(agent).model_dump(by_alias=True)

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +13,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Bot, Plus, AlertTriangle } from "lucide-react";
+import { Bot, Plus, AlertTriangle, Upload } from "lucide-react";
 
 interface Agent {
   id: string;
@@ -24,16 +25,43 @@ interface Agent {
 }
 
 export default function AgentsPage() {
+  const router = useRouter();
   const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
+  const loadAgents = () => {
     api
       .get<{ items: Agent[]; total: number }>("/api/agents")
       .then((res) => setAgents(res.items || []))
       .catch(() => setAgents([]))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadAgents();
   }, []);
+
+  const handleImport = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const file = files[0];
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const result = await api.post<{ id: string }>("/api/agents/import", data);
+      router.push(`/agents/${result.id}`);
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === "object" && "error" in err
+          ? (err as { error: { message: string } }).error.message
+          : "Import failed";
+      alert(msg);
+    } finally {
+      setImporting(false);
+    }
+  };
 
   if (loading) {
     return <div className="text-muted-foreground">加载中...</div>;
@@ -43,12 +71,25 @@ export default function AgentsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Agent 管理</h1>
-        <Link href="/agents/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            创建 Agent
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={importing}>
+            <Upload className="mr-2 h-4 w-4" />
+            {importing ? "导入中..." : "导入 Agent"}
           </Button>
-        </Link>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".json"
+            className="hidden"
+            onChange={(e) => handleImport(e.target.files)}
+          />
+          <Link href="/agents/new">
+            <Button>
+              <Plus className="mr-2 h-4 w-4" />
+              创建 Agent
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {agents.length === 0 ? (

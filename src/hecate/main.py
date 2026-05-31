@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from hecate.api.auth import router as auth_router
+from hecate.api.management.agent_templates import router as agent_templates_router
 from hecate.api.management.agents import router as agents_router
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.knowledge import router as knowledge_router
@@ -131,6 +132,7 @@ app.include_router(conversations_router, prefix="/api", tags=["conversations"])
 app.include_router(messages_router, prefix="/api", tags=["messages"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])
 app.include_router(orchestration_templates_router, prefix="/api", tags=["orchestration-templates"])
+app.include_router(agent_templates_router, prefix="/api", tags=["agent-templates"])
 app.include_router(memory_router, prefix="/api", tags=["memory"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
 app.include_router(model_providers_router, prefix="/api", tags=["model-providers"])
