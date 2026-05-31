@@ -12,7 +12,14 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
-from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
+
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    BeautifulSoup = None
+    logger.warning("beautifulsoup4 not installed. Web crawling will not work.")
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +59,16 @@ class WebCrawler:
         Returns:
             CrawlResult with extracted text and metadata.
         """
+        if BeautifulSoup is None:
+            return CrawlResult(
+                url=url,
+                title="",
+                description="",
+                text="",
+                success=False,
+                error="beautifulsoup4 not installed",
+            )
+
         try:
             parsed = urlparse(url)
             if not parsed.scheme or not parsed.netloc:
