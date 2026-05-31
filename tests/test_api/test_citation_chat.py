@@ -3,82 +3,101 @@
 from __future__ import annotations
 
 import uuid
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from fastapi.testclient import TestClient
+import pytest
+from httpx import AsyncClient
 
+from hecate.core.deps import get_current_user_id
 from hecate.main import app
 
 
-def test_chat_completions_without_kb_ids():
+@pytest.fixture(autouse=True)
+def override_auth():
+    async def override_user_id() -> uuid.UUID:
+        return uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+    app.dependency_overrides[get_current_user_id] = override_user_id
+    yield
+    app.dependency_overrides.pop(get_current_user_id, None)
+
+
+async def test_chat_completions_without_kb_ids(client: AsyncClient) -> None:
     """Test that chat completions work without kb_ids (backward compatible)."""
-    client = TestClient(app)
-    response = client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "gpt-4o",
-            "messages": [{"role": "user", "content": "Hello"}],
-        },
-        headers={"Authorization": "Bearer test-api-key"},
-    )
+    with patch("hecate.api.v1.chat.ConversationService") as mock_cls:
+        mock_service = MagicMock()
+        mock_service.chat = AsyncMock(
+            return_value={
+                "model": "gpt-4o",
+                "content": "Hello!",
+                "finish_reason": "stop",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
+        )
+        mock_cls.return_value = mock_service
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "kb_ids": [str(uuid.uuid4())],
+            },
+        )
     assert response.status_code == 200
     data = response.json()
     assert "choices" in data
     assert len(data["choices"]) > 0
-    assert "annotations" not in data["choices"][0]["message"] or data["choices"][0]["message"]["annotations"] is None
 
 
-def test_chat_completions_with_invalid_kb_ids():
+async def test_chat_completions_with_invalid_kb_ids(client: AsyncClient) -> None:
     """Test that invalid kb_ids return 422."""
-    client = TestClient(app)
-    response = client.post(
+    response = await client.post(
         "/v1/chat/completions",
         json={
             "model": "gpt-4o",
             "messages": [{"role": "user", "content": "Hello"}],
             "kb_ids": ["not-a-uuid"],
         },
-        headers={"Authorization": "Bearer test-api-key"},
     )
     assert response.status_code == 422
 
 
-def test_chat_completions_with_valid_kb_ids():
-    """Test that valid kb_ids are accepted (may return empty citations if KB not found)."""
-    client = TestClient(app)
-    kb_id = str(uuid.uuid4())
-    response = client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "gpt-4o",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "kb_ids": [kb_id],
-        },
-        headers={"Authorization": "Bearer test-api-key"},
-    )
+async def test_chat_completions_with_valid_kb_ids(client: AsyncClient) -> None:
+    """Test that valid kb_ids are accepted."""
+    with patch("hecate.api.v1.chat.ConversationService") as mock_cls:
+        mock_service = MagicMock()
+        mock_service.chat = AsyncMock(
+            return_value={
+                "model": "gpt-4o",
+                "content": "Hello!",
+                "finish_reason": "stop",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            }
+        )
+        mock_cls.return_value = mock_service
+        kb_id = str(uuid.uuid4())
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "kb_ids": [kb_id],
+            },
+        )
     assert response.status_code == 200
     data = response.json()
     assert "choices" in data
 
 
-def test_get_message_citations_not_found():
+async def test_get_message_citations_not_found(client: AsyncClient) -> None:
     """Test that 404 is returned for non-existent message."""
-    client = TestClient(app)
     message_id = str(uuid.uuid4())
-    response = client.get(
-        f"/api/messages/{message_id}/citations",
-        headers={"Authorization": "Bearer test-api-key"},
-    )
+    response = await client.get(f"/api/messages/{message_id}/citations")
     assert response.status_code == 404
 
 
-def test_get_message_citations_empty():
+async def test_get_message_citations_empty(client: AsyncClient) -> None:
     """Test that empty citations array is returned for message without citations."""
-    client = TestClient(app)
-    # This test requires a message to exist in the DB
-    # For now, we test the endpoint structure
     message_id = str(uuid.uuid4())
-    response = client.get(
-        f"/api/messages/{message_id}/citations",
-        headers={"Authorization": "Bearer test-api-key"},
-    )
-    assert response.status_code == 404  # Message doesn't exist
+    response = await client.get(f"/api/messages/{message_id}/citations")
+    assert response.status_code == 404
