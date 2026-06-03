@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.add_column("agents", sa.Column("opening_remarks", sa.Text(), nullable=True))
     op.add_column(
         "agents",
-        sa.Column("enable_suggestions", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("enable_suggestions", sa.Boolean(), nullable=False, server_default=sa.text("TRUE")),
     )
 
 

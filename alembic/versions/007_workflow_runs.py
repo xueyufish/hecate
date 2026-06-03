@@ -23,11 +23,11 @@ def upgrade() -> None:
 
     op.create_table(
         "workflow_runs",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("workflow_id", sa.String(36), sa.ForeignKey("workflows.id"), nullable=False),
+        sa.Column("id", sa.UUID(), primary_key=True),
+        sa.Column("workflow_id", sa.UUID(), sa.ForeignKey("workflows.id"), nullable=False),
         sa.Column("run_id", sa.String(36), nullable=False),
         sa.Column("status", sa.String(50), nullable=False),
-        sa.Column("mock", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("mock", sa.Boolean(), nullable=False, server_default=sa.text("TRUE")),
         sa.Column("input_data", sa.JSON(), nullable=False),
         sa.Column("node_results", sa.JSON(), nullable=False),
         sa.Column("total_duration_ms", sa.Integer(), nullable=False, server_default=sa.text("0")),

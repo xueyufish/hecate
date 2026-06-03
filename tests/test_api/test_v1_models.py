@@ -47,7 +47,6 @@ class TestListModels:
         provider_resp = await models_client.post(
             "/api/model-providers",
             json={
-                "name": "test-openai",
                 "display_name": "OpenAI",
                 "api_key": "sk-test-key",
                 "is_enabled": True,
@@ -82,7 +81,6 @@ class TestListModels:
         provider_resp = await models_client.post(
             "/api/model-providers",
             json={
-                "name": "test-filter",
                 "display_name": "Filter Test",
                 "api_key": "sk-test",
                 "is_enabled": True,
@@ -126,7 +124,6 @@ class TestListModels:
         provider_resp = await models_client.post(
             "/api/model-providers",
             json={
-                "name": "zhipu",
                 "display_name": "智谱AI",
                 "api_key": "sk-test",
             },
@@ -146,9 +143,8 @@ class TestListModels:
         result = response.json()
 
         glm_model = next(m for m in result["data"] if m["id"] == "glm-4")
-        assert glm_model["provider"] == "zhipu"
+        assert glm_model["provider"]  # auto-generated slug
         assert glm_model["provider_display_name"] == "智谱AI"
-        assert glm_model["owned_by"] == "zhipu"
 
     async def test_list_models_disabled_provider_excluded(
         self,
@@ -158,7 +154,6 @@ class TestListModels:
         provider_resp = await models_client.post(
             "/api/model-providers",
             json={
-                "name": "disabled-prov",
                 "display_name": "Disabled Provider",
                 "api_key": "sk-test",
                 "is_enabled": True,

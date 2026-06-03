@@ -82,6 +82,9 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     - 429: Rate limit errors
     - 500: Internal server errors
     """
+    import logging
+
+    logging.getLogger(__name__).exception("Unhandled exception on %s %s", request.method, request.url.path)
     return JSONResponse(
         status_code=500,
         content={

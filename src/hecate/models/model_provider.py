@@ -78,7 +78,6 @@ class ModelProviderCreateSchema(PydanticBase):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(..., min_length=1, max_length=100)
     display_name: str = Field(..., min_length=1, max_length=255)
     api_key: str = Field(..., min_length=1)
     base_url: str | None = Field(None, max_length=512)

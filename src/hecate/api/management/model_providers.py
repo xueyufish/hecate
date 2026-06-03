@@ -41,6 +41,31 @@ router = APIRouter()
 DEFAULT_CONFIG = {"timeout": 30, "max_retries": 3, "rate_limit_rpm": 60}
 
 
+def _generate_provider_name(display_name: str) -> str:
+    """Generate a URL-safe provider name from display_name."""
+    import re
+    import unicodedata
+
+    slug = unicodedata.normalize("NFKD", display_name).lower()
+    slug = re.sub(r"[^\w\s-]", "", slug)
+    slug = re.sub(r"[-\s]+", "-", slug).strip("-")
+    return slug[:100] if slug else str(uuid.uuid4())[:8]
+
+
+def _resolve_litellm_model_id(model_id: str, base_url: str | None) -> str:
+    """Resolve the LiteLLM-compatible model ID from a raw model name.
+
+    If the model_id already contains a '/' prefix (e.g. 'openai/gpt-4'),
+    return as-is. If base_url is set, prepend 'openai/' since the endpoint
+    is OpenAI-compatible. Otherwise return the raw model_id.
+    """
+    if "/" in model_id:
+        return model_id
+    if base_url:
+        return f"openai/{model_id}"
+    return model_id
+
+
 def _validate_config(config: dict) -> None:
     """Validate provider config values."""
     timeout = config.get("timeout", 30)
@@ -87,14 +112,17 @@ async def create_provider(
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
     """Create a new model provider and discover available models."""
+    provider_name = _generate_provider_name(data.display_name)
+
     existing = await db.execute(
         select(ModelProviderModel).where(
-            ModelProviderModel.name == data.name,
+            ModelProviderModel.name == provider_name,
             ModelProviderModel.deleted_at.is_(None),
         )
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"Provider '{data.name}' already exists")
+        suffix = str(uuid.uuid4())[:4]
+        provider_name = f"{provider_name}-{suffix}"
 
     merged_config = {**DEFAULT_CONFIG, **data.config}
     _validate_config(merged_config)
@@ -102,7 +130,7 @@ async def create_provider(
     encrypted_key = encrypt_api_key(data.api_key)
 
     provider = ModelProviderModel(
-        name=data.name,
+        name=provider_name,
         display_name=data.display_name,
         api_key_encrypted=encrypted_key,
         base_url=data.base_url,
@@ -114,7 +142,7 @@ async def create_provider(
     await db.flush()
     await db.refresh(provider)
 
-    models = await _discover_models(data.name, data.api_key, data.base_url)
+    models = await _discover_models(provider_name, data.api_key, data.base_url)
     for m in models:
         model = ModelRegistryModel(
             provider_id=provider.id,
@@ -240,10 +268,11 @@ async def test_provider(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
-    """Test provider connectivity with a lightweight LLM call.
+    """Test provider connectivity by verifying API key and endpoint reachability.
 
-    Uses the provider's own decrypted API key and picks the first
-    enabled model from the registry (instead of a hardcoded model).
+    Validates that the provider's API key is accepted by calling the
+    OpenAI-compatible ``/models`` endpoint. Does not require any registered
+    models — this only checks authentication and network connectivity.
     """
     result = await db.execute(
         select(ModelProviderModel).where(
@@ -257,51 +286,53 @@ async def test_provider(
 
     decrypted_key = decrypt_api_key(provider.api_key_encrypted)
 
-    first_model_result = await db.execute(
-        select(ModelRegistryModel)
-        .where(
-            ModelRegistryModel.provider_id == provider.id,
-            ModelRegistryModel.deleted_at.is_(None),
-            ModelRegistryModel.is_enabled.is_(True),
-        )
-        .limit(1)
-    )
-    first_model = first_model_result.scalar_one_or_none()
-    test_model_id = first_model.model_id if first_model else f"{provider.name}/default"
-
     try:
+        import httpx
+
         start = time.monotonic()
 
-        try:
-            from litellm import acompletion as litellm_completion
-        except ImportError as err:
-            raise HTTPException(
-                status_code=503,
-                detail="litellm is required for provider testing",
-            ) from err
+        base = (provider.base_url or "").rstrip("/")
+        models_url = f"{base}/models" if base else "https://api.openai.com/v1/models"
 
-        litellm_kwargs: dict = {
-            "model": test_model_id,
-            "messages": [{"role": "user", "content": "Hi"}],
-            "api_key": decrypted_key,
-            "max_tokens": 5,
-        }
-        if provider.base_url:
-            litellm_kwargs["api_base"] = provider.base_url
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                models_url,
+                headers={"Authorization": f"Bearer {decrypted_key}"},
+            )
 
-        await litellm_completion(**litellm_kwargs)
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
-        provider.status = "active"
-        await db.flush()
+        if resp.status_code in (200, 401, 403):
+            if resp.status_code == 200:
+                provider.status = "active"
+                await db.flush()
+                return {"status": "active", "response_time_ms": elapsed_ms}
+            provider.status = "error"
+            await db.flush()
+            return {
+                "status": "error",
+                "error_message": "Authentication failed — API key rejected",
+                "response_time_ms": elapsed_ms,
+            }
 
-        return {"status": "active", "response_time_ms": elapsed_ms}
-    except HTTPException:
-        raise
+        provider.status = "error"
+        await db.flush()
+        return {
+            "status": "error",
+            "error_message": f"Unexpected response: HTTP {resp.status_code}",
+            "response_time_ms": elapsed_ms,
+        }
+    except httpx.ConnectError as e:
+        provider.status = "error"
+        await db.flush()
+        return {"status": "error", "error_message": f"Connection failed: {e}"}
+    except httpx.TimeoutException:
+        provider.status = "error"
+        await db.flush()
+        return {"status": "error", "error_message": "Connection timed out (15s)"}
     except Exception as e:
         provider.status = "error"
         await db.flush()
-
         return {"status": "error", "error_message": str(e)}
 
 
@@ -377,12 +408,15 @@ async def add_custom_model(
             ModelProviderModel.deleted_at.is_(None),
         )
     )
-    if provider_result.scalar_one_or_none() is None:
+    provider = provider_result.scalar_one_or_none()
+    if provider is None:
         raise HTTPException(status_code=404, detail="Provider not found")
+
+    resolved_model_id = _resolve_litellm_model_id(data.model_id, provider.base_url)
 
     model = ModelRegistryModel(
         provider_id=data.provider_id,
-        model_id=data.model_id,
+        model_id=resolved_model_id,
         display_name=data.display_name,
         model_type="chat",
         capabilities={},

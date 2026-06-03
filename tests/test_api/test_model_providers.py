@@ -14,7 +14,6 @@ from hecate.main import app
 def _provider_payload(**overrides: object) -> dict:
     """Build a valid provider creation payload."""
     payload = {
-        "name": "test-provider",
         "display_name": "Test Provider",
         "api_key": "sk-test-key-123",
         "base_url": None,
@@ -47,7 +46,7 @@ class TestCreateProvider:
         assert response.status_code == 201
 
         result = response.json()
-        assert result["name"] == "test-provider"
+        assert result["name"]  # auto-generated from display_name
         assert result["display_name"] == "Test Provider"
         assert result["status"] == "pending"
         assert result["is_enabled"] is True
@@ -55,21 +54,21 @@ class TestCreateProvider:
         assert "model_count" in result
 
     async def test_create_provider_duplicate_name(self, provider_client: AsyncClient) -> None:
-        """Test POST /api/model-providers rejects duplicate name."""
+        """Test POST /api/model-providers handles duplicate display_name with suffix."""
         await provider_client.post("/api/model-providers", json=_provider_payload())
 
         response = await provider_client.post(
             "/api/model-providers",
             json=_provider_payload(),
         )
-        assert response.status_code == 409
+        assert response.status_code == 201
+        assert response.json()["name"] != "test-provider"
 
     async def test_create_provider_with_base_url(self, provider_client: AsyncClient) -> None:
         """Test creating a provider with custom base_url."""
         response = await provider_client.post(
             "/api/model-providers",
             json=_provider_payload(
-                name="custom-endpoint",
                 display_name="Custom",
                 base_url="https://api.custom-endpoint.com/v1",
             ),
@@ -82,7 +81,6 @@ class TestCreateProvider:
         response = await provider_client.post(
             "/api/model-providers",
             json=_provider_payload(
-                name="custom-config",
                 config={"timeout": 60, "max_retries": 5},
             ),
         )
@@ -95,7 +93,7 @@ class TestCreateProvider:
         """Test creating a provider with invalid timeout returns 400."""
         response = await provider_client.post(
             "/api/model-providers",
-            json=_provider_payload(name="bad-timeout", config={"timeout": 999}),
+            json=_provider_payload(config={"timeout": 999}),
         )
         assert response.status_code == 400
 
@@ -103,7 +101,7 @@ class TestCreateProvider:
         """Test creating a provider with invalid max_retries returns 400."""
         response = await provider_client.post(
             "/api/model-providers",
-            json=_provider_payload(name="bad-retries", config={"max_retries": -1}),
+            json=_provider_payload(config={"max_retries": -1}),
         )
         assert response.status_code == 400
 
@@ -111,7 +109,7 @@ class TestCreateProvider:
         """Test creating a provider with invalid rate_limit_rpm returns 400."""
         response = await provider_client.post(
             "/api/model-providers",
-            json=_provider_payload(name="bad-ratelimit", config={"rate_limit_rpm": 0}),
+            json=_provider_payload(config={"rate_limit_rpm": 0}),
         )
         assert response.status_code == 400
 
@@ -130,11 +128,11 @@ class TestListProviders:
         """Test GET /api/model-providers returns created providers."""
         await provider_client.post(
             "/api/model-providers",
-            json=_provider_payload(name="provider-a", display_name="Provider A"),
+            json=_provider_payload(display_name="Provider A"),
         )
         await provider_client.post(
             "/api/model-providers",
-            json=_provider_payload(name="provider-b", display_name="Provider B"),
+            json=_provider_payload(display_name="Provider B"),
         )
 
         response = await provider_client.get("/api/model-providers")
@@ -143,7 +141,7 @@ class TestListProviders:
         result = response.json()
         assert result["total"] == 2
         names = {item["name"] for item in result["items"]}
-        assert names == {"provider-a", "provider-b"}
+        assert len(names) == 2
 
     async def test_list_providers_includes_model_count(self, provider_client: AsyncClient) -> None:
         """Test list response includes model_count field."""

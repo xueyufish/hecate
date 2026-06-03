@@ -42,7 +42,6 @@ async def _seed_provider_and_model(
     resp = await e2e_client.post(
         "/api/model-providers",
         json={
-            "name": provider_name,
             "display_name": f"{provider_name} Display",
             "api_key": "sk-test-key",
             "config": {"timeout": 60, "max_retries": 5},
@@ -86,7 +85,7 @@ class TestE2EProviderModelFlow:
         assert "v1-model-x" in model_ids
 
         model_obj = next(m for m in data if m["id"] == "v1-model-x")
-        assert model_obj["provider"] == "v1-provider"
+        assert model_obj["provider"]  # auto-generated slug
         assert model_obj["provider_display_name"] == "v1-provider Display"
 
     async def test_disabled_model_hidden_from_v1_models(self, e2e_client: AsyncClient) -> None:

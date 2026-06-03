@@ -22,7 +22,6 @@ from hecate.main import app
 
 def _provider_payload(**overrides: object) -> dict:
     payload = {
-        "name": "test-provider",
         "display_name": "Test Provider",
         "api_key": "sk-test-key-123",
         "base_url": None,
@@ -57,7 +56,7 @@ async def _create_provider_with_model(
 
     resp = await provider_client.post(
         "/api/model-providers",
-        json=_provider_payload(name=provider_name, display_name=f"{provider_name} Display"),
+        json=_provider_payload(display_name=f"{provider_name} Display"),
     )
     assert resp.status_code == 201
     provider_data = resp.json()

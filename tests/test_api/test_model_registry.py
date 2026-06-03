@@ -11,18 +11,15 @@ from hecate.core.deps import get_current_user_id
 from hecate.main import app
 
 
-def _provider_payload(name: str = "test-provider") -> dict:
+def _provider_payload(display_name: str = "Test Provider") -> dict:
     return {
-        "name": name,
-        "display_name": "Test Provider",
+        "display_name": display_name,
         "api_key": "sk-test-key-123",
     }
 
 
 @pytest.fixture
 def provider_client(client: AsyncClient) -> AsyncClient:  # noqa: ARG001
-    """Client with get_current_user_id overridden."""
-
     async def override_user_id() -> uuid.UUID:
         return uuid.UUID("00000000-0000-0000-0000-000000000000")
 
@@ -31,9 +28,8 @@ def provider_client(client: AsyncClient) -> AsyncClient:  # noqa: ARG001
     app.dependency_overrides.pop(get_current_user_id, None)
 
 
-async def _create_provider(provider_client: AsyncClient, name: str = "test-provider") -> dict:
-    """Helper to create a provider and return its JSON response."""
-    resp = await provider_client.post("/api/model-providers", json=_provider_payload(name))
+async def _create_provider(provider_client: AsyncClient, display_name: str = "Test Provider") -> dict:
+    resp = await provider_client.post("/api/model-providers", json=_provider_payload(display_name))
     assert resp.status_code == 201
     return resp.json()
 
