@@ -22,6 +22,7 @@ follows the interrupted node in the edge graph.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -31,6 +32,7 @@ from hecate.engine.checkpoint import CheckpointStore
 from hecate.engine.temporal.conflict import ConflictResolver
 from hecate.engine.types import (
     CompiledGraph,
+    NodeType,
     StreamMode,
     WorkerResult,
 )
@@ -138,10 +140,24 @@ class PregelRuntime:
             snapshot = self._channel_manager.snapshot()
 
             results: list[WorkerResult] = []
+
             for node_id in current_nodes:
                 node = self._graph.nodes.get(node_id)
                 if node is None:
                     continue
+
+                node_type = getattr(node, "type", None)
+
+                if node_type == NodeType.FAN_OUT:
+                    fan_out_results = await self._dispatch_fan_out(node_id, node, snapshot)
+                    results.extend(fan_out_results)
+                    continue
+
+                if node_type == NodeType.MERGE:
+                    merge_result = self._execute_merge(node_id, node)
+                    results.append(merge_result)
+                    continue
+
                 result = await self._pool.dispatch(
                     self._worker,
                     node_id,
@@ -241,7 +257,11 @@ class PregelRuntime:
                     next_nodes.append(edge.target)
                 elif isinstance(edge.target, dict):
                     route_key = str(self._interrupt_updates.get("_route", "true"))
-                    target = edge.target.get(route_key, edge.target.get("false"))
+                    target: str | None = edge.target.get(route_key)
+                    if not target:
+                        target = edge.target.get("default")
+                    if not target:
+                        target = edge.target.get("false")
                     if target:
                         next_nodes.append(target)
         if "__end__" in next_nodes:
@@ -275,7 +295,11 @@ class PregelRuntime:
                         next_nodes.append(edge.target)
                     elif isinstance(edge.target, dict):
                         route_key = str(result.channel_updates.get("_route", "true"))
-                        target = edge.target.get(route_key, edge.target.get("false"))
+                        target: str | None = edge.target.get(route_key)
+                        if not target:
+                            target = edge.target.get("default")
+                        if not target:
+                            target = edge.target.get("false")
                         if target:
                             next_nodes.append(target)
         if "__end__" in next_nodes:
@@ -315,3 +339,82 @@ class PregelRuntime:
             )
             if result.resolved:
                 self._channel_manager.write(k, result.final_value)
+
+    async def _dispatch_fan_out(
+        self,
+        node_id: str,
+        node: Any,
+        snapshot: dict,
+    ) -> list[WorkerResult]:
+        """Dispatch all branches of a FAN_OUT node concurrently.
+
+        Creates an isolated sub-channel for each branch, dispatches all branch
+        workers via asyncio.gather, and writes each branch result to its sub-channel.
+
+        Args:
+            node_id: The FAN_OUT node ID.
+            node: The NodeConfig for the FAN_OUT node.
+            snapshot: Current channel state snapshot.
+
+        Returns:
+            List of WorkerResults from all branches.
+        """
+        from hecate.engine.types import ChannelDef, ChannelType
+
+        branches: list[str] = node.config.get("branches", [])
+        if not branches:
+            return []
+
+        for branch_id in branches:
+            sub_channel = f"_fanout__{node_id}__{branch_id}"
+            self._channel_manager.register(sub_channel, ChannelDef(type=ChannelType.LAST_VALUE))
+
+        async def run_branch(branch_id: str) -> WorkerResult:
+            branch_node = self._graph.nodes.get(branch_id)
+            if branch_node is None:
+                return WorkerResult(node_id=branch_id, error=RuntimeError(f"Branch node '{branch_id}' not found"))
+            result = await self._pool.dispatch(self._worker, branch_id, branch_node.config, snapshot)
+            if result.error is None:
+                sub_channel = f"_fanout__{node_id}__{branch_id}"
+                self._channel_manager.write(sub_channel, result.channel_updates)
+            return result
+
+        branch_results = await asyncio.gather(*[run_branch(b) for b in branches])
+
+        for r in branch_results:
+            if r.error is not None:
+                raise r.error
+
+        return list(branch_results)
+
+    def _execute_merge(self, node_id: str, node: Any) -> WorkerResult:
+        """Aggregate results from all branches of a preceding FAN_OUT.
+
+        Reads all branch sub-channels, combines them into a dict keyed by
+        branch node ID, and writes the result to the configured output channel.
+
+        Args:
+            node_id: The MERGE node ID.
+            node: The NodeConfig for the MERGE node.
+
+        Returns:
+            WorkerResult with the aggregated output.
+        """
+        fan_out_source: str = node.config.get("fan_out_source", "")
+        output_channel: str = node.config.get("output_channel", "merged_output")
+
+        source_node = self._graph.nodes.get(fan_out_source)
+        if source_node is None:
+            return WorkerResult(node_id=node_id, error=RuntimeError(f"FAN_OUT source '{fan_out_source}' not found"))
+
+        branches: list[str] = source_node.config.get("branches", [])
+        aggregated: dict[str, Any] = {}
+        for branch_id in branches:
+            sub_channel = f"_fanout__{fan_out_source}__{branch_id}"
+            value = self._channel_manager.snapshot().get(sub_channel)
+            aggregated[branch_id] = value
+
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={output_channel: aggregated},
+        )

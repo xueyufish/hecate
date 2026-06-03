@@ -50,6 +50,7 @@ class GraphCompiler:
         self._validate_entry(config)
         self._validate_edges(config)
         self._validate_handoff_edges(config)
+        self._validate_fan_out_merge(config)
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
@@ -108,6 +109,68 @@ class GraphCompiler:
                             f"Edge target '{target_id}' (key '{key}') references non-existent node",
                             field=f"edges[{edge.source}].target.{key}",
                         )
+
+    def _validate_fan_out_merge(self, config: GraphConfig) -> None:
+        """Validate FAN_OUT/MERGE structural constraints.
+
+        Every FAN_OUT node must have at least one reachable MERGE node downstream,
+        and every MERGE node must have an upstream FAN_OUT node.
+
+        Raises:
+            GraphValidationError: if FAN_OUT/MERGE constraints are violated.
+        """
+        from hecate.engine.types import NodeType
+
+        fan_out_nodes = [nid for nid, n in config.nodes.items() if n.type == NodeType.FAN_OUT]
+        merge_nodes = [nid for nid, n in config.nodes.items() if n.type == NodeType.MERGE]
+
+        if not fan_out_nodes and not merge_nodes:
+            return
+
+        adjacency: dict[str, list[str]] = {nid: [] for nid in config.nodes}
+        for edge in config.edges:
+            if isinstance(edge.target, str):
+                if edge.source in adjacency and edge.target in config.nodes:
+                    adjacency[edge.source].append(edge.target)
+            elif isinstance(edge.target, dict):
+                for target_id in edge.target.values():
+                    if edge.source in adjacency and target_id in config.nodes:
+                        adjacency[edge.source].append(target_id)
+
+        def bfs_reachable(start: str) -> set[str]:
+            visited: set[str] = set()
+            queue = [start]
+            while queue:
+                node = queue.pop(0)
+                if node in visited:
+                    continue
+                visited.add(node)
+                for neighbor in adjacency.get(node, []):
+                    if neighbor not in visited:
+                        queue.append(neighbor)
+            return visited
+
+        for fan_out_id in fan_out_nodes:
+            reachable = bfs_reachable(fan_out_id)
+            merge_reachable = reachable & set(merge_nodes)
+            if not merge_reachable:
+                raise GraphValidationError(
+                    f"FAN_OUT node '{fan_out_id}' has no reachable MERGE node",
+                    field=f"nodes[{fan_out_id}]",
+                )
+
+        for merge_id in merge_nodes:
+            has_upstream = False
+            for fan_out_id in fan_out_nodes:
+                reachable = bfs_reachable(fan_out_id)
+                if merge_id in reachable:
+                    has_upstream = True
+                    break
+            if not has_upstream:
+                raise GraphValidationError(
+                    f"MERGE node '{merge_id}' has no upstream FAN_OUT node",
+                    field=f"nodes[{merge_id}]",
+                )
 
     def _detect_unreachable(self, config: GraphConfig) -> list[str]:
         """Return node IDs not reachable from the entry point via BFS.

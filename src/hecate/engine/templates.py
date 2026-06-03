@@ -121,3 +121,300 @@ def build_three_layer_graph(
         edges=edges,
         entry="guard",
     )
+
+
+def build_fan_out_pipeline(
+    researcher_model: str,
+    analyst_model: str,
+    summarizer_model: str,
+    researcher_prompt: str = "You are a research agent. Gather relevant information on the given topic.",
+    analyst_a_prompt: str = "You are Analyst A. Analyze from a financial perspective.",
+    analyst_b_prompt: str = "You are Analyst B. Analyze from a technical perspective.",
+    analyst_c_prompt: str = "You are Analyst C. Analyze from a market perspective.",
+    summarizer_prompt: str = "You are a summarizer. Synthesize analysis from multiple perspectives.",
+) -> GraphConfig:
+    """Build a fan-out pipeline: researcher → parallel analysts → merge → summarizer.
+
+    Args:
+        researcher_model: Model for the researcher node.
+        analyst_model: Model for the analyst nodes.
+        summarizer_model: Model for the summarizer node.
+        researcher_prompt: System prompt for the researcher.
+        analyst_a_prompt: System prompt for Analyst A.
+        analyst_b_prompt: System prompt for Analyst B.
+        analyst_c_prompt: System prompt for Analyst C.
+        summarizer_prompt: System prompt for the summarizer.
+
+    Returns:
+        A GraphConfig with parallel fan-out pattern.
+    """
+    nodes = {
+        "researcher": NodeConfig(
+            id="researcher",
+            type=NodeType.AGENT,
+            config={
+                "model": researcher_model,
+                "system_prompt": researcher_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages", "research_data"]},
+            },
+        ),
+        "fanout": NodeConfig(
+            id="fanout",
+            type=NodeType.FAN_OUT,
+            config={"branches": ["analyst_a", "analyst_b", "analyst_c"]},
+        ),
+        "analyst_a": NodeConfig(
+            id="analyst_a",
+            type=NodeType.AGENT,
+            config={
+                "model": analyst_model,
+                "system_prompt": analyst_a_prompt,
+                "channels": {"readable": ["messages", "research_data"], "writable": ["messages"]},
+            },
+        ),
+        "analyst_b": NodeConfig(
+            id="analyst_b",
+            type=NodeType.AGENT,
+            config={
+                "model": analyst_model,
+                "system_prompt": analyst_b_prompt,
+                "channels": {"readable": ["messages", "research_data"], "writable": ["messages"]},
+            },
+        ),
+        "analyst_c": NodeConfig(
+            id="analyst_c",
+            type=NodeType.AGENT,
+            config={
+                "model": analyst_model,
+                "system_prompt": analyst_c_prompt,
+                "channels": {"readable": ["messages", "research_data"], "writable": ["messages"]},
+            },
+        ),
+        "merge": NodeConfig(
+            id="merge",
+            type=NodeType.MERGE,
+            config={"fan_out_source": "fanout", "output_channel": "analysis_results"},
+        ),
+        "summarizer": NodeConfig(
+            id="summarizer",
+            type=NodeType.AGENT,
+            config={
+                "model": summarizer_model,
+                "system_prompt": summarizer_prompt,
+                "channels": {"readable": ["messages", "analysis_results"], "writable": ["messages"]},
+            },
+        ),
+    }
+
+    edges = [
+        Edge(source="researcher", target="fanout"),
+        Edge(source="analyst_a", target="merge"),
+        Edge(source="analyst_b", target="merge"),
+        Edge(source="analyst_c", target="merge"),
+        Edge(source="merge", target="summarizer"),
+        Edge(source="summarizer", target="__end__"),
+    ]
+
+    state = {
+        "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
+        "research_data": ChannelDef(type=ChannelType.LAST_VALUE, default={}),
+        "analysis_results": ChannelDef(type=ChannelType.LAST_VALUE, default={}),
+    }
+
+    return GraphConfig(
+        version="1.0",
+        name="fan-out-pipeline",
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry="researcher",
+    )
+
+
+def build_conditional_pipeline(
+    classifier_model: str,
+    specialist_model: str,
+    classifier_prompt: str = "You are a classifier. Categorize input as finance, tech, or legal.",
+    finance_prompt: str = "You are a finance specialist.",
+    tech_prompt: str = "You are a tech specialist.",
+    legal_prompt: str = "You are a legal specialist.",
+    general_prompt: str = "You are a general-purpose agent.",
+) -> GraphConfig:
+    """Build a conditional routing pipeline: classifier → multi-key condition → specialists.
+
+    Args:
+        classifier_model: Model for the classifier node.
+        specialist_model: Model for the specialist nodes.
+        classifier_prompt: System prompt for the classifier.
+        finance_prompt: System prompt for the finance specialist.
+        tech_prompt: System prompt for the tech specialist.
+        legal_prompt: System prompt for the legal specialist.
+        general_prompt: System prompt for the general fallback agent.
+
+    Returns:
+        A GraphConfig with multi-key conditional routing.
+    """
+    nodes = {
+        "classifier": NodeConfig(
+            id="classifier",
+            type=NodeType.AGENT,
+            config={
+                "model": classifier_model,
+                "system_prompt": classifier_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages", "category"]},
+            },
+        ),
+        "check_category": NodeConfig(
+            id="check_category",
+            type=NodeType.CONDITION,
+            config={"expression": "category"},
+        ),
+        "finance_agent": NodeConfig(
+            id="finance_agent",
+            type=NodeType.AGENT,
+            config={
+                "model": specialist_model,
+                "system_prompt": finance_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        ),
+        "tech_agent": NodeConfig(
+            id="tech_agent",
+            type=NodeType.AGENT,
+            config={
+                "model": specialist_model,
+                "system_prompt": tech_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        ),
+        "legal_agent": NodeConfig(
+            id="legal_agent",
+            type=NodeType.AGENT,
+            config={
+                "model": specialist_model,
+                "system_prompt": legal_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        ),
+        "general_agent": NodeConfig(
+            id="general_agent",
+            type=NodeType.AGENT,
+            config={
+                "model": specialist_model,
+                "system_prompt": general_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        ),
+    }
+
+    edges = [
+        Edge(source="classifier", target="check_category"),
+        Edge(
+            source="check_category",
+            target={
+                "finance": "finance_agent",
+                "tech": "tech_agent",
+                "legal": "legal_agent",
+                "default": "general_agent",
+            },
+        ),
+        Edge(source="finance_agent", target="__end__"),
+        Edge(source="tech_agent", target="__end__"),
+        Edge(source="legal_agent", target="__end__"),
+        Edge(source="general_agent", target="__end__"),
+    ]
+
+    state = {
+        "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
+        "category": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+    }
+
+    return GraphConfig(
+        version="1.0",
+        name="conditional-pipeline",
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry="classifier",
+    )
+
+
+def build_reflection_loop(
+    drafter_model: str,
+    reviewer_model: str,
+    reviser_model: str,
+    drafter_prompt: str = "You are a drafter. Create an initial draft.",
+    reviewer_prompt: str = (
+        "You are a reviewer. Evaluate quality. Set quality_status to 'approved' or 'needs_improvement'."
+    ),
+    reviser_prompt: str = "You are a reviser. Improve the draft based on feedback.",
+) -> GraphConfig:
+    """Build a reflection loop: drafter → reviewer → check quality → revise or finish.
+
+    Args:
+        drafter_model: Model for the drafter node.
+        reviewer_model: Model for the reviewer node.
+        reviser_model: Model for the reviser node.
+        drafter_prompt: System prompt for the drafter.
+        reviewer_prompt: System prompt for the reviewer.
+        reviser_prompt: System prompt for the reviser.
+
+    Returns:
+        A GraphConfig with iterative refinement loop.
+    """
+    nodes = {
+        "drafter": NodeConfig(
+            id="drafter",
+            type=NodeType.AGENT,
+            config={
+                "model": drafter_model,
+                "system_prompt": drafter_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages", "draft"]},
+            },
+        ),
+        "reviewer": NodeConfig(
+            id="reviewer",
+            type=NodeType.AGENT,
+            config={
+                "model": reviewer_model,
+                "system_prompt": reviewer_prompt,
+                "channels": {"readable": ["messages", "draft"], "writable": ["messages", "quality_status"]},
+            },
+        ),
+        "check_quality": NodeConfig(
+            id="check_quality",
+            type=NodeType.CONDITION,
+            config={"expression": "quality_status == 'needs_improvement'"},
+        ),
+        "reviser": NodeConfig(
+            id="reviser",
+            type=NodeType.AGENT,
+            config={
+                "model": reviser_model,
+                "system_prompt": reviser_prompt,
+                "channels": {"readable": ["messages", "draft", "quality_status"], "writable": ["messages", "draft"]},
+            },
+        ),
+    }
+
+    edges = [
+        Edge(source="drafter", target="reviewer"),
+        Edge(source="reviewer", target="check_quality"),
+        Edge(source="check_quality", target={"true": "reviser", "false": "__end__"}),
+        Edge(source="reviser", target="reviewer"),
+    ]
+
+    state = {
+        "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
+        "draft": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+        "quality_status": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+    }
+
+    return GraphConfig(
+        version="1.0",
+        name="reflection-loop",
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry="drafter",
+    )

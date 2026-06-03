@@ -54,7 +54,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["conversation", "tool-call", "condition", "agent", "knowledge-retrieval", "variable-set"]
+            "enum": ["conversation", "tool-call", "condition", "agent", "knowledge-retrieval", "variable-set", "fan-out", "merge"]
           },
           "config": {
             "type": "object",
@@ -72,6 +72,9 @@
               "value": {},
               "agent_id": { "type": "string", "description": "UUID of the agent to invoke (agent node type)" },
               "invocation_mode": { "type": "string", "enum": ["direct", "tool"], "description": "How the agent is invoked: direct (execute inline) or tool (expose as callable tool)" },
+              "branches": { "type": "array", "items": { "type": "string" }, "description": "Node IDs of parallel branches (fan-out node type)" },
+              "fan_out_source": { "type": "string", "description": "ID of the upstream FAN_OUT node (merge node type)" },
+              "output_channel": { "type": "string", "description": "Channel name to write aggregated results (merge node type)" },
               "channels": {
                 "type": "object",
                 "properties": {
