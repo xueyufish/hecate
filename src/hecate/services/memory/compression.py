@@ -44,7 +44,7 @@ class CompressionPipeline:
         """Initialize the compression pipeline.
 
         Args:
-            token_counter: Token counter for measuring compression效果.
+            token_counter: Token counter for measuring compression effect.
         """
         self.token_counter = token_counter or TokenCounter()
 

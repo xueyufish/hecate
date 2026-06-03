@@ -74,7 +74,7 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 
 | File | Purpose |
 |------|---------|
-| `docs/features/feature-catalog.md` | Full feature inventory (~400 lines, in Chinese) |
+| `docs/features/feature-catalog.md` | Full feature inventory (~400 lines) |
 | `docs/design/architecture.md` | Top-level architecture v0.2 |
 | `docs/research/reports/00-architecture-decisions.md` | 10 architecture decisions (AD-1~AD-10) |
 | `schemas/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) |
@@ -132,7 +132,7 @@ Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCas
 
 ### Language
 
-All **code** artifacts — code, docstrings, comments, specs, design docs, proposals, tasks — **SHALL be written in English**. The feature catalog (`docs/features/feature-catalog.md`) is an exception and is maintained in Chinese.
+All **code** artifacts — code, docstrings, comments, specs, design docs, proposals, tasks — **SHALL be written in English**.
 
 We may converse in Chinese, but everything committed to the repository is English unless explicitly noted.
 
@@ -162,11 +162,3 @@ We may converse in Chinese, but everything committed to the repository is Englis
 - **Don't** import from `engine/` in `api/` — route through `services/` + `EnginePort`.
 - **Don't** use `git commit --no-verify` to skip pre-commit hooks.
 - **Don't** assume test failures are "pre-existing" without investigating.
-
-## Implementation status
-
-**Done (P1)**: All 88 tasks across §1-§11 (project skeleton through documentation).
-
-**Done (P2 engine ABCs)**: EventStore, SchedulerStrategy, EvictionPolicy, ContextEngine, OptimizationPass, LLM Circuit Breaker, GuardrailHook (4 independent ABCs, composition over inheritance).
-
-**In progress (P2)**: 1.3.13 PlanningAgent, 2.3a orchestration pattern library, 2.9 Agent-as-Tool, 4.1a MemoryBlock.
