@@ -6,21 +6,20 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.15.0
+  - repo: local
     hooks:
       - id: mypy
-        files: ^src/
-        additional_dependencies:
-          - pydantic>=2.0
-          - sqlalchemy>=2.0
-          - fastapi
+        name: mypy
+        entry: .venv/bin/python -m mypy src/
+        language: system
+        pass_filenames: false
+        always_run: true
 
   - repo: local
     hooks:
       - id: pytest
         name: pytest
-        entry: .venv/bin/python -m pytest tests/ -q --tb=short
+        entry: scripts/smart-pytest.sh
         language: system
         pass_filenames: false
         always_run: true
