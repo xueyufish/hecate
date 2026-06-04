@@ -134,13 +134,13 @@ export default function WorkflowEditorPage() {
         { graph_dsl: reactFlowToDsl(nodes, edges, workflow.name) }
       );
       if (result.valid) {
-        alert("验证通过");
+        alert("Validation passed");
       } else {
-        alert("验证失败:\n" + result.errors.join("\n"));
+        alert("Validation failed:\n" + result.errors.join("\n"));
       }
     } catch (err: unknown) {
       const apiErr = err as { error?: { message?: string } };
-      alert("验证错误: " + (apiErr.error?.message || "未知错误"));
+      alert("Validation error: " + (apiErr.error?.message || "Unknown error"));
     }
   }
 
@@ -172,7 +172,7 @@ export default function WorkflowEditorPage() {
       setRunHistory((prev) => [withTimestamp, ...prev].slice(0, MAX_HISTORY));
     } catch (err: unknown) {
       const apiErr = err as { error?: { message?: string } };
-      alert("测试运行错误: " + (apiErr.error?.message || "未知错误"));
+      alert("Test run error: " + (apiErr.error?.message || "Unknown error"));
     } finally {
       setRunning(false);
     }
@@ -252,7 +252,7 @@ export default function WorkflowEditorPage() {
   }
 
   if (loading) {
-    return <div className="text-muted-foreground">加载中...</div>;
+    return <div className="text-muted-foreground">Loading...</div>;
   }
 
   if (!workflow) {
@@ -266,7 +266,7 @@ export default function WorkflowEditorPage() {
           <Link href="/workflows">
             <Button variant="ghost" size="sm">
               <ArrowLeft className="mr-1 h-4 w-4" />
-              返回
+              Back
             </Button>
           </Link>
           <h1 className="text-lg font-semibold">{workflow.name}</h1>
@@ -274,26 +274,26 @@ export default function WorkflowEditorPage() {
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowTemplatePicker(true)}>
             <LayoutTemplate className="mr-1 h-4 w-4" />
-            编排模板
+            Templates
           </Button>
           <Button variant="outline" size="sm" onClick={handleValidate}>
             <CheckCircle className="mr-1 h-4 w-4" />
-            验证
+            Validate
           </Button>
           <Button variant="outline" size="sm" onClick={() => setShowInputForm(!showInputForm)}>
-            输入
+            Input
           </Button>
           <Button variant="outline" size="sm" onClick={() => setShowHistory(!showHistory)}>
             <History className="mr-1 h-4 w-4" />
-            历史 ({runHistory.length})
+            History ({runHistory.length})
           </Button>
           <Button size="sm" onClick={handleTestRun} disabled={running}>
             <Play className="mr-1 h-4 w-4" />
-            {running ? "运行中..." : "测试运行"}
+            {running ? "Running..." : "Test Run"}
           </Button>
           <Button size="sm" onClick={handleSave} disabled={saving}>
             <Save className="mr-1 h-4 w-4" />
-            {saving ? "保存中..." : "保存"}
+            {saving ? "Saving..." : "Save"}
           </Button>
         </div>
       </div>
@@ -325,7 +325,7 @@ export default function WorkflowEditorPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium">
-                    测试结果: {testResult.status === "completed" ? "✅ 完成" : "❌ 失败"}
+                    Test Result: {testResult.status === "completed" ? "✅ Completed" : "❌ Failed"}
                   </span>
                   {testResult.total_duration_ms && (
                     <span className="text-xs text-muted-foreground">
@@ -336,7 +336,7 @@ export default function WorkflowEditorPage() {
                 <div className="flex items-center gap-1">
                   <Button variant="ghost" size="sm" onClick={() => setShowLogs(!showLogs)}>
                     {showLogs ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    日志
+                    Logs
                   </Button>
                   <Button variant="ghost" size="sm" onClick={clearResults}>
                     <X className="h-4 w-4" />
@@ -380,7 +380,7 @@ export default function WorkflowEditorPage() {
           {showInputForm && (
             <div className="border-b p-3 space-y-2">
               <div className="flex items-center justify-between">
-                <Label className="text-xs font-medium">输入数据</Label>
+                <Label className="text-xs font-medium">Input Data</Label>
                 <Button variant="ghost" size="sm" onClick={() => setShowInputForm(false)}>
                   <X className="h-3 w-3" />
                 </Button>
@@ -401,7 +401,7 @@ export default function WorkflowEditorPage() {
           {selectedNode && (
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-xs font-medium">节点详情</Label>
+                <Label className="text-xs font-medium">Node Details</Label>
                 <Button variant="ghost" size="sm" onClick={() => setSelectedNode(null)}>
                   <X className="h-3 w-3" />
                 </Button>
@@ -457,7 +457,7 @@ export default function WorkflowEditorPage() {
           {!showInputForm && !selectedNode && (
             <div className="flex flex-1 items-center justify-center p-3">
               <p className="text-xs text-muted-foreground text-center">
-                点击&quot;输入&quot;配置测试数据，<br />或点击节点查看执行结果
+                Click &quot;Input&quot; to configure test data,<br />or click a node to view its result
               </p>
             </div>
           )}
@@ -466,13 +466,13 @@ export default function WorkflowEditorPage() {
         {showHistory && (
           <div className="absolute right-0 top-12 z-50 w-64 rounded-md border bg-background p-2 shadow-md">
             <div className="flex items-center justify-between mb-2">
-              <Label className="text-xs font-medium">运行历史</Label>
+              <Label className="text-xs font-medium">Run History</Label>
               <Button variant="ghost" size="sm" onClick={() => setShowHistory(false)}>
                 <X className="h-3 w-3" />
               </Button>
             </div>
             {runHistory.length === 0 ? (
-              <p className="text-xs text-muted-foreground">暂无历史记录</p>
+              <p className="text-xs text-muted-foreground">No history</p>
             ) : (
               <div className="max-h-60 overflow-y-auto space-y-1">
                 {runHistory.map((entry, i) => (
@@ -483,7 +483,7 @@ export default function WorkflowEditorPage() {
                   >
                     <div className="flex items-center gap-2">
                       <span className={`h-2 w-2 rounded-full ${getNodeStatusColor(entry.status)}`} />
-                      <span>{entry.status === "completed" ? "完成" : "失败"}</span>
+                      <span>{entry.status === "completed" ? "Completed" : "Failed"}</span>
                     </div>
                     <span className="text-muted-foreground">
                       {entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : ""}

@@ -33,7 +33,7 @@ export default function NewWorkflowPage() {
 
   async function handleSubmit() {
     if (!name.trim()) {
-      setError("请输入工作流名称");
+      setError("Please enter a workflow name");
       return;
     }
 
@@ -41,7 +41,7 @@ export default function NewWorkflowPage() {
     try {
       graphDsl = JSON.parse(dslText);
     } catch {
-      setError("Graph DSL JSON 格式错误");
+      setError("Invalid Graph DSL JSON format");
       return;
     }
 
@@ -57,7 +57,7 @@ export default function NewWorkflowPage() {
       router.push("/workflows");
     } catch (err: unknown) {
       const apiErr = err as { error?: { message?: string } };
-      setError(apiErr.error?.message || "创建失败");
+      setError(apiErr.error?.message || "Creation failed");
     } finally {
       setSubmitting(false);
     }
@@ -69,32 +69,32 @@ export default function NewWorkflowPage() {
         <Link href="/workflows">
           <Button variant="ghost" size="sm">
             <ArrowLeft className="mr-1 h-4 w-4" />
-            返回
+            Back
           </Button>
         </Link>
-        <h1 className="text-2xl font-bold">新建工作流</h1>
+        <h1 className="text-2xl font-bold">New Workflow</h1>
       </div>
 
       <div className="max-w-2xl space-y-4">
         <div>
-          <label className="mb-1 block text-sm font-medium">名称</label>
+          <label className="mb-1 block text-sm font-medium">Name</label>
           <input
             type="text"
             className="w-full rounded-md border px-3 py-2 text-sm"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="工作流名称"
+            placeholder="Workflow name"
           />
         </div>
 
         <div>
-          <label className="mb-1 block text-sm font-medium">描述</label>
+          <label className="mb-1 block text-sm font-medium">Description</label>
           <textarea
             className="w-full rounded-md border px-3 py-2 text-sm"
             rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="工作流描述（可选）"
+            placeholder="Workflow description (optional)"
           />
         </div>
 
@@ -115,7 +115,7 @@ export default function NewWorkflowPage() {
         )}
 
         <Button onClick={handleSubmit} disabled={submitting}>
-          {submitting ? "创建中..." : "创建"}
+          {submitting ? "Creating..." : "Create"}
         </Button>
       </div>
     </div>

@@ -36,7 +36,7 @@ export default function WorkflowsPage() {
   }, []);
 
   if (loading) {
-    return <div className="text-muted-foreground">加载中...</div>;
+    return <div className="text-muted-foreground">Loading...</div>;
   }
 
   return (
@@ -44,26 +44,26 @@ export default function WorkflowsPage() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Share2 className="h-6 w-6" />
-          <h1 className="text-2xl font-bold">工作流</h1>
+          <h1 className="text-2xl font-bold">Workflows</h1>
         </div>
         <Link href="/workflows/new">
           <Button>
             <Plus className="mr-2 h-4 w-4" />
-            新建工作流
+            New Workflow
           </Button>
         </Link>
       </div>
 
       {workflows.length === 0 ? (
-        <div className="text-muted-foreground">暂无工作流</div>
+        <div className="text-muted-foreground">No workflows yet</div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>名称</TableHead>
-              <TableHead>版本</TableHead>
-              <TableHead>创建时间</TableHead>
-              <TableHead>操作</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Version</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -79,7 +79,7 @@ export default function WorkflowsPage() {
                     href={`/workflows/${wf.id}`}
                     className="text-sm text-blue-600 hover:underline"
                   >
-                    编辑
+                    Edit
                   </Link>
                 </TableCell>
               </TableRow>
