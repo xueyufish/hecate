@@ -31,12 +31,12 @@ interface ParsedDsl {
 }
 
 const NODE_TYPE_LABELS: Record<string, string> = {
-  conversation: "对话",
-  "tool-call": "工具调用",
-  condition: "条件",
+  conversation: "Conversation",
+  "tool-call": "Tool Call",
+  condition: "Condition",
   agent: "Agent",
-  "knowledge-retrieval": "知识检索",
-  "variable-set": "变量设置",
+  "knowledge-retrieval": "Knowledge Retrieval",
+  "variable-set": "Variable Set",
 };
 
 /** Convert Graph DSL to React Flow nodes and edges */
@@ -77,7 +77,7 @@ export function dslToReactFlow(dsl: ParsedDsl): {
         target,
         animated: true as const,
         style: isHandoff ? { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5 5" } : undefined,
-        label: isHandoff ? "移交" : "",
+        label: isHandoff ? "Handoff" : "",
         data: { edgeType: isHandoff ? "handoff" : "default" },
       }];
     }
@@ -115,7 +115,7 @@ export function reactFlowToDsl(
   const simpleEdges: { source: string; target: string }[] = [];
 
   for (const edge of edges) {
-    if (edge.label && typeof edge.label === "string" && edge.label !== "移交") {
+    if (edge.label && typeof edge.label === "string" && edge.label !== "Handoff") {
       if (!edgeGroups.has(edge.source)) {
         edgeGroups.set(edge.source, new Map());
       }
@@ -134,7 +134,7 @@ export function reactFlowToDsl(
     );
     const isHandoff =
       (flowEdge?.data as Record<string, unknown> | undefined)?.edgeType === "handoff" ||
-      (flowEdge?.label === "移交");
+      (flowEdge?.label === "Handoff");
     dslEdges.push({
       source,
       target,

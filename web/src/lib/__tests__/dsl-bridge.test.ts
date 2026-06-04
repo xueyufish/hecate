@@ -83,7 +83,7 @@ describe("dslToReactFlow", () => {
       strokeWidth: 2,
       strokeDasharray: "5 5",
     });
-    expect(edges[0].label).toBe("移交");
+    expect(edges[0].label).toBe("Handoff");
     expect((edges[0].data as Record<string, unknown>)?.edgeType).toBe("handoff");
   });
 
@@ -106,7 +106,7 @@ describe("dslToReactFlow", () => {
     });
 
     const { nodes } = dslToReactFlow(dsl);
-    expect(nodes[0].data.label).toBe("工具调用");
+    expect(nodes[0].data.label).toBe("Tool Call");
   });
 });
 

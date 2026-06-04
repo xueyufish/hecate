@@ -86,7 +86,7 @@ export default function CanvasArea({
           ? {
               type: "handoff",
               style: { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5 5" },
-              label: "移交",
+              label: "Handoff",
               data: { edgeType: "handoff" },
             }
           : {}),
@@ -97,7 +97,7 @@ export default function CanvasArea({
   );
 
   const typedEdges = edges.map((edge: any) => {
-    if (edge.data?.edgeType === "handoff" || edge.label === "移交") {
+    if (edge.data?.edgeType === "handoff" || edge.label === "Handoff") {
       return { ...edge, type: "handoff", animated: false };
     }
     return edge;

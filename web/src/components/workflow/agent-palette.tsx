@@ -34,13 +34,13 @@ export function AgentPalette() {
   return (
     <div className="flex flex-col gap-1">
       <span className="text-xs font-semibold text-muted-foreground px-1 py-1">
-        已有 Agent
+        Existing Agents
       </span>
       {loading && (
-        <span className="text-xs text-muted-foreground px-1">加载中...</span>
+        <span className="text-xs text-muted-foreground px-1">Loading...</span>
       )}
       {!loading && agents.length === 0 && (
-        <span className="text-xs text-muted-foreground px-1">暂无 Agent</span>
+        <span className="text-xs text-muted-foreground px-1">No agents available</span>
       )}
       {agents.map((agent) => (
         <div

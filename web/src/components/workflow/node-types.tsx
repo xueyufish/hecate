@@ -78,7 +78,7 @@ export const AgentNode = memo(function AgentNode(props: NodeProps) {
         )}
         {invocationMode && invocationMode !== "direct" && (
           <span className="inline-flex self-start rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
-            {invocationMode === "tool" ? "工具模式" : invocationMode}
+            {invocationMode === "tool" ? "Tool Mode" : invocationMode}
           </span>
         )}
       </div>
@@ -100,7 +100,7 @@ export const StartNode = memo(function StartNode() {
       <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-green-400 bg-green-100">
         <Play className="h-4 w-4 text-green-600" />
       </div>
-      <span className="mt-1 text-xs text-muted-foreground">开始</span>
+      <span className="mt-1 text-xs text-muted-foreground">Start</span>
     </div>
   );
 });
@@ -111,7 +111,7 @@ export const EndNode = memo(function EndNode() {
       <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-red-400 bg-red-100">
         <Square className="h-4 w-4 text-red-600" />
       </div>
-      <span className="mt-1 text-xs text-muted-foreground">结束</span>
+      <span className="mt-1 text-xs text-muted-foreground">End</span>
     </div>
   );
 });

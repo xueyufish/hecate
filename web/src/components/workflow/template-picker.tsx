@@ -50,21 +50,21 @@ export function TemplatePicker({ onSelect, onClose }: TemplatePickerProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-[480px] rounded-lg border bg-background p-4 shadow-lg">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-semibold">编排模板</h3>
+          <h3 className="text-sm font-semibold">Templates</h3>
           <button
             onClick={onClose}
             className="text-xs text-muted-foreground hover:text-foreground"
           >
-            关闭
+            Close
           </button>
         </div>
 
         {loading && (
-          <p className="text-xs text-muted-foreground">加载中...</p>
+          <p className="text-xs text-muted-foreground">Loading...</p>
         )}
 
         {!loading && templates.length === 0 && (
-          <p className="text-xs text-muted-foreground">暂无可用模板</p>
+          <p className="text-xs text-muted-foreground">No templates available</p>
         )}
 
         <div className="space-y-2 max-h-[400px] overflow-y-auto">
@@ -85,9 +85,9 @@ export function TemplatePicker({ onSelect, onClose }: TemplatePickerProps) {
                 {t.description}
               </p>
               <div className="flex gap-3 mt-1.5 text-[10px] text-muted-foreground">
-                <span>{t.preview.total_nodes} 节点</span>
+                <span>{t.preview.total_nodes} nodes</span>
                 <span>{t.preview.agent_nodes} Agent</span>
-                <span>{t.preview.total_edges} 连线</span>
+                <span>{t.preview.total_edges} edges</span>
               </div>
             </button>
           ))}

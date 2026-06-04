@@ -13,19 +13,19 @@ interface ConfigPanelProps {
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  conversation: "对话节点",
-  "tool-call": "工具调用节点",
-  condition: "条件节点",
-  agent: "Agent 节点",
-  "knowledge-rerieval": "知识检索节点",
-  "variable-set": "变量设置节点",
+  conversation: "Conversation Node",
+  "tool-call": "Tool Call Node",
+  condition: "Condition Node",
+  agent: "Agent Node",
+  "knowledge-retrieval": "Knowledge Retrieval Node",
+  "variable-set": "Variable Set Node",
 };
 
 export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
   if (!node) {
     return (
       <div className="flex h-full w-[300px] items-center justify-center border-l bg-muted/30 p-4 text-sm text-muted-foreground">
-        选择节点以配置
+        Select a node to configure
       </div>
     );
   }
@@ -41,7 +41,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
     <div className="flex h-full w-[300px] flex-col border-l bg-background">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h3 className="text-sm font-semibold">
-          {TYPE_LABELS[node.type] || "节点配置"}
+          {TYPE_LABELS[node.type] || "Node Configuration"}
         </h3>
         <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
           <X className="h-4 w-4" />
@@ -53,7 +53,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
           <>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                模型
+                 Model
               </label>
               <input
                 type="text"
@@ -65,14 +65,14 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                系统提示词
+                 System Prompt
               </label>
               <textarea
                 className="w-full rounded-md border px-3 py-1.5 text-sm"
                 rows={4}
                 value={(config.system_prompt as string) || ""}
                 onChange={(e) => handleChange("system_prompt", e.target.value)}
-                placeholder="输入系统提示词..."
+                placeholder="Enter system prompt..."
               />
             </div>
           </>
@@ -81,7 +81,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
         {node.type === "condition" && (
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              条件表达式
+               Condition Expression
             </label>
             <input
               type="text"
@@ -96,7 +96,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
         {node.type === "tool-call" && (
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              工具名称
+               Tool Name
             </label>
             <input
               type="text"
@@ -111,7 +111,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
         {node.type === "agent" && (
           <div>
             <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Agent 引用
+              Agent Reference
             </label>
             <input
               type="text"
@@ -127,7 +127,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
           <>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                知识库 ID（逗号分隔）
+                Knowledge Base IDs (comma-separated)
               </label>
               <input
                 type="text"
@@ -151,14 +151,14 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                查询模板
+                Query Template
               </label>
               <textarea
                 className="w-full rounded-md border px-3 py-1.5 text-sm"
                 rows={3}
                 value={(config.query_template as string) || ""}
                 onChange={(e) => handleChange("query_template", e.target.value)}
-                placeholder="查询模板..."
+                placeholder="Query template..."
               />
             </div>
             <div>
@@ -179,7 +179,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
           <>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                变量名
+                Variable Name
               </label>
               <input
                 type="text"
@@ -191,7 +191,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-muted-foreground">
-                值
+                Value
               </label>
               <input
                 type="text"
@@ -206,7 +206,7 @@ export function ConfigPanel({ node, onUpdate, onClose }: ConfigPanelProps) {
                     handleChange("value", e.target.value);
                   }
                 }}
-                placeholder="值或 JSON 表达式"
+                placeholder="Value or JSON expression"
               />
             </div>
           </>

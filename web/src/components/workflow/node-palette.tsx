@@ -10,19 +10,19 @@ import {
 } from "lucide-react";
 
 const PALETTE_ITEMS = [
-  { type: "conversation", label: "对话", icon: Bot, color: "text-blue-600" },
-  { type: "condition", label: "条件", icon: GitBranch, color: "text-yellow-600" },
-  { type: "tool-call", label: "工具调用", icon: Wrench, color: "text-purple-600" },
+  { type: "conversation", label: "Conversation", icon: Bot, color: "text-blue-600" },
+  { type: "condition", label: "Condition", icon: GitBranch, color: "text-yellow-600" },
+  { type: "tool-call", label: "Tool Call", icon: Wrench, color: "text-purple-600" },
   { type: "agent", label: "Agent", icon: Users, color: "text-green-600" },
   {
     type: "knowledge-retrieval",
-    label: "知识检索",
+    label: "Knowledge Retrieval",
     icon: Search,
     color: "text-cyan-600",
   },
   {
     type: "variable-set",
-    label: "变量设置",
+    label: "Variable Set",
     icon: Variable,
     color: "text-orange-600",
   },
@@ -38,7 +38,7 @@ export function NodePalette() {
     <>
       <div className="border-b px-3 py-2">
         <span className="text-xs font-semibold text-muted-foreground">
-          节点类型
+          Node Types
         </span>
       </div>
       <div className="flex-1 space-y-1 p-2">
