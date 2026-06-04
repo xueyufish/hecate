@@ -124,7 +124,7 @@ class TestListModels:
         provider_resp = await models_client.post(
             "/api/model-providers",
             json={
-                "display_name": "智谱AI",
+                "display_name": "Zhipu AI",
                 "api_key": "sk-test",
             },
         )
@@ -144,7 +144,7 @@ class TestListModels:
 
         glm_model = next(m for m in result["data"] if m["id"] == "glm-4")
         assert glm_model["provider"]  # auto-generated slug
-        assert glm_model["provider_display_name"] == "智谱AI"
+        assert glm_model["provider_display_name"] == "Zhipu AI"
 
     async def test_list_models_disabled_provider_excluded(
         self,
