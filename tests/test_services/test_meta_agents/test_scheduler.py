@@ -43,7 +43,6 @@ async def test_start_and_stop(scheduler: MetaAgentScheduler) -> None:
 
 
 async def test_run_agent_records_result(scheduler: MetaAgentScheduler) -> None:
-
     async def ok_agent() -> None:
         pass
 
@@ -55,7 +54,6 @@ async def test_run_agent_records_result(scheduler: MetaAgentScheduler) -> None:
 
 
 async def test_run_agent_records_error(scheduler: MetaAgentScheduler) -> None:
-
     async def bad_agent() -> None:
         raise ValueError("boom")
 
@@ -66,7 +64,6 @@ async def test_run_agent_records_error(scheduler: MetaAgentScheduler) -> None:
 
 
 async def test_get_results(scheduler: MetaAgentScheduler) -> None:
-
     async def agent() -> None:
         pass
 

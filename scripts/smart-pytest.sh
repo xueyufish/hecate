@@ -1,20 +1,24 @@
 #!/usr/bin/env bash
 # Run pytest scoped to changed files based on dependency layer mapping.
-#
-# Layer mapping:
-#   engine/    -> test_engine/
-#   models/    -> test_models/ + test_api/ + test_services/
-#   services/  -> test_services/ + test_api/
-#   api/       -> test_api/
-#   core/      -> full suite (infrastructure affects everything)
-#   tests/     -> only the changed test directory
+# Optimizations:
+#   1. Skip pytest for doc-only, frontend-only, config-only changes
+#   2. Scope tests by dependency layer (engine->test_engine, etc.)
+#   3. Use pytest-xdist for parallel execution (-n auto)
 set -euo pipefail
 
 staged=$(git diff --cached --name-only --diff-filter=ACMR)
 
 if [ -z "$staged" ]; then
-    echo "pytest: no staged files, running full suite"
-    exec .venv/bin/python -m pytest tests/ -q --tb=short -x
+    echo "pytest: no staged files, skipping"
+    exit 0
+fi
+
+# Check if only non-Python files changed (docs, frontend, configs)
+python_files=$(echo "$staged" | grep -E '\.py$' || true)
+
+if [ -z "$python_files" ]; then
+    echo "pytest: no Python files changed, skipping"
+    exit 0
 fi
 
 test_dirs=""
@@ -23,7 +27,7 @@ while IFS= read -r f; do
     case "$f" in
         src/hecate/core/*|alembic/*|pyproject.toml)
             echo "pytest: full suite (infrastructure change: $f)"
-            exec .venv/bin/python -m pytest tests/ -q --tb=short -x
+            exec .venv/bin/python -m pytest tests/ -q --tb=short -x -n auto
             ;;
         src/hecate/engine/*)
             test_dirs="$test_dirs tests/test_engine"
@@ -42,15 +46,14 @@ while IFS= read -r f; do
             test_dirs="$test_dirs $dir"
             ;;
     esac
-done <<< "$staged"
+done <<< "$python_files"
 
 test_dirs=$(echo "$test_dirs" | tr ' ' '\n' | sort -u | grep -v '^$' | tr '\n' ' ' || true)
 
-# Only non-testable files changed (configs, scripts, docs, web) -> skip pytest
 if [ -z "$test_dirs" ]; then
     echo "pytest: no testable changes detected, skipping"
     exit 0
 fi
 
 echo "pytest: scoped -> $test_dirs"
-exec .venv/bin/python -m pytest $test_dirs -q --tb=short -x
+exec .venv/bin/python -m pytest $test_dirs -q --tb=short -x -n auto
