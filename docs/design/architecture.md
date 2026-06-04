@@ -1,114 +1,114 @@
-# Hecate 顶层架构设计
+# Hecate Top-Level Architecture Design
 
-> **版本**: v0.2
-> **日期**: 2026-05-16
-> **状态**: Draft
-> **定位**: Hecate 企业级 Agent 平台的顶层架构设计，聚焦 P1 范围（月 1-3，19 个核心功能），P2-P4 用扩展点标注
-> **调研基础**: 26 个项目调研 + 7 份综合报告 + 华为财经 Agent 建设指南 + RelayAgent 架构分析
+> **Version**: v0.2
+> **Date**: 2026-05-16
+> **Status**: Draft
+> **Scope**: Top-level architecture design for the Hecate enterprise Agent platform, focusing on P1 scope (months 1-3, 19 core features), with P2-P4 noted as extension points
+> **Research Basis**: 26 project surveys + 7 comprehensive reports + Huawei Finance Agent construction guide + RelayAgent architecture analysis
 
 ---
 
-## 架构决策记录 (ADR)
+## Architecture Decision Records (ADR)
 
-本节汇总所有已确认的架构决策，每条决策包含背景、结论和理由。
+This section summarizes all confirmed architecture decisions. Each decision includes background, conclusion, and rationale.
 
-### AD-1: 编排模式 — Graph 编排为主，三层 Agent 为预设模板
+### AD-1: Orchestration Pattern — Graph-first with Three-Layer Agent as Preset Template
 
-- **背景**: 需要确定 Agent 编排的基本范式 — 固定分层 vs 通用图 vs 代码优先
-- **结论**: Graph 编排为主，三层 Agent（Guard→Plan→Sub-Agent）作为预设 Workflow 模板
-- **理由**: 三层 Agent 是固定 Graph 拓扑的特例，不是替代。渐进式复杂度（对话→三层Agent模板→画布→代码SDK），每层向上兼容
-- **竞品对比**: 华为财经 Agent 硬编码 6 种编排模式；RelayAgent 三层 Agent 硬编码；Hecate 用通用 Graph 统一，三层 Agent 只是模板
+- **Background**: Need to determine the basic paradigm for Agent orchestration — fixed layering vs. general-purpose graph vs. code-first
+- **Conclusion**: Graph orchestration as primary, three-layer Agent (Guard→Plan→Sub-Agent) as preset workflow template
+- **Rationale**: Three-layer Agent is a special case of fixed Graph topology, not a replacement. Progressive complexity (conversation→three-layer Agent template→canvas→code SDK), each level is backward compatible
+- **Competitor Comparison**: Huawei Finance Agent hardcodes 6 orchestration patterns; RelayAgent hardcodes three-layer Agent; Hecate unifies with general-purpose Graph, three-layer Agent is just a template
 
-### AD-2: 系统分层 — 五层架构
+### AD-2: System Layering — Five-Layer Architecture
 
-- **背景**: 需要确定系统的分层方式，平衡模块化和复杂度
-- **结论**: 五层架构 — 接入层→编排层→执行引擎层→能力服务层→基础设施层
-- **理由**: 编排层（做什么）和执行引擎层（怎么跑）解耦，便于独立演进和替换
-- **竞品对比**: Dify 四层（接入→编排→服务→数据）；华为四层（接入→服务→引擎→基础设施）；Hecate 增加独立的编排层
+- **Background**: Need to determine system layering approach, balancing modularity and complexity
+- **Conclusion**: Five-layer architecture — Gateway→Orchestration→Execution Engine→Capability Services→Infrastructure
+- **Rationale**: Decoupling the orchestration layer (what to do) from the execution engine layer (how to run) enables independent evolution and replacement
+- **Competitor Comparison**: Dify uses four layers (Gateway→Orchestration→Services→Data); Huawei uses four layers (Gateway→Services→Engine→Infrastructure); Hecate adds an independent orchestration layer
 
-### AD-3: Session 状态 — Checkpoint 持久化 + 内存缓存
+### AD-3: Session State — Checkpoint Persistence + Memory Cache
 
-- **背景**: 需要确定 Session 的状态管理策略 — 有状态 vs 无状态 vs 混合
-- **结论**: P1 实现 Checkpoint 持久化接口（PostgreSQL），允许内存缓存加速 hot path，缓存一致性 P2 优化
-- **理由**: Checkpoint 接口必须 P1 就有（支持断点恢复、时间旅行调试），内存缓存是性能优化
-- **竞品对比**: RelayAgent 严格无状态（Session V2 + 事件溯源重建）；LangGraph Checkpoint 可选；Hecate 取中间路线
+- **Background**: Need to determine Session state management strategy — stateful vs. stateless vs. hybrid
+- **Conclusion**: P1 implements Checkpoint persistence interface (PostgreSQL), allows memory cache for hot path acceleration, cache consistency optimized in P2
+- **Rationale**: Checkpoint interface must exist from P1 (supports breakpoint recovery, time-travel debugging), memory cache is a performance optimization
+- **Competitor Comparison**: RelayAgent is strictly stateless (Session V2 + event sourcing rebuild); LangGraph Checkpoint is optional; Hecate takes a middle-ground approach
 
-### AD-4: Skill 系统 — P1 核心 / P2 增强
+### AD-4: Skill System — P1 Core / P2 Enhanced
 
-- **背景**: Skill 系统是 Hecate 的核心差异化之一，需要确定 P1/P2 边界
-- **结论**: P1 实现 SKILL.md 格式 + 多源发现（system/user/project）+ 按需加载；P2 增加知识图谱自动选择 + Play 咨询模式 + 远程源 + 角色叠加
-- **理由**: P1 的 Skill 核心足以支撑三层 Agent 模板的 Sub-Agent 动态加载；知识图谱等增强功能不是 P1 阻塞项
-- **竞品对比**: RelayAgent 4-Tier Skill + 知识图谱 + Play 模式；Claude Code SKILL.md 格式；Hecate P1 覆盖 Claude Code 模式，P2 覆盖 RelayAgent 增强
+- **Background**: The Skill system is one of Hecate's core differentiators; need to determine P1/P2 boundary
+- **Conclusion**: P1 implements SKILL.md format + multi-source discovery (system/user/project) + on-demand loading; P2 adds knowledge graph auto-selection + Play advisory mode + remote sources + role overlay
+- **Rationale**: P1 Skill core is sufficient to support three-layer Agent template's Sub-Agent dynamic loading; knowledge graph and other enhancements are not P1 blockers
+- **Competitor Comparison**: RelayAgent has 4-Tier Skill + knowledge graph + Play mode; Claude Code uses SKILL.md format; Hecate P1 covers Claude Code's pattern, P2 covers RelayAgent's enhancements
 
-### AD-5: 执行引擎分布式 — Worker Pool 渐进式
+### AD-5: Execution Engine Distribution — Progressive Worker Pool
 
-- **背景**: 当前功能清单中未明确多进程/分布式执行的支持路径，需要确定演进方向
-- **结论**: Pregel 调度器保持单进程（轻量），Node 实际执行分发到 Worker Pool。P1 进程内线程池 → P2 跨进程 Worker → P3 可选 Temporal 后端
-- **理由**: Channel/Checkpoint 所有权在 Scheduler（简单），Worker 无状态可扩展（弹性），演进到 P3 时替换调度器为 Temporal（兼容）
-- **关键约束**: Worker 只接收 Channel 只读快照，不直接修改 Channel；interrupt 通过 WorkerResult 通知 Scheduler；Worker 无状态可被重新调度
-- **竞品对比**: LangGraph OSS 单进程，Cloud 版分布式（闭源）；Dify 单进程 + Celery 异步任务；Hecate 从 P1 就设计 Worker 接口，渐进式扩展
+- **Background**: The current feature list does not explicitly define a path for multi-process/distributed execution support; need to determine evolution direction
+- **Conclusion**: Pregel scheduler remains single-process (lightweight), actual Node execution dispatched to Worker Pool. P1 in-process thread pool → P2 cross-process Worker → P3 optional Temporal backend
+- **Rationale**: Channel/Checkpoint ownership stays in Scheduler (simple), Workers are stateless and scalable (elastic), evolution to P3 replaces scheduler with Temporal (compatible)
+- **Key Constraints**: Workers only receive Channel read-only snapshots, never directly modify Channels; interrupts notify Scheduler via WorkerResult; Workers are stateless and can be rescheduled
+- **Competitor Comparison**: LangGraph OSS is single-process, Cloud version is distributed (closed-source); Dify is single-process + Celery async tasks; Hecate designs Worker interface from P1, with progressive scaling
 
-### AD-6: 记忆系统分级 — 四级记忆渐进式实现
+### AD-6: Tiered Memory System — Four-Level Memory with Progressive Implementation
 
-- **背景**: 调研报告 `03-memory-system.md` 已设计完整四级记忆（L1-L4）+ 华为三工序（构建→演化→检索）+ Consolidation Agent，但全部放入 P1 过重。BGE Embedding 补调确认 P1 默认选型为 BGE-M3
-- **结论**: 四级记忆按优先级渐进实现 — P1 做 L2 简化版 + L4（即 RAG），P2 做 L1 + L2 完整 + L3，P3 做 Consolidation Agent + 实体图谱
+- **Background**: Research report `03-memory-system.md` has designed a complete four-level memory (L1-L4) + Huawei three-stage process (Build→Evolve→Retrieve) + Consolidation Agent, but implementing all in P1 is too heavy. BGE Embedding supplementary review confirms P1 default selection as BGE-M3
+- **Conclusion**: Four-level memory implemented progressively by priority — P1 does L2 simplified + L4 (i.e., RAG), P2 does L1 + full L2 + L3, P3 does Consolidation Agent + entity graph
 
-| 级别 | P1 | P2 | P3 |
-|------|-----|-----|-----|
-| **L1 工作记忆** | ❌ 用 system_prompt 拼接代替 | ✅ 完整 MemoryBlock（命名块、Token 预算、Agent 可编辑） | 只读块、并发控制 |
-| **L2 会话记忆** | ✅ 对话历史 + 基础截断（超长截最早消息） | ✅ 完整压缩管道（snip→microcompact→autocompact） | 413 紧急压缩 |
-| **L3 用户记忆** | ❌ 不做 | ✅ Mem0 式提取 + pgvector + 多信号融合排序 | Consolidation Agent + 实体图谱 |
-| **L4 知识记忆** | ✅ 即 RAG 管道，不单独列为"记忆" | 增强：混合检索 + 重排 | 记忆-RAG 联合检索 |
+| Level | P1 | P2 | P3 |
+|-------|----|----|-----|
+| **L1 Working Memory** | ❌ Use system_prompt concatenation instead | ✅ Full MemoryBlock (named blocks, token budget, Agent-editable) | Read-only blocks, concurrency control |
+| **L2 Conversation Memory** | ✅ Conversation history + basic truncation (oldest messages truncated when too long) | ✅ Full compression pipeline (snip→microcompact→autocompact) | 413 emergency compression |
+| **L3 User Memory** | ❌ Not implemented | ✅ Mem0-style extraction + pgvector + multi-signal fusion ranking | Consolidation Agent + entity graph |
+| **L4 Knowledge Memory** | ✅ Equivalent to RAG pipeline, not separately listed as "memory" | Enhanced: hybrid retrieval + reranking | Memory-RAG joint retrieval |
 
-- **L4 RAG Embedding 选型（BGE-M3 补调结论）**: P1 默认使用 **BGE-M3**（569M 参数, 1024 维, 8192 token 长度, MIT 协议），核心优势：
-  - Dense + Sparse + ColBERT 三合一混合检索，与 Qdrant dense + sparse 双向量天然匹配
-  - 100+ 语言覆盖，一个模型解决中英日韩等多语言知识库
-  - LlamaIndex 原生支持 + Qdrant 混合索引配置
-  - FP16 部署仅 ~1.5 GB 显存，开发环境 CPU 亦可运行
-- **P1 RAG 管线**: Docling 解析 → 文本分片(512-1024 tokens) → BGE-M3 encode(dense+sparse) → Qdrant 混合索引 → Query encode → Hybrid Search → Top-K → LLM
-- **P2 增强**: bge-reranker-v2-m3 精排 + bge-code-v1 代码知识库
-- **理由**: P1 目标是"能跑通完整 Agent 应用"，多轮对话需要 L2（至少简化版），RAG 已在功能清单中（即 L4）。L1 工作记忆块和 L3 跨会话记忆是好体验但不是 P1 阻塞项
-- **竞品对比**: Letta 四级全部一次性实现（学习曲线陡）；Mem0 只做 L3（单点）；Claude Code 只做 L2 压缩（无持久记忆）；Hecate 渐进式，每期交付可用价值
+- **L4 RAG Embedding Selection (BGE-M3 supplementary review conclusion)**: P1 default is **BGE-M3** (569M params, 1024 dimensions, 8192 token length, MIT license), core advantages:
+  - Dense + Sparse + ColBERT triple hybrid retrieval, naturally matching Qdrant dense + sparse dual vectors
+  - 100+ language coverage, one model solves multilingual knowledge bases (Chinese, English, Japanese, Korean, etc.)
+  - LlamaIndex native support + Qdrant hybrid index configuration
+  - FP16 deployment uses only ~1.5 GB VRAM, CPU also works in development environments
+- **P1 RAG Pipeline**: Docling parsing → text chunking (512-1024 tokens) → BGE-M3 encode (dense+sparse) → Qdrant hybrid index → Query encode → Hybrid Search → Top-K → LLM
+- **P2 Enhancement**: bge-reranker-v2-m3 reranking + bge-code-v1 code knowledge base
+- **Rationale**: P1 goal is "run a complete Agent application end-to-end"; multi-turn conversations need L2 (at least simplified), RAG is already in the feature list (i.e., L4). L1 working memory blocks and L3 cross-session memory are nice-to-have but not P1 blockers
+- **Competitor Comparison**: Letta implements all four levels at once (steep learning curve); Mem0 only does L3 (single point); Claude Code only does L2 compression (no persistent memory); Hecate is progressive, each phase delivers usable value
 
-### AD-7: 多 Agent 编排 — 所有模式统一为 Graph 模板，渐进提供
+### AD-7: Multi-Agent Orchestration — All Patterns Unified as Graph Templates, Provided Progressively
 
-- **背景**: 功能清单列出 10 种多 Agent 编排模式（层级/移交/流水线/广播/对等选择/专家团/中央控制器等），需要确定如何在 Graph 框架中统一表达以及 P1/P2/P3 边界
-- **核心洞察**: 所有编排模式都可以用 Graph 表达 — 层级 = agent 节点嵌套；移交 = Command(goto)；流水线 = 线性链；广播 = fan-out/fan-in；对等选择 = LLM 路由循环。因此不需要硬编码任何模式，统一为 Graph 模板
-- **结论**: 所有模式都是预编译 Graph 模板，按阶段渐进增加模板库
+- **Background**: The feature list includes 10 multi-Agent orchestration patterns (hierarchical/handoff/pipeline/broadcast/peer-selection/expert-panel/central-controller, etc.), need to determine how to unify them within the Graph framework and define P1/P2/P3 boundaries
+- **Core Insight**: All orchestration patterns can be expressed as Graphs — hierarchical = agent node nesting; handoff = Command(goto); pipeline = linear chain; broadcast = fan-out/fan-in; peer-selection = LLM routing loop. Therefore no pattern needs to be hardcoded; all are unified as Graph templates
+- **Conclusion**: All patterns are pre-compiled Graph templates, progressively added to the template library by phase
 
-| 阶段 | 提供的模式 | 说明 |
-|------|-----------|------|
-| **P1** | 层级委派 | 已通过三层 Agent 模板（Guard→Plan→Sub-Agent）覆盖，无需额外工作 |
-| **P2** | 移交（Handoff）+ 多 Agent 可视化编排 | 移交是最常见场景（客服转专家、通用转垂直）；画布是 P2 核心交付物 |
-| **P3** | 流水线 + 广播 + 对等选择 + 专家团 + 中央控制器 + 冲突处理 + Agent 间通信 | 逐步增加预设模板，每个模板就是一个预编译的 Graph |
+| Phase | Provided Patterns | Description |
+|-------|-------------------|-------------|
+| **P1** | Hierarchical delegation | Already covered by three-layer Agent template (Guard→Plan→Sub-Agent), no additional work needed |
+| **P2** | Handoff + multi-Agent visual orchestration | Handoff is the most common scenario (customer service→expert, general→vertical); canvas is P2 core deliverable |
+| **P3** | Pipeline + Broadcast + Peer-selection + Expert-panel + Central-controller + Conflict resolution + Inter-Agent communication | Gradually add preset templates, each template is a pre-compiled Graph |
 
-- **实现方式**: `agent` 类型节点是统一原语（引用另一个 Agent，状态映射 parent→child），所有模式通过组合 agent 节点 + condition 节点 + Command 构建不同的 Graph 拓扑
-- **竞品对比**: Coze 硬编码 Multi-Agent 模式；AutoGen 提供 GroupChat 抽象但不可视化编排；CrewAI 支持 Sequential/Hierarchical 但不支持自由拓扑；Hecate 用通用 Graph 统一所有模式，画布可视化
+- **Implementation**: `agent` type node is the unified primitive (references another Agent, maps state parent→child), all patterns are built by combining agent nodes + condition nodes + Commands to construct different Graph topologies
+- **Competitor Comparison**: Coze hardcodes Multi-Agent patterns; AutoGen provides GroupChat abstraction but no visual orchestration; CrewAI supports Sequential/Hierarchical but not free topology; Hecate unifies all patterns with general-purpose Graph, with canvas visualization
 
-### AD-8: 安全与授权 — 横切关注点，Plugin 扩展点实现，渐进增强
+### AD-8: Security & Authorization — Cross-Cutting Concern, Implemented via Plugin Extension Points, Progressive Enhancement
 
-- **背景**: 安全是横切关注点（跨越接入层→编排层→引擎层→服务层），功能清单中涉及四级风险授权、审批作用域、安全护栏、审计日志、沙箱隔离。LLM Guard + OWASP LLM Top 10 补调完成后，安全分层架构和风险覆盖更加明确
-- **结论**: 通过 Plugin 系统的 Decision（决策）和 Observe（观测）扩展点实现安全策略，不硬编码在引擎中。渐进增强：
+- **Background**: Security is a cross-cutting concern (spanning Gateway→Orchestration→Engine→Services layers), the feature list includes four-level risk authorization, approval scopes, security guardrails, audit logging, and sandbox isolation. After the LLM Guard + OWASP LLM Top 10 supplementary review, the security layered architecture and risk coverage are more clearly defined
+- **Conclusion**: Security policies are implemented through the Plugin system's Decision and Observe extension points, not hardcoded in the engine. Progressive enhancement:
 
-| 阶段 | 安全能力 | 说明 |
-|------|---------|------|
-| **P1** | 基础内容过滤 + API Key 认证 + LLM Guard 四 Scanner | 最低安全基线：防注入/泄露 + 简单认证 |
-| **P2** | 四级风险授权 + Once/Session 作用域 + 沙箱隔离 | 工具调用授权确认；代码执行容器隔离 |
-| **P3** | 完整护栏（输入/输出/检索/执行四层）+ Project/Global 作用域 + 审计日志 + SSO/LDAP | 企业级安全合规 |
+| Phase | Security Capability | Description |
+|-------|-------------------|-------------|
+| **P1** | Basic content filtering + API Key authentication + LLM Guard four Scanners | Minimum security baseline: injection/leakage prevention + simple authentication |
+| **P2** | Four-level risk authorization + Once/Session scope + sandbox isolation | Tool call authorization confirmation; code execution container isolation |
+| **P3** | Complete guardrails (input/output/retrieval/execution four layers) + Project/Global scope + audit logging + SSO/LDAP | Enterprise-grade security compliance |
 
-- **安全分层架构（LLM Guard + NeMo Guardrails 互补）**:
+- **Security Layered Architecture (LLM Guard + NeMo Guardrails Complementary)**:
 
 ```
-用户请求
+User Request
   │
   ▼
 ┌─────────────────────────┐
-│  NeMo Guardrails (外层)  │  ← 对话流程、话题约束、行为边界
+│  NeMo Guardrails (outer) │  ← Conversation flow, topic constraints, behavioral boundaries
 └────────────┬────────────┘
              │
              ▼
 ┌─────────────────────────┐
-│  LLM Guard (内层)        │  ← 内容级安全扫描
+│  LLM Guard (inner)       │  ← Content-level security scanning
 │  P1 Input Scanners:      │
 │  - PromptInjection       │
 │  - Anonymize (PII)       │
@@ -117,11 +117,11 @@
 └────────────┬────────────┘
              │
              ▼
-        LLM 推理
+        LLM Inference
              │
              ▼
 ┌─────────────────────────┐
-│  LLM Guard (内层)        │
+│  LLM Guard (inner)       │
 │  P1 Output Scanners:     │
 │  - Sensitive (PII)       │
 │  - Toxicity              │
@@ -129,202 +129,207 @@
              │
              ▼
 ┌─────────────────────────┐
-│  NeMo Guardrails (外层)  │  ← 输出合规检查
+│  NeMo Guardrails (outer) │  ← Output compliance check
 └────────────┬────────────┘
              │
              ▼
-         用户响应
+         User Response
 ```
 
-- **OWASP LLM Top 10 (2025) 风险映射**: P1 需重点覆盖 LLM01(Prompt Injection)、LLM02(敏感信息泄露)、LLM05(不当输出处理)、LLM07(System Prompt 泄露)、LLM10(无界消费)；P2 增加 LLM06(Excessive Agency — Agent 核心风险)和 LLM08(向量/嵌入弱点)；P3 完整覆盖全部 10 项
-- **架构预留**: Tool/Agent 实体中已有 `risk_level`（LOW/MEDIUM/HIGH/CRITICAL）和 `approval_scope`（once/session/project/global）字段，P1 即存在但 P2 才强制执行。Plugin 五类扩展点（Transform/Decision/Observe/Lifecycle/Registration）中 Decision 用于授权决策，Observe 用于审计记录
-- **P1 安全基线具体内容**:
-  - LLM Guard PromptInjection Scanner（DeBERTa-v3 分类模型）— 对应 OWASP LLM01
-  - LLM Guard Anonymize + Deanonymize（Presidio + BERT NER）— 对应 OWASP LLM02
-  - LLM Guard Secrets Scanner（detect-secrets）— 对应 OWASP LLM02
-  - LLM Guard Toxicity Scanner（输入+输出）— 基础内容安全
-  - NeMo Guardrails 话题控制 — 对应 OWASP LLM06/LLM07
-  - API Key 认证 + Rate Limiting — 对应 OWASP LLM10
-- **竞品对比**: RelayAgent 四级风险授权从第一天强制执行（个人 Agent 场景）；OpenClaw 有 session lanes 冲突隔离；Hecate 面向企业，P1 最小基线 + LLM Guard 内层扫描，P2/P3 逐步加严
+- **OWASP LLM Top 10 (2025) Risk Mapping**: P1 should focus on LLM01 (Prompt Injection), LLM02 (Sensitive Information Disclosure), LLM05 (Improper Output Handling), LLM07 (System Prompt Leakage), LLM10 (Unbounded Consumption); P2 adds LLM06 (Excessive Agency — core Agent risk) and LLM08 (Vector/Embedding Weaknesses); P3 covers all 10 items
+- **Architecture Reservations**: Tool/Agent entities already have `risk_level` (LOW/MEDIUM/HIGH/CRITICAL) and `approval_scope` (once/session/project/global) fields, present from P1 but enforced only from P2. Among the five Plugin extension point types (Transform/Decision/Observe/Lifecycle/Registration), Decision is used for authorization decisions, Observe for audit logging
+- **P1 Security Baseline Details**:
+  - LLM Guard PromptInjection Scanner (DeBERTa-v3 classification model) — corresponds to OWASP LLM01
+  - LLM Guard Anonymize + Deanonymize (Presidio + BERT NER) — corresponds to OWASP LLM02
+  - LLM Guard Secrets Scanner (detect-secrets) — corresponds to OWASP LLM02
+  - LLM Guard Toxicity Scanner (input + output) — basic content safety
+  - NeMo Guardrails topic control — corresponds to OWASP LLM06/LLM07
+  - API Key authentication + Rate Limiting — corresponds to OWASP LLM10
+- **Competitor Comparison**: RelayAgent enforces four-level risk authorization from day one (personal Agent scenario); OpenClaw has session lanes for conflict isolation; Hecate targets enterprise, P1 minimum baseline + LLM Guard inner scanning, P2/P3 progressively stricter
 
-### AD-9: API 设计 — OpenAI 兼容 + Hecate 管理 API 双轨
+### AD-9: API Design — OpenAI-Compatible + Hecate Management API Dual Track
 
-- **背景**: Hecate 需要同时支持 OpenAI 兼容接口（现有工具无缝接入）和自有管理 API（Agent/Workflow/Session 等 CRUD）。需要确定路径设计和 P1 边界
-- **结论**: OpenAI 兼容接口保持 `/v1/` 路径不做扩展，Hecate 特有能力走 `/api/` RESTful 路径，双轨并行
+- **Background**: Hecate needs to support both OpenAI-compatible interfaces (seamless integration with existing tools) and its own management API (Agent/Workflow/Session CRUD). Need to determine path design and P1 boundaries
+- **Conclusion**: OpenAI-compatible interface keeps `/v1/` path without extensions, Hecate-specific capabilities use `/api/` RESTful path, dual tracks in parallel
 
-| API 类别 | 路径前缀 | P1 | P2 | P3 |
-|---------|---------|-----|-----|-----|
-| **OpenAI 兼容** | `/v1/chat/completions`, `/v1/models` | ✅ 核心对话 + 模型列表 | 工具调用流式 | 多模态 |
-| **Agent 管理** | `/api/agents` CRUD | ✅ 创建/读取/更新/删除 | 版本管理 | 灰度发布 |
-| **Workflow 管理** | `/api/workflows` CRUD | ❌ P1 用三层模板 | ✅ 完整 CRUD + 版本 | 导入/导出 |
-| **Session 管理** | `/api/sessions` | ✅ 创建/列表/恢复 | 历史查询 | 管理后台 |
-| **Knowledge Base** | `/api/knowledge-bases` | ✅ 创建/上传/检索 | 文档解析状态 | 自动同步 |
-| **Tool 管理** | `/api/tools` | ✅ 列表（内置 + MCP 发现） | 自定义工具 CRUD | Tool 市场 |
-| **Skill 管理** | `/api/skills` | ✅ 列表 + 加载 | CRUD + 远程源 | 知识图谱 |
-| **Prompt 管理** | `/api/prompts` | ❌ P1 硬编码在 Agent 配置中 | ✅ 版本 + 标签 | A/B 测试 |
-| **认证** | `Authorization: Bearer <api_key>` | ✅ API Key | OAuth 2.0 | SSO/LDAP |
+| API Category | Path Prefix | P1 | P2 | P3 |
+|-------------|------------|-----|-----|-----|
+| **OpenAI Compatible** | `/v1/chat/completions`, `/v1/models` | ✅ Core conversation + model list | Tool call streaming | Multi-modal |
+| **Agent Management** | `/api/agents` CRUD | ✅ Create/Read/Update/Delete | Version management | Canary deployment |
+| **Workflow Management** | `/api/workflows` CRUD | ❌ P1 uses three-layer template | ✅ Full CRUD + versioning | Import/Export |
+| **Session Management** | `/api/sessions` | ✅ Create/List/Resume | History query | Admin dashboard |
+| **Knowledge Base** | `/api/knowledge-bases` | ✅ Create/Upload/Search | Document parsing status | Auto sync |
+| **Tool Management** | `/api/tools` | ✅ List (built-in + MCP discovery) | Custom tool CRUD | Tool marketplace |
+| **Skill Management** | `/api/skills` | ✅ List + Load | CRUD + remote sources | Knowledge graph |
+| **Prompt Management** | `/api/prompts` | ❌ P1 hardcoded in Agent config | ✅ Version + tags | A/B testing |
+| **Authentication** | `Authorization: Bearer <api_key>` | ✅ API Key | OAuth 2.0 | SSO/LDAP |
 
-- **设计约定**: `/v1/` 路径严格兼容 OpenAI 规范（不扩展字段名），`/api/` 遵循 RESTful + JSON + 统一错误格式（`{error: {code, message, details}}`），认证统一用 Bearer token
-- **竞品对比**: Dify 自有 API + OpenAI 兼容（但兼容层不完整）；Coze 纯自有 API；LangGraph 无平台 API（只是 SDK）；Hecate 双轨设计，兼容层优先级最高
+- **Design Conventions**: `/v1/` path strictly compatible with OpenAI spec (no extended field names), `/api/` follows RESTful + JSON + unified error format (`{error: {code, message, details}}`), authentication unified with Bearer token
+- **Competitor Comparison**: Dify has its own API + OpenAI compatibility (but compatibility layer is incomplete); Coze has purely proprietary API; LangGraph has no platform API (SDK only); Hecate dual-track design, compatibility layer is highest priority
 
-### AD-10: 前端画布 — React Flow + JSON DSL 双向同步
+### AD-10: Frontend Canvas — React Flow + JSON DSL Bidirectional Sync
 
-- **背景**: P2 核心交付物之一是可视化画布，需要确定技术选型和架构方式。P1 不需要画布，仅对话 UI
-- **结论**: React Flow 作为画布引擎，自定义节点组件对应 Node 类型，JSON DSL 为单一 source of truth，画布是 DSL 的可视化编辑器
+- **Background**: One of P2's core deliverables is the visual canvas; need to determine technology selection and architecture approach. P1 does not need a canvas, only a conversation UI
+- **Conclusion**: React Flow as the canvas engine, custom node components correspond to Node types, JSON DSL as single source of truth, canvas is a visual editor for the DSL
 
-| 决策点 | 选择 | 理由 |
-|-------|------|------|
-| **画布库** | React Flow | 开源 MIT、社区活跃、自定义节点/边灵活、Mini Map + Controls 开箱即用 |
-| **节点渲染** | 每种 Node 类型一个自定义 React 组件 | `llm`、`code`、`condition`、`tool`、`agent`、`subgraph` 各有不同 UI |
-| **边类型** | 条件边用 label 标注（true/false）、普通边默认样式 | 和 Graph DSL 的 edge definition 对应 |
-| **双向同步** | 画布操作 → JSON DSL → 编译器；JSON DSL 变更 → 画布更新 | 单一 source of truth 是 JSON DSL |
-| **前端框架** | React 19 + TypeScript + Vite | 和 React Flow 生态一致 |
-| **P1 前端** | 纯对话 UI（Chat 界面），无画布 | P1 不需要画布 |
-| **P2 前端** | 对话 UI + Agent 配置器 + 画布 + 知识库管理 | 完整开发者界面 |
+| Decision Point | Choice | Rationale |
+|---------------|--------|-----------|
+| **Canvas Library** | React Flow | Open-source MIT, active community, flexible custom nodes/edges, Mini Map + Controls out of the box |
+| **Node Rendering** | One custom React component per Node type | `llm`, `code`, `condition`, `tool`, `agent`, `subgraph` each has different UI |
+| **Edge Types** | Conditional edges labeled (true/false), default style for normal edges | Corresponds to Graph DSL edge definition |
+| **Bidirectional Sync** | Canvas operation → JSON DSL → compiler; JSON DSL change → canvas update | Single source of truth is JSON DSL |
+| **Frontend Framework** | React 19 + TypeScript + Vite | Consistent with React Flow ecosystem |
+| **P1 Frontend** | Pure conversation UI (Chat interface), no canvas | P1 does not need canvas |
+| **P2 Frontend** | Conversation UI + Agent configurator + canvas + knowledge base management | Complete developer interface |
 
-- **竞品对比**: Coze 自研画布绑定自家组件；Dify 用 React Flow 但节点类型硬编码；Langflow 用 React Flow 但只有 Python 执行；Hecate 用 React Flow + 自定义节点 + JSON DSL 双向同步，Graph-first 架构
+- **Competitor Comparison**: Coze has proprietary canvas tied to their own components; Dify uses React Flow but hardcodes node types; Langflow uses React Flow but only Python execution; Hecate uses React Flow + custom nodes + JSON DSL bidirectional sync, Graph-first architecture
 
 ---
 
-## 第一章：产品定位与设计原则
+## Chapter 1: Product Positioning & Design Principles
 
-### 1.1 一句话定义
+### 1.1 One-Sentence Definition
 
-Hecate 是一个**开源、自托管、模型无关、MCP-first** 的企业级 Agent 平台，让企业在其自有基础设施上构建、编排和运行 AI Agent 应用，拒绝供应商锁定。
+Hecate is an **open-source, self-hosted, model-agnostic, MCP-first** enterprise Agent platform that enables enterprises to build, orchestrate, and run AI Agent applications on their own infrastructure, rejecting vendor lock-in.
 
-### 1.2 Hecate 不是什么
+### 1.2 What Hecate Is Not
 
-- 不是一个 Agent 框架（如 LangGraph/AutoGen/CrewAI）— 框架是给开发者的库，Hecate 是给企业的平台
-- 不是一个 SaaS 服务（如 Coze/百炼/千帆）— Hecate 是自托管的，数据主权在用户手中
-- 不是一个 Agent 应用（如 RelayAgent/Claude Code）— Hecate 是让用户构建 Agent 应用的平台
+- Not an Agent framework (like LangGraph/AutoGen/CrewAI) — frameworks are libraries for developers; Hecate is a platform for enterprises
+- Not a SaaS service (like Coze/Dashboard/Bailian) — Hecate is self-hosted, data sovereignty stays with the user
+- Not an Agent application (like RelayAgent/Claude Code) — Hecate is a platform for users to build Agent applications
 
-### 1.3 核心差异化
+### 1.3 Core Differentiators
 
-| 差异化维度 | vs 商业平台（百炼/千帆/Coze） | vs 开源框架（LangGraph/AutoGen/Dify） |
-|-----------|-------------------------------|--------------------------------------|
-| **自托管优先** | 全部是 SaaS，不支持气隔部署 | LangGraph 需要 LangSmith；Hecate 完全自包含 |
-| **MCP-first 架构** | MCP 是后加的节点类型；Hecate 以 MCP 为主要集成协议 | 没有框架原生支持 MCP Client+Server |
-| **模型无关** | 各家绑定自有模型（Qwen/ERNIE/Doubao） | 无内置多 Provider 路由；Hecate 用 LiteLLM |
-| **可视化画布 + 代码** | 有画布但扩展性差 | Langflow 有画布但只有 Python 执行；Hecate 是多语言 |
-| **企业级记忆** | 基础或无记忆系统 | Mem0/Letta 是独立组件；Hecate 集成两者模式 |
-| **开源核心** | 无一开源 | LangGraph 开源但依赖 LangSmith；Hecate 完全开源 |
+| Differentiation Dimension | vs Commercial Platforms (Bailian/Qianfan/Coze) | vs Open-Source Frameworks (LangGraph/AutoGen/Dify) |
+|--------------------------|------------------------------------------------|---------------------------------------------------|
+| **Self-hosted First** | All are SaaS, no air-gapped deployment support | LangGraph requires LangSmith; Hecate is fully self-contained |
+| **MCP-first Architecture** | MCP is an add-on node type; Hecate uses MCP as the primary integration protocol | No framework natively supports MCP Client+Server |
+| **Model-Agnostic** | Each vendor locks in their own models (Qwen/ERNIE/Doubao) | No built-in multi-Provider routing; Hecate uses LiteLLM |
+| **Visual Canvas + Code** | Has canvas but poor extensibility | Langflow has canvas but only Python execution; Hecate is multi-language |
+| **Enterprise Memory** | Basic or no memory system | Mem0/Letta are standalone components; Hecate integrates both patterns |
+| **Open-Source Core** | None are open-source | LangGraph is open-source but depends on LangSmith; Hecate is fully open-source |
 
-### 1.4 六条设计原则
+### 1.4 Six Design Principles
 
-#### 原则一：开放优于封闭
+#### Principle 1: Open Over Closed
 
-- 模型无关：通过 LiteLLM 支持 100+ LLM Provider，不绑定任何模型厂商
-- 协议开放：MCP（工具互操作）+ A2A（Agent 间互操作）作为一等公民
-- 标准兼容：API 接口兼容 OpenAI 格式，Skill 格式兼容 Claude Code
-- 拒绝供应商锁定：这是 Hecate 的核心品牌承诺
+- Model-agnostic: supports 100+ LLM Providers via LiteLLM, not tied to any model vendor
+- Open protocols: MCP (tool interoperability) + A2A (inter-Agent interoperability) as first-class citizens
+- Standards-compatible: API interface compatible with OpenAI format, Skill format compatible with Claude Code
+- No vendor lock-in: this is Hecate's core brand promise
 
-#### 原则二：可组合优于一体化
+#### Principle 2: Composable Over Monolithic
 
-- MCP-first：所有外部能力通过 MCP 协议接入，而非硬编码集成
-- 模块解耦：执行引擎、记忆服务、RAG 管道、工具系统独立可替换
-- 预设模板：三层 Agent（Guard→Plan→Sub-Agent）是预设而非限制，用户可自定义任意编排
-- 插件扩展：Plugin 系统提供 Transform/Decision/Observe/Lifecycle/Registration 五类扩展点
+- MCP-first: all external capabilities integrated via MCP protocol, not hardcoded integrations
+- Module decoupling: execution engine, memory service, RAG pipeline, tool system are independently replaceable
+- Preset templates: three-layer Agent (Guard→Plan→Sub-Agent) is a preset, not a constraint; users can customize any orchestration
+- Plugin extension: Plugin system provides Transform/Decision/Observe/Lifecycle/Registration five extension point types
 
-#### 原则三：可观测优于黑盒
+#### Principle 3: Observable Over Black Box
 
-- 全链路追踪：每个请求从接入到执行到响应，完整 Trace→Span→Generation 层级
-- Checkpoint 可回溯：执行状态持久化，支持"时间旅行"调试
-- 评估驱动：Agent 的每一步推理链必须可记录、可展示、可评估
-- 成本透明：按用户/Agent/会话的 Token 和费用实时统计
+- Full-chain tracing: every request from gateway to execution to response, complete Trace→Span→Generation hierarchy
+- Checkpoint traceability: execution state persistence, supports "time-travel" debugging
+- Evaluation-driven: every reasoning step of the Agent must be recordable, displayable, and evaluable
+- Cost transparency: real-time Token and cost statistics per user/Agent/session
 
-#### 原则四：安全内建而非外挂
+#### Principle 4: Security Built-in, Not Bolted-on
 
-- 四级风险授权：LOW（自动放行）→ MEDIUM → HIGH → CRITICAL（不可自动批准），支持 Once/Session/Project/Global 四种作用域
-- 安全护栏：输入/输出/检索/执行四层安全检查
-- 审计日志：全量操作审计，满足合规要求
-- 沙箱隔离：代码执行在加固容器中运行，网络/资源/文件系统隔离
+- Four-level risk authorization: LOW (auto-approve) → MEDIUM → HIGH → CRITICAL (cannot be auto-approved), supports Once/Session/Project/Global four scopes
+- Security guardrails: input/output/retrieval/execution four-layer security checks
+- Audit logging: full operation audit, meeting compliance requirements
+- Sandbox isolation: code execution runs in hardened containers, with network/resource/filesystem isolation
 
-#### 原则五：渐进式复杂度
+#### Principle 5: Progressive Complexity
 
-用户不需要一开始就理解所有概念，按照使用深度自然递进：
+Users do not need to understand all concepts from the start; complexity increases naturally with usage depth:
 
 ```
-Level 0: 对话模式 — 直接和 Agent 聊天（类似 ChatGPT）
-Level 1: 三层 Agent 模板 — 一键启用 Guard→Plan→Sub-Agent，零配置
-Level 2: 可视化画布 — 拖拽编排自定义工作流，确定性+不确定性混合
-Level 3: 代码 SDK — 完全编程控制，高级用户
+Level 0: Conversation mode — chat directly with Agent (similar to ChatGPT)
+Level 1: Three-layer Agent template — one-click enable Guard→Plan→Sub-Agent, zero configuration
+Level 2: Visual canvas — drag-and-drop orchestration of custom workflows, deterministic + non-deterministic hybrid
+Level 3: Code SDK — full programming control, advanced users
 ```
 
-每个 Level 向上兼容 — Level 0 的对话可以无缝升级到 Level 1 的三层 Agent，Level 1 的模板可以在 Level 2 的画布中编辑。
+Each Level is backward compatible — Level 0 conversations can seamlessly upgrade to Level 1 three-layer Agent, Level 1 templates can be edited in Level 2 canvas.
 
-#### 原则六：开发者体验优先
+#### Principle 6: Developer Experience First
 
-- 低代码 + 高代码双轨：画布和 SDK 是同一系统的两个界面，不是两个独立产品
-- 热重载：Agent 配置和工作流修改后实时生效
-- 一致性抽象：无论是画布操作还是 SDK 调用，底层执行引擎完全相同
-- 完善的 CLI：命令行创建、测试、部署 Agent
+- Low-code + high-code dual track: canvas and SDK are two interfaces to the same system, not two separate products
+- Hot reload: Agent configuration and workflow modifications take effect in real-time
+- Consistent abstraction: whether canvas operation or SDK call, the underlying execution engine is identical
+- Comprehensive CLI: command-line creation, testing, and deployment of Agents
 
 ---
 
-## 第二章：系统分层架构
+## Chapter 2: System Layered Architecture
 
-### 2.1 五层总览
+### 2.1 Five-Layer Overview
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                    接入层 (Gateway)                       │
-│  API Gateway · WebSocket/SSE · Web Widget · 多渠道适配    │
-│  认证鉴权 · 限流 · OpenAI 兼容接口                         │
+│                    Gateway Layer                          │
+│  API Gateway · WebSocket/SSE · Web Widget · Multi-channel│
+│  Authentication · Rate Limiting · OpenAI-compatible API   │
 ├─────────────────────────────────────────────────────────┤
-│                    编排层 (Orchestration)                 │
-│  Graph DSL 编译器 · 工作流管理 · 多 Agent 编排策略          │
-│  预设模板（对话/三层Agent/固定工作流）· Human-in-the-Loop    │
+│                    Orchestration Layer                    │
+│  Graph DSL Compiler · Workflow Management · Multi-Agent   │
+│  Orchestration Strategies · Preset Templates              │
+│  (Conversation/Three-layer Agent/Fixed Workflow)          │
+│  · Human-in-the-Loop                                     │
 ├─────────────────────────────────────────────────────────┤
-│                  执行引擎层 (Engine)                      │
-│  Pregel 运行时 · Channel 状态 · Checkpoint 持久化          │
-│  interrupt/Command · 子图组合 · 策略系统 · 流式输出         │
+│                  Execution Engine Layer                   │
+│  Pregel Runtime · Channel State · Checkpoint Persistence  │
+│  interrupt/Command · Subgraph Composition                 │
+│  · Strategy System · Streaming Output                     │
 ├─────────────────────────────────────────────────────────┤
-│                  能力服务层 (Services)                    │
-│  模型路由 · RAG 管道 · 记忆服务 · 工具系统(MCP)            │
-│  Skill 管理 · 安全护栏 · 上下文管理                        │
+│                  Capability Services Layer                │
+│  Model Routing · RAG Pipeline · Memory Service            │
+│  · Tool System (MCP) · Skill Management                  │
+│  · Security Guardrails · Context Management               │
 ├─────────────────────────────────────────────────────────┤
-│                  基础设施层 (Infrastructure)              │
-│  PostgreSQL · Qdrant · MinIO · LangFuse · 容器编排        │
-│  认证授权(OAuth/OIDC/LDAP) · 日志 · 监控                  │
+│                  Infrastructure Layer                     │
+│  PostgreSQL · Qdrant · MinIO · LangFuse                   │
+│  · Container Orchestration · Auth (OAuth/OIDC/LDAP)      │
+│  · Logging · Monitoring                                   │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 各层职责与接口
+### 2.2 Layer Responsibilities & Interfaces
 
-#### 接入层 (Gateway)
+#### Gateway Layer
 
-| 模块 | 职责 | P1 范围 |
-|------|------|---------|
-| API Gateway | REST API 路由、认证鉴权、限流 | ✅ OpenAI 兼容接口 + 基础 API Key 认证 |
-| WebSocket/SSE | 流式响应推送 | ✅ SSE 流式输出 |
-| Web Widget | 嵌入式聊天组件 | P2 |
-| 多渠道适配 | 飞书/企微/钉钉/Slack 等 | P2 |
-| 认证鉴权 | OAuth 2.0 / OIDC / LDAP | P1: API Key；P3: SSO/LDAP |
+| Module | Responsibility | P1 Scope |
+|--------|---------------|----------|
+| API Gateway | REST API routing, authentication, rate limiting | ✅ OpenAI-compatible API + basic API Key authentication |
+| WebSocket/SSE | Streaming response push | ✅ SSE streaming output |
+| Web Widget | Embedded chat component | P2 |
+| Multi-channel Adaptation | Feishu/WeCom/DingTalk/Slack etc. | P2 |
+| Authentication | OAuth 2.0 / OIDC / LDAP | P1: API Key; P3: SSO/LDAP |
 
-**接入层对下层接口**: 所有请求统一封装为 `ExecutionRequest`，透传到编排层。
+**Gateway to lower layer interface**: All requests are uniformly wrapped as `ExecutionRequest` and passed to the orchestration layer.
 
 ```
 ExecutionRequest {
     agent_id: UUID
     messages: List[Message]
     stream: bool
-    config: ExecutionConfig     # 模型、温度、工具列表等
-    context: RequestContext     # 用户信息、会话 ID、权限等
+    config: ExecutionConfig     # Model, temperature, tool list, etc.
+    context: RequestContext     # User info, session ID, permissions, etc.
 }
 ```
 
-#### 编排层 (Orchestration)
+#### Orchestration Layer
 
-| 模块 | 职责 | P1 范围 |
-|------|------|---------|
-| Graph DSL 编译器 | JSON/YAML → Compiled Graph | ✅ 基础 DAG 编译 |
-| 工作流管理 | Workflow CRUD、版本管理 | P2 |
-| 编排策略 | 确定性路由、LLM 路由、条件分支 | ✅ 路由分发 |
-| 预设模板 | 对话模式、三层 Agent、固定工作流 | ✅ 对话模式 + 三层 Agent |
-| HITL | 人工审批、暂停/恢复 | ✅ interrupt 机制 |
-| 多 Agent 编排 | 10 种模式统一为 Graph 模板（AD-7） | P1: 层级（三层Agent模板）；P2: 移交+画布编排；P3: 流水线/广播/对等选择/专家团等 |
+| Module | Responsibility | P1 Scope |
+|--------|---------------|----------|
+| Graph DSL Compiler | JSON/YAML → Compiled Graph | ✅ Basic DAG compilation |
+| Workflow Management | Workflow CRUD, version management | P2 |
+| Orchestration Strategies | Deterministic routing, LLM routing, conditional branching | ✅ Route dispatch |
+| Preset Templates | Conversation mode, three-layer Agent, fixed workflow | ✅ Conversation mode + three-layer Agent |
+| HITL | Human approval, pause/resume | ✅ interrupt mechanism |
+| Multi-Agent Orchestration | 10 patterns unified as Graph templates (AD-7) | P1: Hierarchical (three-layer Agent template); P2: Handoff + canvas orchestration; P3: Pipeline/Broadcast/Peer-selection/Expert-panel, etc. |
 
-**编排层对下层接口**: 编译后的 `CompiledGraph` 交给执行引擎层运行。
+**Orchestration to lower layer interface**: Compiled `CompiledGraph` is passed to the execution engine layer for running.
 
 ```
 CompiledGraph {
@@ -336,105 +341,105 @@ CompiledGraph {
 }
 ```
 
-**关键设计决策：三层 Agent 作为预设模板**
+**Key Design Decision: Three-Layer Agent as Preset Template**
 
-三层 Agent 不是编排层的硬编码路径，而是一个预定义的 Graph 模板：
+The three-layer Agent is not a hardcoded path in the orchestration layer, but a predefined Graph template:
 
 ```
-Guard→Plan→Sub-Agent 模板 = CompiledGraph {
+Guard→Plan→Sub-Agent Template = CompiledGraph {
     nodes: {
-        "guard": GuardNode,          # 安全检查、长任务规划
-        "plan": PlanNode,            # 任务分解、Skill 选择
-        "sub_agent": DynamicSubAgent # 根据 Skill 动态生成
+        "guard": GuardNode,          # Security check, long task planning
+        "plan": PlanNode,            # Task decomposition, Skill selection
+        "sub_agent": DynamicSubAgent # Dynamically generated based on Skill
     },
     edges: [
         START → "guard",
         "guard" → "plan",
         "plan" → condition("sub_agent" | END),
-        "sub_agent" → "plan"         # 循环直到完成
+        "sub_agent" → "plan"         # Loop until complete
     ]
 }
 ```
 
-用户选择"三层 Agent 模式"时，编排层自动实例化这个模板。用户在画布中可以看到并编辑这个 Graph。
+When the user selects "three-layer Agent mode", the orchestration layer automatically instantiates this template. Users can view and edit this Graph in the canvas.
 
-#### 执行引擎层 (Engine)
+#### Execution Engine Layer
 
-| 模块 | 职责 | P1 范围 |
-|------|------|---------|
-| Pregel 运行时 | BSP 超步循环：读 Channel → 执行 Node → 写 Channel | ✅ |
-| Channel 系统 | 状态管理：LastValue、Topic、PersistentTopic、Accumulator | ✅ |
-| Checkpoint | 状态持久化到 PostgreSQL，支持断点恢复 | ✅ |
-| interrupt/Command | Human-in-the-Loop：暂停等待、恢复继续 | ✅ |
-| 子图组合 | 嵌套 Graph，状态映射（parent→child） | P2 |
-| 策略系统 | Retry、Timeout、Cache、Fallback | ✅ Retry + Timeout + Fallback |
-| 流式输出 | 7 种 stream 模式 | ✅ 4 种（values, updates, messages, debug） |
+| Module | Responsibility | P1 Scope |
+|--------|---------------|----------|
+| Pregel Runtime | BSP superstep loop: read Channel → execute Node → write Channel | ✅ |
+| Channel System | State management: LastValue, Topic, PersistentTopic, Accumulator | ✅ |
+| Checkpoint | State persistence to PostgreSQL, supports breakpoint recovery | ✅ |
+| interrupt/Command | Human-in-the-Loop: pause and wait, resume and continue | ✅ |
+| Subgraph Composition | Nested Graph, state mapping (parent→child) | P2 |
+| Strategy System | Retry, Timeout, Cache, Fallback | ✅ Retry + Timeout + Fallback |
+| Streaming Output | 7 stream modes | ✅ 4 (values, updates, messages, debug) |
 
-**执行引擎对下层接口**: 通过 Port 接口调用能力服务层。
+**Execution Engine to lower layer interface**: Calls capability services layer via Port interface.
 
 ```
 EnginePorts {
-    llm_invoke(messages, config) → Stream[Token]        # 模型调用
-    tool_execute(name, args, context) → Result           # 工具执行
-    memory_query(query, scope) → List[Memory]            # L3 用户记忆检索（P2）
-    memory_store(key, value, scope) → void               # L3 用户记忆存储（P2）
-    conversation_load(session_id) → ConversationHistory  # L2 会话记忆加载（P1）
-    conversation_save(session_id, messages) → void       # L2 会话记忆保存（P1）
-    knowledge_query(query, kb_ids) → List[Chunk]         # 知识库检索
-    skill_load(name) → SkillContent                      # Skill 加载
-    checkpoint_save(state) → CheckpointId                 # 状态持久化
-    checkpoint_load(id) → State                          # 状态恢复
+    llm_invoke(messages, config) → Stream[Token]        # Model invocation
+    tool_execute(name, args, context) → Result           # Tool execution
+    memory_query(query, scope) → List[Memory]            # L3 user memory retrieval (P2)
+    memory_store(key, value, scope) → void               # L3 user memory storage (P2)
+    conversation_load(session_id) → ConversationHistory  # L2 conversation memory loading (P1)
+    conversation_save(session_id, messages) → void       # L2 conversation memory saving (P1)
+    knowledge_query(query, kb_ids) → List[Chunk]         # Knowledge base retrieval
+    skill_load(name) → SkillContent                      # Skill loading
+    checkpoint_save(state) → CheckpointId                 # State persistence
+    checkpoint_load(id) → State                          # State recovery
 }
 ```
 
-**关键设计决策：Checkpoint 持久化 + 内存缓存**
+**Key Design Decision: Checkpoint Persistence + Memory Cache**
 
-- Checkpoint 接口从 P1 就必须实现，所有状态变更都通过 Checkpoint 持久化
-- 允许内存缓存作为 hot path 加速访问（缓存在写入成功后更新）
-- 数据库写入可异步（WAL 先写日志，后台刷盘）
-- 缓存一致性方案（TTL 失效 / 写穿透 / 事件通知）在 P2 优化
+- Checkpoint interface must be implemented from P1; all state changes are persisted via Checkpoint
+- Memory cache allowed as hot path acceleration (cache updated after successful write)
+- Database writes can be asynchronous (WAL first, background flush)
+- Cache consistency solutions (TTL invalidation / write-through / event notification) optimized in P2
 
-#### 能力服务层 (Services)
+#### Capability Services Layer
 
-| 模块 | 职责 | P1 范围 |
-|------|------|---------|
-| 模型路由 | LiteLLM 集成，100+ Provider，降级/Fallback | ✅ 多模型接入 + 模型降级 |
-| RAG 管道 | 文档解析→分块→Embedding→检索 | ✅ 基础 RAG（Docling + Qdrant） |
-| 记忆服务 | 四级记忆（L1-L4）渐进实现 | P1: L2 简化版（对话历史+截断）；P2: L1 工作记忆+L2 完整压缩+L3 用户记忆；P3: Consolidation Agent |
-| 工具系统 | 内置工具 + 自定义工具 + MCP Client | ✅ MCP 客户端 + 内置/自定义工具 |
-| Skill 管理 | SKILL.md 格式 + 多源发现 + 按需加载 | ✅ 核心 Skill |
-| 安全护栏 | 四层安全（输入/输出/检索/执行）+ 四级风险授权（AD-8） | P1: 基础内容过滤；P2: 四级授权+沙箱；P3: 完整护栏+审计 |
-| 上下文管理 | 写入/选择/压缩/隔离 | P2 完整上下文管理；P1 基础压缩 |
+| Module | Responsibility | P1 Scope |
+|--------|---------------|----------|
+| Model Routing | LiteLLM integration, 100+ Providers, degradation/Fallback | ✅ Multi-model access + model fallback |
+| RAG Pipeline | Document parsing → chunking → Embedding → retrieval | ✅ Basic RAG (Docling + Qdrant) |
+| Memory Service | Four-level memory (L1-L4) progressive implementation | P1: Simplified L2 (conversation history + truncation); P2: L1 working memory + full L2 compression + L3 user memory; P3: Consolidation Agent |
+| Tool System | Built-in tools + custom tools + MCP Client | ✅ MCP client + built-in/custom tools |
+| Skill Management | SKILL.md format + multi-source discovery + on-demand loading | ✅ Core Skill |
+| Security Guardrails | Four-layer security (input/output/retrieval/execution) + four-level risk authorization (AD-8) | P1: Basic content filtering; P2: Four-level authorization + sandbox; P3: Complete guardrails + audit |
+| Context Management | Write/Select/Compress/Isolate | P2 complete context management; P1 basic compression |
 
-#### 基础设施层 (Infrastructure)
+#### Infrastructure Layer
 
-| 组件 | 用途 | P1 范围 |
-|------|------|---------|
-| PostgreSQL | 关系数据 + Checkpoint + JSONB 元数据 | ✅ |
-| Qdrant | 向量检索（Embedding + ANN） | ✅ |
-| MinIO | 文件/文档/制品存储 | ✅ |
-| LangFuse | 可观测性：追踪、成本、Prompt 管理 | ✅ 对话日志 + 基础追踪 |
-| Docker Compose | 开发/单机部署 | ✅ |
-| 认证授权 | API Key 认证 | ✅ API Key；P3: SSO/LDAP |
+| Component | Purpose | P1 Scope |
+|-----------|---------|----------|
+| PostgreSQL | Relational data + Checkpoint + JSONB metadata | ✅ |
+| Qdrant | Vector retrieval (Embedding + ANN) | ✅ |
+| MinIO | File/document/artifact storage | ✅ |
+| LangFuse | Observability: tracing, cost, Prompt management | ✅ Conversation logging + basic tracing |
+| Docker Compose | Development/single-machine deployment | ✅ |
+| Authentication | API Key authentication | ✅ API Key; P3: SSO/LDAP |
 
-### 2.3 与参考架构的关键差异
+### 2.3 Key Differences from Reference Architectures
 
-| 维度 | 华为财经 Agent | RelayAgent | Hecate |
-|------|--------------|------------|--------|
-| **定位** | 企业内部建设指南 | 个人 Agent 应用 | 开源 Agent 平台 |
-| **编排** | LangGraph 直接使用 | 三层 Agent 硬编码 | 通用 Graph + 三层 Agent 预设模板 |
-| **执行引擎** | LangGraph Runtime | AgentScope Runtime | 自建引擎（借鉴 LangGraph 设计模式） |
-| **前端** | AUI（华为内部） | Vue 3 + tinyVue | React Flow + React 19 |
-| **部署** | 华为云内部 | 本地/单机 | Docker Compose → K8s → 气隔环境 |
-| **模型** | MaaS + ModelArts | 单用户配置 | LiteLLM 100+ Provider |
-| **无状态** | 未强调 | 严格无状态（Session V2） | Checkpoint 持久化 + 内存缓存 |
-| **多租户** | 未涉及 | 未涉及 | P3 多租户 + RBAC |
+| Dimension | Huawei Finance Agent | RelayAgent | Hecate |
+|-----------|---------------------|------------|--------|
+| **Positioning** | Enterprise internal construction guide | Personal Agent application | Open-source Agent platform |
+| **Orchestration** | Direct LangGraph usage | Hardcoded three-layer Agent | General-purpose Graph + three-layer Agent preset template |
+| **Execution Engine** | LangGraph Runtime | AgentScope Runtime | Self-built engine (borrowing LangGraph design patterns) |
+| **Frontend** | AUI (Huawei internal) | Vue 3 + tinyVue | React Flow + React 19 |
+| **Deployment** | Huawei Cloud internal | Local/single-machine | Docker Compose → K8s → air-gapped environments |
+| **Models** | MaaS + ModelArts | Single user configuration | LiteLLM 100+ Providers |
+| **Stateless** | Not emphasized | Strictly stateless (Session V2) | Checkpoint persistence + memory cache |
+| **Multi-tenancy** | Not covered | Not covered | P3 multi-tenancy + RBAC |
 
 ---
 
-## 第三章：核心概念模型
+## Chapter 3: Core Concept Model
 
-### 3.1 实体关系总览
+### 3.1 Entity Relationship Overview
 
 ```
 Organization ─┬── Workspace ─┬── Agent ─┬── has Tools
@@ -455,11 +460,11 @@ Organization ─┬── Workspace ─┬── Agent ─┬── has Tools
               └── User ─── has Role
 ```
 
-### 3.2 核心实体定义
+### 3.2 Core Entity Definitions
 
 #### Agent
 
-Agent 是 Hecate 的核心概念 — 一个具备人设、模型、工具、知识和记忆的自主执行单元。
+Agent is Hecate's core concept — an autonomous execution unit with persona, model, tools, knowledge, and memory.
 
 ```python
 class Agent:
@@ -467,28 +472,28 @@ class Agent:
     name: str
     workspace_id: UUID
 
-    # 身份
-    persona: str                    # 系统提示词 / 人设描述
-    model_config: ModelConfig       # 主模型 + 备用模型 + 参数
+    # Identity
+    persona: str                    # System prompt / persona description
+    model_config: ModelConfig       # Primary model + fallback model + parameters
 
-    # 能力
-    tools: List[ToolRef]            # 关联的工具（内置 + 自定义 + MCP）
-    skills: List[SkillRef]          # 关联的 Skill
-    knowledge_bases: List[UUID]     # 关联的知识库
+    # Capabilities
+    tools: List[ToolRef]            # Associated tools (built-in + custom + MCP)
+    skills: List[SkillRef]          # Associated Skills
+    knowledge_bases: List[UUID]     # Associated knowledge bases
 
-    # 记忆
-    memory_blocks: List[MemoryBlock]  # L1 工作记忆（P2）
-    memory_config: MemoryConfig       # 记忆策略（P2，含三工序配置）
+    # Memory
+    memory_blocks: List[MemoryBlock]  # L1 working memory (P2)
+    memory_config: MemoryConfig       # Memory strategy (P2, including three-stage process config)
 
-    # 执行
-    workflow_id: Optional[UUID]       # 绑定的工作流（None = 纯对话模式）
+    # Execution
+    workflow_id: Optional[UUID]       # Bound workflow (None = pure conversation mode)
     mode: AgentMode                   # chat | three_layer | workflow
 
-    # 安全
-    risk_level: RiskLevel             # 默认风险等级
+    # Security
+    risk_level: RiskLevel             # Default risk level
     approval_rules: List[ApprovalRule]
 
-    # 元数据
+    # Metadata
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime]
@@ -496,7 +501,7 @@ class Agent:
 
 #### Workflow
 
-Workflow 是一个可执行的有向图，定义了 Agent 的执行流程。
+Workflow is an executable directed graph that defines the Agent's execution flow.
 
 ```python
 class Workflow:
@@ -505,16 +510,16 @@ class Workflow:
     workspace_id: UUID
     version: int
 
-    # 图定义
+    # Graph definition
     nodes: List[Node]
     edges: List[Edge]
     entry_node: NodeId
 
-    # 状态定义
-    state_schema: dict               # Channel 定义（字段名 → Channel 类型）
-    state_defaults: dict              # Channel 默认值
+    # State definition
+    state_schema: dict               # Channel definition (field name → Channel type)
+    state_defaults: dict              # Channel default values
 
-    # 元数据
+    # Metadata
     created_at: datetime
     updated_at: datetime
     deleted_at: Optional[datetime]
@@ -522,30 +527,30 @@ class Workflow:
 class Node:
     id: NodeId
     type: NodeType                    # llm | code | condition | tool | agent | subgraph | input | output
-    config: dict                      # 节点配置（模型、工具、代码等）
-    position: Optional[Position]      # 画布位置（前端用）
+    config: dict                      # Node configuration (model, tools, code, etc.)
+    position: Optional[Position]      # Canvas position (for frontend)
 
 class Edge:
     id: EdgeId
     source: NodeId
     target: NodeId
-    source_handle: Optional[str]      # 输出端口
-    target_handle: Optional[str]      # 输入端口
-    condition: Optional[str]          # 条件表达式（条件边）
+    source_handle: Optional[str]      # Output port
+    target_handle: Optional[str]      # Input port
+    condition: Optional[str]          # Condition expression (conditional edge)
 ```
 
-#### Node 类型
+#### Node Types
 
-| 类型 | 说明 | Channel 读写 |
-|------|------|-------------|
-| `llm` | LLM 推理节点 | 读取 messages/tools → 写入 response |
-| `code` | 代码执行节点（沙箱） | 读取 input → 写入 output |
-| `condition` | 条件分支节点 | 读取 state → 路由到对应分支 |
-| `tool` | 工具调用节点 | 读取 tool_name/args → 写入 result |
-| `agent` | 子 Agent 节点（引用另一个 Agent） | 映射 parent state → child state → 回传 result |
-| `subgraph` | 子图节点（嵌套 Workflow） | 映射 outer state → inner state → 回传 result |
-| `input` | 工作流输入节点 | 接收外部输入 |
-| `output` | 工作流输出节点 | 输出最终结果 |
+| Type | Description | Channel Read/Write |
+|------|-------------|-------------------|
+| `llm` | LLM inference node | Reads messages/tools → writes response |
+| `code` | Code execution node (sandbox) | Reads input → writes output |
+| `condition` | Conditional branch node | Reads state → routes to corresponding branch |
+| `tool` | Tool invocation node | Reads tool_name/args → writes result |
+| `agent` | Sub-Agent node (references another Agent) | Maps parent state → child state → returns result |
+| `subgraph` | Subgraph node (nested Workflow) | Maps outer state → inner state → returns result |
+| `input` | Workflow input node | Receives external input |
+| `output` | Workflow output node | Outputs final result |
 
 #### Tool
 
@@ -553,26 +558,26 @@ class Edge:
 class Tool:
     id: UUID
     name: str
-    description: str                  # 自然语言功能描述（Agent 可理解）
+    description: str                  # Natural language description (Agent-understandable)
     source: ToolSource                # builtin | custom | mcp
 
     # Schema
-    parameters: dict                  # JSON Schema（输入）
-    returns: dict                     # JSON Schema（输出）
+    parameters: dict                  # JSON Schema (input)
+    returns: dict                     # JSON Schema (output)
 
-    # 安全
+    # Security
     risk_level: RiskLevel             # LOW | MEDIUM | HIGH | CRITICAL
     approval_required: bool
     approval_scope: ApprovalScope     # once | session | project | global
 
-    # MCP（当 source=mcp 时）
+    # MCP (when source=mcp)
     mcp_server: Optional[str]
     mcp_tool_name: Optional[str]
 
 class ToolSource(str, Enum):
-    builtin = "builtin"               # 内置工具（代码执行、文件操作等）
-    custom = "custom"                  # 用户自定义（API Schema）
-    mcp = "mcp"                        # MCP 服务器提供
+    builtin = "builtin"               # Built-in tools (code execution, file operations, etc.)
+    custom = "custom"                  # User-defined (API Schema)
+    mcp = "mcp"                        # Provided by MCP server
 ```
 
 #### Skill
@@ -580,28 +585,28 @@ class ToolSource(str, Enum):
 ```python
 class Skill:
     id: UUID
-    name: str                         # 小写字母+连字符，如 "developer"
-    description: str                  # 一句话描述
+    name: str                         # Lowercase letters + hyphens, e.g. "developer"
+    description: str                  # One-sentence description
     source: SkillSource               # system | user | project
 
-    # 内容
-    instructions: str                 # SKILL.md body（Agent 指令）
-    allowed_tools: List[str]          # 允许使用的工具列表
-    metadata: dict                    # 元数据（~100 tokens）
+    # Content
+    instructions: str                 # SKILL.md body (Agent instructions)
+    allowed_tools: List[str]          # List of allowed tools
+    metadata: dict                    # Metadata (~100 tokens)
 
-    # 资源
-    scripts: List[str]                # 可执行脚本路径
-    references: List[str]             # 参考文档路径
-    assets: List[str]                 # 资源文件路径
+    # Resources
+    scripts: List[str]                # Executable script paths
+    references: List[str]             # Reference document paths
+    assets: List[str]                 # Asset file paths
 
-    # 加载控制
-    max_tokens: int                   # 最大 Token 限制
-    auto_load: bool                   # 是否自动加载
+    # Load control
+    max_tokens: int                   # Maximum Token limit
+    auto_load: bool                   # Whether to auto-load
 
 class SkillSource(str, Enum):
-    project = "project"               # 项目级：{project}/.skills/
-    user = "user"                     # 用户级：~/.hecate/skills/
-    system = "system"                 # 系统级：平台内置
+    project = "project"               # Project-level: {project}/.skills/
+    user = "user"                     # User-level: ~/.hecate/skills/
+    system = "system"                 # System-level: platform built-in
 ```
 
 #### KnowledgeBase / Document / Chunk
@@ -611,7 +616,7 @@ class KnowledgeBase:
     id: UUID
     name: str
     workspace_id: UUID
-    embedding_model: str              # 使用的 Embedding 模型
+    embedding_model: str              # Embedding model used
     chunk_strategy: ChunkStrategy     # auto | fixed | semantic
     chunk_size: int
     chunk_overlap: int
@@ -627,46 +632,46 @@ class Document:
 class Chunk:
     id: UUID
     document_id: UUID
-    content: str                      # 分块文本内容
-    metadata: dict                    # 元数据（页码、位置、标题等）
-    embedding: List[float]            # 向量
+    content: str                      # Chunked text content
+    metadata: dict                    # Metadata (page number, position, title, etc.)
+    embedding: List[float]            # Vector
 ```
 
-#### Memory — 四级记忆系统
+#### Memory — Four-Level Memory System
 
-四级记忆渐进实现（AD-6）。L2 会话记忆 P1 必须有（多轮对话刚需），L1/L3 P2 引入，L4 等价于 RAG 管道。
+Four-level memory implemented progressively (AD-6). L2 conversation memory is required for P1 (multi-turn conversation necessity), L1/L3 introduced in P2, L4 is equivalent to RAG pipeline.
 
 ```python
 class MemoryBlock:
-    """L1 工作记忆 — 上下文窗口中的命名区域（P2）"""
+    """L1 Working Memory — named area in context window (P2)"""
     id: UUID
     agent_id: UUID
-    label: str                        # 如 "persona", "user_profile", "domain_context"
+    label: str                        # e.g. "persona", "user_profile", "domain_context"
     content: str
-    position: int                     # 在上下文中的位置
-    limit: int                        # 最大 Token 数
+    position: int                     # Position in context
+    limit: int                        # Maximum Token count
 
 class ConversationHistory:
-    """L2 会话记忆 — 对话历史 + 自动压缩"""
-    # P1: 简单消息列表 + 超长截断
-    # P2: 完整压缩管道（snip→microcompact→autocompact）
+    """L2 Conversation Memory — conversation history + auto-compression"""
+    # P1: Simple message list + truncation when too long
+    # P2: Full compression pipeline (snip→microcompact→autocompact)
     messages: List[Message]
-    summary: Optional[str]            # 压缩摘要（P2）
-    token_count: int                  # 当前 Token 计数
+    summary: Optional[str]            # Compression summary (P2)
+    token_count: int                  # Current Token count
 
 class Memory:
-    """L3 用户/Agent 记忆 — 跨会话持久事实（P2）"""
+    """L3 User/Agent Memory — cross-session persistent facts (P2)"""
     id: UUID
-    content: str                      # 提取的事实/偏好/知识
+    content: str                      # Extracted facts/preferences/knowledge
     scope: MemoryScope                # user + agent + session
     memory_type: MemoryType           # semantic | procedural | episodic
-    importance: float                 # 重要性评分
-    access_count: int                 # 访问次数
-    embedding: List[float]            # 向量
+    importance: float                 # Importance score
+    access_count: int                 # Access count
+    embedding: List[float]            # Vector
     created_at: datetime
     updated_at: datetime
 
-# L4 知识记忆 = RAG 管道（KnowledgeBase + Document + Chunk），已在上方定义
+# L4 Knowledge Memory = RAG pipeline (KnowledgeBase + Document + Chunk), defined above
 
 class MemoryScope:
     user_id: str
@@ -674,9 +679,9 @@ class MemoryScope:
     session_id: Optional[UUID]
 
 class MemoryType(str, Enum):
-    semantic = "semantic"             # 事实知识
-    procedural = "procedural"         # 方法步骤
-    episodic = "episodic"             # 事件经历
+    semantic = "semantic"             # Factual knowledge
+    procedural = "procedural"         # Method/procedure
+    episodic = "episodic"             # Event/experience
 ```
 
 #### Conversation / Message / Session
@@ -693,19 +698,19 @@ class Message:
     conversation_id: UUID
     role: str                         # system | user | assistant | tool
     content: str
-    tool_calls: Optional[List[dict]]  # 工具调用列表
-    tool_call_id: Optional[str]       # 工具调用结果关联 ID
-    metadata: dict                    # Token 用量、模型、延迟等
+    tool_calls: Optional[List[dict]]  # Tool call list
+    tool_call_id: Optional[str]       # Tool call result association ID
+    metadata: dict                    # Token usage, model, latency, etc.
     created_at: datetime
 
 class Session:
-    """一次完整的 Agent 执行上下文"""
+    """A complete Agent execution context"""
     id: UUID
     conversation_id: UUID
     agent_id: UUID
     status: SessionStatus             # active | interrupted | completed | failed
-    current_node: Optional[NodeId]    # 当前执行到的节点
-    checkpoint_id: Optional[UUID]     # 最新 Checkpoint
+    current_node: Optional[NodeId]    # Currently executing node
+    checkpoint_id: Optional[UUID]     # Latest Checkpoint
     created_at: datetime
     updated_at: datetime
 ```
@@ -717,36 +722,36 @@ class Prompt:
     id: UUID
     name: str
     workspace_id: UUID
-    template: str                     # Prompt 模板（支持变量插值）
-    variables: List[str]              # 模板变量列表
+    template: str                     # Prompt template (supports variable interpolation)
+    variables: List[str]              # Template variable list
     version: int
     labels: List[str]                 # production | staging | development
     created_at: datetime
 ```
 
-#### ResourceVersion — 通用资源版本化（P2）
+#### ResourceVersion — Generic Resource Versioning (P2)
 
-Agent、Workflow、Prompt、Skill 等可版本化资源共享同一套版本管理机制，P2 统一实现，P3 扩展灰度发布和变更审批。
+Versionable resources such as Agent, Workflow, Prompt, Skill share the same version management mechanism, unified in P2, extended in P3 with canary deployment and change approval.
 
 ```python
 class ResourceVersion:
     resource_type: str                # "agent" | "workflow" | "prompt" | "skill"
     resource_id: UUID
-    version: int                      # 单调递增
-    snapshot: dict                    # 该版本的完整配置快照（JSONB）
-    change_summary: str               # 变更描述（自动生成或用户填写）
-    changed_by: UUID                  # 操作人
+    version: int                      # Monotonically increasing
+    snapshot: dict                    # Complete configuration snapshot for this version (JSONB)
+    change_summary: str               # Change description (auto-generated or user-provided)
+    changed_by: UUID                  # Operator
     created_at: datetime
 ```
 
-**适用范围**:
+**Applicable Scope**:
 
-| 资源类型 | 版本化内容 | P2 能力 | P3 扩展 |
-|---------|-----------|---------|---------|
-| Agent | persona, model_config, tools, skills, kb_refs | 查看历史、回滚 | 草稿/测试/生产环境隔离 |
-| Workflow | nodes, edges, state_schema | 已在 1.1.9 列出，对比、回滚 | 版本级回归测试 |
-| Prompt | template, variables | 已在 8.5 列出，标签部署 | A/B 测试 |
-| Skill | instructions, allowed_tools | 查看历史、回滚 | 远程源版本同步 |
+| Resource Type | Versioned Content | P2 Capability | P3 Extension |
+|--------------|-------------------|--------------|-------------|
+| Agent | persona, model_config, tools, skills, kb_refs | View history, rollback | Draft/test/production environment isolation |
+| Workflow | nodes, edges, state_schema | Listed in 1.1.9, diff, rollback | Version-level regression testing |
+| Prompt | template, variables | Listed in 8.5, tag deployment | A/B testing |
+| Skill | instructions, allowed_tools | View history, rollback | Remote source version sync |
 
 #### Organization / User / Workspace
 
@@ -754,7 +759,7 @@ class ResourceVersion:
 class Organization:
     id: UUID
     name: str
-    settings: dict                    # 组织级配置
+    settings: dict                    # Organization-level configuration
 
 class User:
     id: UUID
@@ -767,15 +772,15 @@ class Workspace:
     id: UUID
     org_id: UUID
     name: str
-    settings: dict                    # 工作空间级配置
+    settings: dict                    # Workspace-level configuration
 ```
 
-### 3.3 存储设计
+### 3.3 Storage Design
 
-#### PostgreSQL 表映射
+#### PostgreSQL Table Mapping
 
-| 实体 | 表名 | 主要字段 |
-|------|------|---------|
+| Entity | Table Name | Key Fields |
+|--------|-----------|------------|
 | Agent | `agents` | id, workspace_id, name, persona, model_config(JSONB), mode |
 | Workflow | `workflows` | id, workspace_id, name, version, nodes(JSONB), edges(JSONB) |
 | Tool | `tools` | id, workspace_id, name, source, parameters(JSONB), risk_level |
@@ -795,38 +800,38 @@ class Workspace:
 | Workspace | `workspaces` | id, org_id, name, settings(JSONB) |
 | ResourceVersion | `resource_versions` | resource_type, resource_id, version, snapshot(JSONB), change_summary, changed_by |
 
-#### 设计约定
+#### Design Conventions
 
-- UUID 主键，支持分布式 ID 生成
-- JSONB 列存储灵活元数据和配置
-- 软删除（`deleted_at` timestamp）
-- 租户隔离通过 `org_id` / `workspace_id` 外键（P3 启用 Row-Level Security）
-- Alembic 管理 schema 演进
-- Checkpoint 表按 session_id 分区（高频写入，P2 优化）
+- UUID primary keys, supporting distributed ID generation
+- JSONB columns for flexible metadata and configuration storage
+- Soft delete (`deleted_at` timestamp)
+- Tenant isolation via `org_id` / `workspace_id` foreign keys (P3 enables Row-Level Security)
+- Alembic manages schema evolution
+- Checkpoint table partitioned by session_id (high-frequency writes, P2 optimization)
 
-#### 与 LangGraph StateGraph 的映射
+#### Mapping to LangGraph StateGraph
 
-| Hecate 概念 | LangGraph 等价物 | Hecate 扩展 |
-|------------|-----------------|------------|
-| Workflow | `StateGraph` | JSON 序列化、可视化编辑、版本管理 |
-| Node | `PregelNode` | 类型化输入输出、component metadata、8 种节点类型 |
-| Edge | `add_edge` / `add_conditional_edges` | 可视化 source/target handles、类型校验 |
-| Channel | channels/ | 扩展类型：PersistentTopic、Accumulator |
-| Checkpoint | `BaseCheckpointSaver` | PostgreSQL 后端、多租户、审计 |
-| Execution | `Pregel` runtime | 可选分布式后端（Temporal）、OTel 追踪 |
-| Session | Thread ID | 完整生命周期管理（active/interrupted/completed） |
+| Hecate Concept | LangGraph Equivalent | Hecate Extension |
+|---------------|---------------------|-----------------|
+| Workflow | `StateGraph` | JSON serialization, visual editing, version management |
+| Node | `PregelNode` | Typed input/output, component metadata, 8 node types |
+| Edge | `add_edge` / `add_conditional_edges` | Visual source/target handles, type validation |
+| Channel | channels/ | Extended types: PersistentTopic, Accumulator |
+| Checkpoint | `BaseCheckpointSaver` | PostgreSQL backend, multi-tenancy, audit |
+| Execution | `Pregel` runtime | Optional distributed backend (Temporal), OTel tracing |
+| Session | Thread ID | Full lifecycle management (active/interrupted/completed) |
 
 ---
 
-## 第四章：执行引擎设计
+## Chapter 4: Execution Engine Design
 
-### 4.1 设计定位
+### 4.1 Design Positioning
 
-执行引擎是 Hecate 的心脏。它接收编译后的 Graph，按 Pregel 模型执行，管理状态、处理中断、输出流式结果。
+The execution engine is Hecate's heart. It receives compiled Graphs, executes them following the Pregel model, manages state, handles interrupts, and outputs streaming results.
 
-**核心设计决策**: 自建引擎，借鉴 LangGraph 的五个设计模式（Channel、Checkpoint、Pregel、interrupt/Command、子图），不依赖 LangChain 代码。
+**Core Design Decision**: Self-built engine, borrowing five design patterns from LangGraph (Channel, Checkpoint, Pregel, interrupt/Command, subgraph), without depending on LangChain code.
 
-**代码量估算**: ~5000 行核心代码（借鉴 ~2500 行 + 自建 ~2500 行）。
+**Code Volume Estimate**: ~5000 lines of core code (~2500 lines borrowed + ~2500 lines self-built).
 
 ### 4.2 Graph DSL
 
@@ -888,62 +893,63 @@ class Workspace:
 }
 ```
 
-#### Channel 类型
+#### Channel Types
 
-| 类型 | 语义 | 写入行为 | 典型用途 |
-|------|------|---------|---------|
-| `last_value` | 保留最后一个值 | 新值覆盖旧值 | 当前计划、当前状态 |
-| `topic` | 消息流 | 追加（支持 reducer） | 对话消息列表、工具调用记录 |
-| `persistent_topic` | 持久消息流 | 追加 + 持久化 | 审计日志、不可变事件流 |
-| `accumulator` | 累加器 | 按指定函数聚合 | 迭代计数器、Token 用量统计 |
+| Type | Semantics | Write Behavior | Typical Use |
+|------|-----------|---------------|-------------|
+| `last_value` | Keeps the last value | New value overwrites old value | Current plan, current state |
+| `topic` | Message stream | Append (supports reducer) | Conversation message list, tool call records |
+| `persistent_topic` | Persistent message stream | Append + persistence | Audit log, immutable event stream |
+| `accumulator` | Accumulator | Aggregate via specified function | Iteration counter, Token usage statistics |
 
-### 4.3 编译器
+### 4.3 Compiler
 
-编译器将 Graph DSL（JSON）转换为运行时可直接执行的 `CompiledGraph`：
+The compiler transforms Graph DSL (JSON) into a runtime-executable `CompiledGraph`:
 
 ```
 JSON DSL
   │
-  ├── 1. Schema 校验
-  │     └── 验证节点类型、边连接、Channel 定义
+  ├── 1. Schema Validation
+  │     └── Validate node types, edge connections, Channel definitions
   │
-  ├── 2. 依赖分析
-  │     └── 构建节点依赖图、检测循环依赖（不允许的循环）
+  ├── 2. Dependency Analysis
+  │     └── Build node dependency graph, detect circular dependencies (disallowed cycles)
   │
-  ├── 3. Channel 绑定
-  │     └── 分析每个节点的读写 Channel，验证类型兼容
+  ├── 3. Channel Binding
+  │     └── Analyze each node's read/write Channels, verify type compatibility
   │
-  ├── 4. 编译优化
-  │     └── 识别可并行节点、合并连续的纯函数节点
+  ├── 4. Compilation Optimization
+  │     └── Identify parallelizable nodes, merge consecutive pure-function nodes
   │
-  └── 5. 输出 CompiledGraph
+  └── 5. Output CompiledGraph
         ├── nodes: Map[NodeId, CompiledNode]
         ├── edges: Map[NodeId, List[CompiledEdge]]
         ├── channels: Map[ChannelName, ChannelInstance]
         └── entry_point: NodeId
 ```
 
-### 4.4 Pregel 运行时 + Worker Pool 分布式执行
+### 4.4 Pregel Runtime + Worker Pool Distributed Execution
 
-执行引擎采用 Pregel/BSP（Bulk Synchronous Parallel）模型，节点执行分发到 Worker Pool：
+The execution engine adopts the Pregel/BSP (Bulk Synchronous Parallel) model, with node execution dispatched to the Worker Pool:
 
-**架构决策 AD-5**: Pregel 调度器保持单进程（轻量），Node 的实际执行（LLM 调用、工具执行、代码运行）分发到 Worker Pool。演进路径：P1 进程内线程池 → P2 跨进程 Worker → P3 可选 Temporal 后端。
+**Architecture Decision AD-5**: Pregel scheduler remains single-process (lightweight), actual Node execution (LLM calls, tool execution, code execution) dispatched to Worker Pool. Evolution path: P1 in-process thread pool → P2 cross-process Worker → P3 optional Temporal backend.
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                  Pregel Scheduler（单进程）            │
+│                  Pregel Scheduler (single-process)    │
 │                                                       │
-│  1. READ: 各节点读取 Channel 当前值                    │
-│  2. DISPATCH: 将就绪节点分发到 Worker Pool             │
-│  3. AWAIT: 等待所有 Worker 返回结果                    │
-│  4. WRITE: 各节点写入 Channel 新值                     │
-│  5. CHECKPOINT: 持久化当前状态                         │
-│  6. ROUTE: 根据条件边决定下一步                       │
-│  7. CHECK: 是否还有就绪节点？                          │
-│     ├── YES → 回到 Step 1                             │
-│     └── NO → 执行结束                                 │
+│  1. READ: Each node reads current Channel values      │
+│  2. DISPATCH: Dispatch ready nodes to Worker Pool     │
+│  3. AWAIT: Wait for all Workers to return results     │
+│  4. WRITE: Each node writes new Channel values        │
+│  5. CHECKPOINT: Persist current state                 │
+│  6. ROUTE: Determine next step based on conditional   │
+│     edges                                             │
+│  7. CHECK: Are there still ready nodes?               │
+│     ├── YES → Go back to Step 1                      │
+│     └── NO → Execution complete                      │
 │                                                       │
-│  随时可被 interrupt() 暂停                             │
+│  Can be paused at any time via interrupt()            │
 └──────────────┬───────────────────────────────────────┘
                │ dispatch tasks
                ▼
@@ -955,13 +961,15 @@ JSON DSL
 │  │(Thread) │  │(Thread) │  │(Thread) │              │
 │  └────┬────┘  └────┬────┘  └────┬────┘              │
 │       │            │            │                     │
-│  P1: 进程内线程池 (asyncio/concurrent.futures)        │
-│  P2: 跨进程 Worker (多进程 / 多容器)                  │
-│  P3: 可选 Temporal / NATS 分布式后端                  │
+│  P1: In-process thread pool (asyncio/concurrent.     │
+│      futures)                                         │
+│  P2: Cross-process Workers (multi-process /          │
+│      multi-container)                                 │
+│  P3: Optional Temporal / NATS distributed backend    │
 └──────────────────────────────────────────────────────┘
 ```
 
-#### Worker 接口
+#### Worker Interface
 
 ```python
 class WorkerTask:
@@ -970,110 +978,110 @@ class WorkerTask:
     node_id: NodeId
     node_type: NodeType              # llm | tool | code | ...
     node_config: dict
-    channel_snapshot: dict            # 该节点需要的 Channel 只读快照
-    deadline: Optional[float]         # 超时时间
+    channel_snapshot: dict            # Channel read-only snapshot needed by this node
+    deadline: Optional[float]         # Timeout
 
 class WorkerResult:
     task_id: UUID
     status: Literal["success", "error", "timeout", "interrupted"]
-    output: dict                      # Channel 写入内容
-    metadata: dict                    # Token 用量、耗时等
+    output: dict                      # Channel write content
+    metadata: dict                    # Token usage, elapsed time, etc.
     error: Optional[ErrorInfo]
 ```
 
-#### 渐进式扩展路径
+#### Progressive Scaling Path
 
-| 阶段 | Worker 实现 | 通信方式 | 适用场景 |
-|------|------------|---------|---------|
-| **P1** | 进程内线程池 | 直接函数调用 / asyncio | 单机、低并发 |
-| **P2** | 跨进程 Worker | 进程间通信（multiprocessing / Redis Queue） | 多用户并发、CPU 密集型工具 |
-| **P3** | 分布式 Worker | Temporal Task Queue / NATS | 高可用、水平扩展、多租户 |
+| Phase | Worker Implementation | Communication Method | Use Case |
+|-------|----------------------|---------------------|----------|
+| **P1** | In-process thread pool | Direct function call / asyncio | Single machine, low concurrency |
+| **P2** | Cross-process Worker | IPC (multiprocessing / Redis Queue) | Multi-user concurrency, CPU-intensive tools |
+| **P3** | Distributed Worker | Temporal Task Queue / NATS | High availability, horizontal scaling, multi-tenancy |
 
-#### 设计约束
+#### Design Constraints
 
-- **Channel 所有权在 Scheduler**: Worker 只接收 Channel 快照（只读），不直接修改 Channel。Worker 返回结果后，由 Scheduler 统一写入 Channel。
-- **Checkpoint 由 Scheduler 控制**: Worker 不感知 Checkpoint，Scheduler 在所有 Worker 完成后统一持久化。
-- **interrupt 由 Worker 触发**: Worker 执行中调用 `interrupt()` → 通过 `WorkerResult.status="interrupted"` 通知 Scheduler → Scheduler 暂停循环。
-- **Worker 无状态**: Worker 不保存执行状态，重启后可被 Scheduler 重新调度（基于 Checkpoint 恢复）。
+- **Channel ownership in Scheduler**: Workers only receive Channel snapshots (read-only), never directly modify Channels. After Workers return results, the Scheduler uniformly writes to Channels.
+- **Checkpoint controlled by Scheduler**: Workers are unaware of Checkpoints; the Scheduler uniformly persists after all Workers complete.
+- **Interrupt triggered by Worker**: Worker calls `interrupt()` during execution → notifies Scheduler via `WorkerResult.status="interrupted"` → Scheduler pauses the loop.
+- **Workers are stateless**: Workers do not save execution state; they can be rescheduled by the Scheduler after restart (based on Checkpoint recovery).
 
-#### 执行流程示例：三层 Agent 模板
+#### Execution Flow Example: Three-Layer Agent Template
 
 ```
 Superstep 1:
   READ:   messages = [user_input]
-  EXECUTE: guard 节点 → 安全检查 + 风险评估
+  EXECUTE: guard node → security check + risk assessment
   WRITE:  guard_result = {safe: true, risk: LOW}
   CHECKPOINT: #1
 
 Superstep 2:
   READ:   messages + guard_result
-  EXECUTE: plan 节点 → 任务分解 + Skill 选择
+  EXECUTE: plan node → task decomposition + Skill selection
   WRITE:  current_plan = {skill: "developer", tasks: [...]}
   CHECKPOINT: #2
 
 Superstep 3:
   READ:   messages + current_plan
-  EXECUTE: execute 节点（developer Sub-Agent）→ 执行任务
+  EXECUTE: execute node (developer Sub-Agent) → execute task
   WRITE:  messages.append(assistant_response), iterations += 1
   CHECKPOINT: #3
 
 Superstep 4:
   READ:   iterations + current_plan
-  EXECUTE: should_continue 节点 → 条件判断
-  WRITE:  路由结果 = true/false
-  → 如果 true: 回到 Superstep 2（Plan 重新评估）
-  → 如果 false: 执行结束
+  EXECUTE: should_continue node → condition evaluation
+  WRITE:  routing result = true/false
+  → If true: go back to Superstep 2 (Plan re-evaluation)
+  → If false: execution complete
 ```
 
-### 4.5 Checkpoint 持久化
+### 4.5 Checkpoint Persistence
 
-#### 设计原则
+#### Design Principles
 
-1. **每步必存**: 每个 Pregel superstep 完成后，Checkpoint 写入 PostgreSQL
-2. **内存缓存**: 最近一次 Checkpoint 缓存在内存中，加速恢复
-3. **异步写入**: 数据库写入可异步（先写 WAL，后台刷盘）
-4. **不可变**: Checkpoint 一旦写入不可修改，支持时间旅行
+1. **Persist every step**: After each Pregel superstep completes, Checkpoint is written to PostgreSQL
+2. **Memory cache**: Most recent Checkpoint cached in memory for fast recovery
+3. **Asynchronous writes**: Database writes can be async (WAL first, background flush)
+4. **Immutable**: Once written, Checkpoints cannot be modified, enabling time-travel
 
-#### Checkpoint 结构
+#### Checkpoint Structure
 
 ```python
 class Checkpoint:
     id: UUID
     session_id: UUID
-    superstep: int                    # 第几轮超步
-    node_id: NodeId                   # 当前执行的节点
-    channel_state: dict               # 所有 Channel 的当前值
-    pending_writes: List[Write]       # 待写入的 Channel 更新
-    metadata: dict                    # 执行元数据（耗时、Token 等）
+    superstep: int                    # Superstep number
+    node_id: NodeId                   # Currently executing node
+    channel_state: dict               # All Channel current values
+    pending_writes: List[Write]       # Pending Channel updates
+    metadata: dict                    # Execution metadata (elapsed time, Tokens, etc.)
     created_at: datetime
 ```
 
-#### 恢复流程
+#### Recovery Flow
 
 ```
-Session 被中断 → 用户发送恢复请求
+Session interrupted → User sends resume request
   │
-  ├── 1. 加载最新 Checkpoint
-  ├── 2. 重建 Channel 状态
-  ├── 3. 从中断点继续 Pregel 循环
-  └── 4. 可选：用户修改状态后恢复（"时间旅行"）
+  ├── 1. Load latest Checkpoint
+  ├── 2. Rebuild Channel state
+  ├── 3. Continue Pregel loop from interruption point
+  └── 4. Optional: User modifies state then resumes ("time-travel")
 ```
 
 ### 4.6 interrupt / Command — Human-in-the-Loop
 
 #### interrupt
 
-节点可以调用 `interrupt(value)` 暂停执行，将控制权交还给用户：
+Nodes can call `interrupt(value)` to pause execution, returning control to the user:
 
 ```python
-# 在 Agent 节点中
+# In an Agent node
 def approval_node(state):
     if state["risk_level"] == "HIGH":
         user_decision = interrupt({
             "type": "approval",
             "operation": state["pending_operation"],
             "risk_level": "HIGH",
-            "message": "此操作需要您的审批"
+            "message": "This operation requires your approval"
         })
         if user_decision == "deny":
             return {"status": "cancelled"}
@@ -1082,108 +1090,108 @@ def approval_node(state):
 
 #### Command
 
-节点可以返回 `Command` 对象，控制执行流程：
+Nodes can return `Command` objects to control execution flow:
 
 ```python
-# 移交给另一个 Agent
+# Handoff to another Agent
 Command(goto="other_agent", update={"context": "handoff data"})
 
-# 恢复中断的执行
+# Resume interrupted execution
 Command(resume=value, update={"user_decision": "approved"})
 ```
 
-### 4.7 子图组合（P2）
+### 4.7 Subgraph Composition (P2)
 
-子图允许在一个 Workflow 中嵌套另一个 Workflow：
+Subgraphs allow nesting one Workflow inside another:
 
 ```
-外层 Graph:
+Outer Graph:
   ├── Node A
-  ├── SubGraph B (内层 Graph)
+  ├── SubGraph B (Inner Graph)
   │     ├── Node B1
   │     ├── Node B2
   │     └── Node B3
   └── Node C
 
-状态映射:
-  外层 Channel → 内层 Channel（输入映射）
-  内层 Channel → 外层 Channel（输出映射）
+State Mapping:
+  Outer Channel → Inner Channel (input mapping)
+  Inner Channel → Outer Channel (output mapping)
 ```
 
-**命名空间隔离**: 子图内部的 Channel 使用命名空间前缀（如 `subgraph_b.messages`），避免与外层冲突。
+**Namespace Isolation**: Channels inside subgraphs use namespace prefixes (e.g. `subgraph_b.messages`) to avoid conflicts with the outer layer.
 
-### 4.8 策略系统
+### 4.8 Strategy System
 
-| 策略 | 说明 | P1 |
-|------|------|-----|
-| **Retry** | 指数退避重试，可配置最大次数、抖动、自定义判断 | ✅ |
-| **Timeout** | 节点级超时、全局超时 | ✅ |
-| **Fallback** | 主模型失败 → 备用模型 → 兜底响应 | ✅ |
-| **Cache** | 工具调用结果缓存（相同参数直接返回） | P2 |
-| **Rate Limit** | 工具/模型调用频率限制 | P2 |
-| **Circuit Breaker** | 工具/模型熔断 | P3 |
+| Strategy | Description | P1 |
+|----------|-------------|-----|
+| **Retry** | Exponential backoff retry, configurable max attempts, jitter, custom predicate | ✅ |
+| **Timeout** | Node-level timeout, global timeout | ✅ |
+| **Fallback** | Primary model failure → fallback model → default response | ✅ |
+| **Cache** | Tool call result caching (same parameters return directly) | P2 |
+| **Rate Limit** | Tool/model call rate limiting | P2 |
+| **Circuit Breaker** | Tool/model circuit breaking | P3 |
 
-### 4.9 流式输出
+### 4.9 Streaming Output
 
-执行引擎支持 4 种流式模式（P1），后续扩展到 7 种：
+The execution engine supports 4 streaming modes (P1), later expanded to 7:
 
-| 模式 | 输出内容 | 用途 |
-|------|---------|------|
-| `values` | 每个 superstep 后的完整状态 | 调试、状态监控 |
-| `updates` | 每个 superstep 的增量更新 | 进度展示 |
-| `messages` | LLM 生成的 Token 流 | 前端实时显示 Agent 响应 |
-| `debug` | 内部执行细节（工具调用、Channel 变更） | 开发调试 |
-| `checkpoints` | Checkpoint 事件 | P2: 时间旅行 UI |
-| `tasks` | 子任务状态变更 | P2: 多 Agent 任务追踪 |
-| `custom` | 用户自定义流式输出 | P2: 自定义事件 |
+| Mode | Output Content | Use Case |
+|------|---------------|----------|
+| `values` | Complete state after each superstep | Debugging, state monitoring |
+| `updates` | Incremental updates per superstep | Progress display |
+| `messages` | LLM-generated Token stream | Frontend real-time Agent response display |
+| `debug` | Internal execution details (tool calls, Channel changes) | Development debugging |
+| `checkpoints` | Checkpoint events | P2: Time-travel UI |
+| `tasks` | Sub-task status changes | P2: Multi-Agent task tracking |
+| `custom` | User-defined streaming output | P2: Custom events |
 
-### 4.10 与 LangGraph 的对比
+### 4.10 Comparison with LangGraph
 
-| 维度 | LangGraph | Hecate |
-|------|-----------|--------|
-| **Graph 定义** | 纯代码（Python API） | JSON DSL + 画布 + 代码（三种入口） |
-| **序列化** | 无原生序列化 | JSON Schema 原生支持 |
-| **状态模型** | Channel（LastValue/Topic） | 扩展 Channel（+PersistentTopic/Accumulator） |
-| **Checkpoint** | PostgreSQL/SQLite/内存 | PostgreSQL 优先，内存缓存加速 |
-| **流式** | 7 种模式 | 4 种（P1）→ 7 种（P2） |
-| **分布式** | 单进程（OSS） | Worker Pool 渐进式（P1 线程池 → P2 跨进程 → P3 Temporal） |
-| **模型** | 绑定 LangChain BaseChatModel | LiteLLM 模型适配层，100+ Provider |
-| **依赖** | 强依赖 langchain-core | 零外部框架依赖 |
-| **DSL** | 无 | JSON/YAML → 编译器 → CompiledGraph |
-| **可视化** | 无 | React Flow 画布（P2） |
+| Dimension | LangGraph | Hecate |
+|-----------|-----------|--------|
+| **Graph Definition** | Pure code (Python API) | JSON DSL + canvas + code (three entry points) |
+| **Serialization** | No native serialization | JSON Schema native support |
+| **State Model** | Channel (LastValue/Topic) | Extended Channel (+PersistentTopic/Accumulator) |
+| **Checkpoint** | PostgreSQL/SQLite/memory | PostgreSQL primary, memory cache acceleration |
+| **Streaming** | 7 modes | 4 (P1) → 7 (P2) |
+| **Distribution** | Single-process (OSS) | Worker Pool progressive (P1 thread pool → P2 cross-process → P3 Temporal) |
+| **Models** | Tied to LangChain BaseChatModel | LiteLLM model adapter layer, 100+ Providers |
+| **Dependencies** | Strong dependency on langchain-core | Zero external framework dependencies |
+| **DSL** | None | JSON/YAML → compiler → CompiledGraph |
+| **Visualization** | None | React Flow canvas (P2) |
 
-### 4.11 引擎模块代码量估算
+### 4.11 Engine Module Code Volume Estimate
 
-| 模块 | 行数 | 说明 |
-|------|------|------|
-| **Channel 系统** | ~500 | LastValue, Topic, PersistentTopic, Accumulator |
-| **Checkpoint** | ~800 | PostgreSQL 后端 + 内存缓存 + 恢复逻辑 |
-| **Pregel 运行时** | ~400 | BSP 超步循环 + 调度 |
-| **Worker Pool** | ~600 | Worker 接口 + 线程池调度 + 任务分发/结果收集 |
-| **interrupt/Command** | ~300 | 暂停/恢复/控制流 |
-| **子图组合** | ~400 | 状态映射 + 命名空间隔离 |
-| **Graph DSL 序列化** | ~1000 | JSON Schema + 编译器 |
-| **FSM 语义** | ~300 | 显式状态机 + 转换 + 守卫 |
-| **OTel 集成** | ~400 | traces/spans/metrics |
-| **模型适配层** | ~300 | LiteLLM → Hecate 接口 |
-| **工具系统** | ~500 | Tool 定义/注册/执行/MCP Client |
-| **策略系统** | ~400 | Retry/Timeout/Fallback |
-| **合计** | **~5900** | |
+| Module | Lines | Description |
+|--------|-------|-------------|
+| **Channel System** | ~500 | LastValue, Topic, PersistentTopic, Accumulator |
+| **Checkpoint** | ~800 | PostgreSQL backend + memory cache + recovery logic |
+| **Pregel Runtime** | ~400 | BSP superstep loop + scheduling |
+| **Worker Pool** | ~600 | Worker interface + thread pool scheduling + task dispatch/result collection |
+| **interrupt/Command** | ~300 | Pause/resume/control flow |
+| **Subgraph Composition** | ~400 | State mapping + namespace isolation |
+| **Graph DSL Serialization** | ~1000 | JSON Schema + compiler |
+| **FSM Semantics** | ~300 | Explicit state machine + transitions + guards |
+| **OTel Integration** | ~400 | traces/spans/metrics |
+| **Model Adapter Layer** | ~300 | LiteLLM → Hecate interface |
+| **Tool System** | ~500 | Tool definition/registration/execution/MCP Client |
+| **Strategy System** | ~400 | Retry/Timeout/Fallback |
+| **Total** | **~5900** | |
 
 ---
 
-## 参考资料
+## References
 
-| 资料 | 位置 | 说明 |
-|------|------|------|
-| 功能全集 | `docs/features/feature-catalog.md` | 156 功能点，P1-P4 |
-| 调研追踪 | `docs/research/research-tracker.md` | 37/80 完成 |
-| 架构决策总纲 | `docs/research/reports/00-architecture-decisions.md` | D1-D5 决策 |
-| 执行引擎决策 | `docs/research/reports/01-execution-engine-decision.md` | D1 完整讨论 |
-| 执行引擎报告 | `docs/research/reports/01-execution-engine.md` | 引擎综合分析 |
-| RAG 架构 | `docs/research/reports/02-rag-knowledge.md` | RAG 分层设计 |
-| 记忆系统 | `docs/research/reports/03-memory-system.md` | 四级记忆 |
-| 基础设施 | `docs/research/reports/04-infrastructure.md` | 技术栈选型 |
-| 功能对齐 | `docs/research/reports/05-feature-parity.md` | 差异化分析 |
-| 华为财经 Agent 指南 | `docs/refs/md/huawei-finance-agent-guide-summary.md` | 华为四层架构+编排模式 |
-| RelayAgent 架构 | `docs/refs/md/relay-agent-summary.md` | 三层Agent+无状态+Skill+授权 |
+| Reference | Location | Description |
+|-----------|----------|-------------|
+| Full Feature Set | `docs/features/feature-catalog.md` | 156 features, P1-P4 |
+| Research Tracker | `docs/research/research-tracker.md` | 37/80 completed |
+| Architecture Decision Overview | `docs/research/reports/00-architecture-decisions.md` | D1-D5 decisions |
+| Execution Engine Decision | `docs/research/reports/01-execution-engine-decision.md` | D1 full discussion |
+| Execution Engine Report | `docs/research/reports/01-execution-engine.md` | Engine comprehensive analysis |
+| RAG Architecture | `docs/research/reports/02-rag-knowledge.md` | RAG layered design |
+| Memory System | `docs/research/reports/03-memory-system.md` | Four-level memory |
+| Infrastructure | `docs/research/reports/04-infrastructure.md` | Technology stack selection |
+| Feature Parity | `docs/research/reports/05-feature-parity.md` | Differentiation analysis |
+| Huawei Finance Agent Guide | `docs/refs/md/huawei-finance-agent-guide-summary.md` | Huawei four-layer architecture + orchestration patterns |
+| RelayAgent Architecture | `docs/refs/md/relay-agent-summary.md` | Three-layer Agent + stateless + Skill + authorization |
