@@ -77,16 +77,16 @@ export function TemplatePicker({ onSelect, onClose }: TemplatePickerProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-background p-6">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">选择模板</h2>
+          <h2 className="text-lg font-semibold">Select Template</h2>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
         </div>
 
         {loading ? (
-          <p className="text-center text-muted-foreground">加载中...</p>
+          <p className="text-center text-muted-foreground">Loading...</p>
         ) : templates.length === 0 ? (
-          <p className="text-center text-muted-foreground">暂无可用模板</p>
+          <p className="text-center text-muted-foreground">No templates available</p>
         ) : (
           <div className="space-y-6">
             {categories.map((category) => (

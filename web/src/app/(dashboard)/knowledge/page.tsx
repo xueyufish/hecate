@@ -35,17 +35,17 @@ export default function KnowledgePage() {
   }, []);
 
   if (loading) {
-    return <div className="text-muted-foreground">加载中...</div>;
+    return <div className="text-muted-foreground">Loading...</div>;
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">知识库</h1>
+        <h1 className="text-2xl font-semibold">Knowledge Bases</h1>
         <Link href="/knowledge/new">
           <Button>
             <Plus className="mr-2 h-4 w-4" />
-            创建知识库
+            Create Knowledge Base
           </Button>
         </Link>
       </div>
@@ -54,19 +54,19 @@ export default function KnowledgePage() {
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16">
           <Database className="mb-4 h-12 w-12 text-muted-foreground" />
           <p className="mb-4 text-muted-foreground">
-            还没有知识库，点击创建第一个
+            No knowledge bases yet, click to create your first
           </p>
           <Link href="/knowledge/new">
-            <Button>创建知识库</Button>
+            <Button>Create Knowledge Base</Button>
           </Link>
         </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>名称</TableHead>
-              <TableHead>文档数</TableHead>
-              <TableHead>创建时间</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Documents</TableHead>
+              <TableHead>Created</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -82,7 +82,7 @@ export default function KnowledgePage() {
                 </TableCell>
                 <TableCell>{kb.document_count ?? 0}</TableCell>
                 <TableCell>
-                  {new Date(kb.created_at).toLocaleDateString("zh-CN")}
+                  {new Date(kb.created_at).toLocaleDateString("en-US")}
                 </TableCell>
               </TableRow>
             ))}

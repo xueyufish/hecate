@@ -73,7 +73,7 @@ export default function ModelDebugPage() {
   const [modelGroups, setModelGroups] = useState<ModelGroup[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
-  const [prompt, setPrompt] = useState("你好，请简短回复");
+  const [prompt, setPrompt] = useState("Hello, please reply briefly");
   const [temperature, setTemperature] = useState(0.7);
   const [maxTokens, setMaxTokens] = useState(100);
   const [streaming, setStreaming] = useState(true);
@@ -164,7 +164,7 @@ export default function ModelDebugPage() {
     } catch (e: unknown) {
       const msg = e && typeof e === "object" && "error" in e
         ? (e as { error: { message: string } }).error.message
-        : "测试失败";
+        : "Test failed";
       setError(msg);
       setErrorSuggestion(getErrorSuggestion(msg));
     } finally {
@@ -191,7 +191,7 @@ export default function ModelDebugPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">模型调试</h1>
+        <h1 className="text-2xl font-semibold">Model Debug</h1>
         <Button variant="outline" size="sm" onClick={() => setShowHistory(!showHistory)}>
           <History className="mr-1 h-4 w-4" />
           History ({history.length})
@@ -238,17 +238,17 @@ export default function ModelDebugPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>测试配置</CardTitle>
+          <CardTitle>Test Configuration</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>选择模型</Label>
+            <Label>Select Model</Label>
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
               className="flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
-              <option value="">选择模型</option>
+              <option value="">Select Model</option>
               {modelGroups.map((group) => (
                 <optgroup
                   key={group.provider_name}
@@ -275,12 +275,12 @@ export default function ModelDebugPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>测试提示词</Label>
+            <Label>Test Prompt</Label>
             <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={3}
-              placeholder="输入要测试的提示词..."
+              placeholder="Enter a test prompt..."
             />
           </div>
 
@@ -326,7 +326,7 @@ export default function ModelDebugPage() {
               disabled={testing || !selectedModel || !prompt.trim()}
             >
               <Play className="mr-2 h-4 w-4" />
-              {testing ? "测试中..." : "运行测试"}
+              {testing ? "Testing..." : "Run Test"}
             </Button>
           </div>
         </CardContent>
@@ -365,7 +365,7 @@ export default function ModelDebugPage() {
       {result && !testing && (
         <Card>
           <CardHeader>
-            <CardTitle>测试结果</CardTitle>
+            <CardTitle>Test Result</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
@@ -375,7 +375,7 @@ export default function ModelDebugPage() {
             </div>
 
             <div>
-              <Label>响应内容</Label>
+              <Label>Response Content</Label>
               <div className="mt-1 rounded-md border bg-muted p-4 text-sm whitespace-pre-wrap">
                 {result.content}
               </div>

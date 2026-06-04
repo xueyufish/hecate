@@ -25,7 +25,7 @@ export default function LoginPage() {
       await login(email, password);
       router.push("/agents");
     } catch {
-      setError("邮箱或密码错误");
+      setError("Invalid email or password");
     } finally {
       setLoading(false);
     }
@@ -35,12 +35,12 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-center text-2xl">登录</CardTitle>
+          <CardTitle className="text-center text-2xl">Login</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">邮箱</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
@@ -51,7 +51,7 @@ export default function LoginPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">密码</Label>
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 type="password"
@@ -65,12 +65,12 @@ export default function LoginPage() {
               <p className="text-sm text-red-500">{error}</p>
             )}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "登录中..." : "登录"}
+              {loading ? "Logging in..." : "Login"}
             </Button>
             <p className="text-center text-sm text-muted-foreground">
-              没有账号？{" "}
+              Don&apos;t have an account?{" "}
               <Link href="/register" className="text-foreground underline">
-                注册
+                Register
               </Link>
             </p>
           </form>

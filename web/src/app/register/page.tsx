@@ -22,11 +22,11 @@ export default function RegisterPage() {
     e.preventDefault();
     setError("");
     if (password !== confirmPassword) {
-      setError("两次输入的密码不一致");
+      setError("Passwords do not match");
       return;
     }
     if (password.length < 8) {
-      setError("密码至少 8 位");
+      setError("Password must be at least 8 characters");
       return;
     }
     setLoading(true);
@@ -35,7 +35,7 @@ export default function RegisterPage() {
       router.push("/login");
     } catch (err: unknown) {
       const apiErr = err as { error?: { message?: string } };
-      setError(apiErr.error?.message || "注册失败，请重试");
+      setError(apiErr.error?.message || "Registration failed, please try again");
     } finally {
       setLoading(false);
     }
@@ -45,12 +45,12 @@ export default function RegisterPage() {
     <div className="flex min-h-screen items-center justify-center">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-center text-2xl">注册</CardTitle>
+          <CardTitle className="text-center text-2xl">Register</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">邮箱</Label>
+              <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
@@ -61,7 +61,7 @@ export default function RegisterPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">密码</Label>
+              <Label htmlFor="password">Password</Label>
               <Input
                 id="password"
                 type="password"
@@ -69,11 +69,11 @@ export default function RegisterPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={8}
-                placeholder="至少 8 位"
+                placeholder="At least 8 characters"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirm">确认密码</Label>
+              <Label htmlFor="confirm">Confirm Password</Label>
               <Input
                 id="confirm"
                 type="password"
@@ -85,12 +85,12 @@ export default function RegisterPage() {
             </div>
             {error && <p className="text-sm text-red-500">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "注册中..." : "注册"}
+              {loading ? "Registering..." : "Register"}
             </Button>
             <p className="text-center text-sm text-muted-foreground">
-              已有账号？{" "}
+              Already have an account?{" "}
               <Link href="/login" className="text-foreground underline">
-                登录
+                Login
               </Link>
             </p>
           </form>

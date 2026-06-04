@@ -19,28 +19,28 @@ export function Sidebar() {
           className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
         >
           <Bot className="h-4 w-4" />
-          Agent 管理
+          Agents
         </Link>
         <Link
           href="/workflows"
           className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
         >
           <Share2 className="h-4 w-4" />
-          工作流
+          Workflows
         </Link>
         <Link
           href="/knowledge"
           className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
         >
           <Database className="h-4 w-4" />
-          知识库
+          Knowledge
         </Link>
         <Link
           href="/settings/models"
           className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
         >
           <Settings className="h-4 w-4" />
-          设置
+          Settings
         </Link>
       </nav>
       <div className="border-t p-3">
@@ -52,7 +52,7 @@ export function Sidebar() {
           className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           <LogOut className="h-4 w-4" />
-          退出登录
+          Logout
         </button>
       </div>
     </aside>

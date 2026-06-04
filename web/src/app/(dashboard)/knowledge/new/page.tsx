@@ -25,7 +25,7 @@ export default function NewKnowledgePage() {
       });
       router.push(`/knowledge/${kb.id}`);
     } catch {
-      alert("创建失败");
+      alert("Creation failed");
     } finally {
       setLoading(false);
     }
@@ -33,35 +33,35 @@ export default function NewKnowledgePage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-semibold">创建知识库</h1>
+      <h1 className="text-2xl font-semibold">Create Knowledge Base</h1>
       <Card>
         <CardHeader>
-          <CardTitle>基本信息</CardTitle>
+          <CardTitle>Basic Info</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">名称</Label>
+              <Label htmlFor="name">Name</Label>
               <Input
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                placeholder="知识库名称"
+                placeholder="Knowledge base name"
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="desc">描述</Label>
+              <Label htmlFor="desc">Description</Label>
               <Textarea
                 id="desc"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
-                placeholder="知识库用途描述"
+                placeholder="Knowledge base purpose description"
               />
             </div>
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? "创建中..." : "创建"}
+              {loading ? "Creating..." : "Create"}
             </Button>
           </form>
         </CardContent>

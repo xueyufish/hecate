@@ -3,8 +3,8 @@ import { AuthProvider } from "@/lib/auth";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Hecate - Agent 平台",
-  description: "企业级自托管 Agent 平台",
+  title: "Hecate - Agent Platform",
+  description: "Enterprise self-hosted Agent platform",
 };
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
+    <html lang="en">
       <body className="antialiased">
         <AuthProvider>{children}</AuthProvider>
       </body>

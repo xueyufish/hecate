@@ -33,10 +33,10 @@ interface KB {
 }
 
 const statusMap: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  pending: { label: "等待中", variant: "outline" },
-  parsing: { label: "解析中", variant: "secondary" },
-  completed: { label: "已完成", variant: "default" },
-  failed: { label: "失败", variant: "destructive" },
+  pending: { label: "Pending", variant: "outline" },
+  parsing: { label: "Parsing", variant: "secondary" },
+  completed: { label: "Completed", variant: "default" },
+  failed: { label: "Failed", variant: "destructive" },
 };
 
 export default function KnowledgeDetailPage() {
@@ -75,7 +75,7 @@ export default function KnowledgeDetailPage() {
       }
       await loadDocs();
     } catch {
-      alert("上传失败");
+      alert("Upload failed");
     } finally {
       setUploading(false);
     }
@@ -102,14 +102,14 @@ export default function KnowledgeDetailPage() {
       setUrls("");
       await loadDocs();
     } catch {
-      alert("爬取失败");
+      alert("Crawl failed");
     } finally {
       setCrawling(false);
     }
   };
 
   if (!kb) {
-    return <div className="text-muted-foreground">加载中...</div>;
+    return <div className="text-muted-foreground">Loading...</div>;
   }
 
   return (
@@ -119,14 +119,14 @@ export default function KnowledgeDetailPage() {
       <div className="rounded-lg border border-dashed p-8 text-center">
         <Upload className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
         <p className="mb-3 text-sm text-muted-foreground">
-          支持 PDF, DOCX, TXT, MD 格式
+          Supports PDF, DOCX, TXT, MD formats
         </p>
         <Button
           variant="outline"
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
         >
-          {uploading ? "上传中..." : "上传文档"}
+          {uploading ? "Uploading..." : "Upload Document"}
         </Button>
         <input
           ref={fileRef}
@@ -141,13 +141,13 @@ export default function KnowledgeDetailPage() {
       <div className="rounded-lg border p-6 space-y-4">
         <div className="flex items-center gap-2">
           <Globe className="h-5 w-5 text-muted-foreground" />
-          <h2 className="text-lg font-medium">从网页抓取</h2>
+          <h2 className="text-lg font-medium">Crawl from Web</h2>
         </div>
         <p className="text-sm text-muted-foreground">
-          输入 URL，系统将自动抓取网页内容并添加到知识库
+          Enter URLs, the system will automatically crawl and add to knowledge base
         </p>
         <div className="space-y-2">
-          <Label htmlFor="urls">URL（每行一个，支持批量）</Label>
+          <Label htmlFor="urls">URLs (one per line, batch supported)</Label>
           <Textarea
             id="urls"
             value={urls}
@@ -158,11 +158,11 @@ export default function KnowledgeDetailPage() {
         </div>
         <div className="flex items-center gap-4">
           <Button onClick={handleCrawl} disabled={crawling || !urls.trim()}>
-            {crawling ? "抓取中..." : "开始抓取"}
+            {crawling ? "Crawling..." : "Start Crawling"}
           </Button>
           {crawlResult && (
             <span className="text-sm text-muted-foreground">
-              成功 {crawlResult.success}，失败 {crawlResult.failed}，共 {crawlResult.total} 个
+              Success: {crawlResult.success}, Failed: {crawlResult.failed}, Total: {crawlResult.total}
             </span>
           )}
         </div>
@@ -172,10 +172,10 @@ export default function KnowledgeDetailPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>文件名</TableHead>
-              <TableHead>大小</TableHead>
-              <TableHead>状态</TableHead>
-              <TableHead>分块数</TableHead>
+              <TableHead>Filename</TableHead>
+              <TableHead>Size</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Chunks</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>

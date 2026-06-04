@@ -100,7 +100,7 @@ export default function ChatPage() {
         setMessages([...updated, { ...assistantMsg }]);
       }
     } catch {
-      assistantMsg.content += "\n\n[请求失败]";
+      assistantMsg.content += "\n\n[Request failed]";
       setMessages([...updated, { ...assistantMsg }]);
     } finally {
       setStreaming(false);
@@ -123,9 +123,9 @@ export default function ChatPage() {
     <div className="flex h-[calc(100vh-3rem)] flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg font-medium">对话</h2>
+          <h2 className="text-lg font-medium">Chat</h2>
           {kbLoading && (
-            <span className="text-xs text-muted-foreground">加载知识库...</span>
+            <span className="text-xs text-muted-foreground">Loading knowledge base...</span>
           )}
           {!kbLoading && kbNames.length > 0 && (
             <div className="flex items-center gap-1">
@@ -153,20 +153,20 @@ export default function ChatPage() {
           )}
           {queuePosition > 0 && (
             <span className="inline-flex items-center rounded-full bg-yellow-100 px-2 py-0.5 text-xs text-yellow-800">
-              排队中...
+              Queued...
             </span>
           )}
         </div>
         <Button variant="outline" size="sm" onClick={newChat}>
           <Plus className="mr-1 h-4 w-4" />
-          新对话
+          New Chat
         </Button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
           <p className="text-center text-muted-foreground">
-            输入消息开始对话
+            Type a message to start chatting
           </p>
         )}
         {messages.map((msg, i) => (
@@ -185,7 +185,7 @@ export default function ChatPage() {
             >
               {msg.role === "tool" && msg.name && (
                 <div className="mb-1 text-xs font-medium text-muted-foreground">
-                  工具: {msg.name}
+                  Tool: {msg.name}
                 </div>
               )}
               <div className="whitespace-pre-wrap text-sm">
@@ -196,7 +196,7 @@ export default function ChatPage() {
                   {msg.tool_calls.map((tc, j) => (
                     <details key={j} className="text-xs">
                       <summary className="cursor-pointer font-medium">
-                        调用工具: {tc.function.name}
+                        Calling tool: {tc.function.name}
                       </summary>
                       <pre className="mt-1 overflow-auto rounded bg-background/50 p-2">
                         {tc.function.arguments}
@@ -222,7 +222,7 @@ export default function ChatPage() {
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="输入消息..."
+            placeholder="Type a message..."
             disabled={streaming}
             className="flex-1"
           />

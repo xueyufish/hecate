@@ -109,7 +109,7 @@ export default function ModelsPage() {
       setForm({ display_name: "", api_key: "", base_url: "" });
       fetchProviders();
     } catch {
-      alert("操作失败");
+      alert("Operation failed");
     }
   };
 
@@ -126,17 +126,17 @@ export default function ModelsPage() {
       fetchProviders();
       fetchModels(targetProviderId);
     } catch {
-      alert("添加模型失败");
+      alert("Failed to add model");
     }
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("确定删除该服务商？")) return;
+    if (!confirm("Are you sure you want to delete this provider?")) return;
     try {
       await api.delete(`/api/model-providers/${id}`);
       fetchProviders();
     } catch {
-      alert("删除失败");
+      alert("Deletion failed");
     }
   };
 
@@ -148,13 +148,13 @@ export default function ModelsPage() {
         {}
       );
       if (res.status === "active") {
-        alert("连通测试成功");
+        alert("Connectivity test passed");
       } else {
-        alert(`连通测试失败：${res.error_message || "未知错误"}`);
+        alert(`Connectivity test failed: ${res.error_message || "Unknown error"}`);
       }
       fetchProviders();
     } catch {
-      alert("测试失败");
+      alert("Test failed");
     } finally {
       setTesting(null);
     }
@@ -185,24 +185,24 @@ export default function ModelsPage() {
   const statusLabel = (status: string) => {
     switch (status) {
       case "active":
-        return "已连通";
+        return "Connected";
       case "error":
-        return "连接失败";
+        return "Connection failed";
       case "pending":
-        return "待测试";
+        return "Pending test";
       default:
         return status;
     }
   };
 
   if (loading) {
-    return <div className="text-muted-foreground">加载中...</div>;
+    return <div className="text-muted-foreground">Loading...</div>;
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">模型服务商</h1>
+        <h1 className="text-2xl font-semibold">Model Providers</h1>
         <Button
           onClick={() => {
             setEditingProvider(null);
@@ -211,7 +211,7 @@ export default function ModelsPage() {
           }}
         >
           <Plus className="mr-2 h-4 w-4" />
-          添加服务商
+          Add Provider
         </Button>
       </div>
 
@@ -221,17 +221,17 @@ export default function ModelsPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="w-8" />
-                <TableHead>名称</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>模型数</TableHead>
-                <TableHead className="text-right">操作</TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Models</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {providers.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    暂无服务商，点击&ldquo;添加服务商&rdquo;开始配置
+                    No providers yet, click &ldquo;Add Provider&rdquo; to get started
                   </TableCell>
                 </TableRow>
               ) : (
@@ -263,7 +263,7 @@ export default function ModelsPage() {
                           disabled={testing === p.id}
                         >
                           <Zap className="mr-1 h-3 w-3" />
-                          {testing === p.id ? "测试中" : "连通测试"}
+                          {testing === p.id ? "Testing" : "Connectivity Test"}
                         </Button>
                         <Button
                           variant="outline"
@@ -294,7 +294,7 @@ export default function ModelsPage() {
                         <TableCell colSpan={5} className="bg-muted/30 px-8 py-3">
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-medium text-muted-foreground">
-                              模型列表
+                              Model List
                             </span>
                             <Button
                               variant="outline"
@@ -306,20 +306,20 @@ export default function ModelsPage() {
                               }}
                             >
                               <Plus className="mr-1 h-3 w-3" />
-                              添加模型
+                               Add Model
                             </Button>
                           </div>
                           {(models[p.id] || []).length === 0 ? (
                             <p className="text-sm text-muted-foreground py-2">
-                              暂无模型，点击&ldquo;添加模型&rdquo;配置
+                               No models yet, click &ldquo;Add Model&rdquo; to configure
                             </p>
                           ) : (
                             <Table>
                               <TableHeader>
                                 <TableRow>
-                                  <TableHead>模型名称</TableHead>
-                                  <TableHead>类型</TableHead>
-                                  <TableHead className="text-right">操作</TableHead>
+                                  <TableHead>Model Name</TableHead>
+                                  <TableHead>Type</TableHead>
+                                  <TableHead className="text-right">Actions</TableHead>
                                 </TableRow>
                               </TableHeader>
                               <TableBody>
@@ -342,7 +342,7 @@ export default function ModelsPage() {
                                         }}
                                       >
                                         <FlaskConical className="mr-1 h-3 w-3" />
-                                        测试
+                                         Test
                                       </Button>
                                     </TableCell>
                                   </TableRow>
@@ -366,19 +366,19 @@ export default function ModelsPage() {
           <Card className="w-full max-w-md">
             <CardHeader>
               <CardTitle>
-                {editingProvider ? "编辑服务商" : "添加服务商"}
+                {editingProvider ? "Edit Provider" : "Add Provider"}
               </CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label>显示名</Label>
+                  <Label>Display Name</Label>
                   <Input
                     value={form.display_name}
                     onChange={(e) =>
                       setForm({ ...form, display_name: e.target.value })
                     }
-                    placeholder="智谱AI, DeepSeek, OpenAI"
+                    placeholder="ZhipuAI, DeepSeek, OpenAI"
                     required
                   />
                 </div>
@@ -390,21 +390,21 @@ export default function ModelsPage() {
                     onChange={(e) =>
                       setForm({ ...form, api_key: e.target.value })
                     }
-                    placeholder={editingProvider ? "留空则不修改" : "输入 API Key"}
+                    placeholder={editingProvider ? "Leave empty to keep unchanged" : "Enter API Key"}
                     required={!editingProvider}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>API 端点（可选）</Label>
+                  <Label>API Endpoint (optional)</Label>
                   <Input
                     value={form.base_url}
                     onChange={(e) =>
                       setForm({ ...form, base_url: e.target.value })
                     }
-                    placeholder="如 https://open.bigmodel.cn/api/paas/v4"
+                    placeholder="e.g. https://open.bigmodel.cn/api/paas/v4"
                   />
                   <p className="text-xs text-muted-foreground">
-                    不填则使用服务商官方端点
+                    Leave empty to use provider&apos;s official endpoint
                   </p>
                 </div>
                 <div className="flex justify-end gap-2">
@@ -413,9 +413,9 @@ export default function ModelsPage() {
                     variant="outline"
                     onClick={() => setShowDialog(false)}
                   >
-                    取消
+                    Cancel
                   </Button>
-                  <Button type="submit">确定</Button>
+                  <Button type="submit">Confirm</Button>
                 </div>
               </form>
             </CardContent>
@@ -427,12 +427,12 @@ export default function ModelsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <Card className="w-full max-w-md">
             <CardHeader>
-              <CardTitle>添加模型</CardTitle>
+              <CardTitle>Add Model</CardTitle>
             </CardHeader>
             <CardContent>
               <form onSubmit={handleAddModel} className="space-y-4">
                 <div className="space-y-2">
-                  <Label>模型 ID</Label>
+                  <Label>Model ID</Label>
                   <Input
                     value={modelForm.model_id}
                     onChange={(e) =>
@@ -442,11 +442,11 @@ export default function ModelsPage() {
                     required
                   />
                   <p className="text-xs text-muted-foreground">
-                    直接填模型名称即可，如 glm-4-flash
+                    Enter model name directly, e.g. glm-4-flash
                   </p>
                 </div>
                 <div className="space-y-2">
-                  <Label>显示名</Label>
+                  <Label>Display Name</Label>
                   <Input
                     value={modelForm.display_name}
                     onChange={(e) =>
@@ -462,9 +462,9 @@ export default function ModelsPage() {
                     variant="outline"
                     onClick={() => setShowModelDialog(false)}
                   >
-                    取消
+                    Cancel
                   </Button>
-                  <Button type="submit">确定</Button>
+                  <Button type="submit">Confirm</Button>
                 </div>
               </form>
             </CardContent>
@@ -475,7 +475,7 @@ export default function ModelsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <Card className="w-full max-w-lg">
             <CardHeader>
-              <CardTitle>测试模型 — {testTarget.display_name}</CardTitle>
+              <CardTitle>Test Model — {testTarget.display_name}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -484,7 +484,7 @@ export default function ModelsPage() {
                   <Input
                     value={testPrompt}
                     onChange={(e) => setTestPrompt(e.target.value)}
-                    placeholder="输入测试消息"
+                    placeholder="Enter test message"
                   />
                 </div>
                 {testError && (
@@ -494,10 +494,10 @@ export default function ModelsPage() {
                 )}
                 {testResult && (
                   <div className="rounded-md bg-muted p-3 space-y-2">
-                    <p className="text-sm font-medium">回复：</p>
+                    <p className="text-sm font-medium">Response:</p>
                     <p className="text-sm whitespace-pre-wrap">{testResult.content}</p>
                     <div className="flex gap-4 text-xs text-muted-foreground">
-                      <span>模型: {testResult.model}</span>
+                      <span>Model: {testResult.model}</span>
                       <span>Prompt: {testResult.usage.prompt_tokens} tokens</span>
                       <span>Completion: {testResult.usage.completion_tokens} tokens</span>
                     </div>
@@ -513,7 +513,7 @@ export default function ModelsPage() {
                       setTestError(null);
                     }}
                   >
-                    关闭
+                     Close
                   </Button>
                   <Button
                     disabled={testingModel || !testPrompt.trim()}
@@ -532,20 +532,20 @@ export default function ModelsPage() {
                         });
                         setTestResult(res);
                       } catch (err: unknown) {
-                        const msg = err instanceof Error ? err.message : "测试失败";
+                        const msg = err instanceof Error ? err.message : "Test failed";
                         setTestError(msg);
                       } finally {
                         setTestingModel(false);
                       }
                     }}
                   >
-                    {testingModel ? (
+                      {testingModel ? (
                       <>
                         <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                        测试中…
+                        Testing…
                       </>
                     ) : (
-                      "发送测试"
+                      "Send Test"
                     )}
                   </Button>
                 </div>

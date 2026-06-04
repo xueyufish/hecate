@@ -64,17 +64,17 @@ export default function AgentsPage() {
   };
 
   if (loading) {
-    return <div className="text-muted-foreground">加载中...</div>;
+    return <div className="text-muted-foreground">Loading...</div>;
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Agent 管理</h1>
+        <h1 className="text-2xl font-semibold">Agents</h1>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={importing}>
             <Upload className="mr-2 h-4 w-4" />
-            {importing ? "导入中..." : "导入 Agent"}
+            {importing ? "Importing..." : "Import Agent"}
           </Button>
           <input
             ref={fileRef}
@@ -86,7 +86,7 @@ export default function AgentsPage() {
           <Link href="/agents/new">
             <Button>
               <Plus className="mr-2 h-4 w-4" />
-              创建 Agent
+              Create Agent
             </Button>
           </Link>
         </div>
@@ -96,19 +96,19 @@ export default function AgentsPage() {
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-16">
           <Bot className="mb-4 h-12 w-12 text-muted-foreground" />
           <p className="mb-4 text-muted-foreground">
-            还没有 Agent，点击创建第一个
+            No agents yet, click to create your first
           </p>
           <Link href="/agents/new">
-            <Button>创建 Agent</Button>
+            <Button>Create Agent</Button>
           </Link>
         </div>
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>名称</TableHead>
-              <TableHead>模型</TableHead>
-              <TableHead>创建时间</TableHead>
+              <TableHead>Name</TableHead>
+              <TableHead>Model</TableHead>
+              <TableHead>Created</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -126,14 +126,14 @@ export default function AgentsPage() {
                   <span className="flex items-center gap-1.5">
                     {agent.model_config?.model || "-"}
                     {agent.model_available === false && (
-                      <span title="模型不可用：Provider 已停用或模型已禁用" className="text-yellow-500">
+                      <span title="Model unavailable: Provider disabled or model disabled" className="text-yellow-500">
                         <AlertTriangle className="h-4 w-4" />
                       </span>
                     )}
                   </span>
                 </TableCell>
                 <TableCell>
-                  {new Date(agent.created_at).toLocaleDateString("zh-CN")}
+                  {new Date(agent.created_at).toLocaleDateString("en-US")}
                 </TableCell>
               </TableRow>
             ))}

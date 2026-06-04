@@ -81,7 +81,7 @@ class ApiClient {
         localStorage.removeItem("refresh_token");
         window.location.href = "/login";
       }
-      throw { error: { code: "UNAUTHORIZED", message: "请重新登录", details: null } };
+      throw { error: { code: "UNAUTHORIZED", message: "Please log in again", details: null } };
     }
 
     if (!response.ok) {
