@@ -12,6 +12,7 @@ import type { GraphDSL } from "@/lib/workflow-types";
 import { NodePalette } from "@/components/workflow/node-palette";
 import { AgentPalette } from "@/components/workflow/agent-palette";
 import { TemplatePicker } from "@/components/workflow/template-picker";
+import { ConfigPanel } from "@/components/workflow/config-panel";
 import { ArrowLeft, Save, CheckCircle, Play, LayoutTemplate, History, X, ChevronDown, ChevronUp } from "lucide-react";
 import Link from "next/link";
 
@@ -49,6 +50,29 @@ interface WorkflowData {
 
 const MAX_HISTORY = 10;
 
+const LAYOUT_KEY = (id: string) => `hecate-layout-${id}`;
+
+function saveLayout(workflowId: string, nodes: any[]) {
+  const layout: Record<string, { x: number; y: number }> = {};
+  for (const node of nodes) {
+    layout[node.id] = { x: node.position.x, y: node.position.y };
+  }
+  try {
+    localStorage.setItem(LAYOUT_KEY(workflowId), JSON.stringify(layout));
+  } catch {
+    // localStorage full or unavailable — ignore
+  }
+}
+
+function loadLayout(workflowId: string): Record<string, { x: number; y: number }> | null {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY(workflowId));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function WorkflowEditorPage() {
   const params = useParams();
   const router = useRouter();
@@ -71,6 +95,7 @@ export default function WorkflowEditorPage() {
   const [runHistory, setRunHistory] = useState<TestRunData[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [running, setRunning] = useState(false);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   useEffect(() => {
     api
@@ -79,7 +104,14 @@ export default function WorkflowEditorPage() {
         setWorkflow(data);
         if (data.graph_dsl) {
           const { nodes: rfNodes, edges: rfEdges } = dslToReactFlow(data.graph_dsl);
-          setNodes(rfNodes);
+          const savedLayout = loadLayout(workflowId);
+          const mergedNodes = savedLayout
+            ? rfNodes.map((n) => ({
+                ...n,
+                position: savedLayout[n.id] || n.position,
+              }))
+            : rfNodes;
+          setNodes(mergedNodes);
           setEdges(rfEdges);
         }
       })
@@ -94,6 +126,7 @@ export default function WorkflowEditorPage() {
         if (!workflow) return;
         const dsl = reactFlowToDsl(updatedNodes, updatedEdges, workflow.name);
         api.put(`/api/workflows/${workflowId}`, { graph_dsl: dsl }).catch(() => {});
+        saveLayout(workflowId, updatedNodes);
       }, 2000);
     },
     [workflow, workflowId]
@@ -317,6 +350,8 @@ export default function WorkflowEditorPage() {
               edges={edges}
               onNodesChange={handleNodesChange}
               onEdgesChange={handleEdgesChange}
+              onNodeClick={(nodeId) => setSelectedNodeId(nodeId)}
+              onPaneClick={() => setSelectedNodeId(null)}
             />
           </div>
 
@@ -376,7 +411,7 @@ export default function WorkflowEditorPage() {
           )}
         </div>
 
-        <div className="flex h-full w-[280px] flex-col border-l bg-muted/30">
+        <div className="flex h-full w-[300px] flex-col border-l bg-muted/30">
           {showInputForm && (
             <div className="border-b p-3 space-y-2">
               <div className="flex items-center justify-between">
@@ -398,7 +433,19 @@ export default function WorkflowEditorPage() {
             </div>
           )}
 
-          {selectedNode && (
+          {selectedNodeId ? (
+            <ConfigPanel
+              node={nodes.find((n: any) => n.id === selectedNodeId) || null}
+              onUpdate={(nodeId: string, data: Record<string, unknown>) => {
+                const updatedNodes = nodes.map((n: any) =>
+                  n.id === nodeId ? { ...n, data } : n
+                );
+                setNodes(updatedNodes);
+                scheduleSave(updatedNodes, edges);
+              }}
+              onClose={() => setSelectedNodeId(null)}
+            />
+          ) : selectedNode ? (
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-medium">Node Details</Label>
@@ -452,12 +499,10 @@ export default function WorkflowEditorPage() {
                 )}
               </div>
             </div>
-          )}
-
-          {!showInputForm && !selectedNode && (
+          ) : (
             <div className="flex flex-1 items-center justify-center p-3">
               <p className="text-xs text-muted-foreground text-center">
-                Click &quot;Input&quot; to configure test data,<br />or click a node to view its result
+                Click a node to configure it,<br />or click &quot;Input&quot; to configure test data
               </p>
             </div>
           )}

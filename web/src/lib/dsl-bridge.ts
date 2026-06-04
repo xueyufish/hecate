@@ -37,6 +37,8 @@ const NODE_TYPE_LABELS: Record<string, string> = {
   agent: "Agent",
   "knowledge-retrieval": "Knowledge Retrieval",
   "variable-set": "Variable Set",
+  "fan-out": "Fan Out",
+  merge: "Merge",
 };
 
 /** Convert Graph DSL to React Flow nodes and edges */

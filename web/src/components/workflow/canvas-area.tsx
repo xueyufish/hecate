@@ -21,6 +21,8 @@ interface CanvasAreaProps {
   edges: any[];
   onNodesChange: (nodes: any[]) => void;
   onEdgesChange: (edges: any[]) => void;
+  onNodeClick?: (nodeId: string) => void;
+  onPaneClick?: () => void;
 }
 
 function HandoffEdge({
@@ -61,6 +63,8 @@ export default function CanvasArea({
   edges,
   onNodesChange,
   onEdgesChange,
+  onNodeClick,
+  onPaneClick,
 }: CanvasAreaProps) {
   const handleNodesChange = useCallback(
     (changes: any) => {
@@ -110,6 +114,8 @@ export default function CanvasArea({
       onNodesChange={handleNodesChange}
       onEdgesChange={handleEdgesChange}
       onConnect={handleConnect}
+      onNodeClick={(_event: any, node: any) => onNodeClick?.(node.id)}
+      onPaneClick={() => onPaneClick?.()}
       nodeTypes={nodeTypeComponents}
       edgeTypes={edgeTypes}
       fitView

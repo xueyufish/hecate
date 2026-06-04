@@ -13,7 +13,7 @@ repos:
         entry: .venv/bin/python -m mypy src/
         language: system
         pass_filenames: false
-        always_run: true
+        files: \.py$
 
   - repo: local
     hooks:
@@ -22,4 +22,4 @@ repos:
         entry: scripts/smart-pytest.sh
         language: system
         pass_filenames: false
-        always_run: true
+        files: \.py$

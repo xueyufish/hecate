@@ -10,6 +10,8 @@ import {
   Variable,
   Play,
   Square,
+  GitMerge,
+  GitFork,
 } from "lucide-react";
 
 interface NodeProps {
@@ -54,6 +56,16 @@ const TYPE_STYLES: Record<
     border: "border-orange-300",
     icon: <Variable className="h-4 w-4 text-orange-600" />,
   },
+  "fan-out": {
+    bg: "bg-indigo-50",
+    border: "border-indigo-300",
+    icon: <GitFork className="h-4 w-4 text-indigo-600" />,
+  },
+  merge: {
+    bg: "bg-slate-50",
+    border: "border-slate-300",
+    icon: <GitMerge className="h-4 w-4 text-slate-600" />,
+  },
 };
 
 export const ConversationNode = memo(function ConversationNode(props: NodeProps) {
@@ -92,6 +104,12 @@ export const KnowledgeRetrievalNode = memo(function KnowledgeRetrievalNode(
 });
 export const VariableSetNode = memo(function VariableSetNode(props: NodeProps) {
   return <WorkflowNodeBase {...props} typeKey="variable-set" />;
+});
+export const FanOutNode = memo(function FanOutNode(props: NodeProps) {
+  return <WorkflowNodeBase {...props} typeKey="fan-out" />;
+});
+export const MergeNode = memo(function MergeNode(props: NodeProps) {
+  return <WorkflowNodeBase {...props} typeKey="merge" />;
 });
 
 export const StartNode = memo(function StartNode() {
@@ -142,6 +160,8 @@ export const nodeTypeComponents = {
   agent: AgentNode,
   "knowledge-retrieval": KnowledgeRetrievalNode,
   "variable-set": VariableSetNode,
+  "fan-out": FanOutNode,
+  merge: MergeNode,
   start: StartNode,
   end: EndNode,
 };
