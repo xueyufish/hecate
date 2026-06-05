@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## Requirements
 
 ### Requirement: Pregel runtime executes superstep loop
 The `PregelRuntime.execute()` SHALL execute a compiled graph in superstep cycles until termination. When a FAN_OUT node is encountered, the runtime SHALL dispatch all branch nodes concurrently via `asyncio.gather` and collect results before advancing to the MERGE node.

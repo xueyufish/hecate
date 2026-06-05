@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Fan-out Pipeline template
 The system SHALL include a pre-built "Fan-out Pipeline" orchestration template demonstrating parallel processing with a researcher agent fanning out to multiple analyst agents and merging results.
