@@ -29,7 +29,7 @@ class EnginePort(ABC):
     """
 
     @abstractmethod
-    async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
+    def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
         """Invoke an LLM with the given messages and return a stream of tokens.
 
         Args:

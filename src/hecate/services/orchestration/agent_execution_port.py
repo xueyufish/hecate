@@ -3,7 +3,7 @@
 Implements the ``agent_execute`` method on EnginePort by resolving the
 AgentModel from the database, building an isolated execution context
 (system prompt from persona, agent-specific tools, agent-specific knowledge
-bases), and invoking the LLM via ConversationService.
+bases), and invoking via the unified WorkflowExecutionService.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.engine.ports import EnginePort
 from hecate.models.agent import AgentModel
 from hecate.models.knowledge import KnowledgeBaseModel
-from hecate.services.conversation import ConversationService
 from hecate.services.rag.service import knowledge_base_service
 
 logger = logging.getLogger(__name__)
@@ -33,7 +32,7 @@ class AgentExecutionPort(EnginePort):
     1. Loading the AgentModel from the database by ID.
     2. Building an isolated context using the agent's persona, model config,
        tools, and knowledge bases.
-    3. Invoking the LLM via ConversationService.
+    3. Invoking the LLM via LLMService (fallback for sub-agent execution).
     4. Returning the response.
 
     Also implements ``knowledge_query`` by delegating to the KnowledgeBaseService
@@ -42,7 +41,6 @@ class AgentExecutionPort(EnginePort):
 
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
-        self._conversation_service = ConversationService()
 
     async def agent_execute(
         self,
@@ -65,6 +63,8 @@ class AgentExecutionPort(EnginePort):
         Raises:
             ValueError: If agent_id does not resolve to a valid agent.
         """
+        from hecate.services.llm.service import llm_service
+
         agent = await self._load_agent(agent_id)
         if agent is None:
             raise ValueError(f"Agent {agent_id} not found")
@@ -76,20 +76,16 @@ class AgentExecutionPort(EnginePort):
         system_message = {"role": "system", "content": agent.persona or "You are a helpful assistant."}
         full_messages = [system_message] + messages
 
-        session_id = str(agent_id) if context is None else context.get("node_id", str(agent_id))
-
-        result = await self._conversation_service.chat(
+        response = await llm_service.chat(
             messages=full_messages,
             model=model_name,
             tools=None,
-            stream=False,
-            session_id=session_id,
         )
 
         return {
-            "response": result.get("content", ""),
-            "usage": result.get("usage", {}),
-            "model": result.get("model", model_name),
+            "response": response.content,
+            "usage": response.usage,
+            "model": response.model or model_name,
         }
 
     async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
@@ -169,8 +165,8 @@ class AgentExecutionPort(EnginePort):
     # Stub implementations for other EnginePort methods.
     # These are required by the ABC but not used for agent execution.
 
-    async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
-        raise NotImplementedError("Use ConversationService directly for LLM invocation")
+    def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
+        raise NotImplementedError("Use LLMService directly for streaming LLM invocation")
 
     async def tool_execute(self, name: str, args: dict, context: dict | None = None) -> Any:
         raise NotImplementedError("Use tool execution service directly")

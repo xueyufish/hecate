@@ -27,6 +27,7 @@ class NodeType(StrEnum):
     - AGENT: delegates execution to a sub-graph representing another agent.
     - KNOWLEDGE_RETRIEVAL: queries knowledge bases via EnginePort.knowledge_query().
     - VARIABLE_SET: sets/updates channel variables based on expressions.
+    - SUGGESTION: generates opening remarks or follow-up question suggestions.
     - FAN_OUT: dispatches multiple parallel branches concurrently (no worker invoked).
     - MERGE: collects results from all branches of a preceding FAN_OUT node.
     """
@@ -37,6 +38,7 @@ class NodeType(StrEnum):
     AGENT = "agent"
     KNOWLEDGE_RETRIEVAL = "knowledge-retrieval"
     VARIABLE_SET = "variable-set"
+    SUGGESTION = "suggestion"
     FAN_OUT = "fan-out"
     MERGE = "merge"
 

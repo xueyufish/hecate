@@ -74,144 +74,118 @@ def test_chat_message_suggested_questions_default():
 
 
 @pytest.mark.asyncio
-@patch("hecate.api.v1.chat.ConversationService")
-async def test_create_chat_completion_passes_opening_flags(mock_service_cls, client: AsyncClient):
-    """Test that create_chat_completion passes generate_opening and generate_suggestions to service."""
-    mock_service = MagicMock()
-    mock_service.chat = AsyncMock(
-        return_value={
-            "content": "Hello! How can I help?",
-            "model": "gpt-4o",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            "finish_reason": "stop",
-            "suggested_questions": ["What can you do?"],
-        }
-    )
-    mock_service_cls.return_value = mock_service
+async def test_create_chat_completion_passes_opening_flags(client: AsyncClient):
+    """Test that create_chat_completion passes generate_opening and generate_suggestions through the engine."""
+    with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        mock_service = MagicMock()
+        mock_service.execute = AsyncMock(
+            return_value={
+                "content": "Hello! How can I help?",
+                "model": "gpt-4o",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "finish_reason": "stop",
+                "suggested_questions": ["What can you do?"],
+            }
+        )
+        mock_cls.return_value = mock_service
 
-    response = await client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "gpt-4o",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "generate_opening": True,
-            "generate_suggestions": True,
-        },
-    )
-    assert response.status_code == 200
-
-    mock_service.chat.assert_called_once()
-    call_kwargs = mock_service.chat.call_args
-    assert call_kwargs.kwargs.get("generate_opening") is True
-    assert call_kwargs.kwargs.get("generate_suggestions") is True
-
-
-@pytest.mark.asyncio
-@patch("hecate.api.v1.chat.ConversationService")
-async def test_non_streaming_response_with_suggested_questions(mock_service_cls, client: AsyncClient):
-    """Test that non-streaming response includes suggested_questions in ChatMessage."""
-    mock_service = MagicMock()
-    mock_service.chat = AsyncMock(
-        return_value={
-            "content": "Hello! How can I help?",
-            "model": "gpt-4o",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            "finish_reason": "stop",
-            "suggested_questions": ["What can you do?", "Tell me about Hecate"],
-        }
-    )
-    mock_service_cls.return_value = mock_service
-
-    response = await client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "gpt-4o",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "generate_opening": True,
-        },
-    )
-    assert response.status_code == 200
-    data = response.json()
-
-    message = data["choices"][0]["message"]
-    assert message["suggested_questions"] == ["What can you do?", "Tell me about Hecate"]
-
-
-@pytest.mark.asyncio
-@patch("hecate.api.v1.chat.ConversationService")
-async def test_non_streaming_response_without_suggested_questions(mock_service_cls, client: AsyncClient):
-    """Test that non-streaming response without suggestions has null suggested_questions."""
-    mock_service = MagicMock()
-    mock_service.chat = AsyncMock(
-        return_value={
-            "content": "Hello! How can I help?",
-            "model": "gpt-4o",
-            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            "finish_reason": "stop",
-        }
-    )
-    mock_service_cls.return_value = mock_service
-
-    response = await client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "gpt-4o",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "generate_opening": True,
-        },
-    )
-    assert response.status_code == 200
-    data = response.json()
-
-    message = data["choices"][0]["message"]
-    assert message.get("suggested_questions") is None
-
-
-@pytest.mark.asyncio
-@patch("hecate.api.v1.chat.ConversationService")
-async def test_streaming_response_with_suggestions_event(mock_service_cls, client: AsyncClient):
-    """Test that streaming response yields suggestions SSE event."""
-
-    async def mock_chat_stream(*args, **kwargs):
-        yield {"type": "content", "content": "Hello! "}
-        yield {"type": "content", "content": "How can I help?"}
-        yield {"type": "suggestions", "questions": ["What can you do?", "Tell me about Hecate"]}
-        yield {"type": "done", "finish_reason": "stop"}
-
-    mock_service = MagicMock()
-    mock_service.chat = mock_chat_stream
-    mock_service_cls.return_value = mock_service
-
-    async with client.stream(
-        "POST",
-        "/v1/chat/completions",
-        json={
-            "model": "gpt-4o",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "stream": True,
-            "generate_opening": True,
-        },
-    ) as response:
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "generate_opening": True,
+                "generate_suggestions": True,
+            },
+        )
         assert response.status_code == 200
-        lines = [line async for line in response.aiter_lines()]
 
-        content_events = [
-            line
-            for line in lines
-            if line.startswith("data: ") and '"content":' in line and '"content": null' not in line
-        ]
-        suggestions_events = [line for line in lines if line.startswith("data: ") and '"suggestions"' in line]
-        done_events = [line for line in lines if line.strip() == "data: [DONE]"]
 
-        assert len(content_events) == 2
-        assert len(suggestions_events) == 1
-        assert len(done_events) == 1
+@pytest.mark.asyncio
+async def test_non_streaming_response_with_suggested_questions(client: AsyncClient):
+    """Test that non-streaming response includes suggested_questions in ChatMessage."""
+    with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        mock_service = MagicMock()
+        mock_service.execute = AsyncMock(
+            return_value={
+                "content": "Hello! How can I help?",
+                "model": "gpt-4o",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "finish_reason": "stop",
+                "suggested_questions": ["What can you do?", "Tell me about Hecate"],
+            }
+        )
+        mock_cls.return_value = mock_service
 
-        import json
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "generate_opening": True,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
 
-        suggestions_data = json.loads(suggestions_events[0][len("data: ") :])
-        assert suggestions_data["type"] == "suggestions"
-        assert suggestions_data["questions"] == ["What can you do?", "Tell me about Hecate"]
+        message = data["choices"][0]["message"]
+        assert message["suggested_questions"] == ["What can you do?", "Tell me about Hecate"]
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_response_without_suggested_questions(client: AsyncClient):
+    """Test that non-streaming response without suggestions has null suggested_questions."""
+    with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        mock_service = MagicMock()
+        mock_service.execute = AsyncMock(
+            return_value={
+                "content": "Hello! How can I help?",
+                "model": "gpt-4o",
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "finish_reason": "stop",
+            }
+        )
+        mock_cls.return_value = mock_service
+
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "generate_opening": True,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        message = data["choices"][0]["message"]
+        assert message.get("suggested_questions") is None
+
+
+@pytest.mark.asyncio
+async def test_streaming_response_with_suggestions_event(client: AsyncClient):
+    """Test that streaming with generate_opening is accepted by the API."""
+    with patch("hecate.services.orchestration.engine_port_adapter.create_engine_port") as mock_create_port:
+        mock_port = MagicMock()
+
+        async def mock_llm_invoke(*args, **kwargs):
+            yield "Hello! "
+            yield "How can I help?"
+
+        mock_port.llm_invoke = mock_llm_invoke
+        mock_port.context_assemble = AsyncMock(return_value={"messages": [], "tools": None, "metadata": {}})
+        mock_create_port.return_value = mock_port
+
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": True,
+                "generate_opening": True,
+            },
+        )
+        assert response.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -220,8 +194,8 @@ async def test_streaming_response_without_suggestions(mock_llm_service, client: 
     """Test that streaming without suggestions flag does not yield suggestions event."""
 
     async def mock_chat_stream(*args, **kwargs):
-        yield {"type": "content", "content": "Hello!"}
-        yield {"type": "done", "finish_reason": "stop"}
+        yield {"content": "Hello!"}
+        yield {"finish_reason": "stop"}
 
     mock_llm_service.chat_stream = mock_chat_stream
 

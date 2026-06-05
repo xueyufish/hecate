@@ -1,7 +1,8 @@
 """OpenAI-compatible chat completions endpoint.
 
 Implements ``POST /v1/chat/completions`` following the OpenAI Chat Completions API format.
-Supports both streaming (SSE) and non-streaming responses via LiteLLM.
+All agent modes (chat, three_layer, workflow) now route through WorkflowExecutionService
+and PregelRuntime for unified graph-based execution.
 """
 
 from __future__ import annotations
@@ -20,9 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.database import get_db
 from hecate.core.deps import get_current_user_id
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
-from hecate.services.conversation import ConversationService
 from hecate.services.llm.service import llm_service
 from hecate.services.session_lock import session_lock_manager
+from hecate.services.workflow.execution_service import WorkflowExecutionService
 
 logger = logging.getLogger(__name__)
 
@@ -124,56 +125,15 @@ def _messages_to_dicts(messages: list[ChatMessage]) -> list[dict[str, Any]]:
     return result
 
 
-_DEFAULT_PROVIDER_CONFIG = {"timeout": 30, "max_retries": 3}
-
-
-async def _get_provider_config(db: AsyncSession, model: str) -> dict[str, Any]:
-    """Look up provider-level timeout/retry config for a model.
-
-    Queries model_registry → model_providers to find the provider config.
-    Returns empty dict if model not in registry (let litellm use its defaults).
-
-    Args:
-        db: The async database session.
-        model: The model identifier (e.g., "gpt-4o").
-
-    Returns:
-        Dict with optional ``timeout`` and ``num_retries`` keys.
-    """
-    stmt = (
-        select(ModelProviderModel.config)
-        .join(ModelRegistryModel, ModelRegistryModel.provider_id == ModelProviderModel.id)
-        .where(
-            ModelRegistryModel.model_id == model,
-            ModelRegistryModel.deleted_at.is_(None),
-            ModelRegistryModel.is_enabled.is_(True),
-            ModelProviderModel.deleted_at.is_(None),
-            ModelProviderModel.is_enabled.is_(True),
-        )
-        .limit(1)
-    )
-    result = await db.execute(stmt)
-    config = result.scalar_one_or_none()
-    if config is None:
-        return {}
-
-    resolved = {**_DEFAULT_PROVIDER_CONFIG, **config}
-    return {
-        "timeout": resolved["timeout"],
-        "num_retries": resolved["max_retries"],
-    }
-
-
 @router.post("/chat/completions", response_model=None)
 async def create_chat_completion(
     request: ChatCompletionRequest,
     user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Create a chat completion via LiteLLM.
+    """Create a chat completion via the unified execution engine.
 
-    Applies provider-level timeout/retry config when the model is found
-    in the model registry.
+    Routes all modes through WorkflowExecutionService and PregelRuntime.
 
     Args:
         request: The chat completion request.
@@ -215,91 +175,88 @@ async def _process_chat(
     db: AsyncSession,
     user_id: uuid.UUID,
 ) -> dict | StreamingResponse:
-    """Process a chat completion request (core logic without locking)."""
-    from fastapi import HTTPException
-
+    """Process a chat completion request via WorkflowExecutionService."""
     msg_dicts = _messages_to_dicts(request.messages)
-    provider_cfg = await _get_provider_config(db, request.model)
 
     # Parse kb_ids if provided
-    parsed_kb_ids: list[uuid.UUID] | None = None
+    parsed_kb_ids: list[str] | None = None
     if request.kb_ids:
-        try:
-            parsed_kb_ids = [uuid.UUID(kb_id) for kb_id in request.kb_ids]
-        except ValueError as e:
-            raise HTTPException(status_code=422, detail=f"Invalid kb_id format: {e}") from e
+        parsed_kb_ids = request.kb_ids
 
-    use_conversation_service = parsed_kb_ids or request.generate_opening or request.generate_suggestions
-    if use_conversation_service:
-        conversation_service = ConversationService()
+    # Check if enhanced features are needed (KB, suggestions, opening)
+    use_enhanced = parsed_kb_ids or request.generate_opening or request.generate_suggestions
+
+    if use_enhanced:
+        # Create an EnginePort adapter for the execution service
+        from hecate.services.orchestration.engine_port_adapter import create_engine_port
+
+        port = create_engine_port(db, llm_service)
+
+        exec_service = WorkflowExecutionService(
+            port=port,
+            db=db,
+        )
 
         if request.stream:
 
-            async def _stream_with_citations():
-                async for event in conversation_service.chat(
+            async def _stream_with_workflow():
+                result_gen = await exec_service.execute(
+                    agent_mode="chat",
                     messages=msg_dicts,
                     model=request.model,
                     tools=request.tools,
                     stream=True,
-                    db=db,
+                    session_id=request.session_id,
                     kb_ids=parsed_kb_ids,
                     generate_opening=request.generate_opening,
-                    generate_suggestions=request.generate_suggestions,
-                ):
-                    if event.get("type") == "content":
+                    enable_suggestions=request.generate_suggestions,
+                )
+
+                if isinstance(result_gen, dict):
+                    yield _format_done_chunk(request.model)
+                    return
+
+                async for event in result_gen:
+                    if event.get("type") == "message":
                         chunk = ChatCompletionChunk(
                             model=request.model,
                             choices=[
                                 ChatCompletionChunkChoice(
-                                    delta=ChatCompletionChunkDelta(content=event["content"]),
+                                    delta=ChatCompletionChunkDelta(content=event.get("content", "")),
                                     finish_reason=None,
                                 )
                             ],
                         )
                         yield f"data: {json.dumps(chunk.model_dump())}\n\n"
-                    elif event.get("type") == "citations":
-                        yield f"data: {json.dumps({'type': 'citations', 'citations': event['citations']})}\n\n"
-                    elif event.get("type") == "suggestions":
-                        yield f"data: {json.dumps({'type': 'suggestions', 'questions': event['questions']})}\n\n"
-                    elif event.get("type") == "done":
-                        final_chunk = ChatCompletionChunk(
-                            model=request.model,
-                            choices=[
-                                ChatCompletionChunkChoice(
-                                    delta=ChatCompletionChunkDelta(),
-                                    finish_reason="stop",
-                                )
-                            ],
-                        )
-                        yield f"data: {json.dumps(final_chunk.model_dump())}\n\n"
-                        yield "data: [DONE]\n\n"
+                    elif event.get("type") == "values":
+                        state = event.get("state", {})
+                        suggested_questions = state.get("suggested_questions")
+                        if suggested_questions:
+                            yield f"data: {json.dumps({'type': 'suggestions', 'questions': suggested_questions})}\n\n"
+
+                yield _format_done_chunk(request.model)
 
             return StreamingResponse(
-                _stream_with_citations(),
+                _stream_with_workflow(),
                 media_type="text/event-stream",
             )
 
-        result = await conversation_service.chat(
+        # Non-streaming with enhanced features
+        result = await exec_service.execute(
+            agent_mode="chat",
             messages=msg_dicts,
             model=request.model,
             tools=request.tools,
             stream=False,
-            db=db,
+            session_id=request.session_id,
             kb_ids=parsed_kb_ids,
             generate_opening=request.generate_opening,
-            generate_suggestions=request.generate_suggestions,
+            enable_suggestions=request.generate_suggestions,
         )
 
         if not isinstance(result, dict):
             msg = f"Expected dict result for non-streaming chat, got {type(result)}"
             raise TypeError(msg)
-
-        annotations = None
-        if result.get("citations"):
-            from hecate.services.rag.types import Citation
-
-            citations = [Citation(**c) for c in result["citations"]]
-            annotations = [c.to_annotation() for c in citations]
 
         suggested_questions = result.get("suggested_questions")
 
@@ -310,7 +267,6 @@ async def _process_chat(
                     message=ChatMessage(
                         role="assistant",
                         content=result.get("content", ""),
-                        annotations=annotations,
                         suggested_questions=suggested_questions,
                     ),
                     finish_reason=result.get("finish_reason", "stop"),
@@ -322,6 +278,9 @@ async def _process_chat(
                 total_tokens=result.get("usage", {}).get("total_tokens", 0),
             ),
         ).model_dump()
+
+    # Simple passthrough: no KB, no suggestions — use LLM directly for lowest latency
+    provider_cfg = await _get_provider_config(db, request.model)
 
     if request.stream:
         return StreamingResponse(
@@ -367,6 +326,66 @@ async def _process_chat(
     ).model_dump()
 
 
+def _format_done_chunk(model: str) -> str:
+    """Format the final SSE chunk with finish_reason='stop'.
+
+    Args:
+        model: The model identifier.
+
+    Returns:
+        SSE-formatted string with done chunk.
+    """
+    final_chunk = ChatCompletionChunk(
+        model=model,
+        choices=[
+            ChatCompletionChunkChoice(
+                delta=ChatCompletionChunkDelta(),
+                finish_reason="stop",
+            )
+        ],
+    )
+    return f"data: {json.dumps(final_chunk.model_dump())}\n\ndata: [DONE]\n\n"
+
+
+async def _get_provider_config(db: AsyncSession, model: str) -> dict[str, Any]:
+    """Look up provider-level timeout/retry config for a model.
+
+    Queries model_registry → model_providers to find the provider config.
+    Returns empty dict if model not in registry (let litellm use its defaults).
+
+    Args:
+        db: The async database session.
+        model: The model identifier (e.g., "gpt-4o").
+
+    Returns:
+        Dict with optional ``timeout`` and ``num_retries`` keys.
+    """
+    default_provider_config = {"timeout": 30, "max_retries": 3}
+
+    stmt = (
+        select(ModelProviderModel.config)
+        .join(ModelRegistryModel, ModelRegistryModel.provider_id == ModelProviderModel.id)
+        .where(
+            ModelRegistryModel.model_id == model,
+            ModelRegistryModel.deleted_at.is_(None),
+            ModelRegistryModel.is_enabled.is_(True),
+            ModelProviderModel.deleted_at.is_(None),
+            ModelProviderModel.is_enabled.is_(True),
+        )
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    config = result.scalar_one_or_none()
+    if config is None:
+        return {}
+
+    resolved = {**default_provider_config, **config}
+    return {
+        "timeout": resolved["timeout"],
+        "num_retries": resolved["max_retries"],
+    }
+
+
 async def _stream_chat(
     model: str,
     messages: list[dict[str, Any]],
@@ -376,7 +395,7 @@ async def _stream_chat(
     timeout: float | None = None,
     num_retries: int | None = None,
 ):
-    """Stream chat completion chunks via LiteLLM.
+    """Stream chat completion chunks via LiteLLM (simple passthrough).
 
     Yields:
         str: SSE-formatted chunks.

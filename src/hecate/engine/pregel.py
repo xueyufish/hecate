@@ -158,13 +158,20 @@ class PregelRuntime:
                     results.append(merge_result)
                     continue
 
-                result = await self._pool.dispatch(
-                    self._worker,
-                    node_id,
-                    node.config,
-                    snapshot,
-                )
-                results.append(result)
+                if stream_mode == StreamMode.MESSAGES:
+                    async for item in self._worker.execute_stream(node_id, node.config, snapshot):
+                        if isinstance(item, WorkerResult):
+                            results.append(item)
+                        elif isinstance(item, dict):
+                            yield {"type": "message", "content": item.get("content", "")}
+                else:
+                    result = await self._pool.dispatch(
+                        self._worker,
+                        node_id,
+                        node.config,
+                        snapshot,
+                    )
+                    results.append(result)
 
             interrupted = False
             for result in results:
@@ -208,7 +215,7 @@ class PregelRuntime:
             if stream_mode == StreamMode.UPDATES:
                 for result in results:
                     yield {"type": "update", "node": result.node_id, "output": result.channel_updates}
-            elif stream_mode == StreamMode.VALUES:
+            elif stream_mode in (StreamMode.VALUES, StreamMode.MESSAGES):
                 yield {"type": "values", "state": self._channel_manager.snapshot()}
 
             current_nodes = self._resolve_next_nodes(results)

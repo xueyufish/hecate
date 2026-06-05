@@ -17,40 +17,150 @@ from hecate.engine.types import (
 )
 
 
+def build_chat_graph(
+    model: str,
+    system_prompt: str = "You are a helpful assistant.",
+    enable_suggestions: bool = False,
+    generate_opening: bool = False,
+    max_tool_iterations: int = 10,
+) -> GraphConfig:
+    """Build a chat-mode graph template that replicates ConversationService orchestration.
+
+    **Architecture pattern:**
+
+    Without suggestions::
+
+        [__start__] → [llm] → [check_tools] ──(has tool)──→ [tool_call] → [llm] (loop)
+                                     │
+                                     (no tool)
+                                     ▼
+                                  [__end__]
+
+    With suggestions::
+
+        [__start__] → [llm] → [check_tools] ──(has tool)──→ [tool_call] → [llm] (loop)
+                                     │
+                                     (no tool)
+                                     ▼
+                               [suggestions] → [__end__]
+
+    **State channels:**
+    - ``messages`` (TOPIC): accumulates all conversation turns and tool results.
+    - ``_has_tool_call`` (LAST_VALUE): flag set by LLMWorker when response contains tool_calls.
+    - ``_route`` (LAST_VALUE): routing decision from ConditionWorker.
+    - ``_session_id`` (LAST_VALUE): session identifier for evidence tracking.
+    - ``_agent_id`` (LAST_VALUE): agent identifier for memory operations.
+    - ``_user_id`` (LAST_VALUE): user identifier for memory retrieval.
+    - ``_turn_index`` (LAST_VALUE): turn counter for evidence tracking.
+
+    Args:
+        model: LLM model identifier for the conversation node.
+        system_prompt: System prompt for the LLM node.
+        enable_suggestions: If True, add a SUGGESTION node after conversation.
+        generate_opening: If True, configure the suggestion node for opening remarks.
+        max_tool_iterations: Upper bound for tool-calling loop (enforced by PregelRuntime's max_supersteps).
+
+    Returns:
+        A GraphConfig ready for compilation and execution.
+    """
+    nodes: dict[str, NodeConfig] = {
+        "llm": NodeConfig(
+            id="llm",
+            type=NodeType.CONVERSATION,
+            config={
+                "model": model,
+                "system_prompt": system_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        ),
+        "check_tools": NodeConfig(
+            id="check_tools",
+            type=NodeType.CONDITION,
+            config={"expression": "has_tool_call"},
+        ),
+        "tool_call": NodeConfig(
+            id="tool_call",
+            type=NodeType.TOOL_CALL,
+            config={
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        ),
+    }
+
+    if enable_suggestions:
+        nodes["suggestions"] = NodeConfig(
+            id="suggestions",
+            type=NodeType.SUGGESTION,
+            config={
+                "enable_suggestions": enable_suggestions,
+                "generate_opening": generate_opening,
+            },
+        )
+
+    edges = [
+        Edge(source="llm", target="check_tools"),
+        Edge(
+            source="check_tools",
+            target={"true": "tool_call", "false": "suggestions" if enable_suggestions else "__end__"},
+        ),
+        Edge(source="tool_call", target="llm"),
+    ]
+
+    if enable_suggestions:
+        edges.append(Edge(source="suggestions", target="__end__"))
+
+    state = {
+        "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
+        "_has_tool_call": ChannelDef(type=ChannelType.LAST_VALUE, default=False),
+        "_route": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+        "_session_id": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+        "_agent_id": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+        "_user_id": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+        "_turn_index": ChannelDef(type=ChannelType.LAST_VALUE, default=0),
+    }
+
+    return GraphConfig(
+        version="1.0",
+        name="chat-agent",
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry="llm",
+    )
+
+
 def build_three_layer_graph(
-    guard_model: str,
-    planner_model: str,
-    sub_agent_model: str,
+    guard_model: str = "",
+    planner_model: str = "gpt-4o",
+    sub_agent_model: str = "gpt-4o",
     guard_prompt: str = "You are a guard agent. Check user input for safety.",
     planner_prompt: str = "You are a planner agent. Decide the next action.",
     sub_agent_prompt: str = "You are a sub-agent. Execute the given task.",
 ) -> GraphConfig:
-    """Build the preset three-layer Agent graph: Guard -> Planner -> Sub-Agent.
+    """Build the preset three-layer Agent graph: Planner -> Tool Loop -> Sub-Agent.
 
     **Architecture pattern:**
 
-    1. **Guard** (CONVERSATION) -- inspects user input for safety/policy violations
-       and passes safe messages to the planner.
-    2. **Planner** (CONVERSATION) -- decides the next action. After each step, the
+    1. **Planner** (CONVERSATION) -- decides the next action. After each step, the
        ``check_tools`` condition node inspects the planner's output:
        - If a tool call is present (``has_tool_call`` is true), execution routes to
          the ``tool_call`` node which executes the tool and loops back to the planner.
        - If no tool call is present, execution routes to the sub-agent.
-    3. **Sub-Agent** (AGENT) -- handles the actual task and the graph ends.
+    2. **Sub-Agent** (AGENT) -- handles the actual task and the graph ends.
+
+    Security is handled by Guardrail Hooks (PreLLMHook, PostLLMHook, PreToolHook,
+    PostToolHook) injected into Workers by WorkflowExecutionService, NOT by a
+    guard graph node. All execution modes get security protection automatically.
 
     **State channels:**
     - ``messages`` (TOPIC): accumulates all conversation turns and tool results.
     - ``context`` (LAST_VALUE): holds the latest planning context (overwritten each step).
 
-    Use this template when you need a standard input-safety-check -> plan -> execute
-    workflow. For custom control flows, build a GraphConfig directly or modify the
-    one returned here.
-
     Args:
-        guard_model: LLM model identifier for the guard node.
+        guard_model: Kept for API compatibility; no longer used (guard is a Hook).
         planner_model: LLM model identifier for the planner node.
         sub_agent_model: Model or agent reference for the sub-agent node.
-        guard_prompt: System prompt for the guard node.
+        guard_prompt: Kept for API compatibility; no longer used.
         planner_prompt: System prompt for the planner node.
         sub_agent_prompt: System prompt for the sub-agent node.
 
@@ -58,15 +168,6 @@ def build_three_layer_graph(
         A complete GraphConfig ready for compilation and execution.
     """
     nodes = {
-        "guard": NodeConfig(
-            id="guard",
-            type=NodeType.CONVERSATION,
-            config={
-                "model": guard_model,
-                "system_prompt": guard_prompt,
-                "channels": {"readable": ["messages", "context"], "writable": ["messages"]},
-            },
-        ),
         "planner": NodeConfig(
             id="planner",
             type=NodeType.CONVERSATION,
@@ -101,7 +202,6 @@ def build_three_layer_graph(
     }
 
     edges = [
-        Edge(source="guard", target="planner"),
         Edge(source="planner", target="check_tools"),
         Edge(source="check_tools", target={"true": "tool_call", "false": "sub_agent"}),
         Edge(source="tool_call", target="planner"),
@@ -119,7 +219,7 @@ def build_three_layer_graph(
         state=state,
         nodes=nodes,
         edges=edges,
-        entry="guard",
+        entry="planner",
     )
 
 

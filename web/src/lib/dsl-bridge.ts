@@ -39,6 +39,7 @@ const NODE_TYPE_LABELS: Record<string, string> = {
   "variable-set": "Variable Set",
   "fan-out": "Fan Out",
   merge: "Merge",
+  suggestion: "Suggestion",
 };
 
 /** Convert Graph DSL to React Flow nodes and edges */

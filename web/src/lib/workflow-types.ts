@@ -18,6 +18,7 @@ export const NodeTypeSchema = z.enum([
   "variable-set",
   "fan-out",
   "merge",
+  "suggestion",
 ]);
 
 /** Edge target can be a string node ID or a dict of route→nodeId for conditional edges */

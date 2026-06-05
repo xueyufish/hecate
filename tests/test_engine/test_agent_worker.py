@@ -59,7 +59,7 @@ async def test_agent_worker_valid_agent_id():
     """AgentWorker calls port.agent_execute with correct arguments."""
     agent_id = uuid.uuid4()
     port = MockAgentPort(response="Specialist response")
-    worker = AgentWorker(port)
+    worker = AgentWorker(port=port)
 
     result = await worker.execute(
         node_id="agent_1",
@@ -79,7 +79,7 @@ async def test_agent_worker_valid_agent_id():
 async def test_agent_worker_missing_agent_id():
     """AgentWorker returns error when agent_id is missing from config."""
     port = MockAgentPort()
-    worker = AgentWorker(port)
+    worker = AgentWorker(port=port)
 
     result = await worker.execute(
         node_id="agent_1",
@@ -94,7 +94,7 @@ async def test_agent_worker_missing_agent_id():
 async def test_agent_worker_invalid_agent_id():
     """AgentWorker returns error when agent_id is not a valid UUID."""
     port = MockAgentPort()
-    worker = AgentWorker(port)
+    worker = AgentWorker(port=port)
 
     result = await worker.execute(
         node_id="agent_1",
@@ -110,7 +110,7 @@ async def test_agent_worker_port_failure():
     """AgentWorker returns error when port.agent_execute raises."""
     agent_id = uuid.uuid4()
     port = MockAgentPort(should_fail=True)
-    worker = AgentWorker(port)
+    worker = AgentWorker(port=port)
 
     result = await worker.execute(
         node_id="agent_1",
@@ -126,7 +126,7 @@ async def test_agent_worker_context_isolation():
     """AgentWorker passes only messages from channel_snapshot to port."""
     agent_id = uuid.uuid4()
     port = MockAgentPort()
-    worker = AgentWorker(port)
+    worker = AgentWorker(port=port)
 
     await worker.execute(
         node_id="isolated_agent",
@@ -144,7 +144,7 @@ async def test_agent_worker_non_list_messages():
     """AgentWorker handles non-list messages gracefully."""
     agent_id = uuid.uuid4()
     port = MockAgentPort()
-    worker = AgentWorker(port)
+    worker = AgentWorker(port=port)
 
     result = await worker.execute(
         node_id="agent_1",
@@ -160,7 +160,7 @@ async def test_agent_worker_uuid_object():
     """AgentWorker accepts UUID object (not just string) as agent_id."""
     agent_id = uuid.uuid4()
     port = MockAgentPort()
-    worker = AgentWorker(port)
+    worker = AgentWorker(port=port)
 
     result = await worker.execute(
         node_id="agent_1",

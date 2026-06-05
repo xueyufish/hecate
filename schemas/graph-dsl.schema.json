@@ -54,7 +54,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["conversation", "tool-call", "condition", "agent", "knowledge-retrieval", "variable-set", "fan-out", "merge"]
+            "enum": ["conversation", "tool-call", "condition", "agent", "knowledge-retrieval", "variable-set", "fan-out", "merge", "suggestion"]
           },
           "config": {
             "type": "object",

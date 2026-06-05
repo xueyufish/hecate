@@ -234,26 +234,26 @@ class TestThreeLayerTemplate:
     with routing nodes)."""
 
     def test_build_three_layer_graph(self):
-        """The template graph has 5 nodes with ``guard`` as the entry point."""
+        """The template graph has 4 nodes with ``planner`` as the entry point (guard removed)."""
         config = build_three_layer_graph(
-            guard_model="gpt-4o",
             planner_model="gpt-4o",
             sub_agent_model="gpt-4o",
         )
         assert config.name == "three-layer-agent"
-        assert len(config.nodes) == 5
-        assert config.entry == "guard"
+        assert len(config.nodes) == 4
+        assert config.entry == "planner"
+        assert "guard" not in config.nodes
 
     def test_three_layer_compiles(self):
         """The template graph passes all compiler validation checks."""
         config = build_three_layer_graph(
-            guard_model="gpt-4o",
             planner_model="gpt-4o",
             sub_agent_model="gpt-4o",
         )
         compiler = GraphCompiler()
         compiled = compiler.compile(config)
-        assert compiled.entry_point == "guard"
+        assert compiled.entry_point == "planner"
+        assert "guard" not in compiled.nodes
 
 
 class TestHandoffEdgeParsing:

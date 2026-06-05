@@ -1,15 +1,9 @@
-"""Agent worker for executing AGENT-type nodes via EnginePort.
+"""Agent worker for executing AGENT-type nodes via nested graph execution.
 
-This worker handles the ``agent`` node type by resolving the configured
-agent_id, passing conversation messages from the channel snapshot to the
-engine port's ``agent_execute`` method, and returning the agent's response
-as channel updates.
-
-It supports two invocation modes controlled by the node config:
-- ``direct`` (default): execute the agent inline and write its response to
-  the ``messages`` channel.
-- ``tool``: register the agent as a callable tool for the parent agent's
-  LLM invocation (handled by the service layer's AgentToolProvider).
+Resolves the sub-agent by agent_id from config, packages parent channel context
+(messages, variables) as initial_input, and calls WorkflowExecutionService for
+nested graph execution (NOT direct agent_execute). This enables graph-within-graph
+execution and keeps the door open for P3 Agent-Workflow composability.
 """
 
 from __future__ import annotations
@@ -18,7 +12,6 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from hecate.engine.ports import EnginePort
 from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
 
@@ -26,14 +19,19 @@ logger = logging.getLogger(__name__)
 
 
 class AgentWorker(Worker):
-    """Worker that executes AGENT-type nodes by delegating to EnginePort.agent_execute.
+    """Worker that executes AGENT-type nodes via nested graph execution.
 
-    Requires an ``agent_id`` in the node config. The worker extracts
-    messages from the channel snapshot and calls the port to execute the
-    agent with its own isolated context.
+    Resolves the sub-agent by ID, packages parent channel context as
+    initial_input, and delegates to the workflow execution service for
+    nested graph execution. This approach (Decision 9) ensures sub-agents
+    get full template resolution, compilation, and guard hook injection.
+
+    The execution service is injected at construction time to avoid circular
+    imports between engine and services layers.
     """
 
-    def __init__(self, port: EnginePort) -> None:
+    def __init__(self, execution_service: Any = None, port: Any = None) -> None:
+        self._execution_service = execution_service
         self._port = port
 
     async def execute(
@@ -61,13 +59,38 @@ class AgentWorker(Worker):
         if not isinstance(messages, list):
             messages = []
 
+        # Extract parent context for nested execution
+        initial_input = {
+            "messages": messages,
+            "_parent_session_id": channel_snapshot.get("_session_id"),
+            "_parent_agent_id": channel_snapshot.get("_agent_id"),
+            "_parent_user_id": channel_snapshot.get("_user_id"),
+        }
+        for key in ("context", "variables", "category"):
+            if key in channel_snapshot:
+                initial_input[key] = channel_snapshot[key]
+
         try:
-            result = await self._port.agent_execute(
-                agent_id=agent_id,
-                messages=messages,
-                channel_snapshot=channel_snapshot,
-                context={"node_id": node_id},
-            )
+            if self._execution_service is not None:
+                result = await self._execution_service(
+                    agent_id=agent_id,
+                    messages=messages,
+                    channel_snapshot=channel_snapshot,
+                    initial_input=initial_input,
+                    context={"node_id": node_id, "parent_channel": channel_snapshot},
+                )
+            elif self._port is not None:
+                result = await self._port.agent_execute(
+                    agent_id=agent_id,
+                    messages=messages,
+                    channel_snapshot=channel_snapshot,
+                    context={"node_id": node_id},
+                )
+            else:
+                return WorkerResult(
+                    node_id=node_id,
+                    error=RuntimeError("AgentWorker has no execution service or port configured"),
+                )
         except Exception as e:
             logger.warning("Agent execution failed for node '%s': %s", node_id, e)
             return WorkerResult(node_id=node_id, error=e)

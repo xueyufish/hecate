@@ -4,11 +4,17 @@ Defines the contract for executing individual graph nodes (Worker) and the
 dispatch mechanism for running them (WorkerPool). The execution engine dispatches
 one worker per node per superstep, passing a read-only channel snapshot and
 receiving a WorkerResult with channel updates and an optional Command.
+
+Workers that produce streaming output (e.g., LLM token generation) can override
+``execute_stream()`` to yield intermediate token events before returning the
+final WorkerResult.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from hecate.engine.types import WorkerResult
 
@@ -19,6 +25,10 @@ class Worker(ABC):
     A Worker receives a node ID, its configuration, and a read-only snapshot
     of all channels. It must return a WorkerResult containing channel updates
     and an optional Command (interrupt, goto, or state update).
+
+    For streaming use cases (e.g., LLM token generation), override
+    ``execute_stream()`` instead. The default ``execute_stream()`` delegates
+    to ``execute()`` with no intermediate events.
     """
 
     @abstractmethod
@@ -44,6 +54,33 @@ class Worker(ABC):
             optional error.
         """
         ...
+
+    async def execute_stream(
+        self,
+        node_id: str,
+        node_config: dict,
+        channel_snapshot: dict,
+    ) -> AsyncGenerator[dict[str, Any] | WorkerResult, None]:
+        """Execute a node with optional intermediate token events.
+
+        Override this method for streaming Workers (e.g., LLM nodes that yield
+        tokens). Each yielded dict is forwarded as a ``{"type": "message", ...}``
+        event by PregelRuntime. The final yielded value MUST be a WorkerResult.
+
+        The default implementation delegates to ``execute()`` with no intermediate
+        events, so non-streaming Workers do not need to override this method.
+
+        Args:
+            node_id: The ID of the node to execute.
+            node_config: The node's configuration dict.
+            channel_snapshot: A read-only deep copy of all channel values.
+
+        Yields:
+            Intermediate token dicts (``{"content": "<token>"}``), followed by
+            a final WorkerResult.
+        """
+        result = await self.execute(node_id, node_config, channel_snapshot)
+        yield result
 
 
 class WorkerPool(ABC):

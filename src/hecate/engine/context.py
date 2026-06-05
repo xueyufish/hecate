@@ -4,7 +4,7 @@ Provides the abstract contract (ContextEngine) and a default implementation:
 - ``InMemoryContextEngine`` — simple heuristics for testing and single-machine use
 
 ContextEngine is the bottom layer for context operations. Higher-level
-orchestration (ConversationService) delegates to ContextEngine for the
+orchestration (WorkflowExecutionService) delegates to ContextEngine for the
 fundamental context operations.
 """
 

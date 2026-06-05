@@ -9,8 +9,8 @@ point in the agent execution lifecycle:
 - ``PostToolHook`` — intercept after a tool has been executed
 
 Each hook returns a ``GuardrailResult`` with an allow-or-block decision.
-P2 defines the interface only; integration into PregelRuntime and
-ConversationService is P3 (features 9.1a/9.1b).
+P2 defines the interface; integration into production Workers (LLMWorker,
+ToolWorker) is handled by the unified execution engine.
 
 Design rationale (composition over inheritance):
 Each hook type is a separate ABC so implementers only write the hooks they

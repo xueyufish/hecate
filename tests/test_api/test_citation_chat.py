@@ -24,23 +24,19 @@ def override_auth():
 
 async def test_chat_completions_without_kb_ids(client: AsyncClient) -> None:
     """Test that chat completions work without kb_ids (backward compatible)."""
-    with patch("hecate.api.v1.chat.ConversationService") as mock_cls:
-        mock_service = MagicMock()
-        mock_service.chat = AsyncMock(
-            return_value={
-                "model": "gpt-4o",
-                "content": "Hello!",
-                "finish_reason": "stop",
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            }
-        )
-        mock_cls.return_value = mock_service
+    with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        mock_response = MagicMock()
+        mock_response.content = "Hello!"
+        mock_response.model = "gpt-4o"
+        mock_response.finish_reason = "stop"
+        mock_response.usage = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        mock_response.tool_calls = None
+        mock_llm.chat = AsyncMock(return_value=mock_response)
         response = await client.post(
             "/v1/chat/completions",
             json={
                 "model": "gpt-4o",
                 "messages": [{"role": "user", "content": "Hello"}],
-                "kb_ids": [str(uuid.uuid4())],
             },
         )
     assert response.status_code == 200
@@ -50,23 +46,35 @@ async def test_chat_completions_without_kb_ids(client: AsyncClient) -> None:
 
 
 async def test_chat_completions_with_invalid_kb_ids(client: AsyncClient) -> None:
-    """Test that invalid kb_ids return 422."""
-    response = await client.post(
-        "/v1/chat/completions",
-        json={
-            "model": "gpt-4o",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "kb_ids": ["not-a-uuid"],
-        },
-    )
-    assert response.status_code == 422
+    """Test that invalid kb_ids are passed through (validation happens in execution service)."""
+    with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        mock_service = MagicMock()
+        mock_service.execute = AsyncMock(
+            return_value={
+                "model": "gpt-4o",
+                "content": "Hello!",
+                "finish_reason": "stop",
+                "usage": {},
+            }
+        )
+        mock_cls.return_value = mock_service
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "gpt-4o",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "kb_ids": ["not-a-uuid"],
+            },
+        )
+    # kb_ids are now strings, validation happens downstream in the execution service
+    assert response.status_code == 200
 
 
 async def test_chat_completions_with_valid_kb_ids(client: AsyncClient) -> None:
-    """Test that valid kb_ids are accepted."""
-    with patch("hecate.api.v1.chat.ConversationService") as mock_cls:
+    """Test that valid kb_ids are accepted and routed through WorkflowExecutionService."""
+    with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
-        mock_service.chat = AsyncMock(
+        mock_service.execute = AsyncMock(
             return_value={
                 "model": "gpt-4o",
                 "content": "Hello!",
