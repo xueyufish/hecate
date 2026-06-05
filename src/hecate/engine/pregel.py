@@ -29,6 +29,7 @@ from typing import Any
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
+from hecate.engine.scheduler import FIFOScheduler, SchedulerStrategy
 from hecate.engine.temporal.conflict import ConflictResolver
 from hecate.engine.types import (
     CompiledGraph,
@@ -66,6 +67,7 @@ class PregelRuntime:
         pool: WorkerPool | None = None,
         max_supersteps: int = 100,
         conflict_resolver: ConflictResolver | None = None,
+        scheduler: SchedulerStrategy | None = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
@@ -73,6 +75,7 @@ class PregelRuntime:
         self._pool = pool or DirectWorkerPool()
         self._max_supersteps = max_supersteps
         self._conflict_resolver = conflict_resolver
+        self._scheduler = scheduler or FIFOScheduler()
         self._channel_manager = ChannelManager()
         self._superstep = 0
         self._interrupted = False
@@ -138,10 +141,12 @@ class PregelRuntime:
                     f"Possible infinite loop in graph '{self._graph.name}'."
                 )
             snapshot = self._channel_manager.snapshot()
+            context = {"superstep": self._superstep, "channel_snapshot": snapshot}
+            scheduled_nodes = self._scheduler.select_next(current_nodes, context)
 
             results: list[WorkerResult] = []
 
-            for node_id in current_nodes:
+            for node_id in scheduled_nodes:
                 node = self._graph.nodes.get(node_id)
                 if node is None:
                     continue
