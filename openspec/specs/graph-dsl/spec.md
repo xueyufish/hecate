@@ -1,5 +1,6 @@
-## MODIFIED Requirements
-
+## Purpose
+Define the Graph DSL JSON schema, parser, and compiler validation rules for the Hecate execution engine.
+## Requirements
 ### Requirement: Compiler validates entry point, edges, and handoff cycles
 The `GraphCompiler.compile()` SHALL perform four validation stages before producing a `CompiledGraph`: entry point, edges, handoff cycles, and fan-out/merge structural constraints.
 
@@ -32,16 +33,21 @@ The `GraphCompiler.compile()` SHALL perform four validation stages before produc
 - **THEN** it SHALL raise `GraphValidationError`
 
 ### Requirement: Graph DSL parser validates against JSON Schema
-The `parse_graph()` function SHALL accept a JSON string or dict and validate it against `schemas/graph-dsl.schema.json`. The schema SHALL include "fan-out" and "merge" as valid node type enum values.
+The `parse_graph()` function SHALL accept a JSON string or dict and validate it against `schemas/graph-dsl.schema.json`. The schema SHALL include `"persistent"` as an optional boolean property on channel definitions. The parser SHALL auto-migrate deprecated `"persistent_topic"` to `"topic"` with `persistent=True`.
 
-#### Scenario: Valid JSON graph
-- **WHEN** `parse_graph('{"version":"1.0","nodes":{...},"edges":[...]}')` is called with valid input
-- **THEN** it SHALL return a `GraphConfig` with typed `ChannelDef`, `NodeConfig`, and `Edge` objects
+#### Scenario: Persistent channel in JSON
+- **WHEN** `parse_graph()` encounters a channel definition with `"type": "topic", "persistent": true`
+- **THEN** it SHALL create `ChannelDef(type=ChannelType.TOPIC, persistent=True)`
 
-#### Scenario: Fan-out node in JSON
-- **WHEN** `parse_graph(...)` encounters a node with `"type": "fan-out"`
-- **THEN** it SHALL create a `NodeConfig` with `NodeType.FAN_OUT`
+#### Scenario: Deprecated persistent_topic
+- **WHEN** `parse_graph()` encounters `"type": "persistent_topic"`
+- **THEN** it SHALL create `ChannelDef(type=ChannelType.TOPIC, persistent=True)` and log a deprecation warning
 
-#### Scenario: Merge node in JSON
-- **WHEN** `parse_graph(...)` encounters a node with `"type": "merge"`
-- **THEN** it SHALL create a `NodeConfig` with `NodeType.MERGE`
+#### Scenario: Custom registered type
+- **WHEN** `parse_graph()` encounters `"type": "priority_queue"` and "priority_queue" is registered in ChannelTypeRegistry
+- **THEN** it SHALL create `ChannelDef(type=ChannelType("priority_queue"))` without error
+
+#### Scenario: Unknown type
+- **WHEN** `parse_graph()` encounters `"type": "unknown"` and "unknown" is NOT in the registry
+- **THEN** it SHALL raise `GraphValidationError` with field pointing to the channel type
+

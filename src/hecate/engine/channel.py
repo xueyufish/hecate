@@ -4,29 +4,180 @@ Channels are named state slots that form the shared memory of a executing graph.
 Each channel has type-specific write semantics (overwrite, append, or reduce) that
 determine how worker outputs are merged into the global state. All reads return deep
 copies to guarantee isolation between concurrent workers within a superstep.
+
+Channel behavior is defined by ``ChannelBehavior`` implementations registered in
+the module-level ``ChannelTypeRegistry``. The registry maps type name strings to
+behavior objects, allowing custom channel types to be registered at runtime.
 """
 
 from __future__ import annotations
 
+import logging
+from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Any
 
 from hecate.engine.eviction import EvictionPolicy, NoEviction
 from hecate.engine.types import ChannelDef, ChannelType
 
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# ChannelBehavior ABC
+# ============================================================
+
+
+class ChannelBehavior(ABC):
+    """Abstract base class defining the behavioral contract for channel types.
+
+    Each channel type must implement 4 concerns:
+    - ``initial_value``: what value a new channel starts with.
+    - ``write``: how a new value is merged into the current value.
+    - ``is_evictable``: whether the eviction policy applies to this type.
+    - ``resolve_conflict``: how concurrent writes are merged.
+    """
+
+    @abstractmethod
+    def initial_value(self, defn: ChannelDef) -> Any:
+        """Return the initial value for a channel with this definition."""
+
+    @abstractmethod
+    def write(self, current: Any, value: Any, defn: ChannelDef) -> Any:
+        """Return the new value after applying write semantics."""
+
+    @abstractmethod
+    def is_evictable(self) -> bool:
+        """Return True if the eviction policy applies to this channel type."""
+
+    @abstractmethod
+    def resolve_conflict(self, current: Any, proposed: Any) -> Any:
+        """Return the merged value for concurrent writes."""
+
+
+class LastValueBehavior(ChannelBehavior):
+    """Overwrite semantics: new value replaces old."""
+
+    def initial_value(self, defn: ChannelDef) -> Any:
+        return None
+
+    def write(self, current: Any, value: Any, defn: ChannelDef) -> Any:
+        return value
+
+    def is_evictable(self) -> bool:
+        return False
+
+    def resolve_conflict(self, current: Any, proposed: Any) -> Any:
+        return proposed
+
+
+class TopicBehavior(ChannelBehavior):
+    """Append semantics: new values are appended to a list."""
+
+    def initial_value(self, defn: ChannelDef) -> Any:
+        return []
+
+    def write(self, current: Any, value: Any, defn: ChannelDef) -> Any:
+        if isinstance(value, list):
+            return current + value
+        return [*current, value]
+
+    def is_evictable(self) -> bool:
+        return True
+
+    def resolve_conflict(self, current: Any, proposed: Any) -> Any:
+        if not isinstance(current, list):
+            current = [current] if current is not None else []
+        if not isinstance(proposed, list):
+            proposed = [proposed] if proposed is not None else []
+        seen: set[str] = set()
+        merged: list[Any] = []
+        for item in current + proposed:
+            key = str(item)
+            if key not in seen:
+                seen.add(key)
+                merged.append(item)
+        return merged
+
+
+class AccumulatorBehavior(ChannelBehavior):
+    """Reduce semantics: values are combined via a reduce function."""
+
+    def initial_value(self, defn: ChannelDef) -> Any:
+        return deepcopy(defn.initial) if defn.initial is not None else 0
+
+    def write(self, current: Any, value: Any, defn: ChannelDef) -> Any:
+        if defn.reduce_fn == "add":
+            return (current or 0) + value
+        return value
+
+    def is_evictable(self) -> bool:
+        return False
+
+    def resolve_conflict(self, current: Any, proposed: Any) -> Any:
+        try:
+            return (current or 0) + (proposed or 0)
+        except (TypeError, ValueError):
+            return proposed
+
+
+# ============================================================
+# ChannelTypeRegistry
+# ============================================================
+
+_REGISTRY: dict[str, ChannelBehavior] = {}
+
+
+def register(name: str, behavior: ChannelBehavior) -> None:
+    """Register a channel behavior for a type name.
+
+    Args:
+        name: The channel type string (e.g. "last_value", "topic").
+        behavior: The behavior implementation for this type.
+    """
+    _REGISTRY[name] = behavior
+    logger.debug(f"Registered channel type '{name}' → {behavior.__class__.__name__}")
+
+
+def get(name: str) -> ChannelBehavior:
+    """Get the registered behavior for a channel type name.
+
+    Args:
+        name: The channel type string.
+
+    Returns:
+        The registered ChannelBehavior.
+
+    Raises:
+        KeyError: If no behavior is registered for this type.
+    """
+    if name not in _REGISTRY:
+        raise KeyError(f"Channel type '{name}' not registered. Available types: {', '.join(sorted(_REGISTRY))}")
+    return _REGISTRY[name]
+
+
+def list_types() -> list[str]:
+    """Return all registered channel type names."""
+    return sorted(_REGISTRY.keys())
+
+
+# Pre-register built-in types
+register(ChannelType.LAST_VALUE, LastValueBehavior())
+register(ChannelType.TOPIC, TopicBehavior())
+register(ChannelType.ACCUMULATOR, AccumulatorBehavior())
+register(ChannelType.PERSISTENT_TOPIC, TopicBehavior())
+
+
+# ============================================================
+# Channel
+# ============================================================
+
 
 class Channel:
-    """A named state slot with type-specific write semantics and deep-copy isolation.
+    """A named state slot with behavior-delegated write semantics and deep-copy isolation.
 
-    A Channel holds a single mutable value whose update behavior depends on its
-    ChannelType:
-
-    - LAST_VALUE: the new value replaces the old one entirely.
-    - TOPIC / PERSISTENT_TOPIC: values are appended to a list (lists extend, scalars append).
-    - ACCUMULATOR: the new value is combined with the old one via a reduce function
-      (currently only ``"add"`` is supported; unsupported reduce functions overwrite).
-
-    All reads (``read`` and ``snapshot``) return deep copies so that workers never
+    All type-specific logic is delegated to the registered ``ChannelBehavior``.
+    Reads (``read`` and ``snapshot``) return deep copies so that workers never
     observe mutations caused by other workers in the same superstep.
     """
 
@@ -36,34 +187,13 @@ class Channel:
         self._value: Any = deepcopy(defn.default) if defn.default is not None else self._initial_value()
 
     def _initial_value(self) -> Any:
-        if self.defn.type == ChannelType.TOPIC or self.defn.type == ChannelType.PERSISTENT_TOPIC:
-            return []
-        if self.defn.type == ChannelType.ACCUMULATOR:
-            return deepcopy(self.defn.initial) if self.defn.initial is not None else 0
-        return None
+        """Delegate initial value to the registered behavior."""
+        return get(self.defn.type).initial_value(self.defn)
 
     def write(self, value: Any) -> None:
-        """Write a value using the channel's type-specific semantics.
-
-        Behavior by ChannelType:
-        - LAST_VALUE: replaces ``_value`` with ``value``.
-        - TOPIC / PERSISTENT_TOPIC: if ``value`` is a list, extends the internal
-          list; otherwise appends the scalar.
-        - ACCUMULATOR: if ``reduce_fn`` is ``"add"``, adds ``value`` to the current
-          accumulator; otherwise overwrites with ``value``.
-        """
-        if self.defn.type == ChannelType.LAST_VALUE:
-            self._value = value
-        elif self.defn.type in (ChannelType.TOPIC, ChannelType.PERSISTENT_TOPIC):
-            if isinstance(value, list):
-                self._value.extend(value)
-            else:
-                self._value.append(value)
-        elif self.defn.type == ChannelType.ACCUMULATOR:
-            if self.defn.reduce_fn == "add":
-                self._value = (self._value or 0) + value
-            else:
-                self._value = value
+        """Write a value using the registered behavior's semantics."""
+        behavior = get(self.defn.type)
+        self._value = behavior.write(self._value, value, self.defn)
 
     def read(self) -> Any:
         """Return a deep copy of the current value."""
@@ -72,6 +202,11 @@ class Channel:
     def snapshot(self) -> Any:
         """Return a deep copy snapshot for checkpoint persistence."""
         return self.read()
+
+
+# ============================================================
+# ChannelManager
+# ============================================================
 
 
 class ChannelManager:
@@ -101,10 +236,8 @@ class ChannelManager:
             return
         channel = self._channels[name]
         channel.write(value)
-        if channel.defn.type in (
-            ChannelType.TOPIC,
-            ChannelType.PERSISTENT_TOPIC,
-        ) and self._eviction_policy.should_evict(name, len(channel._value), {}):
+        behavior = get(channel.defn.type)
+        if behavior.is_evictable() and self._eviction_policy.should_evict(name, len(channel._value), {}):
             channel._value = self._eviction_policy.select_victim(channel._value)
 
     def read(self, name: str) -> Any:

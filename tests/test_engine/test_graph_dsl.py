@@ -398,3 +398,77 @@ class TestOptimizationPassIntegration:
         assert "A" in compiled.nodes
         assert "B" in compiled.nodes
         assert "C" not in compiled.nodes
+
+
+class TestPersistentField:
+    """Tests for persistent field parsing and deprecated persistent_topic migration."""
+
+    def test_persistent_field_parsed(self) -> None:
+        """Parse persistent=true from JSON."""
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "persistent-test",
+                "state": {
+                    "audit_log": {"type": "topic", "persistent": True, "default": []},
+                    "messages": {"type": "topic", "default": []},
+                },
+                "nodes": {"A": {"type": "conversation", "config": {"model": "gpt-4o", "system_prompt": "test"}}},
+                "edges": [{"source": "A", "target": "__end__"}],
+                "entry": "A",
+            }
+        )
+        assert graph.state["audit_log"].persistent is True
+        assert graph.state["messages"].persistent is False
+
+    def test_persistent_defaults_false(self) -> None:
+        """Persistent defaults to false when not specified."""
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "default-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {"A": {"type": "conversation", "config": {"model": "gpt-4o", "system_prompt": "test"}}},
+                "edges": [{"source": "A", "target": "__end__"}],
+                "entry": "A",
+            }
+        )
+        assert graph.state["messages"].persistent is False
+
+    def test_deprecated_persistent_topic_migrated(self) -> None:
+        """Auto-migrate persistent_topic to topic + persistent=True."""
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "migration-test",
+                "state": {"audit_log": {"type": "persistent_topic", "default": []}},
+                "nodes": {"A": {"type": "conversation", "config": {"model": "gpt-4o", "system_prompt": "test"}}},
+                "edges": [{"source": "A", "target": "__end__"}],
+                "entry": "A",
+            }
+        )
+
+        assert graph.state["audit_log"].type.value == "topic"
+        assert graph.state["audit_log"].persistent is True
+
+    def test_compiled_graph_to_json_includes_persistent(self) -> None:
+        """CompiledGraph.to_json() includes persistent field."""
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "serialize-test",
+                "state": {
+                    "audit_log": {"type": "topic", "persistent": True, "default": []},
+                    "messages": {"type": "topic", "default": []},
+                },
+                "nodes": {"A": {"type": "conversation", "config": {"model": "gpt-4o", "system_prompt": "test"}}},
+                "edges": [{"source": "A", "target": "__end__"}],
+                "entry": "A",
+            }
+        )
+        compiled = GraphCompiler().compile(graph)
+        json_data = compiled.to_json()
+        assert json_data["state"]["audit_log"]["persistent"] is True
+        assert json_data["state"]["messages"]["persistent"] is False

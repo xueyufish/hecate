@@ -52,7 +52,7 @@ class ConflictResult:
 class ConflictResolver:
     """Resolves conflicts for concurrent channel updates.
 
-    Provides multiple resolution strategies based on channel type
+    Provides multiple resolution strategies based on channel behavior
     and conflict severity. Supports human approval for critical conflicts
     via a pending-approval queue that external systems (e.g., Temporal Signals)
     can resolve.
@@ -66,7 +66,7 @@ class ConflictResolver:
         channel_key: str,
         current_value: Any,
         proposed_value: Any,
-        channel_type: str = "last_value",
+        behavior: Any | None = None,
         agent_id: str | None = None,
         require_approval: bool = False,
     ) -> ConflictResult:
@@ -76,7 +76,9 @@ class ConflictResolver:
             channel_key: The channel being updated.
             current_value: Current channel value.
             proposed_value: Proposed new value.
-            channel_type: Type of channel (last_value, topic, accumulator).
+            behavior: ChannelBehavior instance for this channel type.
+                If provided, delegates conflict resolution to the behavior.
+                If None, falls back to last-write-wins.
             agent_id: ID of the agent making the update.
 
         Returns:
@@ -85,36 +87,17 @@ class ConflictResolver:
         if require_approval:
             return self._request_approval(channel_key, current_value, proposed_value, agent_id)
 
-        # Last-value channels: last write wins
-        if channel_type == "last_value":
-            return ConflictResult(
-                resolved=True,
-                final_value=proposed_value,
-                strategy_used=ConflictStrategy.LAST_WRITE_WINS.value,
-            )
-
-        # Topic channels: merge lists
-        if channel_type == "topic":
-            merged = self._merge_lists(current_value, proposed_value)
-            return ConflictResult(
-                resolved=True,
-                final_value=merged,
-                strategy_used=ConflictStrategy.MERGE_LIST.value,
-            )
-
-        # Accumulator channels: sum values
-        if channel_type == "accumulator":
+        if behavior is not None:
             try:
-                merged = (current_value or 0) + (proposed_value or 0)
+                merged = behavior.resolve_conflict(current_value, proposed_value)
                 return ConflictResult(
                     resolved=True,
                     final_value=merged,
-                    strategy_used="accumulator_sum",
+                    strategy_used="behavior_delegated",
                 )
             except (TypeError, ValueError):
                 pass
 
-        # Default: last write wins
         return ConflictResult(
             resolved=True,
             final_value=proposed_value,

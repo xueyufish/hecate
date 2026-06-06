@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock
 
+from hecate.engine.channel import LastValueBehavior
 from hecate.engine.temporal.conflict import (
     ConflictResolver,
     ConflictStrategy,
@@ -54,7 +55,7 @@ class TestDistributedPregelWorkflow:
 class TestConflictResolverHumanApproval:
     def test_resolve_normal_no_approval_needed(self) -> None:
         resolver = ConflictResolver()
-        result = resolver.resolve("ch", "old", "new", channel_type="last_value")
+        result = resolver.resolve("ch", "old", "new", behavior=LastValueBehavior())
 
         assert result.resolved is True
         assert result.final_value == "new"
@@ -66,7 +67,7 @@ class TestConflictResolverHumanApproval:
             "ch",
             "old",
             "new",
-            channel_type="last_value",
+            behavior=LastValueBehavior(),
             require_approval=True,
         )
 

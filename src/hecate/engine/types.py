@@ -128,12 +128,15 @@ class ChannelDef:
         default: initial value set when the channel is first registered.
         initial: starting value for ACCUMULATOR channels (e.g., 0 for "add").
         reduce_fn: reduction function name (currently only "add" is supported).
+        persistent: whether the channel persists across sessions (checkpoint).
+            This is orthogonal to write semantics — any type can be persistent.
     """
 
     type: ChannelType
     default: Any = None
     initial: Any = None
     reduce_fn: str | None = None
+    persistent: bool = False
 
 
 @dataclass
@@ -224,7 +227,10 @@ class CompiledGraph:
         return {
             "version": "1.0",
             "name": self.name,
-            "state": {k: {"type": v.type.value, "default": v.default} for k, v in self.channels.items()},
+            "state": {
+                k: {"type": v.type.value, "default": v.default, "persistent": v.persistent}
+                for k, v in self.channels.items()
+            },
             "nodes": {k: {"type": v.type.value, "config": v.config} for k, v in self.nodes.items()},
             "edges": [
                 {

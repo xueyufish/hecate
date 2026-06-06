@@ -33,6 +33,10 @@
           "reduce": {
             "type": "string",
             "enum": ["append", "add"]
+          },
+          "persistent": {
+            "type": "boolean",
+            "description": "Whether the channel persists across sessions (checkpoint). Orthogonal to write semantics."
           }
         }
       }

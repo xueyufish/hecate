@@ -15,6 +15,7 @@ has two stages:
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import jsonschema
@@ -27,6 +28,8 @@ from hecate.engine.types import (
     NodeConfig,
     NodeType,
 )
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_PATH = Path(__file__).parent.parent.parent.parent / "schemas" / "graph-dsl.schema.json"
 
@@ -93,11 +96,25 @@ def parse_graph(raw: str | dict) -> GraphConfig:
 
     state = {}
     for name, defn in data.get("state", {}).items():
+        raw_type = defn["type"]
+        persistent = defn.get("persistent", False)
+
+        # Auto-migrate deprecated "persistent_topic"
+        if raw_type == "persistent_topic":
+            logger.warning(
+                "Channel type 'persistent_topic' is deprecated. "
+                "Use 'topic' with 'persistent: true' instead. "
+                f"Migrating channel '{name}' automatically."
+            )
+            raw_type = "topic"
+            persistent = True
+
         state[name] = ChannelDef(
-            type=ChannelType(defn["type"]),
+            type=ChannelType(raw_type),
             default=defn.get("default"),
             initial=defn.get("initial"),
             reduce_fn=defn.get("reduce"),
+            persistent=persistent,
         )
 
     nodes = {}

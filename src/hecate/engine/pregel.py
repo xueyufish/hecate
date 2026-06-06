@@ -408,26 +408,27 @@ class PregelRuntime:
         """Return the interrupt payload if execution is paused."""
         return self._interrupt_value
 
-    def _apply_writes(self, updates: dict[str, Any], channel_types: dict[str, str] | None = None) -> None:
+    def _apply_writes(self, updates: dict[str, Any]) -> None:
         """Write channel updates, applying conflict resolution if available.
 
         Args:
             updates: Channel key to value mapping.
-            channel_types: Optional channel type hints for conflict strategy.
         """
         if not self._conflict_resolver:
             for k, v in updates.items():
                 self._channel_manager.write(k, v)
             return
 
-        types = channel_types or {}
+        from hecate.engine.channel import get as get_channel_behavior
+
         for k, v in updates.items():
             current = self._channel_manager.snapshot().get(k)
+            behavior = get_channel_behavior(self._channel_manager._channels[k].defn.type)
             result = self._conflict_resolver.resolve(
                 channel_key=k,
                 current_value=current,
                 proposed_value=v,
-                channel_type=types.get(k, "last_value"),
+                behavior=behavior,
             )
             if result.resolved:
                 self._channel_manager.write(k, result.final_value)
