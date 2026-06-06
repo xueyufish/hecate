@@ -23,6 +23,7 @@ import pytest
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import InMemoryCheckpointStore
+from hecate.engine.eviction import SizeBasedEviction
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.types import (
     ChannelDef,
@@ -548,3 +549,29 @@ class TestMaxSupersteps:
         runtime = PregelRuntime(graph, worker, store)
 
         assert runtime._max_supersteps == 100
+
+
+class TopFiveWorker(Worker):
+    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"messages": [f"{node_id}_{i}" for i in range(5)]},
+        )
+
+
+class TestEvictionIntegration:
+    @pytest.mark.asyncio
+    async def test_runtime_applies_eviction_policy(self):
+        graph = _make_linear_graph()
+        worker = TopFiveWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store, eviction_policy=SizeBasedEviction(max_size=3))
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        final_state = results[-1]["state"]
+        assert len(final_state["messages"]) == 3
+        assert final_state["messages"][-3:] == final_state["messages"]

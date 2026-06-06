@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import pytest
 
+from hecate.engine.channel import ChannelManager
 from hecate.engine.eviction import EvictionPolicy, NoEviction, SizeBasedEviction
+from hecate.engine.types import ChannelDef, ChannelType
 
 # --- EvictionPolicy ABC ---
 
@@ -81,3 +83,47 @@ def test_size_eviction_select_victim_within_limit():
     items = ["a", "b", "c"]
     result = eviction.select_victim(items)
     assert result == ["a", "b", "c"]
+
+
+def test_channel_manager_default_no_eviction():
+    """ChannelManager without eviction policy SHALL keep all writes."""
+    mgr = ChannelManager()
+    mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
+    for i in range(100):
+        mgr.write("msgs", i)
+    assert mgr.read("msgs") == list(range(100))
+
+
+def test_channel_manager_size_based_eviction():
+    """ChannelManager SHALL evict when TOPIC size exceeds eviction threshold."""
+    mgr = ChannelManager(eviction_policy=SizeBasedEviction(max_size=5))
+    mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
+    for i in range(10):
+        mgr.write("msgs", i)
+    assert mgr.read("msgs") == [5, 6, 7, 8, 9]
+
+
+def test_channel_manager_eviction_skips_last_value():
+    """Eviction policy SHALL NOT apply to LAST_VALUE channels."""
+    mgr = ChannelManager(eviction_policy=SizeBasedEviction(max_size=3))
+    mgr.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
+    for ch in ["a", "b", "c", "d", "e"]:
+        mgr.write("val", ch)
+    assert mgr.read("val") == "e"
+
+
+def test_channel_manager_eviction_skips_accumulator():
+    """Eviction policy SHALL NOT apply to ACCUMULATOR channels."""
+    mgr = ChannelManager(eviction_policy=SizeBasedEviction(max_size=3))
+    mgr.register("count", ChannelDef(type=ChannelType.ACCUMULATOR, initial=0, reduce_fn="add"))
+    for value in [1, 2, 3, 4, 5]:
+        mgr.write("count", value)
+    assert mgr.read("count") == 15
+
+
+def test_channel_manager_restore_bypasses_eviction():
+    """Restore MUST reproduce snapshot state without applying eviction."""
+    mgr = ChannelManager(eviction_policy=SizeBasedEviction(max_size=3))
+    mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
+    mgr.restore({"msgs": list(range(10))})
+    assert mgr.read("msgs") == list(range(10))

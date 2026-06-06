@@ -11,6 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from hecate.engine.eviction import EvictionPolicy, NoEviction
 from hecate.engine.types import ChannelDef, ChannelType
 
 
@@ -81,8 +82,9 @@ class ChannelManager:
     access by name. It also supports snapshot/restore for checkpoint persistence.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, eviction_policy: EvictionPolicy | None = None) -> None:
         self._channels: dict[str, Channel] = {}
+        self._eviction_policy: EvictionPolicy = eviction_policy or NoEviction()
 
     def register(self, name: str, defn: ChannelDef) -> None:
         """Register a new channel with the given definition."""
@@ -97,7 +99,13 @@ class ChannelManager:
         """
         if name not in self._channels:
             return
-        self._channels[name].write(value)
+        channel = self._channels[name]
+        channel.write(value)
+        if channel.defn.type in (
+            ChannelType.TOPIC,
+            ChannelType.PERSISTENT_TOPIC,
+        ) and self._eviction_policy.should_evict(name, len(channel._value), {}):
+            channel._value = self._eviction_policy.select_victim(channel._value)
 
     def read(self, name: str) -> Any:
         """Read a value from the named channel.
