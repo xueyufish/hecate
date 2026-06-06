@@ -518,3 +518,238 @@ def build_reflection_loop(
         edges=edges,
         entry="drafter",
     )
+
+
+def build_sequential_pipeline(
+    stages: list[dict[str, str]],
+    revision_config: dict[str, str] | None = None,
+) -> GraphConfig:
+    """Build a sequential pipeline: stage_0 → stage_1 → ... → stage_N.
+
+    Each stage is an AGENT node that reads from a shared ``messages`` TOPIC
+    channel and an optional per-stage LAST_VALUE channel carrying the previous
+    stage's output.
+
+    **Architecture pattern (without revision):**
+
+    ::
+
+        [__start__] → [stage_0] → [stage_1] → ... → [stage_N] → [__end__]
+
+    **Architecture pattern (with revision):**
+
+    ::
+
+        [__start__] → [stage_0] → ... → [stage_N] → [check_revision] ──(true)──→ [target_stage]
+                                                            │                        │
+                                                            (false)                  │
+                                                            ▼                        │
+                                                         [__end__]          ←←←←←←←←┘
+
+    **State channels:**
+    - ``messages`` (TOPIC): shared across all stages — accumulates every turn.
+    - ``{stage_id}_output`` (LAST_VALUE): written by stage N, read by stage N+1.
+    - ``revision_status`` (LAST_VALUE): only present when *revision_config* is set.
+
+    Args:
+        stages: Ordered list of stage definitions.  Each dict MUST contain
+            ``id`` (unique identifier), ``model`` (LLM model), and
+            ``system_prompt``.
+        revision_config: Optional dict with ``expression`` (condition to
+            evaluate) and ``target_stage`` (stage ID to loop back to when the
+            expression is true).
+
+    Returns:
+        A GraphConfig ready for compilation and execution.
+
+    Raises:
+        ValueError: If fewer than 2 stages or duplicate stage IDs.
+    """
+    if len(stages) < 2:
+        msg = "Sequential pipeline requires at least 2 stages."
+        raise ValueError(msg)
+
+    stage_ids = [s["id"] for s in stages]
+    if len(stage_ids) != len(set(stage_ids)):
+        msg = f"Duplicate stage IDs: {stage_ids}"
+        raise ValueError(msg)
+
+    nodes: dict[str, NodeConfig] = {}
+    state: dict[str, ChannelDef] = {
+        "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
+    }
+
+    for i, stage in enumerate(stages):
+        readable = ["messages"]
+        writable = ["messages"]
+
+        if i > 0:
+            prev_output = f"{stages[i - 1]['id']}_output"
+            readable.append(prev_output)
+
+        output_channel = f"{stage['id']}_output"
+        state[output_channel] = ChannelDef(type=ChannelType.LAST_VALUE, default=None)
+
+        if i < len(stages) - 1:
+            writable.append(output_channel)
+        elif revision_config is not None:
+            writable.append(output_channel)
+            writable.append("revision_status")
+            readable.append("revision_status")
+
+        nodes[stage["id"]] = NodeConfig(
+            id=stage["id"],
+            type=NodeType.AGENT,
+            config={
+                "model": stage["model"],
+                "system_prompt": stage["system_prompt"],
+                "channels": {"readable": readable, "writable": writable},
+            },
+        )
+
+    edges: list[Edge] = []
+    for i in range(len(stages) - 1):
+        edges.append(Edge(source=stages[i]["id"], target=stages[i + 1]["id"]))
+
+    if revision_config is not None:
+        state["revision_status"] = ChannelDef(type=ChannelType.LAST_VALUE, default="")
+
+        target_id = revision_config["target_stage"]
+        if target_id in nodes:
+            target_readable = nodes[target_id].config.setdefault("channels", {}).setdefault("readable", [])
+            if "revision_status" not in target_readable:
+                target_readable.append("revision_status")
+
+        nodes["check_revision"] = NodeConfig(
+            id="check_revision",
+            type=NodeType.CONDITION,
+            config={
+                "expression": revision_config["expression"],
+                "channels": {"readable": ["revision_status"]},
+            },
+        )
+
+        last_stage_id = stages[-1]["id"]
+        edges.append(Edge(source=last_stage_id, target="check_revision"))
+        edges.append(
+            Edge(source="check_revision", target={"true": target_id, "false": "__end__"}),
+        )
+    else:
+        edges.append(Edge(source=stages[-1]["id"], target="__end__"))
+
+    return GraphConfig(
+        version="1.0",
+        name="sequential-pipeline",
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry=stages[0]["id"],
+    )
+
+
+def build_broadcast_pipeline(
+    participants: list[dict[str, str]],
+    moderator: dict[str, str] | None = None,
+) -> GraphConfig:
+    """Build a broadcast pipeline: sequential round-robin with shared messages.
+
+    All participants share the same ``messages`` TOPIC channel so every agent
+    sees all previous turns.  An optional moderator frames the discussion at
+    the beginning and end.
+
+    **Architecture pattern (without moderator):**
+
+    ::
+
+        [__start__] → [p_0] → [p_1] → ... → [p_N] → [__end__]
+
+    **Architecture pattern (with moderator):**
+
+    ::
+
+        [__start__] → [moderator] → [p_0] → ... → [p_N] → [moderator_summary] → [__end__]
+
+    **State channels:**
+    - ``messages`` (TOPIC): shared by all nodes — every participant reads and
+      writes to the same channel.
+
+    Args:
+        participants: Ordered list of participant definitions.  Each dict MUST
+            contain ``id``, ``model``, and ``system_prompt``.
+        moderator: Optional moderator definition with ``model`` and
+            ``system_prompt``.  When provided, a ``moderator`` node is inserted
+            at the start and a ``moderator_summary`` node at the end.
+
+    Returns:
+        A GraphConfig ready for compilation and execution.
+
+    Raises:
+        ValueError: If fewer than 2 participants or duplicate participant IDs.
+    """
+    if len(participants) < 2:
+        msg = "Broadcast pipeline requires at least 2 participants."
+        raise ValueError(msg)
+
+    participant_ids = [p["id"] for p in participants]
+    if len(participant_ids) != len(set(participant_ids)):
+        msg = f"Duplicate participant IDs: {participant_ids}"
+        raise ValueError(msg)
+
+    nodes: dict[str, NodeConfig] = {}
+    edges: list[Edge] = []
+    state: dict[str, ChannelDef] = {
+        "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
+    }
+
+    shared_channels = {"readable": ["messages"], "writable": ["messages"]}
+
+    if moderator is not None:
+        nodes["moderator"] = NodeConfig(
+            id="moderator",
+            type=NodeType.AGENT,
+            config={
+                "model": moderator["model"],
+                "system_prompt": moderator["system_prompt"],
+                "channels": dict(shared_channels),
+            },
+        )
+        nodes["moderator_summary"] = NodeConfig(
+            id="moderator_summary",
+            type=NodeType.AGENT,
+            config={
+                "model": moderator["model"],
+                "system_prompt": moderator["system_prompt"],
+                "channels": dict(shared_channels),
+            },
+        )
+
+    for p in participants:
+        nodes[p["id"]] = NodeConfig(
+            id=p["id"],
+            type=NodeType.AGENT,
+            config={
+                "model": p["model"],
+                "system_prompt": p["system_prompt"],
+                "channels": dict(shared_channels),
+            },
+        )
+
+    ordered_ids: list[str] = []
+    if moderator is not None:
+        ordered_ids.append("moderator")
+    ordered_ids.extend(p["id"] for p in participants)
+    if moderator is not None:
+        ordered_ids.append("moderator_summary")
+
+    for i in range(len(ordered_ids) - 1):
+        edges.append(Edge(source=ordered_ids[i], target=ordered_ids[i + 1]))
+    edges.append(Edge(source=ordered_ids[-1], target="__end__"))
+
+    return GraphConfig(
+        version="1.0",
+        name="broadcast-pipeline",
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry=ordered_ids[0],
+    )
