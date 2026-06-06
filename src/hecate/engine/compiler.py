@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 
 from hecate.engine.graph_dsl import GraphValidationError
+from hecate.engine.optimization import OptimizationPass
 from hecate.engine.types import (
     CompiledGraph,
     GraphConfig,
@@ -35,6 +36,15 @@ class GraphCompiler:
     This allows graphs to be incrementally built and tested during development.
     """
 
+    def __init__(self, passes: list[OptimizationPass] | None = None) -> None:
+        """Initialize the compiler with optional optimization passes.
+
+        Args:
+            passes: Optimization passes to apply after validation. Applied in list order.
+                Defaults to empty list (no optimization).
+        """
+        self._passes: list[OptimizationPass] = passes or []
+
     def compile(self, config: GraphConfig) -> CompiledGraph:
         """Validate the graph structure and return a compiled graph.
 
@@ -54,13 +64,16 @@ class GraphCompiler:
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
-        return CompiledGraph(
+        graph = CompiledGraph(
             nodes=config.nodes,
             edges=config.edges,
             channels=config.state,
             entry_point=config.entry,
             name=config.name,
         )
+        for optimization_pass in self._passes:
+            graph = optimization_pass.optimize(graph)
+        return graph
 
     def _validate_entry(self, config: GraphConfig) -> None:
         """Ensure the declared entry point references an existing node.

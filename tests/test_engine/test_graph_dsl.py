@@ -343,3 +343,58 @@ class TestHandoffEdgeParsing:
         }
         config = parse_graph(dsl)
         assert config.nodes["supervisor"].config.get("invocation_mode") == "tool"
+
+
+class TestOptimizationPassIntegration:
+    """Test that GraphCompiler applies optimization passes correctly."""
+
+    GRAPH_WITH_UNREACHABLE = """
+    {
+        "version": "1.0",
+        "name": "test-unreachable",
+        "state": {"messages": {"type": "topic", "default": []}},
+        "nodes": {
+            "A": {"type": "conversation", "config": {"model": "gpt-4o", "system_prompt": "Entry"}},
+            "B": {"type": "conversation", "config": {"model": "gpt-4o", "system_prompt": "Reachable"}},
+            "C": {"type": "conversation", "config": {"model": "gpt-4o", "system_prompt": "Unreachable"}}
+        },
+        "edges": [
+            {"source": "A", "target": "B"},
+            {"source": "B", "target": "__end__"}
+        ],
+        "entry": "A"
+    }
+    """
+
+    def test_compiler_default_no_optimization(self):
+        """GraphCompiler with no passes preserves all nodes including unreachable."""
+        from hecate.engine.compiler import GraphCompiler
+
+        config = parse_graph(self.GRAPH_WITH_UNREACHABLE)
+        compiled = GraphCompiler().compile(config)
+        assert "A" in compiled.nodes
+        assert "B" in compiled.nodes
+        assert "C" in compiled.nodes
+
+    def test_compiler_single_pass(self):
+        """GraphCompiler with DeadNodeElimination removes unreachable nodes."""
+        from hecate.engine.compiler import GraphCompiler
+        from hecate.engine.optimization import DeadNodeElimination
+
+        config = parse_graph(self.GRAPH_WITH_UNREACHABLE)
+        compiled = GraphCompiler(passes=[DeadNodeElimination()]).compile(config)
+        assert "A" in compiled.nodes
+        assert "B" in compiled.nodes
+        assert "C" not in compiled.nodes
+
+    def test_compiler_multi_pass_pipeline(self):
+        """GraphCompiler applies passes in order."""
+        from hecate.engine.compiler import GraphCompiler
+        from hecate.engine.optimization import DeadNodeElimination
+
+        config = parse_graph(self.GRAPH_WITH_UNREACHABLE)
+        compiler = GraphCompiler(passes=[DeadNodeElimination(), DeadNodeElimination()])
+        compiled = compiler.compile(config)
+        assert "A" in compiled.nodes
+        assert "B" in compiled.nodes
+        assert "C" not in compiled.nodes
