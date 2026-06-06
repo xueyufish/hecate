@@ -7,9 +7,17 @@ The `EnginePort` ABC SHALL define 7 abstract methods and 4 optional methods that
 - **WHEN** `llm_invoke(messages, config)` is called
 - **THEN** it SHALL return an `AsyncGenerator[str, None]` yielding tokens
 
-#### Scenario: Tool execution
+#### Scenario: Tool execution routes through ToolRegistry
 - **WHEN** `tool_execute(name, args, context)` is called
-- **THEN** it SHALL return the tool's result (type depends on the tool)
+- **THEN** it SHALL route the call through ToolRegistry, which resolves the tool by name and source type, executes it via the appropriate executor, and returns the tool's result
+
+#### Scenario: Tool execution via registry
+- **WHEN** `tool_execute("web_search", {"query": "test"}, context)` is called
+- **THEN** the adapter SHALL delegate to `ToolRegistry.execute("web_search", {"query": "test"}, context)` and return the registry's result
+
+#### Scenario: Tool not found
+- **WHEN** `tool_execute("nonexistent", args, context)` is called and the tool does not exist
+- **THEN** it SHALL raise `ValueError` with message indicating the tool was not found
 
 #### Scenario: Knowledge query
 - **WHEN** `knowledge_query(query, kb_ids)` is called

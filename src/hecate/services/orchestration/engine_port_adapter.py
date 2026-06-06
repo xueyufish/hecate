@@ -26,9 +26,15 @@ class _ProductionEnginePort(EnginePort):
     and knowledge queries to the knowledge base service.
     """
 
-    def __init__(self, db: AsyncSession, llm_service: Any) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        llm_service: Any,
+        tool_registry: Any = None,
+    ) -> None:
         self._db = db
         self._llm_service = llm_service
+        self._tool_registry = tool_registry
 
     async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
         """Invoke LLM via LLMService in streaming mode.
@@ -53,7 +59,7 @@ class _ProductionEnginePort(EnginePort):
                 yield content
 
     async def tool_execute(self, name: str, args: dict, context: dict | None = None) -> Any:
-        """Execute a tool by name.
+        """Execute a tool by name via ToolRegistry.
 
         Args:
             name: The registered tool name.
@@ -63,7 +69,9 @@ class _ProductionEnginePort(EnginePort):
         Returns:
             The tool's return value.
         """
-        return f"Executed {name} with args {args}"
+        if self._tool_registry is None:
+            raise RuntimeError("ToolRegistry not configured in EnginePort")
+        return await self._tool_registry.execute(name, args, context)
 
     async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
         """Query knowledge bases via knowledge_base_service.
@@ -120,14 +128,19 @@ class _ProductionEnginePort(EnginePort):
         return await port.agent_execute(agent_id, messages, channel_snapshot, context)
 
 
-def create_engine_port(db: AsyncSession, llm_service: Any) -> EnginePort:
+def create_engine_port(
+    db: AsyncSession,
+    llm_service: Any,
+    tool_registry: Any = None,
+) -> EnginePort:
     """Create a production EnginePort adapter.
 
     Args:
         db: Database session for service lookups.
         llm_service: The LLMService instance for LLM invocations.
+        tool_registry: Optional ToolRegistry for tool execution.
 
     Returns:
         A concrete EnginePort wired to production services.
     """
-    return _ProductionEnginePort(db=db, llm_service=llm_service)
+    return _ProductionEnginePort(db=db, llm_service=llm_service, tool_registry=tool_registry)

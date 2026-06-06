@@ -187,10 +187,23 @@ async def _process_chat(
     use_enhanced = parsed_kb_ids or request.generate_opening or request.generate_suggestions
 
     if use_enhanced:
-        # Create an EnginePort adapter for the execution service
+        from hecate.core.config import settings
         from hecate.services.orchestration.engine_port_adapter import create_engine_port
+        from hecate.services.tool.builtin import BuiltInToolExecutor
+        from hecate.services.tool.registry import ToolRegistry
+        from hecate.services.tool.search.factory import create_search_provider
 
-        port = create_engine_port(db, llm_service)
+        search_provider = create_search_provider(
+            provider=settings.SEARCH_PROVIDER,
+            api_key=settings.SEARCH_API_KEY,
+        )
+        builtin_executor = BuiltInToolExecutor(
+            search_provider=search_provider,
+            workspace_root=settings.WORKSPACE_ROOT,
+        )
+        tool_registry = ToolRegistry(db=db, builtin_executor=builtin_executor)
+
+        port = create_engine_port(db, llm_service, tool_registry=tool_registry)
 
         exec_service = WorkflowExecutionService(
             port=port,

@@ -54,6 +54,10 @@ class Settings(BaseSettings):
 
     FERNET_KEY: str = ""
 
+    WORKSPACE_ROOT: str = "./workspace"
+    SEARCH_PROVIDER: str = "duckduckgo"
+    SEARCH_API_KEY: str = ""
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""

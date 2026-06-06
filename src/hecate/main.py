@@ -41,10 +41,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager.
 
     Handles startup and shutdown events for the FastAPI application.
-    On startup: ensures database connection pool is ready.
+    On startup: ensures database connection pool is ready; seeds built-in tools.
     On shutdown: disposes of the database connection pool.
     """
-    # Startup: engine is already created at module level
+    from hecate.core.database import async_session_factory
+    from hecate.services.tool.registry import seed_builtin_tools
+
+    async with async_session_factory() as session:
+        try:
+            await seed_builtin_tools(session)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+
     yield
     # Shutdown: clean up database connections
     await engine.dispose()
