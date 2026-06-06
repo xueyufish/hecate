@@ -33,6 +33,7 @@ class ConditionWorker(Worker):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> WorkerResult:
         expression = node_config.get("expression", "")
         route_value = self._evaluate(expression, channel_snapshot)

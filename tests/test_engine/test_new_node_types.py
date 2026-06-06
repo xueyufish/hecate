@@ -83,7 +83,9 @@ MIXED_DSL = {
 class _KnowledgeWorker(Worker):
     """Worker that simulates knowledge-retrieval: returns retrieved docs."""
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         return WorkerResult(
             node_id=node_id,
             channel_updates={
@@ -96,7 +98,9 @@ class _KnowledgeWorker(Worker):
 class _VariableWorker(Worker):
     """Worker that simulates variable-set: writes a channel value."""
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         var_name = node_config.get("variable_name", "unknown")
         var_value = node_config.get("value", "")
         return WorkerResult(
@@ -108,7 +112,9 @@ class _VariableWorker(Worker):
 class _MixedWorker(Worker):
     """Worker that routes based on node type via config inspection."""
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         if "kb_ids" in node_config:
             return WorkerResult(
                 node_id=node_id,

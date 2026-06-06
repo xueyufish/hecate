@@ -25,7 +25,8 @@ class SuggestionWorker(Worker):
     The suggestion service is injected at construction time.
     """
 
-    def __init__(self, suggestion_service: Any = None) -> None:
+    def __init__(self, suggestion_service: Any = None, event_store: Any = None) -> None:
+        super().__init__(event_store=event_store)
         self._suggestion_service = suggestion_service
 
     async def execute(
@@ -33,6 +34,7 @@ class SuggestionWorker(Worker):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> WorkerResult:
         if self._suggestion_service is None:
             return WorkerResult(

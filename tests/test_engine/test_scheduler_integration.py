@@ -29,7 +29,9 @@ from hecate.engine.worker import Worker
 class SimpleWorker(Worker):
     """Pass-through worker that echoes the node id as output."""
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         return WorkerResult(
             node_id=node_id,
             channel_updates={"messages": [f"{node_id}_output"]},
@@ -148,7 +150,9 @@ async def test_custom_scheduler_reorders_nodes() -> None:
     execution_order: list[str] = []
 
     class OrderTrackingWorker(Worker):
-        async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+        async def execute(
+            self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+        ) -> WorkerResult:
             execution_order.append(node_id)
             return WorkerResult(node_id=node_id, channel_updates={"messages": [f"{node_id}_output"]})
 

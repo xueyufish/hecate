@@ -31,8 +31,23 @@ class Worker(ABC):
     to ``execute()`` with no intermediate events.
     """
 
+    def __init__(self, event_store: Any = None) -> None:
+        """Initialize the worker with an optional event store.
+
+        Args:
+            event_store: Optional EventStore for recording execution events.
+                When None, no events are recorded (default behavior).
+        """
+        self._event_store = event_store
+
     @abstractmethod
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self,
+        node_id: str,
+        node_config: dict,
+        channel_snapshot: dict,
+        execution_context: dict | None = None,
+    ) -> WorkerResult:
         """Execute a node and return the result.
 
         The contract is:
@@ -48,6 +63,9 @@ class Worker(ABC):
             node_config: The node's configuration dict (model, prompts, channels, etc.).
             channel_snapshot: A read-only deep copy of all channel values at the
                 start of this superstep.
+            execution_context: Optional dict with execution metadata from PregelRuntime:
+                {"session_id": UUID, "superstep": int, "event_store": EventStore}.
+                Workers can use this to record execution detail events.
 
         Returns:
             A WorkerResult with channel_updates, optional command, node_id, and
@@ -60,6 +78,7 @@ class Worker(ABC):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> AsyncGenerator[dict[str, Any] | WorkerResult, None]:
         """Execute a node with optional intermediate token events.
 
@@ -74,12 +93,13 @@ class Worker(ABC):
             node_id: The ID of the node to execute.
             node_config: The node's configuration dict.
             channel_snapshot: A read-only deep copy of all channel values.
+            execution_context: Optional dict with execution metadata from PregelRuntime.
 
         Yields:
             Intermediate token dicts (``{"content": "<token>"}``), followed by
             a final WorkerResult.
         """
-        result = await self.execute(node_id, node_config, channel_snapshot)
+        result = await self.execute(node_id, node_config, channel_snapshot, execution_context)
         yield result
 
 
@@ -91,7 +111,14 @@ class WorkerPool(ABC):
     """
 
     @abstractmethod
-    async def dispatch(self, worker: Worker, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def dispatch(
+        self,
+        worker: Worker,
+        node_id: str,
+        node_config: dict,
+        channel_snapshot: dict,
+        execution_context: dict | None = None,
+    ) -> WorkerResult:
         """Dispatch a worker execution and await the result.
 
         Args:
@@ -99,6 +126,7 @@ class WorkerPool(ABC):
             node_id: The ID of the node being executed.
             node_config: The node's configuration dict.
             channel_snapshot: A read-only snapshot of all channel values.
+            execution_context: Optional dict with execution metadata from PregelRuntime.
 
         Returns:
             The WorkerResult produced by the worker.
@@ -115,6 +143,13 @@ class DirectWorkerPool(WorkerPool):
     nodes, a thread or process-based pool can be substituted.
     """
 
-    async def dispatch(self, worker: Worker, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def dispatch(
+        self,
+        worker: Worker,
+        node_id: str,
+        node_config: dict,
+        channel_snapshot: dict,
+        execution_context: dict | None = None,
+    ) -> WorkerResult:
         """Await the worker directly in the current event loop."""
-        return await worker.execute(node_id, node_config, channel_snapshot)
+        return await worker.execute(node_id, node_config, channel_snapshot, execution_context)

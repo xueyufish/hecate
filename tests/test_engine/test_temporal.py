@@ -148,7 +148,7 @@ class TestConflictResolverWithPregelRuntime:
         )
 
         class TestWorker(Worker):
-            async def execute(self, node_id: str, config: dict, state: dict) -> WorkerResult:
+            async def execute(self, node_id: str, config: dict, state: dict, execution_context=None) -> WorkerResult:
                 return WorkerResult(node_id=node_id, channel_updates={"messages": "hello"})
 
         checkpoint_store = AsyncMock(spec=CheckpointStore)
@@ -187,7 +187,7 @@ class TestConflictResolverWithPregelRuntime:
         )
 
         class TestWorker(Worker):
-            async def execute(self, node_id: str, config: dict, state: dict) -> WorkerResult:
+            async def execute(self, node_id: str, config: dict, state: dict, execution_context=None) -> WorkerResult:
                 return WorkerResult(node_id=node_id, channel_updates={"messages": "hello"})
 
         checkpoint_store = AsyncMock(spec=CheckpointStore)

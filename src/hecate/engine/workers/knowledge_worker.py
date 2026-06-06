@@ -8,6 +8,7 @@ channel_updates for downstream LLM consumption.
 from __future__ import annotations
 
 import logging
+from typing import Any
 from uuid import UUID
 
 from hecate.engine.ports import EnginePort
@@ -25,7 +26,8 @@ class KnowledgeWorker(Worker):
     writes the retrieved context to channels.
     """
 
-    def __init__(self, port: EnginePort) -> None:
+    def __init__(self, port: EnginePort, event_store: Any = None) -> None:
+        super().__init__(event_store=event_store)
         self._port = port
 
     async def execute(
@@ -33,6 +35,7 @@ class KnowledgeWorker(Worker):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> WorkerResult:
         kb_ids_raw = node_config.get("kb_ids", [])
         top_k = node_config.get("top_k", 5)

@@ -45,7 +45,9 @@ class SimpleWorker(Worker):
     routing, or goto commands.
     """
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         return WorkerResult(
             node_id=node_id,
             channel_updates={"messages": [f"{node_id}_output"]},
@@ -59,10 +61,13 @@ class InterruptWorker(Worker):
     parameter controls which node triggers the interrupt, defaulting to ``B``.
     """
 
-    def __init__(self, interrupt_at: str = "B"):
+    def __init__(self, interrupt_at: str = "B", event_store=None):
+        super().__init__(event_store=event_store)
         self._interrupt_at = interrupt_at
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         if node_id == self._interrupt_at:
             return WorkerResult(
                 node_id=node_id,
@@ -83,10 +88,13 @@ class RoutingWorker(Worker):
     the engine will follow out of the condition node (``"check"``).
     """
 
-    def __init__(self, route_value: str = "true"):
+    def __init__(self, route_value: str = "true", event_store=None):
+        super().__init__(event_store=event_store)
         self._route_value = route_value
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         updates: dict = {"messages": [f"{node_id}_output"]}
         if node_id == "check":
             updates["_route"] = self._route_value
@@ -100,7 +108,9 @@ class GotoWorker(Worker):
     directly to a downstream node (C).
     """
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         if node_id == "A":
             return WorkerResult(
                 node_id=node_id,
@@ -122,10 +132,13 @@ class InterruptRoutingWorker(Worker):
     route that was set before the interrupt.
     """
 
-    def __init__(self, route_value: str = "false"):
+    def __init__(self, route_value: str = "false", event_store=None):
+        super().__init__(event_store=event_store)
         self._route_value = route_value
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         if node_id == "check":
             return WorkerResult(
                 node_id=node_id,
@@ -552,7 +565,9 @@ class TestMaxSupersteps:
 
 
 class TopFiveWorker(Worker):
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         return WorkerResult(
             node_id=node_id,
             channel_updates={"messages": [f"{node_id}_{i}" for i in range(5)]},
@@ -575,3 +590,107 @@ class TestEvictionIntegration:
         final_state = results[-1]["state"]
         assert len(final_state["messages"]) == 3
         assert final_state["messages"][-3:] == final_state["messages"]
+
+
+class TestEventStoreIntegration:
+    @pytest.mark.asyncio
+    async def test_pregel_records_lifecycle_events(self):
+        """PregelRuntime records NODE_START, NODE_END, CHANNEL_WRITE, SUPERSTEP_END events."""
+        from hecate.engine.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events = await event_store.get_events(session_id)
+        event_types = [e.event_type for e in events]
+
+        assert EventType.CUSTOM in event_types  # SESSION_START
+        assert EventType.NODE_START in event_types
+        assert EventType.NODE_END in event_types
+        assert EventType.CHANNEL_WRITE in event_types
+
+    @pytest.mark.asyncio
+    async def test_pregel_records_resume_event(self):
+        """PregelRuntime records RESUME event when resuming from checkpoint."""
+        from hecate.engine.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        checkpoint_store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, checkpoint_store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events_before = await event_store.get_events(session_id)
+        assert any(e.event_type == EventType.INTERRUPT for e in events_before)
+
+        runtime2 = PregelRuntime(graph, SimpleWorker(), checkpoint_store, event_store=event_store)
+        async for _ in runtime2.execute(session_id, resume_value="approved"):
+            pass
+
+        events_after = await event_store.get_events(session_id)
+        assert any(e.event_type == EventType.RESUME for e in events_after)
+
+    @pytest.mark.asyncio
+    async def test_pregel_records_interrupt_event(self):
+        """PregelRuntime records INTERRUPT event when worker returns interrupt command."""
+        from hecate.engine.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events = await event_store.get_events(session_id)
+        assert any(e.event_type == EventType.INTERRUPT for e in events)
+
+    @pytest.mark.asyncio
+    async def test_pregel_records_error_event(self):
+        """PregelRuntime records ERROR event when worker returns error."""
+        from hecate.engine.eventstore import EventType, InMemoryEventStore
+
+        class ErrorWorker(Worker):
+            async def execute(self, node_id, node_config, channel_snapshot, execution_context=None) -> WorkerResult:
+                return WorkerResult(node_id=node_id, error=ValueError("test error"))
+
+        graph = _make_linear_graph()
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, ErrorWorker(), store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        with pytest.raises(ValueError, match="test error"):
+            async for _ in runtime.execute(session_id):
+                pass
+
+        events = await event_store.get_events(session_id)
+        assert any(e.event_type == EventType.ERROR for e in events)
+
+    @pytest.mark.asyncio
+    async def test_pregel_no_recording_without_event_store(self):
+        """PregelRuntime does not record events when event_store is None."""
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        assert runtime._event_store is None

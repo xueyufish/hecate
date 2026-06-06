@@ -78,17 +78,23 @@ class _CompositeWorker:
     def _get_worker(self, node_type_value: str) -> Any:
         return self._workers_by_type.get(node_type_value, self._llm)
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> Any:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> Any:
         """Delegate to the appropriate worker based on node_type in config."""
         node_type = node_config.get("_node_type", "conversation")
         worker = self._get_worker(node_type)
-        return await worker.execute(node_id, node_config, channel_snapshot)
+        return await worker.execute(node_id, node_config, channel_snapshot, execution_context=execution_context)
 
-    async def execute_stream(self, node_id: str, node_config: dict, channel_snapshot: dict) -> AsyncGenerator:
+    async def execute_stream(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> AsyncGenerator:
         """Delegate streaming execution to the appropriate worker."""
         node_type = node_config.get("_node_type", "conversation")
         worker = self._get_worker(node_type)
-        async for item in worker.execute_stream(node_id, node_config, channel_snapshot):
+        async for item in worker.execute_stream(
+            node_id, node_config, channel_snapshot, execution_context=execution_context
+        ):
             yield item
 
 

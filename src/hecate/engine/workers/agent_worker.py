@@ -30,7 +30,8 @@ class AgentWorker(Worker):
     imports between engine and services layers.
     """
 
-    def __init__(self, execution_service: Any = None, port: Any = None) -> None:
+    def __init__(self, execution_service: Any = None, port: Any = None, event_store: Any = None) -> None:
+        super().__init__(event_store=event_store)
         self._execution_service = execution_service
         self._port = port
 
@@ -39,6 +40,7 @@ class AgentWorker(Worker):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> WorkerResult:
         agent_id_str = node_config.get("agent_id")
         if not agent_id_str:

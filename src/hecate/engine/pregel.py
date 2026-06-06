@@ -29,6 +29,7 @@ from typing import Any
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
+from hecate.engine.eventstore import Event, EventStore, EventType
 from hecate.engine.eviction import EvictionPolicy, NoEviction
 from hecate.engine.scheduler import FIFOScheduler, SchedulerStrategy
 from hecate.engine.temporal.conflict import ConflictResolver
@@ -70,6 +71,7 @@ class PregelRuntime:
         conflict_resolver: ConflictResolver | None = None,
         scheduler: SchedulerStrategy | None = None,
         eviction_policy: EvictionPolicy | None = None,
+        event_store: EventStore | None = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
@@ -79,6 +81,7 @@ class PregelRuntime:
         self._conflict_resolver = conflict_resolver
         self._scheduler = scheduler or FIFOScheduler()
         self._channel_manager = ChannelManager(eviction_policy=eviction_policy or NoEviction())
+        self._event_store = event_store
         self._superstep = 0
         self._interrupted = False
         self._interrupt_value: Any = None
@@ -87,6 +90,33 @@ class PregelRuntime:
 
         for name, defn in graph.channels.items():
             self._channel_manager.register(name, defn)
+
+    async def _emit(
+        self,
+        session_id: uuid.UUID,
+        event_type: EventType,
+        node_id: str | None = None,
+        payload: dict | None = None,
+    ) -> None:
+        """Record an event if event_store is configured."""
+        if self._event_store:
+            await self._event_store.append(
+                Event(
+                    session_id=session_id,
+                    superstep=self._superstep,
+                    event_type=event_type,
+                    node_id=node_id,
+                    payload=payload or {},
+                )
+            )
+
+    def _execution_context(self, session_id: uuid.UUID) -> dict:
+        """Build execution context dict for worker dispatch."""
+        return {
+            "session_id": session_id,
+            "superstep": self._superstep,
+            "event_store": self._event_store,
+        }
 
     async def execute(
         self,
@@ -129,11 +159,17 @@ class PregelRuntime:
         if resume_value is not None:
             await self._restore_from_checkpoint(session_id, resume_value)
             current_nodes = self._resolve_next_nodes_after_interrupt()
+            await self._emit(session_id, EventType.RESUME, payload={"interrupted_node": self._interrupted_node})
         else:
             if initial_input:
                 for key, value in initial_input.items():
                     self._channel_manager.write(key, value)
             current_nodes = [self._graph.entry_point] if self._graph.entry_point else []
+            await self._emit(
+                session_id,
+                EventType.CUSTOM,
+                payload={"event_name": "SESSION_START", "initial_input_keys": list(initial_input or {})},
+            )
 
         while current_nodes and not self._interrupted:
             self._superstep += 1
@@ -147,6 +183,7 @@ class PregelRuntime:
             scheduled_nodes = self._scheduler.select_next(current_nodes, context)
 
             results: list[WorkerResult] = []
+            execution_context = self._execution_context(session_id)
 
             for node_id in scheduled_nodes:
                 node = self._graph.nodes.get(node_id)
@@ -154,9 +191,17 @@ class PregelRuntime:
                     continue
 
                 node_type = getattr(node, "type", None)
+                await self._emit(
+                    session_id,
+                    EventType.NODE_START,
+                    node_id=node_id,
+                    payload={"node_type": str(node_type) if node_type else None},
+                )
 
                 if node_type == NodeType.FAN_OUT:
-                    fan_out_results = await self._dispatch_fan_out(node_id, node, snapshot)
+                    fan_out_results = await self._dispatch_fan_out(
+                        node_id, node, snapshot, execution_context=execution_context
+                    )
                     results.extend(fan_out_results)
                     continue
 
@@ -166,7 +211,9 @@ class PregelRuntime:
                     continue
 
                 if stream_mode == StreamMode.MESSAGES:
-                    async for item in self._worker.execute_stream(node_id, node.config, snapshot):
+                    async for item in self._worker.execute_stream(
+                        node_id, node.config, snapshot, execution_context=execution_context
+                    ):
                         if isinstance(item, WorkerResult):
                             results.append(item)
                         elif isinstance(item, dict):
@@ -177,12 +224,25 @@ class PregelRuntime:
                         node_id,
                         node.config,
                         snapshot,
+                        execution_context=execution_context,
                     )
                     results.append(result)
 
             interrupted = False
             for result in results:
+                await self._emit(
+                    session_id,
+                    EventType.NODE_END,
+                    node_id=result.node_id,
+                    payload={"success": result.error is None, "has_command": result.command is not None},
+                )
                 if result.error:
+                    await self._emit(
+                        session_id,
+                        EventType.ERROR,
+                        node_id=result.node_id,
+                        payload={"error_type": type(result.error).__name__, "error_message": str(result.error)},
+                    )
                     raise result.error
                 if result.command:
                     if result.command.is_interrupt():
@@ -190,6 +250,12 @@ class PregelRuntime:
                         self._interrupt_value = result.command.interrupt
                         self._interrupted_node = result.node_id
                         self._apply_writes(result.channel_updates)
+                        await self._emit(
+                            session_id,
+                            EventType.INTERRUPT,
+                            node_id=result.node_id,
+                            payload={"interrupt_value_type": type(self._interrupt_value).__name__},
+                        )
                         await self._checkpoint_store.save(
                             session_id=session_id,
                             superstep=self._superstep,
@@ -208,6 +274,13 @@ class PregelRuntime:
                         self._apply_writes(result.command.update)
                 if not self._interrupted:
                     self._apply_writes(result.channel_updates)
+                    if result.channel_updates:
+                        await self._emit(
+                            session_id,
+                            EventType.CHANNEL_WRITE,
+                            node_id=result.node_id,
+                            payload={"channels": list(result.channel_updates.keys())},
+                        )
 
             if interrupted:
                 return
@@ -217,6 +290,11 @@ class PregelRuntime:
                 superstep=self._superstep,
                 node_id=current_nodes[0] if len(current_nodes) == 1 else None,
                 channel_state=self._channel_manager.snapshot(),
+            )
+            await self._emit(
+                session_id,
+                EventType.CUSTOM,
+                payload={"event_name": "SUPERSTEP_END", "completed_nodes": len(results)},
             )
 
             if stream_mode == StreamMode.UPDATES:
@@ -359,6 +437,7 @@ class PregelRuntime:
         node_id: str,
         node: Any,
         snapshot: dict,
+        execution_context: dict | None = None,
     ) -> list[WorkerResult]:
         """Dispatch all branches of a FAN_OUT node concurrently.
 
@@ -369,6 +448,7 @@ class PregelRuntime:
             node_id: The FAN_OUT node ID.
             node: The NodeConfig for the FAN_OUT node.
             snapshot: Current channel state snapshot.
+            execution_context: Optional dict with execution metadata from PregelRuntime.
 
         Returns:
             List of WorkerResults from all branches.
@@ -387,7 +467,13 @@ class PregelRuntime:
             branch_node = self._graph.nodes.get(branch_id)
             if branch_node is None:
                 return WorkerResult(node_id=branch_id, error=RuntimeError(f"Branch node '{branch_id}' not found"))
-            result = await self._pool.dispatch(self._worker, branch_id, branch_node.config, snapshot)
+            result = await self._pool.dispatch(
+                self._worker,
+                branch_id,
+                branch_node.config,
+                snapshot,
+                execution_context=execution_context,
+            )
             if result.error is None:
                 sub_channel = f"_fanout__{node_id}__{branch_id}"
                 self._channel_manager.write(sub_channel, result.channel_updates)

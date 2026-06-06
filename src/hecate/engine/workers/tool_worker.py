@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from hecate.engine.eventstore import Event, EventType
 from hecate.engine.guardrail import (
     GuardrailAction,
     NoOpPostToolHook,
@@ -41,7 +42,9 @@ class ToolWorker(Worker):
         port: EnginePort,
         pre_tool_hook: PreToolHook | None = None,
         post_tool_hook: PostToolHook | None = None,
+        event_store: Any = None,
     ) -> None:
+        super().__init__(event_store=event_store)
         self._port = port
         self._pre_hook = pre_tool_hook or NoOpPreToolHook()
         self._post_hook = post_tool_hook or NoOpPostToolHook()
@@ -51,6 +54,7 @@ class ToolWorker(Worker):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> WorkerResult:
         messages = channel_snapshot.get("messages", [])
         tool_calls = self._extract_tool_calls(messages)
@@ -63,7 +67,7 @@ class ToolWorker(Worker):
 
         tool_results: list[dict[str, Any]] = []
         for tc in tool_calls:
-            result = await self._execute_single_tool(tc, channel_snapshot)
+            result = await self._execute_single_tool(tc, channel_snapshot, execution_context)
             tool_results.append(result)
 
         return WorkerResult(
@@ -89,6 +93,7 @@ class ToolWorker(Worker):
         self,
         tool_call: dict,
         context: dict,
+        execution_context: dict | None = None,
     ) -> dict[str, Any]:
         """Execute a single tool call with pre/post hooks.
 
@@ -128,6 +133,16 @@ class ToolWorker(Worker):
             }
 
         # Execute tool
+        if self._event_store and execution_context:
+            await self._event_store.append(
+                Event(
+                    session_id=execution_context["session_id"],
+                    superstep=execution_context["superstep"],
+                    event_type=EventType.TOOL_CALL,
+                    node_id=None,
+                    payload={"tool_name": name, "arguments": arguments},
+                )
+            )
         try:
             result = await self._port.tool_execute(
                 name=name,
@@ -142,6 +157,16 @@ class ToolWorker(Worker):
                 "content": str(e),
                 "is_error": True,
             }
+        if self._event_store and execution_context:
+            await self._event_store.append(
+                Event(
+                    session_id=execution_context["session_id"],
+                    superstep=execution_context["superstep"],
+                    event_type=EventType.TOOL_RESULT,
+                    node_id=None,
+                    payload={"tool_name": name, "result_length": len(str(result))},
+                )
+            )
 
         # Post-tool hook
         post_result = await self._post_hook.on_post_tool_call(

@@ -12,6 +12,7 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from hecate.engine.eventstore import Event, EventType
 from hecate.engine.guardrail import (
     GuardrailAction,
     NoOpPostLLMHook,
@@ -46,7 +47,9 @@ class LLMWorker(Worker):
         port: EnginePort,
         pre_llm_hook: PreLLMHook | None = None,
         post_llm_hook: PostLLMHook | None = None,
+        event_store: Any = None,
     ) -> None:
+        super().__init__(event_store=event_store)
         self._port = port
         self._pre_hook = pre_llm_hook or NoOpPreLLMHook()
         self._post_hook = post_llm_hook or NoOpPostLLMHook()
@@ -56,6 +59,7 @@ class LLMWorker(Worker):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> WorkerResult:
         """Execute a non-streaming LLM call with full context engineering."""
         messages = channel_snapshot.get("messages", [])
@@ -93,6 +97,16 @@ class LLMWorker(Worker):
 
         # LLM invocation (non-streaming via llm_invoke)
         full_response = ""
+        if self._event_store and execution_context:
+            await self._event_store.append(
+                Event(
+                    session_id=execution_context["session_id"],
+                    superstep=execution_context["superstep"],
+                    event_type=EventType.LLM_REQUEST,
+                    node_id=node_id,
+                    payload={"model": model, "message_count": len(shaped_messages)},
+                )
+            )
         try:
             async for token in self._port.llm_invoke(
                 messages=shaped_messages,
@@ -102,6 +116,16 @@ class LLMWorker(Worker):
         except Exception as e:
             logger.warning("LLM invocation failed for node '%s': %s", node_id, e)
             return WorkerResult(node_id=node_id, error=e)
+        if self._event_store and execution_context:
+            await self._event_store.append(
+                Event(
+                    session_id=execution_context["session_id"],
+                    superstep=execution_context["superstep"],
+                    event_type=EventType.LLM_RESPONSE,
+                    node_id=node_id,
+                    payload={"model": model, "response_length": len(full_response)},
+                )
+            )
 
         response_dict: dict[str, Any] = {
             "content": full_response,
@@ -141,6 +165,7 @@ class LLMWorker(Worker):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> AsyncGenerator[dict[str, Any] | WorkerResult, None]:
         """Execute a streaming LLM call, yielding tokens before final result."""
         messages = channel_snapshot.get("messages", [])

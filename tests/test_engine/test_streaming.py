@@ -5,10 +5,10 @@ from hecate.engine.worker import Worker
 
 
 class TokenWorker(Worker):
-    async def execute(self, node_id, node_config, channel_snapshot):
+    async def execute(self, node_id, node_config, channel_snapshot, execution_context=None):
         return WorkerResult(node_id=node_id, channel_updates={"messages": [{"role": "assistant", "content": "final"}]})
 
-    async def execute_stream(self, node_id, node_config, channel_snapshot):
+    async def execute_stream(self, node_id, node_config, channel_snapshot, execution_context=None):
         for token in ["Hello", " ", "world"]:
             yield {"content": token}
         yield WorkerResult(
@@ -18,7 +18,7 @@ class TokenWorker(Worker):
 
 
 class SimpleWorker(Worker):
-    async def execute(self, node_id, node_config, channel_snapshot):
+    async def execute(self, node_id, node_config, channel_snapshot, execution_context=None):
         return WorkerResult(node_id=node_id, channel_updates={"messages": [{"role": "assistant", "content": "simple"}]})
 
 
@@ -56,10 +56,10 @@ class TestStreamModeMessages:
             def __init__(self, tokens):
                 self.tokens = tokens
 
-            async def execute(self, node_id, node_config, channel_snapshot):
+            async def execute(self, node_id, node_config, channel_snapshot, execution_context=None):
                 return WorkerResult(node_id=node_id, channel_updates={"messages": []})
 
-            async def execute_stream(self, node_id, node_config, channel_snapshot):
+            async def execute_stream(self, node_id, node_config, channel_snapshot, execution_context=None):
                 for t in self.tokens:
                     yield {"content": t}
                 yield WorkerResult(node_id=node_id, channel_updates={"messages": []})

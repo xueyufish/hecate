@@ -25,6 +25,7 @@ class VariableSetWorker(Worker):
         node_id: str,
         node_config: dict,
         channel_snapshot: dict,
+        execution_context: dict | None = None,
     ) -> WorkerResult:
         var_name = node_config.get("variable_name", "")
         var_value = node_config.get("value", "")

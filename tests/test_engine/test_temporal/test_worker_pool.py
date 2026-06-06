@@ -11,7 +11,7 @@ from hecate.engine.worker import Worker, WorkerResult
 class SimpleWorker(Worker):
     """Simple worker for testing."""
 
-    async def execute(self, node_id, node_config, channel_snapshot):
+    async def execute(self, node_id, node_config, channel_snapshot, execution_context=None):
         return WorkerResult(
             node_id=node_id,
             channel_updates={"result": "done"},

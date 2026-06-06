@@ -50,6 +50,7 @@ class TemporalWorkerPool(WorkerPool):
         node_id: str,
         node_config: dict[str, Any],
         channel_snapshot: dict[str, Any],
+        execution_context: dict[str, Any] | None = None,
     ) -> WorkerResult:
         """Dispatch node execution as a Temporal Activity.
 

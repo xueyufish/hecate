@@ -62,12 +62,15 @@ class _TestWorker(Worker):
     - variable-set: writes variable to channel
     """
 
-    def __init__(self, mock: bool = False, node_types: dict[str, NodeType] | None = None) -> None:
+    def __init__(self, mock: bool = False, node_types: dict[str, NodeType] | None = None, event_store=None) -> None:
+        super().__init__(event_store=event_store)
         self._mock = mock
         self._node_results: dict[str, NodeExecutionResult] = {}
         self._node_types: dict[str, NodeType] = node_types or {}
 
-    async def execute(self, node_id: str, node_config: dict, channel_snapshot: dict) -> WorkerResult:
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
         start = time.monotonic()
         node_type_enum = self._node_types.get(node_id, NodeType.CONVERSATION)
         node_type = node_type_enum.value
