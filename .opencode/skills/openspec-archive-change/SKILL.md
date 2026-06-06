@@ -63,9 +63,36 @@ Archive a completed change in the experimental workflow.
    - If changes needed: "Sync now (recommended)", "Archive without syncing"
    - If already synced: "Archive now", "Sync anyway", "Cancel"
 
-   If user chooses sync, use Task tool (subagent_type: "general-purpose", prompt: "Use Skill tool to invoke openspec-sync-specs for change '<name>'. Delta spec analysis: <include the analyzed delta spec summary>"). Proceed to archive regardless of choice.
+    If user chooses sync, use Task tool (subagent_type: "general-purpose", prompt: "Use Skill tool to invoke openspec-sync-specs for change '<name>'. Delta spec analysis: <include the analyzed delta spec summary>"). Proceed to archive regardless of choice.
 
-5. **Perform the archive**
+5. **Check feature catalog and roadmap sync**
+
+    Before performing the archive, assess whether `docs/features/feature-catalog.md` and `docs/features/roadmap.md` need updates.
+
+    **Assessment steps:**
+    - Read the change's `proposal.md` and `design.md` to identify which feature IDs are affected
+    - Check the current ✅/⚠️ status of those features in `docs/features/feature-catalog.md`
+    - Check the current status of those features in `docs/features/roadmap.md` (Sprint tables, Architecture Readiness table, Milestone checkboxes)
+    - Determine if any updates are needed (new ✅ markers, updated descriptions, stat count changes, milestone checkboxes)
+
+    **If updates needed:**
+    - Show what needs to change (which features, which files, what updates)
+    - Apply the updates directly to both files
+    - Confirm updates were applied
+
+    **If no updates needed:**
+    - State that catalog and roadmap are already up to date
+    - Proceed to archive
+
+    **Updates typically include:**
+    - Feature status markers: `⚠️` → `✅` or add `✅` to previously unmarked features
+    - Feature descriptions: update to reflect actual implementation scope
+    - Statistics table: recalculate done/remaining counts per priority level
+    - Roadmap Sprint tables: mark features as complete
+    - Architecture Readiness table: update ABC integration status
+    - Milestone checkboxes: check off completed items
+
+6. **Perform the archive**
 
    Create the archive directory if it doesn't exist:
    ```bash
@@ -82,14 +109,15 @@ Archive a completed change in the experimental workflow.
    mv openspec/changes/<name> openspec/changes/archive/YYYY-MM-DD-<name>
    ```
 
-6. **Display summary**
+7. **Display summary**
 
-   Show archive completion summary including:
-   - Change name
-   - Schema that was used
-   - Archive location
-   - Whether specs were synced (if applicable)
-   - Note about any warnings (incomplete artifacts/tasks)
+    Show archive completion summary including:
+    - Change name
+    - Schema that was used
+    - Archive location
+    - Whether specs were synced (if applicable)
+    - Whether catalog/roadmap were updated (if applicable)
+    - Note about any warnings (incomplete artifacts/tasks)
 
 **Output On Success**
 
@@ -100,6 +128,7 @@ Archive a completed change in the experimental workflow.
 **Schema:** <schema-name>
 **Archived to:** openspec/changes/archive/YYYY-MM-DD-<name>/
 **Specs:** ✓ Synced to main specs (or "No delta specs" or "Sync skipped")
+**Catalog & Roadmap:** ✓ Updated (or "Already up to date")
 
 All artifacts complete. All tasks complete.
 ```
@@ -112,3 +141,4 @@ All artifacts complete. All tasks complete.
 - Show clear summary of what happened
 - If sync is requested, use openspec-sync-specs approach (agent-driven)
 - If delta specs exist, always run the sync assessment and show the combined summary before prompting
+- Always check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` before archiving — this is MANDATORY, not optional

@@ -107,6 +107,7 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 - **OpenSpec workflow is MANDATORY for ALL changes** — no exceptions. Every change MUST follow: `proposal → design → specs → tasks → implement → verify → archive`. Use `/opsx-propose` to create a change, then `/opsx-apply` to implement tasks, then run verification commands, then `/opsx-archive` to close. Never skip the propose step or implement outside an OpenSpec change directory. Mark tasks complete in `tasks.md` immediately.
 - **OpenSpec commands MUST be triggered by the user manually** — the AI agent SHALL NOT automatically invoke `/opsx-explore`, `/opsx-propose`, `/opsx-apply`, `/opsx-archive`, or any other `/opsx-*` command. The agent may suggest running a command, but MUST wait for explicit user approval.
 - Feature catalog: maintain P1→P5 priority ordering, update counts when features change.
+- **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` before performing the archive move. This includes: updating ✅ markers for completed features, updating statistics counts, updating ABC integration status, and checking off milestone items. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
 - Run `ruff check` + `ruff format --check` + `mypy` + `pytest` before committing.
 
 ### Coding rules (enforced by ruff E/F/I/N/W/UP/B/S/SIM)
