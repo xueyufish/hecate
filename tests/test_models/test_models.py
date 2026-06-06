@@ -619,6 +619,7 @@ class TestReadSchemaFromAttributes:
 
         attrs = self._make_base_attrs()
         skill = SkillModel(
+            workspace_id=uuid.UUID(int=0),
             name="developer",
             description="A developer skill",
             source="system",

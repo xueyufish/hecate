@@ -45,6 +45,10 @@ class SkillModel(BaseModel):
 
     __tablename__ = "skills"
 
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -58,7 +62,8 @@ class SkillModel(BaseModel):
 
     __table_args__ = (
         Index(
-            "idx_skills_name",
+            "idx_skills_workspace_name",
+            "workspace_id",
             "name",
             unique=True,
             postgresql_where=BaseModel.deleted_at.is_(None),
@@ -83,12 +88,29 @@ class SkillCreateSchema(PydanticBase):
     auto_load: bool = False
 
 
+class SkillUpdateSchema(PydanticBase):
+    """Schema for updating an existing skill. All fields are optional."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(None, min_length=1, max_length=255, pattern=r"^[a-z][a-z0-9-]*$")
+    description: str | None = None
+    instructions: str | None = None
+    allowed_tools: list | None = None
+    metadata: dict | None = None
+    scripts: list | None = None
+    references: list | None = None
+    max_tokens: int | None = None
+    auto_load: bool | None = None
+
+
 class SkillReadSchema(PydanticBase):
     """Schema for reading skill data."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
+    workspace_id: uuid.UUID
     name: str
     description: str
     source: str

@@ -66,3 +66,14 @@ The `evidence_query()` method SHALL default to returning an empty list.
 #### Scenario: No evidence adapter
 - **WHEN** a concrete EnginePort does not override `evidence_query()`
 - **THEN** it SHALL return `[]`
+
+### Requirement: Agent execution loads skills into system prompt
+When `agent_execute()` is called for a sub-agent, the system SHALL load the agent's skills via `SkillLoader` and inject the formatted XML block into the system message alongside the agent's persona.
+
+#### Scenario: Sub-agent with persona and skills
+- **WHEN** `agent_execute(agent_id, messages, channel_snapshot)` is called for an agent with `persona="Expert coder"` and `skills=["code-review"]`
+- **THEN** the system message SHALL be `"Expert coder\n\n<skills>\n<skill name=\"code-review\">\n...\n</skill>\n</skills>"` followed by the conversation messages
+
+#### Scenario: Sub-agent with no skills
+- **WHEN** `agent_execute()` is called for an agent with `skills=[]`
+- **THEN** the system message SHALL be the agent's persona only, unchanged from current behavior

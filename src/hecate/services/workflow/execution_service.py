@@ -168,6 +168,27 @@ class WorkflowExecutionService:
         if isinstance(session_id, str):
             session_id = uuid.UUID(session_id)
 
+        if agent_id and self._db is not None:
+            from hecate.models.agent import AgentModel
+            from hecate.services.skill.loader import SkillLoader
+
+            agent_uuid = agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id))
+            result = await self._db.execute(
+                select(AgentModel).where(
+                    AgentModel.id == agent_uuid,
+                    AgentModel.deleted_at.is_(None),
+                )
+            )
+            agent = result.scalar_one_or_none()
+            if agent is not None:
+                persona = agent.persona or "You are a helpful assistant."
+                loader = SkillLoader(self._db)
+                skills_block = await loader.format_skills(
+                    agent_id=agent_uuid,
+                    workspace_id=agent.workspace_id,
+                )
+                system_prompt = f"{persona}\n\n{skills_block}" if skills_block else persona
+
         # Resolve graph config based on mode
         if agent_mode == "chat":
             graph_config = build_chat_graph(

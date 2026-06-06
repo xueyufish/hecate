@@ -16,7 +16,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel as PydanticBase
-from pydantic import ConfigDict
+from pydantic import ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -327,6 +327,129 @@ async def delete_agent(
 
     agent.deleted_at = datetime.now(UTC)
     await db.flush()
+
+
+class SkillAssociationRequest(PydanticBase):
+    """Request body for adding a skill to an agent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_name: str = Field(..., min_length=1, max_length=255)
+
+
+@router.post("/agents/{agent_id}/skills")
+async def add_skill_to_agent(
+    agent_id: uuid.UUID,
+    data: SkillAssociationRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Add a skill to an agent's skills list.
+
+    Idempotent — if the skill is already associated, returns the
+    unchanged list.
+
+    Args:
+        agent_id: The UUID of the agent.
+        data: Request body with skill_name.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: ``{"skills": [...]}`` with the updated skills list.
+
+    Raises:
+        HTTPException: 404 if agent or skill not found.
+    """
+    result = await db.execute(
+        select(AgentModel).where(
+            AgentModel.id == agent_id,
+            AgentModel.deleted_at.is_(None),
+        )
+    )
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "Agent not found", "details": None}},
+        )
+
+    from hecate.models.skill import SkillModel
+
+    workspace_id = agent.workspace_id
+    zero_uuid = uuid.UUID(int=0)
+    skill_result = await db.execute(
+        select(SkillModel).where(
+            SkillModel.name == data.skill_name,
+            SkillModel.workspace_id.in_([workspace_id, zero_uuid]),
+            SkillModel.deleted_at.is_(None),
+        )
+    )
+    if skill_result.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "SKILL_NOT_FOUND",
+                    "message": f"Skill '{data.skill_name}' not found in workspace",
+                    "details": None,
+                }
+            },
+        )
+
+    current_skills: list[str] = agent.skills or []
+    if data.skill_name not in current_skills:
+        agent.skills = current_skills + [data.skill_name]
+        await db.flush()
+        await db.refresh(agent)
+
+    return {"skills": agent.skills}
+
+
+@router.delete("/agents/{agent_id}/skills/{skill_name}")
+async def remove_skill_from_agent(
+    agent_id: uuid.UUID,
+    skill_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Remove a skill from an agent's skills list.
+
+    Idempotent — if the skill is not associated, returns the
+    unchanged list.
+
+    Args:
+        agent_id: The UUID of the agent.
+        skill_name: The name of the skill to remove.
+        db: The async database session.
+        api_key: The validated API key.
+
+    Returns:
+        dict: ``{"skills": [...]}`` with the updated skills list.
+
+    Raises:
+        HTTPException: 404 if agent not found.
+    """
+    result = await db.execute(
+        select(AgentModel).where(
+            AgentModel.id == agent_id,
+            AgentModel.deleted_at.is_(None),
+        )
+    )
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "Agent not found", "details": None}},
+        )
+
+    current_skills: list[str] = agent.skills or []
+    if skill_name in current_skills:
+        agent.skills = [s for s in current_skills if s != skill_name]
+        await db.flush()
+        await db.refresh(agent)
+
+    return {"skills": agent.skills}
 
 
 @router.get("/agents/{agent_id}/export")

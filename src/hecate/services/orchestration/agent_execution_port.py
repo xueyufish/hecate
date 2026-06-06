@@ -73,7 +73,17 @@ class AgentExecutionPort(EnginePort):
             agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"
         )
 
-        system_message = {"role": "system", "content": agent.persona or "You are a helpful assistant."}
+        persona = agent.persona or "You are a helpful assistant."
+
+        from hecate.services.skill.loader import SkillLoader
+
+        loader = SkillLoader(self._db)
+        skills_block = await loader.format_skills(
+            agent_id=agent_id,
+            workspace_id=agent.workspace_id,
+        )
+        system_content = f"{persona}\n\n{skills_block}" if skills_block else persona
+        system_message = {"role": "system", "content": system_content}
         full_messages = [system_message] + messages
 
         response = await llm_service.chat(

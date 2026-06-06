@@ -54,6 +54,7 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: str | dict | None = None
     kb_ids: list[str] | None = None
     session_id: str | None = Field(None, description="Session ID for sequential processing")
+    agent_id: str | None = Field(None, description="Agent ID for skill loading")
     generate_opening: bool = Field(default=False, description="Generate opening remarks with starter questions")
     generate_suggestions: bool = Field(default=False, description="Generate follow-up question suggestions")
 
@@ -183,7 +184,10 @@ async def _process_chat(
     if request.kb_ids:
         parsed_kb_ids = request.kb_ids
 
-    # Check if enhanced features are needed (KB, suggestions, opening)
+    parsed_agent_id: str | uuid.UUID | None = None
+    if request.agent_id:
+        parsed_agent_id = request.agent_id
+
     use_enhanced = parsed_kb_ids or request.generate_opening or request.generate_suggestions
 
     if use_enhanced:
@@ -220,6 +224,7 @@ async def _process_chat(
                     tools=request.tools,
                     stream=True,
                     session_id=request.session_id,
+                    agent_id=parsed_agent_id,
                     kb_ids=parsed_kb_ids,
                     generate_opening=request.generate_opening,
                     enable_suggestions=request.generate_suggestions,
@@ -262,6 +267,7 @@ async def _process_chat(
             tools=request.tools,
             stream=False,
             session_id=request.session_id,
+            agent_id=parsed_agent_id,
             kb_ids=parsed_kb_ids,
             generate_opening=request.generate_opening,
             enable_suggestions=request.generate_suggestions,
