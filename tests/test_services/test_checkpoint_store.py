@@ -1,19 +1,27 @@
-"""Unit tests for PostgresCheckpointStore."""
+"""Unit tests for PostgresCheckpointStore in the services layer."""
 
 from __future__ import annotations
 
 import uuid
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from hecate.engine.checkpoint import PostgresCheckpointStore
+from hecate.services.checkpoint_store import PostgresCheckpointStore
+
+from ..conftest import test_session_factory
+
+
+@pytest.fixture()
+def session_factory() -> async_sessionmaker:
+    """Provide the shared test session factory."""
+    return test_session_factory
 
 
 @pytest.mark.asyncio
-async def test_save_checkpoint(db_session: AsyncSession) -> None:
+async def test_save_checkpoint(session_factory: async_sessionmaker) -> None:
     """Test saving a checkpoint to PostgreSQL."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     cp_id = await store.save(
@@ -27,9 +35,9 @@ async def test_save_checkpoint(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_save_checkpoint_with_metadata(db_session: AsyncSession) -> None:
+async def test_save_checkpoint_with_metadata(session_factory: async_sessionmaker) -> None:
     """Test saving a checkpoint with metadata."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     cp_id = await store.save(
@@ -44,9 +52,9 @@ async def test_save_checkpoint_with_metadata(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_load_latest_checkpoint(db_session: AsyncSession) -> None:
+async def test_load_latest_checkpoint(session_factory: async_sessionmaker) -> None:
     """Test loading the latest checkpoint."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     await store.save(session_id, 1, "node_a", {"step": 1})
@@ -61,9 +69,9 @@ async def test_load_latest_checkpoint(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_load_specific_checkpoint(db_session: AsyncSession) -> None:
+async def test_load_specific_checkpoint(session_factory: async_sessionmaker) -> None:
     """Test loading a specific checkpoint by ID."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     cp_id_1 = await store.save(session_id, 1, "node_a", {"step": 1})
@@ -77,9 +85,9 @@ async def test_load_specific_checkpoint(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_load_nonexistent_checkpoint(db_session: AsyncSession) -> None:
+async def test_load_nonexistent_checkpoint(session_factory: async_sessionmaker) -> None:
     """Test loading a non-existent checkpoint returns None."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
 
     checkpoint = await store.load(uuid.uuid4())
 
@@ -87,9 +95,9 @@ async def test_load_nonexistent_checkpoint(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_checkpoints(db_session: AsyncSession) -> None:
+async def test_list_checkpoints(session_factory: async_sessionmaker) -> None:
     """Test listing checkpoints for a session."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     await store.save(session_id, 1, "node_a", {"step": 1})
@@ -105,9 +113,9 @@ async def test_list_checkpoints(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_checkpoints_with_limit(db_session: AsyncSession) -> None:
+async def test_list_checkpoints_with_limit(session_factory: async_sessionmaker) -> None:
     """Test listing checkpoints with limit."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     await store.save(session_id, 1, "node_a", {"step": 1})
@@ -122,14 +130,14 @@ async def test_list_checkpoints_with_limit(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cache_hit_on_load(db_session: AsyncSession) -> None:
+async def test_cache_hit_on_load(session_factory: async_sessionmaker) -> None:
     """Test that cache is used for subsequent loads."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     await store.save(session_id, 1, "node_a", {"step": 1})
 
-    # First load - from DB
+    # First load - from DB (and cached)
     checkpoint1 = await store.load(session_id)
     assert checkpoint1 is not None
 
@@ -140,9 +148,9 @@ async def test_cache_hit_on_load(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cache_invalidation_on_save(db_session: AsyncSession) -> None:
+async def test_cache_invalidation_on_save(session_factory: async_sessionmaker) -> None:
     """Test that cache is updated on save."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     await store.save(session_id, 1, "node_a", {"step": 1})
@@ -157,9 +165,9 @@ async def test_cache_invalidation_on_save(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_cache_eviction(db_session: AsyncSession) -> None:
+async def test_cache_eviction(session_factory: async_sessionmaker) -> None:
     """Test that cache evicts old entries when full."""
-    store = PostgresCheckpointStore(db_session, cache_size=2)
+    store = PostgresCheckpointStore(session_factory, cache_size=2)
 
     session_1 = uuid.uuid4()
     session_2 = uuid.uuid4()
@@ -176,9 +184,9 @@ async def test_cache_eviction(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_checkpoint_to_dict(db_session: AsyncSession) -> None:
+async def test_checkpoint_to_dict(session_factory: async_sessionmaker) -> None:
     """Test checkpoint to dict conversion."""
-    store = PostgresCheckpointStore(db_session)
+    store = PostgresCheckpointStore(session_factory)
     session_id = uuid.uuid4()
 
     cp_id = await store.save(
