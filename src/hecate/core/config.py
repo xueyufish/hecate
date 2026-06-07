@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     LLM_GUARD_ENABLED: bool = True
     RATE_LIMIT_RPM: int = 60
 
+    MCP_SERVER_ENABLED: bool = False
+    MCP_SERVER_HOST: str = "0.0.0.0"  # noqa: S104
+    MCP_SERVER_PORT: int = 8000
+    MCP_AUTH_TYPE: str = "api_key"
+    MCP_TRANSPORT: str = "http"
+    MCP_CLIENT_TIMEOUT: int = 30
+
     TEMPORAL_SERVER_URL: str = "localhost:7233"
     TEMPORAL_TASK_QUEUE: str = "hecate-workers"
     TEMPORAL_HEARTBEAT_TIMEOUT: int = 30

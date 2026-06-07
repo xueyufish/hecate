@@ -11,57 +11,29 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.mcp.client import MCPClient, MCPManager
-from hecate.services.mcp.sync import mcp_tool_sync
+from hecate.services.mcp.client import HecateMCPClient
+from hecate.services.mcp.connection import MCPClientManager
 
 
 @pytest.mark.asyncio
-async def test_mcp_client_connect() -> None:
-    """Test MCP client connection."""
-    client = MCPClient("http://localhost:8080")
-    result = await client.connect()
-    assert result is True
-    assert client._connected is True
+async def test_hecate_mcp_client_init() -> None:
+    """Test HecateMCPClient initialization."""
+    client = HecateMCPClient(timeout=30)
+    assert client.connected is False
+    assert client._timeout == 30
 
 
 @pytest.mark.asyncio
-async def test_mcp_client_list_tools() -> None:
-    """Test MCP client tool listing."""
-    client = MCPClient("http://localhost:8080")
-    await client.connect()
-    tools = await client.list_tools()
-    assert isinstance(tools, list)
+async def test_mcp_client_manager_init() -> None:
+    """Test MCPClientManager initialization."""
+    manager = MCPClientManager(default_timeout=30)
+    assert manager._default_timeout == 30
+    assert len(manager._clients) == 0
 
 
 @pytest.mark.asyncio
-async def test_mcp_client_call_tool() -> None:
-    """Test MCP client tool execution."""
-    client = MCPClient("http://localhost:8080")
-    await client.connect()
-    result = await client.call_tool("test_tool", {"arg": "value"})
-    assert result["success"] is True
-
-
-@pytest.mark.asyncio
-async def test_mcp_manager_add_server() -> None:
-    """Test MCP manager server addition."""
-    manager = MCPManager()
-    client = await manager.add_server("http://localhost:8080")
-    assert client is not None
-    assert "http://localhost:8080" in manager._clients
-
-
-@pytest.mark.asyncio
-async def test_mcp_manager_discover_tools() -> None:
-    """Test MCP manager tool discovery."""
-    manager = MCPManager()
-    await manager.add_server("http://localhost:8080")
-    tools = await manager.discover_tools()
-    assert isinstance(tools, list)
-
-
-@pytest.mark.asyncio
-async def test_mcp_tool_sync() -> None:
-    """Test MCP tool synchronization."""
-    tools = await mcp_tool_sync.sync_tools("http://localhost:8080")
-    assert isinstance(tools, list)
+async def test_mcp_client_manager_get_nonexistent() -> None:
+    """Test MCPClientManager returns None for nonexistent server."""
+    manager = MCPClientManager()
+    client = manager.get_client("nonexistent")
+    assert client is None

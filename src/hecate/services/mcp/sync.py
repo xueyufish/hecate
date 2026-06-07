@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hecate.services.mcp.client import mcp_manager
+from hecate.services.mcp.client import HecateMCPClient
 
 logger = logging.getLogger(__name__)
 
@@ -17,37 +17,34 @@ logger = logging.getLogger(__name__)
 class MCPToolSync:
     """Synchronize MCP tools with Hecate tool registry.
 
-    Provides:
-    - Tool discovery from MCP servers
-    - Conversion to Hecate tool format
-    - Sync with database
+    Args:
+        client: A connected ``HecateMCPClient`` instance.
     """
 
-    async def sync_tools(
-        self,
-        server_url: str,
-    ) -> list[dict[str, Any]]:
+    def __init__(self, client: HecateMCPClient) -> None:
+        self._client = client
+
+    async def sync_tools(self, server_url: str) -> list[dict[str, Any]]:
         """Sync tools from an MCP server.
 
         Args:
-            server_url: URL of the MCP server.
+            server_url: URL of the MCP server (used for metadata tagging).
 
         Returns:
-            List of synced tool definitions.
+            List of synced tool definitions in Hecate format.
         """
-        client = await mcp_manager.add_server(server_url)
-        mcp_tools = await client.list_tools()
+        mcp_tools = await self._client.list_tools()
 
-        hecate_tools = []
+        hecate_tools: list[dict[str, Any]] = []
         for tool in mcp_tools:
             hecate_tool = self._convert_tool(tool, server_url)
             hecate_tools.append(hecate_tool)
 
-        logger.info(f"Synced {len(hecate_tools)} tools from {server_url}")
+        logger.info("Synced %d tools from %s", len(hecate_tools), server_url)
         return hecate_tools
 
+    @staticmethod
     def _convert_tool(
-        self,
         mcp_tool: dict[str, Any],
         server_url: str,
     ) -> dict[str, Any]:
@@ -71,6 +68,3 @@ class MCPToolSync:
             "mcp_server": server_url,
             "mcp_tool_name": mcp_tool.get("name", "unknown"),
         }
-
-
-mcp_tool_sync = MCPToolSync()

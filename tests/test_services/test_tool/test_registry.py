@@ -56,7 +56,7 @@ class TestRegistryBuiltinRouting:
         with pytest.raises(NotImplementedError, match="Custom tool"):
             await registry.execute("my_custom_tool", {})
 
-    async def test_mcp_tool_not_implemented(self, db_session: Any, mock_builtin_executor: BuiltInToolExecutor) -> None:
+    async def test_mcp_tool_no_manager(self, db_session: Any, mock_builtin_executor: BuiltInToolExecutor) -> None:
         tool = ToolModel(
             workspace_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
             name="mcp_tool",
@@ -70,7 +70,7 @@ class TestRegistryBuiltinRouting:
         await db_session.flush()
 
         registry = ToolRegistry(db=db_session, builtin_executor=mock_builtin_executor)
-        with pytest.raises(NotImplementedError, match="MCP tool"):
+        with pytest.raises(RuntimeError, match="MCPClientManager not configured"):
             await registry.execute("mcp_tool", {})
 
 

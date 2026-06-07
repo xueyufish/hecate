@@ -30,6 +30,8 @@ dependencies = [
     "email-validator>=2.0.0",
     "beautifulsoup4>=4.12.0",
     "python-multipart>=0.0.9",
+    "fastmcp>=2.0.0",
+    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]

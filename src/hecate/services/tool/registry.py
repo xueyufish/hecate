@@ -8,13 +8,16 @@ non-builtin tools query the ``ToolModel`` database table.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.tool import ToolModel
 from hecate.services.tool.builtin import BUILTIN_TOOL_DEFINITIONS, BuiltInToolExecutor
+
+if TYPE_CHECKING:
+    from hecate.services.mcp.connection import MCPClientManager
 
 logger = logging.getLogger(__name__)
 
@@ -27,15 +30,18 @@ class ToolRegistry:
     Args:
         db: Async database session for non-builtin tool lookups.
         builtin_executor: The built-in tool executor instance.
+        mcp_manager: Optional MCP client manager for routing MCP tool calls.
     """
 
     def __init__(
         self,
         db: AsyncSession,
         builtin_executor: BuiltInToolExecutor,
+        mcp_manager: MCPClientManager | None = None,
     ) -> None:
         self._db = db
         self._builtin = builtin_executor
+        self._mcp_manager = mcp_manager
         self._builtin_names: set[str] = set(BUILTIN_TOOL_DEFINITIONS.keys())
 
     async def execute(
@@ -78,7 +84,13 @@ class ToolRegistry:
         if tool.source == "custom":
             raise NotImplementedError(f"Custom tool execution not yet implemented for '{name}'")
         if tool.source == "mcp":
-            raise NotImplementedError(f"MCP tool execution not yet implemented for '{name}'")
+            if self._mcp_manager is None:
+                raise RuntimeError("MCPClientManager not configured in ToolRegistry")
+            server_name = tool.mcp_server
+            mcp_tool_name = tool.mcp_tool_name or name
+            if server_name is None:
+                raise ValueError(f"MCP tool '{name}' has no mcp_server configured")
+            return await self._mcp_manager.call_tool(server_name, mcp_tool_name, args)
         raise ValueError(f"Unknown tool source: {tool.source!r} for tool '{name}'")
 
 

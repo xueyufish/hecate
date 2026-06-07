@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager as _asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,6 +34,7 @@ from hecate.api.management.tools import router as tools_router
 from hecate.api.management.workflows import router as workflows_router
 from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
+from hecate.core.config import settings as _settings
 from hecate.core.database import engine
 
 
@@ -148,3 +150,23 @@ app.include_router(agent_templates_router, prefix="/api", tags=["agent-templates
 app.include_router(memory_router, prefix="/api", tags=["memory"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
 app.include_router(model_providers_router, prefix="/api", tags=["model-providers"])
+
+# MCP Server — conditional mount when MCP_SERVER_ENABLED=true
+if _settings.MCP_SERVER_ENABLED:
+    from hecate.services.mcp.server import create_mcp_server
+
+    _mcp = create_mcp_server()
+    _mcp_app = _mcp.http_app(path="/mcp")
+
+    _original_lifespan = app.router.lifespan_context
+
+    @_asynccontextmanager
+    async def _combined_lifespan(app_inner: FastAPI) -> AsyncGenerator[None, None]:
+        async with (
+            _original_lifespan(app_inner),
+            _mcp_app.lifespan(app_inner),
+        ):
+            yield
+
+    app.router.lifespan_context = _combined_lifespan
+    app.mount("/mcp", _mcp_app)
