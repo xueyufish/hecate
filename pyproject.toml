@@ -32,7 +32,12 @@ dependencies = [
     "python-multipart>=0.0.9",
     "fastmcp>=2.0.0",
     "mcp>=1.0.0",
+    "typer>=0.15.0",
+    "rich>=13.0.0",
 ]
+
+[project.scripts]
+hecate = "hecate.cli.main:app"
 
 [project.optional-dependencies]
 llm = [
