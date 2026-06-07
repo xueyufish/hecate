@@ -110,6 +110,7 @@ class PromptReadSchema(PydanticBase):
     current_version: int
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None
 
 
@@ -138,5 +139,6 @@ class PromptDetailSchema(PydanticBase):
     current_version: int
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None
     version: PromptVersionReadSchema | None = None

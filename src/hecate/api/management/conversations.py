@@ -69,7 +69,7 @@ async def list_conversations(
     Returns:
         dict: ``{"items": [...], "total": int}`` with conversation list and total count.
     """
-    base_query = select(ConversationModel).where(ConversationModel.deleted_at.is_(None))
+    base_query = select(ConversationModel).where(~ConversationModel.deleted)
     if agent_id is not None:
         base_query = base_query.where(ConversationModel.agent_id == agent_id)
 
@@ -109,7 +109,7 @@ async def get_conversation(
     result = await db.execute(
         select(ConversationModel).where(
             ConversationModel.id == conversation_id,
-            ConversationModel.deleted_at.is_(None),
+            ~ConversationModel.deleted,
         )
     )
     conversation = result.scalar_one_or_none()

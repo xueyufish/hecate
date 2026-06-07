@@ -66,7 +66,7 @@ class ToolRegistry:
         result = await self._db.execute(
             select(ToolModel).where(
                 ToolModel.name == name,
-                ToolModel.deleted_at.is_(None),
+                ~ToolModel.deleted,
             )
         )
         tool = result.scalar_one_or_none()
@@ -106,7 +106,7 @@ async def seed_builtin_tools(db: AsyncSession) -> int:
                 ToolModel.name == tool_name,
                 ToolModel.source == "builtin",
                 ToolModel.workspace_id == zero_ws,
-                ToolModel.deleted_at.is_(None),
+                ~ToolModel.deleted,
             )
         )
         existing = result.scalar_one_or_none()

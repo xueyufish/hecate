@@ -58,7 +58,7 @@ class AgentModel(BaseModel):
     opening_remarks: Mapped[str | None] = mapped_column(nullable=True)
     enable_suggestions: Mapped[bool] = mapped_column(default=True)
 
-    __table_args__ = (Index("idx_agents_workspace", "workspace_id", postgresql_where=BaseModel.deleted_at.is_(None)),)
+    __table_args__ = (Index("idx_agents_workspace", "workspace_id", "deleted"),)
 
 
 class AgentCreateSchema(PydanticBase):
@@ -120,5 +120,6 @@ class AgentReadSchema(PydanticBase):
     enable_suggestions: bool
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None
     model_available: bool | None = None

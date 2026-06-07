@@ -120,7 +120,7 @@ class AgentExecutionPort(EnginePort):
                 result = await self._db.execute(
                     select(KnowledgeBaseModel).where(
                         KnowledgeBaseModel.id == kb_id,
-                        KnowledgeBaseModel.deleted_at.is_(None),
+                        ~KnowledgeBaseModel.deleted,
                     )
                 )
                 kb = result.scalar_one_or_none()
@@ -167,7 +167,7 @@ class AgentExecutionPort(EnginePort):
         result = await self._db.execute(
             select(AgentModel).where(
                 AgentModel.id == agent_id,
-                AgentModel.deleted_at.is_(None),
+                ~AgentModel.deleted,
             )
         )
         return result.scalar_one_or_none()

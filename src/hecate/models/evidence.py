@@ -96,4 +96,5 @@ class EvidenceReadSchema(PydanticBase):
     provenance: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None

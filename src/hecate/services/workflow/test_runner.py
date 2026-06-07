@@ -250,7 +250,7 @@ class WorkflowTestRunner:
             select(WorkflowVersionModel)
             .where(
                 WorkflowVersionModel.workflow_id == workflow_id,
-                WorkflowVersionModel.deleted_at.is_(None),
+                ~WorkflowVersionModel.deleted,
             )
             .order_by(WorkflowVersionModel.version.desc())
             .limit(1)
@@ -309,7 +309,7 @@ class WorkflowTestRunner:
             select(WorkflowRunModel)
             .where(
                 WorkflowRunModel.workflow_id == workflow_id,
-                WorkflowRunModel.deleted_at.is_(None),
+                ~WorkflowRunModel.deleted,
             )
             .order_by(WorkflowRunModel.created_at.desc())
         )

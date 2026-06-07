@@ -13,7 +13,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import Boolean, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -33,10 +33,10 @@ class BaseModel(Base):
       across application instances. ``updated_at`` is refreshed on every
       UPDATE via ``onupdate=func.now()``.
     - **Soft delete** — instead of issuing ``DELETE`` statements, rows are
-      marked as deleted by setting ``deleted_at``. Queries apply a
-      ``WHERE deleted_at IS NULL`` filter (enforced via partial indexes)
-      so that "deleted" rows are excluded from results without being
-      removed from the database.
+      marked as deleted by setting ``deleted = True`` and recording the
+      timestamp in ``deleted_at``. Queries apply ``WHERE deleted = false``
+      (enforced via composite indexes) so that "deleted" rows are excluded
+      from results without being removed from the database.
     """
 
     __abstract__ = True
@@ -52,6 +52,12 @@ class BaseModel(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+    deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="0",
     )
     deleted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

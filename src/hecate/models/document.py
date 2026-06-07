@@ -47,13 +47,7 @@ class DocumentModel(BaseModel):
     parsing_error: Mapped[str | None] = mapped_column(nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    __table_args__ = (
-        Index(
-            "idx_documents_kb",
-            "knowledge_base_id",
-            postgresql_where=BaseModel.deleted_at.is_(None),
-        ),
-    )
+    __table_args__ = (Index("idx_documents_kb", "knowledge_base_id", "deleted"),)
 
 
 class DocumentCreateSchema(PydanticBase):
@@ -84,4 +78,5 @@ class DocumentReadSchema(PydanticBase):
     chunk_count: int
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None

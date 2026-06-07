@@ -32,7 +32,7 @@ class ModelProviderModel(BaseModel):
     is_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="inactive")
 
-    __table_args__ = (Index("idx_model_providers_name", "name", postgresql_where=BaseModel.deleted_at.is_(None)),)
+    __table_args__ = (Index("idx_model_providers_name", "name", "deleted"),)
 
 
 class ModelRegistryModel(BaseModel):
@@ -57,18 +57,19 @@ class ModelRegistryModel(BaseModel):
             "uq_model_registry_provider_model",
             "provider_id",
             "model_id",
+            "deleted",
+            "deleted_at",
             unique=True,
-            postgresql_where=BaseModel.deleted_at.is_(None),
         ),
         Index(
             "idx_model_registry_provider",
             "provider_id",
-            postgresql_where=BaseModel.deleted_at.is_(None),
+            "deleted",
         ),
         Index(
             "idx_model_registry_model_id",
             "model_id",
-            postgresql_where=BaseModel.deleted_at.is_(None),
+            "deleted",
         ),
     )
 

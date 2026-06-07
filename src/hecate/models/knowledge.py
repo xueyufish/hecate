@@ -89,4 +89,5 @@ class KnowledgeBaseReadSchema(PydanticBase):
     sparse_weight: float
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None

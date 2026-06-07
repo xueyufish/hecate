@@ -58,7 +58,7 @@ async def _get_skill_with_ownership_check(
     result = await db.execute(
         select(SkillModel).where(
             SkillModel.id == skill_id,
-            SkillModel.deleted_at.is_(None),
+            ~SkillModel.deleted,
         )
     )
     skill = result.scalar_one_or_none()
@@ -109,7 +109,7 @@ async def create_skill(
         select(SkillModel).where(
             SkillModel.name == data.name,
             SkillModel.workspace_id == workspace_id,
-            SkillModel.deleted_at.is_(None),
+            ~SkillModel.deleted,
         )
     )
     if existing.scalar_one_or_none() is not None:
@@ -170,7 +170,7 @@ async def list_skills(
 
     # Include workspace skills + system skills
     base_query = select(SkillModel).where(
-        SkillModel.deleted_at.is_(None),
+        ~SkillModel.deleted,
         or_(
             SkillModel.workspace_id == workspace_id,
             SkillModel.workspace_id == _ZERO_UUID,
@@ -215,7 +215,7 @@ async def get_skill(
     result = await db.execute(
         select(SkillModel).where(
             SkillModel.id == skill_id,
-            SkillModel.deleted_at.is_(None),
+            ~SkillModel.deleted,
         )
     )
     skill = result.scalar_one_or_none()
@@ -306,6 +306,7 @@ async def delete_skill(
             },
         )
 
+    skill.deleted = True
     skill.deleted_at = datetime.now(UTC)
     await db.flush()
 
@@ -387,7 +388,7 @@ async def import_skill(
         select(SkillModel).where(
             SkillModel.name == parsed["name"],
             SkillModel.workspace_id == workspace_id,
-            SkillModel.deleted_at.is_(None),
+            ~SkillModel.deleted,
         )
     )
     if existing.scalar_one_or_none() is not None:

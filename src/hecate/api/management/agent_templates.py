@@ -73,7 +73,7 @@ async def _validate_kb_ids(db: AsyncSession, kb_ids: list[str]) -> list[str]:
 
     stmt = select(KnowledgeBaseModel.id).where(
         KnowledgeBaseModel.id.in_(valid_uuids),
-        KnowledgeBaseModel.deleted_at.is_(None),
+        ~KnowledgeBaseModel.deleted,
     )
     result = await db.execute(stmt)
     found_ids = {str(row[0]) for row in result.all()}

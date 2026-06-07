@@ -386,9 +386,9 @@ async def _get_provider_config(db: AsyncSession, model: str) -> dict[str, Any]:
         .join(ModelRegistryModel, ModelRegistryModel.provider_id == ModelProviderModel.id)
         .where(
             ModelRegistryModel.model_id == model,
-            ModelRegistryModel.deleted_at.is_(None),
+            ~ModelRegistryModel.deleted,
             ModelRegistryModel.is_enabled.is_(True),
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelProviderModel.deleted,
             ModelProviderModel.is_enabled.is_(True),
         )
         .limit(1)

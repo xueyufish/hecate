@@ -85,7 +85,7 @@ class UserMemoryService:
         query_embedding = self._generate_mock_embedding(query)  # noqa: F841
 
         # Build query conditions
-        conditions = [MemoryModel.deleted_at.is_(None)]
+        conditions = [~MemoryModel.deleted]
 
         if min_importance > 0:
             conditions.append(MemoryModel.importance >= min_importance)
@@ -155,6 +155,7 @@ class UserMemoryService:
         if memory is None:
             raise ValueError(f"Memory {memory_id} not found")
 
+        memory.deleted = True
         memory.deleted_at = datetime.now(UTC)
         await self.db.flush()
         logger.info(f"Deleted memory {memory_id}")
@@ -177,7 +178,7 @@ class UserMemoryService:
         Returns:
             List of memories.
         """
-        conditions = [MemoryModel.deleted_at.is_(None)]
+        conditions = [~MemoryModel.deleted]
 
         if memory_type:
             conditions.append(MemoryModel.memory_type == memory_type)
@@ -261,7 +262,7 @@ class UserMemoryService:
         """Get memory by ID."""
         stmt = select(MemoryModel).where(
             MemoryModel.id == memory_id,
-            MemoryModel.deleted_at.is_(None),
+            ~MemoryModel.deleted,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()

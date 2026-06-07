@@ -616,7 +616,7 @@ class ConversationService:
                 result = await db.execute(
                     select(KnowledgeBaseModel).where(
                         KnowledgeBaseModel.id == kb_id,
-                        KnowledgeBaseModel.deleted_at.is_(None),
+                        ~KnowledgeBaseModel.deleted,
                     )
                 )
                 kb = result.scalar_one_or_none()

@@ -84,13 +84,13 @@ async def list_knowledge_bases(
     Returns:
         dict: ``{"items": [...], "total": int}`` with knowledge base list and total count.
     """
-    count_stmt = select(func.count()).select_from(KnowledgeBaseModel).where(KnowledgeBaseModel.deleted_at.is_(None))
+    count_stmt = select(func.count()).select_from(KnowledgeBaseModel).where(~KnowledgeBaseModel.deleted)
     total = (await db.execute(count_stmt)).scalar_one()
 
     offset = (page - 1) * page_size
     stmt = (
         select(KnowledgeBaseModel)
-        .where(KnowledgeBaseModel.deleted_at.is_(None))
+        .where(~KnowledgeBaseModel.deleted)
         .order_by(KnowledgeBaseModel.created_at.desc())
         .offset(offset)
         .limit(page_size)
@@ -134,7 +134,7 @@ async def upload_document(
     result = await db.execute(
         select(KnowledgeBaseModel).where(
             KnowledgeBaseModel.id == kb_id,
-            KnowledgeBaseModel.deleted_at.is_(None),
+            ~KnowledgeBaseModel.deleted,
         )
     )
     kb = result.scalar_one_or_none()
@@ -180,7 +180,7 @@ async def list_documents(
     """
     base_query = select(DocumentModel).where(
         DocumentModel.knowledge_base_id == kb_id,
-        DocumentModel.deleted_at.is_(None),
+        ~DocumentModel.deleted,
     )
 
     count_stmt = select(func.count()).select_from(base_query.subquery())
@@ -202,7 +202,7 @@ async def _get_kb_or_404(kb_id: uuid.UUID, db: AsyncSession) -> KnowledgeBaseMod
     result = await db.execute(
         select(KnowledgeBaseModel).where(
             KnowledgeBaseModel.id == kb_id,
-            KnowledgeBaseModel.deleted_at.is_(None),
+            ~KnowledgeBaseModel.deleted,
         )
     )
     kb = result.scalar_one_or_none()
@@ -336,7 +336,7 @@ async def _cleanup_kb_references(db: AsyncSession, kb_id: uuid.UUID) -> None:
         kb_id: The UUID of the knowledge base being deleted.
     """
     stmt = select(AgentModel).where(
-        AgentModel.deleted_at.is_(None),
+        ~AgentModel.deleted,
     )
     result = await db.execute(stmt)
     agents = result.scalars().all()
@@ -367,6 +367,7 @@ async def delete_knowledge_base(
         HTTPException: 404 if knowledge base not found or already deleted.
     """
     kb = await _get_kb_or_404(kb_id, db)
+    kb.deleted = True
     kb.deleted_at = datetime.now(UTC)
     await _cleanup_kb_references(db, kb_id)
 
@@ -397,7 +398,7 @@ async def list_agents_for_knowledge_base(
     await _get_kb_or_404(kb_id, db)
 
     kb_id_str = str(kb_id)
-    stmt = select(AgentModel).where(AgentModel.deleted_at.is_(None))
+    stmt = select(AgentModel).where(~AgentModel.deleted)
     result = await db.execute(stmt)
     all_agents = result.scalars().all()
 

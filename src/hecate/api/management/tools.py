@@ -40,7 +40,7 @@ async def list_tools(
     Returns:
         dict: ``{"items": [...], "total": int}`` with tool list and total count.
     """
-    base_query = select(ToolModel).where(ToolModel.deleted_at.is_(None))
+    base_query = select(ToolModel).where(~ToolModel.deleted)
     if source is not None:
         base_query = base_query.where(ToolModel.source == source)
 
@@ -80,7 +80,7 @@ async def get_tool(
     result = await db.execute(
         select(ToolModel).where(
             ToolModel.id == tool_id,
-            ToolModel.deleted_at.is_(None),
+            ~ToolModel.deleted,
         )
     )
     tool = result.scalar_one_or_none()

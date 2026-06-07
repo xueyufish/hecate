@@ -136,7 +136,7 @@ class EvidenceTracker:
         """
         stmt = select(EvidenceModel).where(
             EvidenceModel.id == evidence_id,
-            EvidenceModel.deleted_at.is_(None),
+            ~EvidenceModel.deleted,
         )
         result = await self.db.execute(stmt)
         evidence = result.scalar_one_or_none()
@@ -176,7 +176,7 @@ class EvidenceTracker:
         Returns:
             List of matching EvidenceModel records.
         """
-        conditions: list[Any] = [EvidenceModel.deleted_at.is_(None)]
+        conditions: list[Any] = [~EvidenceModel.deleted]
 
         if session_id is not None:
             conditions.append(EvidenceModel.session_id == session_id)
@@ -203,7 +203,7 @@ class EvidenceTracker:
         """
         stmt = select(EvidenceModel).where(
             EvidenceModel.id == evidence_id,
-            EvidenceModel.deleted_at.is_(None),
+            ~EvidenceModel.deleted,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()

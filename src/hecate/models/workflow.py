@@ -41,9 +41,7 @@ class WorkflowModel(BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    __table_args__ = (
-        Index("idx_workflows_workspace", "workspace_id", postgresql_where=BaseModel.deleted_at.is_(None)),
-    )
+    __table_args__ = (Index("idx_workflows_workspace", "workspace_id", "deleted"),)
 
 
 class WorkflowVersionModel(BaseModel):
@@ -147,6 +145,7 @@ class WorkflowReadSchema(PydanticBase):
     current_version: int
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None
 
 
@@ -175,6 +174,7 @@ class WorkflowDetailSchema(PydanticBase):
     current_version: int
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None
     version: WorkflowVersionReadSchema | None = None
 

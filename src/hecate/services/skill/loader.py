@@ -113,7 +113,7 @@ class SkillLoader:
         result = await self._db.execute(
             select(AgentModel).where(
                 AgentModel.id == agent_id,
-                AgentModel.deleted_at.is_(None),
+                ~AgentModel.deleted,
             )
         )
         return result.scalar_one_or_none()
@@ -124,7 +124,7 @@ class SkillLoader:
             select(SkillModel).where(
                 SkillModel.workspace_id == workspace_id,
                 SkillModel.auto_load.is_(True),
-                SkillModel.deleted_at.is_(None),
+                ~SkillModel.deleted,
             )
         )
         return list(result.scalars().all())
@@ -140,7 +140,7 @@ class SkillLoader:
             select(SkillModel).where(
                 SkillModel.name.in_(names),
                 SkillModel.workspace_id.in_([workspace_id, zero_uuid]),
-                SkillModel.deleted_at.is_(None),
+                ~SkillModel.deleted,
             )
         )
         return list(result.scalars().all())

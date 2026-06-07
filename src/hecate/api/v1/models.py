@@ -72,7 +72,7 @@ async def list_models(
     """
     providers_result = await db.execute(
         select(ModelProviderModel).where(
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelProviderModel.deleted,
             ModelProviderModel.is_enabled.is_(True),
         )
     )
@@ -81,7 +81,7 @@ async def list_models(
     if providers:
         models_result = await db.execute(
             select(ModelRegistryModel).where(
-                ModelRegistryModel.deleted_at.is_(None),
+                ~ModelRegistryModel.deleted,
                 ModelRegistryModel.is_enabled.is_(True),
                 ModelRegistryModel.model_type == "chat",
             )

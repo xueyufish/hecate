@@ -118,7 +118,7 @@ class PromptService:
         result = await self.db.execute(
             select(PromptModel).where(
                 PromptModel.id == prompt_id,
-                PromptModel.deleted_at.is_(None),
+                ~PromptModel.deleted,
             )
         )
         prompt = result.scalar_one_or_none()
@@ -158,7 +158,7 @@ class PromptService:
         result = await self.db.execute(
             select(PromptModel).where(
                 PromptModel.id == prompt_id,
-                PromptModel.deleted_at.is_(None),
+                ~PromptModel.deleted,
             )
         )
         prompt = result.scalar_one_or_none()
@@ -208,13 +208,14 @@ class PromptService:
         result = await self.db.execute(
             select(PromptModel).where(
                 PromptModel.id == prompt_id,
-                PromptModel.deleted_at.is_(None),
+                ~PromptModel.deleted,
             )
         )
         prompt = result.scalar_one_or_none()
         if prompt is None:
             raise ValueError(f"Prompt {prompt_id} not found")
 
+        prompt.deleted = True
         prompt.deleted_at = datetime.now(UTC)
         await self.db.flush()
         logger.info(f"Deleted prompt {prompt_id}")
@@ -235,7 +236,7 @@ class PromptService:
         Returns:
             Dict with 'items' and 'total' keys.
         """
-        conditions = [PromptModel.deleted_at.is_(None)]
+        conditions = [~PromptModel.deleted]
         if workspace_id is not None:
             conditions.append(PromptModel.workspace_id == workspace_id)
 
@@ -271,7 +272,7 @@ class PromptService:
             select(PromptVersionModel)
             .where(
                 PromptVersionModel.prompt_id == prompt_id,
-                PromptVersionModel.deleted_at.is_(None),
+                ~PromptVersionModel.deleted,
             )
             .order_by(PromptVersionModel.version.asc())
         )
@@ -323,7 +324,7 @@ class PromptService:
         result = await self.db.execute(
             select(PromptModel).where(
                 PromptModel.id == prompt_id,
-                PromptModel.deleted_at.is_(None),
+                ~PromptModel.deleted,
             )
         )
         prompt = result.scalar_one_or_none()
@@ -364,7 +365,7 @@ class PromptService:
             select(PromptVersionModel)
             .where(
                 PromptVersionModel.labels.contains([label]),
-                PromptVersionModel.deleted_at.is_(None),
+                ~PromptVersionModel.deleted,
             )
             .order_by(PromptVersionModel.created_at.desc())
             .limit(1)
@@ -379,7 +380,7 @@ class PromptService:
         prompt_result = await self.db.execute(
             select(PromptModel).where(
                 PromptModel.id == version.prompt_id,
-                PromptModel.deleted_at.is_(None),
+                ~PromptModel.deleted,
             )
         )
         prompt = prompt_result.scalar_one_or_none()
@@ -407,7 +408,7 @@ class PromptService:
         stmt = select(PromptVersionModel).where(
             PromptVersionModel.prompt_id == prompt_id,
             PromptVersionModel.version == version,
-            PromptVersionModel.deleted_at.is_(None),
+            ~PromptVersionModel.deleted,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()

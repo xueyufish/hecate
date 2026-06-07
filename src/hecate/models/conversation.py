@@ -42,13 +42,7 @@ class ConversationModel(BaseModel):
     agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    __table_args__ = (
-        Index(
-            "idx_conversations_agent",
-            "agent_id",
-            postgresql_where=BaseModel.deleted_at.is_(None),
-        ),
-    )
+    __table_args__ = (Index("idx_conversations_agent", "agent_id", "deleted"),)
 
 
 class ConversationCreateSchema(PydanticBase):
@@ -70,4 +64,5 @@ class ConversationReadSchema(PydanticBase):
     title: str | None
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None

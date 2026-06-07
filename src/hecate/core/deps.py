@@ -123,7 +123,7 @@ async def get_current_agent(
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
-            AgentModel.deleted_at.is_(None),
+            ~AgentModel.deleted,
         )
     )
     agent = result.scalar_one_or_none()

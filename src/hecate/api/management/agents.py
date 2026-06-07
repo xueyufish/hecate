@@ -67,7 +67,7 @@ async def validate_knowledge_base_ids(
 
     stmt = select(KnowledgeBaseModel.id).where(
         KnowledgeBaseModel.id.in_(kb_uuids),
-        KnowledgeBaseModel.deleted_at.is_(None),
+        ~KnowledgeBaseModel.deleted,
     )
     result = await db.execute(stmt)
     found_ids = {str(row[0]) for row in result.all()}
@@ -106,9 +106,9 @@ async def _check_models_availability(
         .join(ModelProviderModel, ModelProviderModel.id == ModelRegistryModel.provider_id)
         .where(
             ModelRegistryModel.model_id.in_(model_names),
-            ModelRegistryModel.deleted_at.is_(None),
+            ~ModelRegistryModel.deleted,
             ModelRegistryModel.is_enabled.is_(True),
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelProviderModel.deleted,
             ModelProviderModel.is_enabled.is_(True),
             ModelProviderModel.status == "active",
         )
@@ -172,14 +172,14 @@ async def list_agents(
         dict: ``{"items": [...], "total": int}`` with agent list and total count.
     """
     # Count total
-    count_stmt = select(func.count()).select_from(AgentModel).where(AgentModel.deleted_at.is_(None))
+    count_stmt = select(func.count()).select_from(AgentModel).where(~AgentModel.deleted)
     total = (await db.execute(count_stmt)).scalar_one()
 
     # Fetch page
     offset = (page - 1) * page_size
     stmt = (
         select(AgentModel)
-        .where(AgentModel.deleted_at.is_(None))
+        .where(~AgentModel.deleted)
         .order_by(AgentModel.created_at.desc())
         .offset(offset)
         .limit(page_size)
@@ -229,7 +229,7 @@ async def get_agent(
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
-            AgentModel.deleted_at.is_(None),
+            ~AgentModel.deleted,
         )
     )
     agent = result.scalar_one_or_none()
@@ -272,7 +272,7 @@ async def update_agent(
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
-            AgentModel.deleted_at.is_(None),
+            ~AgentModel.deleted,
         )
     )
     agent = result.scalar_one_or_none()
@@ -315,7 +315,7 @@ async def delete_agent(
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
-            AgentModel.deleted_at.is_(None),
+            ~AgentModel.deleted,
         )
     )
     agent = result.scalar_one_or_none()
@@ -325,6 +325,7 @@ async def delete_agent(
             detail={"error": {"code": "NOT_FOUND", "message": "Agent not found", "details": None}},
         )
 
+    agent.deleted = True
     agent.deleted_at = datetime.now(UTC)
     await db.flush()
 
@@ -364,7 +365,7 @@ async def add_skill_to_agent(
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
-            AgentModel.deleted_at.is_(None),
+            ~AgentModel.deleted,
         )
     )
     agent = result.scalar_one_or_none()
@@ -382,7 +383,7 @@ async def add_skill_to_agent(
         select(SkillModel).where(
             SkillModel.name == data.skill_name,
             SkillModel.workspace_id.in_([workspace_id, zero_uuid]),
-            SkillModel.deleted_at.is_(None),
+            ~SkillModel.deleted,
         )
     )
     if skill_result.scalar_one_or_none() is None:
@@ -433,7 +434,7 @@ async def remove_skill_from_agent(
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
-            AgentModel.deleted_at.is_(None),
+            ~AgentModel.deleted,
         )
     )
     agent = result.scalar_one_or_none()
@@ -474,7 +475,7 @@ async def export_agent(
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
-            AgentModel.deleted_at.is_(None),
+            ~AgentModel.deleted,
         )
     )
     agent = result.scalar_one_or_none()
@@ -507,7 +508,7 @@ async def export_agent(
         wf_result = await db.execute(
             select(WorkflowModel).where(
                 WorkflowModel.id == agent.workflow_id,
-                WorkflowModel.deleted_at.is_(None),
+                ~WorkflowModel.deleted,
             )
         )
         workflow = wf_result.scalar_one_or_none()
@@ -531,7 +532,7 @@ async def export_agent(
     blocks_result = await db.execute(
         select(MemoryBlockModel).where(
             MemoryBlockModel.agent_id == agent_id,
-            MemoryBlockModel.deleted_at.is_(None),
+            ~MemoryBlockModel.deleted,
         )
     )
     blocks = blocks_result.scalars().all()

@@ -82,7 +82,7 @@ class BudgetSnapshotService:
             select(BudgetSnapshotModel)
             .where(
                 BudgetSnapshotModel.session_id == session_id,
-                BudgetSnapshotModel.deleted_at.is_(None),
+                ~BudgetSnapshotModel.deleted,
             )
             .order_by(BudgetSnapshotModel.created_at.desc())
             .limit(limit)
@@ -106,7 +106,7 @@ class BudgetSnapshotService:
             select(BudgetSnapshotModel)
             .where(
                 BudgetSnapshotModel.session_id == session_id,
-                BudgetSnapshotModel.deleted_at.is_(None),
+                ~BudgetSnapshotModel.deleted,
             )
             .order_by(BudgetSnapshotModel.created_at.desc())
             .limit(1)

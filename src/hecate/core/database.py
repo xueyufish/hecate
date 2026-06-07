@@ -9,17 +9,57 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy.pool import StaticPool
 
 from hecate.core.config import settings
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    pool_size=20,
-    max_overflow=10,
-)
+SUPPORTED_DIALECTS = ("postgresql", "mysql", "sqlite")
+
+
+def create_engine_from_url(url: str) -> AsyncEngine:
+    """Create an async SQLAlchemy engine with dialect-appropriate pool settings.
+
+    Supported dialects:
+
+    - **postgresql** — connection pooling (pool_size=20, max_overflow=10)
+    - **mysql** — connection pooling (pool_size=20, max_overflow=10)
+    - **sqlite** — no pooling for file-based; ``StaticPool`` for in-memory
+
+    Raises:
+        ValueError: If the URL scheme is not a supported dialect.
+        ImportError: If MySQL is selected but ``aiomysql`` is not installed.
+    """
+    dialect = url.split("://")[0].split("+")[0]
+
+    if dialect not in SUPPORTED_DIALECTS:
+        raise ValueError(f"Unsupported database dialect: {dialect}. Supported: {', '.join(SUPPORTED_DIALECTS)}")
+
+    if dialect == "mysql":
+        try:
+            import aiomysql  # noqa: F401
+        except ImportError:
+            raise ImportError("MySQL support requires aiomysql. Install with: pip install hecate[mysql]") from None
+        return create_async_engine(url, echo=False, pool_size=20, max_overflow=10)
+
+    if dialect == "postgresql":
+        return create_async_engine(url, echo=False, pool_size=20, max_overflow=10)
+
+    # sqlite
+    if "://" in url and url.split("://")[1] in ("", "/"):
+        # In-memory SQLite — use StaticPool to maintain single connection
+        return create_async_engine(
+            url,
+            echo=False,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    # File-based SQLite — default pool
+    return create_async_engine(url, echo=False)
+
+
+engine = create_engine_from_url(settings.DATABASE_URL)
 
 async_session_factory = async_sessionmaker(
     engine,

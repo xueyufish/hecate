@@ -117,7 +117,7 @@ async def create_provider(
     existing = await db.execute(
         select(ModelProviderModel).where(
             ModelProviderModel.name == provider_name,
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelProviderModel.deleted,
         )
     )
     if existing.scalar_one_or_none():
@@ -173,9 +173,9 @@ async def list_providers(
         select(ModelProviderModel, func.count(ModelRegistryModel.id).label("model_count"))
         .outerjoin(
             ModelRegistryModel,
-            (ModelRegistryModel.provider_id == ModelProviderModel.id) & (ModelRegistryModel.deleted_at.is_(None)),
+            (ModelRegistryModel.provider_id == ModelProviderModel.id) & (~ModelRegistryModel.deleted),
         )
-        .where(ModelProviderModel.deleted_at.is_(None))
+        .where(~ModelProviderModel.deleted)
         .group_by(ModelProviderModel.id)
     )
     result = await db.execute(stmt)
@@ -204,7 +204,7 @@ async def update_provider(
     result = await db.execute(
         select(ModelProviderModel).where(
             ModelProviderModel.id == provider_id,
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelProviderModel.deleted,
         )
     )
     provider = result.scalar_one_or_none()
@@ -240,7 +240,7 @@ async def delete_provider(
     result = await db.execute(
         select(ModelProviderModel).where(
             ModelProviderModel.id == provider_id,
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelProviderModel.deleted,
         )
     )
     provider = result.scalar_one_or_none()
@@ -248,15 +248,17 @@ async def delete_provider(
         raise HTTPException(status_code=404, detail="Provider not found")
 
     now = datetime.now(UTC)
+    provider.deleted = True
     provider.deleted_at = now
 
     models_result = await db.execute(
         select(ModelRegistryModel).where(
             ModelRegistryModel.provider_id == provider_id,
-            ModelRegistryModel.deleted_at.is_(None),
+            ~ModelRegistryModel.deleted,
         )
     )
     for model in models_result.scalars().all():
+        model.deleted = True
         model.deleted_at = now
 
     await db.flush()
@@ -277,7 +279,7 @@ async def test_provider(
     result = await db.execute(
         select(ModelProviderModel).where(
             ModelProviderModel.id == provider_id,
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelProviderModel.deleted,
         )
     )
     provider = result.scalar_one_or_none()
@@ -342,10 +344,10 @@ async def list_models(
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
     """List all registered models grouped by provider."""
-    providers_result = await db.execute(select(ModelProviderModel).where(ModelProviderModel.deleted_at.is_(None)))
+    providers_result = await db.execute(select(ModelProviderModel).where(~ModelProviderModel.deleted))
     providers = {p.id: p for p in providers_result.scalars().all()}
 
-    models_result = await db.execute(select(ModelRegistryModel).where(ModelRegistryModel.deleted_at.is_(None)))
+    models_result = await db.execute(select(ModelRegistryModel).where(~ModelRegistryModel.deleted))
     models = models_result.scalars().all()
 
     grouped: dict[str, dict] = {}
@@ -376,7 +378,7 @@ async def update_model(
     result = await db.execute(
         select(ModelRegistryModel).where(
             ModelRegistryModel.id == model_id,
-            ModelRegistryModel.deleted_at.is_(None),
+            ~ModelRegistryModel.deleted,
         )
     )
     model = result.scalar_one_or_none()
@@ -405,7 +407,7 @@ async def add_custom_model(
     provider_result = await db.execute(
         select(ModelProviderModel).where(
             ModelProviderModel.id == data.provider_id,
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelProviderModel.deleted,
         )
     )
     provider = provider_result.scalar_one_or_none()
@@ -442,8 +444,8 @@ async def test_model(
         .join(ModelRegistryModel, ModelRegistryModel.provider_id == ModelProviderModel.id)
         .where(
             ModelRegistryModel.model_id == data.model_id,
-            ModelRegistryModel.deleted_at.is_(None),
-            ModelProviderModel.deleted_at.is_(None),
+            ~ModelRegistryModel.deleted,
+            ~ModelProviderModel.deleted,
         )
     )
     provider = provider_result.scalar_one_or_none()

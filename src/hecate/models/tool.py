@@ -63,8 +63,9 @@ class ToolModel(BaseModel):
             "idx_tools_workspace_name",
             "workspace_id",
             "name",
+            "deleted",
+            "deleted_at",
             unique=True,
-            postgresql_where=BaseModel.deleted_at.is_(None),
         ),
     )
 
@@ -107,4 +108,5 @@ class ToolReadSchema(PydanticBase):
     mcp_tool_name: str | None
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None

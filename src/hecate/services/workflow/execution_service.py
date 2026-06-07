@@ -182,7 +182,7 @@ class WorkflowExecutionService:
             result = await self._db.execute(
                 select(AgentModel).where(
                     AgentModel.id == agent_uuid,
-                    AgentModel.deleted_at.is_(None),
+                    ~AgentModel.deleted,
                 )
             )
             agent = result.scalar_one_or_none()
@@ -390,7 +390,7 @@ class WorkflowExecutionService:
             select(WorkflowVersionModel)
             .where(
                 WorkflowVersionModel.workflow_id == workflow_id,
-                WorkflowVersionModel.deleted_at.is_(None),
+                ~WorkflowVersionModel.deleted,
             )
             .order_by(WorkflowVersionModel.version.desc())
             .limit(1)

@@ -42,7 +42,7 @@ async def get_message_citations(
     result = await db.execute(
         select(MessageModel).where(
             MessageModel.id == message_id,
-            MessageModel.deleted_at.is_(None),
+            ~MessageModel.deleted,
         )
     )
     message = result.scalar_one_or_none()

@@ -65,8 +65,9 @@ class SkillModel(BaseModel):
             "idx_skills_workspace_name",
             "workspace_id",
             "name",
+            "deleted",
+            "deleted_at",
             unique=True,
-            postgresql_where=BaseModel.deleted_at.is_(None),
         ),
     )
 
@@ -123,4 +124,5 @@ class SkillReadSchema(PydanticBase):
     auto_load: bool
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None

@@ -124,6 +124,7 @@ class MemoryBlockReadSchema(PydanticBase):
     limit: int
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None
 
 
@@ -151,4 +152,5 @@ class MemoryReadSchema(PydanticBase):
     access_count: int
     created_at: datetime
     updated_at: datetime
+    deleted: bool | None = False
     deleted_at: datetime | None

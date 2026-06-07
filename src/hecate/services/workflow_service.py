@@ -114,7 +114,7 @@ class WorkflowService:
         result = await self.db.execute(
             select(WorkflowModel).where(
                 WorkflowModel.id == workflow_id,
-                WorkflowModel.deleted_at.is_(None),
+                ~WorkflowModel.deleted,
             )
         )
         workflow = result.scalar_one_or_none()
@@ -156,7 +156,7 @@ class WorkflowService:
         result = await self.db.execute(
             select(WorkflowModel).where(
                 WorkflowModel.id == workflow_id,
-                WorkflowModel.deleted_at.is_(None),
+                ~WorkflowModel.deleted,
             )
         )
         workflow = result.scalar_one_or_none()
@@ -203,13 +203,14 @@ class WorkflowService:
         result = await self.db.execute(
             select(WorkflowModel).where(
                 WorkflowModel.id == workflow_id,
-                WorkflowModel.deleted_at.is_(None),
+                ~WorkflowModel.deleted,
             )
         )
         workflow = result.scalar_one_or_none()
         if workflow is None:
             raise ValueError(f"Workflow {workflow_id} not found")
 
+        workflow.deleted = True
         workflow.deleted_at = datetime.now(UTC)
         await self.db.flush()
         logger.info(f"Deleted workflow {workflow_id}")
@@ -230,7 +231,7 @@ class WorkflowService:
         Returns:
             Dict with 'items' and 'total' keys.
         """
-        conditions = [WorkflowModel.deleted_at.is_(None)]
+        conditions = [~WorkflowModel.deleted]
         if workspace_id is not None:
             conditions.append(WorkflowModel.workspace_id == workspace_id)
 
@@ -268,7 +269,7 @@ class WorkflowService:
             select(WorkflowVersionModel)
             .where(
                 WorkflowVersionModel.workflow_id == workflow_id,
-                WorkflowVersionModel.deleted_at.is_(None),
+                ~WorkflowVersionModel.deleted,
             )
             .order_by(WorkflowVersionModel.version.asc())
         )
@@ -323,7 +324,7 @@ class WorkflowService:
         result = await self.db.execute(
             select(WorkflowModel).where(
                 WorkflowModel.id == workflow_id,
-                WorkflowModel.deleted_at.is_(None),
+                ~WorkflowModel.deleted,
             )
         )
         workflow = result.scalar_one_or_none()
@@ -388,7 +389,7 @@ class WorkflowService:
         stmt = select(WorkflowVersionModel).where(
             WorkflowVersionModel.workflow_id == workflow_id,
             WorkflowVersionModel.version == version,
-            WorkflowVersionModel.deleted_at.is_(None),
+            ~WorkflowVersionModel.deleted,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()

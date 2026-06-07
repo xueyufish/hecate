@@ -150,6 +150,7 @@ class WorkingMemoryService:
         if block is None:
             raise ValueError(f"Memory block {block_id} not found")
 
+        block.deleted = True
         block.deleted_at = datetime.now(UTC)
         await self.db.flush()
         logger.info(f"Deleted memory block {block_id} for agent {agent_id}")
@@ -170,7 +171,7 @@ class WorkingMemoryService:
             select(MemoryBlockModel)
             .where(
                 MemoryBlockModel.agent_id == agent_id,
-                MemoryBlockModel.deleted_at.is_(None),
+                ~MemoryBlockModel.deleted,
             )
             .order_by(MemoryBlockModel.position.asc())
         )
@@ -230,7 +231,7 @@ class WorkingMemoryService:
         stmt = select(MemoryBlockModel).where(
             MemoryBlockModel.id == block_id,
             MemoryBlockModel.agent_id == agent_id,
-            MemoryBlockModel.deleted_at.is_(None),
+            ~MemoryBlockModel.deleted,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
@@ -244,7 +245,7 @@ class WorkingMemoryService:
         stmt = select(MemoryBlockModel).where(
             MemoryBlockModel.agent_id == agent_id,
             MemoryBlockModel.label == label,
-            MemoryBlockModel.deleted_at.is_(None),
+            ~MemoryBlockModel.deleted,
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
