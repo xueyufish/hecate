@@ -1,7 +1,9 @@
-## ADDED Requirements
+## Purpose
 
+Data models define the SQLAlchemy ORM schema for the Hecate platform, including abstract base models with UUID primary keys, timestamp and soft-delete support, and concrete models for agents, sessions, messages, tools, knowledge bases, documents, checkpoints, and skills — with careful alias handling for columns that collide with Pydantic or SQLAlchemy reserved names.
+## Requirements
 ### Requirement: BaseModel provides UUID primary key, timestamps, and soft delete
-The abstract `BaseModel` SHALL provide `id` (UUID4), `created_at`, `updated_at`, and `deleted_at` columns for all concrete ORM models.
+The abstract `BaseModel` SHALL provide `id` (UUID4), `created_at`, `updated_at`, `deleted` (bool), and `deleted_at` columns for all concrete ORM models. The `deleted` field represents the deletion state; the `deleted_at` field is an audit timestamp recording when deletion occurred.
 
 #### Scenario: UUID primary key auto-generated
 - **WHEN** a new model instance is created
@@ -15,9 +17,25 @@ The abstract `BaseModel` SHALL provide `id` (UUID4), `created_at`, `updated_at`,
 - **WHEN** a row is updated
 - **THEN** `updated_at` SHALL be refreshed via `onupdate=func.now()`
 
-#### Scenario: Soft delete via deleted_at
-- **WHEN** a row's `deleted_at` is set to a datetime
-- **THEN** the row SHALL still exist in the database but be excluded from queries via `WHERE deleted_at IS NULL`
+#### Scenario: New row is not deleted by default
+- **WHEN** a new model instance is created
+- **THEN** `deleted` SHALL be `False` and `deleted_at` SHALL be `None`
+
+#### Scenario: Soft delete sets both deleted and deleted_at
+- **WHEN** a row is soft-deleted
+- **THEN** `deleted` SHALL be set to `True` and `deleted_at` SHALL be set to the current timestamp
+
+#### Scenario: Active rows queried by deleted field
+- **WHEN** queries filter for active (non-deleted) rows
+- **THEN** they SHALL use `WHERE deleted = false` (not `WHERE deleted_at IS NULL`)
+
+#### Scenario: Unique composite indexes include deleted field
+- **WHEN** a unique index enforces name uniqueness among active rows
+- **THEN** the index SHALL be `Index("name", <columns...>, "deleted", "deleted_at", unique=True)` — fully portable across PostgreSQL, MySQL, and SQLite
+
+#### Scenario: Non-unique filtered indexes include deleted field
+- **WHEN** a non-unique index previously used `postgresql_where=deleted_at IS NULL`
+- **THEN** the index SHALL be `Index("name", <columns...>, "deleted")` — composite index without dialect-specific kwargs
 
 ### Requirement: AgentModel with model_config column alias
 The `AgentModel` SHALL use `model_config_db` as the Python attribute name mapping to the `model_config` database column to avoid collision with Pydantic's reserved `model_config`.
@@ -141,3 +159,4 @@ The `SkillModel` SHALL enforce lowercase hyphenated names matching pattern `^[a-
 #### Scenario: SkillCreateSchema includes workspace_id
 - **WHEN** a skill is created via API
 - **THEN** `workspace_id` SHALL be automatically set from the authenticated user's workspace context, not from the request body
+
