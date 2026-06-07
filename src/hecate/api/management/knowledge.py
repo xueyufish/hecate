@@ -58,7 +58,7 @@ async def create_knowledge_base(
         chunk_strategy=data.chunk_strategy,
         chunk_size=data.chunk_size,
         chunk_overlap=data.chunk_overlap,
-        qdrant_collection=collection_name,
+        collection_name=collection_name,
     )
     db.add(kb)
     await db.flush()
@@ -247,7 +247,7 @@ async def search_knowledge_base(
     mode = data.mode if data.mode in ("hybrid", "dense", "sparse") else "hybrid"
 
     results = await knowledge_base_service.search_with_score_breakdown(
-        collection_name=kb.qdrant_collection,
+        collection_name=kb.collection_name,
         query=data.query,
         limit=data.limit,
         mode=mode,
@@ -293,7 +293,7 @@ async def list_knowledge_base_chunks(
     """
     kb = await _get_kb_or_404(kb_id, db)
     return await knowledge_base_service.list_chunks(
-        collection_name=kb.qdrant_collection,
+        collection_name=kb.collection_name,
         page=page,
         page_size=page_size,
     )
@@ -322,7 +322,7 @@ async def compare_search_modes(
     """
     kb = await _get_kb_or_404(kb_id, db)
     return await knowledge_base_service.compare_modes(
-        collection_name=kb.qdrant_collection,
+        collection_name=kb.collection_name,
         query=data.query,
         limit=data.limit,
     )
@@ -483,7 +483,7 @@ async def ingest_urls(
 
         ingest_result = await knowledge_base_service.ingest_document_text(
             text=result.text,
-            collection_name=kb.qdrant_collection,
+            collection_name=kb.collection_name,
             metadata=metadata,
         )
 

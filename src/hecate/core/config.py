@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     Configuration groups:
 
     - **Database**: ``DATABASE_URL`` — async PostgreSQL connection string.
-    - **Vector Store**: ``QDRANT_URL`` — Qdrant vector database endpoint used
-      for embedding search.
+    - **Vector Store**: ``VECTOR_STORE_TYPE`` — backend selector (``qdrant``
+      or ``chroma``); ``QDRANT_URL``, ``QDRANT_API_KEY`` for Qdrant;
+      ``CHROMA_PERSIST_DIR`` for Chroma.
     - **Object Storage**: ``MINIO_URL``, ``MINIO_ACCESS_KEY``,
       ``MINIO_SECRET_KEY``, ``MINIO_BUCKET`` — MinIO/S3-compatible storage
       for uploaded files and parsed documents.
@@ -36,7 +37,12 @@ class Settings(BaseSettings):
     )
 
     DATABASE_URL: str = "postgresql+asyncpg://hecate:hecate@localhost:5432/hecate"
+
+    VECTOR_STORE_TYPE: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_API_KEY: str = ""
+    CHROMA_PERSIST_DIR: str = "./data/chroma"
+
     MINIO_URL: str = "localhost:9000"
     MINIO_ACCESS_KEY: str = ""
     MINIO_SECRET_KEY: str = ""

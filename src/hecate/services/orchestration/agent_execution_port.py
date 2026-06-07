@@ -129,7 +129,7 @@ class AgentExecutionPort(EnginePort):
                     return []
 
                 search_results = await knowledge_base_service.search(
-                    collection_name=kb.qdrant_collection,
+                    collection_name=kb.collection_name,
                     query=query,
                     limit=10,
                     mode="hybrid",

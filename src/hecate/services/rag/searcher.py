@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from hecate.services.rag.embedding import embedding_service
-from hecate.services.rag.indexer import qdrant_indexer
+from hecate.services.rag.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +42,11 @@ class HybridSearcher:
 
     def __init__(
         self,
+        store: VectorStore,
         dense_weight: float = 0.7,
         sparse_weight: float = 0.3,
-    ):
+    ) -> None:
+        self._store = store
         self.dense_weight = dense_weight
         self.sparse_weight = sparse_weight
 
@@ -58,7 +60,7 @@ class HybridSearcher:
         """Search for relevant documents.
 
         Args:
-            collection_name: Qdrant collection name.
+            collection_name: Vector store collection name.
             query: The search query.
             limit: Maximum number of results.
             mode: Search mode - "hybrid" (default), "dense", or "sparse".
@@ -85,33 +87,24 @@ class HybridSearcher:
         query_embedding: Any,
         limit: int,
     ) -> list[HybridSearchResult]:
-        """Perform hybrid search with fallback to dense-only.
-
-        Runs dense and sparse searches in parallel alongside the hybrid
-        search to populate per-mode score breakdown on each result.
-        """
+        """Perform hybrid search with fallback to dense-only."""
         if not query_embedding.sparse:
             logger.warning("No sparse vector available. Falling back to dense-only search.")
             return await self._search_dense(collection_name, query_embedding, limit)
 
-        has_sparse = await qdrant_indexer.has_sparse_vectors(collection_name)
-        if not has_sparse:
-            logger.warning(f"Collection {collection_name} has no sparse vectors. Falling back to dense-only.")
-            return await self._search_dense(collection_name, query_embedding, limit)
-
         hybrid_results, dense_results, sparse_results = await asyncio.gather(
-            qdrant_indexer.search_hybrid(
+            self._store.search_hybrid(
                 collection_name=collection_name,
                 query_dense=query_embedding.dense,
                 query_sparse=query_embedding.sparse,
                 limit=limit,
             ),
-            qdrant_indexer.search(
+            self._store.search_dense(
                 collection_name=collection_name,
                 query_vector=query_embedding.dense,
                 limit=limit,
             ),
-            qdrant_indexer.search_sparse(
+            self._store.search_sparse(
                 collection_name=collection_name,
                 query_sparse=query_embedding.sparse,
                 limit=limit,
@@ -139,13 +132,11 @@ class HybridSearcher:
         query_embedding: Any,
         limit: int,
     ) -> list[HybridSearchResult]:
-        """Perform dense-only search."""
-        results = await qdrant_indexer.search(
+        results = await self._store.search_dense(
             collection_name=collection_name,
             query_vector=query_embedding.dense,
             limit=limit,
         )
-
         return [
             HybridSearchResult(
                 id=r.id,
@@ -164,13 +155,11 @@ class HybridSearcher:
         query_embedding: Any,
         limit: int,
     ) -> list[HybridSearchResult]:
-        """Perform sparse-only search."""
-        results = await qdrant_indexer.search_sparse(
+        results = await self._store.search_sparse(
             collection_name=collection_name,
             query_sparse=query_embedding.sparse,
             limit=limit,
         )
-
         return [
             HybridSearchResult(
                 id=r.id,
@@ -181,6 +170,3 @@ class HybridSearcher:
             )
             for r in results
         ]
-
-
-hybrid_searcher = HybridSearcher()

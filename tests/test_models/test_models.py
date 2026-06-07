@@ -399,7 +399,7 @@ class TestKnowledgeBaseModel:
         """A new knowledge base gets server defaults for embedding model and chunk settings."""
         kb = KnowledgeBaseModel(
             name="test-kb",
-            qdrant_collection="kb_test",
+            collection_name="kb_test",
         )
         db_session.add(kb)
         await db_session.flush()
@@ -421,7 +421,7 @@ class TestDocumentModel:
     @pytest.mark.asyncio
     async def test_create_document(self, db_session: AsyncSession) -> None:
         """A new document defaults to ``pending`` parsing status with zero chunks."""
-        kb = KnowledgeBaseModel(name="doc-kb", qdrant_collection="kb_doc")
+        kb = KnowledgeBaseModel(name="doc-kb", collection_name="kb_doc")
         db_session.add(kb)
         await db_session.flush()
         doc = DocumentModel(
@@ -439,7 +439,7 @@ class TestDocumentModel:
     @pytest.mark.asyncio
     async def test_document_status_transition(self, db_session: AsyncSession) -> None:
         """A document can transition from pending to parsing to completed with a chunk count."""
-        kb = KnowledgeBaseModel(name="status-kb", qdrant_collection="kb_status")
+        kb = KnowledgeBaseModel(name="status-kb", collection_name="kb_status")
         db_session.add(kb)
         await db_session.flush()
         doc = DocumentModel(
@@ -460,7 +460,7 @@ class TestDocumentModel:
     @pytest.mark.asyncio
     async def test_document_parsing_failed(self, db_session: AsyncSession) -> None:
         """A failed document stores an error message alongside the failed status."""
-        kb = KnowledgeBaseModel(name="fail-kb", qdrant_collection="kb_fail")
+        kb = KnowledgeBaseModel(name="fail-kb", collection_name="kb_fail")
         db_session.add(kb)
         await db_session.flush()
         doc = DocumentModel(

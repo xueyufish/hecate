@@ -3,11 +3,11 @@
 Core infrastructure provides the foundational application layer — configuration management (pydantic-settings), async database engine creation, authentication (API Key + JWT), user context resolution, agent lookup with soft-delete filtering, and in-memory rate limiting.
 ## Requirements
 ### Requirement: Settings loaded from environment variables and .env file
-The `Settings` class (pydantic-settings) SHALL load all configuration from environment variables and an optional `.env` file, ignoring extra variables.
+The `Settings` class (pydantic-settings) SHALL include `VECTOR_STORE_TYPE` (default `"qdrant"`) and per-backend connection settings: `QDRANT_URL` (default `"http://localhost:6333"`), `QDRANT_API_KEY` (default `""`), and `CHROMA_PERSIST_DIR` (default `"./data/chroma"`). The existing `QDRANT_URL` field SHALL be retained for backward compatibility when `VECTOR_STORE_TYPE=qdrant`.
 
 #### Scenario: Default values
 - **WHEN** no environment variables are set
-- **THEN** `Settings` SHALL use defaults: `DATABASE_URL`="postgresql+asyncpg://hecate:hecate@localhost:5432/hecate", `QDRANT_URL`="http://localhost:6333", `MINIO_URL`="localhost:9000", `RATE_LIMIT_RPM`=60, `LLM_GUARD_ENABLED`=True
+- **THEN** `Settings` SHALL use defaults: `VECTOR_STORE_TYPE="qdrant"`, `QDRANT_URL="http://localhost:6333"`, `CHROMA_PERSIST_DIR="./data/chroma"`
 
 #### Scenario: API keys parsed from comma-separated string
 - **WHEN** `HECATE_API_KEYS` is set to "key1,key2,key3"
@@ -16,6 +16,18 @@ The `Settings` class (pydantic-settings) SHALL load all configuration from envir
 #### Scenario: Empty API keys
 - **WHEN** `HECATE_API_KEYS` is empty or unset
 - **THEN** `settings.api_keys_list` SHALL return `[]`
+
+#### Scenario: Qdrant configuration
+- **WHEN** `VECTOR_STORE_TYPE=qdrant` and `QDRANT_URL=http://custom:6333`
+- **THEN** the QdrantVectorStore SHALL connect to the specified URL
+
+#### Scenario: Chroma configuration
+- **WHEN** `VECTOR_STORE_TYPE=chroma` and `CHROMA_PERSIST_DIR=/data/vecs`
+- **THEN** the ChromaVectorStore SHALL use `/data/vecs` as the persistence directory
+
+#### Scenario: Unsupported vector store type
+- **WHEN** `VECTOR_STORE_TYPE` is set to an unrecognized value
+- **THEN** `get_vector_store()` SHALL raise `ValueError` at runtime
 
 ### Requirement: Async database engine with auto-commit session
 The `engine` module SHALL create an async SQLAlchemy engine from `DATABASE_URL` using a factory function that applies dialect-appropriate pool settings. PostgreSQL and MySQL SHALL use pool_size=20, max_overflow=10. SQLite SHALL use no connection pooling (StaticPool for in-memory, default for file-based). The `get_db()` FastAPI dependency SHALL remain unchanged — it SHALL auto-commit on success and auto-rollback on error.

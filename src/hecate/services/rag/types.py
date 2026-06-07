@@ -1,16 +1,30 @@
-"""Citation types for knowledge base retrieval.
+"""Types for the RAG subsystem.
 
-Provides Pydantic schemas for representing citations from RAG retrieval,
-including OpenAI-compatible annotation format for API responses.
+Provides shared data structures for vector store operations and
+citation formatting across all RAG components.
 """
 
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
+
+
+@dataclass
+class SearchResult:
+    """A single search result from a vector store backend.
+
+    Shared across all ``VectorStore`` implementations to provide a
+    uniform return type for dense, sparse, and hybrid searches.
+    """
+
+    id: str
+    score: float
+    payload: dict[str, Any]
 
 
 class Citation(PydanticBase):

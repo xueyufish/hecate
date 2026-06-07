@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Hybrid search combines dense and sparse retrieval
 The system SHALL perform hybrid search by calling `VectorStore.search_hybrid()` which transparently delegates to the backend's native hybrid (for backends like Qdrant that support it) or falls back to application-layer RRF fusion (for backends like Chroma that do not). The `HybridSearcher` SHALL no longer reference `qdrant_indexer` directly.
@@ -44,14 +44,3 @@ The `AgentExecutionPort.knowledge_query()` SHALL delegate to `KnowledgeBaseServi
 #### Scenario: Knowledge base not found
 - **WHEN** `knowledge_query` is called with a `kb_id` that doesn't exist
 - **THEN** it SHALL return an empty list and log a warning (not raise)
-
-### Requirement: Document ingestion stores sparse vectors
-The `KnowledgeBaseService.ingest_document()` pipeline SHALL generate and store both dense and sparse vectors for each document chunk.
-
-#### Scenario: Ingest with hybrid indexing
-- **WHEN** `KnowledgeBaseService.ingest_document(file_path, collection_name)` is called
-- **THEN** the pipeline SHALL generate sparse embeddings via `EmbeddingService.encode()` and pass both dense and sparse vectors to `QdrantIndexer.upsert_vectors()`
-
-#### Scenario: Ingest with dense-only (fallback)
-- **WHEN** sparse embedding generation fails (model not available)
-- **THEN** the pipeline SHALL fall back to dense-only indexing and log a warning

@@ -2,7 +2,7 @@
 
 Defines the persistence layer and API schemas for knowledge bases — the
 configuration layer that controls embedding model selection, chunking
-strategy, and the target Qdrant collection for document retrieval.
+strategy, and the target vector store collection for document retrieval.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ class KnowledgeBaseModel(BaseModel):
       structure), or ``"semantic"`` (semantic boundary detection).
     - **chunk_size** / **chunk_overlap** — parameters controlling the chunker
       behaviour (in tokens).
-    - **qdrant_collection** — the Qdrant collection name where this
+    - **collection_name** — the vector store collection name where this
       knowledge base's document embeddings are stored. Set at creation time
       and used for all vector similarity queries.
     - **search_mode** — retrieval strategy: ``"hybrid"`` (dense + sparse),
@@ -51,7 +51,7 @@ class KnowledgeBaseModel(BaseModel):
     chunk_strategy: Mapped[str] = mapped_column(String(20), nullable=False, default="fixed")
     chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=512)
     chunk_overlap: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
-    qdrant_collection: Mapped[str] = mapped_column(String(255), nullable=False)
+    collection_name: Mapped[str] = mapped_column("collection_name", String(255), nullable=False)
     search_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="hybrid")
     sparse_weight: Mapped[float] = mapped_column(Float, nullable=False, default=0.3)
 
@@ -67,6 +67,7 @@ class KnowledgeBaseCreateSchema(PydanticBase):
     chunk_strategy: str = Field(default="fixed", pattern="^(auto|fixed|semantic)$")
     chunk_size: int = Field(default=512, ge=128, le=2048)
     chunk_overlap: int = Field(default=100, ge=0, le=512)
+    collection_name: str | None = None
     search_mode: str = Field(default="hybrid", pattern="^(hybrid|dense|sparse)$")
     sparse_weight: float = Field(default=0.3, ge=0.0, le=1.0)
 
@@ -84,7 +85,7 @@ class KnowledgeBaseReadSchema(PydanticBase):
     chunk_strategy: str
     chunk_size: int
     chunk_overlap: int
-    qdrant_collection: str
+    collection_name: str
     search_mode: str
     sparse_weight: float
     created_at: datetime

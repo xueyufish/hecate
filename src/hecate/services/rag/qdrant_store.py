@@ -1,48 +1,46 @@
-"""Qdrant vector store indexer for managing document embeddings.
+"""Qdrant vector store adapter implementing the VectorStore ABC.
 
-Provides collection management and vector upsert operations
-for the Qdrant vector database, supporting both dense and sparse vectors
-for hybrid search.
+Wraps ``qdrant-client`` for collection management, vector upsert,
+and dense/sparse/hybrid search.  Falls back to deterministic mocks
+when the ``qdrant_client`` package is not installed.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
+
+from hecate.services.rag.types import SearchResult
+from hecate.services.rag.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class SearchResult:
-    """A single search result from Qdrant."""
+class QdrantVectorStore(VectorStore):
+    """VectorStore implementation backed by Qdrant.
 
-    id: str
-    score: float
-    payload: dict[str, Any]
-
-
-class QdrantIndexer:
-    """Manage Qdrant collections and document indexing.
-
-    Supports:
-    - Collection creation with dense/sparse vector configs
-    - Vector upsert with metadata (dense and sparse)
-    - Similarity search (dense, sparse, and hybrid)
+    Supports native hybrid search via Qdrant's ``Prefetch + Fusion.RRF``
+    query pattern — sets ``supports_hybrid = True``.
     """
 
-    def __init__(self, url: str = "http://localhost:6333"):
+    def __init__(self, url: str = "http://localhost:6333", api_key: str = "") -> None:
         self.url = url
-        self._client = None
+        self.api_key = api_key or None
+        self._client: Any = None
 
-    def _get_client(self):
-        """Lazy load the Qdrant client."""
+    @property
+    def supports_hybrid(self) -> bool:
+        return True
+
+    def _get_client(self) -> Any:
         if self._client is None:
             try:
                 from qdrant_client import QdrantClient
 
-                self._client = QdrantClient(url=self.url)
+                kwargs: dict[str, Any] = {"url": self.url}
+                if self.api_key:
+                    kwargs["api_key"] = self.api_key
+                self._client = QdrantClient(**kwargs)
                 logger.info(f"Connected to Qdrant at {self.url}")
             except ImportError:
                 logger.warning("qdrant-client not installed. Using mock client.")
@@ -55,16 +53,6 @@ class QdrantIndexer:
         vector_size: int = 1024,
         with_sparse: bool = True,
     ) -> bool:
-        """Create a Qdrant collection.
-
-        Args:
-            collection_name: Name of the collection.
-            vector_size: Dimension of the dense vectors.
-            with_sparse: Whether to add sparse vector configuration.
-
-        Returns:
-            bool: True if collection was created or already exists.
-        """
         client = self._get_client()
 
         if client == "mock":
@@ -81,15 +69,10 @@ class QdrantIndexer:
 
             kwargs: dict[str, Any] = {
                 "collection_name": collection_name,
-                "vectors_config": VectorParams(
-                    size=vector_size,
-                    distance=Distance.COSINE,
-                ),
+                "vectors_config": VectorParams(size=vector_size, distance=Distance.COSINE),
             }
             if with_sparse:
-                kwargs["sparse_vectors_config"] = {
-                    "sparse": SparseVectorParams(),
-                }
+                kwargs["sparse_vectors_config"] = {"sparse": SparseVectorParams()}
 
             client.create_collection(**kwargs)
             logger.info(f"Created collection {collection_name} (sparse={with_sparse})")
@@ -98,7 +81,34 @@ class QdrantIndexer:
             logger.error(f"Failed to create collection: {e}")
             return False
 
-    async def upsert_vectors(
+    async def delete_collection(self, collection_name: str) -> bool:
+        client = self._get_client()
+
+        if client == "mock":
+            logger.info(f"Mock: Deleted collection {collection_name}")
+            return True
+
+        try:
+            client.delete_collection(collection_name=collection_name)
+            logger.info(f"Deleted collection {collection_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete collection: {e}")
+            return False
+
+    async def collection_exists(self, collection_name: str) -> bool:
+        client = self._get_client()
+
+        if client == "mock":
+            return True
+
+        try:
+            info = client.get_collection(collection_name)
+            return info is not None
+        except Exception:
+            return False
+
+    async def upsert(
         self,
         collection_name: str,
         ids: list[str],
@@ -106,18 +116,6 @@ class QdrantIndexer:
         payloads: list[dict[str, Any]],
         sparse_vectors: list[dict[int, float]] | None = None,
     ) -> bool:
-        """Upsert vectors into a collection.
-
-        Args:
-            collection_name: Name of the collection.
-            ids: List of point IDs.
-            vectors: List of dense vectors.
-            payloads: List of metadata payloads.
-            sparse_vectors: Optional list of sparse vectors (token_id -> weight).
-
-        Returns:
-            bool: True if upsert was successful.
-        """
         client = self._get_client()
 
         if client == "mock":
@@ -139,32 +137,37 @@ class QdrantIndexer:
                         )
                 points.append(PointStruct(id=id_, vector=point_vectors, payload=payload))
 
-            client.upsert(
-                collection_name=collection_name,
-                points=points,
-            )
+            client.upsert(collection_name=collection_name, points=points)
             logger.info(f"Upserted {len(ids)} vectors to {collection_name}")
             return True
         except Exception as e:
             logger.error(f"Failed to upsert vectors: {e}")
             return False
 
-    async def search(
+    async def delete_by_ids(self, collection_name: str, ids: list[str]) -> bool:
+        client = self._get_client()
+
+        if client == "mock":
+            logger.info(f"Mock: Deleted {len(ids)} points from {collection_name}")
+            return True
+
+        try:
+            client.delete(
+                collection_name=collection_name,
+                points_selector=ids,
+            )
+            logger.info(f"Deleted {len(ids)} points from {collection_name}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete points: {e}")
+            return False
+
+    async def search_dense(
         self,
         collection_name: str,
         query_vector: list[float],
         limit: int = 10,
     ) -> list[SearchResult]:
-        """Search for similar vectors (dense only).
-
-        Args:
-            collection_name: Name of the collection.
-            query_vector: The dense query vector.
-            limit: Maximum number of results.
-
-        Returns:
-            List of SearchResult objects.
-        """
         client = self._get_client()
 
         if client == "mock":
@@ -185,16 +188,9 @@ class QdrantIndexer:
                 limit=limit,
                 with_payload=True,
             )
-            return [
-                SearchResult(
-                    id=str(r.id),
-                    score=r.score,
-                    payload=r.payload or {},
-                )
-                for r in results.points
-            ]
+            return [SearchResult(id=str(r.id), score=r.score, payload=r.payload or {}) for r in results.points]
         except Exception as e:
-            logger.error(f"Search failed: {e}")
+            logger.error(f"Dense search failed: {e}")
             return []
 
     async def search_sparse(
@@ -203,16 +199,6 @@ class QdrantIndexer:
         query_sparse: dict[int, float],
         limit: int = 10,
     ) -> list[SearchResult]:
-        """Search using sparse vectors only.
-
-        Args:
-            collection_name: Name of the collection.
-            query_sparse: The sparse query vector (token_id -> weight).
-            limit: Maximum number of results.
-
-        Returns:
-            List of SearchResult objects.
-        """
         client = self._get_client()
 
         if client == "mock":
@@ -239,14 +225,7 @@ class QdrantIndexer:
                 limit=limit,
                 with_payload=True,
             )
-            return [
-                SearchResult(
-                    id=str(r.id),
-                    score=r.score,
-                    payload=r.payload or {},
-                )
-                for r in results.points
-            ]
+            return [SearchResult(id=str(r.id), score=r.score, payload=r.payload or {}) for r in results.points]
         except Exception as e:
             logger.error(f"Sparse search failed: {e}")
             return []
@@ -258,17 +237,6 @@ class QdrantIndexer:
         query_sparse: dict[int, float],
         limit: int = 10,
     ) -> list[SearchResult]:
-        """Search using hybrid (dense + sparse) with RRF fusion.
-
-        Args:
-            collection_name: Name of the collection.
-            query_dense: The dense query vector.
-            query_sparse: The sparse query vector (token_id -> weight).
-            limit: Maximum number of results.
-
-        Returns:
-            List of SearchResult objects ordered by fused score.
-        """
         client = self._get_client()
 
         if client == "mock":
@@ -298,37 +266,23 @@ class QdrantIndexer:
                 limit=limit,
                 with_payload=True,
             )
-            return [
-                SearchResult(
-                    id=str(r.id),
-                    score=r.score,
-                    payload=r.payload or {},
-                )
-                for r in results.points
-            ]
+            return [SearchResult(id=str(r.id), score=r.score, payload=r.payload or {}) for r in results.points]
         except Exception as e:
             logger.error(f"Hybrid search failed: {e}")
             return []
 
-    async def has_sparse_vectors(self, collection_name: str) -> bool:
-        """Check if a collection has sparse vector configuration.
-
-        Args:
-            collection_name: Name of the collection.
-
-        Returns:
-            bool: True if collection has sparse vectors configured.
-        """
+    async def count(self, collection_name: str) -> int:
         client = self._get_client()
 
         if client == "mock":
-            return True
+            return 42
 
         try:
-            info = client.get_collection(collection_name)
-            return info.config.params.sparse_vectors is not None
-        except Exception:
-            return False
+            result = client.count(collection_name=collection_name)
+            return result.count
+        except Exception as e:
+            logger.error(f"Count failed: {e}")
+            return 0
 
     async def scroll(
         self,
@@ -336,16 +290,6 @@ class QdrantIndexer:
         offset: str | None = None,
         limit: int = 20,
     ) -> tuple[list[SearchResult], str | None]:
-        """Scroll through collection points with cursor-based pagination.
-
-        Args:
-            collection_name: Name of the collection.
-            offset: Cursor offset from previous scroll (None for first page).
-            limit: Number of points to return.
-
-        Returns:
-            Tuple of (list of SearchResult, next_offset or None if no more).
-        """
         client = self._get_client()
 
         if client == "mock":
@@ -367,39 +311,8 @@ class QdrantIndexer:
                 with_payload=True,
                 with_vectors=False,
             )
-            results = [
-                SearchResult(
-                    id=str(p.id),
-                    score=1.0,
-                    payload=p.payload or {},
-                )
-                for p in points
-            ]
+            results = [SearchResult(id=str(p.id), score=1.0, payload=p.payload or {}) for p in points]
             return results, next_offset
         except Exception as e:
             logger.error(f"Scroll failed: {e}")
             return [], None
-
-    async def count(self, collection_name: str) -> int:
-        """Get total point count in a collection.
-
-        Args:
-            collection_name: Name of the collection.
-
-        Returns:
-            int: Total number of points.
-        """
-        client = self._get_client()
-
-        if client == "mock":
-            return 42
-
-        try:
-            result = client.count(collection_name=collection_name)
-            return result.count
-        except Exception as e:
-            logger.error(f"Count failed: {e}")
-            return 0
-
-
-qdrant_indexer = QdrantIndexer()

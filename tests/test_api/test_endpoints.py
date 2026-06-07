@@ -173,7 +173,7 @@ async def test_create_knowledge_base(client: AsyncClient, auth_headers: dict) ->
     assert response.status_code == 201
     data = response.json()
     assert data["name"] == "Test Knowledge Base"
-    assert "qdrant_collection" in data
+    assert "collection_name" in data
 
 
 @pytest.mark.asyncio

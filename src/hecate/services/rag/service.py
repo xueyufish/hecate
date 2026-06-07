@@ -13,9 +13,9 @@ from typing import Any
 
 from hecate.services.rag.chunker import text_chunker
 from hecate.services.rag.embedding import embedding_service
-from hecate.services.rag.indexer import qdrant_indexer
+from hecate.services.rag.factory import get_vector_store
 from hecate.services.rag.parser import document_parser
-from hecate.services.rag.searcher import HybridSearchResult, SearchMode, hybrid_searcher
+from hecate.services.rag.searcher import HybridSearcher, HybridSearchResult, SearchMode
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +38,9 @@ class KnowledgeBaseService:
     ) -> dict[str, Any]:
         """Ingest a document into the knowledge base.
 
-        Generates both dense and sparse embeddings for each chunk and stores
-        them in the Qdrant collection.
-
         Args:
             file_path: Path to the document file.
-            collection_name: Qdrant collection name.
+            collection_name: Vector store collection name.
             metadata: Optional metadata to attach to chunks.
 
         Returns:
@@ -75,7 +72,8 @@ class KnowledgeBaseService:
             for chunk in chunks
         ]
 
-        await qdrant_indexer.upsert_vectors(
+        store = get_vector_store()
+        await store.upsert(
             collection_name=collection_name,
             ids=ids,
             vectors=vectors,
@@ -93,11 +91,9 @@ class KnowledgeBaseService:
     ) -> dict[str, Any]:
         """Ingest pre-extracted text into the knowledge base.
 
-        Used for web-crawled content where text is already extracted.
-
         Args:
             text: The text content to ingest.
-            collection_name: Qdrant collection name.
+            collection_name: Vector store collection name.
             metadata: Optional metadata to attach to chunks.
 
         Returns:
@@ -127,7 +123,8 @@ class KnowledgeBaseService:
             for chunk in chunks
         ]
 
-        await qdrant_indexer.upsert_vectors(
+        store = get_vector_store()
+        await store.upsert(
             collection_name=collection_name,
             ids=ids,
             vectors=vectors,
@@ -147,7 +144,7 @@ class KnowledgeBaseService:
         """Search the knowledge base.
 
         Args:
-            collection_name: Qdrant collection name.
+            collection_name: Vector store collection name.
             query: The search query.
             limit: Maximum number of results.
             mode: Search mode - "hybrid" (default), "dense", or "sparse".
@@ -155,7 +152,9 @@ class KnowledgeBaseService:
         Returns:
             List of HybridSearchResult ordered by relevance.
         """
-        return await hybrid_searcher.search(
+        store = get_vector_store()
+        searcher = HybridSearcher(store=store)
+        return await searcher.search(
             collection_name=collection_name,
             query=query,
             limit=limit,
@@ -168,7 +167,7 @@ class KnowledgeBaseService:
         vector_size: int = 1024,
         with_sparse: bool = True,
     ) -> bool:
-        """Create a Qdrant collection for a knowledge base.
+        """Create a vector store collection for a knowledge base.
 
         Args:
             collection_name: Name of the collection.
@@ -178,7 +177,8 @@ class KnowledgeBaseService:
         Returns:
             bool: True if collection was created or already exists.
         """
-        return await qdrant_indexer.create_collection(
+        store = get_vector_store()
+        return await store.create_collection(
             collection_name=collection_name,
             vector_size=vector_size,
             with_sparse=with_sparse,
@@ -199,60 +199,58 @@ class KnowledgeBaseService:
         Returns:
             dict with re-indexing results (updated_count, etc.).
         """
-        client = qdrant_indexer._get_client()
-        if client == "mock":
-            return {"updated_count": 0, "status": "mock"}
+        store = get_vector_store()
+        offset = None
+        updated_count = 0
 
         try:
-            from qdrant_client.models import SparseVector
-
-            offset = None
-            updated_count = 0
-
             while True:
-                results, offset = client.scroll(
+                results, offset = await store.scroll(
                     collection_name=collection_name,
-                    limit=100,
                     offset=offset,
-                    with_payload=True,
-                    with_vectors=True,
+                    limit=100,
                 )
 
                 if not results:
                     break
 
                 texts = []
-                points_to_update = []
-                for point in results:
-                    text = point.payload.get("text", "")
+                valid_results = []
+                for r in results:
+                    text = r.payload.get("text", "")
                     if text:
                         texts.append(text)
-                        points_to_update.append(point)
+                        valid_results.append(r)
 
                 if not texts:
+                    if offset is None:
+                        break
                     continue
 
                 embeddings = await embedding_service.encode(texts)
 
-                for point, emb in zip(points_to_update, embeddings, strict=True):
+                ids_to_update: list[str] = []
+                vectors_to_update: list[list[float]] = []
+                sparse_to_update: list[dict[int, float]] = []
+                payloads_to_update: list[dict[str, Any]] = []
+
+                for r, emb in zip(valid_results, embeddings, strict=True):
                     if not emb.sparse:
                         continue
+                    ids_to_update.append(r.id)
+                    vectors_to_update.append(emb.dense)
+                    sparse_to_update.append(emb.sparse)
+                    payloads_to_update.append(r.payload)
 
-                    client.update_vectors(
+                if ids_to_update:
+                    await store.upsert(
                         collection_name=collection_name,
-                        points=[
-                            {
-                                "id": point.id,
-                                "vector": {
-                                    "sparse": SparseVector(
-                                        indices=list(emb.sparse.keys()),
-                                        values=list(emb.sparse.values()),
-                                    )
-                                },
-                            }
-                        ],
+                        ids=ids_to_update,
+                        vectors=vectors_to_update,
+                        payloads=payloads_to_update,
+                        sparse_vectors=sparse_to_update,
                     )
-                    updated_count += 1
+                    updated_count += len(ids_to_update)
 
                 if offset is None:
                     break
@@ -271,11 +269,8 @@ class KnowledgeBaseService:
     ) -> list[HybridSearchResult]:
         """Search with per-mode score breakdown for hit testing.
 
-        Same as ``search()`` but ensures ``dense_score`` and ``sparse_score``
-        are populated on each result for transparency.
-
         Args:
-            collection_name: Qdrant collection name.
+            collection_name: Vector store collection name.
             query: The search query.
             limit: Maximum number of results.
             mode: Search mode — "hybrid" (default), "dense", or "sparse".
@@ -283,7 +278,9 @@ class KnowledgeBaseService:
         Returns:
             List of HybridSearchResult with score breakdown.
         """
-        return await hybrid_searcher.search(
+        store = get_vector_store()
+        searcher = HybridSearcher(store=store)
+        return await searcher.search(
             collection_name=collection_name,
             query=query,
             limit=limit,
@@ -299,25 +296,25 @@ class KnowledgeBaseService:
         """List stored chunks in a collection with pagination.
 
         Args:
-            collection_name: Qdrant collection name.
+            collection_name: Vector store collection name.
             page: Page number (1-indexed).
             page_size: Number of items per page.
 
         Returns:
             Dict with ``items`` (chunk list) and ``total`` count.
         """
-        total = await qdrant_indexer.count(collection_name)
+        store = get_vector_store()
+        total = await store.count(collection_name)
         if total == 0:
             return {"items": [], "total": 0}
 
-        # Use cursor-based scroll. For page > 1 we skip (page-1)*page_size items.
         offset = None
         items: list[dict[str, Any]] = []
         remaining_skip = (page - 1) * page_size
 
         while remaining_skip > 0:
             batch_size = min(remaining_skip, 100)
-            results, next_offset = await qdrant_indexer.scroll(
+            results, next_offset = await store.scroll(
                 collection_name=collection_name,
                 offset=offset,
                 limit=batch_size,
@@ -327,7 +324,7 @@ class KnowledgeBaseService:
             if offset is None or not results:
                 break
 
-        results, _ = await qdrant_indexer.scroll(
+        results, _ = await store.scroll(
             collection_name=collection_name,
             offset=offset,
             limit=page_size,
@@ -353,11 +350,8 @@ class KnowledgeBaseService:
     ) -> dict[str, Any]:
         """Run the same query across dense, sparse, and hybrid modes.
 
-        Executes all three searches in parallel and returns results
-        per mode for side-by-side comparison.
-
         Args:
-            collection_name: Qdrant collection name.
+            collection_name: Vector store collection name.
             query: The search query.
             limit: Maximum results per mode.
 

@@ -22,7 +22,7 @@ async def _create_test_kb(db: AsyncSession, name: str) -> KnowledgeBaseModel:
     kb = KnowledgeBaseModel(
         name=name,
         description=f"Test KB {name}",
-        qdrant_collection=f"test_{uuid.uuid4().hex[:8]}",
+        collection_name=f"test_{uuid.uuid4().hex[:8]}",
     )
     db.add(kb)
     await db.flush()
@@ -47,14 +47,14 @@ async def test_parallel_search_returns_globally_ranked(db_session: AsyncSession)
     kb3 = await _create_test_kb(db_session, "kb-3")
 
     mock_results = {
-        str(kb1.qdrant_collection): [
+        str(kb1.collection_name): [
             _make_search_result("kb1-chunk-high", 0.9),
             _make_search_result("kb1-chunk-low", 0.3),
         ],
-        str(kb2.qdrant_collection): [
+        str(kb2.collection_name): [
             _make_search_result("kb2-chunk-mid", 0.6),
         ],
-        str(kb3.qdrant_collection): [
+        str(kb3.collection_name): [
             _make_search_result("kb3-chunk-highest", 0.95),
         ],
     }
@@ -84,7 +84,7 @@ async def test_parallel_search_one_kb_fails(db_session: AsyncSession) -> None:
     kb2 = await _create_test_kb(db_session, "kb-fail")
 
     async def mock_search(collection_name: str, query: str, limit: int = 10, mode: str = "hybrid"):
-        if collection_name == kb2.qdrant_collection:
+        if collection_name == kb2.collection_name:
             raise RuntimeError("Search failed")
         return [_make_search_result("good-chunk", 0.8)]
 
