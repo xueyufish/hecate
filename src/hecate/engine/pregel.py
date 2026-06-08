@@ -29,6 +29,7 @@ from typing import Any
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
+from hecate.engine.eventbus import EventBus
 from hecate.engine.eventstore import Event, EventStore, EventType
 from hecate.engine.eviction import EvictionPolicy, NoEviction
 from hecate.engine.scheduler import FIFOScheduler, SchedulerStrategy
@@ -72,6 +73,7 @@ class PregelRuntime:
         scheduler: SchedulerStrategy | None = None,
         eviction_policy: EvictionPolicy | None = None,
         event_store: EventStore | None = None,
+        event_bus: EventBus | None = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
@@ -82,6 +84,7 @@ class PregelRuntime:
         self._scheduler = scheduler or FIFOScheduler()
         self._channel_manager = ChannelManager(eviction_policy=eviction_policy or NoEviction())
         self._event_store = event_store
+        self._event_bus = event_bus
         self._superstep = 0
         self._interrupted = False
         self._interrupt_value: Any = None
@@ -112,11 +115,14 @@ class PregelRuntime:
 
     def _execution_context(self, session_id: uuid.UUID) -> dict:
         """Build execution context dict for worker dispatch."""
-        return {
+        ctx: dict[str, Any] = {
             "session_id": session_id,
             "superstep": self._superstep,
             "event_store": self._event_store,
         }
+        if self._event_bus is not None:
+            ctx["event_bus"] = self._event_bus
+        return ctx
 
     async def execute(
         self,
