@@ -1,5 +1,6 @@
-## ADDED Requirements
-
+## Purpose
+Define the EnginePort abstract interface that decouples the execution engine from external capability services (LLM providers, tool runners, knowledge bases, checkpoint storage, conversation history).
+## Requirements
 ### Requirement: EnginePort abstract interface decouples engine from services
 The `EnginePort` ABC SHALL define 7 abstract methods and 4 optional methods that the engine calls for all I/O, with no imports from the services layer.
 
@@ -47,7 +48,15 @@ The `context_assemble()` method SHALL default to pass-through, returning message
 - **THEN** it SHALL return `{"messages": messages, "tools": tools, "metadata": {}}`
 
 ### Requirement: Optional agent_execute method for Multi-Agent
-The `agent_execute()` method SHALL default to raising NotImplementedError.
+The `agent_execute()` method SHALL accept an optional `agent_definition: AgentDefinition | None = None` parameter. When provided, the execution SHALL use the AgentDefinition's overrides (tool filter, context mode, model override, max_turns) instead of the agent's defaults.
+
+#### Scenario: Agent execution without definition (existing behavior)
+- **WHEN** `agent_execute(agent_id=UUID("..."), messages=[...], channel_snapshot={})` is called without agent_definition
+- **THEN** the execution SHALL proceed using the agent's configured tools, prompt, model, and context (existing behavior unchanged)
+
+#### Scenario: Agent execution with definition override
+- **WHEN** `agent_execute(agent_id=UUID("..."), messages=[...], channel_snapshot={}, agent_definition=AgentDefinition(agent_id=UUID("..."), tools=["web_search"], context_mode="isolated"))` is called
+- **THEN** the execution SHALL use only `["web_search"]` as the tool list, create an isolated message context, and use the agent's configured model
 
 #### Scenario: Unimplemented agent execution
 - **WHEN** a concrete EnginePort does not override `agent_execute()`
@@ -77,3 +86,4 @@ When `agent_execute()` is called for a sub-agent, the system SHALL load the agen
 #### Scenario: Sub-agent with no skills
 - **WHEN** `agent_execute()` is called for an agent with `skills=[]`
 - **THEN** the system message SHALL be the agent's persona only, unchanged from current behavior
+

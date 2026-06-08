@@ -1,5 +1,6 @@
-## ADDED Requirements
-
+## Purpose
+Define how agents are invoked in the execution graph, including direct agent execution via EnginePort, AGENT node handling in workers, and Agent-as-Tool dynamic registration for hierarchical delegation.
+## Requirements
 ### Requirement: EnginePort agent_execute method
 The system SHALL add an `agent_execute` method to `EnginePort` that accepts an agent_id, messages, channel_snapshot, and optional context, and returns a dict containing the agent's response.
 
@@ -23,15 +24,19 @@ The system SHALL execute AGENT-type nodes by calling `EnginePort.agent_execute()
 - **THEN** the worker returns a `WorkerResult` with an error indicating the missing agent_id
 
 ### Requirement: Agent-as-Tool dynamic registration
-The system SHALL support an `invocation_mode` field in AGENT node configuration. When `invocation_mode: "tool"`, the target agent SHALL be registered as a callable tool in the parent agent's tool list during execution.
+The system SHALL support an `invocation_mode` field in AGENT node configuration. When `invocation_mode: "tool"`, the target agent SHALL be registered as a callable tool in the parent agent's tool list during execution, using an `AgentDefinition` for permission scoping when provided.
 
-#### Scenario: Agent exposed as tool
-- **WHEN** an AGENT node has config `{"agent_id": "uuid-of-specialist", "invocation_mode": "tool"}`
-- **THEN** the parent agent's tool list includes a tool named `agent_{specialist_name}` with a description derived from the specialist's persona
+#### Scenario: Agent exposed as tool with AgentDefinition
+- **WHEN** an AGENT node has config `{"agent_id": "uuid-of-specialist", "invocation_mode": "tool", "agent_definition": {"tools": ["web_search"], "context_mode": "isolated"}}`
+- **THEN** the parent agent's tool list includes a tool named `agent_{specialist_name}` with the AgentDefinition's tool filter and context isolation applied
 
-#### Scenario: Agent tool invocation
+#### Scenario: Agent exposed as tool without AgentDefinition (existing behavior)
+- **WHEN** an AGENT node has config `{"agent_id": "uuid-of-specialist", "invocation_mode": "tool"}` (no agent_definition)
+- **THEN** the parent agent's tool list includes a tool named `agent_{specialist_name}` with full tool inheritance (existing behavior unchanged)
+
+#### Scenario: Agent tool invocation with filtered tools
 - **WHEN** the parent LLM calls the `agent_{specialist_name}` tool with arguments `{"task": "analyze this data"}`
-- **THEN** the system executes the specialist agent with the task as input and returns the specialist's response as the tool result
+- **THEN** the system executes the specialist agent with only the tools specified in the AgentDefinition, not the specialist's full tool list
 
 ### Requirement: Context isolation per agent
 The system SHALL provide isolated execution context for each agent invocation. Each agent SHALL use its own system prompt (from persona field), tools, and knowledge bases as defined in its AgentModel.
@@ -43,3 +48,4 @@ The system SHALL provide isolated execution context for each agent invocation. E
 #### Scenario: Specialist agent uses own tools
 - **WHEN** agent "billing_specialist" has tools `["lookup_invoice", "process_refund"]` in its AgentModel
 - **THEN** only those tools are available during the billing_specialist's execution, not the parent agent's tools
+
