@@ -168,10 +168,11 @@ class EnginePort(ABC):
         messages: list[dict],
         channel_snapshot: dict,
         context: dict | None = None,
+        agent_definition: Any | None = None,
     ) -> dict:
         """Execute an agent by ID with isolated context (optional).
 
-        Multi-Agent capability — resolves the AgentModel, builds an isolated
+        Multi-Agent capability -- resolves the AgentModel, builds an isolated
         execution context (system prompt, tools, knowledge bases from the
         agent definition), invokes the LLM, and returns the response.
 
@@ -183,6 +184,8 @@ class EnginePort(ABC):
             messages: Conversation messages to pass as input.
             channel_snapshot: Read-only snapshot of current channel state.
             context: Optional execution context (session, parent agent, etc.).
+            agent_definition: Optional AgentDefinition for per-invocation overrides
+                (tool whitelist/blacklist, context mode, model override, etc.).
 
         Returns:
             Dict with keys: ``response`` (str), ``usage`` (dict), and

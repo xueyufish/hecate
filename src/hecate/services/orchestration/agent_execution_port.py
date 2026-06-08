@@ -48,6 +48,7 @@ class AgentExecutionPort(EnginePort):
         messages: list[dict],
         channel_snapshot: dict,
         context: dict | None = None,
+        agent_definition: Any | None = None,
     ) -> dict:
         """Execute an agent by ID with isolated context.
 
@@ -56,6 +57,7 @@ class AgentExecutionPort(EnginePort):
             messages: Conversation messages from parent graph.
             channel_snapshot: Read-only channel state snapshot.
             context: Optional execution context (node_id, etc.).
+            agent_definition: Optional AgentDefinition for per-invocation overrides.
 
         Returns:
             Dict with ``response``, ``usage``, and optionally ``tool_calls``.

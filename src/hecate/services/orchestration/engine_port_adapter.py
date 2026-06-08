@@ -110,6 +110,7 @@ class _ProductionEnginePort(EnginePort):
         messages: list[dict],
         channel_snapshot: dict,
         context: dict | None = None,
+        agent_definition: Any | None = None,
     ) -> dict:
         """Execute an agent by ID via AgentExecutionPort.
 
@@ -118,6 +119,7 @@ class _ProductionEnginePort(EnginePort):
             messages: Conversation messages from parent graph.
             channel_snapshot: Read-only channel state snapshot.
             context: Optional execution context.
+            agent_definition: Optional AgentDefinition for per-invocation overrides.
 
         Returns:
             Dict with response, usage, and optionally tool_calls.
@@ -125,7 +127,7 @@ class _ProductionEnginePort(EnginePort):
         from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
 
         port = AgentExecutionPort(self._db)
-        return await port.agent_execute(agent_id, messages, channel_snapshot, context)
+        return await port.agent_execute(agent_id, messages, channel_snapshot, context, agent_definition)
 
 
 def create_engine_port(
