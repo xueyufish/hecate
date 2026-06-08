@@ -42,12 +42,14 @@ class WorkingMemoryService:
     async def create_block(
         self,
         agent_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         data: MemoryBlockCreateSchema,
     ) -> MemoryBlockReadSchema:
         """Create a new memory block for an agent.
 
         Args:
             agent_id: The agent to create the block for.
+            workspace_id: The workspace for tenant isolation.
             data: Block creation data.
 
         Returns:
@@ -56,12 +58,12 @@ class WorkingMemoryService:
         Raises:
             ValueError: If a block with the same label already exists.
         """
-        # Check for duplicate label
-        existing = await self._get_by_label(agent_id, data.label)
+        existing = await self._get_by_label(agent_id, data.label, workspace_id)
         if existing is not None:
             raise ValueError(f"Memory block '{data.label}' already exists for agent {agent_id}")
 
         block = MemoryBlockModel(
+            workspace_id=workspace_id,
             agent_id=agent_id,
             label=data.label,
             content=data.content,
@@ -77,12 +79,14 @@ class WorkingMemoryService:
     async def get_block(
         self,
         agent_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         block_id: uuid.UUID,
     ) -> MemoryBlockReadSchema:
         """Get a memory block by ID.
 
         Args:
             agent_id: The agent that owns the block.
+            workspace_id: The workspace for tenant isolation.
             block_id: The block ID.
 
         Returns:
@@ -91,7 +95,7 @@ class WorkingMemoryService:
         Raises:
             ValueError: If block not found.
         """
-        block = await self._get_by_id(agent_id, block_id)
+        block = await self._get_by_id(agent_id, workspace_id, block_id)
         if block is None:
             raise ValueError(f"Memory block {block_id} not found")
         return MemoryBlockReadSchema.model_validate(block)
@@ -99,6 +103,7 @@ class WorkingMemoryService:
     async def update_block(
         self,
         agent_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         block_id: uuid.UUID,
         data: MemoryBlockUpdateSchema,
     ) -> MemoryBlockReadSchema:
@@ -106,6 +111,7 @@ class WorkingMemoryService:
 
         Args:
             agent_id: The agent that owns the block.
+            workspace_id: The workspace for tenant isolation.
             block_id: The block ID.
             data: Update data.
 
@@ -115,7 +121,7 @@ class WorkingMemoryService:
         Raises:
             ValueError: If block not found.
         """
-        block = await self._get_by_id(agent_id, block_id)
+        block = await self._get_by_id(agent_id, workspace_id, block_id)
         if block is None:
             raise ValueError(f"Memory block {block_id} not found")
 
@@ -133,12 +139,14 @@ class WorkingMemoryService:
     async def delete_block(
         self,
         agent_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         block_id: uuid.UUID,
     ) -> None:
         """Delete a memory block.
 
         Args:
             agent_id: The agent that owns the block.
+            workspace_id: The workspace for tenant isolation.
             block_id: The block ID.
 
         Raises:
@@ -146,7 +154,7 @@ class WorkingMemoryService:
         """
         from datetime import UTC, datetime
 
-        block = await self._get_by_id(agent_id, block_id)
+        block = await self._get_by_id(agent_id, workspace_id, block_id)
         if block is None:
             raise ValueError(f"Memory block {block_id} not found")
 
@@ -158,11 +166,13 @@ class WorkingMemoryService:
     async def list_blocks(
         self,
         agent_id: uuid.UUID,
+        workspace_id: uuid.UUID,
     ) -> list[MemoryBlockReadSchema]:
         """List all memory blocks for an agent.
 
         Args:
             agent_id: The agent to list blocks for.
+            workspace_id: The workspace for tenant isolation.
 
         Returns:
             List of blocks ordered by position.
@@ -171,6 +181,7 @@ class WorkingMemoryService:
             select(MemoryBlockModel)
             .where(
                 MemoryBlockModel.agent_id == agent_id,
+                MemoryBlockModel.workspace_id == workspace_id,
                 ~MemoryBlockModel.deleted,
             )
             .order_by(MemoryBlockModel.position.asc())
@@ -198,7 +209,6 @@ class WorkingMemoryService:
         if not blocks:
             return messages
 
-        # Build block messages
         block_messages = []
         for block in blocks:
             if block.content:
@@ -212,7 +222,6 @@ class WorkingMemoryService:
         if not block_messages:
             return messages
 
-        # Insert after system messages but before user messages
         insert_idx = 0
         for i, msg in enumerate(messages):
             if msg.get("role") == "system":
@@ -225,12 +234,14 @@ class WorkingMemoryService:
     async def _get_by_id(
         self,
         agent_id: uuid.UUID,
+        workspace_id: uuid.UUID,
         block_id: uuid.UUID,
     ) -> MemoryBlockModel | None:
-        """Get block by ID with agent ownership check."""
+        """Get block by ID with agent ownership and workspace check."""
         stmt = select(MemoryBlockModel).where(
             MemoryBlockModel.id == block_id,
             MemoryBlockModel.agent_id == agent_id,
+            MemoryBlockModel.workspace_id == workspace_id,
             ~MemoryBlockModel.deleted,
         )
         result = await self.db.execute(stmt)
@@ -240,10 +251,12 @@ class WorkingMemoryService:
         self,
         agent_id: uuid.UUID,
         label: str,
+        workspace_id: uuid.UUID,
     ) -> MemoryBlockModel | None:
-        """Get block by label within an agent."""
+        """Get block by label within an agent and workspace."""
         stmt = select(MemoryBlockModel).where(
             MemoryBlockModel.agent_id == agent_id,
+            MemoryBlockModel.workspace_id == workspace_id,
             MemoryBlockModel.label == label,
             ~MemoryBlockModel.deleted,
         )

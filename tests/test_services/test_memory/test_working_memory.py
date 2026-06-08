@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.models.memory import MemoryBlockCreateSchema, MemoryBlockReadSchema, MemoryBlockUpdateSchema
 from hecate.services.memory.working_memory import WorkingMemoryService
 
+_DEFAULT_WORKSPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 
 @pytest.mark.asyncio
 async def test_create_block(db_session: AsyncSession) -> None:
@@ -24,7 +26,7 @@ async def test_create_block(db_session: AsyncSession) -> None:
         limit=1000,
     )
 
-    result = await service.create_block(agent_id, data)
+    result = await service.create_block(agent_id, _DEFAULT_WORKSPACE, data)
 
     assert result.label == "persona"
     assert result.content == "You are a helpful assistant"
@@ -39,10 +41,10 @@ async def test_create_duplicate_label(db_session: AsyncSession) -> None:
 
     data = MemoryBlockCreateSchema(label="persona", content="First")
 
-    await service.create_block(agent_id, data)
+    await service.create_block(agent_id, _DEFAULT_WORKSPACE, data)
 
     with pytest.raises(ValueError, match="already exists"):
-        await service.create_block(agent_id, data)
+        await service.create_block(agent_id, _DEFAULT_WORKSPACE, data)
 
 
 @pytest.mark.asyncio
@@ -52,9 +54,9 @@ async def test_get_block(db_session: AsyncSession) -> None:
     agent_id = uuid.uuid4()
 
     data = MemoryBlockCreateSchema(label="persona", content="Test")
-    created = await service.create_block(agent_id, data)
+    created = await service.create_block(agent_id, _DEFAULT_WORKSPACE, data)
 
-    result = await service.get_block(agent_id, created.id)
+    result = await service.get_block(agent_id, _DEFAULT_WORKSPACE, created.id)
 
     assert result.id == created.id
     assert result.label == "persona"
@@ -66,7 +68,7 @@ async def test_get_block_not_found(db_session: AsyncSession) -> None:
     service = WorkingMemoryService(db_session)
 
     with pytest.raises(ValueError, match="not found"):
-        await service.get_block(uuid.uuid4(), uuid.uuid4())
+        await service.get_block(uuid.uuid4(), _DEFAULT_WORKSPACE, uuid.uuid4())
 
 
 @pytest.mark.asyncio
@@ -76,10 +78,10 @@ async def test_update_block(db_session: AsyncSession) -> None:
     agent_id = uuid.uuid4()
 
     data = MemoryBlockCreateSchema(label="persona", content="Original")
-    created = await service.create_block(agent_id, data)
+    created = await service.create_block(agent_id, _DEFAULT_WORKSPACE, data)
 
     update = MemoryBlockUpdateSchema(content="Updated content")
-    result = await service.update_block(agent_id, created.id, update)
+    result = await service.update_block(agent_id, _DEFAULT_WORKSPACE, created.id, update)
 
     assert result.content == "Updated content"
     assert result.label == "persona"
@@ -92,12 +94,12 @@ async def test_delete_block(db_session: AsyncSession) -> None:
     agent_id = uuid.uuid4()
 
     data = MemoryBlockCreateSchema(label="persona", content="Test")
-    created = await service.create_block(agent_id, data)
+    created = await service.create_block(agent_id, _DEFAULT_WORKSPACE, data)
 
-    await service.delete_block(agent_id, created.id)
+    await service.delete_block(agent_id, _DEFAULT_WORKSPACE, created.id)
 
     with pytest.raises(ValueError, match="not found"):
-        await service.get_block(agent_id, created.id)
+        await service.get_block(agent_id, _DEFAULT_WORKSPACE, created.id)
 
 
 @pytest.mark.asyncio
@@ -106,11 +108,17 @@ async def test_list_blocks(db_session: AsyncSession) -> None:
     service = WorkingMemoryService(db_session)
     agent_id = uuid.uuid4()
 
-    await service.create_block(agent_id, MemoryBlockCreateSchema(label="b", content="B", position=2))
-    await service.create_block(agent_id, MemoryBlockCreateSchema(label="a", content="A", position=1))
-    await service.create_block(agent_id, MemoryBlockCreateSchema(label="c", content="C", position=3))
+    await service.create_block(
+        agent_id, _DEFAULT_WORKSPACE, MemoryBlockCreateSchema(label="b", content="B", position=2)
+    )
+    await service.create_block(
+        agent_id, _DEFAULT_WORKSPACE, MemoryBlockCreateSchema(label="a", content="A", position=1)
+    )
+    await service.create_block(
+        agent_id, _DEFAULT_WORKSPACE, MemoryBlockCreateSchema(label="c", content="C", position=3)
+    )
 
-    blocks = await service.list_blocks(agent_id)
+    blocks = await service.list_blocks(agent_id, _DEFAULT_WORKSPACE)
 
     assert len(blocks) == 3
     assert blocks[0].label == "a"
@@ -131,6 +139,7 @@ async def test_inject_blocks(db_session: AsyncSession) -> None:
     blocks = [
         MemoryBlockReadSchema(
             id=uuid.uuid4(),
+            workspace_id=_DEFAULT_WORKSPACE,
             agent_id=uuid.uuid4(),
             label="persona",
             content="You are a coding expert",

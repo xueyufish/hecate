@@ -16,6 +16,8 @@ from hecate.models.agent import AgentModel
 from hecate.models.memory import MemoryBlockModel, MemoryModel
 from hecate.services.conversation import ConversationService
 
+_DEFAULT_WORKSPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 
 def _mock_llm_response(content: str = "Hi there!") -> MagicMock:
     """Create a mock LLM response object."""
@@ -57,6 +59,7 @@ async def agent_with_blocks(db_session: AsyncSession, agent_id: uuid.UUID) -> uu
     db_session.add(agent)
 
     block = MemoryBlockModel(
+        workspace_id=_DEFAULT_WORKSPACE,
         agent_id=agent_id,
         label="persona",
         content="You are a helpful coding assistant",
@@ -72,6 +75,7 @@ async def agent_with_blocks(db_session: AsyncSession, agent_id: uuid.UUID) -> uu
 async def user_with_memories(db_session: AsyncSession, user_id: str) -> str:
     """Create a user with L3 memories."""
     memory = MemoryModel(
+        workspace_id=_DEFAULT_WORKSPACE,
         content="User prefers Python over JavaScript",
         scope={"user_id": user_id},
         memory_type="semantic",

@@ -1,6 +1,7 @@
 """Memory management API endpoints.
 
-Provides endpoints for L1 working memory blocks and L3 user memories:
+Provides endpoints for L1 working memory blocks, L3 user memories,
+and L4 knowledge memories:
 
 **Memory Blocks (per agent):**
 - ``POST /api/agents/{id}/memory-blocks`` — Create memory block
@@ -13,6 +14,13 @@ Provides endpoints for L1 working memory blocks and L3 user memories:
 - ``POST /api/memory`` — Create memory
 - ``GET /api/memory`` — List/search memories
 - ``DELETE /api/memory/{id}`` — Delete memory
+
+**Knowledge Memories (per agent):**
+- ``POST /api/agents/{id}/knowledge`` — Create knowledge memory
+- ``GET /api/agents/{id}/knowledge`` — List knowledge memories
+- ``GET /api/agents/{id}/knowledge/{memory_id}`` — Get knowledge memory
+- ``DELETE /api/agents/{id}/knowledge/{memory_id}`` — Delete knowledge memory
+- ``POST /api/agents/{id}/knowledge/search`` — Search knowledge memories
 """
 
 from __future__ import annotations
@@ -21,21 +29,61 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.deps import get_db, verify_api_key
+from hecate.models.agent import AgentModel
 from hecate.models.memory import (
+    KnowledgeMemoryCreateSchema,
+    KnowledgeMemorySearchSchema,
     MemoryBlockCreateSchema,
     MemoryBlockUpdateSchema,
     MemoryCreateSchema,
 )
+from hecate.services.memory.knowledge_memory import KnowledgeMemoryService
 from hecate.services.memory.user_memory import UserMemoryService
 from hecate.services.memory.working_memory import WorkingMemoryService
 
 router = APIRouter()
 
+_ZERO_UUID = uuid.UUID(int=0)
 
-# --- Memory Block Endpoints ---
+
+async def _get_workspace_id() -> uuid.UUID:
+    """Get workspace ID from auth context.
+
+    P1 returns zero UUID (single-workspace mode). P3 will resolve
+    from the authenticated user's workspace membership.
+    """
+    return _ZERO_UUID
+
+
+async def _get_agent(db: AsyncSession, agent_id: uuid.UUID) -> AgentModel:
+    """Load an agent or raise 404.
+
+    Args:
+        db: Database session.
+        agent_id: Agent ID.
+
+    Returns:
+        The agent model.
+
+    Raises:
+        HTTPException: 404 if agent not found.
+    """
+    stmt = select(AgentModel).where(AgentModel.id == agent_id, ~AgentModel.deleted)
+    result = await db.execute(stmt)
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": f"Agent {agent_id} not found", "details": None}},
+        )
+    return agent
+
+
+# --- Memory Block Endpoints (L1) ---
 
 
 @router.post("/agents/{agent_id}/memory-blocks", status_code=status.HTTP_201_CREATED)
@@ -45,20 +93,12 @@ async def create_memory_block(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
-    """Create a new memory block for an agent.
-
-    Args:
-        agent_id: The agent to create the block for.
-        data: Block creation data.
-        db: The async database session.
-        api_key: The validated API key.
-
-    Returns:
-        dict: The created block data.
-    """
+    """Create a new memory block for an agent."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
     service = WorkingMemoryService(db)
     try:
-        result = await service.create_block(agent_id, data)
+        result = await service.create_block(agent_id, workspace_id, data)
         return result.model_dump()
     except ValueError as e:
         raise HTTPException(
@@ -73,18 +113,11 @@ async def list_memory_blocks(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> list[dict]:
-    """List all memory blocks for an agent.
-
-    Args:
-        agent_id: The agent to list blocks for.
-        db: The async database session.
-        api_key: The validated API key.
-
-    Returns:
-        list: List of memory block dicts ordered by position.
-    """
+    """List all memory blocks for an agent."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
     service = WorkingMemoryService(db)
-    blocks = await service.list_blocks(agent_id)
+    blocks = await service.list_blocks(agent_id, workspace_id)
     return [b.model_dump() for b in blocks]
 
 
@@ -95,23 +128,12 @@ async def get_memory_block(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
-    """Get a memory block by ID.
-
-    Args:
-        agent_id: The agent that owns the block.
-        block_id: The block ID.
-        db: The async database session.
-        api_key: The validated API key.
-
-    Returns:
-        dict: The block data.
-
-    Raises:
-        HTTPException: 404 if block not found.
-    """
+    """Get a memory block by ID."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
     service = WorkingMemoryService(db)
     try:
-        result = await service.get_block(agent_id, block_id)
+        result = await service.get_block(agent_id, workspace_id, block_id)
         return result.model_dump()
     except ValueError as e:
         raise HTTPException(
@@ -128,24 +150,12 @@ async def update_memory_block(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
-    """Update a memory block.
-
-    Args:
-        agent_id: The agent that owns the block.
-        block_id: The block ID.
-        data: Update data.
-        db: The async database session.
-        api_key: The validated API key.
-
-    Returns:
-        dict: The updated block data.
-
-    Raises:
-        HTTPException: 404 if block not found.
-    """
+    """Update a memory block."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
     service = WorkingMemoryService(db)
     try:
-        result = await service.update_block(agent_id, block_id, data)
+        result = await service.update_block(agent_id, workspace_id, block_id, data)
         return result.model_dump()
     except ValueError as e:
         raise HTTPException(
@@ -161,20 +171,12 @@ async def delete_memory_block(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> None:
-    """Delete a memory block.
-
-    Args:
-        agent_id: The agent that owns the block.
-        block_id: The block ID.
-        db: The async database session.
-        api_key: The validated API key.
-
-    Raises:
-        HTTPException: 404 if block not found.
-    """
+    """Delete a memory block."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
     service = WorkingMemoryService(db)
     try:
-        await service.delete_block(agent_id, block_id)
+        await service.delete_block(agent_id, workspace_id, block_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -182,7 +184,7 @@ async def delete_memory_block(
         ) from e
 
 
-# --- User Memory Endpoints ---
+# --- User Memory Endpoints (L3) ---
 
 
 @router.post("/memory", status_code=status.HTTP_201_CREATED)
@@ -191,18 +193,10 @@ async def create_memory(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
-    """Create a new user memory.
-
-    Args:
-        data: Memory creation data.
-        db: The async database session.
-        api_key: The validated API key.
-
-    Returns:
-        dict: The created memory data.
-    """
+    """Create a new user memory."""
+    workspace_id = await _get_workspace_id()
     service = UserMemoryService(db)
-    result = await service.store_memory(data)
+    result = await service.store_memory(workspace_id, data)
     return result.model_dump()
 
 
@@ -214,20 +208,11 @@ async def list_memories(
     min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
     limit: int = Query(50, ge=1, le=200, description="Max results"),
 ) -> list[dict]:
-    """List/search user memories.
-
-    Args:
-        db: The async database session.
-        api_key: The validated API key.
-        memory_type: Optional type filter.
-        min_importance: Minimum importance threshold.
-        limit: Maximum results.
-
-    Returns:
-        list: List of memory dicts.
-    """
+    """List/search user memories."""
+    workspace_id = await _get_workspace_id()
     service = UserMemoryService(db)
     memories = await service.list_memories(
+        workspace_id=workspace_id,
         memory_type=memory_type,
         min_importance=min_importance,
         limit=limit,
@@ -241,19 +226,11 @@ async def delete_memory(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> None:
-    """Delete a user memory.
-
-    Args:
-        memory_id: The memory to delete.
-        db: The async database session.
-        api_key: The validated API key.
-
-    Raises:
-        HTTPException: 404 if memory not found.
-    """
+    """Delete a user memory."""
+    workspace_id = await _get_workspace_id()
     service = UserMemoryService(db)
     try:
-        await service.delete_memory(memory_id)
+        await service.delete_memory(workspace_id, memory_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -273,21 +250,11 @@ async def search_user_memories(
     top_k: int = Query(5, ge=1, le=20, description="Max results"),
     min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
 ) -> dict:
-    """Semantic search for user memories.
-
-    Args:
-        user_id: The user to search memories for.
-        q: Search query string.
-        db: The async database session.
-        api_key: The validated API key.
-        top_k: Maximum number of results.
-        min_importance: Minimum importance threshold.
-
-    Returns:
-        dict with items list of matching memories.
-    """
+    """Semantic search for user memories."""
+    workspace_id = await _get_workspace_id()
     service = UserMemoryService(db)
     memories = await service.retrieve_memories(
+        workspace_id=workspace_id,
         query=q,
         scope={"user_id": str(user_id)},
         top_k=top_k,
@@ -310,22 +277,11 @@ async def list_user_memories(
     limit: int = Query(50, ge=1, le=200, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
 ) -> dict:
-    """List memories for a specific user.
-
-    Args:
-        user_id: The user to list memories for.
-        db: The async database session.
-        api_key: The validated API key.
-        memory_type: Optional type filter.
-        min_importance: Minimum importance threshold.
-        limit: Maximum results.
-        offset: Pagination offset.
-
-    Returns:
-        dict with items list and total count.
-    """
+    """List memories for a specific user."""
+    workspace_id = await _get_workspace_id()
     service = UserMemoryService(db)
     memories = await service.list_memories(
+        workspace_id=workspace_id,
         scope={"user_id": str(user_id)},
         memory_type=memory_type,
         min_importance=min_importance,
@@ -348,21 +304,141 @@ async def get_compression_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
 ) -> dict:
-    """Get compression status for a session.
-
-    Returns metadata about compression operations applied to this session.
-
-    Args:
-        session_id: The session to check.
-        db: The async database session.
-        api_key: The validated API key.
-
-    Returns:
-        dict with compression metadata.
-    """
+    """Get compression status for a session."""
     return {
         "session_id": str(session_id),
         "compression_applied": False,
         "levels_available": ["snip", "microcompact", "autocompact"],
         "message": "Compression status tracking will be implemented with session persistence.",
+    }
+
+
+# --- Knowledge Memory Endpoints (L4) ---
+
+
+@router.post("/agents/{agent_id}/knowledge", status_code=status.HTTP_201_CREATED)
+async def create_knowledge_memory(
+    agent_id: uuid.UUID,
+    data: KnowledgeMemoryCreateSchema,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Create a new knowledge memory for an agent."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
+    service = KnowledgeMemoryService(db)
+    result = await service.insert_knowledge(
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        content=data.content,
+        tags=data.tags,
+        importance=data.importance,
+        user_id=data.user_id,
+        source=data.source,
+    )
+    return result.model_dump()
+
+
+@router.get("/agents/{agent_id}/knowledge")
+async def list_knowledge_memories(
+    agent_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+    tags: str | None = Query(None, description="Comma-separated tag filter"),
+    limit: int = Query(20, ge=1, le=100, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+) -> dict:
+    """List knowledge memories for an agent."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
+    service = KnowledgeMemoryService(db)
+    tag_list = tags.split(",") if tags else None
+    memories, total = await service.list_knowledge(
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        tags=tag_list,
+        limit=limit,
+        offset=offset,
+    )
+    return {
+        "items": [m.model_dump() for m in memories],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
+
+
+@router.get("/agents/{agent_id}/knowledge/{memory_id}")
+async def get_knowledge_memory(
+    agent_id: uuid.UUID,
+    memory_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Get a specific knowledge memory."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
+    service = KnowledgeMemoryService(db)
+    try:
+        result = await service.get_knowledge(agent_id, workspace_id, memory_id)
+        return result.model_dump()
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
+        ) from e
+
+
+@router.delete("/agents/{agent_id}/knowledge/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_knowledge_memory(
+    agent_id: uuid.UUID,
+    memory_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> None:
+    """Delete a knowledge memory."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
+    service = KnowledgeMemoryService(db)
+    try:
+        await service.delete_knowledge(agent_id, workspace_id, memory_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
+        ) from e
+
+
+@router.post("/agents/{agent_id}/knowledge/search")
+async def search_knowledge_memories(
+    agent_id: uuid.UUID,
+    data: KnowledgeMemorySearchSchema,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> dict:
+    """Search knowledge memories with hybrid search."""
+    agent = await _get_agent(db, agent_id)
+    workspace_id = agent.workspace_id
+    service = KnowledgeMemoryService(db)
+    results = await service.search_knowledge(
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+        query=data.query,
+        top_k=data.top_k,
+        tags=data.tags,
+        user_id=data.user_id,
+        mode=data.mode,
+    )
+    return {
+        "items": [
+            {
+                "memory": r.memory.model_dump(),
+                "score": r.score,
+                "dense_score": r.dense_score,
+                "sparse_score": r.sparse_score,
+            }
+            for r in results
+        ],
+        "query": data.query,
+        "total": len(results),
     }

@@ -21,6 +21,8 @@ from hecate.services.context.provider_shaping import get_strategy
 from hecate.services.context.types import AssembledContext, SessionMeta, TaskPhase
 from hecate.services.conversation import ConversationService
 
+_DEFAULT_WORKSPACE = uuid4()
+
 
 class TestFullPipelineIntegration:
     """Integration tests for the full context engineering pipeline."""
@@ -303,6 +305,7 @@ class TestMemoryInjectionIntegration:
         blocks = [
             MemoryBlockReadSchema(
                 id=uuid4(),
+                workspace_id=_DEFAULT_WORKSPACE,
                 agent_id=uuid4(),
                 label="persona",
                 content="Expert Python developer",
@@ -343,6 +346,7 @@ class TestMemoryInjectionIntegration:
         memories = [
             MemoryReadSchema(
                 id=uuid4(),
+                workspace_id=_DEFAULT_WORKSPACE,
                 content="User works at Google",
                 scope={"user_id": "u1"},
                 memory_type="semantic",
@@ -388,6 +392,7 @@ class TestMemoryInjectionIntegration:
         blocks = [
             MemoryBlockReadSchema(
                 id=uuid4(),
+                workspace_id=_DEFAULT_WORKSPACE,
                 agent_id=uuid4(),
                 label="context",
                 content="Additional context that takes up tokens in the budget window",

@@ -141,7 +141,10 @@ class ConversationService:
         memory_blocks: list[MemoryBlockReadSchema] | None = None
         if db and agent_id:
             wm_service = WorkingMemoryService(db)
-            memory_blocks = await wm_service.list_blocks(uuid.UUID(agent_id))
+            memory_blocks = await wm_service.list_blocks(
+                uuid.UUID(agent_id),
+                uuid.UUID(int=0),
+            )
 
         # L3 user memory: retrieve relevant memories
         user_memories: list[MemoryReadSchema] | None = None
@@ -149,6 +152,7 @@ class ConversationService:
             um_service = UserMemoryService(db)
             query_text = messages[-1].get("content", "") if messages else ""
             user_memories = await um_service.retrieve_memories(
+                workspace_id=uuid.UUID(int=0),
                 query=query_text,
                 scope={"user_id": user_id},
                 top_k=5,
@@ -506,11 +510,12 @@ class ConversationService:
             facts = await um_service.extract_facts(messages)
             for fact in facts:
                 await um_service.store_memory(
-                    MemoryCreateSchema(
+                    workspace_id=uuid.UUID(int=0),
+                    data=MemoryCreateSchema(
                         content=fact,
                         scope={"user_id": user_id},
                         memory_type="semantic",
-                    )
+                    ),
                 )
         except Exception:
             logger.warning("Failed to extract user memories", exc_info=True)

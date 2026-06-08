@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.memory import MemoryCreateSchema, MemoryModel, MemoryReadSchema
@@ -36,12 +36,14 @@ class UserMemoryService:
 
     async def store_memory(
         self,
+        workspace_id: uuid.UUID,
         data: MemoryCreateSchema,
         embedding: list[float] | None = None,
     ) -> MemoryReadSchema:
         """Store a new memory with optional embedding.
 
         Args:
+            workspace_id: The workspace for tenant isolation.
             data: Memory creation data.
             embedding: Optional vector embedding. If None, generates a mock embedding.
 
@@ -52,6 +54,7 @@ class UserMemoryService:
             embedding = self._generate_mock_embedding(data.content)
 
         memory = MemoryModel(
+            workspace_id=workspace_id,
             content=data.content,
             scope=data.scope,
             memory_type=data.memory_type,
@@ -66,6 +69,7 @@ class UserMemoryService:
 
     async def retrieve_memories(
         self,
+        workspace_id: uuid.UUID,
         query: str,
         scope: dict[str, Any] | None = None,
         top_k: int = 5,
@@ -74,6 +78,7 @@ class UserMemoryService:
         """Retrieve relevant memories by semantic similarity.
 
         Args:
+            workspace_id: The workspace for tenant isolation.
             query: The query to search for.
             scope: Optional scope filter (user_id, agent_id, session_id).
             top_k: Maximum number of results.
@@ -82,16 +87,17 @@ class UserMemoryService:
         Returns:
             List of relevant memories ordered by similarity.
         """
-        query_embedding = self._generate_mock_embedding(query)  # noqa: F841
+        _query_embedding = self._generate_mock_embedding(query)  # noqa: F841
 
-        # Build query conditions
-        conditions = [~MemoryModel.deleted]
+        conditions = [
+            ~MemoryModel.deleted,
+            MemoryModel.workspace_id == workspace_id,
+        ]
 
         if min_importance > 0:
             conditions.append(MemoryModel.importance >= min_importance)
 
         if scope:
-            # Filter by scope fields
             if "user_id" in scope:
                 conditions.append(MemoryModel.scope["user_id"].as_string() == str(scope["user_id"]))
             if "agent_id" in scope:
@@ -102,13 +108,11 @@ class UserMemoryService:
         result = await self.db.execute(stmt)
         memories = result.scalars().all()
 
-        # Update access count for retrieved memories
         for memory in memories:
             memory.access_count += 1
 
         await self.db.flush()
 
-        # Refresh to get updated_at
         for memory in memories:
             await self.db.refresh(memory)
 
@@ -116,12 +120,14 @@ class UserMemoryService:
 
     async def update_importance(
         self,
+        workspace_id: uuid.UUID,
         memory_id: uuid.UUID,
         boost: float = 0.1,
     ) -> float:
         """Update memory importance score.
 
         Args:
+            workspace_id: The workspace for tenant isolation.
             memory_id: The memory to update.
             boost: Amount to boost importance (can be negative).
 
@@ -131,7 +137,7 @@ class UserMemoryService:
         Raises:
             ValueError: If memory not found.
         """
-        memory = await self._get_by_id(memory_id)
+        memory = await self._get_by_id(workspace_id, memory_id)
         if memory is None:
             raise ValueError(f"Memory {memory_id} not found")
 
@@ -142,16 +148,21 @@ class UserMemoryService:
         logger.debug(f"Updated memory {memory_id} importance to {new_importance}")
         return new_importance
 
-    async def delete_memory(self, memory_id: uuid.UUID) -> None:
+    async def delete_memory(
+        self,
+        workspace_id: uuid.UUID,
+        memory_id: uuid.UUID,
+    ) -> None:
         """Soft delete a memory.
 
         Args:
+            workspace_id: The workspace for tenant isolation.
             memory_id: The memory to delete.
 
         Raises:
             ValueError: If memory not found.
         """
-        memory = await self._get_by_id(memory_id)
+        memory = await self._get_by_id(workspace_id, memory_id)
         if memory is None:
             raise ValueError(f"Memory {memory_id} not found")
 
@@ -162,6 +173,7 @@ class UserMemoryService:
 
     async def list_memories(
         self,
+        workspace_id: uuid.UUID,
         scope: dict[str, Any] | None = None,
         memory_type: str | None = None,
         min_importance: float = 0.0,
@@ -170,6 +182,7 @@ class UserMemoryService:
         """List memories with optional filters.
 
         Args:
+            workspace_id: The workspace for tenant isolation.
             scope: Optional scope filter.
             memory_type: Optional type filter.
             min_importance: Minimum importance threshold.
@@ -178,7 +191,10 @@ class UserMemoryService:
         Returns:
             List of memories.
         """
-        conditions = [~MemoryModel.deleted]
+        conditions = [
+            ~MemoryModel.deleted,
+            MemoryModel.workspace_id == workspace_id,
+        ]
 
         if memory_type:
             conditions.append(MemoryModel.memory_type == memory_type)
@@ -195,6 +211,29 @@ class UserMemoryService:
         result = await self.db.execute(stmt)
         memories = result.scalars().all()
         return [MemoryReadSchema.model_validate(m) for m in memories]
+
+    async def count_memories(
+        self,
+        workspace_id: uuid.UUID,
+    ) -> int:
+        """Count total non-deleted memories in a workspace.
+
+        Args:
+            workspace_id: The workspace for tenant isolation.
+
+        Returns:
+            Total count.
+        """
+        stmt = (
+            select(func.count())
+            .select_from(MemoryModel)
+            .where(
+                ~MemoryModel.deleted,
+                MemoryModel.workspace_id == workspace_id,
+            )
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one()
 
     async def extract_facts(
         self,
@@ -221,7 +260,6 @@ class UserMemoryService:
             if not isinstance(content, str):
                 continue
 
-            # Look for preference/fact patterns
             content_lower = content.lower()
             if any(
                 indicator in content_lower
@@ -258,10 +296,11 @@ class UserMemoryService:
         dense = dense + [0.0] * (1024 - len(dense))
         return dense[:1024]
 
-    async def _get_by_id(self, memory_id: uuid.UUID) -> MemoryModel | None:
-        """Get memory by ID."""
+    async def _get_by_id(self, workspace_id: uuid.UUID, memory_id: uuid.UUID) -> MemoryModel | None:
+        """Get memory by ID with workspace check."""
         stmt = select(MemoryModel).where(
             MemoryModel.id == memory_id,
+            MemoryModel.workspace_id == workspace_id,
             ~MemoryModel.deleted,
         )
         result = await self.db.execute(stmt)

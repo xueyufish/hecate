@@ -9,6 +9,8 @@ from hecate.services.context.assembler import ContextAssembler
 from hecate.services.context.budget import BudgetManager
 from hecate.services.context.types import SessionMeta
 
+_DEFAULT_WORKSPACE = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
 
 class TestContextAssemblerMemory:
     """Tests for ContextAssembler with memory injection."""
@@ -26,6 +28,7 @@ class TestContextAssemblerMemory:
         blocks = [
             MemoryBlockReadSchema(
                 id=uuid.uuid4(),
+                workspace_id=_DEFAULT_WORKSPACE,
                 agent_id=uuid.uuid4(),
                 label="persona",
                 content="You are a coding expert",
@@ -67,6 +70,7 @@ class TestContextAssemblerMemory:
         memories = [
             MemoryReadSchema(
                 id=uuid.uuid4(),
+                workspace_id=_DEFAULT_WORKSPACE,
                 content="User prefers Python",
                 scope={"user_id": "user1"},
                 memory_type="semantic",
@@ -109,6 +113,7 @@ class TestContextAssemblerMemory:
         blocks = [
             MemoryBlockReadSchema(
                 id=uuid.uuid4(),
+                workspace_id=_DEFAULT_WORKSPACE,
                 agent_id=uuid.uuid4(),
                 label="persona",
                 content="Expert coder",
@@ -123,6 +128,7 @@ class TestContextAssemblerMemory:
         memories = [
             MemoryReadSchema(
                 id=uuid.uuid4(),
+                workspace_id=_DEFAULT_WORKSPACE,
                 content="User likes Python",
                 scope={},
                 memory_type="semantic",
