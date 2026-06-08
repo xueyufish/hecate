@@ -753,3 +753,212 @@ def build_broadcast_pipeline(
         edges=edges,
         entry=ordered_ids[0],
     )
+
+
+def build_negotiation_graph(
+    proposer_model: str,
+    responder_model: str,
+    proposer_prompt: str = "You are a proposer. Make a proposal for the given task.",
+    responder_prompt: str = (
+        "You are a responder. Evaluate proposals and respond with "
+        "'accepted' or a counter-proposal. Set agreement_status to "
+        "'accepted' when you agree, or 'counter' for counter-proposal."
+    ),
+    max_rounds: int = 5,
+) -> GraphConfig:
+    """Build a negotiation graph: proposer → responder → check agreement loop.
+
+    Two agents negotiate via a shared ``negotiation_channel``. The responder
+    sets ``agreement_status`` to signal acceptance or counter-proposal. A
+    condition node checks the status and either terminates or loops back.
+
+    **Architecture pattern:**
+
+    ::
+
+        [__start__] → [proposer] → [responder] → [check_agreement]
+                                                         │
+                                              (accepted)  │  (counter)
+                                                 ▼        │
+                                              [__end__]   │
+                                                         │
+                                                ←←←←←←←←┘
+
+    **State channels:**
+    - ``messages`` (TOPIC): accumulates all negotiation turns.
+    - ``agreement_status`` (LAST_VALUE): "accepted" or "counter".
+    - ``negotiation_round`` (LAST_VALUE): round counter for max_rounds guard.
+
+    Args:
+        proposer_model: Model for the proposer node.
+        responder_model: Model for the responder node.
+        proposer_prompt: System prompt for the proposer.
+        responder_prompt: System prompt for the responder.
+        max_rounds: Maximum negotiation rounds before forced termination.
+
+    Returns:
+        A GraphConfig ready for compilation and execution.
+    """
+    nodes = {
+        "proposer": NodeConfig(
+            id="proposer",
+            type=NodeType.AGENT,
+            config={
+                "model": proposer_model,
+                "system_prompt": proposer_prompt,
+                "channels": {
+                    "readable": ["messages", "agreement_status"],
+                    "writable": ["messages", "negotiation_channel"],
+                },
+            },
+        ),
+        "responder": NodeConfig(
+            id="responder",
+            type=NodeType.AGENT,
+            config={
+                "model": responder_model,
+                "system_prompt": responder_prompt,
+                "channels": {
+                    "readable": ["messages", "negotiation_channel"],
+                    "writable": ["messages", "agreement_status"],
+                },
+            },
+        ),
+        "check_agreement": NodeConfig(
+            id="check_agreement",
+            type=NodeType.CONDITION,
+            config={"expression": "agreement_status == 'accepted'"},
+        ),
+    }
+
+    edges = [
+        Edge(source="proposer", target="responder"),
+        Edge(source="responder", target="check_agreement"),
+        Edge(source="check_agreement", target={"true": "__end__", "false": "proposer"}),
+    ]
+
+    state = {
+        "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
+        "agreement_status": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+        "negotiation_channel": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
+        "negotiation_round": ChannelDef(type=ChannelType.LAST_VALUE, default=0),
+    }
+
+    return GraphConfig(
+        version="1.0",
+        name="negotiation",
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry="proposer",
+    )
+
+
+def build_debate_graph(
+    debater_a_model: str,
+    debater_b_model: str,
+    debater_a_prompt: str = "You are Debater A. Present clear, evidence-based arguments.",
+    debater_b_prompt: str = "You are Debater B. Present counter-arguments with supporting reasoning.",
+    judge_model: str | None = None,
+    judge_prompt: str = ("You are a debate judge. Review all arguments and deliver a balanced verdict."),
+    rounds: int = 3,
+) -> GraphConfig:
+    """Build a debate graph: alternating arguments with optional judge evaluation.
+
+    Two debaters take turns presenting arguments and rebuttals. After all
+    rounds, an optional judge reviews the debate and produces a verdict.
+
+    **Architecture pattern (with judge):**
+
+    ::
+
+        [__start__] → [debater_a] → [debater_b] → [check_rounds]
+                                                       │
+                                          (continue)   │  (done)
+                                              ▼        │
+                                        [debater_a]    │
+                                              ↑        │
+                                              └────────┘
+                                              │
+                                              ▼
+                                          [judge] → [__end__]
+
+    **State channels:**
+    - ``messages`` (TOPIC): accumulates all debate arguments.
+    - ``debate_round`` (LAST_VALUE): current round counter.
+    - ``max_debate_rounds`` (LAST_VALUE): total rounds limit.
+
+    Args:
+        debater_a_model: Model for Debater A.
+        debater_b_model: Model for Debater B.
+        debater_a_prompt: System prompt for Debater A.
+        debater_b_prompt: System prompt for Debater B.
+        judge_model: Optional model for the judge. None = no judge.
+        judge_prompt: System prompt for the judge (unused if no judge).
+        rounds: Number of debate rounds.
+
+    Returns:
+        A GraphConfig ready for compilation and execution.
+    """
+    nodes: dict[str, NodeConfig] = {
+        "debater_a": NodeConfig(
+            id="debater_a",
+            type=NodeType.AGENT,
+            config={
+                "model": debater_a_model,
+                "system_prompt": debater_a_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        ),
+        "debater_b": NodeConfig(
+            id="debater_b",
+            type=NodeType.AGENT,
+            config={
+                "model": debater_b_model,
+                "system_prompt": debater_b_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        ),
+        "check_rounds": NodeConfig(
+            id="check_rounds",
+            type=NodeType.CONDITION,
+            config={"expression": "debate_round < max_debate_rounds"},
+        ),
+    }
+
+    if judge_model is not None:
+        nodes["judge"] = NodeConfig(
+            id="judge",
+            type=NodeType.AGENT,
+            config={
+                "model": judge_model,
+                "system_prompt": judge_prompt,
+                "channels": {"readable": ["messages"], "writable": ["messages"]},
+            },
+        )
+
+    debate_done_target = "judge" if judge_model is not None else "__end__"
+
+    edges = [
+        Edge(source="debater_a", target="debater_b"),
+        Edge(source="debater_b", target="check_rounds"),
+        Edge(source="check_rounds", target={"true": "debater_a", "false": debate_done_target}),
+    ]
+
+    if judge_model is not None:
+        edges.append(Edge(source="judge", target="__end__"))
+
+    state = {
+        "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
+        "debate_round": ChannelDef(type=ChannelType.LAST_VALUE, default=0),
+        "max_debate_rounds": ChannelDef(type=ChannelType.LAST_VALUE, default=rounds),
+    }
+
+    return GraphConfig(
+        version="1.0",
+        name="debate",
+        state=state,
+        nodes=nodes,
+        edges=edges,
+        entry="debater_a",
+    )
