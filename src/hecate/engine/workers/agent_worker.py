@@ -82,11 +82,13 @@ class AgentWorker(Worker):
                     context={"node_id": node_id, "parent_channel": channel_snapshot},
                 )
             elif self._port is not None:
+                agent_definition = node_config.get("agent_definition")
                 result = await self._port.agent_execute(
                     agent_id=agent_id,
                     messages=messages,
                     channel_snapshot=channel_snapshot,
                     context={"node_id": node_id},
+                    agent_definition=agent_definition,
                 )
             else:
                 return WorkerResult(

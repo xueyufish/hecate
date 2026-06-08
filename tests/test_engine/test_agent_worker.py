@@ -19,6 +19,7 @@ class MockAgentPort(EnginePort):
         self._should_fail = should_fail
         self.last_agent_id: uuid.UUID | None = None
         self.last_messages: list[dict] | None = None
+        self.last_agent_definition: Any | None = None
 
     async def agent_execute(
         self,
@@ -26,11 +27,13 @@ class MockAgentPort(EnginePort):
         messages: list[dict],
         channel_snapshot: dict,
         context: dict | None = None,
+        agent_definition: Any | None = None,
     ) -> dict:
         if self._should_fail:
             raise ValueError(f"Agent {agent_id} not found")
         self.last_agent_id = agent_id
         self.last_messages = messages
+        self.last_agent_definition = agent_definition
         return {"response": self._response, "usage": {"tokens": 42}}
 
     async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
@@ -170,3 +173,27 @@ async def test_agent_worker_uuid_object():
 
     assert result.error is None
     assert port.last_agent_id == agent_id
+
+
+async def test_agent_worker_forwards_agent_definition():
+    """AgentWorker passes agent_definition from node_config to port.agent_execute."""
+    from hecate.engine.agent_tool import AgentDefinition
+
+    agent_id = uuid.uuid4()
+    port = MockAgentPort()
+    worker = AgentWorker(port=port)
+    definition = AgentDefinition(
+        agent_id=agent_id,
+        description="test agent",
+        tools=["search"],
+        context_mode="isolated",
+    )
+
+    result = await worker.execute(
+        node_id="agent_1",
+        node_config={"agent_id": str(agent_id), "agent_definition": definition},
+        channel_snapshot={"messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert result.error is None
+    assert port.last_agent_definition is definition
