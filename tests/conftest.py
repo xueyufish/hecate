@@ -31,6 +31,7 @@ from hecate.models import (  # noqa: F401
     checkpoint,
     conversation,
     document,
+    evaluation,
     evidence,
     knowledge,
     memory,

@@ -52,6 +52,7 @@ rag = [
     "docling>=2.0",
     "FlagEmbedding>=1.2",
     "minio>=7.2",
+    "ragas>=0.2.0",
 ]
 security = [
     "llm-guard>=0.3.0",
