@@ -2,7 +2,7 @@
 
 ## Overview
 
-Provides REST API endpoints for working memory block CRUD, user memory view/search, and compression status query.
+Provides REST API endpoints for working memory block CRUD, user memory view/search, compression status query, and L4 knowledge memory management.
 
 ## Requirements
 
@@ -29,6 +29,18 @@ Provides REST API endpoints for working memory block CRUD, user memory view/sear
 - Agent memory blocks are only accessible to the Agent's owner
 - User memories are only accessible to the user themselves
 
+### REQ-5: L4 Knowledge Memory Endpoints
+
+- `GET /api/agents/{agent_id}/knowledge` — List knowledge memories with optional `?tags=policy&limit=20&offset=0`
+- `POST /api/agents/{agent_id}/knowledge/search` — Hybrid search with `{"query": "...", "top_k": 5, "tags": ["policy"], "mode": "hybrid"}`
+- `POST /api/agents/{agent_id}/knowledge` — Create knowledge memory with `{"content": "...", "tags": [...], "importance": 0.8}`, stores in PostgreSQL + Qdrant
+- `DELETE /api/agents/{agent_id}/knowledge/{memory_id}` — Soft-delete in PostgreSQL, remove from Qdrant
+
+### REQ-6: Workspace Isolation
+
+- All existing memory endpoints enforce workspace isolation via `workspace_id` resolved from the agent (for L1) or auth context (for L3)
+- `workspace_id` is a first-class query parameter in all service layer methods
+
 ## Scenarios
 
 ### Scenario 1: Manage Working Memory Blocks
@@ -54,4 +66,29 @@ Then Return result list containing that memory
 Given Session has gone through 3 compressions
 When GET /api/sessions/{session_id}/compression
 Then Return compression record list [{level: "snip", tokens_saved: 1200, timestamp: "..."}, ...]
+```
+
+### Scenario 4: Manage Knowledge Memories
+
+```
+Given Agent "assistant" (agent_id=abc) has knowledge memory enabled
+When POST /api/agents/abc/knowledge {"content": "Company policy: 2FA required for all accounts", "tags": ["policy", "security"], "importance": 0.9}
+Then Return 201 + created knowledge memory details
+And Agent can retrieve this knowledge via search
+```
+
+### Scenario 5: Search Knowledge Memories
+
+```
+Given Agent has 10 stored knowledge memories
+When POST /api/agents/abc/knowledge/search {"query": "security policy", "top_k": 5}
+Then Return scored search results from Qdrant hybrid search
+```
+
+### Scenario 6: Workspace Isolation on Memory Blocks
+
+```
+Given Agent "assistant" belongs to workspace "ws-1"
+When GET /api/agents/abc/memory/blocks
+Then Only blocks where workspace_id matches the agent's workspace are returned
 ```
