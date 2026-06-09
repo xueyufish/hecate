@@ -25,9 +25,11 @@ Provides REST API endpoints for working memory block CRUD, user memory view/sear
 
 ### REQ-4: Authentication & Authorization
 
-- All endpoints require API Key authentication (reuse `verify_api_key` dependency)
-- Agent memory blocks are only accessible to the Agent's owner
-- User memories are only accessible to the user themselves
+- All endpoints SHALL require authentication via `get_auth_context()` dependency, replacing the previous `verify_api_key` dependency
+- Agent memory blocks SHALL be accessible to users with `editor` or `admin` role in the agent's workspace
+- User memories SHALL only be accessible to the user themselves
+- workspace_id for memory operations SHALL be resolved from the authenticated workspace context (JWT claims or API key scope), not from request parameters
+- System-scope API keys SHALL bypass workspace ownership checks
 
 ### REQ-5: L4 Knowledge Memory Endpoints
 
@@ -38,8 +40,10 @@ Provides REST API endpoints for working memory block CRUD, user memory view/sear
 
 ### REQ-6: Workspace Isolation
 
-- All existing memory endpoints enforce workspace isolation via `workspace_id` resolved from the agent (for L1) or auth context (for L3)
-- `workspace_id` is a first-class query parameter in all service layer methods
+- All existing memory endpoints SHALL enforce workspace isolation via `workspace_id` resolved from the auth context, not from agent lookup or request parameter
+- `workspace_id` SHALL be resolved automatically by the `get_auth_context()` dependency
+- Service layer methods SHALL receive `workspace_id` from the auth context, not from direct parameters
+- Queries SHALL include a `workspace_id` filter matching the authenticated workspace
 
 ## Scenarios
 
