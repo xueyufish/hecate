@@ -4,10 +4,16 @@ Provides common dependencies used across API endpoints:
 - Database session management (re-exports ``get_db``)
 - Dual authentication: JWT Bearer Token (user) + API Key (service)
 - Current Agent retrieval by path parameter
+
+.. deprecated::
+    The ``verify_api_key`` and ``get_current_user_id`` functions are
+    deprecated. Use ``get_auth_context`` from ``deps_workspace`` instead
+    which returns a full ``AuthContext`` with workspace_id, role, etc.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Annotated
 
@@ -22,6 +28,8 @@ from hecate.core.database import get_db
 from hecate.models.agent import AgentModel
 from hecate.services.auth.token import decode_access_token
 
+logger = logging.getLogger(__name__)
+
 security_scheme = HTTPBearer()
 
 
@@ -29,6 +37,9 @@ async def verify_api_key(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
 ) -> str:
     """Verify the request via API Key or JWT Bearer token.
+
+    .. deprecated::
+        Use ``get_auth_context`` from ``deps_workspace`` instead.
 
     Accepts both authentication methods for backward compatibility:
     - API Key: ``Authorization: Bearer <hecate-api-key>``
@@ -46,6 +57,7 @@ async def verify_api_key(
     token = credentials.credentials
 
     if token in settings.api_keys_list:
+        logger.warning("verify_api_key with env-var API key is deprecated. Use get_auth_context instead.")
         return token
 
     try:
@@ -71,6 +83,9 @@ async def get_current_user_id(
 ) -> uuid.UUID:
     """Extract the user ID from a JWT Bearer access token or API key.
 
+    .. deprecated::
+        Use ``get_auth_context`` from ``deps_workspace`` instead.
+
     Tries JWT first; falls back to a placeholder UUID for API key auth.
 
     Returns:
@@ -90,6 +105,7 @@ async def get_current_user_id(
 
     # Fallback to API Key — return a system placeholder
     if token in settings.api_keys_list:
+        logger.warning("get_current_user_id with env-var API key is deprecated. Use get_auth_context instead.")
         return uuid.UUID("00000000-0000-0000-0000-000000000000")
 
     raise HTTPException(
