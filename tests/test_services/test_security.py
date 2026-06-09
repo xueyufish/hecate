@@ -3,21 +3,17 @@
 Tests cover:
 - PII anonymization/deanonymization
 - LLM Guard scanner
-- NeMo Guardrails configuration
 - Security middleware
 """
 
 from __future__ import annotations
 
-import pytest
-
 from hecate.services.security.anonymizer import pii_anonymizer
 from hecate.services.security.llm_guard import llm_guard_scanner
-from hecate.services.security.nemo_guardrails import nemo_config
+from hecate.services.security.middleware import security_middleware
 
 
 def test_pii_anonymize_email() -> None:
-    """Test email anonymization."""
     text = "Contact me at user@example.com"
     result = pii_anonymizer.anonymize(text)
     assert "user@example.com" not in result.text
@@ -26,7 +22,6 @@ def test_pii_anonymize_email() -> None:
 
 
 def test_pii_anonymize_phone() -> None:
-    """Test phone number anonymization."""
     text = "Call me at 555-123-4567"
     result = pii_anonymizer.anonymize(text)
     assert "555-123-4567" not in result.text
@@ -34,7 +29,6 @@ def test_pii_anonymize_phone() -> None:
 
 
 def test_pii_anonymize_multiple() -> None:
-    """Test multiple PII types."""
     text = "Email: test@test.com, Phone: 555-123-4567"
     result = pii_anonymizer.anonymize(text)
     assert "test@test.com" not in result.text
@@ -42,7 +36,6 @@ def test_pii_anonymize_multiple() -> None:
 
 
 def test_pii_deanonymize() -> None:
-    """Test PII restoration."""
     original = "Contact: user@example.com"
     anonymized = pii_anonymizer.anonymize(original)
     restored = pii_anonymizer.deanonymize(anonymized)
@@ -50,35 +43,68 @@ def test_pii_deanonymize() -> None:
 
 
 def test_pii_has_pii() -> None:
-    """Test PII detection."""
     assert pii_anonymizer.has_pii("Email me at test@test.com") is True
     assert pii_anonymizer.has_pii("Hello world") is False
 
 
-@pytest.mark.asyncio
 async def test_llm_guard_scan_safe() -> None:
-    """Test LLM Guard scanning safe content."""
     result = await llm_guard_scanner.scan_prompt("What is the weather today?")
     assert result.is_safe is True
 
 
-@pytest.mark.asyncio
 async def test_llm_guard_scan_unsafe() -> None:
-    """Test LLM Guard scanning unsafe content."""
     result = await llm_guard_scanner.scan_prompt("How to hack into a system?")
     assert result.is_safe is False
     assert len(result.issues) > 0
 
 
-@pytest.mark.asyncio
-async def test_nemo_check_safe() -> None:
-    """Test NeMo Guardrails safe input."""
-    result = await nemo_config.check_input("Help me with my project")
-    assert result is True
+async def test_middleware_check_input_safe() -> None:
+    result = await security_middleware.check_input("What is the weather today?")
+    assert result["is_safe"] is True
+    assert result["issues"] == []
 
 
-@pytest.mark.asyncio
-async def test_nemo_check_unsafe() -> None:
-    """Test NeMo Guardrails unsafe input."""
-    result = await nemo_config.check_input("How to make a bomb?")
-    assert result is False
+async def test_middleware_check_input_unsafe() -> None:
+    result = await security_middleware.check_input("How to hack into a system?")
+    assert result["is_safe"] is False
+    assert len(result["issues"]) > 0
+
+
+async def test_middleware_check_output_safe() -> None:
+    result = await security_middleware.check_output("The weather is sunny today.")
+    assert result["is_safe"] is True
+
+
+async def test_middleware_check_output_unsafe() -> None:
+    result = await security_middleware.check_output("How to hack exploit bomb")
+    assert result["is_safe"] is False
+
+
+def test_scan_result_sanitized_text_default() -> None:
+    from hecate.services.security.llm_guard import ScanResult
+
+    result = ScanResult(is_safe=True, score=1.0, issues=[])
+    assert result.sanitized_text is None
+
+
+def test_scan_result_sanitized_text_set() -> None:
+    from hecate.services.security.llm_guard import ScanResult
+
+    result = ScanResult(is_safe=True, score=1.0, issues=[], sanitized_text="clean text")
+    assert result.sanitized_text == "clean text"
+
+
+async def test_scan_prompt_disabled_no_sanitized_text() -> None:
+    from hecate.services.security.llm_guard import LLMGuardScanner
+
+    scanner = LLMGuardScanner(enabled=False)
+    result = await scanner.scan_prompt("test")
+    assert result.sanitized_text is None
+
+
+async def test_scan_output_disabled_no_sanitized_text() -> None:
+    from hecate.services.security.llm_guard import LLMGuardScanner
+
+    scanner = LLMGuardScanner(enabled=False)
+    result = await scanner.scan_output("test")
+    assert result.sanitized_text is None

@@ -209,6 +209,64 @@ class TestAgentSchema:
         assert schema.opening_remarks == "Welcome!"
         assert schema.enable_suggestions is False
 
+    @pytest.mark.asyncio
+    async def test_guardrail_config_default_none(self, db_session: AsyncSession) -> None:
+        agent = AgentModel(name="no-guardrail", model_config_db={})
+        db_session.add(agent)
+        await db_session.flush()
+        assert agent.guardrail_config is None
+
+    @pytest.mark.asyncio
+    async def test_guardrail_config_with_dict(self, db_session: AsyncSession) -> None:
+        config = {
+            "input_security": {"enabled": True, "pii_entities": ["email", "phone"]},
+            "output_security": {"enabled": True},
+            "data_security": {"pii_storage_mode": "mask_only"},
+        }
+        agent = AgentModel(name="with-guardrail", model_config_db={}, guardrail_config=config)
+        db_session.add(agent)
+        await db_session.flush()
+        assert agent.guardrail_config is not None
+        assert agent.guardrail_config["input_security"]["pii_entities"] == ["email", "phone"]
+
+    def test_create_schema_with_guardrail_config(self) -> None:
+        schema = AgentCreateSchema(
+            name="test",
+            model_config={"model": "gpt-4o"},
+            guardrail_config={"input_security": {"enabled": True}},
+        )
+        assert schema.guardrail_config == {"input_security": {"enabled": True}}
+
+    def test_create_schema_guardrail_config_default_none(self) -> None:
+        schema = AgentCreateSchema(name="test", model_config={"model": "gpt-4o"})
+        assert schema.guardrail_config is None
+
+    def test_update_schema_guardrail_config(self) -> None:
+        from hecate.models.agent import AgentUpdateSchema
+
+        schema = AgentUpdateSchema(guardrail_config={"input_security": {"enabled": False}})
+        assert schema.guardrail_config == {"input_security": {"enabled": False}}
+
+    def test_read_schema_guardrail_config(self) -> None:
+        now = datetime.now()
+        agent = AgentModel(
+            name="gc-test",
+            model_config_db={"model": "gpt-4"},
+            guardrail_config={"data_security": {"pii_storage_mode": "mask_and_encrypt"}},
+            enable_suggestions=True,
+            created_at=now,
+            updated_at=now,
+        )
+        agent.id = uuid.uuid4()
+        agent.workspace_id = uuid.uuid4()
+        agent.mode = "chat"
+        agent.tools = []
+        agent.skills = []
+        agent.knowledge_base_ids = []
+        agent.risk_level = "LOW"
+        schema = AgentReadSchema.model_validate(agent)
+        assert schema.guardrail_config == {"data_security": {"pii_storage_mode": "mask_and_encrypt"}}
+
 
 class TestConversationModel:
     """Verify Conversation ORM creation and its one-to-one link with Session."""

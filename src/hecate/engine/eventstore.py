@@ -33,6 +33,7 @@ class EventType(StrEnum):
     INTERRUPT = "INTERRUPT"
     RESUME = "RESUME"
     ERROR = "ERROR"
+    PII_DETECTED = "PII_DETECTED"
     CUSTOM = "CUSTOM"
 
 

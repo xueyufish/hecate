@@ -46,9 +46,8 @@ def test_guardrail_action_string_comparison():
     assert GuardrailAction.BLOCK == "block"
 
 
-def test_guardrail_action_has_two_members():
-    """GuardrailAction SHALL have exactly ALLOW and BLOCK."""
-    assert len(GuardrailAction) == 2
+def test_guardrail_action_has_three_members():
+    assert len(GuardrailAction) == 3
 
 
 # --- GuardrailResult tests ---

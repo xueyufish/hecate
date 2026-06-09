@@ -24,6 +24,7 @@ class ScanResult:
     is_safe: bool
     score: float
     issues: list[str]
+    sanitized_text: str | None = None
 
 
 class LLMGuardScanner:
@@ -95,9 +96,13 @@ class LLMGuardScanner:
             return self._mock_scan(prompt)
 
         issues = []
+        sanitized_text = None
         for scanner in scanners:
             try:
                 sanitized, is_valid, risk_score = scanner.scan(prompt)
+                if scanner.__class__.__name__ == "Anonymize":
+                    sanitized_text = sanitized
+                prompt = sanitized
                 if not is_valid:
                     issues.append(f"{scanner.__class__.__name__}: risk_score={risk_score:.2f}")
             except Exception as e:
@@ -107,6 +112,7 @@ class LLMGuardScanner:
             is_safe=len(issues) == 0,
             score=1.0 - len(issues) * 0.3,
             issues=issues,
+            sanitized_text=sanitized_text,
         )
 
     async def scan_output(self, output: str, prompt: str = "") -> ScanResult:
@@ -128,9 +134,12 @@ class LLMGuardScanner:
             return self._mock_scan(output)
 
         issues = []
+        sanitized_text = None
         for scanner in scanners:
             try:
                 sanitized, is_valid, risk_score = scanner.scan(output)
+                sanitized_text = sanitized
+                output = sanitized
                 if not is_valid:
                     issues.append(f"{scanner.__class__.__name__}: risk_score={risk_score:.2f}")
             except Exception as e:
@@ -140,6 +149,7 @@ class LLMGuardScanner:
             is_safe=len(issues) == 0,
             score=1.0 - len(issues) * 0.3,
             issues=issues,
+            sanitized_text=sanitized_text,
         )
 
     def _mock_scan(self, text: str) -> ScanResult:

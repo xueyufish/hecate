@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: GuardrailAction enum
 The system SHALL define `GuardrailAction` as a `StrEnum` with three members: `ALLOW`, `BLOCK`, and `SANITIZE`.
@@ -38,40 +38,10 @@ The system SHALL define a `GuardrailResult` dataclass in `engine/guardrail.py` w
 - **WHEN** `GuardrailResult(action=GuardrailAction.SANITIZE, modified_data={"messages": [...]})` is constructed
 - **THEN** `action` is `GuardrailAction.SANITIZE` and `modified_data` is `{"messages": [...]}`
 
-### Requirement: PreLLMHook abstract base class
-The system SHALL define a `PreLLMHook` ABC in `engine/guardrail.py` with one abstract async method: `on_pre_llm_call(self, messages: list[dict], model: str, tools: list[dict] | None) -> GuardrailResult`.
+## ADDED Requirements
 
-#### Scenario: Cannot instantiate directly
-- **WHEN** `PreLLMHook()` is called
-- **THEN** `TypeError` is raised
-
-#### Scenario: Subclass with implementation succeeds
-- **WHEN** a class inherits from `PreLLMHook` and implements `on_pre_llm_call`
-- **THEN** the class can be instantiated
-
-### Requirement: PostLLMHook abstract base class
-The system SHALL define a `PostLLMHook` ABC with one abstract async method: `on_post_llm_call(self, response: dict, messages: list[dict]) -> GuardrailResult`.
-
-#### Scenario: Cannot instantiate directly
-- **WHEN** `PostLLMHook()` is called
-- **THEN** `TypeError` is raised
-
-### Requirement: PreToolHook abstract base class
-The system SHALL define a `PreToolHook` ABC with one abstract async method: `on_pre_tool_call(self, name: str, arguments: dict, context: dict | None) -> GuardrailResult`.
-
-#### Scenario: Cannot instantiate directly
-- **WHEN** `PreToolHook()` is called
-- **THEN** `TypeError` is raised
-
-### Requirement: PostToolHook abstract base class
-The system SHALL define a `PostToolHook` ABC with one abstract async method: `on_post_tool_call(self, name: str, result: Any, context: dict | None) -> GuardrailResult`.
-
-#### Scenario: Cannot instantiate directly
-- **WHEN** `PostToolHook()` is called
-- **THEN** `TypeError` is raised
-
-### Requirement: NoOp pass-through implementations
-The system SHALL provide four NoOp classes (`NoOpPreLLMHook`, `NoOpPostLLMHook`, `NoOpPreToolHook`, `NoOpPostToolHook`), each inheriting from its respective ABC and returning `GuardrailResult(action=GuardrailAction.ALLOW, modified_data=None)` from its method.
+### Requirement: NoOp hooks support modified_data
+The NoOp hook implementations SHALL return `GuardrailResult` with `modified_data=None`.
 
 #### Scenario: NoOpPreLLMHook returns allow without modified_data
 - **WHEN** `NoOpPreLLMHook().on_pre_llm_call(messages, model, tools)` is called
@@ -107,10 +77,3 @@ LLMWorker and ToolWorker SHALL handle the SANITIZE action by replacing the relev
 #### Scenario: SANITIZE with empty modified_data
 - **WHEN** `GuardrailResult(action=SANITIZE, modified_data=None)` is returned
 - **THEN** the worker SHALL treat it as ALLOW (pass through unchanged) and log a warning
-
-### Requirement: Module structure
-The `engine/__init__.py` SHALL remain empty. Users import directly from submodules: `from hecate.engine.guardrail import PreLLMHook, PostLLMHook, PreToolHook, PostToolHook`.
-
-#### Scenario: Direct submodule import
-- **WHEN** code does `from hecate.engine.guardrail import PreLLMHook`
-- **THEN** the import succeeds without errors

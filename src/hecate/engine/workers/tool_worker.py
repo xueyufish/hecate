@@ -181,6 +181,11 @@ class ToolWorker(Worker):
                 "tool_call_id": tc_id,
                 "content": f"Result sanitized: {post_result.reason}",
             }
+        if post_result.action == GuardrailAction.SANITIZE:
+            if post_result.modified_data and "result" in post_result.modified_data:
+                result = post_result.modified_data["result"]
+            else:
+                logger.warning("SANITIZE without modified_data for tool '%s'", name)
 
         return {
             "role": "tool",

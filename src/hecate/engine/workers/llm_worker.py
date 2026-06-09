@@ -84,6 +84,14 @@ class LLMWorker(Worker):
                     ],
                 },
             )
+        if pre_result.action == GuardrailAction.SANITIZE:
+            if pre_result.modified_data and "messages" in pre_result.modified_data:
+                messages = pre_result.modified_data["messages"]
+            else:
+                logger.warning(
+                    "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
+                    node_id,
+                )
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -147,6 +155,15 @@ class LLMWorker(Worker):
                     ],
                 },
             )
+        if post_result.action == GuardrailAction.SANITIZE:
+            if post_result.modified_data and "response" in post_result.modified_data:
+                response_dict = post_result.modified_data["response"]
+                full_response = response_dict.get("content", full_response)
+            else:
+                logger.warning(
+                    "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
+                    node_id,
+                )
 
         # Build channel updates
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": full_response}
@@ -191,6 +208,14 @@ class LLMWorker(Worker):
                 },
             )
             return
+        if pre_result.action == GuardrailAction.SANITIZE:
+            if pre_result.modified_data and "messages" in pre_result.modified_data:
+                messages = pre_result.modified_data["messages"]
+            else:
+                logger.warning(
+                    "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
+                    node_id,
+                )
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -237,6 +262,15 @@ class LLMWorker(Worker):
                 },
             )
             return
+        if post_result.action == GuardrailAction.SANITIZE:
+            if post_result.modified_data and "response" in post_result.modified_data:
+                response_dict = post_result.modified_data["response"]
+                full_response = response_dict.get("content", full_response)
+            else:
+                logger.warning(
+                    "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
+                    node_id,
+                )
 
         # Build final WorkerResult
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": full_response}

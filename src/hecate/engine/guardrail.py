@@ -8,9 +8,9 @@ point in the agent execution lifecycle:
 - ``PreToolHook`` — intercept before executing a tool
 - ``PostToolHook`` — intercept after a tool has been executed
 
-Each hook returns a ``GuardrailResult`` with an allow-or-block decision.
-P2 defines the interface; integration into production Workers (LLMWorker,
-ToolWorker) is handled by the unified execution engine.
+Each hook returns a ``GuardrailResult`` with an allow, block, or sanitize
+decision.  SANITIZE enables in-flight data transformation (e.g., PII masking)
+while allowing execution to continue.
 
 Design rationale (composition over inheritance):
 Each hook type is a separate ABC so implementers only write the hooks they
@@ -18,7 +18,6 @@ need.  A ``NoOpPreLLMHook`` / ``NoOpPostLLMHook`` / ``NoOpPreToolHook`` /
 ``NoOpPostToolHook`` are provided as pass-through defaults.
 
 Deferred to P3:
-- ``modify`` action (transform data in-flight) — tracked in feature catalog
 - ``check_cost_ceiling`` hook — deferred to BudgetGovernance (feature 4.1a)
 """
 
@@ -35,10 +34,12 @@ class GuardrailAction(StrEnum):
 
     - ALLOW: execution continues unchanged
     - BLOCK: execution halts with a reason string
+    - SANITIZE: execution continues with modified data from modified_data field
     """
 
     ALLOW = "allow"
     BLOCK = "block"
+    SANITIZE = "sanitize"
 
 
 @dataclass
@@ -46,12 +47,14 @@ class GuardrailResult:
     """Structured return value from a guardrail hook invocation.
 
     Attributes:
-        action: The guardrail decision (allow or block).
+        action: The guardrail decision (allow, block, or sanitize).
         reason: Human-readable explanation when action is BLOCK; empty for ALLOW.
+        modified_data: Transformed data when action is SANITIZE; None otherwise.
     """
 
     action: GuardrailAction = GuardrailAction.ALLOW
     reason: str = ""
+    modified_data: dict | None = None
 
 
 # ---------------------------------------------------------------------------

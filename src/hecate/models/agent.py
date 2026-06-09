@@ -57,6 +57,7 @@ class AgentModel(BaseModel):
     risk_level: Mapped[str] = mapped_column(String(20), default="LOW")
     opening_remarks: Mapped[str | None] = mapped_column(nullable=True)
     enable_suggestions: Mapped[bool] = mapped_column(default=True)
+    guardrail_config: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
 
     __table_args__ = (Index("idx_agents_workspace", "workspace_id", "deleted"),)
 
@@ -81,6 +82,7 @@ class AgentCreateSchema(PydanticBase):
     risk_level: str = Field(default="LOW")
     opening_remarks: str | None = None
     enable_suggestions: bool = Field(default=True)
+    guardrail_config: dict | None = None
 
 
 class AgentUpdateSchema(PydanticBase):
@@ -98,6 +100,7 @@ class AgentUpdateSchema(PydanticBase):
     risk_level: str | None = None
     opening_remarks: str | None = None
     enable_suggestions: bool | None = None
+    guardrail_config: dict | None = None
 
 
 class AgentReadSchema(PydanticBase):
@@ -118,6 +121,7 @@ class AgentReadSchema(PydanticBase):
     risk_level: str
     opening_remarks: str | None
     enable_suggestions: bool
+    guardrail_config: dict | None = None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
