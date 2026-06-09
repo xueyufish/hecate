@@ -20,7 +20,9 @@ from pydantic import ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.agent import (
     AgentCreateSchema,
     AgentModel,
@@ -122,21 +124,21 @@ async def _check_models_availability(
 async def create_agent(
     data: AgentCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new agent.
 
     Args:
         data: The agent creation data.
         db: The async database session.
-        api_key: The validated API key.
-
+        ctx: The authenticated context.
     Returns:
         dict: The created agent data.
     """
     await validate_knowledge_base_ids(db, data.knowledge_base_ids)
 
     agent = AgentModel(
+        workspace_id=ctx.workspace_id or uuid.UUID(int=0),
         name=data.name,
         persona=data.persona,
         model_config_db=data.llm_config,
@@ -156,7 +158,7 @@ async def create_agent(
 @router.get("/agents")
 async def list_agents(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -164,8 +166,7 @@ async def list_agents(
 
     Args:
         db: The async database session.
-        api_key: The validated API key.
-        page: Page number (1-indexed).
+        ctx: The authenticated context.        page: Page number (1-indexed).
         page_size: Number of items per page.
 
     Returns:
@@ -173,17 +174,16 @@ async def list_agents(
     """
     # Count total
     count_stmt = select(func.count()).select_from(AgentModel).where(~AgentModel.deleted)
+    if ctx.workspace_id is not None:
+        count_stmt = count_stmt.where(AgentModel.workspace_id == ctx.workspace_id)
     total = (await db.execute(count_stmt)).scalar_one()
 
     # Fetch page
     offset = (page - 1) * page_size
-    stmt = (
-        select(AgentModel)
-        .where(~AgentModel.deleted)
-        .order_by(AgentModel.created_at.desc())
-        .offset(offset)
-        .limit(page_size)
-    )
+    stmt = select(AgentModel).where(~AgentModel.deleted)
+    if ctx.workspace_id is not None:
+        stmt = stmt.where(AgentModel.workspace_id == ctx.workspace_id)
+    stmt = stmt.order_by(AgentModel.created_at.desc()).offset(offset).limit(page_size)
     result = await db.execute(stmt)
     agents = result.scalars().all()
 
@@ -211,25 +211,26 @@ async def list_agents(
 async def get_agent(
     agent_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get an agent by ID.
 
     Args:
         agent_id: The UUID of the agent to retrieve.
         db: The async database session.
-        api_key: The validated API key.
-
+        ctx: The authenticated context.
     Returns:
         dict: The agent data.
 
     Raises:
         HTTPException: 404 if agent not found or deleted.
     """
+    _ws_filter = AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0))
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
             ~AgentModel.deleted,
+            _ws_filter,
         )
     )
     agent = result.scalar_one_or_none()
@@ -253,7 +254,7 @@ async def update_agent(
     agent_id: uuid.UUID,
     data: AgentUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Update an existing agent.
 
@@ -261,18 +262,19 @@ async def update_agent(
         agent_id: The UUID of the agent to update.
         data: The update data (all fields optional).
         db: The async database session.
-        api_key: The validated API key.
-
+        ctx: The authenticated context.
     Returns:
         dict: The updated agent data.
 
     Raises:
         HTTPException: 404 if agent not found or deleted.
     """
+    _ws_filter = AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0))
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
             ~AgentModel.deleted,
+            _ws_filter,
         )
     )
     agent = result.scalar_one_or_none()
@@ -300,22 +302,24 @@ async def update_agent(
 async def delete_agent(
     agent_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Soft delete an agent.
 
     Args:
         agent_id: The UUID of the agent to delete.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Raises:
         HTTPException: 404 if agent not found or already deleted.
     """
+    _ws_filter = AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0))
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
             ~AgentModel.deleted,
+            _ws_filter,
         )
     )
     agent = result.scalar_one_or_none()
@@ -343,7 +347,7 @@ async def add_skill_to_agent(
     agent_id: uuid.UUID,
     data: SkillAssociationRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Add a skill to an agent's skills list.
 
@@ -354,18 +358,19 @@ async def add_skill_to_agent(
         agent_id: The UUID of the agent.
         data: Request body with skill_name.
         db: The async database session.
-        api_key: The validated API key.
-
+        ctx: The authenticated context.
     Returns:
         dict: ``{"skills": [...]}`` with the updated skills list.
 
     Raises:
         HTTPException: 404 if agent or skill not found.
     """
+    _ws_filter = AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0))
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
             ~AgentModel.deleted,
+            _ws_filter,
         )
     )
     agent = result.scalar_one_or_none()
@@ -412,7 +417,7 @@ async def remove_skill_from_agent(
     agent_id: uuid.UUID,
     skill_name: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Remove a skill from an agent's skills list.
 
@@ -423,18 +428,19 @@ async def remove_skill_from_agent(
         agent_id: The UUID of the agent.
         skill_name: The name of the skill to remove.
         db: The async database session.
-        api_key: The validated API key.
-
+        ctx: The authenticated context.
     Returns:
         dict: ``{"skills": [...]}`` with the updated skills list.
 
     Raises:
         HTTPException: 404 if agent not found.
     """
+    _ws_filter = AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0))
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
             ~AgentModel.deleted,
+            _ws_filter,
         )
     )
     agent = result.scalar_one_or_none()
@@ -457,25 +463,26 @@ async def remove_skill_from_agent(
 async def export_agent(
     agent_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Export agent configuration as portable JSON.
 
     Args:
         agent_id: The UUID of the agent to export.
         db: The async database session.
-        api_key: The validated API key.
-
+        ctx: The authenticated context.
     Returns:
         dict: Export data with version, exported_at, agent config, workflow, memory_blocks.
 
     Raises:
         HTTPException: 404 if agent not found.
     """
+    _ws_filter = AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0))
     result = await db.execute(
         select(AgentModel).where(
             AgentModel.id == agent_id,
             ~AgentModel.deleted,
+            _ws_filter,
         )
     )
     agent = result.scalar_one_or_none()
@@ -566,15 +573,14 @@ class AgentImportSchema(PydanticBase):
 async def import_agent(
     data: AgentImportSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Import agent from exported JSON.
 
     Args:
         data: The import data.
         db: The async database session.
-        api_key: The validated API key.
-
+        ctx: The authenticated context.
     Returns:
         dict: The created agent data.
     """
@@ -591,11 +597,14 @@ async def import_agent(
             logger.warning("Some KB IDs are invalid on import, clearing knowledge_base_ids")
             agent_config["knowledge_base_ids"] = []
 
+    _import_ws = ctx.workspace_id or uuid.UUID(int=0)
+
     workflow_id = None
     if data.workflow:
         from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 
         workflow = WorkflowModel(
+            workspace_id=_import_ws,
             name=f"{data.workflow['name']} (imported)",
             description=data.workflow.get("description", ""),
         )
@@ -612,6 +621,7 @@ async def import_agent(
         workflow_id = workflow.id
 
     agent = AgentModel(
+        workspace_id=_import_ws,
         name=agent_config.get("name", "Imported Agent"),
         persona=agent_config.get("persona"),
         model_config_db=agent_config.get("model_config", {}),

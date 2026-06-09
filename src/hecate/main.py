@@ -22,17 +22,21 @@ from hecate.api.auth import router as auth_router
 from hecate.api.evaluation import router as evaluation_router
 from hecate.api.management.agent_templates import router as agent_templates_router
 from hecate.api.management.agents import router as agents_router
+from hecate.api.management.api_keys import router as api_keys_router
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.memory import router as memory_router
 from hecate.api.management.messages import router as messages_router
 from hecate.api.management.model_providers import router as model_providers_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
+from hecate.api.management.orgs import router as orgs_router
 from hecate.api.management.prompts import router as prompts_router
 from hecate.api.management.sessions import router as sessions_router
 from hecate.api.management.skills import router as skills_router
 from hecate.api.management.tools import router as tools_router
 from hecate.api.management.workflows import router as workflows_router
+from hecate.api.management.workspace_members import router as workspace_members_router
+from hecate.api.management.workspaces import router as workspaces_router
 from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
 from hecate.core.config import settings as _settings
@@ -152,6 +156,10 @@ app.include_router(agent_templates_router, prefix="/api", tags=["agent-templates
 app.include_router(memory_router, prefix="/api", tags=["memory"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
 app.include_router(model_providers_router, prefix="/api", tags=["model-providers"])
+app.include_router(orgs_router, prefix="/api", tags=["orgs"])
+app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
+app.include_router(workspace_members_router, prefix="/api", tags=["workspace-members"])
+app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:

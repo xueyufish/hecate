@@ -18,8 +18,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
-from hecate.core.deps import get_current_user_id
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 from hecate.services.llm.service import llm_service
 from hecate.services.session_lock import session_lock_manager
@@ -129,7 +130,7 @@ def _messages_to_dicts(messages: list[ChatMessage]) -> list[dict[str, Any]]:
 @router.post("/chat/completions", response_model=None)
 async def create_chat_completion(
     request: ChatCompletionRequest,
-    user_id: Annotated[uuid.UUID, Depends(get_current_user_id)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Create a chat completion via the unified execution engine.
@@ -138,7 +139,7 @@ async def create_chat_completion(
 
     Args:
         request: The chat completion request.
-        user_id: The authenticated user ID.
+        ctx: The authenticated context.
         db: The async database session.
 
     Returns:
@@ -151,7 +152,7 @@ async def create_chat_completion(
     if session_id:
         try:
             async with session_lock_manager.acquire(session_id) as lock_info:
-                result = await _process_chat(request, db, user_id)
+                result = await _process_chat(request, db, ctx.user_id, ctx.workspace_id)
                 if isinstance(result, StreamingResponse):
                     result.headers["X-Queue-Position"] = str(lock_info["queue_position"])
                     result.headers["X-Queue-Wait-Ms"] = str(lock_info["wait_ms"])
@@ -168,13 +169,14 @@ async def create_chat_completion(
                 },
             ) from None
     else:
-        return await _process_chat(request, db, user_id)
+        return await _process_chat(request, db, ctx.user_id, ctx.workspace_id)
 
 
 async def _process_chat(
     request: ChatCompletionRequest,
     db: AsyncSession,
     user_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
 ) -> dict | StreamingResponse:
     """Process a chat completion request via WorkflowExecutionService."""
     msg_dicts = _messages_to_dicts(request.messages)

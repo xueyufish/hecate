@@ -19,22 +19,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.skill import SkillCreateSchema, SkillModel, SkillReadSchema, SkillUpdateSchema
 
 router = APIRouter()
-
-# Zero UUID for workspace (P1 single-workspace mode)
-_ZERO_UUID = uuid.UUID(int=0)
-
-
-async def _get_workspace_id() -> uuid.UUID:
-    """Get workspace ID from auth context.
-
-    P1 returns zero UUID (single-workspace mode). P3 will resolve
-    from the authenticated user's workspace membership.
-    """
-    return _ZERO_UUID
 
 
 async def _get_skill_with_ownership_check(
@@ -68,7 +58,7 @@ async def _get_skill_with_ownership_check(
             detail={"error": {"code": "NOT_FOUND", "message": "Skill not found", "details": None}},
         )
 
-    if skill.workspace_id != workspace_id and skill.workspace_id != _ZERO_UUID:
+    if skill.workspace_id != workspace_id and skill.workspace_id != uuid.UUID(int=0):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
@@ -87,14 +77,14 @@ async def _get_skill_with_ownership_check(
 async def create_skill(
     data: SkillCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new skill.
 
     Args:
         data: The skill creation data.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The created skill data.
@@ -102,7 +92,7 @@ async def create_skill(
     Raises:
         HTTPException: 409 if skill name already exists in workspace.
     """
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
 
     # Check for duplicate name in workspace
     existing = await db.execute(
@@ -146,7 +136,7 @@ async def create_skill(
 @router.get("/skills")
 async def list_skills(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     source: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -158,7 +148,7 @@ async def list_skills(
 
     Args:
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         source: Optional filter by skill source (system, user, project).
         page: Page number (1-indexed).
         page_size: Number of items per page.
@@ -166,14 +156,14 @@ async def list_skills(
     Returns:
         dict: ``{"items": [...], "total": int}`` with skill list and total count.
     """
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
 
     # Include workspace skills + system skills
     base_query = select(SkillModel).where(
         ~SkillModel.deleted,
         or_(
             SkillModel.workspace_id == workspace_id,
-            SkillModel.workspace_id == _ZERO_UUID,
+            SkillModel.workspace_id == uuid.UUID(int=0),
         ),
     )
     if source is not None:
@@ -197,14 +187,14 @@ async def list_skills(
 async def get_skill(
     skill_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a skill by ID.
 
     Args:
         skill_id: The UUID of the skill to retrieve.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The skill data.
@@ -232,7 +222,7 @@ async def update_skill(
     skill_id: uuid.UUID,
     data: SkillUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Update an existing skill.
 
@@ -240,7 +230,7 @@ async def update_skill(
         skill_id: The UUID of the skill to update.
         data: The update data (all fields optional).
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The updated skill data.
@@ -248,7 +238,7 @@ async def update_skill(
     Raises:
         HTTPException: 404 if skill not found, 403 if not owned by workspace.
     """
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     skill = await _get_skill_with_ownership_check(db, skill_id, workspace_id)
 
     if skill.source == "system":
@@ -279,19 +269,19 @@ async def update_skill(
 async def delete_skill(
     skill_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Soft delete a skill.
 
     Args:
         skill_id: The UUID of the skill to delete.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Raises:
         HTTPException: 404 if skill not found, 403 if not owned by workspace.
     """
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     skill = await _get_skill_with_ownership_check(db, skill_id, workspace_id)
 
     if skill.source == "system":
@@ -315,7 +305,7 @@ async def delete_skill(
 async def import_skill(
     file: Annotated[UploadFile, File(...)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Import a skill from a SKILL.md file.
 
@@ -325,7 +315,7 @@ async def import_skill(
     Args:
         file: The uploaded SKILL.md file.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The created skill data.
@@ -381,7 +371,7 @@ async def import_skill(
             },
         ) from None
 
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
 
     # Check for duplicate name
     existing = await db.execute(

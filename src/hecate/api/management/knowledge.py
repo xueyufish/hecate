@@ -20,7 +20,9 @@ from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.agent import AgentModel, AgentReadSchema
 from hecate.models.document import DocumentModel, DocumentReadSchema
 from hecate.models.knowledge import (
@@ -38,20 +40,21 @@ router = APIRouter()
 async def create_knowledge_base(
     data: KnowledgeBaseCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new knowledge base.
 
     Args:
         data: The knowledge base creation data.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The created knowledge base data.
     """
     collection_name = f"kb_{uuid.uuid4().hex[:12]}"
     kb = KnowledgeBaseModel(
+        workspace_id=ctx.workspace_id or uuid.UUID(int=0),
         name=data.name,
         description=data.description,
         embedding_model=data.embedding_model,
@@ -69,7 +72,7 @@ async def create_knowledge_base(
 @router.get("/knowledge-bases")
 async def list_knowledge_bases(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -77,20 +80,21 @@ async def list_knowledge_bases(
 
     Args:
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         page: Page number (1-indexed).
         page_size: Number of items per page.
 
     Returns:
         dict: ``{"items": [...], "total": int}`` with knowledge base list and total count.
     """
-    count_stmt = select(func.count()).select_from(KnowledgeBaseModel).where(~KnowledgeBaseModel.deleted)
+    _ws_filter = KnowledgeBaseModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0))
+    count_stmt = select(func.count()).select_from(KnowledgeBaseModel).where(~KnowledgeBaseModel.deleted, _ws_filter)
     total = (await db.execute(count_stmt)).scalar_one()
 
     offset = (page - 1) * page_size
     stmt = (
         select(KnowledgeBaseModel)
-        .where(~KnowledgeBaseModel.deleted)
+        .where(~KnowledgeBaseModel.deleted, _ws_filter)
         .order_by(KnowledgeBaseModel.created_at.desc())
         .offset(offset)
         .limit(page_size)
@@ -108,7 +112,7 @@ async def list_knowledge_bases(
 async def upload_document(
     kb_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     filename: str = "untitled",
     file_path: str = "",
     file_size: int = 0,
@@ -119,7 +123,7 @@ async def upload_document(
     Args:
         kb_id: The UUID of the knowledge base.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         filename: The original filename.
         file_path: The MinIO storage path.
         file_size: The file size in bytes.
@@ -162,7 +166,7 @@ async def upload_document(
 async def list_documents(
     kb_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -171,7 +175,7 @@ async def list_documents(
     Args:
         kb_id: The UUID of the knowledge base.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         page: Page number (1-indexed).
         page_size: Number of items per page.
 
@@ -197,14 +201,19 @@ async def list_documents(
     }
 
 
-async def _get_kb_or_404(kb_id: uuid.UUID, db: AsyncSession) -> KnowledgeBaseModel:
+async def _get_kb_or_404(
+    kb_id: uuid.UUID,
+    db: AsyncSession,
+    workspace_id: uuid.UUID | None = None,
+) -> KnowledgeBaseModel:
     """Look up a knowledge base by ID or raise 404."""
-    result = await db.execute(
-        select(KnowledgeBaseModel).where(
-            KnowledgeBaseModel.id == kb_id,
-            ~KnowledgeBaseModel.deleted,
-        )
+    stmt = select(KnowledgeBaseModel).where(
+        KnowledgeBaseModel.id == kb_id,
+        ~KnowledgeBaseModel.deleted,
     )
+    if workspace_id is not None:
+        stmt = stmt.where(KnowledgeBaseModel.workspace_id == workspace_id)
+    result = await db.execute(stmt)
     kb = result.scalar_one_or_none()
     if kb is None:
         raise HTTPException(
@@ -230,7 +239,7 @@ async def search_knowledge_base(
     kb_id: uuid.UUID,
     data: KBSearchRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict[str, Any]:
     """Search a knowledge base for hit testing.
 
@@ -238,12 +247,12 @@ async def search_knowledge_base(
         kb_id: The UUID of the knowledge base.
         data: Search request with query, mode, and limit.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: Search results with score breakdown.
     """
-    kb = await _get_kb_or_404(kb_id, db)
+    kb = await _get_kb_or_404(kb_id, db, ctx.workspace_id)
     mode = data.mode if data.mode in ("hybrid", "dense", "sparse") else "hybrid"
 
     results = await knowledge_base_service.search_with_score_breakdown(
@@ -275,7 +284,7 @@ async def search_knowledge_base(
 async def list_knowledge_base_chunks(
     kb_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 20,
 ) -> dict:
@@ -284,14 +293,14 @@ async def list_knowledge_base_chunks(
     Args:
         kb_id: The UUID of the knowledge base.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         page: Page number (1-indexed).
         page_size: Number of items per page.
 
     Returns:
         dict: ``{"items": [...], "total": int}`` with chunk list and total count.
     """
-    kb = await _get_kb_or_404(kb_id, db)
+    kb = await _get_kb_or_404(kb_id, db, ctx.workspace_id)
     return await knowledge_base_service.list_chunks(
         collection_name=kb.collection_name,
         page=page,
@@ -304,7 +313,7 @@ async def compare_search_modes(
     kb_id: uuid.UUID,
     data: KBCompareRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict[str, Any]:
     """Compare search modes for a query.
 
@@ -315,12 +324,12 @@ async def compare_search_modes(
         kb_id: The UUID of the knowledge base.
         data: Compare request with query and limit.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: Results per mode (dense, sparse, hybrid).
     """
-    kb = await _get_kb_or_404(kb_id, db)
+    kb = await _get_kb_or_404(kb_id, db, ctx.workspace_id)
     return await knowledge_base_service.compare_modes(
         collection_name=kb.collection_name,
         query=data.query,
@@ -328,16 +337,17 @@ async def compare_search_modes(
     )
 
 
-async def _cleanup_kb_references(db: AsyncSession, kb_id: uuid.UUID) -> None:
+async def _cleanup_kb_references(db: AsyncSession, kb_id: uuid.UUID, workspace_id: uuid.UUID | None = None) -> None:
     """Remove a KB ID from all agents' knowledge_base_ids arrays.
 
     Args:
         db: The async database session.
         kb_id: The UUID of the knowledge base being deleted.
+        workspace_id: Optional workspace filter for agent query.
     """
-    stmt = select(AgentModel).where(
-        ~AgentModel.deleted,
-    )
+    stmt = select(AgentModel).where(~AgentModel.deleted)
+    if workspace_id is not None:
+        stmt = stmt.where(AgentModel.workspace_id == workspace_id)
     result = await db.execute(stmt)
     agents = result.scalars().all()
 
@@ -354,29 +364,29 @@ async def _cleanup_kb_references(db: AsyncSession, kb_id: uuid.UUID) -> None:
 async def delete_knowledge_base(
     kb_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Soft delete a knowledge base and cascade cleanup agent references.
 
     Args:
         kb_id: The UUID of the knowledge base to delete.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Raises:
         HTTPException: 404 if knowledge base not found or already deleted.
     """
-    kb = await _get_kb_or_404(kb_id, db)
+    kb = await _get_kb_or_404(kb_id, db, ctx.workspace_id)
     kb.deleted = True
     kb.deleted_at = datetime.now(UTC)
-    await _cleanup_kb_references(db, kb_id)
+    await _cleanup_kb_references(db, kb_id, ctx.workspace_id)
 
 
 @router.get("/knowledge-bases/{kb_id}/agents")
 async def list_agents_for_knowledge_base(
     kb_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -385,7 +395,7 @@ async def list_agents_for_knowledge_base(
     Args:
         kb_id: The UUID of the knowledge base.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         page: Page number (1-indexed).
         page_size: Number of items per page.
 
@@ -395,10 +405,12 @@ async def list_agents_for_knowledge_base(
     Raises:
         HTTPException: 404 if knowledge base not found or deleted.
     """
-    await _get_kb_or_404(kb_id, db)
+    await _get_kb_or_404(kb_id, db, ctx.workspace_id)
 
     kb_id_str = str(kb_id)
     stmt = select(AgentModel).where(~AgentModel.deleted)
+    if ctx.workspace_id is not None:
+        stmt = stmt.where(AgentModel.workspace_id == ctx.workspace_id)
     result = await db.execute(stmt)
     all_agents = result.scalars().all()
 
@@ -428,7 +440,7 @@ async def ingest_urls(
     kb_id: uuid.UUID,
     data: URLIngestRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Crawl URLs and ingest content into the knowledge base.
 
@@ -436,12 +448,12 @@ async def ingest_urls(
         kb_id: The UUID of the knowledge base.
         data: Request with url (single) or urls (batch).
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: Ingestion results with document_id, chunk_count, metadata.
     """
-    kb = await _get_kb_or_404(kb_id, db)
+    kb = await _get_kb_or_404(kb_id, db, ctx.workspace_id)
 
     urls: list[str] = []
     if data.url:

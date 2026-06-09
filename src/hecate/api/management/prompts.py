@@ -20,7 +20,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
 from hecate.services.prompt_service import PromptService
 
@@ -31,12 +33,12 @@ router = APIRouter()
 async def create_prompt(
     data: PromptCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new prompt with initial version."""
     service = PromptService(db)
     try:
-        result = await service.create_prompt(data)
+        result = await service.create_prompt(data, workspace_id=ctx.workspace_id or uuid.UUID(int=0))
         return result.model_dump()
     except ValueError as e:
         raise HTTPException(
@@ -48,13 +50,17 @@ async def create_prompt(
 @router.get("/prompts")
 async def list_prompts(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
     """List prompts with pagination."""
     service = PromptService(db)
-    result = await service.list_prompts(page=page, page_size=page_size)
+    result = await service.list_prompts(
+        workspace_id=ctx.workspace_id or uuid.UUID(int=0),
+        page=page,
+        page_size=page_size,
+    )
     return {
         "items": [item.model_dump() for item in result["items"]],
         "total": result["total"],
@@ -65,7 +71,7 @@ async def list_prompts(
 async def get_prompt(
     prompt_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a prompt by ID."""
     service = PromptService(db)
@@ -84,7 +90,7 @@ async def update_prompt(
     prompt_id: uuid.UUID,
     data: PromptUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Update an existing prompt."""
     service = PromptService(db)
@@ -102,7 +108,7 @@ async def update_prompt(
 async def delete_prompt(
     prompt_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Soft delete a prompt."""
     service = PromptService(db)
@@ -119,7 +125,7 @@ async def delete_prompt(
 async def list_prompt_versions(
     prompt_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> list[dict]:
     """List all versions of a prompt."""
     service = PromptService(db)
@@ -132,7 +138,7 @@ async def get_prompt_version(
     prompt_id: uuid.UUID,
     version: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a specific version of a prompt."""
     service = PromptService(db)
@@ -151,7 +157,7 @@ async def rollback_prompt(
     prompt_id: uuid.UUID,
     version: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Rollback a prompt to a specific version."""
     service = PromptService(db)
@@ -169,7 +175,7 @@ async def rollback_prompt(
 async def get_prompt_by_label(
     label: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a prompt by deployment label."""
     service = PromptService(db)

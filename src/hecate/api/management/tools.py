@@ -14,7 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.tool import ToolModel, ToolReadSchema
 
 router = APIRouter()
@@ -23,7 +25,7 @@ router = APIRouter()
 @router.get("/tools")
 async def list_tools(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     source: str | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -32,7 +34,7 @@ async def list_tools(
 
     Args:
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         source: Optional filter by tool source (builtin, custom, mcp).
         page: Page number (1-indexed).
         page_size: Number of items per page.
@@ -62,14 +64,14 @@ async def list_tools(
 async def get_tool(
     tool_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a tool by ID.
 
     Args:
         tool_id: The UUID of the tool to retrieve.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The tool data.

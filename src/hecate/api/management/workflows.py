@@ -23,7 +23,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel as PydanticBase
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.engine.graph_dsl import GraphValidationError
 from hecate.models.workflow import (
     WorkflowCreateSchema,
@@ -40,14 +42,14 @@ router = APIRouter()
 async def create_workflow(
     data: WorkflowCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new workflow.
 
     Args:
         data: The workflow creation data.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The created workflow data with version details.
@@ -57,7 +59,7 @@ async def create_workflow(
     """
     service = WorkflowService(db)
     try:
-        result = await service.create_workflow(data)
+        result = await service.create_workflow(data, workspace_id=ctx.workspace_id or uuid.UUID(int=0))
         return result.model_dump()
     except GraphValidationError as e:
         raise HTTPException(
@@ -69,7 +71,7 @@ async def create_workflow(
 @router.get("/workflows")
 async def list_workflows(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -77,7 +79,7 @@ async def list_workflows(
 
     Args:
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         page: Page number (1-indexed).
         page_size: Number of items per page.
 
@@ -85,7 +87,11 @@ async def list_workflows(
         dict: ``{"items": [...], "total": int}`` with workflow list and total count.
     """
     service = WorkflowService(db)
-    result = await service.list_workflows(page=page, page_size=page_size)
+    result = await service.list_workflows(
+        workspace_id=ctx.workspace_id or uuid.UUID(int=0),
+        page=page,
+        page_size=page_size,
+    )
     return {
         "items": [item.model_dump() for item in result["items"]],
         "total": result["total"],
@@ -96,14 +102,14 @@ async def list_workflows(
 async def get_workflow(
     workflow_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a workflow by ID.
 
     Args:
         workflow_id: The UUID of the workflow to retrieve.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The workflow data with current version details.
@@ -127,7 +133,7 @@ async def update_workflow(
     workflow_id: uuid.UUID,
     data: WorkflowUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Update an existing workflow.
 
@@ -135,7 +141,7 @@ async def update_workflow(
         workflow_id: The UUID of the workflow to update.
         data: The update data.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The updated workflow data.
@@ -163,14 +169,14 @@ async def update_workflow(
 async def delete_workflow(
     workflow_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Soft delete a workflow.
 
     Args:
         workflow_id: The UUID of the workflow to delete.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Raises:
         HTTPException: 404 if workflow not found or already deleted.
@@ -189,14 +195,14 @@ async def delete_workflow(
 async def list_workflow_versions(
     workflow_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> list[dict]:
     """List all versions of a workflow.
 
     Args:
         workflow_id: The UUID of the workflow.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         list: List of version dicts ordered by version number.
@@ -211,7 +217,7 @@ async def get_workflow_version(
     workflow_id: uuid.UUID,
     version: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a specific version of a workflow.
 
@@ -219,7 +225,7 @@ async def get_workflow_version(
         workflow_id: The UUID of the workflow.
         version: The version number.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The version data.
@@ -247,7 +253,7 @@ async def validate_workflow(
     workflow_id: uuid.UUID,
     data: ValidateRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Validate a graph DSL without persisting (dry-run compile).
 
@@ -255,7 +261,7 @@ async def validate_workflow(
         workflow_id: The UUID of the workflow.
         data: Request body containing graph_dsl to validate.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: ``{"valid": bool, "errors": [...]}``
@@ -269,7 +275,7 @@ async def rollback_workflow(
     workflow_id: uuid.UUID,
     version: int,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Rollback a workflow to a specific version.
 
@@ -277,7 +283,7 @@ async def rollback_workflow(
         workflow_id: The UUID of the workflow.
         version: The version number to rollback to.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: The updated workflow with new version.
@@ -308,7 +314,7 @@ async def test_run_workflow(
     workflow_id: uuid.UUID,
     data: TestRunRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Execute a workflow test run and return per-node results.
 
@@ -316,7 +322,7 @@ async def test_run_workflow(
         workflow_id: The UUID of the workflow to test.
         data: Request body with input_data and mock flag.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
 
     Returns:
         dict: ``{"run_id": str, "status": str, "nodes": [...], "total_duration_ms": int}``
@@ -359,7 +365,7 @@ async def test_run_workflow(
 async def list_workflow_runs(
     workflow_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -368,7 +374,7 @@ async def list_workflow_runs(
     Args:
         workflow_id: The UUID of the workflow.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context.
         page: Page number (1-indexed).
         page_size: Number of items per page.
 

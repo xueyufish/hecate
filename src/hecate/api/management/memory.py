@@ -32,7 +32,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.agent import AgentModel
 from hecate.models.memory import (
     KnowledgeMemoryCreateSchema,
@@ -46,17 +48,6 @@ from hecate.services.memory.user_memory import UserMemoryService
 from hecate.services.memory.working_memory import WorkingMemoryService
 
 router = APIRouter()
-
-_ZERO_UUID = uuid.UUID(int=0)
-
-
-async def _get_workspace_id() -> uuid.UUID:
-    """Get workspace ID from auth context.
-
-    P1 returns zero UUID (single-workspace mode). P3 will resolve
-    from the authenticated user's workspace membership.
-    """
-    return _ZERO_UUID
 
 
 async def _get_agent(db: AsyncSession, agent_id: uuid.UUID) -> AgentModel:
@@ -91,7 +82,7 @@ async def create_memory_block(
     agent_id: uuid.UUID,
     data: MemoryBlockCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new memory block for an agent."""
     agent = await _get_agent(db, agent_id)
@@ -111,7 +102,7 @@ async def create_memory_block(
 async def list_memory_blocks(
     agent_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> list[dict]:
     """List all memory blocks for an agent."""
     agent = await _get_agent(db, agent_id)
@@ -126,7 +117,7 @@ async def get_memory_block(
     agent_id: uuid.UUID,
     block_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a memory block by ID."""
     agent = await _get_agent(db, agent_id)
@@ -148,7 +139,7 @@ async def update_memory_block(
     block_id: uuid.UUID,
     data: MemoryBlockUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Update a memory block."""
     agent = await _get_agent(db, agent_id)
@@ -169,7 +160,7 @@ async def delete_memory_block(
     agent_id: uuid.UUID,
     block_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete a memory block."""
     agent = await _get_agent(db, agent_id)
@@ -191,10 +182,10 @@ async def delete_memory_block(
 async def create_memory(
     data: MemoryCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new user memory."""
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     service = UserMemoryService(db)
     result = await service.store_memory(workspace_id, data)
     return result.model_dump()
@@ -203,13 +194,13 @@ async def create_memory(
 @router.get("/memory")
 async def list_memories(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     memory_type: str | None = Query(None, description="Filter by memory type"),
     min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
     limit: int = Query(50, ge=1, le=200, description="Max results"),
 ) -> list[dict]:
     """List/search user memories."""
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     service = UserMemoryService(db)
     memories = await service.list_memories(
         workspace_id=workspace_id,
@@ -224,10 +215,10 @@ async def list_memories(
 async def delete_memory(
     memory_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete a user memory."""
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     service = UserMemoryService(db)
     try:
         await service.delete_memory(workspace_id, memory_id)
@@ -245,13 +236,13 @@ async def delete_memory(
 async def search_user_memories(
     user_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     q: str = Query(..., min_length=1, description="Search query"),
     top_k: int = Query(5, ge=1, le=20, description="Max results"),
     min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
 ) -> dict:
     """Semantic search for user memories."""
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     service = UserMemoryService(db)
     memories = await service.retrieve_memories(
         workspace_id=workspace_id,
@@ -271,14 +262,14 @@ async def search_user_memories(
 async def list_user_memories(
     user_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     memory_type: str | None = Query(None, description="Filter by memory type"),
     min_importance: float = Query(0.0, ge=0.0, le=1.0, description="Minimum importance"),
     limit: int = Query(50, ge=1, le=200, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
 ) -> dict:
     """List memories for a specific user."""
-    workspace_id = await _get_workspace_id()
+    workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     service = UserMemoryService(db)
     memories = await service.list_memories(
         workspace_id=workspace_id,
@@ -302,7 +293,7 @@ async def list_user_memories(
 async def get_compression_status(
     session_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get compression status for a session."""
     return {
@@ -321,7 +312,7 @@ async def create_knowledge_memory(
     agent_id: uuid.UUID,
     data: KnowledgeMemoryCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new knowledge memory for an agent."""
     agent = await _get_agent(db, agent_id)
@@ -343,7 +334,7 @@ async def create_knowledge_memory(
 async def list_knowledge_memories(
     agent_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     tags: str | None = Query(None, description="Comma-separated tag filter"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
@@ -373,7 +364,7 @@ async def get_knowledge_memory(
     agent_id: uuid.UUID,
     memory_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a specific knowledge memory."""
     agent = await _get_agent(db, agent_id)
@@ -394,7 +385,7 @@ async def delete_knowledge_memory(
     agent_id: uuid.UUID,
     memory_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete a knowledge memory."""
     agent = await _get_agent(db, agent_id)
@@ -414,7 +405,7 @@ async def search_knowledge_memories(
     agent_id: uuid.UUID,
     data: KnowledgeMemorySearchSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Search knowledge memories with hybrid search."""
     agent = await _get_agent(db, agent_id)
