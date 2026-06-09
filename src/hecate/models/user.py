@@ -18,12 +18,18 @@ from hecate.models.base import BaseModel
 
 
 class UserModel(BaseModel):
-    """ORM model for users — supports email/password authentication."""
+    """ORM model for users — supports email/password authentication.
+
+    The optional ``sso_id`` field stores the external identity provider's
+    user identifier for future SSO integration (OIDC/SAML). It is not used
+    by the local auth flow.
+    """
 
     __tablename__ = "users"
 
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    sso_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, unique=True)
 
     __table_args__ = (Index("idx_users_email_unique", "email", unique=True),)
 
@@ -53,6 +59,7 @@ class UserReadSchema(PydanticBase):
 
     id: uuid.UUID
     email: str
+    sso_id: str | None = None
     created_at: datetime
 
 
@@ -62,6 +69,23 @@ class TokenResponseSchema(PydanticBase):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"  # noqa: S105
+
+
+class LoginResponseSchema(PydanticBase):
+    """Schema for login response with workspace context."""
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"  # noqa: S105
+    workspaces: list[dict[str, str]] = []
+
+
+class SwitchWorkspaceSchema(PydanticBase):
+    """Schema for workspace switching request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: uuid.UUID
 
 
 class RefreshTokenSchema(PydanticBase):
