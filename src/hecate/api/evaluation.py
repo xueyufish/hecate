@@ -26,7 +26,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.evaluation import (
     EvaluationDatasetCreateSchema,
     EvaluationDatasetModel,
@@ -113,7 +115,7 @@ async def _get_dataset_or_404(
 async def create_dataset(
     data: EvaluationDatasetCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new evaluation dataset."""
     svc = EvaluationDatasetService(db)
@@ -121,6 +123,7 @@ async def create_dataset(
         name=data.name,
         description=data.description,
         metadata=data.metadata,
+        workspace_id=ctx.workspace_id,
     )
     return EvaluationDatasetReadSchema.model_validate(ds).model_dump(by_alias=True)
 
@@ -128,7 +131,7 @@ async def create_dataset(
 @router.get("/datasets")
 async def list_datasets(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -145,7 +148,7 @@ async def list_datasets(
 async def get_dataset(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a single evaluation dataset."""
     ds = await _get_dataset_or_404(dataset_id, db)
@@ -157,7 +160,7 @@ async def update_dataset(
     dataset_id: uuid.UUID,
     data: EvaluationDatasetUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Update an evaluation dataset."""
     await _get_dataset_or_404(dataset_id, db)
@@ -175,7 +178,7 @@ async def update_dataset(
 async def delete_dataset(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete an evaluation dataset (soft delete)."""
     await _get_dataset_or_404(dataset_id, db)
@@ -193,7 +196,7 @@ async def add_items(
     dataset_id: uuid.UUID,
     items: list[EvaluationItemCreateSchema],
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Add items to an evaluation dataset."""
     await _get_dataset_or_404(dataset_id, db)
@@ -207,7 +210,7 @@ async def add_items(
 async def list_items(
     dataset_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -229,7 +232,7 @@ async def delete_item(
     dataset_id: uuid.UUID,
     item_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete an item from an evaluation dataset."""
     await _get_dataset_or_404(dataset_id, db)
@@ -246,7 +249,7 @@ async def delete_item(
 async def create_run(
     data: EvaluationRunCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create and execute an evaluation run."""
     # Validate dataset exists
@@ -293,7 +296,7 @@ async def create_run(
 @router.get("/runs")
 async def list_runs(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     dataset_id: uuid.UUID | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -321,7 +324,7 @@ async def list_runs(
 async def get_run(
     run_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get an evaluation run with summary statistics."""
     result = await db.execute(
@@ -360,7 +363,7 @@ async def get_run(
 async def get_run_scores(
     run_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:

@@ -592,6 +592,7 @@ class TestReadSchemaFromAttributes:
             agent_id=uuid.uuid4(),
             status="active",
             metadata_={"key": "value"},
+            workspace_id=uuid.UUID(int=0),
             **attrs,
         )
         schema = SessionReadSchema.model_validate(session)
@@ -608,6 +609,7 @@ class TestReadSchemaFromAttributes:
             content="hello",
             tool_calls=[{"id": "1", "name": "test"}],
             metadata_={"tokens": 5},
+            workspace_id=uuid.UUID(int=0),
             **attrs,
         )
         schema = MessageReadSchema.model_validate(msg)
@@ -647,6 +649,7 @@ class TestReadSchemaFromAttributes:
             channel_state={"messages": ["hello"]},
             pending_writes=[],
             metadata_={"interrupted": False},
+            workspace_id=uuid.UUID(int=0),
         )
         cp.id = cp_id
         cp.created_at = datetime.now()

@@ -141,6 +141,7 @@ class KnowledgeMemoryService:
             query,
             limit=top_k * 3,
             mode=mode,
+            workspace_id=str(workspace_id),
         )
 
         filtered: list[KnowledgeSearchResult] = []

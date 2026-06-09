@@ -174,6 +174,7 @@ class VectorStore(ABC):
         collection_name: str,
         query_vector: list[float],
         limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         """Dense vector similarity search.
 
@@ -181,6 +182,7 @@ class VectorStore(ABC):
             collection_name: Name of the collection.
             query_vector: Dense query vector.
             limit: Maximum number of results.
+            workspace_id: Optional workspace filter for tenant isolation.
 
         Returns:
             Results ordered by similarity (descending).
@@ -192,6 +194,7 @@ class VectorStore(ABC):
         collection_name: str,
         query_sparse: dict[int, float],
         limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         """Sparse vector search.
 
@@ -199,6 +202,7 @@ class VectorStore(ABC):
             collection_name: Name of the collection.
             query_sparse: Sparse query vector (token_id → weight).
             limit: Maximum number of results.
+            workspace_id: Optional workspace filter for tenant isolation.
 
         Returns:
             Results ordered by relevance (descending).
@@ -220,6 +224,7 @@ class VectorStore(ABC):
         query_dense: list[float],
         query_sparse: dict[int, float],
         limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         """Hybrid search combining dense and sparse retrieval.
 
@@ -235,14 +240,15 @@ class VectorStore(ABC):
             query_dense: Dense query vector.
             query_sparse: Sparse query vector (token_id → weight).
             limit: Maximum number of results.
+            workspace_id: Optional workspace filter for tenant isolation.
 
         Returns:
             Results ordered by fused score (descending).
         """
         prefetch = limit * 4
         dense_results, sparse_results = (
-            await self.search_dense(collection_name, query_dense, limit=prefetch),
-            await self.search_sparse(collection_name, query_sparse, limit=prefetch),
+            await self.search_dense(collection_name, query_dense, limit=prefetch, workspace_id=workspace_id),
+            await self.search_sparse(collection_name, query_sparse, limit=prefetch, workspace_id=workspace_id),
         )
         return _rrf_fuse(dense_results, sparse_results, k=DEFAULT_RRF_K, top_k=limit)
 

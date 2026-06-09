@@ -37,8 +37,15 @@ class BudgetSnapshotModel(BaseModel):
     tokens_used: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     tokens_remaining: Mapped[int] = mapped_column(Integer, nullable=False)
     degradation_level: Mapped[str] = mapped_column(String(20), default="none")
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
-    __table_args__ = (Index("idx_budget_snapshots_session", "session_id"),)
+    __table_args__ = (
+        Index("idx_budget_snapshots_session", "session_id"),
+        Index("idx_budget_snapshots_workspace", "workspace_id", "deleted"),
+    )
 
 
 class BudgetSnapshotCreateSchema(PydanticBase):
@@ -51,6 +58,7 @@ class BudgetSnapshotCreateSchema(PydanticBase):
     tokens_used: int = Field(default=0, ge=0)
     tokens_remaining: int = Field(..., ge=0)
     degradation_level: str = Field(default="none", pattern="^(none|drop|compress|emergency)$")
+    workspace_id: uuid.UUID | None = None
 
 
 class BudgetSnapshotReadSchema(PydanticBase):
@@ -64,5 +72,6 @@ class BudgetSnapshotReadSchema(PydanticBase):
     tokens_used: int
     tokens_remaining: int
     degradation_level: str
+    workspace_id: uuid.UUID
     created_at: datetime
     updated_at: datetime

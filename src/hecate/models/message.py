@@ -46,8 +46,15 @@ class MessageModel(BaseModel):
     tool_calls: Mapped[list | None] = mapped_column(JSON, nullable=True)
     tool_call_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
-    __table_args__ = (Index("idx_messages_conversation", "conversation_id", "created_at"),)
+    __table_args__ = (
+        Index("idx_messages_conversation", "conversation_id", "created_at"),
+        Index("idx_messages_workspace", "workspace_id", "deleted"),
+    )
 
 
 class MessageCreateSchema(PydanticBase):
@@ -61,6 +68,7 @@ class MessageCreateSchema(PydanticBase):
     tool_calls: list | None = None
     tool_call_id: str | None = None
     metadata: dict = Field(default_factory=dict)
+    workspace_id: uuid.UUID | None = None
 
 
 class MessageReadSchema(PydanticBase):
@@ -74,5 +82,6 @@ class MessageReadSchema(PydanticBase):
     content: str
     tool_calls: list | None
     tool_call_id: str | None
+    workspace_id: uuid.UUID
     metadata: dict = Field(validation_alias="metadata_")
     created_at: datetime

@@ -56,6 +56,7 @@ class HybridSearcher:
         query: str,
         limit: int = 10,
         mode: SearchMode = "hybrid",
+        workspace_id: str | None = None,
     ) -> list[HybridSearchResult]:
         """Search for relevant documents.
 
@@ -64,6 +65,7 @@ class HybridSearcher:
             query: The search query.
             limit: Maximum number of results.
             mode: Search mode - "hybrid" (default), "dense", or "sparse".
+            workspace_id: Optional workspace ID for tenant isolation filtering.
 
         Returns:
             List of HybridSearchResult ordered by relevance.
@@ -75,22 +77,23 @@ class HybridSearcher:
             mode = "dense"
 
         if mode == "hybrid":
-            return await self._search_hybrid(collection_name, query_embedding, limit)
+            return await self._search_hybrid(collection_name, query_embedding, limit, workspace_id)
         elif mode == "sparse":
-            return await self._search_sparse(collection_name, query_embedding, limit)
+            return await self._search_sparse(collection_name, query_embedding, limit, workspace_id)
         else:
-            return await self._search_dense(collection_name, query_embedding, limit)
+            return await self._search_dense(collection_name, query_embedding, limit, workspace_id)
 
     async def _search_hybrid(
         self,
         collection_name: str,
         query_embedding: Any,
         limit: int,
+        workspace_id: str | None = None,
     ) -> list[HybridSearchResult]:
         """Perform hybrid search with fallback to dense-only."""
         if not query_embedding.sparse:
             logger.warning("No sparse vector available. Falling back to dense-only search.")
-            return await self._search_dense(collection_name, query_embedding, limit)
+            return await self._search_dense(collection_name, query_embedding, limit, workspace_id)
 
         hybrid_results, dense_results, sparse_results = await asyncio.gather(
             self._store.search_hybrid(
@@ -98,16 +101,19 @@ class HybridSearcher:
                 query_dense=query_embedding.dense,
                 query_sparse=query_embedding.sparse,
                 limit=limit,
+                workspace_id=workspace_id,
             ),
             self._store.search_dense(
                 collection_name=collection_name,
                 query_vector=query_embedding.dense,
                 limit=limit,
+                workspace_id=workspace_id,
             ),
             self._store.search_sparse(
                 collection_name=collection_name,
                 query_sparse=query_embedding.sparse,
                 limit=limit,
+                workspace_id=workspace_id,
             ),
         )
 
@@ -131,11 +137,13 @@ class HybridSearcher:
         collection_name: str,
         query_embedding: Any,
         limit: int,
+        workspace_id: str | None = None,
     ) -> list[HybridSearchResult]:
         results = await self._store.search_dense(
             collection_name=collection_name,
             query_vector=query_embedding.dense,
             limit=limit,
+            workspace_id=workspace_id,
         )
         return [
             HybridSearchResult(
@@ -154,11 +162,13 @@ class HybridSearcher:
         collection_name: str,
         query_embedding: Any,
         limit: int,
+        workspace_id: str | None = None,
     ) -> list[HybridSearchResult]:
         results = await self._store.search_sparse(
             collection_name=collection_name,
             query_sparse=query_embedding.sparse,
             limit=limit,
+            workspace_id=workspace_id,
         )
         return [
             HybridSearchResult(

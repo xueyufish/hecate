@@ -47,6 +47,22 @@ class QdrantVectorStore(VectorStore):
                 self._client = "mock"
         return self._client
 
+    def _build_workspace_filter(self, workspace_id: str | None) -> Any:
+        """Build a Qdrant filter for workspace isolation.
+
+        Returns None if workspace_id is not provided (backward-compatible fallback).
+        """
+        if workspace_id is None:
+            logger.warning("Vector search without workspace_id filter — tenant isolation not enforced")
+            return None
+
+        try:
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+            return Filter(must=[FieldCondition(key="workspace_id", match=MatchValue(value=workspace_id))])
+        except ImportError:
+            return None
+
     async def create_collection(
         self,
         collection_name: str,
@@ -167,6 +183,7 @@ class QdrantVectorStore(VectorStore):
         collection_name: str,
         query_vector: list[float],
         limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         client = self._get_client()
 
@@ -181,12 +198,14 @@ class QdrantVectorStore(VectorStore):
             ]
 
         try:
+            query_filter = self._build_workspace_filter(workspace_id)
             results = client.query_points(
                 collection_name=collection_name,
                 query=query_vector,
                 using="dense",
                 limit=limit,
                 with_payload=True,
+                query_filter=query_filter,
             )
             return [SearchResult(id=str(r.id), score=r.score, payload=r.payload or {}) for r in results.points]
         except Exception as e:
@@ -198,6 +217,7 @@ class QdrantVectorStore(VectorStore):
         collection_name: str,
         query_sparse: dict[int, float],
         limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         client = self._get_client()
 
@@ -214,6 +234,7 @@ class QdrantVectorStore(VectorStore):
         try:
             from qdrant_client.models import SparseVector
 
+            query_filter = self._build_workspace_filter(workspace_id)
             sparse_vec = SparseVector(
                 indices=list(query_sparse.keys()),
                 values=list(query_sparse.values()),
@@ -224,6 +245,7 @@ class QdrantVectorStore(VectorStore):
                 using="sparse",
                 limit=limit,
                 with_payload=True,
+                query_filter=query_filter,
             )
             return [SearchResult(id=str(r.id), score=r.score, payload=r.payload or {}) for r in results.points]
         except Exception as e:
@@ -236,6 +258,7 @@ class QdrantVectorStore(VectorStore):
         query_dense: list[float],
         query_sparse: dict[int, float],
         limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         client = self._get_client()
 
@@ -252,6 +275,7 @@ class QdrantVectorStore(VectorStore):
         try:
             from qdrant_client.models import Fusion, FusionQuery, Prefetch, SparseVector
 
+            query_filter = self._build_workspace_filter(workspace_id)
             sparse_vec = SparseVector(
                 indices=list(query_sparse.keys()),
                 values=list(query_sparse.values()),
@@ -259,8 +283,8 @@ class QdrantVectorStore(VectorStore):
             results = client.query_points(
                 collection_name=collection_name,
                 prefetch=[
-                    Prefetch(query=query_dense, using="dense", limit=limit * 2),
-                    Prefetch(query=sparse_vec, using="sparse", limit=limit * 2),
+                    Prefetch(query=query_dense, using="dense", limit=limit * 2, filter=query_filter),
+                    Prefetch(query=sparse_vec, using="sparse", limit=limit * 2, filter=query_filter),
                 ],
                 query=FusionQuery(fusion=Fusion.RRF),
                 limit=limit,

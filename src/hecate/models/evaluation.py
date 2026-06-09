@@ -53,8 +53,15 @@ class EvaluationDatasetModel(BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
-    __table_args__ = (Index("idx_eval_datasets_created", "created_at"),)
+    __table_args__ = (
+        Index("idx_eval_datasets_created", "created_at"),
+        Index("idx_eval_datasets_workspace", "workspace_id", "deleted"),
+    )
 
 
 class EvaluationItemModel(BaseModel):
@@ -79,8 +86,15 @@ class EvaluationItemModel(BaseModel):
     expected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     context: Mapped[list | None] = mapped_column(JSON, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
-    __table_args__ = (Index("idx_eval_items_dataset", "dataset_id"),)
+    __table_args__ = (
+        Index("idx_eval_items_dataset", "dataset_id"),
+        Index("idx_eval_items_workspace", "workspace_id", "deleted"),
+    )
 
 
 class EvaluationRunModel(BaseModel):
@@ -104,8 +118,15 @@ class EvaluationRunModel(BaseModel):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=RunStatus.PENDING.value)
     started_at: Mapped[datetime | None] = mapped_column(nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
-    __table_args__ = (Index("idx_eval_runs_dataset", "dataset_id"),)
+    __table_args__ = (
+        Index("idx_eval_runs_dataset", "dataset_id"),
+        Index("idx_eval_runs_workspace", "workspace_id", "deleted"),
+    )
 
 
 class EvaluationScoreModel(BaseModel):
@@ -133,10 +154,15 @@ class EvaluationScoreModel(BaseModel):
     value: Mapped[float] = mapped_column(Float, nullable=False)
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="llm_judge")
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
     __table_args__ = (
         Index("idx_eval_scores_run", "run_id"),
         Index("idx_eval_scores_item", "item_id"),
+        Index("idx_eval_scores_workspace", "workspace_id", "deleted"),
     )
 
 
@@ -173,6 +199,7 @@ class EvaluationDatasetReadSchema(PydanticBase):
     id: uuid.UUID
     name: str
     description: str | None
+    workspace_id: uuid.UUID
     metadata: dict | None = Field(validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
@@ -206,6 +233,7 @@ class EvaluationItemReadSchema(PydanticBase):
     query: str
     expected_answer: str | None
     context: list | None
+    workspace_id: uuid.UUID
     metadata: dict | None = Field(validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
@@ -236,6 +264,7 @@ class EvaluationRunReadSchema(PydanticBase):
     status: str
     started_at: datetime | None
     completed_at: datetime | None
+    workspace_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
 
@@ -257,4 +286,5 @@ class EvaluationScoreReadSchema(PydanticBase):
     value: float
     reasoning: str | None
     source: str
+    workspace_id: uuid.UUID
     created_at: datetime

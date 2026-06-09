@@ -46,8 +46,15 @@ class DocumentModel(BaseModel):
     parsing_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     parsing_error: Mapped[str | None] = mapped_column(nullable=True)
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
-    __table_args__ = (Index("idx_documents_kb", "knowledge_base_id", "deleted"),)
+    __table_args__ = (
+        Index("idx_documents_kb", "knowledge_base_id", "deleted"),
+        Index("idx_documents_workspace", "workspace_id", "deleted"),
+    )
 
 
 class DocumentCreateSchema(PydanticBase):
@@ -60,6 +67,7 @@ class DocumentCreateSchema(PydanticBase):
     file_path: str
     file_size: int = 0
     content_type: str | None = None
+    workspace_id: uuid.UUID | None = None
 
 
 class DocumentReadSchema(PydanticBase):
@@ -76,6 +84,7 @@ class DocumentReadSchema(PydanticBase):
     parsing_status: str
     parsing_error: str | None
     chunk_count: int
+    workspace_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False

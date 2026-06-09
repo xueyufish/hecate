@@ -15,7 +15,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.conversation import (
     ConversationCreateSchema,
     ConversationModel,
@@ -30,19 +32,23 @@ router = APIRouter()
 async def create_conversation(
     data: ConversationCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new conversation for an agent.
 
     Args:
         data: The conversation creation data (agent_id required, title optional).
         db: The async database session.
-        api_key: The validated API key or JWT token.
+        ctx: The authenticated context with workspace_id.
 
     Returns:
         dict: The created conversation data.
     """
-    conversation = ConversationModel(agent_id=data.agent_id, title=data.title)
+    conversation = ConversationModel(
+        agent_id=data.agent_id,
+        title=data.title,
+        workspace_id=ctx.workspace_id or uuid.UUID(int=0),
+    )
     db.add(conversation)
     await db.flush()
     await db.refresh(conversation)
@@ -52,7 +58,7 @@ async def create_conversation(
 @router.get("/conversations")
 async def list_conversations(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     agent_id: uuid.UUID | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -61,7 +67,7 @@ async def list_conversations(
 
     Args:
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context with workspace_id.
         agent_id: Optional filter by agent ID.
         page: Page number (1-indexed).
         page_size: Number of items per page.
@@ -70,6 +76,8 @@ async def list_conversations(
         dict: ``{"items": [...], "total": int}`` with conversation list and total count.
     """
     base_query = select(ConversationModel).where(~ConversationModel.deleted)
+    if ctx.workspace_id is not None:
+        base_query = base_query.where(ConversationModel.workspace_id == ctx.workspace_id)
     if agent_id is not None:
         base_query = base_query.where(ConversationModel.agent_id == agent_id)
 
@@ -91,14 +99,14 @@ async def list_conversations(
 async def get_conversation(
     conversation_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a conversation by ID with its messages.
 
     Args:
         conversation_id: The UUID of the conversation to retrieve.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context with workspace_id.
 
     Returns:
         dict: The conversation data with nested messages.
@@ -106,12 +114,13 @@ async def get_conversation(
     Raises:
         HTTPException: 404 if conversation not found or deleted.
     """
-    result = await db.execute(
-        select(ConversationModel).where(
-            ConversationModel.id == conversation_id,
-            ~ConversationModel.deleted,
-        )
-    )
+    conditions = [
+        ConversationModel.id == conversation_id,
+        ~ConversationModel.deleted,
+    ]
+    if ctx.workspace_id is not None:
+        conditions.append(ConversationModel.workspace_id == ctx.workspace_id)
+    result = await db.execute(select(ConversationModel).where(*conditions))
     conversation = result.scalar_one_or_none()
     if conversation is None:
         raise HTTPException(

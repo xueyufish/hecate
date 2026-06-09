@@ -35,6 +35,7 @@ class KnowledgeBaseService:
         file_path: str,
         collection_name: str,
         metadata: dict[str, Any] | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
         """Ingest a document into the knowledge base.
 
@@ -42,6 +43,7 @@ class KnowledgeBaseService:
             file_path: Path to the document file.
             collection_name: Vector store collection name.
             metadata: Optional metadata to attach to chunks.
+            workspace_id: Optional workspace ID for tenant isolation.
 
         Returns:
             dict with ingestion results (chunk_count, etc.).
@@ -67,6 +69,7 @@ class KnowledgeBaseService:
                     **chunk.metadata,
                     "chunk_index": chunk.index,
                     "source_file": file_path,
+                    **({"workspace_id": workspace_id} if workspace_id else {}),
                 },
             }
             for chunk in chunks
@@ -88,6 +91,7 @@ class KnowledgeBaseService:
         text: str,
         collection_name: str,
         metadata: dict[str, Any] | None = None,
+        workspace_id: str | None = None,
     ) -> dict[str, Any]:
         """Ingest pre-extracted text into the knowledge base.
 
@@ -95,6 +99,7 @@ class KnowledgeBaseService:
             text: The text content to ingest.
             collection_name: Vector store collection name.
             metadata: Optional metadata to attach to chunks.
+            workspace_id: Optional workspace ID for tenant isolation.
 
         Returns:
             dict with ingestion results (chunk_count, etc.).
@@ -118,6 +123,7 @@ class KnowledgeBaseService:
                 "metadata": {
                     **chunk.metadata,
                     "chunk_index": chunk.index,
+                    **({"workspace_id": workspace_id} if workspace_id else {}),
                 },
             }
             for chunk in chunks
@@ -140,6 +146,7 @@ class KnowledgeBaseService:
         query: str,
         limit: int = 10,
         mode: SearchMode = "hybrid",
+        workspace_id: str | None = None,
     ) -> list[HybridSearchResult]:
         """Search the knowledge base.
 
@@ -148,6 +155,7 @@ class KnowledgeBaseService:
             query: The search query.
             limit: Maximum number of results.
             mode: Search mode - "hybrid" (default), "dense", or "sparse".
+            workspace_id: Optional workspace ID for tenant isolation.
 
         Returns:
             List of HybridSearchResult ordered by relevance.
@@ -159,6 +167,7 @@ class KnowledgeBaseService:
             query=query,
             limit=limit,
             mode=mode,
+            workspace_id=workspace_id,
         )
 
     async def create_collection(
@@ -266,6 +275,7 @@ class KnowledgeBaseService:
         query: str,
         limit: int = 10,
         mode: SearchMode = "hybrid",
+        workspace_id: str | None = None,
     ) -> list[HybridSearchResult]:
         """Search with per-mode score breakdown for hit testing.
 
@@ -274,6 +284,7 @@ class KnowledgeBaseService:
             query: The search query.
             limit: Maximum number of results.
             mode: Search mode — "hybrid" (default), "dense", or "sparse".
+            workspace_id: Optional workspace ID for tenant isolation.
 
         Returns:
             List of HybridSearchResult with score breakdown.
@@ -285,6 +296,7 @@ class KnowledgeBaseService:
             query=query,
             limit=limit,
             mode=mode,
+            workspace_id=workspace_id,
         )
 
     async def list_chunks(

@@ -68,10 +68,15 @@ class PromptVersionModel(BaseModel):
     template: Mapped[str] = mapped_column(Text, nullable=False)
     variables: Mapped[list[str]] = mapped_column(JSON, default=list)
     labels: Mapped[list[str]] = mapped_column(JSON, default=list)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
     __table_args__ = (
         Index("idx_prompt_versions_prompt", "prompt_id"),
         Index("idx_prompt_versions_unique", "prompt_id", "version", unique=True),
+        Index("idx_prompt_versions_workspace", "workspace_id", "deleted"),
     )
 
 
@@ -125,6 +130,7 @@ class PromptVersionReadSchema(PydanticBase):
     template: str
     variables: list[str]
     labels: list[str]
+    workspace_id: uuid.UUID
     created_at: datetime
 
 

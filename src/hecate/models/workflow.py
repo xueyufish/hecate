@@ -69,10 +69,15 @@ class WorkflowVersionModel(BaseModel):
     graph_dsl: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     compiled_graph: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     change_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
     __table_args__ = (
         Index("idx_workflow_versions_workflow", "workflow_id"),
         Index("idx_workflow_versions_unique", "workflow_id", "version", unique=True),
+        Index("idx_workflow_versions_workspace", "workspace_id", "deleted"),
     )
 
 
@@ -107,8 +112,15 @@ class WorkflowRunModel(BaseModel):
     node_results: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     total_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
-    __table_args__ = (Index("idx_workflow_runs_workflow", "workflow_id"),)
+    __table_args__ = (
+        Index("idx_workflow_runs_workflow", "workflow_id"),
+        Index("idx_workflow_runs_workspace", "workspace_id", "deleted"),
+    )
 
 
 # --- Pydantic Schemas ---
@@ -160,6 +172,7 @@ class WorkflowVersionReadSchema(PydanticBase):
     graph_dsl: dict[str, Any]
     compiled_graph: dict[str, Any]
     change_summary: str
+    workspace_id: uuid.UUID
     created_at: datetime
 
 
@@ -193,4 +206,5 @@ class WorkflowRunReadSchema(PydanticBase):
     node_results: list[dict[str, Any]]
     total_duration_ms: int
     error: str | None
+    workspace_id: uuid.UUID
     created_at: datetime

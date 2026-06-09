@@ -37,6 +37,14 @@ The abstract `BaseModel` SHALL provide `id` (UUID4), `created_at`, `updated_at`,
 - **WHEN** a non-unique index previously used `postgresql_where=deleted_at IS NULL`
 - **THEN** the index SHALL be `Index("name", <columns...>, "deleted")` — composite index without dialect-specific kwargs
 
+#### Scenario: Tenant-scoped models have workspace_id FK
+- **WHEN** a resource model that belongs to a tenant is defined
+- **THEN** it SHALL have a `workspace_id` UUID column with FK to `WorkspaceModel.id`, a composite index `idx_<table>_workspace` on `(workspace_id, deleted)`, and a server default of zero UUID
+
+#### Scenario: Tenant-scoped models filter by workspace_id
+- **WHEN** service-layer queries are executed against a tenant-scoped model
+- **THEN** queries SHALL include `WHERE workspace_id = :workspace_id` as a mandatory filter condition
+
 ### Requirement: AgentModel with model_config column alias
 The `AgentModel` SHALL use `model_config_db` as the Python attribute name mapping to the `model_config` database column to avoid collision with Pydantic's reserved `model_config`.
 

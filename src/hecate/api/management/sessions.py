@@ -17,7 +17,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.core.deps import get_db, verify_api_key
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.session import SessionCreateSchema, SessionModel, SessionReadSchema
 
 router = APIRouter()
@@ -33,14 +35,14 @@ class ResumeRequest(BaseModel):
 async def create_session(
     data: SessionCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Create a new session.
 
     Args:
         data: The session creation data (requires agent_id).
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context with workspace_id.
 
     Returns:
         dict: The created session data.
@@ -49,6 +51,7 @@ async def create_session(
         agent_id=data.agent_id,
         conversation_id=data.conversation_id,
         status="active",
+        workspace_id=ctx.workspace_id or uuid.UUID(int=0),
     )
     db.add(session)
     await db.flush()
@@ -59,7 +62,7 @@ async def create_session(
 @router.get("/sessions")
 async def list_sessions(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     agent_id: uuid.UUID | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -68,7 +71,7 @@ async def list_sessions(
 
     Args:
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context with workspace_id.
         agent_id: Optional filter by agent ID.
         page: Page number (1-indexed).
         page_size: Number of items per page.
@@ -77,6 +80,8 @@ async def list_sessions(
         dict: ``{"items": [...], "total": int}`` with session list and total count.
     """
     base_query = select(SessionModel)
+    if ctx.workspace_id is not None:
+        base_query = base_query.where(SessionModel.workspace_id == ctx.workspace_id)
     if agent_id is not None:
         base_query = base_query.where(SessionModel.agent_id == agent_id)
 
@@ -98,14 +103,14 @@ async def list_sessions(
 async def get_session(
     session_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Get a session by ID.
 
     Args:
         session_id: The UUID of the session to retrieve.
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context with workspace_id.
 
     Returns:
         dict: The session data.
@@ -113,7 +118,10 @@ async def get_session(
     Raises:
         HTTPException: 404 if session not found.
     """
-    result = await db.execute(select(SessionModel).where(SessionModel.id == session_id))
+    conditions = [SessionModel.id == session_id]
+    if ctx.workspace_id is not None:
+        conditions.append(SessionModel.workspace_id == ctx.workspace_id)
+    result = await db.execute(select(SessionModel).where(*conditions))
     session = result.scalar_one_or_none()
     if session is None:
         raise HTTPException(
@@ -128,7 +136,7 @@ async def resume_session(
     session_id: uuid.UUID,
     data: ResumeRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Resume an interrupted session.
 
@@ -136,7 +144,7 @@ async def resume_session(
         session_id: The UUID of the session to resume.
         data: The resume value (user input for interrupt).
         db: The async database session.
-        api_key: The validated API key.
+        ctx: The authenticated context with workspace_id.
 
     Returns:
         dict: The session data after resume attempt.
@@ -144,7 +152,10 @@ async def resume_session(
     Raises:
         HTTPException: 404 if session not found, 400 if session is not interruptable.
     """
-    result = await db.execute(select(SessionModel).where(SessionModel.id == session_id))
+    conditions = [SessionModel.id == session_id]
+    if ctx.workspace_id is not None:
+        conditions.append(SessionModel.workspace_id == ctx.workspace_id)
+    result = await db.execute(select(SessionModel).where(*conditions))
     session = result.scalar_one_or_none()
     if session is None:
         raise HTTPException(

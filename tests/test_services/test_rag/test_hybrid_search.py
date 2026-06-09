@@ -55,12 +55,20 @@ class _InMemoryVectorStore(VectorStore):
         return True
 
     async def search_dense(
-        self, collection_name: str, query_vector: list[float], limit: int = 10
+        self,
+        collection_name: str,
+        query_vector: list[float],
+        limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         return sorted(self._data.values(), key=lambda r: r.score, reverse=True)[:limit]
 
     async def search_sparse(
-        self, collection_name: str, query_sparse: dict[int, float], limit: int = 10
+        self,
+        collection_name: str,
+        query_sparse: dict[int, float],
+        limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         return sorted(self._data.values(), key=lambda r: r.score, reverse=True)[:limit]
 

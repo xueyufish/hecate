@@ -159,6 +159,7 @@ class ChromaVectorStore(VectorStore):
         collection_name: str,
         query_vector: list[float],
         limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         collection = self._get_or_create_collection(collection_name)
 
@@ -175,11 +176,17 @@ class ChromaVectorStore(VectorStore):
         try:
             import json
 
-            results = collection.query(
-                query_embeddings=[query_vector],
-                n_results=limit,
-                include=["documents", "metadatas", "distances"],
-            )
+            query_kwargs: dict[str, Any] = {
+                "query_embeddings": [query_vector],
+                "n_results": limit,
+                "include": ["documents", "metadatas", "distances"],
+            }
+            if workspace_id is not None:
+                query_kwargs["where"] = {"workspace_id": workspace_id}
+            else:
+                logger.warning("Vector search without workspace_id filter — tenant isolation not enforced")
+
+            results = collection.query(**query_kwargs)
 
             search_results: list[SearchResult] = []
             if results["ids"] and results["ids"][0]:
@@ -202,6 +209,7 @@ class ChromaVectorStore(VectorStore):
         collection_name: str,
         query_sparse: dict[int, float],
         limit: int = 10,
+        workspace_id: str | None = None,
     ) -> list[SearchResult]:
         logger.warning("Chroma does not support sparse vector search. Returning empty results.")
         return []

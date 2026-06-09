@@ -51,11 +51,16 @@ class EvidenceModel(BaseModel):
     importance: Mapped[float] = mapped_column(Float, default=0.5)
     source_type: Mapped[str] = mapped_column(String(50), default="tool")
     provenance: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
     __table_args__ = (
         Index("idx_evidences_session", "session_id"),
         Index("idx_evidences_tool", "tool_name"),
         Index("idx_evidences_importance", "importance"),
+        Index("idx_evidences_workspace", "workspace_id", "deleted"),
     )
 
 
@@ -75,6 +80,7 @@ class EvidenceCreateSchema(PydanticBase):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     source_type: str = Field(default="tool", max_length=50)
     provenance: dict[str, Any] = Field(default_factory=dict)
+    workspace_id: uuid.UUID | None = None
 
 
 class EvidenceReadSchema(PydanticBase):
@@ -94,6 +100,7 @@ class EvidenceReadSchema(PydanticBase):
     importance: float
     source_type: str
     provenance: dict[str, Any]
+    workspace_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False

@@ -41,8 +41,15 @@ class ConversationModel(BaseModel):
 
     agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
-    __table_args__ = (Index("idx_conversations_agent", "agent_id", "deleted"),)
+    __table_args__ = (
+        Index("idx_conversations_agent", "agent_id", "deleted"),
+        Index("idx_conversations_workspace", "workspace_id", "deleted"),
+    )
 
 
 class ConversationCreateSchema(PydanticBase):
@@ -52,6 +59,7 @@ class ConversationCreateSchema(PydanticBase):
 
     agent_id: uuid.UUID
     title: str | None = None
+    workspace_id: uuid.UUID | None = None
 
 
 class ConversationReadSchema(PydanticBase):
@@ -62,6 +70,7 @@ class ConversationReadSchema(PydanticBase):
     id: uuid.UUID
     agent_id: uuid.UUID
     title: str | None
+    workspace_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False

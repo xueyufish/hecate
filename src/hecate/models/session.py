@@ -48,10 +48,15 @@ class SessionModel(BaseModel):
     current_node: Mapped[str | None] = mapped_column(String(100), nullable=True)
     checkpoint_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
 
     __table_args__ = (
         Index("idx_sessions_agent", "agent_id"),
         Index("idx_sessions_conversation", "conversation_id"),
+        Index("idx_sessions_workspace", "workspace_id", "deleted"),
     )
 
 
@@ -62,6 +67,7 @@ class SessionCreateSchema(PydanticBase):
 
     agent_id: uuid.UUID
     conversation_id: uuid.UUID | None = None
+    workspace_id: uuid.UUID | None = None
 
 
 class SessionReadSchema(PydanticBase):
@@ -75,6 +81,7 @@ class SessionReadSchema(PydanticBase):
     status: str
     current_node: str | None
     checkpoint_id: uuid.UUID | None
+    workspace_id: uuid.UUID
     metadata: dict = Field(validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
