@@ -1,22 +1,25 @@
 """Authentication API endpoints.
 
-Provides registration, login, token refresh, and current user info.
+Provides registration, login, token refresh, current user info,
+and workspace switching for multi-tenant context management.
 """
 
 from __future__ import annotations
 
 from typing import Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
-from hecate.core.deps import get_current_user_id
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.user import (
+    LoginResponseSchema,
     LoginSchema,
     RefreshTokenSchema,
     RegisterSchema,
+    SwitchWorkspaceSchema,
     TokenResponseSchema,
     UserReadSchema,
 )
@@ -46,22 +49,23 @@ async def register(
     return UserReadSchema.model_validate(user)
 
 
-@router.post("/login", response_model=TokenResponseSchema)
+@router.post("/login", response_model=LoginResponseSchema)
 async def login(
     body: LoginSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> TokenResponseSchema:
-    """Authenticate a user and return JWT tokens."""
+) -> LoginResponseSchema:
+    """Authenticate a user and return JWT tokens with workspace context."""
     try:
-        user, access_token, refresh_token = await _auth_service.login(db, body.email, body.password)
+        user, access_token, refresh_token, workspaces = await _auth_service.login(db, body.email, body.password)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid credentials", "details": None}},
         ) from None
-    return TokenResponseSchema(
+    return LoginResponseSchema(
         access_token=access_token,
         refresh_token=refresh_token,
+        workspaces=workspaces,
     )
 
 
@@ -81,13 +85,36 @@ async def refresh_token(
     return TokenResponseSchema(access_token=access, refresh_token=refresh)
 
 
+@router.post("/switch-workspace", response_model=TokenResponseSchema)
+async def switch_workspace(
+    body: SwitchWorkspaceSchema,
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TokenResponseSchema:
+    """Switch the active workspace context, issuing new tokens."""
+    try:
+        access, refresh = await _auth_service.switch_workspace(db, ctx.user_id, body.workspace_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": {
+                    "code": "FORBIDDEN",
+                    "message": "Not a member of this workspace",
+                    "details": None,
+                }
+            },
+        ) from None
+    return TokenResponseSchema(access_token=access, refresh_token=refresh)
+
+
 @router.get("/me", response_model=UserReadSchema)
 async def get_me(
-    user_id: Annotated[UUID, Depends(get_current_user_id)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserReadSchema:
     """Return the authenticated user's profile."""
-    user = await _auth_service.get_user_by_id(db, user_id)
+    user = await _auth_service.get_user_by_id(db, ctx.user_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

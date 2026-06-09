@@ -30,11 +30,19 @@ def _get_secret() -> str:
     return "hecate-default-jwt-secret-change-me"
 
 
-def create_access_token(user_id: UUID) -> str:
+def create_access_token(
+    user_id: UUID,
+    org_id: UUID | None = None,
+    workspace_id: UUID | None = None,
+    role: str | None = None,
+) -> str:
     """Create a short-lived JWT access token.
 
     Args:
         user_id: The user's UUID to encode in the token subject.
+        org_id: Optional organization UUID for workspace context.
+        workspace_id: Optional workspace UUID for workspace context.
+        role: Optional workspace role string.
 
     Returns:
         Encoded JWT string.
@@ -46,14 +54,28 @@ def create_access_token(user_id: UUID) -> str:
         "exp": now + _ACCESS_TOKEN_EXPIRE,
         "iat": now,
     }
+    if org_id is not None:
+        payload["org_id"] = str(org_id)
+    if workspace_id is not None:
+        payload["workspace_id"] = str(workspace_id)
+    if role is not None:
+        payload["role"] = role
     return jwt.encode(payload, _get_secret(), algorithm=_ALGORITHM)
 
 
-def create_refresh_token(user_id: UUID) -> str:
+def create_refresh_token(
+    user_id: UUID,
+    org_id: UUID | None = None,
+    workspace_id: UUID | None = None,
+    role: str | None = None,
+) -> str:
     """Create a long-lived JWT refresh token.
 
     Args:
         user_id: The user's UUID to encode in the token subject.
+        org_id: Optional organization UUID for workspace context.
+        workspace_id: Optional workspace UUID for workspace context.
+        role: Optional workspace role string.
 
     Returns:
         Encoded JWT string.
@@ -65,6 +87,12 @@ def create_refresh_token(user_id: UUID) -> str:
         "exp": now + _REFRESH_TOKEN_EXPIRE,
         "iat": now,
     }
+    if org_id is not None:
+        payload["org_id"] = str(org_id)
+    if workspace_id is not None:
+        payload["workspace_id"] = str(workspace_id)
+    if role is not None:
+        payload["role"] = role
     return jwt.encode(payload, _get_secret(), algorithm=_ALGORITHM)
 
 

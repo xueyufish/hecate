@@ -105,6 +105,7 @@ class ConversationService:
         generate_suggestions: bool = False,
         agent_persona: str | None = None,
         enable_suggestions: bool = True,
+        workspace_id: uuid.UUID | None = None,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute a conversation turn with context engineering.
 
@@ -123,6 +124,7 @@ class ConversationService:
             generate_suggestions: Whether to generate follow-up suggestions.
             agent_persona: Agent persona description for suggestion context.
             enable_suggestions: Whether the agent has suggestions enabled.
+            workspace_id: Optional workspace ID for tenant isolation.
 
         Returns:
             Response dict or streaming generator.
@@ -143,7 +145,7 @@ class ConversationService:
             wm_service = WorkingMemoryService(db)
             memory_blocks = await wm_service.list_blocks(
                 uuid.UUID(agent_id),
-                uuid.UUID(int=0),
+                workspace_id or uuid.UUID(int=0),
             )
 
         # L3 user memory: retrieve relevant memories
@@ -152,7 +154,7 @@ class ConversationService:
             um_service = UserMemoryService(db)
             query_text = messages[-1].get("content", "") if messages else ""
             user_memories = await um_service.retrieve_memories(
-                workspace_id=uuid.UUID(int=0),
+                workspace_id=workspace_id or uuid.UUID(int=0),
                 query=query_text,
                 scope={"user_id": user_id},
                 top_k=5,
@@ -229,6 +231,7 @@ class ConversationService:
                 generate_suggestions=generate_suggestions,
                 agent_persona=agent_persona,
                 enable_suggestions=enable_suggestions,
+                workspace_id=workspace_id,
             )
 
         return await self._complete_chat(
@@ -246,6 +249,7 @@ class ConversationService:
             generate_suggestions=generate_suggestions,
             agent_persona=agent_persona,
             enable_suggestions=enable_suggestions,
+            workspace_id=workspace_id,
         )
 
     async def _complete_chat(
@@ -264,6 +268,7 @@ class ConversationService:
         generate_suggestions: bool = False,
         agent_persona: str | None = None,
         enable_suggestions: bool = True,
+        workspace_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """Execute a non-streaming conversation turn with context engineering."""
         if generate_opening and self._turn_index <= 1:
@@ -292,7 +297,7 @@ class ConversationService:
             )
 
             if not response.tool_calls:
-                await self._extract_facts_async(db, user_id, original_messages or messages)
+                await self._extract_facts_async(db, user_id, original_messages or messages, workspace_id)
 
                 result = {
                     "content": response.content,
@@ -356,6 +361,7 @@ class ConversationService:
         generate_suggestions: bool = False,
         agent_persona: str | None = None,
         enable_suggestions: bool = True,
+        workspace_id: uuid.UUID | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Execute a streaming conversation turn with context engineering."""
         if generate_opening and self._turn_index <= 1:
@@ -393,7 +399,7 @@ class ConversationService:
                     tool_calls_buffer.extend(chunk["tool_calls"])
 
                 if chunk.get("finish_reason") == "stop":
-                    await self._extract_facts_async(db, user_id, original_messages or messages)
+                    await self._extract_facts_async(db, user_id, original_messages or messages, workspace_id)
 
                     if citations:
                         yield {
@@ -494,6 +500,7 @@ class ConversationService:
         db: AsyncSession | None,
         user_id: str | None,
         messages: list[dict[str, Any]],
+        workspace_id: uuid.UUID | None = None,
     ) -> None:
         """Extract facts from conversation for L3 memory (non-blocking).
 
@@ -501,6 +508,7 @@ class ConversationService:
             db: Database session for memory storage.
             user_id: User ID to scope extracted facts.
             messages: Conversation messages to extract from.
+            workspace_id: Optional workspace ID for tenant isolation.
         """
         if not db or not user_id:
             return
@@ -510,7 +518,7 @@ class ConversationService:
             facts = await um_service.extract_facts(messages)
             for fact in facts:
                 await um_service.store_memory(
-                    workspace_id=uuid.UUID(int=0),
+                    workspace_id=workspace_id or uuid.UUID(int=0),
                     data=MemoryCreateSchema(
                         content=fact,
                         scope={"user_id": user_id},
