@@ -174,6 +174,8 @@ async def test_streaming_response_with_suggestions_event(client: AsyncClient):
 
         mock_port.llm_invoke = mock_llm_invoke
         mock_port.context_assemble = AsyncMock(return_value={"messages": [], "tools": None, "metadata": {}})
+        mock_port.create_span = AsyncMock(return_value=None)
+        mock_port.end_span = AsyncMock(return_value=None)
         mock_create_port.return_value = mock_port
 
         response = await client.post(

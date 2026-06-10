@@ -17,8 +17,21 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
+
+
+@dataclass(frozen=True)
+class SpanContext:
+    """Immutable context returned when a span is created via EnginePort.
+
+    Carries the IDs needed to correlate engine events with application-level traces.
+    """
+
+    span_id: str
+    trace_id: str
+    parent_id: str | None = None
 
 
 class EnginePort(ABC):
@@ -111,6 +124,46 @@ class EnginePort(ABC):
         Args:
             session_id: The session to save messages for.
             messages: The list of message dicts to persist.
+        """
+        ...
+
+    @abstractmethod
+    async def create_span(
+        self,
+        name: str,
+        parent_id: str | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> SpanContext | None:
+        """Create an observability span for tracking execution.
+
+        Called by the engine at execution boundaries (node start/end, LLM calls,
+        tool calls). Returns None if tracing is disabled or no trace context exists.
+
+        Args:
+            name: Span name (e.g., "node:agent_1", "llm:gpt-4o").
+            parent_id: Optional parent span ID for hierarchical nesting.
+            attributes: Optional key-value pairs to attach to the span.
+
+        Returns:
+            SpanContext with span/trace IDs, or None if tracing is inactive.
+        """
+        ...
+
+    @abstractmethod
+    async def end_span(
+        self,
+        span_id: str,
+        output_data: dict[str, Any] | None = None,
+        usage: dict[str, int] | None = None,
+    ) -> None:
+        """End an observability span and record its output.
+
+        No-op if the span_id does not correspond to an active span.
+
+        Args:
+            span_id: The span to finalize.
+            output_data: Optional output data from the span's operation.
+            usage: Optional token usage or resource consumption data.
         """
         ...
 

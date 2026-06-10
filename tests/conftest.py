@@ -43,6 +43,7 @@ from hecate.models import (  # noqa: F401
     organization,
     skill,
     tool,
+    trace,
     user,
     workflow,
     workspace,

@@ -101,6 +101,16 @@ class StubPort(EnginePort):
     async def conversation_save(self, session_id: uuid.UUID, messages: list[dict]) -> None:
         pass
 
+    async def create_span(
+        self, name: str, parent_id: str | None = None, attributes: dict[str, Any] | None = None
+    ) -> Any:
+        return None
+
+    async def end_span(
+        self, span_id: str, output_data: dict[str, Any] | None = None, usage: dict[str, int] | None = None
+    ) -> None:
+        pass
+
 
 class TestGuardrailAction:
     """Tests for the three-member GuardrailAction enum."""

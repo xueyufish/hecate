@@ -52,6 +52,7 @@ class Event:
         node_id: The node that produced the event (None for session-level events).
         timestamp: When the event occurred (auto-generated UTC).
         payload: Arbitrary event-specific data.
+        trace_id: Correlation ID linking this event to an application-level trace.
         version: Monotonically increasing version number within the session.
     """
 
@@ -62,6 +63,7 @@ class Event:
     id: uuid.UUID = field(default_factory=uuid.uuid4)
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
     payload: dict[str, Any] = field(default_factory=dict)
+    trace_id: str | None = None
     version: int = 0
 
 
@@ -161,6 +163,7 @@ class InMemoryEventStore(EventStore):
             id=event.id,
             timestamp=event.timestamp,
             payload=event.payload,
+            trace_id=event.trace_id,
             version=next_version,
         )
         session_events.append(versioned)
