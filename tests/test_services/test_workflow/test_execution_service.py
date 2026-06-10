@@ -21,6 +21,8 @@ def _make_port(tokens: list[str] | None = None) -> MagicMock:
     port.llm_invoke = fake_llm_invoke
     port.tool_execute = AsyncMock(return_value="tool result")
     port.knowledge_query = AsyncMock(return_value="knowledge context")
+    port.create_span = AsyncMock(return_value=None)
+    port.end_span = AsyncMock(return_value=None)
     return port
 
 

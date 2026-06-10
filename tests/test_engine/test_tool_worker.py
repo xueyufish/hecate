@@ -9,6 +9,8 @@ from hecate.engine.workers.tool_worker import ToolWorker
 def _make_port(tool_result: str = "tool output") -> MagicMock:
     port = MagicMock()
     port.tool_execute = AsyncMock(return_value=tool_result)
+    port.create_span = AsyncMock(return_value=None)
+    port.end_span = AsyncMock(return_value=None)
     return port
 
 
@@ -49,6 +51,8 @@ class TestToolWorker:
     async def test_multiple_tool_calls(self) -> None:
         port = MagicMock()
         port.tool_execute = AsyncMock(side_effect=["result_1", "result_2"])
+        port.create_span = AsyncMock(return_value=None)
+        port.end_span = AsyncMock(return_value=None)
         worker = ToolWorker(port=port)
         result = await worker.execute(
             node_id="tool",

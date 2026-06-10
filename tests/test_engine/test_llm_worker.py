@@ -26,6 +26,8 @@ def _make_port(tokens: list[str] | None = None) -> MagicMock:
 
     port.llm_invoke = fake_llm_invoke
     port._invoke_tracker = invoke_tracker
+    port.create_span = AsyncMock(return_value=None)
+    port.end_span = AsyncMock(return_value=None)
     return port
 
 

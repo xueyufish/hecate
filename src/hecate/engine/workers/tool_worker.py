@@ -133,6 +133,10 @@ class ToolWorker(Worker):
             }
 
         # Execute tool
+        span_ctx = await self._port.create_span(
+            name=f"tool:{name}",
+            attributes={"tool_name": name, "arguments": str(arguments)[:500]},
+        )
         if self._event_store and execution_context:
             await self._event_store.append(
                 Event(
@@ -151,6 +155,8 @@ class ToolWorker(Worker):
             )
         except Exception as e:
             logger.warning("Tool '%s' execution failed: %s", name, e)
+            if span_ctx:
+                await self._port.end_span(span_ctx.span_id, output_data={"error": str(e)})
             return {
                 "role": "tool",
                 "tool_call_id": tc_id,
@@ -166,6 +172,12 @@ class ToolWorker(Worker):
                     node_id=None,
                     payload={"tool_name": name, "result_length": len(str(result))},
                 )
+            )
+
+        if span_ctx:
+            await self._port.end_span(
+                span_ctx.span_id,
+                output_data={"result_length": len(str(result))},
             )
 
         # Post-tool hook

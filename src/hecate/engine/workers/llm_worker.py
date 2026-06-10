@@ -103,6 +103,11 @@ class LLMWorker(Worker):
         shaped_messages = assembled.get("messages", messages)
         shaped_tools = assembled.get("tools", tools)
 
+        span_ctx = await self._port.create_span(
+            name=f"llm:{node_id}",
+            attributes={"model": model, "message_count": len(shaped_messages)},
+        )
+
         # LLM invocation (non-streaming via llm_invoke)
         full_response = ""
         if self._event_store and execution_context:
@@ -123,6 +128,8 @@ class LLMWorker(Worker):
                 full_response += token
         except Exception as e:
             logger.warning("LLM invocation failed for node '%s': %s", node_id, e)
+            if span_ctx:
+                await self._port.end_span(span_ctx.span_id, output_data={"error": str(e)})
             return WorkerResult(node_id=node_id, error=e)
         if self._event_store and execution_context:
             await self._event_store.append(
@@ -133,6 +140,12 @@ class LLMWorker(Worker):
                     node_id=node_id,
                     payload={"model": model, "response_length": len(full_response)},
                 )
+            )
+
+        if span_ctx:
+            await self._port.end_span(
+                span_ctx.span_id,
+                output_data={"response_length": len(full_response)},
             )
 
         response_dict: dict[str, Any] = {
@@ -227,6 +240,11 @@ class LLMWorker(Worker):
         shaped_messages = assembled.get("messages", messages)
         shaped_tools = assembled.get("tools", tools)
 
+        span_ctx = await self._port.create_span(
+            name=f"llm_stream:{node_id}",
+            attributes={"model": model, "message_count": len(shaped_messages)},
+        )
+
         # LLM invocation (streaming) — yield tokens as they arrive
         full_response = ""
         try:
@@ -238,8 +256,16 @@ class LLMWorker(Worker):
                 yield {"content": token}
         except Exception as e:
             logger.warning("LLM streaming failed for node '%s': %s", node_id, e)
+            if span_ctx:
+                await self._port.end_span(span_ctx.span_id, output_data={"error": str(e)})
             yield WorkerResult(node_id=node_id, error=e)
             return
+
+        if span_ctx:
+            await self._port.end_span(
+                span_ctx.span_id,
+                output_data={"response_length": len(full_response)},
+            )
 
         response_dict: dict[str, Any] = {
             "content": full_response,
