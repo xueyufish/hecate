@@ -73,6 +73,10 @@ class Settings(BaseSettings):
 
     TRACING_ENABLED: bool = True
 
+    METRICS_STORE_TYPE: str = "in_memory"  # "in_memory" | "timescale"
+    METRICS_PUSH_INTERVAL: int = 5  # seconds between WebSocket metric pushes
+    MAX_METRICS_BUFFER_SIZE: int = 100000  # max entries per InMemory ring buffer
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""

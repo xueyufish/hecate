@@ -3,7 +3,7 @@
 Core infrastructure provides the foundational application layer — configuration management (pydantic-settings), async database engine creation, authentication (API Key + JWT), user context resolution, agent lookup with soft-delete filtering, and in-memory rate limiting.
 ## Requirements
 ### Requirement: Settings loaded from environment variables and .env file
-The `Settings` class (pydantic-settings) SHALL include `VECTOR_STORE_TYPE` (default `"qdrant"`) and per-backend connection settings: `QDRANT_URL` (default `"http://localhost:6333"`), `QDRANT_API_KEY` (default `""`), and `CHROMA_PERSIST_DIR` (default `"./data/chroma"`). The existing `QDRANT_URL` field SHALL be retained for backward compatibility when `VECTOR_STORE_TYPE=qdrant`.
+The `Settings` class (pydantic-settings) SHALL include `VECTOR_STORE_TYPE` (default `"qdrant"`) and per-backend connection settings: `QDRANT_URL` (default `"http://localhost:6333"`), `QDRANT_API_KEY` (default `""`), and `CHROMA_PERSIST_DIR` (default `"./data/chroma"`). The existing `QDRANT_URL` field SHALL be retained for backward compatibility when `VECTOR_STORE_TYPE=qdrant`. Monitoring-related settings SHALL also be included: `METRICS_STORE_TYPE` (default `"in_memory"`, values: `"in_memory"` | `"timescale"`), `METRICS_PUSH_INTERVAL` (default `5`, seconds), and `MAX_METRICS_BUFFER_SIZE` (default `100000`, max entries per ring buffer).
 
 #### Scenario: Default values
 - **WHEN** no environment variables are set
@@ -28,6 +28,14 @@ The `Settings` class (pydantic-settings) SHALL include `VECTOR_STORE_TYPE` (defa
 #### Scenario: Unsupported vector store type
 - **WHEN** `VECTOR_STORE_TYPE` is set to an unrecognized value
 - **THEN** `get_vector_store()` SHALL raise `ValueError` at runtime
+
+#### Scenario: Default monitoring configuration
+- **WHEN** no monitoring-related environment variables are set
+- **THEN** `METRICS_STORE_TYPE="in_memory"`, `METRICS_PUSH_INTERVAL=5`, `MAX_METRICS_BUFFER_SIZE=100000`
+
+#### Scenario: Enable TimescaleDB metrics store
+- **WHEN** `METRICS_STORE_TYPE=timescale`
+- **THEN** the `TimescaleMetricsStore` SHALL be used, connecting to the configured `DATABASE_URL`
 
 ### Requirement: Async database engine with auto-commit session
 The `engine` module SHALL create an async SQLAlchemy engine from `DATABASE_URL` using a factory function that applies dialect-appropriate pool settings. PostgreSQL and MySQL SHALL use pool_size=20, max_overflow=10. SQLite SHALL use no connection pooling (StaticPool for in-memory, default for file-based). The `get_db()` FastAPI dependency SHALL remain unchanged — it SHALL auto-commit on success and auto-rollback on error.
@@ -162,4 +170,12 @@ The `main.py` module SHALL initialize the FastAPI application with CORS middlewa
 #### Scenario: Health check endpoint
 - **WHEN** `GET /health` is called
 - **THEN** it SHALL return `{"status": "ok"}`
+
+#### Scenario: Monitoring routes registered on startup
+- **WHEN** the FastAPI application starts
+- **THEN** the `/ws/monitoring` WebSocket route and `/api/monitoring/metrics` REST endpoint SHALL be accessible
+
+#### Scenario: MonitoringService lifecycle in lifespan
+- **WHEN** the application lifespan starts
+- **THEN** `MonitoringService.start()` SHALL be called; on lifespan shutdown, `MonitoringService.stop()` SHALL be called
 

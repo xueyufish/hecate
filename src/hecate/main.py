@@ -30,6 +30,7 @@ from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.memory import router as memory_router
 from hecate.api.management.messages import router as messages_router
 from hecate.api.management.model_providers import router as model_providers_router
+from hecate.api.management.monitoring import router as monitoring_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
 from hecate.api.management.orgs import router as orgs_router
 from hecate.api.management.prompts import router as prompts_router
@@ -99,7 +100,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
         FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
 
+    # Start monitoring service
+    from hecate.api.management.monitoring import get_monitoring_service
+
+    monitoring_svc = get_monitoring_service()
+    monitoring_svc.start()
+
     yield
+    # Shutdown: stop monitoring service
+    await monitoring_svc.stop()
     # Shutdown: clean up database connections
     await engine.dispose()
 
@@ -202,6 +211,7 @@ app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
 app.include_router(workspace_members_router, prefix="/api", tags=["workspace-members"])
 app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
 app.include_router(traces_router, prefix="/api", tags=["traces"])
+app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
