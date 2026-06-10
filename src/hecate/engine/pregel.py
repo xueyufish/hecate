@@ -100,6 +100,7 @@ class PregelRuntime:
         event_type: EventType,
         node_id: str | None = None,
         payload: dict | None = None,
+        trace_id: str | None = None,
     ) -> None:
         """Record an event if event_store is configured."""
         if self._event_store:
@@ -110,15 +111,17 @@ class PregelRuntime:
                     event_type=event_type,
                     node_id=node_id,
                     payload=payload or {},
+                    trace_id=trace_id,
                 )
             )
 
-    def _execution_context(self, session_id: uuid.UUID) -> dict:
+    def _execution_context(self, session_id: uuid.UUID, trace_id: str | None = None) -> dict:
         """Build execution context dict for worker dispatch."""
         ctx: dict[str, Any] = {
             "session_id": session_id,
             "superstep": self._superstep,
             "event_store": self._event_store,
+            "trace_id": trace_id,
         }
         if self._event_bus is not None:
             ctx["event_bus"] = self._event_bus
@@ -130,6 +133,7 @@ class PregelRuntime:
         initial_input: dict | None = None,
         stream_mode: StreamMode = StreamMode.VALUES,
         resume_value: Any = None,
+        trace_id: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Execute the graph and yield events based on the stream mode.
 
@@ -158,6 +162,7 @@ class PregelRuntime:
             stream_mode: Controls what events are yielded (UPDATES or VALUES).
             resume_value: If provided, restores from the last checkpoint and injects
                 this value as the ``_resume_value`` channel, then continues execution.
+            trace_id: Optional trace ID for observability span correlation.
 
         Yields:
             Dicts with ``"type"`` key: ``"interrupt"``, ``"update"``, or ``"values"``.
@@ -165,7 +170,12 @@ class PregelRuntime:
         if resume_value is not None:
             await self._restore_from_checkpoint(session_id, resume_value)
             current_nodes = self._resolve_next_nodes_after_interrupt()
-            await self._emit(session_id, EventType.RESUME, payload={"interrupted_node": self._interrupted_node})
+            await self._emit(
+                session_id,
+                EventType.RESUME,
+                payload={"interrupted_node": self._interrupted_node},
+                trace_id=trace_id,
+            )
         else:
             if initial_input:
                 for key, value in initial_input.items():
@@ -175,6 +185,7 @@ class PregelRuntime:
                 session_id,
                 EventType.CUSTOM,
                 payload={"event_name": "SESSION_START", "initial_input_keys": list(initial_input or {})},
+                trace_id=trace_id,
             )
 
         while current_nodes and not self._interrupted:
@@ -189,7 +200,7 @@ class PregelRuntime:
             scheduled_nodes = self._scheduler.select_next(current_nodes, context)
 
             results: list[WorkerResult] = []
-            execution_context = self._execution_context(session_id)
+            execution_context = self._execution_context(session_id, trace_id=trace_id)
 
             for node_id in scheduled_nodes:
                 node = self._graph.nodes.get(node_id)
@@ -202,6 +213,7 @@ class PregelRuntime:
                     EventType.NODE_START,
                     node_id=node_id,
                     payload={"node_type": str(node_type) if node_type else None},
+                    trace_id=trace_id,
                 )
 
                 if node_type == NodeType.FAN_OUT:
@@ -241,6 +253,7 @@ class PregelRuntime:
                     EventType.NODE_END,
                     node_id=result.node_id,
                     payload={"success": result.error is None, "has_command": result.command is not None},
+                    trace_id=trace_id,
                 )
                 if result.error:
                     await self._emit(
@@ -248,6 +261,7 @@ class PregelRuntime:
                         EventType.ERROR,
                         node_id=result.node_id,
                         payload={"error_type": type(result.error).__name__, "error_message": str(result.error)},
+                        trace_id=trace_id,
                     )
                     raise result.error
                 if result.command:
@@ -261,6 +275,7 @@ class PregelRuntime:
                             EventType.INTERRUPT,
                             node_id=result.node_id,
                             payload={"interrupt_value_type": type(self._interrupt_value).__name__},
+                            trace_id=trace_id,
                         )
                         await self._checkpoint_store.save(
                             session_id=session_id,
@@ -286,6 +301,7 @@ class PregelRuntime:
                             EventType.CHANNEL_WRITE,
                             node_id=result.node_id,
                             payload={"channels": list(result.channel_updates.keys())},
+                            trace_id=trace_id,
                         )
 
             if interrupted:
@@ -301,6 +317,7 @@ class PregelRuntime:
                 session_id,
                 EventType.CUSTOM,
                 payload={"event_name": "SUPERSTEP_END", "completed_nodes": len(results)},
+                trace_id=trace_id,
             )
 
             if stream_mode == StreamMode.UPDATES:
