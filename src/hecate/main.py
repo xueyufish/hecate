@@ -17,6 +17,8 @@ from contextlib import asynccontextmanager as _asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response as StarletteResponse
 
 from hecate.api.auth import router as auth_router
 from hecate.api.evaluation import router as evaluation_router
@@ -34,6 +36,7 @@ from hecate.api.management.prompts import router as prompts_router
 from hecate.api.management.sessions import router as sessions_router
 from hecate.api.management.skills import router as skills_router
 from hecate.api.management.tools import router as tools_router
+from hecate.api.management.traces import router as traces_router
 from hecate.api.management.workflows import router as workflows_router
 from hecate.api.management.workspace_members import router as workspace_members_router
 from hecate.api.management.workspaces import router as workspaces_router
@@ -41,6 +44,31 @@ from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
 from hecate.core.config import settings as _settings
 from hecate.core.database import engine
+
+
+class _OTelAttributeMiddleware(BaseHTTPMiddleware):
+    """Enriches OTel spans with request-scoped attributes."""
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> StarletteResponse:
+        if _settings.TRACING_ENABLED:
+            try:
+                from opentelemetry import trace
+
+                span = trace.get_current_span()
+                if span.is_recording():
+                    for header_key, attr_name in [
+                        ("X-Agent-ID", "agent.id"),
+                        ("X-Session-ID", "session.id"),
+                        ("X-User-ID", "user.id"),
+                    ]:
+                        value = request.headers.get(header_key)
+                        if value:
+                            span.set_attribute(attr_name, value)
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).debug("Failed to set OTel span attributes", exc_info=True)
+        return await call_next(request)
 
 
 @asynccontextmanager
@@ -61,6 +89,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             await session.rollback()
 
+    # Configure OpenTelemetry tracing
+    if _settings.TRACING_ENABLED:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+
+        provider = TracerProvider()
+        provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+        FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
+
     yield
     # Shutdown: clean up database connections
     await engine.dispose()
@@ -72,6 +110,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# OTel attribute enrichment middleware
+app.add_middleware(_OTelAttributeMiddleware)
 
 # CORS middleware - allow all origins for development
 app.add_middleware(
@@ -160,6 +201,7 @@ app.include_router(orgs_router, prefix="/api", tags=["orgs"])
 app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
 app.include_router(workspace_members_router, prefix="/api", tags=["workspace-members"])
 app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
+app.include_router(traces_router, prefix="/api", tags=["traces"])
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
