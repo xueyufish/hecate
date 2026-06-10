@@ -2,7 +2,7 @@
 Define the EnginePort abstract interface that decouples the execution engine from external capability services (LLM providers, tool runners, knowledge bases, checkpoint storage, conversation history).
 ## Requirements
 ### Requirement: EnginePort abstract interface decouples engine from services
-The `EnginePort` ABC SHALL define 7 abstract methods and 4 optional methods that the engine calls for all I/O, with no imports from the services layer.
+The `EnginePort` ABC SHALL define 7 abstract methods and 6 optional methods that the engine calls for all I/O, with no imports from the services layer. The 2 new optional methods `create_span` and `end_span` enable the engine layer to create observability spans without importing OpenTelemetry directly.
 
 #### Scenario: LLM invocation
 - **WHEN** `llm_invoke(messages, config)` is called
@@ -39,6 +39,26 @@ The `EnginePort` ABC SHALL define 7 abstract methods and 4 optional methods that
 #### Scenario: Conversation save
 - **WHEN** `conversation_save(session_id, messages)` is called
 - **THEN** it SHALL persist the message list for the session
+
+#### Scenario: Create a span for observability
+- **WHEN** `create_span(name="llm_call", attributes={"model": "gpt-4o"})` is called
+- **THEN** it SHALL return a `SpanContext` dataclass with `span_id`, `trace_id`, and `parent_id` fields, or `None` if tracing is disabled
+
+#### Scenario: Create a span with explicit parent
+- **WHEN** `create_span(name="tool_call", parent_id=<parent_span_id>, attributes={"tool": "search"})` is called
+- **THEN** it SHALL create a child span under the specified parent and return its `SpanContext`
+
+#### Scenario: End a span with output and usage
+- **WHEN** `end_span(span_id=<id>, output_data={"result": "ok"}, usage={"input_tokens": 50})` is called
+- **THEN** it SHALL finalize the span with the provided output and usage data
+
+#### Scenario: Create span when tracing is disabled
+- **WHEN** `create_span(name="llm_call")` is called and no trace context exists
+- **THEN** it SHALL return `None` without raising an exception
+
+#### Scenario: End span that does not exist
+- **WHEN** `end_span(span_id=<unknown_id>)` is called
+- **THEN** it SHALL return without raising an exception (no-op)
 
 ### Requirement: Optional context_assemble method for Context Engineering
 The `context_assemble()` method SHALL default to pass-through, returning messages and tools unchanged.

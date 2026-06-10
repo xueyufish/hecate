@@ -2,11 +2,15 @@
 Define the EventStore abstraction for recording and replaying granular agent execution events, enabling observability, debugging, and state recovery across sessions.
 ## Requirements
 ### Requirement: Event dataclass captures granular execution state
-The engine SHALL define an immutable `Event` dataclass in `engine/eventstore.py` with fields: `id` (UUID, auto-generated), `session_id` (UUID), `superstep` (int), `event_type` (EventType enum), `node_id` (str | None), `timestamp` (datetime, auto-generated), `payload` (dict).
+The engine SHALL define an immutable `Event` dataclass in `engine/eventstore.py` with fields: `id` (UUID, auto-generated), `session_id` (UUID), `superstep` (int), `event_type` (EventType enum), `node_id` (str | None), `timestamp` (datetime, auto-generated), `payload` (dict), `trace_id` (str | None, default None).
 
-#### Scenario: Create a node execution event
-- **WHEN** an Event is created with `session_id`, `superstep=3`, `event_type=NodeType.NODE_START`, `node_id="agent_1"`
-- **THEN** it SHALL have auto-generated `id` (UUID), `timestamp` (UTC now), and default `payload={}`
+#### Scenario: Create a node execution event with trace correlation
+- **WHEN** an Event is created with `session_id`, `superstep=3`, `event_type=EventType.NODE_START`, `node_id="agent_1"`, `trace_id="abc123"`
+- **THEN** it SHALL have auto-generated `id` (UUID), `timestamp` (UTC now), default `payload={}`, and `trace_id="abc123"`
+
+#### Scenario: Create event without trace context
+- **WHEN** an Event is created without specifying `trace_id`
+- **THEN** `trace_id` SHALL default to `None`
 
 #### Scenario: Event immutability
 - **WHEN** an Event instance exists
