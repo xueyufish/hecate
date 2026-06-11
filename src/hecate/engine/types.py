@@ -73,6 +73,17 @@ class StreamMode(StrEnum):
     DEBUG = "debug"
 
 
+class ExecutionMode(StrEnum):
+    """Execution mode for workflow runs.
+
+    - CONVERSATIONAL: multi-turn, stateful, supports interrupt/resume and streaming.
+    - TASK: single-shot, stateless, no interaction nodes allowed, no checkpointing.
+    """
+
+    CONVERSATIONAL = "conversational"
+    TASK = "task"
+
+
 @dataclass
 class Command:
     """Control instruction returned by a Worker to influence graph execution flow.

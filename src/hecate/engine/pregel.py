@@ -134,6 +134,7 @@ class PregelRuntime:
         stream_mode: StreamMode = StreamMode.VALUES,
         resume_value: Any = None,
         trace_id: str | None = None,
+        execution_mode: str = "conversational",
     ) -> AsyncGenerator[dict, None]:
         """Execute the graph and yield events based on the stream mode.
 
@@ -163,10 +164,16 @@ class PregelRuntime:
             resume_value: If provided, restores from the last checkpoint and injects
                 this value as the ``_resume_value`` channel, then continues execution.
             trace_id: Optional trace ID for observability span correlation.
+            execution_mode: "conversational" or "task". Task mode disables checkpointing
+                and overrides MESSAGES stream mode to VALUES.
 
         Yields:
             Dicts with ``"type"`` key: ``"interrupt"``, ``"update"``, or ``"values"``.
         """
+        # Task mode: override MESSAGES stream mode to VALUES
+        if execution_mode == "task" and stream_mode == StreamMode.MESSAGES:
+            stream_mode = StreamMode.VALUES
+
         if resume_value is not None:
             await self._restore_from_checkpoint(session_id, resume_value)
             current_nodes = self._resolve_next_nodes_after_interrupt()
@@ -277,17 +284,18 @@ class PregelRuntime:
                             payload={"interrupt_value_type": type(self._interrupt_value).__name__},
                             trace_id=trace_id,
                         )
-                        await self._checkpoint_store.save(
-                            session_id=session_id,
-                            superstep=self._superstep,
-                            node_id=result.node_id,
-                            channel_state=self._channel_manager.snapshot(),
-                            metadata={
-                                "interrupted": True,
-                                "interrupt_value": self._interrupt_value,
-                                "interrupt_updates": result.channel_updates,
-                            },
-                        )
+                        if execution_mode == "conversational":
+                            await self._checkpoint_store.save(
+                                session_id=session_id,
+                                superstep=self._superstep,
+                                node_id=result.node_id,
+                                channel_state=self._channel_manager.snapshot(),
+                                metadata={
+                                    "interrupted": True,
+                                    "interrupt_value": self._interrupt_value,
+                                    "interrupt_updates": result.channel_updates,
+                                },
+                            )
                         yield {"type": "interrupt", "value": self._interrupt_value}
                         interrupted = True
                         break
@@ -307,12 +315,13 @@ class PregelRuntime:
             if interrupted:
                 return
 
-            await self._checkpoint_store.save(
-                session_id=session_id,
-                superstep=self._superstep,
-                node_id=current_nodes[0] if len(current_nodes) == 1 else None,
-                channel_state=self._channel_manager.snapshot(),
-            )
+            if execution_mode == "conversational":
+                await self._checkpoint_store.save(
+                    session_id=session_id,
+                    superstep=self._superstep,
+                    node_id=current_nodes[0] if len(current_nodes) == 1 else None,
+                    channel_state=self._channel_manager.snapshot(),
+                )
             await self._emit(
                 session_id,
                 EventType.CUSTOM,

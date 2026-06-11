@@ -36,7 +36,7 @@ from hecate.engine.workers.llm_worker import LLMWorker
 from hecate.engine.workers.suggestion_worker import SuggestionWorker
 from hecate.engine.workers.tool_worker import ToolWorker
 from hecate.engine.workers.variable_set_worker import VariableSetWorker
-from hecate.models.workflow import WorkflowVersionModel
+from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,7 @@ class WorkflowExecutionService:
                 system_prompt = f"{persona}\n\n{skills_block}" if skills_block else persona
 
         # Resolve graph config based on mode
+        execution_mode = "conversational"
         if agent_mode == "chat":
             graph_config = build_chat_graph(
                 model=model,
@@ -210,13 +211,14 @@ class WorkflowExecutionService:
             )
         elif agent_mode == "workflow":
             graph_config = await self._load_workflow_graph(workflow_id)
+            execution_mode = await self._load_workflow_mode(workflow_id) if workflow_id else "conversational"
         else:
             msg = f"Unknown agent mode: {agent_mode}"
             raise ValueError(msg)
 
         # Compile graph
         compiler = GraphCompiler()
-        compiled = compiler.compile(graph_config)
+        compiled = compiler.compile(graph_config, execution_mode=execution_mode)
 
         # Inject node type info into configs for composite worker routing
         for _nid, ncfg in compiled.nodes.items():
@@ -238,6 +240,11 @@ class WorkflowExecutionService:
         if tools:
             initial_input["_tools"] = tools
 
+        initial_input["sys.execution_mode"] = execution_mode
+        if execution_mode == "conversational":
+            initial_input["sys.conversation_id"] = str(session_id)
+            initial_input["sys.dialogue_count"] = 0
+
         # Execute
         checkpoint_store = InMemoryCheckpointStore()
         runtime = PregelRuntime(
@@ -250,15 +257,16 @@ class WorkflowExecutionService:
         stream_mode = StreamMode.MESSAGES if stream else StreamMode.VALUES
 
         if stream:
-            return self._stream_execute(runtime, session_id, initial_input, stream_mode)
+            return self._stream_execute(runtime, session_id, initial_input, stream_mode, execution_mode)
 
-        return await self._non_stream_execute(runtime, session_id, initial_input)
+        return await self._non_stream_execute(runtime, session_id, initial_input, execution_mode)
 
     async def _non_stream_execute(
         self,
         runtime: PregelRuntime,
         session_id: uuid.UUID,
         initial_input: dict,
+        execution_mode: str = "conversational",
     ) -> dict[str, Any]:
         """Execute non-streaming and return final response dict.
 
@@ -266,6 +274,7 @@ class WorkflowExecutionService:
             runtime: The configured PregelRuntime.
             session_id: Session identifier.
             initial_input: Channel initial values.
+            execution_mode: Execution mode (conversational or task).
 
         Returns:
             Response dict with content, model, usage, etc.
@@ -275,6 +284,7 @@ class WorkflowExecutionService:
             session_id=session_id,
             initial_input=initial_input,
             stream_mode=StreamMode.VALUES,
+            execution_mode=execution_mode,
         ):
             if event.get("type") == "values":
                 final_state = event.get("state", {})
@@ -304,6 +314,7 @@ class WorkflowExecutionService:
         session_id: uuid.UUID,
         initial_input: dict,
         stream_mode: StreamMode,
+        execution_mode: str = "conversational",
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Execute streaming and yield events.
 
@@ -312,6 +323,7 @@ class WorkflowExecutionService:
             session_id: Session identifier.
             initial_input: Channel initial values.
             stream_mode: Stream mode for PregelRuntime.
+            execution_mode: Execution mode (conversational or task).
 
         Yields:
             Event dicts from PregelRuntime.
@@ -320,6 +332,7 @@ class WorkflowExecutionService:
             session_id=session_id,
             initial_input=initial_input,
             stream_mode=stream_mode,
+            execution_mode=execution_mode,
         ):
             yield event
 
@@ -366,6 +379,19 @@ class WorkflowExecutionService:
             suggestion_worker=suggestion_worker,
             variable_worker=variable_worker,
         )
+
+    async def _load_workflow_mode(self, workflow_id: uuid.UUID) -> str:
+        """Load execution_mode from the WorkflowModel."""
+        if self._db is None:
+            return "conversational"
+        result = await self._db.execute(
+            select(WorkflowModel).where(
+                WorkflowModel.id == workflow_id,
+                ~WorkflowModel.deleted,
+            )
+        )
+        workflow = result.scalar_one_or_none()
+        return workflow.execution_mode if workflow else "conversational"
 
     async def _load_workflow_graph(self, workflow_id: uuid.UUID | None) -> Any:
         """Load a workflow's graph from the database.

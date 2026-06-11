@@ -30,6 +30,10 @@ class WorkflowModel(BaseModel):
       single-workspace mode; reserved for P3 multi-tenancy support.
     - **name** — human-readable workflow name.
     - **current_version** — the latest version number (auto-incremented).
+    - **execution_mode** — ``"conversational"`` for multi-turn workflows,
+      ``"task"`` for single-shot headless execution.
+    - **published_version** — version number currently published to production,
+      or ``None`` if never published.
     """
 
     __tablename__ = "workflows"
@@ -40,6 +44,8 @@ class WorkflowModel(BaseModel):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    execution_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="conversational")
+    published_version: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
 
     __table_args__ = (Index("idx_workflows_workspace", "workspace_id", "deleted"),)
 
@@ -54,6 +60,7 @@ class WorkflowVersionModel(BaseModel):
     - **graph_dsl** — JSONB column storing the raw graph DSL definition.
     - **compiled_graph** — JSONB column storing the compiled graph output.
     - **change_summary** — optional description of what changed in this version.
+    - **labels** — deployment labels (e.g., ``["production"]``, ``["staging"]``).
 
     Note: This model inherits BaseModel but versions are immutable — once
     created, graph_dsl and compiled_graph never change.
@@ -69,6 +76,7 @@ class WorkflowVersionModel(BaseModel):
     graph_dsl: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
     compiled_graph: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     change_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    labels: Mapped[list] = mapped_column(JSON, default=list)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
@@ -134,6 +142,7 @@ class WorkflowCreateSchema(PydanticBase):
     name: str = Field(..., min_length=1, max_length=255)
     graph_dsl: dict[str, Any] = Field(..., description="Graph DSL definition")
     change_summary: str = Field(default="", max_length=1000)
+    execution_mode: str = Field(default="conversational", pattern="^(conversational|task)$")
 
 
 class WorkflowUpdateSchema(PydanticBase):
@@ -144,6 +153,7 @@ class WorkflowUpdateSchema(PydanticBase):
     name: str | None = Field(None, min_length=1, max_length=255)
     graph_dsl: dict[str, Any] | None = Field(None, description="Updated graph DSL definition")
     change_summary: str = Field(default="", max_length=1000)
+    execution_mode: str | None = Field(None, pattern="^(conversational|task)$")
 
 
 class WorkflowReadSchema(PydanticBase):
@@ -155,6 +165,8 @@ class WorkflowReadSchema(PydanticBase):
     workspace_id: uuid.UUID
     name: str
     current_version: int
+    execution_mode: str
+    published_version: int | None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
@@ -172,6 +184,7 @@ class WorkflowVersionReadSchema(PydanticBase):
     graph_dsl: dict[str, Any]
     compiled_graph: dict[str, Any]
     change_summary: str
+    labels: list[str]
     workspace_id: uuid.UUID
     created_at: datetime
 
@@ -185,6 +198,8 @@ class WorkflowDetailSchema(PydanticBase):
     workspace_id: uuid.UUID
     name: str
     current_version: int
+    execution_mode: str
+    published_version: int | None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False

@@ -244,6 +244,101 @@ async def get_workflow_version(
         ) from e
 
 
+@router.post("/workflows/{workflow_id}/publish/{version}")
+async def publish_workflow_version(
+    workflow_id: uuid.UUID,
+    version: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Publish a specific workflow version to production.
+
+    Args:
+        workflow_id: The UUID of the workflow.
+        version: The version number to publish.
+        db: The async database session.
+        ctx: The authenticated context.
+
+    Returns:
+        dict: The updated workflow data.
+
+    Raises:
+        HTTPException: 404 if workflow or version not found.
+    """
+    service = WorkflowService(db)
+    try:
+        result = await service.publish_version(workflow_id, version)
+        return result.model_dump()
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
+        ) from e
+
+
+@router.get("/workflows/{workflow_id}/diff")
+async def diff_workflow_versions(
+    workflow_id: uuid.UUID,
+    v1: Annotated[int, Query(ge=1)],
+    v2: Annotated[int, Query(ge=1)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Compare two workflow versions.
+
+    Args:
+        workflow_id: The UUID of the workflow.
+        v1: First version number.
+        v2: Second version number.
+        db: The async database session.
+        ctx: The authenticated context.
+
+    Returns:
+        dict: Diff summary and details.
+
+    Raises:
+        HTTPException: 404 if either version not found.
+    """
+    service = WorkflowService(db)
+    try:
+        return await service.diff_versions(workflow_id, v1, v2)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
+        ) from e
+
+
+@router.get("/workflows/{workflow_id}/published")
+async def get_published_workflow_version(
+    workflow_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Get the currently published version of a workflow.
+
+    Args:
+        workflow_id: The UUID of the workflow.
+        db: The async database session.
+        ctx: The authenticated context.
+
+    Returns:
+        dict: The published version data.
+
+    Raises:
+        HTTPException: 404 if workflow not found or no published version.
+    """
+    service = WorkflowService(db)
+    try:
+        result = await service.get_published_version(workflow_id)
+        return result.model_dump()
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
+        ) from e
+
+
 class ValidateRequest(PydanticBase):
     graph_dsl: dict
 

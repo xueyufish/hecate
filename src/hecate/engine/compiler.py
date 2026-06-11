@@ -45,11 +45,13 @@ class GraphCompiler:
         """
         self._passes: list[OptimizationPass] = passes or []
 
-    def compile(self, config: GraphConfig) -> CompiledGraph:
+    def compile(self, config: GraphConfig, execution_mode: str = "conversational") -> CompiledGraph:
         """Validate the graph structure and return a compiled graph.
 
         Args:
             config: The parsed graph configuration to compile.
+            execution_mode: "conversational" or "task". Task mode forbids
+                SUGGESTION nodes.
 
         Returns:
             A CompiledGraph ready for execution.
@@ -61,6 +63,7 @@ class GraphCompiler:
         self._validate_edges(config)
         self._validate_handoff_edges(config)
         self._validate_fan_out_merge(config)
+        self._validate_execution_mode(config, execution_mode)
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
@@ -183,6 +186,32 @@ class GraphCompiler:
                 raise GraphValidationError(
                     f"MERGE node '{merge_id}' has no upstream FAN_OUT node",
                     field=f"nodes[{merge_id}]",
+                )
+
+    def _validate_execution_mode(self, config: GraphConfig, execution_mode: str) -> None:
+        """Validate node restrictions based on execution mode.
+
+        Task mode forbids SUGGESTION nodes (interaction nodes that require
+        user presence). Conversational mode allows all node types.
+
+        Args:
+            config: The parsed graph configuration.
+            execution_mode: "conversational" or "task".
+
+        Raises:
+            GraphValidationError: if task mode contains forbidden node types.
+        """
+        if execution_mode != "task":
+            return
+
+        from hecate.engine.types import NodeType
+
+        forbidden = {NodeType.SUGGESTION}
+        for node_id, node in config.nodes.items():
+            if node.type in forbidden:
+                raise GraphValidationError(
+                    f"{node.type.value} nodes are forbidden in task mode workflows",
+                    field=f"nodes[{node_id}]",
                 )
 
     def _detect_unreachable(self, config: GraphConfig) -> list[str]:
