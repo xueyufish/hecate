@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import select
+
 from hecate.models.evaluation import EvaluationDatasetModel, EvaluationItemModel
 from hecate.services.evaluation.engine import EvaluationEngine
 from hecate.services.evaluation.evaluator import Evaluator
-from hecate.services.evaluation.types import EvalInput, EvalOutput, Score
+from hecate.services.evaluation.types import AnswerSource, EvalInput, EvalOutput, Score
 
 
 class AlwaysGoodEvaluator(Evaluator):
@@ -137,3 +139,48 @@ class TestEvaluationEngine:
         assert result.total_items == 0
         assert result.item_scores == {}
         assert result.metric_averages == {}
+
+    async def test_answer_source_manual(self, db_session: object) -> None:
+        """Manual answer source uses item.generated_answer."""
+        ds_id = await _create_test_dataset(db_session, n_items=1)
+        stmt = select(EvaluationItemModel).where(EvaluationItemModel.dataset_id == ds_id)
+        result = await db_session.execute(stmt)  # type: ignore[union-attr]
+        item = result.scalars().first()
+        item.generated_answer = "pre-generated answer"
+        await db_session.flush()  # type: ignore[union-attr]
+
+        engine = EvaluationEngine(db_session)  # type: ignore[arg-type]
+        run_result = await engine.run([AlwaysGoodEvaluator()], ds_id, answer_source=AnswerSource.MANUAL)
+        assert run_result.total_items == 1
+        assert "always_good" in run_result.metric_averages
+
+    async def test_answer_source_auto_with_existing_answer(self, db_session: object) -> None:
+        """AUTO source uses pre-populated answer when available."""
+        ds_id = await _create_test_dataset(db_session, n_items=1)
+        stmt = select(EvaluationItemModel).where(EvaluationItemModel.dataset_id == ds_id)
+        result = await db_session.execute(stmt)  # type: ignore[union-attr]
+        item = result.scalars().first()
+        item.generated_answer = "existing answer"
+        await db_session.flush()  # type: ignore[union-attr]
+
+        engine = EvaluationEngine(db_session)  # type: ignore[arg-type]
+        run_result = await engine.run([AlwaysGoodEvaluator()], ds_id, answer_source=AnswerSource.AUTO)
+        assert run_result.total_items == 1
+        assert run_result.metric_averages["always_good"] == 1.0
+
+    async def test_answer_source_auto_no_existing_answer(self, db_session: object) -> None:
+        """AUTO source falls back to pipeline when no pre-populated answer."""
+        ds_id = await _create_test_dataset(db_session, n_items=1)
+        engine = EvaluationEngine(db_session)  # type: ignore[arg-type]
+
+        run_result = await engine.run([AlwaysGoodEvaluator()], ds_id, answer_source=AnswerSource.AUTO)
+        assert run_result.total_items == 1
+        assert "always_good" in run_result.metric_averages
+
+    async def test_answer_source_pipeline_fallback(self, db_session: object) -> None:
+        """PIPELINE source falls back gracefully when LLM unavailable."""
+        ds_id = await _create_test_dataset(db_session, n_items=1)
+        engine = EvaluationEngine(db_session)  # type: ignore[arg-type]
+
+        run_result = await engine.run([AlwaysGoodEvaluator()], ds_id, answer_source=AnswerSource.PIPELINE)
+        assert run_result.total_items == 1

@@ -77,6 +77,16 @@ class Settings(BaseSettings):
     METRICS_PUSH_INTERVAL: int = 5  # seconds between WebSocket metric pushes
     MAX_METRICS_BUFFER_SIZE: int = 100000  # max entries per InMemory ring buffer
 
+    # Audit configuration
+    AUDIT_ENABLED: bool = True
+    AUDIT_BATCH_SIZE: int = 50
+    AUDIT_FLUSH_INTERVAL_SECONDS: float = 2.0
+    AUDIT_QUEUE_MAX_SIZE: int = 10000
+    AUDIT_RETENTION_DAYS: int = 90
+    AUDIT_ARCHIVE_ENABLED: bool = False
+    AUDIT_ARCHIVE_STORAGE: str = "minio"
+    AUDIT_ARCHIVE_PATH: str = "audit-archives"
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""

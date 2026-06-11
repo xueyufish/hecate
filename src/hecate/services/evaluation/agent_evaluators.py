@@ -1,11 +1,13 @@
 """Agent evaluators using LLM-as-Judge pattern.
 
-Provides three evaluators that use a configurable LLM to judge agent
+Provides five evaluators that use a configurable LLM to judge agent
 response quality:
 
 - :class:`CorrectnessEvaluator` — compares answer against ground truth
 - :class:`RelevancyEvaluator` — assesses answer relevance to query
 - :class:`CompletenessEvaluator` — measures query coverage completeness
+- :class:`ToolCallAccuracyEvaluator` — evaluates tool call correctness
+- :class:`TaskCompletionEvaluator` — evaluates task completion quality
 """
 
 from __future__ import annotations
@@ -21,6 +23,8 @@ from hecate.services.evaluation.prompts import (
     COMPLETENESS_PROMPT,
     CORRECTNESS_PROMPT,
     RELEVANCY_PROMPT,
+    TASK_COMPLETION_PROMPT,
+    TOOL_CALL_ACCURACY_PROMPT,
 )
 from hecate.services.evaluation.types import (
     EvalInput,
@@ -197,6 +201,96 @@ class CompletenessEvaluator(Evaluator):
                 )
             except Exception as e:
                 logger.error("Completeness evaluation failed: %s", e)
+                score = Score(
+                    metric_name=self.name,
+                    value=-1.0,
+                    reasoning=f"LLM judge error: {e}",
+                    source="llm_judge",
+                )
+
+        return EvalOutput(scores=[score], duration_ms=timer.elapsed_ms)
+
+
+class ToolCallAccuracyEvaluator(Evaluator):
+    """Evaluate whether the agent used tools correctly and appropriately."""
+
+    @property
+    def name(self) -> str:
+        return "tool_call_accuracy"
+
+    @property
+    def description(self) -> str:
+        return "Evaluates whether tool calls were appropriate and correct for the task"
+
+    async def evaluate(self, input: EvalInput) -> EvalOutput:
+        """Evaluate tool call accuracy using LLM-as-Judge.
+
+        Returns Score(value=-1.0) when no tool_calls are provided.
+        """
+        with Timer() as timer:
+            if not input.tool_calls:
+                score = Score(
+                    metric_name=self.name,
+                    value=-1.0,
+                    reasoning="No tool_calls provided",
+                    source="llm_judge",
+                )
+                return EvalOutput(scores=[score], duration_ms=timer.elapsed_ms)
+
+            tool_calls_str = json.dumps(input.tool_calls, indent=2)
+            prompt = TOOL_CALL_ACCURACY_PROMPT.format(
+                query=input.query,
+                tool_calls=tool_calls_str,
+                answer=input.generated_answer,
+            )
+            try:
+                result = await _call_llm_judge(prompt, self.llm_config)
+                score = Score(
+                    metric_name=self.name,
+                    value=float(result["score"]),
+                    reasoning=result.get("reasoning"),
+                    source="llm_judge",
+                )
+            except Exception as e:
+                logger.error("Tool call accuracy evaluation failed: %s", e)
+                score = Score(
+                    metric_name=self.name,
+                    value=-1.0,
+                    reasoning=f"LLM judge error: {e}",
+                    source="llm_judge",
+                )
+
+        return EvalOutput(scores=[score], duration_ms=timer.elapsed_ms)
+
+
+class TaskCompletionEvaluator(Evaluator):
+    """Evaluate whether the agent successfully completed the requested task."""
+
+    @property
+    def name(self) -> str:
+        return "task_completion"
+
+    @property
+    def description(self) -> str:
+        return "Evaluates whether the agent successfully completed the requested task"
+
+    async def evaluate(self, input: EvalInput) -> EvalOutput:
+        """Evaluate task completion using LLM-as-Judge."""
+        with Timer() as timer:
+            prompt = TASK_COMPLETION_PROMPT.format(
+                query=input.query,
+                answer=input.generated_answer,
+            )
+            try:
+                result = await _call_llm_judge(prompt, self.llm_config)
+                score = Score(
+                    metric_name=self.name,
+                    value=float(result["score"]),
+                    reasoning=result.get("reasoning"),
+                    source="llm_judge",
+                )
+            except Exception as e:
+                logger.error("Task completion evaluation failed: %s", e)
                 score = Score(
                     metric_name=self.name,
                     value=-1.0,

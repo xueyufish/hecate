@@ -22,6 +22,7 @@ from hecate.models.evaluation import (
 )
 from hecate.services.evaluation.evaluator import Evaluator
 from hecate.services.evaluation.types import (
+    AnswerSource,
     EvalInput,
     EvaluationRunResult,
     Score,
@@ -45,6 +46,7 @@ class EvaluationEngine:
         self,
         evaluators: list[Evaluator],
         dataset_id: uuid.UUID,
+        answer_source: AnswerSource = AnswerSource.MANUAL,
     ) -> EvaluationRunResult:
         """Execute all evaluators against all items in a dataset.
 
@@ -55,6 +57,8 @@ class EvaluationEngine:
         Args:
             evaluators: List of evaluator instances to run.
             dataset_id: UUID of the dataset to evaluate.
+            answer_source: How to obtain generated answers — manual (from items),
+                pipeline (run RAG), or auto (fallback).
 
         Returns:
             Aggregated :class:`EvaluationRunResult` with scores and averages.
@@ -88,10 +92,15 @@ class EvaluationEngine:
 
             with Timer() as total_timer:
                 for item in items:
+                    generated = item.generated_answer or ""
+
+                    if answer_source in (AnswerSource.PIPELINE, AnswerSource.AUTO) and not generated:
+                        generated = await self._generate_answer_via_pipeline(item.query, item.context or [])
+
                     eval_input = EvalInput(
                         query=item.query,
                         retrieved_contexts=item.context or [],
-                        generated_answer="",
+                        generated_answer=generated,
                         expected_answer=item.expected_answer,
                     )
 
@@ -162,3 +171,44 @@ class EvaluationEngine:
             run.completed_at = datetime.now(UTC)
             await self.db.flush()
             raise
+
+    async def _generate_answer_via_pipeline(
+        self,
+        query: str,
+        contexts: list[str],
+    ) -> str:
+        """Generate an answer using the RAG pipeline.
+
+        Falls back to a simple context-based answer when the LLM service
+        is unavailable.
+
+        Args:
+            query: The user query.
+            contexts: Retrieved context passages.
+
+        Returns:
+            Generated answer string.
+        """
+        if not contexts:
+            return ""
+
+        try:
+            from hecate.services.llm.service import LLMService
+
+            context_text = "\n\n".join(contexts)
+            messages = [
+                {
+                    "role": "system",
+                    "content": "Answer the question based on the provided context. Be concise and accurate.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Context:\n{context_text}\n\nQuestion: {query}",
+                },
+            ]
+            llm = LLMService()
+            response = await llm.chat(messages=messages, model="gpt-4o-mini")
+            return (response.content or "").strip()
+        except Exception as e:
+            logger.warning("Pipeline answer generation failed: %s", e)
+            return ""

@@ -84,6 +84,7 @@ class EvaluationItemModel(BaseModel):
     dataset_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     query: Mapped[str] = mapped_column(Text, nullable=False)
     expected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_answer: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     context: Mapped[list | None] = mapped_column(JSON, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -219,6 +220,7 @@ class EvaluationItemCreateSchema(PydanticBase):
 
     query: str = Field(..., min_length=1)
     expected_answer: str | None = None
+    generated_answer: str | None = None
     context: list[str] | None = None
     metadata: dict | None = Field(None, alias="metadata_")
 
@@ -232,6 +234,7 @@ class EvaluationItemReadSchema(PydanticBase):
     dataset_id: uuid.UUID
     query: str
     expected_answer: str | None
+    generated_answer: str | None
     context: list | None
     workspace_id: uuid.UUID
     metadata: dict | None = Field(validation_alias="metadata_")
@@ -251,6 +254,7 @@ class EvaluationRunCreateSchema(PydanticBase):
 
     dataset_id: uuid.UUID
     evaluators: list[str] = Field(..., min_length=1)
+    answer_source: str = Field("manual", pattern="^(manual|pipeline|auto)$")
 
 
 class EvaluationRunReadSchema(PydanticBase):

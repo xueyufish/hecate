@@ -64,3 +64,44 @@ Consider:
 Respond with ONLY valid JSON (no markdown, no commentary):
 {{"score": <float 0.0-1.0>, "reasoning": "<brief explanation>"}}
 """
+
+TOOL_CALL_ACCURACY_PROMPT = """\
+You are an expert evaluator. Assess whether the **Tool Calls** made by the \
+agent were appropriate and correct for the given **Query**.
+
+Rate tool call accuracy on a scale from 0.0 (completely wrong tools/calls) \
+to 1.0 (all tools used correctly and appropriately).
+
+Consider:
+- Were the right tools selected for the task?
+- Were the tool arguments correct and complete?
+- Were any necessary tool calls missing?
+- Were any unnecessary tool calls made?
+
+**Query:** {query}
+**Tool Calls:** {tool_calls}
+**Generated Answer:** {answer}
+
+Respond with ONLY valid JSON (no markdown, no commentary):
+{{"score": <float 0.0-1.0>, "reasoning": "<brief explanation>"}}
+"""
+
+TASK_COMPLETION_PROMPT = """\
+You are an expert evaluator. Assess whether the agent successfully **completed** \
+the task described in the **Query**.
+
+Rate task completion on a scale from 0.0 (task not completed at all) to 1.0 \
+(task fully completed successfully).
+
+Consider:
+- Did the agent achieve the goal stated in the query?
+- Is the final answer a complete solution to the task?
+- Are there any remaining steps or unresolved parts?
+- Would the user be satisfied with this result?
+
+**Query:** {query}
+**Generated Answer:** {answer}
+
+Respond with ONLY valid JSON (no markdown, no commentary):
+{{"score": <float 0.0-1.0>, "reasoning": "<brief explanation>"}}
+"""

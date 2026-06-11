@@ -14,6 +14,10 @@ Provides CRUD operations for evaluation datasets, items, and runs:
 - ``GET /api/evaluation/runs`` — List evaluation runs
 - ``GET /api/evaluation/runs/{run_id}`` — Get run with summary stats
 - ``GET /api/evaluation/runs/{run_id}/scores`` — Get scores for a run
+
+Built-in evaluators: correctness, relevancy, completeness,
+tool_call_accuracy, task_completion, context_precision, context_recall,
+faithfulness, answer_relevancy (RAG evaluators require ragas).
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ from hecate.models.evaluation import (
 from hecate.services.evaluation.dataset_service import EvaluationDatasetService
 from hecate.services.evaluation.engine import EvaluationEngine
 from hecate.services.evaluation.evaluator import Evaluator
+from hecate.services.evaluation.types import AnswerSource
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +66,15 @@ def _get_evaluator_registry() -> dict[str, type[Evaluator]]:
             CompletenessEvaluator,
             CorrectnessEvaluator,
             RelevancyEvaluator,
+            TaskCompletionEvaluator,
+            ToolCallAccuracyEvaluator,
         )
 
         _EVALUATOR_REGISTRY["correctness"] = CorrectnessEvaluator
         _EVALUATOR_REGISTRY["relevancy"] = RelevancyEvaluator
         _EVALUATOR_REGISTRY["completeness"] = CompletenessEvaluator
+        _EVALUATOR_REGISTRY["tool_call_accuracy"] = ToolCallAccuracyEvaluator
+        _EVALUATOR_REGISTRY["task_completion"] = TaskCompletionEvaluator
 
         # RAG evaluators are optional — only register if ragas is available
         try:
@@ -274,7 +283,8 @@ async def create_run(
         evaluators.append(cls())
 
     engine = EvaluationEngine(db)
-    result = await engine.run(evaluators, data.dataset_id)
+    source = AnswerSource(data.answer_source)
+    result = await engine.run(evaluators, data.dataset_id, answer_source=source)
 
     # Convert result to API response
     return {

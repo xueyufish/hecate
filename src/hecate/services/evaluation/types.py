@@ -14,9 +14,23 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Literal
 
 VALID_SOURCES = ("llm_judge", "deterministic", "human")
+
+
+class AnswerSource(StrEnum):
+    """Determines how the generated answer is obtained for evaluation.
+
+    - **MANUAL** — answers are pre-populated in ``EvaluationItem.generated_answer``
+    - **PIPELINE** — run the RAG pipeline to generate answers at evaluation time
+    - **AUTO** — use pre-populated answers when available, otherwise run the pipeline
+    """
+
+    MANUAL = "manual"
+    PIPELINE = "pipeline"
+    AUTO = "auto"
 
 
 @dataclass
