@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response as StarletteResponse
 
+from hecate.api.audit import router as audit_router
 from hecate.api.auth import router as auth_router
 from hecate.api.evaluation import router as evaluation_router
 from hecate.api.management.agent_templates import router as agent_templates_router
@@ -41,6 +42,8 @@ from hecate.api.management.traces import router as traces_router
 from hecate.api.management.workflows import router as workflows_router
 from hecate.api.management.workspace_members import router as workspace_members_router
 from hecate.api.management.workspaces import router as workspaces_router
+from hecate.api.middleware import AuditMiddleware
+from hecate.api.schedules import router as schedules_router
 from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
 from hecate.core.config import settings as _settings
@@ -106,7 +109,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     monitoring_svc = get_monitoring_service()
     monitoring_svc.start()
 
+    # Start audit batch writer
+    import asyncio
+
+    from hecate.api.middleware import set_audit_queue
+    from hecate.services.audit.store import AuditEvent, DatabaseAuditStore
+    from hecate.services.audit.writer import AuditBatchWriter
+
+    audit_queue: asyncio.Queue[AuditEvent] = asyncio.Queue(maxsize=10000)
+    set_audit_queue(audit_queue)
+    audit_writer = AuditBatchWriter(DatabaseAuditStore(), audit_queue)
+    await audit_writer.start()
+
     yield
+    # Shutdown: stop audit writer
+    await audit_writer.stop()
     # Shutdown: stop monitoring service
     await monitoring_svc.stop()
     # Shutdown: clean up database connections
@@ -119,6 +136,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Audit middleware — captures all HTTP requests as audit events
+app.add_middleware(AuditMiddleware)
 
 # OTel attribute enrichment middleware
 app.add_middleware(_OTelAttributeMiddleware)
@@ -190,6 +210,8 @@ async def metrics() -> PlainTextResponse:
 
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
+app.include_router(audit_router, prefix="/api", tags=["audit"])
+app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(evaluation_router, prefix="/api", tags=["evaluation"])
 app.include_router(chat_router, prefix="/v1", tags=["chat"])
 app.include_router(models_router, prefix="/v1", tags=["models"])
