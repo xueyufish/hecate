@@ -70,6 +70,10 @@ observability = [
 mysql = [
     "aiomysql>=0.2",
 ]
+scheduling = [
+    "apscheduler~=3.10",
+    "croniter~=2.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
