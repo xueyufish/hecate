@@ -1,8 +1,7 @@
-## Purpose
-Define the Graph DSL JSON schema, parser, and compiler validation rules for the Hecate execution engine.
-## Requirements
+## MODIFIED Requirements
+
 ### Requirement: Compiler validates entry point, edges, and handoff cycles
-The `GraphCompiler.compile()` SHALL perform validation stages before producing a `CompiledGraph`: entry point, edges, handoff cycles, fan-out/merge structural constraints, and execution-mode-aware node restrictions. When `execution_mode="task"` is passed to compile(), the compiler SHALL reject graphs containing INTERRUPT or SUGGESTION node types by raising `GraphValidationError`.
+The `GraphCompiler.compile()` SHALL perform validation stages before producing a `CompiledGraph`: entry point, edges, handoff cycles, fan-out/merge structural constraints, execution-mode-aware node restrictions, channel access validation, and routing config validation. When `execution_mode="task"` is passed to compile(), the compiler SHALL reject graphs containing INTERRUPT or SUGGESTION node types by raising `GraphValidationError`.
 
 #### Scenario: Entry point not found
 - **WHEN** the declared entry point references a non-existent node
@@ -48,8 +47,30 @@ The `GraphCompiler.compile()` SHALL perform validation stages before producing a
 - **WHEN** `execution_mode` is not provided to `compile()`
 - **THEN** the compiler SHALL default to `"conversational"` behavior and allow all node types
 
+#### Scenario: Routing config validation for intent mode
+- **WHEN** a CONDITION node has `routing_mode: "intent"` but no `routing_config.intent_patterns`
+- **THEN** the compiler SHALL raise `GraphValidationError` indicating intent routing requires intent_patterns
+
+#### Scenario: Routing config validation for dynamic mode
+- **WHEN** a CONDITION node has `routing_mode: "dynamic"` but no `routing_config.candidate_agents`
+- **THEN** the compiler SHALL raise `GraphValidationError` indicating dynamic routing requires candidate_agents
+
+#### Scenario: Dynamic routing candidates must reference existing nodes
+- **WHEN** a CONDITION node has `routing_mode: "dynamic"` and `candidate_agents: ["agent_a", "nonexistent"]`
+- **THEN** the compiler SHALL raise `GraphValidationError` indicating candidate "nonexistent" is not a declared node
+
+#### Scenario: Invalid routing mode rejected
+- **WHEN** a CONDITION node has `routing_mode: "unknown"`
+- **THEN** `parse_graph()` SHALL raise `GraphValidationError`
+
+#### Scenario: Channel access warnings logged
+- **WHEN** a node declares `channels.readable: ["nonexistent"]` and "nonexistent" is not in graph `state`
+- **THEN** the compiler SHALL log a WARNING about undeclared channel access
+
+## MODIFIED Requirements
+
 ### Requirement: Graph DSL parser validates against JSON Schema
-The `parse_graph()` function SHALL accept a JSON string or dict and validate it against `schemas/graph-dsl.schema.json`. The schema SHALL include `"persistent"` as an optional boolean property on channel definitions. The parser SHALL auto-migrate deprecated `"persistent_topic"` to `"topic"` with `persistent=True`.
+The `parse_graph()` function SHALL accept a JSON string or dict and validate it against `schemas/graph-dsl.schema.json`. The schema SHALL include `"persistent"` as an optional boolean property on channel definitions. The parser SHALL auto-migrate deprecated `"persistent_topic"` to `"topic"` with `persistent=True`. The schema SHALL also support `routing_mode` and `routing_config` fields on CONDITION node config, and `"dynamic_handoff"` as a valid edge trigger value.
 
 #### Scenario: Persistent channel in JSON
 - **WHEN** `parse_graph()` encounters a channel definition with `"type": "topic", "persistent": true`
@@ -67,3 +88,10 @@ The `parse_graph()` function SHALL accept a JSON string or dict and validate it 
 - **WHEN** `parse_graph()` encounters `"type": "unknown"` and "unknown" is NOT in the registry
 - **THEN** it SHALL raise `GraphValidationError` with field pointing to the channel type
 
+#### Scenario: Routing mode in DSL
+- **WHEN** `parse_graph()` encounters a CONDITION node with `routing_mode: "intent"` and `routing_config`
+- **THEN** it SHALL parse the routing config into the NodeConfig without error
+
+#### Scenario: Dynamic handoff trigger in DSL
+- **WHEN** `parse_graph()` encounters an edge with `trigger: "dynamic_handoff"`
+- **THEN** the resulting `Edge` SHALL have `trigger="dynamic_handoff"` set

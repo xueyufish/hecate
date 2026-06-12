@@ -1,75 +1,46 @@
-## Purpose
+## ADDED Requirements
 
-Multi-agent canvas provides the UI for visualizing and interacting with agent workflow graphs, including agent palette, edge visualization, template picker, pattern selector, and execution visualization.
-## Requirements
-### Requirement: Agent palette in workflow canvas
-The system SHALL display an agent palette in the workflow canvas sidebar listing all available agents. Users SHALL be able to drag agents from the palette onto the canvas to create AGENT nodes.
+### Requirement: Channel access summary in config panel
+The agent node config panel SHALL display a channel access summary section showing which channels the selected agent can read from and write to. The summary SHALL group channels by type (LAST_VALUE, TOPIC, ACCUMULATOR) and highlight broadcast participation (TOPIC channels shared with other agents).
 
-#### Scenario: Agent palette displays available agents
-- **WHEN** the user opens the workflow canvas editor
-- **THEN** the sidebar shows an "Agents" section listing all non-deleted agents with name and mode
+#### Scenario: Channel access summary displayed
+- **WHEN** the user selects an agent node that has declared `channels.readable: ["messages", "context"]` and `channels.writable: ["messages"]`
+- **THEN** the config panel shows a "Channel Access" section with "Readable: messages (topic), context (last_value)" and "Writable: messages (topic)"
 
-#### Scenario: Drag agent to canvas creates AGENT node
-- **WHEN** the user drags an agent from the palette onto the canvas
-- **THEN** a new AGENT node is created with the agent's ID and name, positioned at the drop location
+#### Scenario: Broadcast participation highlighted
+- **WHEN** the user selects an agent node that shares a TOPIC channel "shared_context" with 2 other agent nodes
+- **THEN** the channel access summary SHALL highlight "shared_context" with a broadcast icon and show "Shared with 2 agents"
 
-### Requirement: Edge type differentiation in canvas
-The system SHALL render edges with 4 distinct visual types: default (solid gray), handoff (dashed purple), conditional (dotted dark amber with label), and fan-out (solid indigo with branch indicators). The previous 2-type system (handoff vs default) is expanded to include conditional and fan-out edge types.
+#### Scenario: No channel declaration shown as informational
+- **WHEN** the user selects an agent node with no `channels` config
+- **THEN** the config panel shows "No channel access configured" with a suggestion to configure channel access
 
-#### Scenario: Handoff edge rendered as dashed purple
-- **WHEN** a graph contains an edge with `data.edgeType` set to "handoff" between two agent nodes
-- **THEN** the canvas renders the edge as a dashed purple Bezier curve with a "Handoff" label
+### Requirement: Routing mode configuration for condition nodes
+The condition node config panel SHALL provide a routing mode selector with 3 options: "Condition" (expression-based), "Intent" (pattern + LLM classification), and "Dynamic" (LLM selects next speaker). Each mode SHALL show mode-specific configuration fields.
 
-#### Scenario: Default edge rendered as solid gray
-- **WHEN** a graph contains a standard edge (no `data.edgeType` or `data.edgeType` is "default")
-- **THEN** the canvas renders the edge as a solid gray Bezier curve
+#### Scenario: Condition mode selected (default)
+- **WHEN** the user selects a condition node and the routing mode is "condition" (or unset)
+- **THEN** the config panel shows the existing expression field with no additional routing fields
 
-#### Scenario: Conditional edge rendered as dotted with label
-- **WHEN** a graph contains an edge with `data.edgeType` set to "conditional"
-- **THEN** the canvas renders the edge as a dotted dark amber Bezier curve with the condition key as a label
+#### Scenario: Intent mode selected
+- **WHEN** the user changes routing mode to "Intent"
+- **THEN** the config panel shows an "Intent Patterns" section with add/remove pattern rows (each with pattern regex and target node selector), and an optional "Routing Prompt" text field for LLM fallback
 
-#### Scenario: Fan-out edge rendered with branch indicators
-- **WHEN** an edge originates from a fan-out node
-- **THEN** the canvas renders the edge as a solid indigo line with a fork icon indicator
+#### Scenario: Dynamic mode selected
+- **WHEN** the user changes routing mode to "Dynamic"
+- **THEN** the config panel shows a "Candidate Agents" multi-select listing all agent nodes in the graph, a "Routing Prompt" text field, and an "Allow Repeated Speaker" toggle (default off)
 
-### Requirement: Edge type selection when connecting nodes
-The system SHALL allow users to choose the edge type when connecting two nodes via a popover edge type selector with options: Default, Handoff, Conditional. The previous connection dialog with 2 options is replaced with the popover selector supporting 3+ types. Fan-out edges are auto-created when connecting to a fan-out node.
+#### Scenario: Routing mode persisted to graph DSL
+- **WHEN** the user selects "Intent" mode and adds intent patterns
+- **THEN** the graph DSL node config SHALL include `routing_mode: "intent"` and `routing_config: {intent_patterns: [...], routing_prompt: "..."}`
 
-#### Scenario: User creates handoff connection
-- **WHEN** the user connects agent node A to agent node B and selects "Handoff" in the edge type selector
-- **THEN** the graph DSL stores the edge with `data.edgeType` set to "handoff"
+### Requirement: Dynamic handoff edge type in canvas
+The edge type selector SHALL include "Dynamic Handoff" as a 5th option. Dynamic handoff edges SHALL be rendered as a dashed purple line with a sparkle icon, visually distinct from static handoff edges (dashed purple, no sparkle).
 
-#### Scenario: User creates conditional connection
-- **WHEN** the user connects a condition node to an agent node and selects "Conditional" in the edge type selector
-- **THEN** the graph DSL stores the edge with `data.edgeType` set to "conditional" and prompts for a condition label
+#### Scenario: User creates dynamic handoff connection
+- **WHEN** the user connects agent node A to agent nodes B and C, and selects "Dynamic Handoff" in the edge type selector
+- **THEN** the graph DSL stores the edge with `trigger: "dynamic_handoff"` and `target: {"b": "agent_b", "c": "agent_c"}`
 
-#### Scenario: Connection to fan-out auto-sets type
-- **WHEN** the user connects any node to a fan-out node
-- **THEN** the edge is automatically created as a fan-out type without showing the selector
-
-### Requirement: Orchestration template picker
-The system SHALL provide a template picker accessible from the workflow canvas toolbar. Users SHALL be able to select a pre-built orchestration template which populates the canvas with the template's graph. Additionally, a pattern selector SHALL be provided as a separate toolbar action offering 6 collaboration patterns that auto-generate graph structures.
-
-#### Scenario: User loads triage template
-- **WHEN** the user opens the template picker and selects "Customer Service Triage"
-- **THEN** the canvas is populated with a router agent connected to 3 specialist agents via handoff edges
-
-#### Scenario: Template replaces current canvas
-- **WHEN** the user loads a template and the canvas already has nodes
-- **THEN** the system prompts for confirmation before replacing the current canvas content
-
-#### Scenario: Pattern selector accessible from toolbar
-- **WHEN** the user clicks the "Patterns" button in the canvas toolbar
-- **THEN** a pattern selector dialog opens showing 6 collaboration patterns as selectable cards
-
-### Requirement: Multi-agent execution visualization
-The system SHALL highlight the currently executing agent node during workflow test runs. The canvas SHALL visually distinguish completed, executing, and pending agent nodes.
-
-#### Scenario: Test run highlights executing agent
-- **WHEN** a workflow test run is in progress and agent node "specialist" is executing
-- **THEN** the "specialist" node is highlighted with a pulsing animation
-
-#### Scenario: Test run shows completed agents
-- **WHEN** a workflow test run has completed agent nodes
-- **THEN** those nodes show a green checkmark overlay
-
+#### Scenario: Dynamic handoff edge rendered distinctly
+- **WHEN** a graph contains an edge with `trigger: "dynamic_handoff"`
+- **THEN** the canvas renders the edge as a dashed purple Bezier curve with a sparkle icon, distinct from static handoff edges
