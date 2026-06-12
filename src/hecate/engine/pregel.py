@@ -363,6 +363,25 @@ class PregelRuntime:
         if resume_value is not None:
             self._channel_manager.write("_resume_value", resume_value)
 
+    def _resolve_conditional_target(self, target_map: dict, route_value: str) -> str | None:
+        """Resolve a conditional edge target using the route value as the dict key.
+
+        Looks up the ``_route`` value directly in the target map.  This is
+        fully generic -- any key is valid, not just ``"true"``/``"false"``.
+        Falls back to ``"default"`` if the route key is not present.
+
+        Args:
+            target_map: Dict mapping route keys to node IDs.
+            route_value: The value read from the ``_route`` channel.
+
+        Returns:
+            The matched node ID, or None if no branch matches.
+        """
+        target: str | None = target_map.get(route_value)
+        if target is None:
+            target = target_map.get("default")
+        return target
+
     def _resolve_next_nodes_after_interrupt(self) -> list[str]:
         """Determine the next nodes to execute after restoring from an interrupt checkpoint.
 
@@ -384,11 +403,7 @@ class PregelRuntime:
                     next_nodes.append(edge.target)
                 elif isinstance(edge.target, dict):
                     route_key = str(self._interrupt_updates.get("_route", "true"))
-                    target: str | None = edge.target.get(route_key)
-                    if not target:
-                        target = edge.target.get("default")
-                    if not target:
-                        target = edge.target.get("false")
+                    target = self._resolve_conditional_target(edge.target, route_key)
                     if target:
                         next_nodes.append(target)
         if "__end__" in next_nodes:
@@ -422,11 +437,7 @@ class PregelRuntime:
                         next_nodes.append(edge.target)
                     elif isinstance(edge.target, dict):
                         route_key = str(result.channel_updates.get("_route", "true"))
-                        target: str | None = edge.target.get(route_key)
-                        if not target:
-                            target = edge.target.get("default")
-                        if not target:
-                            target = edge.target.get("false")
+                        target = self._resolve_conditional_target(edge.target, route_key)
                         if target:
                             next_nodes.append(target)
         if "__end__" in next_nodes:

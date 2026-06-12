@@ -14,6 +14,7 @@ has two stages:
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from pathlib import Path
@@ -50,8 +51,9 @@ class GraphValidationError(Exception):
         super().__init__(message)
 
 
+@functools.lru_cache(maxsize=1)
 def _load_schema() -> dict:
-    """Load the Graph DSL JSON Schema from disk.
+    """Load the Graph DSL JSON Schema from disk (cached after first call).
 
     The schema file is located at ``schemas/graph-dsl.schema.json`` relative
     to the project root (computed from this module's file path).
