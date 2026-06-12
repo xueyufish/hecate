@@ -131,10 +131,48 @@ function FanOutEdge({
   );
 }
 
+function DynamicHandoffEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+}: EdgeProps) {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  });
+  return (
+    <>
+      <path
+        id={id}
+        className="react-flow__edge-path"
+        d={edgePath}
+        strokeWidth={2}
+        stroke="#7c3aed"
+        strokeDasharray="6 2 2 2"
+        fill="none"
+      />
+      <text
+        x={labelX}
+        y={labelY - 8}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        className="text-[10px] fill-violet-700"
+      >
+        ✦ Dynamic
+      </text>
+    </>
+  );
+}
+
 const edgeTypes = {
   handoff: HandoffEdge,
   conditional: ConditionalEdge,
   fanout: FanOutEdge,
+  dynamic_handoff: DynamicHandoffEdge,
 };
 
 export default function CanvasArea({
@@ -166,7 +204,7 @@ export default function CanvasArea({
   );
 
   function handleEdgeTypeSelect(
-    type: "default" | "handoff" | "conditional",
+    type: "default" | "handoff" | "conditional" | "dynamic_handoff",
     label?: string
   ) {
     if (!edgeSelector) return;
@@ -196,6 +234,13 @@ export default function CanvasArea({
         style: { stroke: "#d97706", strokeWidth: 2, strokeDasharray: "3 6" },
         label: label || "Condition",
         data: { edgeType: "conditional", conditionLabel: label },
+      },
+      dynamic_handoff: {
+        animated: false,
+        type: "dynamic_handoff",
+        style: { stroke: "#7c3aed", strokeWidth: 2, strokeDasharray: "6 2 2 2" },
+        label: "Dynamic Handoff",
+        data: { edgeType: "dynamic_handoff" },
       },
     };
 
@@ -270,6 +315,9 @@ export default function CanvasArea({
     }
     if (edgeType === "conditional") {
       return { ...edge, type: "conditional", animated: false };
+    }
+    if (edgeType === "dynamic_handoff") {
+      return { ...edge, type: "dynamic_handoff", animated: false };
     }
     if (edgeType === "fanout") {
       return { ...edge, type: "fanout", animated: false };

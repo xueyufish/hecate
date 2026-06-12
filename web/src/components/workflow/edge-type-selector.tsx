@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 
 interface EdgeTypeSelectorProps {
   position: { x: number; y: number };
-  onSelect: (type: "default" | "handoff" | "conditional", label?: string) => void;
+  onSelect: (type: "default" | "handoff" | "conditional" | "dynamic_handoff", label?: string) => void;
   onCancel: () => void;
 }
 
@@ -30,6 +30,13 @@ const EDGE_TYPES = [
     color: "#d97706",
     style: "dotted",
   },
+  {
+    type: "dynamic_handoff" as const,
+    label: "Dynamic Handoff",
+    description: "Dash-dot violet",
+    color: "#7c3aed",
+    style: "dashdot",
+  },
 ];
 
 export function EdgeTypeSelector({
@@ -51,7 +58,7 @@ export function EdgeTypeSelector({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onCancel]);
 
-  function handleSelect(type: "default" | "handoff" | "conditional") {
+  function handleSelect(type: "default" | "handoff" | "conditional" | "dynamic_handoff") {
     if (type === "conditional") {
       setShowLabelInput(true);
       return;
@@ -93,7 +100,9 @@ export function EdgeTypeSelector({
                       ? "5 3"
                       : et.style === "dotted"
                         ? "2 4"
-                        : "none"
+                        : et.style === "dashdot"
+                          ? "6 2 2 2"
+                          : "none"
                   }
                 />
               </svg>
