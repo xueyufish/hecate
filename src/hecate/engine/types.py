@@ -16,6 +16,45 @@ from enum import StrEnum
 from typing import Any
 
 
+class RoutingMode(StrEnum):
+    """Routing mode for CONDITION nodes.
+
+    - CONDITION: expression-based routing (default, existing behavior).
+    - INTENT: pattern matching + optional LLM intent classification.
+    - DYNAMIC: LLM selects next speaker from candidate agents.
+    """
+
+    CONDITION = "condition"
+    INTENT = "intent"
+    DYNAMIC = "dynamic"
+
+
+@dataclass
+class ChannelAccess:
+    """Per-node channel access boundaries.
+
+    Attributes:
+        readable: Set of channel names the node is allowed to read.
+        writable: Set of channel names the node is allowed to write.
+    """
+
+    readable: set[str] = field(default_factory=set)
+    writable: set[str] = field(default_factory=set)
+
+
+@dataclass
+class IntentPattern:
+    """A single intent pattern for routing.
+
+    Attributes:
+        pattern: Regex pattern to match against input.
+        target: Target node ID to route to when pattern matches.
+    """
+
+    pattern: str
+    target: str
+
+
 class NodeType(StrEnum):
     """Supported node types in the execution graph.
 
@@ -221,6 +260,7 @@ class CompiledGraph:
         channels: channel definitions keyed by channel name.
         entry_point: the node ID where execution begins.
         name: human-readable graph name.
+        channel_access: per-node channel read/write access boundaries.
     """
 
     nodes: dict[str, NodeConfig]
@@ -228,6 +268,7 @@ class CompiledGraph:
     channels: dict[str, ChannelDef]
     entry_point: str
     name: str = ""
+    channel_access: dict[str, ChannelAccess] = field(default_factory=dict)
 
     def to_json(self) -> dict:
         """Serialize the compiled graph to a JSON-compatible dict.
