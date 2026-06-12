@@ -13,6 +13,7 @@ from hecate.services.orchestration.handoff import (
     get_handoff_targets_for_node,
     inject_handoff_tools,
     is_handoff_tool_call,
+    validate_handoff_target,
 )
 
 
@@ -189,3 +190,62 @@ def test_handoff_non_agent_source_rejected():
     graph_config = parse_graph(dsl)
     with pytest.raises(GraphValidationError, match="must be an agent node"):
         GraphCompiler().compile(graph_config)
+
+
+def test_dynamic_handoff_injects_tool_with_multiple_targets():
+    """Dynamic handoff edges inject handoff tool with all candidate targets."""
+    compiled = _make_compiled_with_handoff(
+        [
+            ("router", "billing", "dynamic_handoff"),
+            ("router", "technical", "dynamic_handoff"),
+            ("router", "support", "dynamic_handoff"),
+        ]
+    )
+    existing_tools = [{"type": "function", "function": {"name": "search"}}]
+
+    result = inject_handoff_tools(existing_tools, compiled, "router")
+
+    assert len(result) == 2
+    handoff_tool = result[1]
+    assert handoff_tool["function"]["name"] == "handoff_to_agent"
+    valid_targets = handoff_tool["function"]["parameters"]["properties"]["target"]["enum"]
+    assert set(valid_targets) == {"billing", "technical", "support"}
+
+
+def test_dynamic_handoff_invalid_target_raises():
+    """validate_handoff_target raises ValueError for invalid target."""
+    compiled = _make_compiled_with_handoff(
+        [
+            ("router", "billing", "dynamic_handoff"),
+            ("router", "technical", "dynamic_handoff"),
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Invalid handoff target"):
+        validate_handoff_target(compiled, "router", "unknown_agent")
+
+
+def test_dynamic_handoff_valid_target_accepted():
+    """validate_handoff_target returns target when valid."""
+    compiled = _make_compiled_with_handoff(
+        [
+            ("router", "billing", "dynamic_handoff"),
+            ("router", "technical", "dynamic_handoff"),
+        ]
+    )
+
+    result = validate_handoff_target(compiled, "router", "billing")
+    assert result == "billing"
+
+
+def test_mixed_handoff_and_dynamic_handoff():
+    """Both handoff and dynamic_handoff edges contribute targets."""
+    compiled = _make_compiled_with_handoff(
+        [
+            ("router", "billing", "handoff"),
+            ("router", "technical", "dynamic_handoff"),
+        ]
+    )
+
+    targets = get_handoff_targets_for_node(compiled, "router")
+    assert set(targets) == {"billing", "technical"}

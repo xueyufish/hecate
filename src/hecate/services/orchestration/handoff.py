@@ -75,7 +75,7 @@ def get_handoff_targets_for_node(
     """
     targets: list[str] = []
     for edge in compiled.edges:
-        if edge.source == node_id and edge.trigger == "handoff":
+        if edge.source == node_id and edge.trigger in ("handoff", "dynamic_handoff"):
             if isinstance(edge.target, str):
                 targets.append(edge.target)
             elif isinstance(edge.target, dict):
@@ -107,6 +107,37 @@ def inject_handoff_tools(
         return tools
     handoff_tool = build_handoff_tool_schema(targets)
     return list(tools) + [handoff_tool]
+
+
+def validate_handoff_target(
+    compiled: CompiledGraph,
+    node_id: str,
+    target: str,
+) -> str:
+    """Validate that a handoff target is in the allowed candidate list.
+
+    Checks the compiled graph edges for handoff and dynamic_handoff edges
+    originating from ``node_id`` and ensures ``target`` is among the valid
+    candidates. Raises ``ValueError`` if the target is not allowed.
+
+    Args:
+        compiled: The compiled graph containing edge definitions.
+        node_id: The source node attempting the handoff.
+        target: The proposed target node ID.
+
+    Returns:
+        The validated target string.
+
+    Raises:
+        ValueError: If the target is not a valid handoff destination.
+    """
+    allowed = get_handoff_targets_for_node(compiled, node_id)
+    if target not in allowed:
+        raise ValueError(
+            f"Invalid handoff target '{target}' from node '{node_id}'. "
+            f"Allowed targets: {', '.join(allowed) or '(none)'}"
+        )
+    return target
 
 
 def is_handoff_tool_call(tool_name: str) -> bool:
