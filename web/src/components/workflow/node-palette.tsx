@@ -3,6 +3,8 @@
 import {
   Bot,
   GitBranch,
+  GitFork,
+  GitMerge,
   Wrench,
   Users,
   Search,
@@ -26,6 +28,8 @@ const PALETTE_ITEMS = [
     icon: Variable,
     color: "text-orange-600",
   },
+  { type: "fan-out", label: "Fan Out", icon: GitFork, color: "text-indigo-600" },
+  { type: "merge", label: "Merge", icon: GitMerge, color: "text-slate-600" },
 ];
 
 export function NodePalette() {
