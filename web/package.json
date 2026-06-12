@@ -1,7 +1,9 @@
 {
-  "name": "web",
+  "name": "@hecate/web",
   "version": "0.1.0",
   "private": true,
+  "description": "Hecate Agent Platform — Management dashboard and canvas UI",
+  "license": "MIT",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

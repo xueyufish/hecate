@@ -25,7 +25,7 @@ Enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/hecate.git
+git clone https://github.com/xueyufish/hecate.git
 cd hecate
 
 # Create virtual environment and install dependencies

@@ -17,7 +17,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
-from pathlib import Path
+from importlib.resources import files
 
 import jsonschema
 
@@ -33,8 +33,6 @@ from hecate.engine.types import (
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_PATH = Path(__file__).parent.parent.parent.parent / "schemas" / "graph-dsl.schema.json"
-
 
 class GraphValidationError(Exception):
     """Raised when a graph definition fails schema or structural validation.
@@ -42,7 +40,7 @@ class GraphValidationError(Exception):
     Attributes:
         field: Dotted JSON path pointing to the invalid element (e.g.
             ``"nodes.guard.config.model"``). Carried from jsonschema's
-            ``absolute_path`` for user-facing error localization. None when
+            ``absolute_path`` for error localization in user-facing messages. None when
             the error applies to the entire document.
     """
 
@@ -53,13 +51,14 @@ class GraphValidationError(Exception):
 
 @functools.lru_cache(maxsize=1)
 def _load_schema() -> dict:
-    """Load the Graph DSL JSON Schema from disk (cached after first call).
+    """Load the Graph DSL JSON Schema from the package (cached after first call).
 
-    The schema file is located at ``schemas/graph-dsl.schema.json`` relative
-    to the project root (computed from this module's file path).
+    The schema is bundled inside the engine package as ``graph-dsl.schema.json``,
+    loaded via ``importlib.resources`` so it works both in development and after
+    ``pip install``.
     """
-    with open(SCHEMA_PATH) as f:
-        return json.load(f)
+    schema_path = files("hecate.engine").joinpath("graph-dsl.schema.json")
+    return json.loads(schema_path.read_text(encoding="utf-8"))
 
 
 def parse_graph(raw: str | dict) -> GraphConfig:
