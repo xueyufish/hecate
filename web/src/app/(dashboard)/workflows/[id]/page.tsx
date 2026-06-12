@@ -12,8 +12,10 @@ import type { GraphDSL } from "@/lib/workflow-types";
 import { NodePalette } from "@/components/workflow/node-palette";
 import { AgentPalette } from "@/components/workflow/agent-palette";
 import { TemplatePicker } from "@/components/workflow/template-picker";
+import { PatternSelector } from "@/components/workflow/pattern-selector";
+import { PatternConfigDialog } from "@/components/workflow/pattern-config-dialog";
 import { ConfigPanel } from "@/components/workflow/config-panel";
-import { ArrowLeft, Save, CheckCircle, Play, LayoutTemplate, History, X, ChevronDown, ChevronUp } from "lucide-react";
+import { ArrowLeft, Save, CheckCircle, Play, LayoutTemplate, History, X, ChevronDown, ChevronUp, Network } from "lucide-react";
 import Link from "next/link";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -96,6 +98,13 @@ export default function WorkflowEditorPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [running, setRunning] = useState(false);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const [customizingFrom, setCustomizingFrom] = useState<string | null>(null);
+  const [saveAsName, setSaveAsName] = useState("");
+  const [showSaveAsDialog, setShowSaveAsDialog] = useState(false);
+  const [patternSelectorOpen, setPatternSelectorOpen] = useState(false);
+  const [selectedPattern, setSelectedPattern] = useState<import("@/lib/workflow-types").PatternDefinition | null>(null);
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
 
   useEffect(() => {
     api
@@ -270,7 +279,58 @@ export default function WorkflowEditorPage() {
     const { nodes: rfNodes, edges: rfEdges } = dslToReactFlow(graphDsl);
     setNodes(rfNodes);
     setEdges(rfEdges);
+    setIsCustomizing(true);
+    setCustomizingFrom(graphDsl.name || "Template");
     setShowTemplatePicker(false);
+  }
+
+  async function handleSaveAsWorkflow() {
+    const name = saveAsName.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      const dsl = reactFlowToDsl(nodes, edges, name);
+      const result = await api.post<{ id: string }>("/api/workflows", {
+        name,
+        description: `Customized from ${customizingFrom}`,
+        graph_dsl: dsl,
+      });
+      setIsCustomizing(false);
+      setCustomizingFrom(null);
+      setSaveAsName("");
+      setShowSaveAsDialog(false);
+      router.push(`/workflows/${result.id}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handlePatternSelect(pattern: import("@/lib/workflow-types").PatternDefinition) {
+    setSelectedPattern(pattern);
+    setPatternSelectorOpen(false);
+    setConfigDialogOpen(true);
+  }
+
+  async function handlePatternGenerate(
+    patternId: string,
+    config: Record<string, unknown>,
+  ) {
+    try {
+      const graphDsl = await api.post<GraphDSL>(
+        `/api/collaboration-patterns/${patternId}/generate`,
+        { config },
+      );
+      const { nodes: rfNodes, edges: rfEdges } = dslToReactFlow(graphDsl);
+      setNodes(rfNodes);
+      setEdges(rfEdges);
+      setIsCustomizing(true);
+      setCustomizingFrom(patternId);
+      setConfigDialogOpen(false);
+      setSelectedPattern(null);
+    } catch (err: unknown) {
+      const apiErr = err as { error?: { message?: string } };
+      alert("Pattern generation error: " + (apiErr.error?.message || "Unknown error"));
+    }
   }
 
   function getNodeStatusColor(status: string) {
@@ -305,6 +365,16 @@ export default function WorkflowEditorPage() {
           <h1 className="text-lg font-semibold">{workflow.name}</h1>
         </div>
         <div className="flex items-center gap-2">
+          {isCustomizing && (
+            <span className="flex items-center gap-1 rounded-md bg-violet-50 px-2 py-1 text-xs font-medium text-violet-700">
+              <LayoutTemplate className="h-3 w-3" />
+              Customizing: {customizingFrom}
+            </span>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setPatternSelectorOpen(true)}>
+            <Network className="mr-1 h-4 w-4" />
+            Patterns
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setShowTemplatePicker(true)}>
             <LayoutTemplate className="mr-1 h-4 w-4" />
             Templates
@@ -328,6 +398,15 @@ export default function WorkflowEditorPage() {
             <Save className="mr-1 h-4 w-4" />
             {saving ? "Saving..." : "Save"}
           </Button>
+          {isCustomizing && (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => setShowSaveAsDialog(true)}
+            >
+              Save as Workflow
+            </Button>
+          )}
         </div>
       </div>
 
@@ -444,6 +523,13 @@ export default function WorkflowEditorPage() {
                 scheduleSave(updatedNodes, edges);
               }}
               onClose={() => setSelectedNodeId(null)}
+              graphStateChannels={
+                workflow?.graph_dsl?.state
+                  ? Object.keys(workflow.graph_dsl.state)
+                  : []
+              }
+              allNodes={nodes}
+              edges={edges}
             />
           ) : selectedNode ? (
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -542,12 +628,64 @@ export default function WorkflowEditorPage() {
         )}
       </div>
 
+      {showSaveAsDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[360px] rounded-lg border bg-background p-4 shadow-lg">
+            <h3 className="mb-3 text-sm font-semibold">Save as New Workflow</h3>
+            <input
+              type="text"
+              className="w-full rounded-md border px-3 py-1.5 text-sm"
+              value={saveAsName}
+              onChange={(e) => setSaveAsName(e.target.value)}
+              placeholder="Workflow name..."
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleSaveAsWorkflow();
+                if (e.key === "Escape") setShowSaveAsDialog(false);
+              }}
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSaveAsDialog(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveAsWorkflow}
+                disabled={saving || !saveAsName.trim()}
+              >
+                {saving ? "Saving..." : "Create"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showTemplatePicker && (
         <TemplatePicker
           onSelect={handleTemplateSelect}
           onClose={() => setShowTemplatePicker(false)}
         />
       )}
+
+      <PatternSelector
+        open={patternSelectorOpen}
+        onSelect={handlePatternSelect}
+        onClose={() => setPatternSelectorOpen(false)}
+      />
+
+      <PatternConfigDialog
+        open={configDialogOpen}
+        pattern={selectedPattern}
+        onGenerate={handlePatternGenerate}
+        onClose={() => {
+          setConfigDialogOpen(false);
+          setSelectedPattern(null);
+        }}
+      />
     </div>
   );
 }

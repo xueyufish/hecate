@@ -87,6 +87,27 @@ export type EdgeDef = z.infer<typeof EdgeDefSchema>;
 export type ChannelDef = z.infer<typeof ChannelDefSchema>;
 export type NodeConfig = z.infer<typeof NodeConfigSchema>;
 
+export type CollaborationPattern =
+  | "sequential"
+  | "parallel"
+  | "handoff"
+  | "broadcast"
+  | "negotiation"
+  | "debate";
+
+export interface PatternPreview {
+  min_nodes: number;
+  min_edges: number;
+}
+
+export interface PatternDefinition {
+  id: CollaborationPattern;
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  preview: PatternPreview;
+}
+
 /** Validate raw DSL data, returning typed result or error list */
 export function validateDsl(
   data: unknown
