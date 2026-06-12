@@ -12,6 +12,22 @@ requires-python = ">=3.12"
 authors = [
     { name = "Hecate Team" },
 ]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+
+[project.urls]
+Homepage = "https://github.com/xueyufish/hecate"
+Repository = "https://github.com/xueyufish/hecate"
+Documentation = "https://github.com/xueyufish/hecate/tree/main/docs"
+Issues = "https://github.com/xueyufish/hecate/issues"
+
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
