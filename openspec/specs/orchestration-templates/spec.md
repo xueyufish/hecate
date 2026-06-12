@@ -1,5 +1,7 @@
-## Requirements
+## Purpose
 
+Orchestration templates provide pre-built agent workflow graph configurations for common collaboration patterns. Templates are auto-discovered from JSON files in `data/orchestration_templates/` and available via the API and canvas UI.
+## Requirements
 ### Requirement: Fan-out Pipeline template
 The system SHALL include a pre-built "Fan-out Pipeline" orchestration template demonstrating parallel processing with a researcher agent fanning out to multiple analyst agents and merging results.
 
@@ -52,12 +54,36 @@ The system SHALL include a "Broadcast Pipeline" orchestration template in the te
 - **THEN** the response SHALL include an entry with `id` "broadcast-pipeline" containing name, description, category, and preview metadata
 
 ### Requirement: Factory functions exported from templates module
-The system SHALL export `build_sequential_pipeline` and `build_broadcast_pipeline` from `engine/templates.py`.
+The system SHALL export `build_sequential_pipeline`, `build_broadcast_pipeline`, `build_negotiation_graph`, and `build_debate_graph` from `engine/templates.py`. Additionally, `build_negotiation_graph` and `build_debate_graph` SHALL have corresponding JSON template files for catalog listing.
 
-#### Scenario: Import sequential pipeline factory
-- **WHEN** `from hecate.engine.templates import build_sequential_pipeline` is executed
+#### Scenario: Import negotiation graph factory
+- **WHEN** `from hecate.engine.templates import build_negotiation_graph` is executed
 - **THEN** the import SHALL succeed and the function SHALL be callable
 
-#### Scenario: Import broadcast pipeline factory
-- **WHEN** `from hecate.engine.templates import build_broadcast_pipeline` is executed
+#### Scenario: Import debate graph factory
+- **WHEN** `from hecate.engine.templates import build_debate_graph` is executed
 - **THEN** the import SHALL succeed and the function SHALL be callable
+
+### Requirement: Orchestration template listing includes pattern type
+The `GET /api/orchestration-templates` endpoint SHALL include a `pattern_type` field in each template item, inferred from the template's graph structure using `infer_pattern()`.
+
+#### Scenario: Sequential template has pattern_type
+- **WHEN** `GET /api/orchestration-templates` is called
+- **THEN** the `sequential-pipeline` item SHALL have `pattern_type` set to `"sequential"`
+
+#### Scenario: Fan-out template has pattern_type
+- **WHEN** `GET /api/orchestration-templates` is called
+- **THEN** the `fan-out-pipeline` item SHALL have `pattern_type` set to `"parallel"`
+
+#### Scenario: Customer service template has pattern_type
+- **WHEN** `GET /api/orchestration-templates` is called
+- **THEN** the `customer-service-triage` item SHALL have `pattern_type` set to `"handoff"`
+
+#### Scenario: Broadcast template has pattern_type
+- **WHEN** `GET /api/orchestration-templates` is called
+- **THEN** the `broadcast-pipeline` item SHALL have `pattern_type` set to `"broadcast"`
+
+#### Scenario: Template with no matching pattern
+- **WHEN** a template's graph structure does not match any known pattern
+- **THEN** its `pattern_type` SHALL be `null`
+
