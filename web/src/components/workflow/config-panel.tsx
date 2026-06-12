@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { X, Radio, Wifi, Sparkles, Zap } from "lucide-react";
 import { ChannelSelector } from "./channel-selector";
 import { api } from "@/lib/api-client";
 
@@ -129,18 +129,251 @@ export function ConfigPanel({
         )}
 
         {node.type === "condition" && (
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
-              Condition Expression
-            </label>
-            <input
-              type="text"
-              className="w-full rounded-md border px-3 py-1.5 text-sm"
-              value={(config.expression as string) || ""}
-              onChange={(e) => handleChange("expression", e.target.value)}
-              placeholder="e.g. messages.length > 0"
-            />
-          </div>
+          <>
+            {/* Routing Mode Selector */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                Routing Mode
+              </label>
+              <div className="flex flex-col gap-1.5">
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input
+                    type="radio"
+                    name="routing_mode"
+                    value="condition"
+                    checked={
+                      !config.routing_mode ||
+                      (config.routing_mode as string) === "condition"
+                    }
+                    onChange={() => {
+                      const { routing_mode: _, routing_config: __, ...rest } = config;
+                      onUpdate(node!.id, { ...node!.data, config: rest });
+                    }}
+                  />
+                  <Zap className="h-3 w-3 text-amber-500" />
+                  Condition
+                  <span className="text-[10px] text-muted-foreground">
+                    — expression-based
+                  </span>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input
+                    type="radio"
+                    name="routing_mode"
+                    value="intent"
+                    checked={(config.routing_mode as string) === "intent"}
+                    onChange={() => {
+                      handleChange("routing_mode", "intent");
+                      if (!config.routing_config) {
+                        handleChange("routing_config", { intent_patterns: [], routing_prompt: "" });
+                      }
+                    }}
+                  />
+                  <Radio className="h-3 w-3 text-blue-500" />
+                  Intent
+                  <span className="text-[10px] text-muted-foreground">
+                    — regex + LLM
+                  </span>
+                </label>
+                <label className="flex items-center gap-1.5 text-xs">
+                  <input
+                    type="radio"
+                    name="routing_mode"
+                    value="dynamic"
+                    checked={(config.routing_mode as string) === "dynamic"}
+                    onChange={() => {
+                      handleChange("routing_mode", "dynamic");
+                      if (!config.routing_config) {
+                        handleChange("routing_config", {
+                          candidate_agents: [],
+                          routing_prompt: "",
+                          allow_repeated_speaker: true,
+                        });
+                      }
+                    }}
+                  />
+                  <Sparkles className="h-3 w-3 text-violet-500" />
+                  Dynamic
+                  <span className="text-[10px] text-muted-foreground">
+                    — LLM selects speaker
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            {/* Condition Mode: Expression Field (default) */}
+            {(!config.routing_mode || (config.routing_mode as string) === "condition") && (
+              <div>
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Condition Expression
+                </label>
+                <input
+                  type="text"
+                  className="w-full rounded-md border px-3 py-1.5 text-sm"
+                  value={(config.expression as string) || ""}
+                  onChange={(e) => handleChange("expression", e.target.value)}
+                  placeholder="e.g. messages.length > 0"
+                />
+              </div>
+            )}
+
+            {/* Intent Mode: Pattern Rows + Routing Prompt */}
+            {(config.routing_mode as string) === "intent" && (
+              <>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Intent Patterns
+                  </label>
+                  {(() => {
+                    const routingConfig = (config.routing_config || {}) as Record<string, unknown>;
+                    const patterns = (routingConfig.intent_patterns || []) as Array<{ pattern: string; target: string }>;
+                    const agentNodes = allNodes.filter((n) => n.type === "agent");
+                    return (
+                      <div className="space-y-2">
+                        {patterns.map((p, idx) => (
+                          <div key={idx} className="flex gap-1">
+                            <input
+                              type="text"
+                              className="flex-1 rounded-md border px-2 py-1 text-xs"
+                              value={p.pattern}
+                              onChange={(e) => {
+                                const updated = [...patterns];
+                                updated[idx] = { ...updated[idx], pattern: e.target.value };
+                                handleChange("routing_config", { ...routingConfig, intent_patterns: updated });
+                              }}
+                              placeholder="regex pattern"
+                            />
+                            <select
+                              className="w-24 rounded-md border px-1 py-1 text-xs"
+                              value={p.target}
+                              onChange={(e) => {
+                                const updated = [...patterns];
+                                updated[idx] = { ...updated[idx], target: e.target.value };
+                                handleChange("routing_config", { ...routingConfig, intent_patterns: updated });
+                              }}
+                            >
+                              <option value="">Target...</option>
+                              {agentNodes.map((n) => (
+                                <option key={n.id} value={n.id}>
+                                  {(n.data?.label as string) || n.id}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => {
+                                const updated = patterns.filter((_, i) => i !== idx);
+                                handleChange("routing_config", { ...routingConfig, intent_patterns: updated });
+                              }}
+                              className="text-xs text-red-500 hover:text-red-700"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                        <button
+                          onClick={() => {
+                            const updated = [...patterns, { pattern: "", target: "" }];
+                            handleChange("routing_config", { ...routingConfig, intent_patterns: updated });
+                          }}
+                          className="text-xs text-primary hover:underline"
+                        >
+                          + Add Pattern
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Routing Prompt (LLM Fallback)
+                  </label>
+                  <textarea
+                    className="w-full rounded-md border px-3 py-1.5 text-sm"
+                    rows={3}
+                    value={((config.routing_config as Record<string, unknown>)?.routing_prompt as string) || ""}
+                    onChange={(e) => {
+                      const rc = (config.routing_config || {}) as Record<string, unknown>;
+                      handleChange("routing_config", { ...rc, routing_prompt: e.target.value });
+                    }}
+                    placeholder="Prompt to classify intent when no pattern matches..."
+                  />
+                </div>
+              </>
+            )}
+
+            {/* Dynamic Mode: Candidate Agents + Routing Prompt + Toggle */}
+            {(config.routing_mode as string) === "dynamic" && (
+              <>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Candidate Agents
+                  </label>
+                  {(() => {
+                    const routingConfig = (config.routing_config || {}) as Record<string, unknown>;
+                    const candidates = (routingConfig.candidate_agents || []) as string[];
+                    const agentNodes = allNodes.filter((n) => n.type === "agent");
+                    return (
+                      <div className="space-y-1">
+                        {agentNodes.map((n) => (
+                          <label key={n.id} className="flex items-center gap-1.5 text-xs">
+                            <input
+                              type="checkbox"
+                              checked={candidates.includes(n.id)}
+                              onChange={(e) => {
+                                const updated = e.target.checked
+                                  ? [...candidates, n.id]
+                                  : candidates.filter((c) => c !== n.id);
+                                handleChange("routing_config", { ...routingConfig, candidate_agents: updated });
+                              }}
+                            />
+                            {(n.data?.label as string) || n.id}
+                          </label>
+                        ))}
+                        {agentNodes.length === 0 && (
+                          <p className="text-xs text-muted-foreground italic">
+                            No agent nodes on canvas
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                    Routing Prompt
+                  </label>
+                  <textarea
+                    className="w-full rounded-md border px-3 py-1.5 text-sm"
+                    rows={3}
+                    value={((config.routing_config as Record<string, unknown>)?.routing_prompt as string) || ""}
+                    onChange={(e) => {
+                      const rc = (config.routing_config || {}) as Record<string, unknown>;
+                      handleChange("routing_config", { ...rc, routing_prompt: e.target.value });
+                    }}
+                    placeholder="Prompt for LLM to select the best agent..."
+                  />
+                </div>
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={
+                        ((config.routing_config as Record<string, unknown>)?.allow_repeated_speaker as boolean) !== false
+                      }
+                      onChange={(e) => {
+                        const rc = (config.routing_config || {}) as Record<string, unknown>;
+                        handleChange("routing_config", { ...rc, allow_repeated_speaker: e.target.checked });
+                      }}
+                    />
+                    Allow Repeated Speaker
+                  </label>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    When disabled, the last speaker is excluded from candidates
+                  </p>
+                </div>
+              </>
+            )}
+          </>
         )}
 
         {node.type === "tool-call" && (
@@ -238,6 +471,56 @@ export function ConfigPanel({
               writable={channels.writable || []}
               onChange={handleChannelsChange}
             />
+
+            {/* Channel Access Summary */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                Channel Access Summary
+              </label>
+              {(!channels.readable?.length && !channels.writable?.length) ? (
+                <p className="text-xs text-muted-foreground italic">
+                  No channel access configured
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {channels.readable?.length ? (
+                    <div>
+                      <p className="mb-0.5 text-[10px] font-medium text-muted-foreground">
+                        Readable
+                      </p>
+                      {channels.readable.map((ch: string) => (
+                        <div
+                          key={ch}
+                          className="flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs"
+                        >
+                          <Radio className="h-3 w-3 text-blue-500" />
+                          <span>{ch}</span>
+                          {graphStateChannels.includes(ch) && (
+                            <Wifi className="ml-auto h-3 w-3 text-green-500" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {channels.writable?.length ? (
+                    <div>
+                      <p className="mb-0.5 text-[10px] font-medium text-muted-foreground">
+                        Writable
+                      </p>
+                      {channels.writable.map((ch: string) => (
+                        <div
+                          key={ch}
+                          className="flex items-center gap-1.5 rounded border px-2 py-0.5 text-xs"
+                        >
+                          <Wifi className="h-3 w-3 text-amber-500" />
+                          <span>{ch}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
 
             {/* Model Override */}
             <div>
