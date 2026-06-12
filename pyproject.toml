@@ -21,13 +21,6 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
 ]
-
-[project.urls]
-Homepage = "https://github.com/xueyufish/hecate"
-Repository = "https://github.com/xueyufish/hecate"
-Documentation = "https://github.com/xueyufish/hecate/tree/main/docs"
-Issues = "https://github.com/xueyufish/hecate/issues"
-
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -51,6 +44,12 @@ dependencies = [
     "typer>=0.15.0",
     "rich>=13.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/xueyufish/hecate"
+Repository = "https://github.com/xueyufish/hecate"
+Documentation = "https://github.com/xueyufish/hecate/tree/main/docs"
+Issues = "https://github.com/xueyufish/hecate/issues"
 
 [project.scripts]
 hecate = "hecate.cli.main:app"
