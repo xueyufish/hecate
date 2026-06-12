@@ -15,6 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from hecate.core.deps import verify_api_key
+from hecate.engine.patterns import infer_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -70,18 +71,42 @@ async def list_templates(
         nodes = data.get("nodes", {})
         edges = data.get("edges", [])
         agent_nodes = [nid for nid, n in nodes.items() if n.get("type") == "agent"]
+
+        pattern_type: str | None = None
+        try:
+            from hecate.engine.graph_dsl import parse_graph
+
+            # Strip non-DSL fields before parsing to avoid schema validation errors
+            dsl_data = {
+                "version": data.get("version", "1.0"),
+                "name": data.get("name", ""),
+                "state": data.get("state", {}),
+                "nodes": data.get("nodes", {}),
+                "edges": data.get("edges", []),
+            }
+            if "entry" in data:
+                dsl_data["entry"] = data["entry"]
+
+            graph_config = parse_graph(dsl_data)
+            detected = infer_pattern(graph_config)
+            if detected is not None:
+                pattern_type = detected.value
+        except Exception:
+            logger.debug("Could not infer pattern for template %s", template_id)
+
         items.append(
             {
                 "id": template_id,
                 "name": data.get("name", template_id),
                 "description": data.get("description", ""),
                 "category": data.get("category", "general"),
+                "pattern_type": pattern_type,
                 "preview": {
                     "total_nodes": len(nodes),
                     "agent_nodes": len(agent_nodes),
                     "total_edges": len(edges),
                 },
-            }
+            },
         )
     return {"items": items}
 

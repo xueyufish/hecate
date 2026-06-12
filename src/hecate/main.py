@@ -26,6 +26,7 @@ from hecate.api.evaluation import router as evaluation_router
 from hecate.api.management.agent_templates import router as agent_templates_router
 from hecate.api.management.agents import router as agents_router
 from hecate.api.management.api_keys import router as api_keys_router
+from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.memory import router as memory_router
@@ -224,6 +225,7 @@ app.include_router(conversations_router, prefix="/api", tags=["conversations"])
 app.include_router(messages_router, prefix="/api", tags=["messages"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])
 app.include_router(orchestration_templates_router, prefix="/api", tags=["orchestration-templates"])
+app.include_router(collaboration_patterns_router, prefix="/api", tags=["collaboration-patterns"])
 app.include_router(agent_templates_router, prefix="/api", tags=["agent-templates"])
 app.include_router(memory_router, prefix="/api", tags=["memory"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
