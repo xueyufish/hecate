@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 import pytest
 
 from hecate.engine.channel import (
@@ -192,3 +195,67 @@ class TestChannelTypeRegistry:
         from hecate.engine.channel import _REGISTRY
 
         del _REGISTRY["custom"]
+
+
+class TestChannelAccess:
+    """Tests for ChannelManager node_id-based channel access warnings."""
+
+    def test_read_logs_warning_for_undeclared_access(self, caplog: Any) -> None:
+        from hecate.engine.channel import ChannelManager
+        from hecate.engine.types import ChannelAccess, ChannelDef, ChannelType
+
+        cm = ChannelManager(
+            channel_access={
+                "agent_a": ChannelAccess(readable={"messages"}, writable=set()),
+            }
+        )
+        cm.register("messages", ChannelDef(type=ChannelType.TOPIC))
+        cm.register("secret", ChannelDef(type=ChannelType.LAST_VALUE))
+
+        with caplog.at_level(logging.WARNING):
+            cm.read("secret", node_id="agent_a")
+        assert any("secret" in r.message and "readable" in r.message for r in caplog.records)
+
+    def test_write_logs_warning_for_undeclared_access(self, caplog: Any) -> None:
+        from hecate.engine.channel import ChannelManager
+        from hecate.engine.types import ChannelAccess, ChannelDef, ChannelType
+
+        cm = ChannelManager(
+            channel_access={
+                "agent_a": ChannelAccess(readable=set(), writable={"messages"}),
+            }
+        )
+        cm.register("messages", ChannelDef(type=ChannelType.TOPIC))
+        cm.register("results", ChannelDef(type=ChannelType.LAST_VALUE))
+
+        with caplog.at_level(logging.WARNING):
+            cm.write("results", "data", node_id="agent_a")
+        assert any("results" in r.message and "writable" in r.message for r in caplog.records)
+
+    def test_read_no_warning_when_node_id_is_none(self, caplog: Any) -> None:
+        from hecate.engine.channel import ChannelManager
+        from hecate.engine.types import ChannelDef, ChannelType
+
+        cm = ChannelManager()
+        cm.register("messages", ChannelDef(type=ChannelType.TOPIC))
+        cm.write("messages", ["hello"])
+
+        with caplog.at_level(logging.WARNING):
+            cm.read("messages")
+        assert not any("readable" in r.message for r in caplog.records)
+
+    def test_read_no_warning_for_declared_access(self, caplog: Any) -> None:
+        from hecate.engine.channel import ChannelManager
+        from hecate.engine.types import ChannelAccess, ChannelDef, ChannelType
+
+        cm = ChannelManager(
+            channel_access={
+                "agent_a": ChannelAccess(readable={"messages"}, writable=set()),
+            }
+        )
+        cm.register("messages", ChannelDef(type=ChannelType.TOPIC))
+        cm.write("messages", ["hello"])
+
+        with caplog.at_level(logging.WARNING):
+            cm.read("messages", node_id="agent_a")
+        assert not any("readable" in r.message for r in caplog.records)

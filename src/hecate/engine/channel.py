@@ -18,7 +18,7 @@ from copy import deepcopy
 from typing import Any
 
 from hecate.engine.eviction import EvictionPolicy, NoEviction
-from hecate.engine.types import ChannelDef, ChannelType
+from hecate.engine.types import ChannelAccess, ChannelDef, ChannelType
 
 logger = logging.getLogger(__name__)
 
@@ -217,21 +217,35 @@ class ChannelManager:
     access by name. It also supports snapshot/restore for checkpoint persistence.
     """
 
-    def __init__(self, eviction_policy: EvictionPolicy | None = None) -> None:
+    def __init__(
+        self,
+        eviction_policy: EvictionPolicy | None = None,
+        channel_access: dict[str, ChannelAccess] | None = None,
+    ) -> None:
         self._channels: dict[str, Channel] = {}
         self._eviction_policy: EvictionPolicy = eviction_policy or NoEviction()
+        self._channel_access: dict[str, ChannelAccess] = channel_access or {}
 
     def register(self, name: str, defn: ChannelDef) -> None:
         """Register a new channel with the given definition."""
         self._channels[name] = Channel(name, defn)
 
-    def write(self, name: str, value: Any) -> None:
+    def write(self, name: str, value: Any, node_id: str | None = None) -> None:
         """Write a value to the named channel.
 
         Silently skips unregistered channels. This intentional no-op design allows
         workers to produce output for channels that may not exist in every graph
         configuration without requiring conditional logic at call sites.
+
+        Args:
+            name: Channel name.
+            value: Value to write.
+            node_id: Optional node ID for channel access validation.
         """
+        if node_id is not None and node_id in self._channel_access:
+            access = self._channel_access[node_id]
+            if name not in access.writable:
+                logger.warning("Node '%s' writes to channel '%s' without declaring it as writable", node_id, name)
         if name not in self._channels:
             return
         channel = self._channels[name]
@@ -240,12 +254,20 @@ class ChannelManager:
         if behavior.is_evictable() and self._eviction_policy.should_evict(name, len(channel._value), {}):
             channel._value = self._eviction_policy.select_victim(channel._value)
 
-    def read(self, name: str) -> Any:
+    def read(self, name: str, node_id: str | None = None) -> Any:
         """Read a value from the named channel.
+
+        Args:
+            name: Channel name.
+            node_id: Optional node ID for channel access validation.
 
         Raises:
             KeyError: if the channel is not registered.
         """
+        if node_id is not None and node_id in self._channel_access:
+            access = self._channel_access[node_id]
+            if name not in access.readable:
+                logger.warning("Node '%s' reads from channel '%s' without declaring it as readable", node_id, name)
         if name not in self._channels:
             raise KeyError(f"Channel '{name}' not registered")
         return self._channels[name].read()

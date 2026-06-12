@@ -82,7 +82,10 @@ class PregelRuntime:
         self._max_supersteps = max_supersteps
         self._conflict_resolver = conflict_resolver
         self._scheduler = scheduler or FIFOScheduler()
-        self._channel_manager = ChannelManager(eviction_policy=eviction_policy or NoEviction())
+        self._channel_manager = ChannelManager(
+            eviction_policy=eviction_policy or NoEviction(),
+            channel_access=graph.channel_access,
+        )
         self._event_store = event_store
         self._event_bus = event_bus
         self._superstep = 0
@@ -276,7 +279,7 @@ class PregelRuntime:
                         self._interrupted = True
                         self._interrupt_value = result.command.interrupt
                         self._interrupted_node = result.node_id
-                        self._apply_writes(result.channel_updates)
+                        self._apply_writes(result.channel_updates, node_id=result.node_id)
                         await self._emit(
                             session_id,
                             EventType.INTERRUPT,
@@ -300,9 +303,9 @@ class PregelRuntime:
                         interrupted = True
                         break
                     if result.command.update:
-                        self._apply_writes(result.command.update)
+                        self._apply_writes(result.command.update, node_id=result.node_id)
                 if not self._interrupted:
-                    self._apply_writes(result.channel_updates)
+                    self._apply_writes(result.channel_updates, node_id=result.node_id)
                     if result.channel_updates:
                         await self._emit(
                             session_id,
@@ -440,15 +443,16 @@ class PregelRuntime:
         """Return the interrupt payload if execution is paused."""
         return self._interrupt_value
 
-    def _apply_writes(self, updates: dict[str, Any]) -> None:
+    def _apply_writes(self, updates: dict[str, Any], node_id: str | None = None) -> None:
         """Write channel updates, applying conflict resolution if available.
 
         Args:
             updates: Channel key to value mapping.
+            node_id: Optional node ID for channel access validation.
         """
         if not self._conflict_resolver:
             for k, v in updates.items():
-                self._channel_manager.write(k, v)
+                self._channel_manager.write(k, v, node_id=node_id)
             return
 
         from hecate.engine.channel import get as get_channel_behavior
@@ -463,7 +467,7 @@ class PregelRuntime:
                 behavior=behavior,
             )
             if result.resolved:
-                self._channel_manager.write(k, result.final_value)
+                self._channel_manager.write(k, result.final_value, node_id=node_id)
 
     async def _dispatch_fan_out(
         self,
