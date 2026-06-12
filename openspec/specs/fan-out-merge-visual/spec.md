@@ -19,11 +19,11 @@ Fan-out nodes SHALL display with a distinct icon and color (e.g., fork icon, ind
 - **THEN** it renders with a slate background, merge icon, and label "Merge"
 
 ### Requirement: Fan-out and merge are not in the node palette
-The NodePalette component SHALL NOT include fan-out or merge as draggable items. These node types can only appear when loaded from an existing DSL.
+The NodePalette component SHALL include fan-out and merge as draggable items. These node types CAN be created interactively by dragging from the palette, in addition to appearing when loaded from an existing DSL.
 
 #### Scenario: Node palette contents
 - **WHEN** the workflow editor loads
-- **THEN** the node palette shows exactly 6 items: Conversation, Condition, Tool Call, Agent, Knowledge Retrieval, Variable Set
+- **THEN** the node palette shows 8 items: Conversation, Condition, Tool Call, Agent, Knowledge Retrieval, Variable Set, Fan Out, Merge
 
 ### Requirement: DSL bridge maps fan-out and merge labels
 The NODE_TYPE_LABELS map in dsl-bridge.ts SHALL include entries for "fan-out" → "Fan Out" and "merge" → "Merge".
