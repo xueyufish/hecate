@@ -27,6 +27,7 @@ from hecate.engine.types import (
     GraphConfig,
     NodeConfig,
     NodeType,
+    RoutingMode,
 )
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,19 @@ def parse_graph(raw: str | dict) -> GraphConfig:
             type=NodeType(node_data["type"]),
             config=node_data.get("config", {}),
         )
+
+    for node_id, node_data in data.get("nodes", {}).items():
+        if node_data["type"] == "condition":
+            config = node_data.get("config", {})
+            rm = config.get("routing_mode")
+            if rm is not None:
+                try:
+                    RoutingMode(rm)
+                except ValueError:
+                    raise GraphValidationError(
+                        f"Invalid routing_mode '{rm}' for node '{node_id}'. Must be one of: condition, intent, dynamic",
+                        field=f"nodes[{node_id}].config.routing_mode",
+                    ) from None
 
     edges = []
     for edge_data in data.get("edges", []):

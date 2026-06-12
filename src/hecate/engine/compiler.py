@@ -13,8 +13,10 @@ import logging
 from hecate.engine.graph_dsl import GraphValidationError
 from hecate.engine.optimization import OptimizationPass
 from hecate.engine.types import (
+    ChannelAccess,
     CompiledGraph,
     GraphConfig,
+    RoutingMode,
 )
 
 logger = logging.getLogger(__name__)
@@ -64,19 +66,91 @@ class GraphCompiler:
         self._validate_handoff_edges(config)
         self._validate_fan_out_merge(config)
         self._validate_execution_mode(config, execution_mode)
+        self._validate_channel_access(config)
+        self._validate_routing_config(config)
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
+        channel_access = self._build_channel_access(config)
         graph = CompiledGraph(
             nodes=config.nodes,
             edges=config.edges,
             channels=config.state,
             entry_point=config.entry,
             name=config.name,
+            channel_access=channel_access,
         )
         for optimization_pass in self._passes:
             graph = optimization_pass.optimize(graph)
         return graph
+
+    def _validate_channel_access(self, config: GraphConfig) -> None:
+        """Warn when nodes declare channel access for channels not in graph state."""
+        state_channels = set(config.state.keys())
+        for node_id, node in config.nodes.items():
+            channels = node.config.get("channels", {})
+            for ch in channels.get("readable", []):
+                if ch not in state_channels:
+                    logger.warning(
+                        "Node '%s' declares readable channel '%s' which is not defined in graph state",
+                        node_id,
+                        ch,
+                    )
+            for ch in channels.get("writable", []):
+                if ch not in state_channels:
+                    logger.warning(
+                        "Node '%s' declares writable channel '%s' which is not defined in graph state",
+                        node_id,
+                        ch,
+                    )
+
+    def _validate_routing_config(self, config: GraphConfig) -> None:
+        """Validate routing configuration for CONDITION nodes with advanced routing modes."""
+        from hecate.engine.types import NodeType
+
+        for node_id, node in config.nodes.items():
+            if node.type != NodeType.CONDITION:
+                continue
+            routing_mode = node.config.get("routing_mode")
+            if not routing_mode or routing_mode == RoutingMode.CONDITION:
+                continue
+            routing_config = node.config.get("routing_config", {})
+
+            if routing_mode == RoutingMode.INTENT:
+                intent_patterns = routing_config.get("intent_patterns", [])
+                if not intent_patterns:
+                    raise GraphValidationError(
+                        f"CONDITION node '{node_id}' with routing_mode='intent' "
+                        f"requires routing_config.intent_patterns",
+                        field=f"nodes[{node_id}].config.routing_config",
+                    )
+
+            elif routing_mode == RoutingMode.DYNAMIC:
+                candidate_agents = routing_config.get("candidate_agents", [])
+                if not candidate_agents:
+                    raise GraphValidationError(
+                        f"CONDITION node '{node_id}' with routing_mode='dynamic' "
+                        f"requires routing_config.candidate_agents",
+                        field=f"nodes[{node_id}].config.routing_config",
+                    )
+                node_ids = set(config.nodes.keys())
+                for candidate in candidate_agents:
+                    if candidate not in node_ids:
+                        raise GraphValidationError(
+                            f"CONDITION node '{node_id}' candidate_agent '{candidate}' is not a declared node",
+                            field=f"nodes[{node_id}].config.routing_config.candidate_agents",
+                        )
+
+    def _build_channel_access(self, config: GraphConfig) -> dict[str, ChannelAccess]:
+        """Build per-node channel access map from node configurations."""
+        result: dict[str, ChannelAccess] = {}
+        for node_id, node in config.nodes.items():
+            channels = node.config.get("channels", {})
+            result[node_id] = ChannelAccess(
+                readable=set(channels.get("readable", [])),
+                writable=set(channels.get("writable", [])),
+            )
+        return result
 
     def _validate_entry(self, config: GraphConfig) -> None:
         """Ensure the declared entry point references an existing node.
@@ -267,7 +341,7 @@ class GraphCompiler:
         """
         from hecate.engine.types import NodeType
 
-        handoff_edges = [e for e in config.edges if e.trigger == "handoff"]
+        handoff_edges = [e for e in config.edges if e.trigger in ("handoff", "dynamic_handoff")]
         if not handoff_edges:
             return
 

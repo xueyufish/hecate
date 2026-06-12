@@ -85,6 +85,42 @@
                   "readable": { "type": "array", "items": { "type": "string" } },
                   "writable": { "type": "array", "items": { "type": "string" } }
                 }
+              },
+              "routing_mode": {
+                "type": "string",
+                "enum": ["condition", "intent", "dynamic"],
+                "description": "Routing mode for CONDITION nodes: condition (expression), intent (pattern+LLM), dynamic (LLM selects speaker)"
+              },
+              "routing_config": {
+                "type": "object",
+                "description": "Configuration for advanced routing modes",
+                "properties": {
+                  "intent_patterns": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["pattern", "target"],
+                      "properties": {
+                        "pattern": { "type": "string", "description": "Regex pattern to match" },
+                        "target": { "type": "string", "description": "Target node ID" }
+                      }
+                    }
+                  },
+                  "candidate_agents": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Candidate agent node IDs for dynamic routing"
+                  },
+                  "routing_prompt": {
+                    "type": "string",
+                    "description": "LLM prompt for routing classification"
+                  },
+                  "allow_repeated_speaker": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Whether to allow the same agent to speak consecutively"
+                  }
+                }
               }
             }
           }

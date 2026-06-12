@@ -16,6 +16,9 @@ The tests use two inline JSON fixtures: a simple linear two-node graph
 
 from __future__ import annotations
 
+import logging
+from typing import Any
+
 import pytest
 
 from hecate.engine.compiler import GraphCompiler
@@ -472,3 +475,376 @@ class TestPersistentField:
         json_data = compiled.to_json()
         assert json_data["state"]["audit_log"]["persistent"] is True
         assert json_data["state"]["messages"]["persistent"] is False
+
+
+class TestRoutingModeParsing:
+    """Tests for parsing routing_mode and routing_config from graph DSL."""
+
+    def test_parse_intent_routing_config(self) -> None:
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "intent-routing-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                    "router": {
+                        "type": "condition",
+                        "config": {
+                            "expression": "category",
+                            "routing_mode": "intent",
+                            "routing_config": {
+                                "intent_patterns": [{"pattern": "billing", "target": "billing_agent"}],
+                                "routing_prompt": "Classify intent",
+                            },
+                        },
+                    },
+                    "billing_agent": {"type": "agent", "config": {"agent_id": "uuid-1"}},
+                },
+                "edges": [
+                    {"source": "start", "target": "router"},
+                    {"source": "router", "target": {"billing_agent": "billing_agent", "default": "start"}},
+                ],
+                "entry": "start",
+            }
+        )
+        router_node = graph.nodes["router"]
+        assert router_node.config["routing_mode"] == "intent"
+        assert len(router_node.config["routing_config"]["intent_patterns"]) == 1
+
+    def test_parse_dynamic_routing_config(self) -> None:
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "dynamic-routing-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                    "router": {
+                        "type": "condition",
+                        "config": {
+                            "routing_mode": "dynamic",
+                            "routing_config": {
+                                "candidate_agents": ["agent_a", "agent_b"],
+                                "routing_prompt": "Select best agent",
+                                "allow_repeated_speaker": True,
+                            },
+                        },
+                    },
+                    "agent_a": {"type": "agent", "config": {"agent_id": "uuid-a"}},
+                    "agent_b": {"type": "agent", "config": {"agent_id": "uuid-b"}},
+                },
+                "edges": [
+                    {"source": "start", "target": "router"},
+                    {"source": "router", "target": {"agent_a": "agent_a", "agent_b": "agent_b"}},
+                ],
+                "entry": "start",
+            }
+        )
+        router_node = graph.nodes["router"]
+        assert router_node.config["routing_mode"] == "dynamic"
+        assert router_node.config["routing_config"]["candidate_agents"] == ["agent_a", "agent_b"]
+        assert router_node.config["routing_config"]["allow_repeated_speaker"] is True
+
+    def test_invalid_routing_mode_raises(self) -> None:
+        with pytest.raises(GraphValidationError, match="unknown"):
+            parse_graph(
+                {
+                    "version": "1.0",
+                    "name": "bad-routing-test",
+                    "state": {"messages": {"type": "topic", "default": []}},
+                    "nodes": {
+                        "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                        "router": {"type": "condition", "config": {"routing_mode": "unknown"}},
+                    },
+                    "edges": [{"source": "start", "target": "router"}],
+                    "entry": "start",
+                }
+            )
+
+    def test_parse_dynamic_handoff_trigger(self) -> None:
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "dynamic-handoff-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                },
+                "edges": [
+                    {"source": "start", "target": "__end__", "trigger": "dynamic_handoff"},
+                ],
+                "entry": "start",
+            }
+        )
+        dyn_edges = [e for e in graph.edges if e.trigger == "dynamic_handoff"]
+        assert len(dyn_edges) == 1
+
+
+class TestCompilerChannelAccessAndRouting:
+    """Tests for compiler channel access validation and routing config validation."""
+
+    def test_compiler_warns_on_nonexistent_readable_channel(self, caplog: Any) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "channel-access-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {
+                        "type": "conversation",
+                        "config": {
+                            "model": "gpt-4o",
+                            "channels": {"readable": ["nonexistent"], "writable": []},
+                        },
+                    },
+                },
+                "edges": [{"source": "start", "target": "__end__"}],
+                "entry": "start",
+            }
+        )
+        with caplog.at_level(logging.WARNING):
+            compiled = GraphCompiler().compile(graph)
+        assert compiled is not None
+        assert any("nonexistent" in r.message and "readable" in r.message for r in caplog.records)
+
+    def test_compiler_warns_on_nonexistent_writable_channel(self, caplog: Any) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "channel-access-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {
+                        "type": "conversation",
+                        "config": {
+                            "model": "gpt-4o",
+                            "channels": {"readable": [], "writable": ["nonexistent"]},
+                        },
+                    },
+                },
+                "edges": [{"source": "start", "target": "__end__"}],
+                "entry": "start",
+            }
+        )
+        with caplog.at_level(logging.WARNING):
+            compiled = GraphCompiler().compile(graph)
+        assert compiled is not None
+        assert any("nonexistent" in r.message and "writable" in r.message for r in caplog.records)
+
+    def test_compiler_rejects_intent_mode_without_patterns(self) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "routing-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                    "router": {
+                        "type": "condition",
+                        "config": {"routing_mode": "intent", "routing_config": {}},
+                    },
+                },
+                "edges": [{"source": "start", "target": "router"}],
+                "entry": "start",
+            }
+        )
+        with pytest.raises(GraphValidationError, match="intent_patterns"):
+            GraphCompiler().compile(graph)
+
+    def test_compiler_rejects_dynamic_mode_without_candidates(self) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "routing-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                    "router": {
+                        "type": "condition",
+                        "config": {"routing_mode": "dynamic", "routing_config": {}},
+                    },
+                },
+                "edges": [{"source": "start", "target": "router"}],
+                "entry": "start",
+            }
+        )
+        with pytest.raises(GraphValidationError, match="candidate_agents"):
+            GraphCompiler().compile(graph)
+
+    def test_compiler_rejects_dynamic_mode_with_nonexistent_candidate(self) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "routing-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                    "router": {
+                        "type": "condition",
+                        "config": {
+                            "routing_mode": "dynamic",
+                            "routing_config": {"candidate_agents": ["nonexistent"]},
+                        },
+                    },
+                },
+                "edges": [{"source": "start", "target": "router"}],
+                "entry": "start",
+            }
+        )
+        with pytest.raises(GraphValidationError, match="not a declared node"):
+            GraphCompiler().compile(graph)
+
+    def test_compiler_populates_channel_access_map(self) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "access-map-test",
+                "state": {
+                    "messages": {"type": "topic", "default": []},
+                    "context": {"type": "last_value"},
+                },
+                "nodes": {
+                    "start": {
+                        "type": "conversation",
+                        "config": {
+                            "model": "gpt-4o",
+                            "channels": {
+                                "readable": ["messages", "context"],
+                                "writable": ["messages"],
+                            },
+                        },
+                    },
+                },
+                "edges": [{"source": "start", "target": "__end__"}],
+                "entry": "start",
+            }
+        )
+        compiled = GraphCompiler().compile(graph)
+        assert "start" in compiled.channel_access
+        assert compiled.channel_access["start"].readable == {"messages", "context"}
+        assert compiled.channel_access["start"].writable == {"messages"}
+
+    def test_compiler_accepts_valid_intent_routing(self) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "valid-intent-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                    "router": {
+                        "type": "condition",
+                        "config": {
+                            "routing_mode": "intent",
+                            "routing_config": {
+                                "intent_patterns": [{"pattern": "billing", "target": "billing"}],
+                            },
+                        },
+                    },
+                    "billing": {"type": "agent", "config": {"agent_id": "uuid-b"}},
+                },
+                "edges": [
+                    {"source": "start", "target": "router"},
+                    {"source": "router", "target": {"billing": "billing", "default": "start"}},
+                ],
+                "entry": "start",
+            }
+        )
+        compiled = GraphCompiler().compile(graph)
+        assert compiled is not None
+
+    def test_compiler_accepts_valid_dynamic_routing(self) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "valid-dynamic-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "start": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                    "router": {
+                        "type": "condition",
+                        "config": {
+                            "routing_mode": "dynamic",
+                            "routing_config": {
+                                "candidate_agents": ["agent_a"],
+                                "routing_prompt": "Select agent",
+                            },
+                        },
+                    },
+                    "agent_a": {"type": "agent", "config": {"agent_id": "uuid-a"}},
+                },
+                "edges": [
+                    {"source": "start", "target": "router"},
+                    {"source": "router", "target": {"agent_a": "agent_a"}},
+                ],
+                "entry": "start",
+            }
+        )
+        compiled = GraphCompiler().compile(graph)
+        assert compiled is not None
+
+
+class TestDynamicHandoff:
+    """Tests for dynamic_handoff edge trigger support."""
+
+    def test_dynamic_handoff_cycle_detection(self) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "cycle-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "a": {"type": "agent", "config": {"agent_id": "uuid-a"}},
+                    "b": {"type": "agent", "config": {"agent_id": "uuid-b"}},
+                    "c": {"type": "agent", "config": {"agent_id": "uuid-c"}},
+                },
+                "edges": [
+                    {"source": "a", "target": "b", "trigger": "dynamic_handoff"},
+                    {"source": "b", "target": "c", "trigger": "dynamic_handoff"},
+                    {"source": "c", "target": "a", "trigger": "dynamic_handoff"},
+                ],
+                "entry": "a",
+            }
+        )
+        with pytest.raises(GraphValidationError, match="[Cc]ircular"):
+            GraphCompiler().compile(graph)
+
+    def test_dynamic_handoff_validates_agent_nodes(self) -> None:
+        from hecate.engine.compiler import GraphCompiler
+
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "non-agent-test",
+                "state": {"messages": {"type": "topic", "default": []}},
+                "nodes": {
+                    "a": {"type": "agent", "config": {"agent_id": "uuid-a"}},
+                    "conv": {"type": "conversation", "config": {"model": "gpt-4o"}},
+                },
+                "edges": [
+                    {"source": "a", "target": "conv", "trigger": "dynamic_handoff"},
+                ],
+                "entry": "a",
+            }
+        )
+        with pytest.raises(GraphValidationError, match="agent node"):
+            GraphCompiler().compile(graph)
