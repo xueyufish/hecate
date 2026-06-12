@@ -106,7 +106,17 @@ export const VariableSetNode = memo(function VariableSetNode(props: NodeProps) {
   return <WorkflowNodeBase {...props} typeKey="variable-set" />;
 });
 export const FanOutNode = memo(function FanOutNode(props: NodeProps) {
-  return <WorkflowNodeBase {...props} typeKey="fan-out" />;
+  const branches = props.data.config?.branches as string[] | undefined;
+  const count = branches?.length || 0;
+  return (
+    <WorkflowNodeBase {...props} typeKey="fan-out">
+      {count > 0 && (
+        <span className="inline-flex self-start rounded bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+          ×{count}
+        </span>
+      )}
+    </WorkflowNodeBase>
+  );
 });
 export const MergeNode = memo(function MergeNode(props: NodeProps) {
   return <WorkflowNodeBase {...props} typeKey="merge" />;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -9,10 +9,14 @@ import {
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
+  getBezierPath,
   type Edge,
+  type EdgeProps,
+  type BaseEdge,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { nodeTypeComponents } from "./node-types";
+import { EdgeTypeSelector } from "./edge-type-selector";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -31,14 +35,13 @@ function HandoffEdge({
   sourceY,
   targetX,
   targetY,
-}: {
-  id: string;
-  sourceX: number;
-  sourceY: number;
-  targetX: number;
-  targetY: number;
-}) {
-  const edgePath = `M ${sourceX},${sourceY} L ${targetX},${targetY}`;
+}: EdgeProps) {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  });
   return (
     <>
       <path
@@ -50,12 +53,88 @@ function HandoffEdge({
         strokeDasharray="5 5"
         fill="none"
       />
+      <text
+        x={labelX}
+        y={labelY}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        className="text-[10px] fill-purple-600"
+      >
+        Handoff
+      </text>
     </>
+  );
+}
+
+function ConditionalEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  label,
+}: EdgeProps) {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  });
+  return (
+    <>
+      <path
+        id={id}
+        className="react-flow__edge-path"
+        d={edgePath}
+        strokeWidth={2}
+        stroke="#d97706"
+        strokeDasharray="3 6"
+        fill="none"
+      />
+      {typeof label === "string" && label && (
+        <text
+          x={labelX}
+          y={labelY}
+          textAnchor="middle"
+          dominantBaseline="middle"
+          className="text-[10px] fill-amber-700"
+        >
+          {label}
+        </text>
+      )}
+    </>
+  );
+}
+
+function FanOutEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+}: EdgeProps) {
+  const [edgePath] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  });
+  return (
+    <path
+      id={id}
+      className="react-flow__edge-path"
+      d={edgePath}
+      strokeWidth={2}
+      stroke="#6366f1"
+      fill="none"
+    />
   );
 }
 
 const edgeTypes = {
   handoff: HandoffEdge,
+  conditional: ConditionalEdge,
+  fanout: FanOutEdge,
 };
 
 export default function CanvasArea({
@@ -66,6 +145,12 @@ export default function CanvasArea({
   onNodeClick,
   onPaneClick,
 }: CanvasAreaProps) {
+  const [edgeSelector, setEdgeSelector] = useState<{
+    x: number;
+    y: number;
+    params: any;
+  } | null>(null);
+
   const handleNodesChange = useCallback(
     (changes: any) => {
       onNodesChange(applyNodeChanges(changes, nodes));
@@ -80,50 +165,155 @@ export default function CanvasArea({
     [edges, onEdgesChange]
   );
 
+  function handleEdgeTypeSelect(
+    type: "default" | "handoff" | "conditional",
+    label?: string
+  ) {
+    if (!edgeSelector) return;
+    const { params } = edgeSelector;
+
+    const isExistingEdge =
+      typeof params.id === "string" && params.id.startsWith("e-");
+
+    const edgeConfigs: Record<string, any> = {
+      default: {
+        animated: true,
+        type: undefined,
+        style: undefined,
+        label: "",
+        data: { edgeType: "default" },
+      },
+      handoff: {
+        animated: false,
+        type: "handoff",
+        style: { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5 5" },
+        label: "Handoff",
+        data: { edgeType: "handoff" },
+      },
+      conditional: {
+        animated: false,
+        type: "conditional",
+        style: { stroke: "#d97706", strokeWidth: 2, strokeDasharray: "3 6" },
+        label: label || "Condition",
+        data: { edgeType: "conditional", conditionLabel: label },
+      },
+    };
+
+    if (isExistingEdge) {
+      const updatedEdges = edges.map((e: any) => {
+        if (e.id !== params.id) return e;
+        return { ...e, ...edgeConfigs[type] };
+      });
+      onEdgesChange(updatedEdges);
+    } else {
+      const newEdge = { ...params, ...edgeConfigs[type] };
+      onEdgesChange(addEdge(newEdge, edges));
+    }
+    setEdgeSelector(null);
+  }
+
   const handleConnect = useCallback(
     (params: any) => {
       const isHandoff = params.sourceHandle === "handoff";
-      const newEdge: Edge = {
-        ...params,
-        animated: !isHandoff,
-        ...(isHandoff
-          ? {
-              type: "handoff",
-              style: { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5 5" },
-              label: "Handoff",
-              data: { edgeType: "handoff" },
-            }
-          : {}),
-      };
-      onEdgesChange(addEdge(newEdge, edges));
+      const targetNode = nodes.find((n: any) => n.id === params.target);
+      const isFanOut = targetNode?.type === "fan-out";
+
+      if (isHandoff) {
+        const newEdge: Edge = {
+          ...params,
+          animated: false,
+          type: "handoff",
+          style: { stroke: "#8b5cf6", strokeWidth: 2, strokeDasharray: "5 5" },
+          label: "Handoff",
+          data: { edgeType: "handoff" },
+        };
+        onEdgesChange(addEdge(newEdge, edges));
+        return;
+      }
+
+      if (isFanOut) {
+        const newEdge = {
+          ...params,
+          animated: false,
+          type: "fanout",
+          style: { stroke: "#6366f1", strokeWidth: 2 },
+          data: { edgeType: "fanout" },
+        };
+        onEdgesChange(addEdge(newEdge, edges));
+        return;
+      }
+
+      setEdgeSelector({
+        x: params.sourceX || 400,
+        y: params.sourceY || 300,
+        params,
+      });
     },
-    [edges, onEdgesChange]
+    [edges, nodes, onEdgesChange]
+  );
+
+  const handleEdgeClick = useCallback(
+    (_event: any, edge: any) => {
+      setEdgeSelector({
+        x: _event.clientX || 400,
+        y: _event.clientY || 300,
+        params: edge,
+      });
+    },
+    []
   );
 
   const typedEdges = edges.map((edge: any) => {
-    if (edge.data?.edgeType === "handoff" || edge.label === "Handoff") {
+    const edgeType = edge.data?.edgeType;
+    if (edgeType === "handoff" || edge.label === "Handoff") {
       return { ...edge, type: "handoff", animated: false };
+    }
+    if (edgeType === "conditional") {
+      return { ...edge, type: "conditional", animated: false };
+    }
+    if (edgeType === "fanout") {
+      return { ...edge, type: "fanout", animated: false };
+    }
+    const sourceNode = nodes.find((n: any) => n.id === edge.source);
+    if (sourceNode?.type === "fan-out") {
+      return {
+        ...edge,
+        type: "fanout",
+        animated: false,
+        style: { stroke: "#6366f1", strokeWidth: 2 },
+      };
     }
     return edge;
   });
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={typedEdges}
-      onNodesChange={handleNodesChange}
-      onEdgesChange={handleEdgesChange}
-      onConnect={handleConnect}
-      onNodeClick={(_event: any, node: any) => onNodeClick?.(node.id)}
-      onPaneClick={() => onPaneClick?.()}
-      nodeTypes={nodeTypeComponents}
-      edgeTypes={edgeTypes}
-      fitView
-      style={{ width: "100%", height: "100%" }}
-    >
-      <Background />
-      <Controls />
-      <MiniMap />
-    </ReactFlow>
+    <>
+      <ReactFlow
+        nodes={nodes}
+        edges={typedEdges}
+        onNodesChange={handleNodesChange}
+        onEdgesChange={handleEdgesChange}
+        onConnect={handleConnect}
+        onEdgeClick={handleEdgeClick}
+        onNodeClick={(_event: any, node: any) => onNodeClick?.(node.id)}
+        onPaneClick={() => onPaneClick?.()}
+        nodeTypes={nodeTypeComponents}
+        edgeTypes={edgeTypes}
+        fitView
+        style={{ width: "100%", height: "100%" }}
+      >
+        <Background />
+        <Controls />
+        <MiniMap />
+      </ReactFlow>
+
+      {edgeSelector && (
+        <EdgeTypeSelector
+          position={{ x: edgeSelector.x, y: edgeSelector.y }}
+          onSelect={handleEdgeTypeSelect}
+          onCancel={() => setEdgeSelector(null)}
+        />
+      )}
+    </>
   );
 }
