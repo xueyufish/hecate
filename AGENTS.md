@@ -2,7 +2,7 @@
 
 ## What this repo is
 
-Hecate is an **enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform** built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. P1 (88 tasks) and a batch of P2 engine architecture features are complete.
+Hecate is an **enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform** built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. P1 (19 features) and P2 (63 features) are 100% complete. P3 in progress (28/89).
 
 ## Commands
 
@@ -10,7 +10,7 @@ Hecate is an **enterprise-grade, self-hosted, model-agnostic, MCP-first Agent pl
 # Install (uses uv + venv at .venv/)
 source .venv/bin/activate && uv pip install -e ".[dev]"
 
-# Run all tests (~980, takes ~2.5 min)
+# Run all tests (1713 tests, takes ~6 min)
 python -m pytest tests/ -q
 
 # Run a single test file or function
@@ -23,7 +23,7 @@ ruff format --check src/ tests/
 mypy src/
 python -m pytest tests/ -q
 
-# Start infrastructure (PostgreSQL 16, Qdrant, MinIO)
+# Start infrastructure (PostgreSQL 16, Qdrant, MinIO, Temporal)
 docker compose -f docker/docker-compose.yml up -d
 
 # Run database migrations (requires PostgreSQL running)
@@ -33,7 +33,7 @@ alembic upgrade head
 uvicorn hecate.main:app --reload
 ```
 
-**Pre-commit hooks** run all 4 checks (ruff, ruff-format, mypy, pytest) — a commit takes ~5 min. Never use `--no-verify`.
+**Pre-commit hooks** run all 4 checks (ruff, ruff-format, mypy, pytest). pytest uses `scripts/smart-pytest.sh` which scopes tests to affected layers and skips for non-Python changes. Never use `--no-verify`.
 
 ## Architecture layers
 
@@ -66,18 +66,22 @@ The engine layer defines these abstract interfaces (all in `src/hecate/engine/`)
 | SchedulerStrategy | `scheduler.py` | select_next, set_weights | FIFOScheduler |
 | EvictionPolicy | `eviction.py` | should_evict, select_victim | NoEviction, SizeBasedEviction |
 | OptimizationPass | `optimization.py` | optimize | DeadNodeElimination, ParallelBranchDetection |
+| ConflictResolver | `temporal/conflict.py` | resolve | NoOpConflictResolver |
 | PreLLMHook / PostLLMHook / PreToolHook / PostToolHook | `guardrail.py` | on_pre_llm_call / on_post_llm_call / on_pre_tool_call / on_post_tool_call | NoOp variants for each |
 
 EnginePort also has 4 optional methods with defaults: `context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`.
+
+**Integration status**: ContextEngine is defined but NOT wired into PregelRuntime (P3). GuardrailHooks are Worker-level only, not PregelRuntime-level (P3).
 
 ## Key files (read these first on a new session)
 
 | File | Purpose |
 |------|---------|
 | `docs/features/feature-catalog.md` | Full feature inventory (~400 lines) |
+| `docs/features/roadmap.md` | Implementation roadmap with sprint milestones |
 | `docs/design/architecture.md` | Top-level architecture v0.2 |
 | `docs/research/reports/00-architecture-decisions.md` | 10 architecture decisions (AD-1~AD-10) |
-| `schemas/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) |
+| `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) — bundled in package |
 | `openspec/specs/` | 40 spec directories — the source of truth for each feature |
 | `openspec/changes/archive/` | Completed OpenSpec changes |
 
@@ -88,15 +92,14 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 - **CheckpointModel** inherits `Base` (not `BaseModel`) — intentionally immutable, no `updated_at`/`deleted_at`.
 - **AgentModel.model_config_db** — ORM column named `model_config` via `mapped_column("model_config", JSON)` to avoid Pydantic's `model_config` collision. CreateSchema uses `alias="model_config"`, ReadSchema uses `serialization_alias="model_config"`.
 - **metadata_ alias** — 5 models use `metadata_` (Python) → `metadata` (SQL) to avoid SQLAlchemy's reserved `metadata` attribute. ReadSchema uses `Field(validation_alias="metadata_")`.
-- **graph_dsl.py** loads JSON Schema from disk on every `parse_graph()` call — not cached. Path is fragile in installed packages.
+- **engine/command.py** is a re-export of `Command` from `types.py` — convenience import, not dead code.
 - **compiler._detect_unreachable()** uses BFS from entry point; logs WARNING for unreachable nodes (does not raise).
-- **engine/command.py** is a re-export of `Command` from `types.py` — dead code.
-- **PERSISTENT_TOPIC** has identical behavior to TOPIC — persistence semantic not yet implemented (P2).
-- **StreamMode.MESSAGES / DEBUG** defined but not yielded in PregelRuntime (P2).
 - **ChannelManager.write()** silently skips unregistered channels (no error). **read()** raises KeyError for unregistered channels. **restore()** bypasses write semantics — directly sets `_value` field.
-- **`_resolve_next_nodes_after_interrupt()`** hardcodes `edge.target.get("true")` for dict targets — assumes conditional edges always follow interrupts with "true"/"false" keys only. Multi-way branches will break.
+- **StreamMode.DEBUG** defined but not yielded in PregelRuntime (P3). StreamMode.MESSAGES is implemented.
+- **PERSISTENT_TOPIC** is deprecated — auto-migrated to `topic` with `persistent: true` in graph_dsl.py.
 - **mypy strict=true** but many error codes disabled in pyproject.toml — not truly strict.
-- **Optional dependency groups** in pyproject.toml: `[llm]`, `[temporal]`, `[rag]`, `[security]`, `[dev]`. Declare new packages in the right group.
+- **pyright LSP** produces false positives for Python 3.12 StrEnum — safe to ignore these diagnostics.
+- **Optional dependency groups** in pyproject.toml: `[llm]`, `[temporal]`, `[rag]`, `[security]`, `[tools]`, `[observability]`, `[mysql]`, `[scheduling]`, `[dev]`. Declare new packages in the right group.
 - **Conftest location**: `tests/conftest.py` (not root). Single file, no per-directory conftests.
 
 ## Conventions
@@ -110,7 +113,7 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 - **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` before performing the archive move. This includes: updating ✅ markers for completed features, updating statistics counts, updating ABC integration status, and checking off milestone items. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
 - Run `ruff check` + `ruff format --check` + `mypy` + `pytest` before committing.
 
-### Coding rules (enforced by ruff E/F/I/N/W/UP/B/S/SIM)
+### Coding rules (enforced by ruff E/F/I/N/W/UP/B/SIM)
 
 - `from __future__ import annotations` at top of every file.
 - All public functions/methods require type annotations.
