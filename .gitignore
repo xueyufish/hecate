@@ -40,3 +40,4 @@ alembic/versions/__pycache__/
 
 # Local reference docs — not published to GitHub
 docs/refs/
+docs/research/

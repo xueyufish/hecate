@@ -80,7 +80,6 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 | `docs/features/feature-catalog.md` | Full feature inventory (~400 lines) |
 | `docs/features/roadmap.md` | Implementation roadmap with sprint milestones |
 | `docs/design/architecture.md` | Top-level architecture v0.2 |
-| `docs/research/reports/00-architecture-decisions.md` | 10 architecture decisions (AD-1~AD-10) |
 | `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) — bundled in package |
 | `openspec/specs/` | 40 spec directories — the source of truth for each feature |
 | `openspec/changes/archive/` | Completed OpenSpec changes |
