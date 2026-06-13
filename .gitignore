@@ -38,6 +38,7 @@ Thumbs.db
 alembic/versions/__pycache__/
 .omo/
 
-# Local reference docs — not published to GitHub
+# Local docs — not published to GitHub
 docs/refs/
 docs/research/
+docs/features/
