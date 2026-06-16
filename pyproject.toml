@@ -116,6 +116,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "S", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S607", "S105"]
+"alembic/versions/**" = ["S608"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

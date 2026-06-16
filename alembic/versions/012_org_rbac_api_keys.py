@@ -41,10 +41,10 @@ def upgrade() -> None:
     # 3. Create organizations table
     op.create_table(
         "organizations",
-        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("slug", sa.String(100), nullable=False, unique=True),
-        sa.Column("owner_id", sa.String(36), nullable=False),
+        sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("settings", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -57,8 +57,8 @@ def upgrade() -> None:
     # 4. Create workspaces table
     op.create_table(
         "workspaces",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("org_id", sa.String(36), nullable=False),
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("org_id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("slug", sa.String(100), nullable=False),
         sa.Column("settings", sa.JSON(), nullable=True),
@@ -72,24 +72,22 @@ def upgrade() -> None:
 
     # 5. Bootstrap default org and workspace
     op.execute(
-        "INSERT INTO organizations (id, name, slug, owner_id, created_at, updated_at, deleted) "
-        "VALUES (?, 'Default Organization', 'default', ?, "
-        "datetime('now'), datetime('now'), 0)",
-        (_DEFAULT_UUID, _DEFAULT_UUID),
+        f"INSERT INTO organizations (id, name, slug, owner_id, created_at, updated_at, deleted) "
+        f"VALUES ('{_DEFAULT_UUID}', 'Default Organization', 'default', "
+        f"'{_DEFAULT_UUID}', NOW(), NOW(), FALSE)"
     )
     op.execute(
-        "INSERT INTO workspaces (id, org_id, name, slug, created_at, updated_at, deleted) "
-        "VALUES (?, ?, 'Default Workspace', 'default', "
-        "datetime('now'), datetime('now'), 0)",
-        (_DEFAULT_UUID, _DEFAULT_UUID),
+        f"INSERT INTO workspaces (id, org_id, name, slug, created_at, updated_at, deleted) "
+        f"VALUES ('{_DEFAULT_UUID}', '{_DEFAULT_UUID}', "
+        f"'Default Workspace', 'default', NOW(), NOW(), FALSE)"
     )
 
     # 6. Create workspace_members table
     op.create_table(
         "workspace_members",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("user_id", sa.String(36), nullable=False),
-        sa.Column("workspace_id", sa.String(36), nullable=False),
+        sa.Column("id", sa.Uuid(), primary_key=True),
+        sa.Column("user_id", sa.Uuid(), nullable=False),
+        sa.Column("workspace_id", sa.Uuid(), nullable=False),
         sa.Column("role", workspace_role, nullable=False, server_default="viewer"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -102,14 +100,14 @@ def upgrade() -> None:
     # 7. Create api_keys table
     op.create_table(
         "api_keys",
-        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("id", sa.Uuid(), primary_key=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("key_hash", sa.String(64), nullable=False, unique=True),
         sa.Column("key_prefix", sa.String(12), nullable=False),
         sa.Column("scope", api_key_scope, nullable=False),
-        sa.Column("org_id", sa.String(36), nullable=True),
-        sa.Column("workspace_id", sa.String(36), nullable=True),
-        sa.Column("created_by", sa.String(36), nullable=False),
+        sa.Column("org_id", sa.Uuid(), nullable=True),
+        sa.Column("workspace_id", sa.Uuid(), nullable=True),
+        sa.Column("created_by", sa.Uuid(), nullable=False),
         sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default="1"),
@@ -123,21 +121,15 @@ def upgrade() -> None:
     op.create_index("idx_api_keys_workspace", "api_keys", ["workspace_id"])
 
     # 8. Add FK constraints on workspace_id for existing tables
-    # Note: SQLite doesn't support ALTER TABLE ADD CONSTRAINT FOREIGN KEY,
-    # so we only add FKs for PostgreSQL. SQLite tests work without FK enforcement.
+    # Only tables that already have workspace_id from 000_base.
+    # Migration 013 adds workspace_id + FK to the remaining tables.
     bind = op.get_bind()
     dialect = bind.dialect.name
     if dialect != "sqlite":
         for table_name in [
             "agents",
-            "workflows",
             "skills",
             "tools",
-            "knowledge_bases",
-            "prompts",
-            "memory_blocks",
-            "memories",
-            "knowledge_memories",
         ]:
             op.create_foreign_key(
                 f"fk_{table_name}_workspace_id",
@@ -156,14 +148,8 @@ def downgrade() -> None:
     if dialect != "sqlite":
         for table_name in [
             "agents",
-            "workflows",
             "skills",
             "tools",
-            "knowledge_bases",
-            "prompts",
-            "memory_blocks",
-            "memories",
-            "knowledge_memories",
         ]:
             op.drop_constraint(f"fk_{table_name}_workspace_id", table_name, type_="foreignkey")
 

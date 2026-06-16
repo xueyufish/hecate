@@ -13,7 +13,7 @@ import pytest
 
 def _docker_available() -> bool:
     try:
-        result = subprocess.run(  # noqa: S607
+        result = subprocess.run(  # noqa: S603, S607
             ["docker", "info"],
             capture_output=True,
             timeout=5,
