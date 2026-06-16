@@ -60,6 +60,63 @@ src/hecate/
 - Docstrings on all modules, public classes, and public methods
 - Inline comments: explain **why**, not **what**
 
+## Commit Message Convention
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types
+
+| Type | Purpose |
+|------|---------|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation only |
+| `style` | Formatting/style (no logic change) |
+| `refactor` | Code refactor (no feature/fix) |
+| `perf` | Performance improvement |
+| `test` | Add/update tests |
+| `build` | Build system or dependencies |
+| `ci` | CI configuration changes |
+| `chore` | Maintenance/misc |
+| `revert` | Revert a previous commit |
+
+### Rules
+
+- Use present tense, imperative mood: "add" not "added"
+- Keep description under 72 characters
+- One logical change per commit
+- Reference issues in footer: `Closes #123`, `Refs #456`
+- For breaking changes, add `!` after type: `feat!: remove deprecated endpoint`
+- Never commit secrets (`.env`, credentials, private keys)
+- Never use `--no-verify` to skip hooks
+
+### Scopes
+
+Use the module name as scope when applicable:
+
+```
+feat(engine): add ContextEngine integration to PregelRuntime
+fix(services): handle None values in LLMService.invoke
+docs(api): update OpenAI-compatible endpoint examples
+test(models): add tenant isolation edge case tests
+ci: add PR title lint workflow
+```
+
+### Enforcement
+
+Commit messages are validated in two places:
+
+1. **Local** — `commitizen` pre-commit hook (run `pre-commit install --hook-type commit-msg` after cloning)
+2. **CI** — GitHub Action validates PR titles using `amannn/action-semantic-pull-request`
+
 ## Testing
 
 - Tests live in `tests/`, mirroring `src/hecate/` structure
