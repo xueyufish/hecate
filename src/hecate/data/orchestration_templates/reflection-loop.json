@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "name": "Reflection Loop",
+  "description": "An iterative refinement pipeline where a drafter creates content, a reviewer evaluates quality, and a reviser improves until approved.",
+  "category": "pipeline",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" },
+    "draft": { "type": "last_value" },
+    "quality_status": { "type": "last_value" }
+  },
+  "nodes": {
+    "drafter": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a drafter agent. Create an initial draft based on the given requirements.",
+        "channels": { "readable": ["messages"], "writable": ["messages", "draft"] }
+      }
+    },
+    "reviewer": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a reviewer agent. Review the draft for quality, accuracy, and completeness. Set quality_status to 'approved' or 'needs_improvement'.",
+        "channels": { "readable": ["messages", "draft"], "writable": ["messages", "quality_status"] }
+      }
+    },
+    "check_quality": {
+      "type": "condition",
+      "config": {
+        "expression": "quality_status == 'needs_improvement'"
+      }
+    },
+    "reviser": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a reviser agent. Improve the draft based on the reviewer's feedback. Update the draft with your revisions.",
+        "channels": { "readable": ["messages", "draft", "quality_status"], "writable": ["messages", "draft"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "drafter", "target": "reviewer" },
+    { "source": "reviewer", "target": "check_quality" },
+    {
+      "source": "check_quality",
+      "target": { "true": "reviser", "false": "__end__" }
+    },
+    { "source": "reviser", "target": "reviewer" }
+  ],
+  "entry": "drafter"
+}

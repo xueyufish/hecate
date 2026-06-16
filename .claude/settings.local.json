@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/ -v)",
+      "WebSearch",
+      "Bash(python *)",
+      "Bash(ruff check *)",
+      "Bash(ruff format *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Read(//Users/yuxiumin/.claude/**)",
+      "Bash(claude mcp *)",
+      "Skill(update-config)",
+      "Bash(python3 *)",
+      "Bash(transporter --help)",
+      "Bash(gh auth *)"
+    ]
+  }
+}

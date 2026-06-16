@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "name": "Content Pipeline",
+  "description": "A sequential pipeline of researcher → writer → reviewer agents for content creation with quality check.",
+  "category": "content",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" },
+    "research_data": { "type": "last_value" },
+    "draft": { "type": "last_value" },
+    "review_status": { "type": "last_value" }
+  },
+  "nodes": {
+    "researcher": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a research agent. Gather relevant information and key points on the given topic.",
+        "channels": { "readable": ["messages"], "writable": ["messages", "research_data"] }
+      }
+    },
+    "writer": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a content writer. Create well-structured content based on the research data provided.",
+        "channels": { "readable": ["messages", "research_data"], "writable": ["messages", "draft"] }
+      }
+    },
+    "reviewer": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a content reviewer. Review the draft for quality, accuracy, and clarity. Set review_status to 'approved' or 'needs_revision'.",
+        "channels": { "readable": ["messages", "draft"], "writable": ["messages", "review_status"] }
+      }
+    },
+    "check_revision": {
+      "type": "condition",
+      "config": {
+        "expression": "review_status == 'needs_revision'",
+        "channels": { "readable": ["review_status"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "__start__", "target": "researcher" },
+    { "source": "researcher", "target": "writer" },
+    { "source": "writer", "target": "reviewer" },
+    { "source": "reviewer", "target": "check_revision" },
+    {
+      "source": "check_revision",
+      "target": { "true": "writer", "false": "__end__" }
+    }
+  ],
+  "entry": "researcher"
+}

@@ -1,0 +1,131 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hecate"
+version = "0.1.0"
+description = "Enterprise-grade, open-source, self-hosted, model-agnostic, MCP-first Agent platform"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Hecate Team" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.6.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30.0",
+    "alembic>=1.14.0",
+    "httpx>=0.28.0",
+    "python-dotenv>=1.0.1",
+    "jsonschema>=4.23.0",
+    "tiktoken>=0.7.0",
+    "bcrypt>=4.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "jinja2>=3.1.0",
+    "email-validator>=2.0.0",
+    "beautifulsoup4>=4.12.0",
+    "python-multipart>=0.0.9",
+    "fastmcp>=2.0.0",
+    "mcp>=1.0.0",
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/xueyufish/hecate"
+Repository = "https://github.com/xueyufish/hecate"
+Documentation = "https://github.com/xueyufish/hecate/tree/main/docs"
+Issues = "https://github.com/xueyufish/hecate/issues"
+
+[project.scripts]
+hecate = "hecate.cli.main:app"
+
+[project.optional-dependencies]
+llm = [
+    "litellm>=1.50.0",
+]
+temporal = [
+    "temporalio>=1.7.0",
+]
+rag = [
+    "qdrant-client>=1.12.0",
+    "chromadb>=0.5.0",
+    "docling>=2.0",
+    "FlagEmbedding>=1.2",
+    "minio>=7.2",
+    "ragas>=0.2.0",
+]
+security = [
+    "llm-guard>=0.3.0",
+    "slowapi>=0.1.9",
+]
+tools = [
+    "duckduckgo-search>=6.0",
+    "tavily-python>=0.5",
+]
+observability = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+]
+mysql = [
+    "aiomysql>=0.2",
+]
+scheduling = [
+    "apscheduler~=3.10",
+    "croniter~=2.0",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "pytest-xdist>=3.5",
+    "ruff>=0.8.0",
+    "mypy>=1.13",
+    "httpx>=0.28.0",
+    "aiosqlite>=0.20",
+    "deepdiff>=8.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "S", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S607", "S105"]
+"alembic/versions/**" = ["S608"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disable_error_code = ["type-arg", "import-not-found", "import-untyped", "no-untyped-def", "no-untyped-call", "no-any-return", "attr-defined", "assignment", "union-attr", "arg-type", "misc"]
