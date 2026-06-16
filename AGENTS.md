@@ -77,17 +77,20 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 
 | File | Purpose |
 |------|---------|
-| `docs/features/feature-catalog.md` | Full feature inventory (~400 lines) |
-| `docs/features/roadmap.md` | Implementation roadmap with sprint milestones |
-| `docs/design/architecture.md` | Top-level architecture v0.2 |
+| `docs/design/architecture.md` | Top-level architecture overview |
+| `docs/design/engine-design.md` | Execution engine deep dive |
+| `docs/design/concepts.md` | Core entity model and data design |
+| `docs/design/adr/` | Architecture Decision Records (10 ADRs) |
 | `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) — bundled in package |
-| `openspec/specs/` | 40 spec directories — the source of truth for each feature |
+| `openspec/specs/` | 86 spec directories — the source of truth for each feature |
 | `openspec/changes/archive/` | Completed OpenSpec changes |
+
+> **Note**: `docs/features/feature-catalog.md` and `docs/features/roadmap.md` are local-only files (gitignored, not in the public repo). They contain competitive analysis and detailed feature tracking. If you need access, ask the maintainer.
 
 ## Gotchas and non-obvious facts
 
 - **Python env**: uv + Python 3.12, venv at `.venv/`. Use `uv pip install`, not bare `pip install`.
-- **Git**: development on `f_dev` branch. CI runs on push to `main` and `f_dev`.
+- **Git**: development branch is `f_dev`. CI runs on push to `main` and `f_dev`. Public releases are squash-merged from `f_dev` to `main`.
 - **CheckpointModel** inherits `Base` (not `BaseModel`) — intentionally immutable, no `updated_at`/`deleted_at`.
 - **AgentModel.model_config_db** — ORM column named `model_config` via `mapped_column("model_config", JSON)` to avoid Pydantic's `model_config` collision. CreateSchema uses `alias="model_config"`, ReadSchema uses `serialization_alias="model_config"`.
 - **metadata_ alias** — 5 models use `metadata_` (Python) → `metadata` (SQL) to avoid SQLAlchemy's reserved `metadata` attribute. ReadSchema uses `Field(validation_alias="metadata_")`.
@@ -109,7 +112,7 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 - **OpenSpec workflow is MANDATORY for ALL changes** — no exceptions. Every change MUST follow: `proposal → design → specs → tasks → implement → verify → archive`. Use `/opsx-propose` to create a change, then `/opsx-apply` to implement tasks, then run verification commands, then `/opsx-archive` to close. Never skip the propose step or implement outside an OpenSpec change directory. Mark tasks complete in `tasks.md` immediately.
 - **OpenSpec commands MUST be triggered by the user manually** — the AI agent SHALL NOT automatically invoke `/opsx-explore`, `/opsx-propose`, `/opsx-apply`, `/opsx-archive`, or any other `/opsx-*` command. The agent may suggest running a command, but MUST wait for explicit user approval.
 - Feature catalog: maintain P1→P5 priority ordering, update counts when features change.
-- **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` before performing the archive move. This includes: updating ✅ markers for completed features, updating statistics counts, updating ABC integration status, and checking off milestone items. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
+- **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` (local-only files, not in public repo) before performing the archive move. This includes: updating ✅ markers for completed features, updating statistics counts, updating ABC integration status, and checking off milestone items. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
 - Run `ruff check` + `ruff format --check` + `mypy` + `pytest` before committing.
 
 ### Coding rules (enforced by ruff E/F/I/N/W/UP/B/SIM)
