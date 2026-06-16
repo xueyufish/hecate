@@ -1,16 +1,73 @@
-# Hecate Agent Platform
+# Hecate
 
-Enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform.
+[![CI](https://github.com/xueyufish/hecate/actions/workflows/ci.yml/badge.svg)](https://github.com/xueyufish/hecate/actions/workflows/ci.yml)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Features
+**Enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform.**
 
-- **Graph-based Agent Orchestration** — Define agents as directed graphs with Guard → Planner → Sub-Agent architecture
-- **OpenAI-Compatible API** — Drop-in replacement for OpenAI's Chat Completions API
-- **Model-Agnostic** — Support for OpenAI, Anthropic, and 100+ LLM providers via LiteLLM
-- **RAG Pipeline** — Document ingestion, chunking, embedding, and hybrid search
-- **Security** — LLM Guard for prompt/output scanning, NeMo Guardrails for conversation control
-- **MCP Integration** — Native Model Context Protocol support for tool discovery and execution
-- **Checkpoint System** — Pause and resume agent execution with full state preservation
+Build, orchestrate, and run AI Agent applications on your own infrastructure — no vendor lock-in.
+
+---
+
+## Highlights
+
+- **Graph-First Engine** — Self-built Pregel runtime with JSON DSL, compiler, and channel system. Zero external framework dependencies (not even LangChain).
+- **11 Engine ABCs** — Pluggable interfaces for scheduling, eviction, optimization, conflict resolution, event sourcing, context engine, and guardrails.
+- **Visual Canvas** — React Flow-based drag-and-drop workflow builder with 6 multi-agent collaboration patterns, typed edges, and fan-out/merge nodes.
+- **Multi-Agent Orchestration** — Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, and Debate patterns — all unified as Graph templates.
+- **MCP Bidirectional** — Native MCP Client (consume external tools) + MCP Server (expose Hecate as tool provider).
+- **Model-Agnostic** — 100+ LLM providers via LiteLLM with intelligent routing, circuit breaker, and A/B testing.
+- **Multi-Tenant** — Organization → Workspace → RBAC with data-level tenant isolation across 15 models.
+- **Enterprise Security** — Engine-level guardrail hooks (Pre/Post LLM/Tool), PII masking with encryption, audit trail, and Docker sandbox execution.
+- **Context Engineering** — 6-component pipeline: assembler, evidence tracker, phase detection, token budget governance, provider shaping, and message prioritization.
+- **Spec-Driven Development** — 86 feature specs + 62 completed change proposals via OpenSpec workflow. Every feature has requirements, scenarios, and design docs.
+
+## Project Stats
+
+| Metric | Value |
+|--------|-------|
+| Features (P1–P5) | 230 total (110 implemented) |
+| Tests | 1,700+ |
+| Engine ABCs | 11 |
+| OpenSpec specs | 86 |
+| Completed changes | 62 |
+| LLM Providers | 100+ via LiteLLM |
+| Database Backends | PostgreSQL, MySQL, SQLite |
+| Vector DB Backends | Qdrant, Chroma |
+| Python | 3.12+ |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Gateway Layer                           │
+│  OpenAI-compatible API  │  Management API  │  WebSocket/SSE    │
+│  Authentication (JWT + API Key)  │  Rate Limiting  │  Multi-Channel │
+├─────────────────────────────────────────────────────────────────┤
+│                      Orchestration Layer                        │
+│  Graph DSL Compiler  │  Visual Canvas (React Flow)              │
+│  Multi-Agent Patterns (6 collaboration templates)               │
+│  Workflow Versioning  │  Human-in-the-Loop (interrupt/Command)  │
+├─────────────────────────────────────────────────────────────────┤
+│                      Execution Engine                           │
+│  Pregel Runtime  │  Channel System (4 types + registry)         │
+│  Checkpoint (PostgreSQL)  │  Worker Pool  │  EventStore         │
+│  11 ABCs: Scheduler, Eviction, Optimization, Conflict,          │
+│  Context, Guardrails (×4), EventStore, Checkpoint               │
+│  Zero external dependencies (jsonschema only)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                    Capability Services                          │
+│  LLM Routing (LiteLLM 100+)  │  RAG Pipeline (Docling + Qdrant) │
+│  Memory System (L1–L4)  │  Context Engineering (6 components)    │
+│  MCP Client + Server  │  Skill Management (SKILL.md)            │
+│  Security (Guardrail Hooks + PII Masking + Sandbox)             │
+├─────────────────────────────────────────────────────────────────┤
+│                      Infrastructure                             │
+│  Multi-DB (PostgreSQL/MySQL/SQLite)  │  Multi-Vector-DB          │
+│  MinIO  │  Docker Compose  │  OTel Tracing  │  Audit Logs       │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ## Quick Start
 
@@ -20,6 +77,8 @@ Enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform.
 - PostgreSQL 16
 - Qdrant (vector database)
 - MinIO (object storage)
+
+> **Note:** MySQL and SQLite are also supported as database backends. PostgreSQL is recommended for production and is the default in Docker Compose.
 
 ### Installation
 
@@ -32,9 +91,6 @@ cd hecate
 uv venv
 source .venv/bin/activate
 uv pip install -e ".[dev]"
-
-# Or use the lock file for exact versions
-uv pip sync uv.lock
 
 # Set up environment
 cp .env.example .env
@@ -50,15 +106,18 @@ uvicorn hecate.main:app --reload
 ### Docker Compose
 
 ```bash
+# Start infrastructure (PostgreSQL, Qdrant, MinIO)
 docker compose -f docker/docker-compose.yml up -d
+
+# Then install and run as above
 ```
 
 ## API Overview
 
-### OpenAI Compatible Endpoints
+### OpenAI-Compatible Endpoints
 
 ```bash
-# Chat completion
+# Chat completion (drop-in replacement)
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
@@ -85,70 +144,96 @@ curl -X POST http://localhost:8000/api/agents \
     "mode": "chat"
   }'
 
-# List agents
-curl http://localhost:8000/api/agents \
-  -H "Authorization: Bearer your-api-key"
-
 # Create knowledge base
 curl -X POST http://localhost:8000/api/knowledge-bases \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"name": "My KB", "description": "Knowledge base for docs"}'
-```
 
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        API Layer                            │
-│  /v1/chat/completions  │  /api/agents  │  /api/sessions    │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────────┐
-│                    Service Layer                            │
-│  LLM Service  │  RAG Pipeline  │  Security  │  MCP Client  │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────────┐
-│                   Engine Layer                              │
-│  Graph DSL  │  Compiler  │  Pregel Runtime  │  Channels    │
-└─────────────────────────┬───────────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────────┐
-│                 Infrastructure                              │
-│  PostgreSQL  │  Qdrant  │  MinIO  │  LiteLLM              │
-└─────────────────────────────────────────────────────────────┘
+# Upload document
+curl -X POST http://localhost:8000/api/knowledge-bases/{kb_id}/documents \
+  -H "Authorization: Bearer your-api-key" \
+  -F "file=@document.pdf"
 ```
 
 ## Configuration
 
-Environment variables (see `.env.example`):
+Key environment variables (see `.env.example` for full list):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://hecate:hecate@localhost:5432/hecate` |
+| `DATABASE_URL` | Database connection string | `postgresql+asyncpg://hecate:hecate@localhost:5432/hecate` |
 | `QDRANT_URL` | Qdrant endpoint | `http://localhost:6333` |
 | `MINIO_URL` | MinIO endpoint | `localhost:9000` |
-| `HECATE_API_KEYS` | Comma-separated API keys | - |
-| `LLM_GUARD_ENABLED` | Enable LLM Guard scanning | `true` |
+| `HECATE_API_KEYS` | Comma-separated API keys | — |
+| `LLM_GUARD_ENABLED` | Enable prompt/output scanning | `true` |
 | `RATE_LIMIT_RPM` | Requests per minute per key | `60` |
 
 ## Development
 
 ```bash
-# Run tests
-pytest tests/ -v
+# Run all tests (1,700+ tests)
+python -m pytest tests/ -q
+
+# Run a specific test file
+python -m pytest tests/test_engine/test_pregel.py -v
 
 # Lint
-ruff check src/ tests/
+ruff check src/hecate/ tests/
 
-# Format
-ruff format src/ tests/
+# Format check
+ruff format --check src/ tests/
 
 # Type check
 mypy src/
+
+# All four checks (also runs as pre-commit hook)
+ruff check src/hecate/ tests/ && ruff format --check src/ tests/ && mypy src/ && python -m pytest tests/ -q
 ```
+
+## Engine Layer Design
+
+The execution engine is Hecate's core differentiator — a self-built Pregel runtime with zero external framework dependencies:
+
+```
+JSON DSL → Compiler (schema validation + optimization passes) → CompiledGraph
+                                                                    │
+                                                                    ▼
+                                                           Pregel Runtime
+                                                    (BSP superstep loop)
+                                                    │               │
+                                         Channel System      Worker Pool
+                                         (4 types +          (thread pool →
+                                          pluggable registry)  cross-process)
+                                                    │
+                                         Checkpoint Store
+                                         (PostgreSQL + memory cache)
+```
+
+**11 Abstract Base Classes** enable pluggable extensibility:
+
+| ABC | Purpose |
+|-----|---------|
+| `EnginePort` | Service-to-engine adapter (LLM, tools, knowledge, checkpoint) |
+| `Worker` / `WorkerPool` | Node execution dispatch |
+| `CheckpointStore` | State persistence and recovery |
+| `EventStore` | Append-only event logging with replay |
+| `ContextEngine` | Message selection, compression, token estimation |
+| `SchedulerStrategy` | Node scheduling (FIFO default, pluggable) |
+| `EvictionPolicy` | Channel memory management |
+| `OptimizationPass` | Graph optimization (dead node elimination, parallel detection) |
+| `ConflictResolver` | Concurrent channel update resolution |
+| `Guardrail Hooks (×4)` | Pre/Post LLM/Tool interception |
+
+## Documentation
+
+| Document | Location | Description |
+|----------|----------|-------------|
+| Architecture Design | `docs/design/architecture.md` | 5-layer architecture, 10 ADRs, engine design |
+| OpenSpec Specs | `openspec/specs/` | 86 feature specifications with requirements and scenarios |
+| OpenSpec Archive | `openspec/changes/archive/` | 62 completed change proposals with design docs |
+| Graph DSL Schema | `src/hecate/engine/graph-dsl.schema.json` | JSON Schema for graph definition |
 
 ## License
 
-MIT License
+[MIT](LICENSE)
