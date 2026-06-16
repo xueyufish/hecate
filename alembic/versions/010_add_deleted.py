@@ -36,9 +36,13 @@ BASEMODEL_TABLES = [
     "memories",
     "prompts",
     "prompt_versions",
-    "evidence",
+    "evidences",
     "budget_snapshots",
 ]
+
+# Subset of BASEMODEL_TABLES that have a deleted_at column for backfill.
+# budget_snapshots lacks deleted_at (immutable audit table).
+TABLES_WITH_DELETED_AT = [t for t in BASEMODEL_TABLES if t != "budget_snapshots"]
 
 # Partial indexes to drop (postgresql_where= deleted_at IS NULL)
 PARTIAL_INDEXES = [
@@ -48,7 +52,6 @@ PARTIAL_INDEXES = [
     ("idx_tools_workspace_name", "tools"),
     ("idx_skills_workspace_name", "skills"),
     ("idx_model_providers_name", "model_providers"),
-    ("uq_model_registry_provider_model", "model_registry"),
     ("idx_model_registry_provider", "model_registry"),
     ("idx_model_registry_model_id", "model_registry"),
     ("idx_workflows_workspace", "workflows"),
@@ -66,9 +69,9 @@ def upgrade() -> None:
         )
 
     # Step 2: Backfill deleted from deleted_at
-    # NULL deleted_at → deleted=False (0), non-NULL deleted_at → deleted=True (1)
-    for table in BASEMODEL_TABLES:
-        op.execute(f"UPDATE {table} SET deleted = 1 WHERE deleted_at IS NOT NULL")  # noqa: S608
+    # NULL deleted_at → deleted=False, non-NULL deleted_at → deleted=True
+    for table in TABLES_WITH_DELETED_AT:
+        op.execute(f"UPDATE {table} SET deleted = TRUE WHERE deleted_at IS NOT NULL")  # noqa: S608
 
     # Step 3: Drop old partial indexes
     for idx_name, table_name in PARTIAL_INDEXES:

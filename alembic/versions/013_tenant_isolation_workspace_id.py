@@ -1,6 +1,6 @@
 """Add workspace_id to 14 unscoped tables for tenant data isolation.
 
-Revision ID: 013_tenant_isolation_workspace_id
+Revision ID: 013_tenant_isolation
 Revises: 012_org_rbac_api_keys
 Create Date: 2026-06-09
 
@@ -25,8 +25,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "013_tenant_isolation_workspace_id"
-down_revision = "012_org_rbac_api_keys"
+revision = "013_tenant_isolation"
+down_revision = "012b_eval_tables"
 branch_labels = None
 depends_on = None
 
@@ -39,19 +39,15 @@ _PARENT_TABLES = [
     "documents",
     "workflow_versions",
     "prompt_versions",
-    "evaluation_datasets",
 ]
 
 # Child tables with backfill mapping: (table, parent_table, fk_column)
 _CHILD_TABLES: list[tuple[str, str, str]] = [
     ("messages", "conversations", "conversation_id"),
-    ("evidence", "sessions", "session_id"),
+    ("evidences", "sessions", "session_id"),
     ("checkpoints", "sessions", "session_id"),
     ("budget_snapshots", "sessions", "session_id"),
-    ("workflow_runs", "workflow_versions", "workflow_version_id"),
-    ("evaluation_items", "evaluation_datasets", "dataset_id"),
-    ("evaluation_runs", "evaluation_datasets", "dataset_id"),
-    ("evaluation_scores", "evaluation_runs", "run_id"),
+    ("workflow_runs", "workflows", "workflow_id"),
 ]
 
 # All 14 tables
@@ -63,15 +59,11 @@ _TABLES_WITH_DELETED = [
     "messages",
     "sessions",
     "documents",
-    "evidence",
+    "evidences",
     "budget_snapshots",
     "workflow_versions",
     "workflow_runs",
     "prompt_versions",
-    "evaluation_datasets",
-    "evaluation_items",
-    "evaluation_runs",
-    "evaluation_scores",
 ]
 
 

@@ -1,7 +1,7 @@
 """Add guardrail_config JSONB column to agents table.
 
 Revision ID: 014_agent_guardrail_config
-Revises: 013_tenant_isolation_workspace_id
+Revises: 013_tenant_isolation
 Create Date: 2026-06-10
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "014_agent_guardrail_config"
-down_revision = "013_tenant_isolation_workspace_id"
+down_revision = "013_tenant_isolation"
 branch_labels = None
 depends_on = None
 
