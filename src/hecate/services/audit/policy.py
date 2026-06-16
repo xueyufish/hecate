@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
 
@@ -125,7 +125,7 @@ class BulkDeleteProtectionPolicy(AuditSecurityPolicy):
             return None
 
         now = context.get_now()
-        window_start = now.replace(minute=now.minute - self._window_minutes)
+        window_start = now - timedelta(minutes=self._window_minutes)
         recent_deletes = [
             a
             for a in context.recent_user_actions

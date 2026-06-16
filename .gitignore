@@ -42,3 +42,6 @@ alembic/versions/__pycache__/
 docs/refs/
 docs/research/
 docs/features/
+
+# Playwright MCP artifacts
+.playwright-mcp/

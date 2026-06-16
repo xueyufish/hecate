@@ -83,10 +83,10 @@ See `openspec/specs/` for existing feature specifications and `openspec/changes/
 
 ## Pull Request Process
 
-1. Create a feature branch from `f_dev`
+1. Fork the repository and create a feature branch from `main`
 2. Make your changes following the conventions above
 3. Ensure all four checks pass locally
-4. Open a PR targeting `f_dev`
+4. Open a PR targeting `main`
 5. Describe what changed and why
 6. Link any relevant issues
 
