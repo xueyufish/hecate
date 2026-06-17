@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from typing import Any
 
+from hecate.engine.errors import ChannelNotFoundError
 from hecate.engine.eviction import EvictionPolicy, NoEviction
 from hecate.engine.types import ChannelAccess, ChannelDef, ChannelType
 
@@ -269,7 +270,7 @@ class ChannelManager:
             if name not in access.readable:
                 logger.warning("Node '%s' reads from channel '%s' without declaring it as readable", node_id, name)
         if name not in self._channels:
-            raise KeyError(f"Channel '{name}' not registered")
+            raise ChannelNotFoundError(name)
         return self._channels[name].read()
 
     def snapshot(self) -> dict[str, Any]:

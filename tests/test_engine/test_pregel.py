@@ -23,6 +23,7 @@ import pytest
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import InMemoryCheckpointStore
+from hecate.engine.errors import MaxSuperstepsError
 from hecate.engine.eviction import SizeBasedEviction
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.types import (
@@ -530,7 +531,7 @@ class TestMaxSupersteps:
 
     @pytest.mark.asyncio
     async def test_cyclic_graph_raises(self):
-        """An A <-> B cycle should exhaust max_supersteps and raise RuntimeError."""
+        """An A <-> B cycle should exhaust max_supersteps and raise MaxSuperstepsError."""
         graph = CompiledGraph(
             nodes={
                 "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
@@ -549,7 +550,7 @@ class TestMaxSupersteps:
         runtime = PregelRuntime(graph, worker, store, max_supersteps=10)
 
         session_id = uuid.uuid4()
-        with pytest.raises(RuntimeError, match="max supersteps"):
+        with pytest.raises(MaxSuperstepsError, match="max supersteps"):
             async for _ in runtime.execute(session_id):
                 pass
 

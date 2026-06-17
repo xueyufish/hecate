@@ -21,6 +21,7 @@ from importlib.resources import files
 
 import jsonschema
 
+from hecate.engine.errors import EngineError
 from hecate.engine.types import (
     ChannelDef,
     ChannelType,
@@ -34,7 +35,7 @@ from hecate.engine.types import (
 logger = logging.getLogger(__name__)
 
 
-class GraphValidationError(Exception):
+class GraphValidationError(EngineError):
     """Raised when a graph definition fails schema or structural validation.
 
     Attributes:
