@@ -14,6 +14,7 @@ from typing import Any
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
+from hecate.engine.context import ContextEngine
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.types import CompiledGraph, StreamMode
 from hecate.engine.worker import Worker
@@ -27,6 +28,7 @@ async def execute_subgraph(
     checkpoint_store: CheckpointStore,
     session_id: uuid.UUID,
     channel_mapping: dict[str, str] | None = None,
+    context_engine: ContextEngine | None = None,
 ) -> dict[str, Any]:
     """Execute a sub-graph and map its final state back to the parent channels.
 
@@ -72,6 +74,7 @@ async def execute_subgraph(
         graph=sub_graph,
         worker=worker,
         checkpoint_store=checkpoint_store,
+        context_engine=context_engine,
     )
 
     results = []

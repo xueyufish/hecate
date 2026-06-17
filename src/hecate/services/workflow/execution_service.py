@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.engine.checkpoint import InMemoryCheckpointStore
 from hecate.engine.compiler import GraphCompiler
+from hecate.engine.context import InMemoryContextEngine
 from hecate.engine.graph_dsl import parse_graph
 from hecate.engine.guardrail import (
     PostLLMHook,
@@ -252,6 +253,7 @@ class WorkflowExecutionService:
             worker=composite,
             checkpoint_store=checkpoint_store,
             max_supersteps=max_iterations * 3 + 5,
+            context_engine=InMemoryContextEngine(),
         )
 
         stream_mode = StreamMode.MESSAGES if stream else StreamMode.VALUES

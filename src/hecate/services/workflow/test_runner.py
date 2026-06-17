@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.engine.checkpoint import InMemoryCheckpointStore
 from hecate.engine.compiler import GraphCompiler
+from hecate.engine.context import InMemoryContextEngine
 from hecate.engine.graph_dsl import parse_graph
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.types import NodeType, StreamMode, WorkerResult
@@ -203,6 +204,7 @@ class WorkflowTestRunner:
                 graph=compiled,
                 worker=worker,
                 checkpoint_store=checkpoint_store,
+                context_engine=InMemoryContextEngine(),
             )
 
             async for _event in runtime.execute(
