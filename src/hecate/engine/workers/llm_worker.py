@@ -12,6 +12,7 @@ import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from hecate.engine.context import ContextEngine
 from hecate.engine.eventstore import Event, EventType
 from hecate.engine.guardrail import (
     GuardrailAction,
@@ -25,6 +26,91 @@ from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_BUDGET = 8000
+_DEFAULT_TOOL_RESULT_LIMIT = 2000
+_TRUNCATION_INDICATOR = "\n[... truncated]"
+
+
+def _estimate_message_tokens(message: dict[str, Any], chars_per_token: int = 4) -> int:
+    """Estimate token count for a single message.
+
+    Args:
+        message: Message dict with 'content' key.
+        chars_per_token: Characters per token for estimation.
+
+    Returns:
+        Estimated token count (minimum 1).
+    """
+    content = message.get("content", "")
+    if content is None:
+        return 0
+    chars = len(content) if isinstance(content, str) else len(str(content))
+    return max(1, chars // chars_per_token)
+
+
+def _truncate_tool_results(
+    messages: list[dict[str, Any]],
+    tool_result_limit: int,
+) -> list[dict[str, Any]]:
+    """Truncate oversized tool result content in messages.
+
+    Scans for messages with 'tool_calls' or 'role' == 'tool' whose content
+    exceeds the token limit. Returns a new list with truncated copies;
+    original messages are not modified.
+
+    Args:
+        messages: List of message dicts.
+        tool_result_limit: Maximum tokens per tool result.
+
+    Returns:
+        New list with truncated tool results where needed.
+    """
+    result: list[dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role")
+        if role not in ("tool", "assistant"):
+            result.append(msg)
+            continue
+
+        content = msg.get("content", "")
+        if content is None or not isinstance(content, str):
+            result.append(msg)
+            continue
+
+        estimated = _estimate_message_tokens(msg)
+        if estimated <= tool_result_limit:
+            result.append(msg)
+            continue
+
+        char_limit = tool_result_limit * 4
+        truncated_content = content[:char_limit] + _TRUNCATION_INDICATOR
+        truncated_msg = {**msg, "content": truncated_content}
+        result.append(truncated_msg)
+
+    return result
+
+
+def _resolve_budget(node_config: dict, execution_context: dict | None) -> int:
+    """Resolve token budget with priority: node_config > execution_context > default.
+
+    Args:
+        node_config: Per-node configuration dict.
+        execution_context: Optional execution context from PregelRuntime.
+
+    Returns:
+        Token budget integer.
+    """
+    node_budget = node_config.get("max_tokens")
+    if node_budget is not None and isinstance(node_budget, int) and node_budget > 0:
+        return node_budget
+
+    if execution_context:
+        ctx_budget = execution_context.get("context_budget")
+        if ctx_budget is not None and isinstance(ctx_budget, int) and ctx_budget > 0:
+            return ctx_budget
+
+    return _DEFAULT_BUDGET
 
 
 class LLMWorker(Worker):
@@ -53,6 +139,44 @@ class LLMWorker(Worker):
         self._port = port
         self._pre_hook = pre_llm_hook or NoOpPreLLMHook()
         self._post_hook = post_llm_hook or NoOpPostLLMHook()
+
+    @staticmethod
+    def _apply_context_pipeline(
+        messages: list[dict[str, Any]],
+        node_config: dict,
+        execution_context: dict | None,
+    ) -> list[dict[str, Any]]:
+        """Apply context pipeline when ContextEngine is available.
+
+        Non-destructive: returns a new filtered list. Does not modify
+        the original messages list or the channel snapshot.
+
+        Steps:
+        1. Tool result truncation (cap oversized outputs)
+        2. Token estimation against budget
+        3. Message selection (if over budget)
+        4. Compression (if still over budget)
+        """
+        ctx_engine: ContextEngine | None = None
+        if execution_context:
+            ctx_engine = execution_context.get("context_engine")
+        if ctx_engine is None:
+            return messages
+
+        tool_result_limit = node_config.get("tool_result_limit", _DEFAULT_TOOL_RESULT_LIMIT)
+        if not isinstance(tool_result_limit, int) or tool_result_limit <= 0:
+            tool_result_limit = _DEFAULT_TOOL_RESULT_LIMIT
+
+        filtered = _truncate_tool_results(messages, tool_result_limit)
+
+        budget = _resolve_budget(node_config, execution_context)
+        estimated = ctx_engine.estimate_tokens(filtered)
+        if estimated > budget:
+            filtered = ctx_engine.select_messages(filtered, budget)
+            if ctx_engine.estimate_tokens(filtered) > budget:
+                filtered = ctx_engine.compress(filtered)
+
+        return filtered
 
     async def execute(
         self,
@@ -92,6 +216,9 @@ class LLMWorker(Worker):
                     "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
                     node_id,
                 )
+
+        # Context pipeline (non-destructive message filtering)
+        messages = self._apply_context_pipeline(messages, node_config, execution_context)
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -229,6 +356,9 @@ class LLMWorker(Worker):
                     "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
                     node_id,
                 )
+
+        # Context pipeline (non-destructive message filtering)
+        messages = self._apply_context_pipeline(messages, node_config, execution_context)
 
         # Context assembly
         assembled = await self._port.context_assemble(

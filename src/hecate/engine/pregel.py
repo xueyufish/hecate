@@ -29,6 +29,7 @@ from typing import Any
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
+from hecate.engine.context import ContextEngine
 from hecate.engine.eventbus import EventBus
 from hecate.engine.eventstore import Event, EventStore, EventType
 from hecate.engine.eviction import EvictionPolicy, NoEviction
@@ -74,6 +75,7 @@ class PregelRuntime:
         eviction_policy: EvictionPolicy | None = None,
         event_store: EventStore | None = None,
         event_bus: EventBus | None = None,
+        context_engine: ContextEngine | None = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
@@ -88,6 +90,7 @@ class PregelRuntime:
         )
         self._event_store = event_store
         self._event_bus = event_bus
+        self._context_engine = context_engine
         self._superstep = 0
         self._interrupted = False
         self._interrupt_value: Any = None
@@ -128,6 +131,8 @@ class PregelRuntime:
         }
         if self._event_bus is not None:
             ctx["event_bus"] = self._event_bus
+        if self._context_engine is not None:
+            ctx["context_engine"] = self._context_engine
         return ctx
 
     async def execute(
