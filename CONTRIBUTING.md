@@ -35,6 +35,39 @@ python -m pytest tests/ -q
 
 These same checks run as pre-commit hooks and in CI.
 
+## Git Workflow
+
+We use GitHub Flow. All changes must go through a feature branch and pull request — never commit directly to `main`.
+
+### Branch Naming
+
+| Prefix | Use case | Example |
+|--------|----------|---------|
+| `feat/` | New feature | `feat/context-engine-phase1` |
+| `fix/` | Bug fix | `fix/audit-timedelta` |
+| `docs/` | Documentation only | `docs/readme-badge` |
+| `chore/` | Tooling, CI, config | `chore/commit-convention` |
+| `refactor/` | Code restructure | `refactor/worker-abc` |
+
+### Workflow
+
+```bash
+# 1. Create feature branch from latest main
+git checkout main && git pull
+git checkout -b feat/your-feature
+
+# 2. Make changes, commit (pre-commit hooks run automatically)
+git add -A && git commit -m "feat(scope): description"
+
+# 3. Push and create PR
+git push -u origin feat/your-feature
+# → Create PR on GitHub, target: main
+
+# 4. After merge, clean up
+git checkout main && git pull
+git branch -d feat/your-feature
+```
+
 ## Project Structure
 
 ```
