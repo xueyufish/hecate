@@ -22,6 +22,7 @@ from hecate.engine.guardrail import (
     PreLLMHook,
 )
 from hecate.engine.ports import EnginePort
+from hecate.engine.tool_gate import ToolGateEvaluator
 from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
 
@@ -139,6 +140,7 @@ class LLMWorker(Worker):
         self._port = port
         self._pre_hook = pre_llm_hook or NoOpPreLLMHook()
         self._post_hook = post_llm_hook or NoOpPostLLMHook()
+        self._tool_gate = ToolGateEvaluator()
 
     @staticmethod
     def _apply_context_pipeline(
@@ -178,6 +180,31 @@ class LLMWorker(Worker):
 
         return filtered
 
+    def _filter_tools(
+        self,
+        tools: Any,
+        execution_context: dict | None,
+        channel_snapshot: dict,
+    ) -> Any:
+        """Filter tools based on available_when expressions.
+
+        Builds a flat context dict from execution_context and channel_snapshot,
+        then delegates to ToolGateEvaluator.filter_tools().
+
+        Returns the original tools list unchanged if tools is not a list.
+        """
+        if not isinstance(tools, list):
+            return tools
+
+        context: dict[str, Any] = {}
+        if execution_context:
+            context.update(execution_context)
+        context.update(channel_snapshot)
+        if "_user_id" in context:
+            context["user_id"] = context.pop("_user_id")
+
+        return self._tool_gate.filter_tools(tools, context)
+
     async def execute(
         self,
         node_id: str,
@@ -189,6 +216,7 @@ class LLMWorker(Worker):
         messages = channel_snapshot.get("messages", [])
         model = node_config.get("model", "gpt-4o")
         tools = node_config.get("tools")
+        tools = self._filter_tools(tools, execution_context, channel_snapshot)
         session_id = channel_snapshot.get("_session_id")
         agent_id = channel_snapshot.get("_agent_id")
 
@@ -328,6 +356,7 @@ class LLMWorker(Worker):
         messages = channel_snapshot.get("messages", [])
         model = node_config.get("model", "gpt-4o")
         tools = node_config.get("tools")
+        tools = self._filter_tools(tools, execution_context, channel_snapshot)
         session_id = channel_snapshot.get("_session_id")
         agent_id = channel_snapshot.get("_agent_id")
 
