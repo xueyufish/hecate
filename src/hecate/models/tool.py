@@ -57,6 +57,7 @@ class ToolModel(BaseModel):
     sandbox_config: Mapped[dict] = mapped_column(JSON, default=dict)
     mcp_server: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mcp_tool_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    available_when: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     __table_args__ = (
         Index(
@@ -86,6 +87,7 @@ class ToolCreateSchema(PydanticBase):
     sandbox_config: dict = Field(default_factory=dict)
     mcp_server: str | None = None
     mcp_tool_name: str | None = None
+    available_when: str | None = None
 
 
 class ToolReadSchema(PydanticBase):
@@ -106,6 +108,7 @@ class ToolReadSchema(PydanticBase):
     sandbox_config: dict
     mcp_server: str | None
     mcp_tool_name: str | None
+    available_when: str | None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
