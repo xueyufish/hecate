@@ -22,6 +22,7 @@ from hecate.engine.errors import (
     ErrorCategory,
     SecurityError,
 )
+from hecate.engine.retry import RetryStrategy
 
 # Provider SDK exception types — imported conditionally to avoid hard dependency
 _PROVIDER_EXCEPTIONS: dict[type, ErrorCategory] = {}
@@ -322,4 +323,54 @@ class RetryPolicy:
             error=last_error,
             attempts=self.max_retries + 1,
             circuit_state=self.circuit_breaker.state.value,
+        )
+
+
+class DefaultRetryStrategy(RetryStrategy):
+    """Engine-level retry strategy using ErrorClassifier for decisions.
+
+    Bridges the existing ErrorClassifier (from 1.3.5g) with the engine's
+    RetryStrategy ABC. Uses exponential backoff with jitter, identical to
+    RetryPolicy's delay calculation.
+
+    Configurable parameters:
+        max_attempts: Maximum retry attempts (0 = no retry, 3 = up to 4 total calls).
+        base_delay: Initial backoff delay in seconds.
+        max_delay: Upper bound on backoff delay in seconds.
+        multiplier: Exponential growth factor for backoff.
+    """
+
+    def __init__(
+        self,
+        max_attempts: int = 3,
+        base_delay: float = 1.0,
+        max_delay: float = 30.0,
+        multiplier: float = 2.0,
+        error_classifier: ErrorClassifier | None = None,
+    ) -> None:
+        self.max_attempts = max_attempts
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.multiplier = multiplier
+        self._classifier = error_classifier or ErrorClassifier()
+
+    def should_retry(self, error: Exception, attempt: int) -> bool:
+        """Check if the error is retryable and attempts remain."""
+        if attempt >= self.max_attempts:
+            return False
+        return self._classifier.is_retryable_exception(error)
+
+    def get_backoff(self, attempt: int) -> float:
+        """Calculate exponential backoff with jitter (50%-150% of base)."""
+        delay = min(self.base_delay * (self.multiplier**attempt), self.max_delay)
+        return delay * (0.5 + random.random())  # noqa: S311
+
+    def with_config(self, **overrides: Any) -> DefaultRetryStrategy:
+        """Create a new strategy with merged configuration overrides."""
+        return DefaultRetryStrategy(
+            max_attempts=overrides.get("max_attempts", self.max_attempts),
+            base_delay=overrides.get("base_delay", self.base_delay),
+            max_delay=overrides.get("max_delay", self.max_delay),
+            multiplier=overrides.get("multiplier", self.multiplier),
+            error_classifier=self._classifier,
         )

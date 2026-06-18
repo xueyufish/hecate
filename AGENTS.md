@@ -62,16 +62,17 @@ The engine layer defines these abstract interfaces (all in `src/hecate/engine/`)
 | WorkerPool | `worker.py` | dispatch | DirectWorkerPool |
 | CheckpointStore | `checkpoint.py` | save, load, list_checkpoints | InMemoryCheckpointStore |
 | EventStore | `eventstore.py` | append, get_events, replay, get_version | InMemoryEventStore |
-| ContextEngine | `context.py` | ❌ | ✅ LLMWorker | 🟡 LLMWorker pipeline |
+| ContextEngine | `context.py` | select_messages, compress, estimate_tokens | InMemoryContextEngine |
 | SchedulerStrategy | `scheduler.py` | select_next, set_weights | FIFOScheduler |
 | EvictionPolicy | `eviction.py` | should_evict, select_victim | NoEviction, SizeBasedEviction |
 | OptimizationPass | `optimization.py` | optimize | DeadNodeElimination, ParallelBranchDetection |
 | ConflictResolver | `temporal/conflict.py` | resolve | NoOpConflictResolver |
 | PreLLMHook / PostLLMHook / PreToolHook / PostToolHook | `guardrail.py` | on_pre_llm_call / on_post_llm_call / on_pre_tool_call / on_post_tool_call | NoOp variants for each |
+| RetryStrategy | `retry.py` | should_retry, get_backoff, with_config | NoRetryStrategy |
 
 EnginePort also has 4 optional methods with defaults: `context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`.
 
-**Integration status**: ContextEngine wired into LLMWorker via PregelRuntime execution_context (Phase 1). GuardrailHooks are Worker-level only, not PregelRuntime-level (P3).
+**Integration status**: ContextEngine wired into LLMWorker via PregelRuntime execution_context (Phase 1). GuardrailHooks are Worker-level only, not PregelRuntime-level (P3). RetryStrategy integrated into PregelRuntime via RetryExecutor (P3).
 
 ## Key files (read these first on a new session)
 
