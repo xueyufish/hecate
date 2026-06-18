@@ -187,3 +187,116 @@ class TestLLMWorker:
         assert token_events[0]["content"] == "toxic"
         assert len(final_events) == 1
         assert "cannot provide" in final_events[0].channel_updates["messages"][0]["content"].lower()
+
+    async def test_tool_gating_filters_before_llm_call(self) -> None:
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        tools: list[dict] = [
+            {"name": "admin_tool", "available_when": "role == 'admin'"},
+            {"name": "public_tool"},
+        ]
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": tools},
+            channel_snapshot={
+                "messages": [{"role": "user", "content": "Hi"}],
+                "role": "user",
+            },
+            execution_context={},
+        )
+        _, kwargs = port._invoke_tracker.call_args
+        passed_tools = kwargs["config"]["tools"]
+        assert len(passed_tools) == 1
+        assert passed_tools[0]["name"] == "public_tool"
+
+    async def test_tool_gating_no_available_when_passthrough(self) -> None:
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        tools: list[dict] = [
+            {"name": "tool_a"},
+            {"name": "tool_b"},
+        ]
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": tools},
+            channel_snapshot={"messages": [{"role": "user", "content": "Hi"}]},
+            execution_context={},
+        )
+        _, kwargs = port._invoke_tracker.call_args
+        assert len(kwargs["config"]["tools"]) == 2
+
+    async def test_tool_gating_pre_hook_sees_filtered_tools(self) -> None:
+        port = _make_port(["OK"])
+        pre_hook = MagicMock()
+        pre_hook.on_pre_llm_call = AsyncMock(return_value=GuardrailResult(action=GuardrailAction.ALLOW))
+        worker = LLMWorker(port=port, pre_llm_hook=pre_hook)
+        tools: list[dict] = [
+            {"name": "admin_tool", "available_when": "role == 'admin'"},
+        ]
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": tools},
+            channel_snapshot={
+                "messages": [{"role": "user", "content": "Hi"}],
+                "role": "user",
+            },
+            execution_context={},
+        )
+        called_tools = pre_hook.on_pre_llm_call.call_args[1].get("tools", [])
+        assert called_tools == [] or called_tools is None
+
+    async def test_tool_gating_streaming(self) -> None:
+        port = _make_port(["stream"])
+        worker = LLMWorker(port=port)
+        tools: list[dict] = [
+            {"name": "blocked", "available_when": "x == 1"},
+            {"name": "allowed"},
+        ]
+        events: list = []
+        async for event in worker.execute_stream(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": tools},
+            channel_snapshot={"messages": [{"role": "user", "content": "Hi"}]},
+            execution_context={},
+        ):
+            events.append(event)
+        _, kwargs = port._invoke_tracker.call_args
+        assert len(kwargs["config"]["tools"]) == 1
+        assert kwargs["config"]["tools"][0]["name"] == "allowed"
+
+    async def test_tool_gating_with_expression_context(self) -> None:
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        tools: list[dict] = [
+            {"name": "matching", "available_when": "user_role == 'admin'"},
+            {"name": "non_matching", "available_when": "user_role == 'guest'"},
+        ]
+        channel = {
+            "messages": [{"role": "user", "content": "Hi"}],
+        }
+        ctx = {"user_role": "admin", "session_id": "sess-1", "superstep": 1}
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": tools},
+            channel_snapshot=channel,
+            execution_context=ctx,
+        )
+        _, kwargs = port._invoke_tracker.call_args
+        passed = kwargs["config"]["tools"]
+        assert len(passed) == 1
+        assert passed[0]["name"] == "matching"
+
+    async def test_tool_gating_missing_keys_fail_closed(self) -> None:
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        tools: list[dict] = [
+            {"name": "dependent", "available_when": "nonexistent > 5"},
+        ]
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": tools},
+            channel_snapshot={"messages": [{"role": "user", "content": "Hi"}]},
+            execution_context={},
+        )
+        _, kwargs = port._invoke_tracker.call_args
+        assert kwargs["config"]["tools"] == []

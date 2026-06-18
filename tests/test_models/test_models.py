@@ -448,6 +448,82 @@ class TestToolModel:
                 parameters={},
             )
 
+    @pytest.mark.asyncio
+    async def test_tool_with_available_when(self, db_session: AsyncSession) -> None:
+        """ToolModel accepts available_when field and persists to database."""
+        tool = ToolModel(
+            name="admin_tool",
+            description="Admin only",
+            source="builtin",
+            parameters={},
+            available_when="user_role == 'admin'",
+        )
+        db_session.add(tool)
+        await db_session.flush()
+        assert tool.available_when == "user_role == 'admin'"
+
+    @pytest.mark.asyncio
+    async def test_tool_without_available_when(self, db_session: AsyncSession) -> None:
+        """ToolModel without available_when defaults to None."""
+        tool = ToolModel(
+            name="public_tool",
+            description="Public",
+            source="builtin",
+            parameters={},
+        )
+        db_session.add(tool)
+        await db_session.flush()
+        assert tool.available_when is None
+
+    def test_tool_create_schema_with_available_when(self) -> None:
+        """ToolCreateSchema accepts optional available_when string."""
+        schema = ToolCreateSchema(
+            name="test",
+            description="desc",
+            source="builtin",
+            parameters={},
+            available_when="user_role == 'admin'",
+        )
+        assert schema.available_when == "user_role == 'admin'"
+
+    def test_tool_create_schema_without_available_when(self) -> None:
+        """ToolCreateSchema without available_when defaults to None."""
+        schema = ToolCreateSchema(
+            name="test",
+            description="desc",
+            source="builtin",
+            parameters={},
+        )
+        assert schema.available_when is None
+
+    def test_tool_read_schema_includes_available_when(self) -> None:
+        """ToolReadSchema includes available_when in serialized output."""
+        from datetime import datetime
+
+        from hecate.models.tool import ToolReadSchema
+
+        schema = ToolReadSchema(
+            id="00000000-0000-0000-0000-000000000001",
+            workspace_id="00000000-0000-0000-0000-000000000000",
+            name="test",
+            description="desc",
+            source="builtin",
+            parameters={},
+            returns=None,
+            risk_level="LOW",
+            approval_required=False,
+            sandbox_enabled=False,
+            sandbox_config={},
+            mcp_server=None,
+            mcp_tool_name=None,
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            deleted=False,
+            deleted_at=None,
+            available_when="user_role == 'admin'",
+        )
+        assert schema.available_when == "user_role == 'admin'"
+
 
 class TestKnowledgeBaseModel:
     """Verify KnowledgeBase ORM creation with defaults and schema defaults."""
