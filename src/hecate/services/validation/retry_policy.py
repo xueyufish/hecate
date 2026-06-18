@@ -16,6 +16,28 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from hecate.engine.errors import (
+    ChannelError,
+    EngineError,
+    ErrorCategory,
+    SecurityError,
+)
+
+# Provider SDK exception types — imported conditionally to avoid hard dependency
+_PROVIDER_EXCEPTIONS: dict[type, ErrorCategory] = {}
+try:
+    import openai
+
+    _PROVIDER_EXCEPTIONS = {
+        openai.RateLimitError: ErrorCategory.LLM_RATE_LIMIT,
+        openai.AuthenticationError: ErrorCategory.LLM_AUTH,
+        openai.APITimeoutError: ErrorCategory.LLM_TIMEOUT,
+        openai.APIConnectionError: ErrorCategory.LLM_TIMEOUT,
+        openai.InternalServerError: ErrorCategory.LLM_RATE_LIMIT,
+    }
+except ImportError:
+    pass
+
 logger = logging.getLogger(__name__)
 
 
@@ -39,7 +61,12 @@ class RetryResult:
 
 
 class ErrorClassifier:
-    """Classifies errors as retryable or non-retryable."""
+    """Classifies errors as retryable or non-retryable.
+
+    Supports two classification modes:
+    1. isinstance-based: for typed exceptions (HecateError subtypes, provider SDK errors)
+    2. string-based: fallback for unrecognized exceptions using keyword matching
+    """
 
     RETRYABLE_KEYWORDS = [
         "timeout",
@@ -63,6 +90,81 @@ class ErrorClassifier:
         "403",
         "404",
     ]
+
+    _HECATE_CATEGORY_MAP: dict[type, ErrorCategory] = {
+        EngineError: ErrorCategory.ENGINE,
+        ChannelError: ErrorCategory.CHANNEL,
+        SecurityError: ErrorCategory.SECURITY,
+    }
+
+    _RETRYABLE_CATEGORIES = frozenset(
+        {
+            ErrorCategory.LLM_RATE_LIMIT,
+            ErrorCategory.LLM_TIMEOUT,
+            ErrorCategory.TOOL_TIMEOUT,
+        }
+    )
+
+    def classify(self, error: Exception) -> ErrorCategory:
+        """Classify an exception into an ErrorCategory.
+
+        Checks in order:
+        1. HecateError subtypes (EngineError, ChannelError, SecurityError)
+        2. Provider SDK exceptions (openai.RateLimitError, etc.)
+        3. String-based keyword fallback
+
+        Args:
+            error: The exception to classify.
+
+        Returns:
+            ErrorCategory for the exception.
+        """
+        # 1. HecateError subtypes
+        for exc_type, category in self._HECATE_CATEGORY_MAP.items():
+            if isinstance(error, exc_type):
+                return category
+
+        # 2. Provider SDK exceptions
+        for exc_type, category in _PROVIDER_EXCEPTIONS.items():
+            if isinstance(error, exc_type):
+                return category
+
+        # 3. String-based fallback
+        return self._classify_by_string(str(error))
+
+    def _classify_by_string(self, error_str: str) -> ErrorCategory:
+        """Classify by keyword matching on error message string."""
+        error_lower = error_str.lower()
+
+        if "rate limit" in error_lower or "429" in error_lower:
+            return ErrorCategory.LLM_RATE_LIMIT
+        if "unauthorized" in error_lower or "401" in error_lower:
+            return ErrorCategory.LLM_AUTH
+        if "timeout" in error_lower:
+            return ErrorCategory.LLM_TIMEOUT
+        if "not found" in error_lower or "404" in error_lower:
+            return ErrorCategory.TOOL_NOT_FOUND
+        if "forbidden" in error_lower or "403" in error_lower:
+            return ErrorCategory.LLM_AUTH
+
+        return ErrorCategory.UNKNOWN
+
+    def is_retryable_exception(self, error: Exception) -> bool:
+        """Classify if an exception is retryable using isinstance checks.
+
+        Args:
+            error: The exception to check.
+
+        Returns:
+            True if the error is retryable.
+        """
+        category = self.classify(error)
+        if category in self._RETRYABLE_CATEGORIES:
+            return True
+        if category != ErrorCategory.UNKNOWN:
+            return False
+        # Fallback to string matching for unknown errors
+        return self.is_retryable(str(error))
 
     def is_retryable(self, error: str) -> bool:
         """Classify if an error is retryable.

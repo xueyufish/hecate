@@ -30,6 +30,7 @@ from typing import Any
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
 from hecate.engine.context import ContextEngine
+from hecate.engine.errors import MaxSuperstepsError
 from hecate.engine.eventbus import EventBus
 from hecate.engine.eventstore import Event, EventStore, EventType
 from hecate.engine.eviction import EvictionPolicy, NoEviction
@@ -206,9 +207,10 @@ class PregelRuntime:
         while current_nodes and not self._interrupted:
             self._superstep += 1
             if self._superstep > self._max_supersteps:
-                raise RuntimeError(
+                raise MaxSuperstepsError(
                     f"Graph execution exceeded max supersteps ({self._max_supersteps}). "
-                    f"Possible infinite loop in graph '{self._graph.name}'."
+                    f"Possible infinite loop in graph '{self._graph.name}'.",
+                    superstep=self._superstep,
                 )
             snapshot = self._channel_manager.snapshot()
             context = {"superstep": self._superstep, "channel_snapshot": snapshot}
