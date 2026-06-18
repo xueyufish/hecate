@@ -34,6 +34,7 @@ from hecate.engine.errors import MaxSuperstepsError
 from hecate.engine.eventbus import EventBus
 from hecate.engine.eventstore import Event, EventStore, EventType
 from hecate.engine.eviction import EvictionPolicy, NoEviction
+from hecate.engine.retry import RetryExecutor, RetryStrategy
 from hecate.engine.scheduler import FIFOScheduler, SchedulerStrategy
 from hecate.engine.temporal.conflict import ConflictResolver
 from hecate.engine.types import (
@@ -77,6 +78,7 @@ class PregelRuntime:
         event_store: EventStore | None = None,
         event_bus: EventBus | None = None,
         context_engine: ContextEngine | None = None,
+        retry_strategy: RetryStrategy | None = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
@@ -92,6 +94,7 @@ class PregelRuntime:
         self._event_store = event_store
         self._event_bus = event_bus
         self._context_engine = context_engine
+        self._retry_executor = RetryExecutor(retry_strategy)
         self._superstep = 0
         self._interrupted = False
         self._interrupt_value: Any = None
@@ -245,16 +248,27 @@ class PregelRuntime:
                     results.append(merge_result)
                     continue
 
+                retry_executor = self._retry_executor
+                node_retry_cfg = node.config.get("retry")
+                if node_retry_cfg:
+                    per_node_strategy = self._retry_executor.strategy.with_config(**node_retry_cfg)
+                    retry_executor = RetryExecutor(per_node_strategy)
+
                 if stream_mode == StreamMode.MESSAGES:
-                    async for item in self._worker.execute_stream(
-                        node_id, node.config, snapshot, execution_context=execution_context
+                    async for item in retry_executor.execute_stream(
+                        self._worker.execute_stream,
+                        node_id,
+                        node.config,
+                        snapshot,
+                        execution_context=execution_context,
                     ):
                         if isinstance(item, WorkerResult):
                             results.append(item)
                         elif isinstance(item, dict):
                             yield {"type": "message", "content": item.get("content", "")}
                 else:
-                    result = await self._pool.dispatch(
+                    result = await retry_executor.execute(
+                        self._pool.dispatch,
                         self._worker,
                         node_id,
                         node.config,
