@@ -11,7 +11,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Index, Integer, String
+from sqlalchemy import JSON, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hecate.models.base import BaseModel
@@ -32,6 +32,7 @@ class ToolPolicyModel(BaseModel):
     tool_pattern: Mapped[str] = mapped_column(String(255), nullable=False)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    arg_conditions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     __table_args__ = (
         Index(
@@ -56,6 +57,7 @@ class ToolPolicyCreateSchema(PydanticBase):
     tool_pattern: str = Field(..., min_length=1, max_length=255)
     priority: int = 0
     description: str | None = None
+    arg_conditions: dict[str, str] | None = None
 
 
 class ToolPolicyReadSchema(PydanticBase):
@@ -69,6 +71,7 @@ class ToolPolicyReadSchema(PydanticBase):
     tool_pattern: str
     priority: int
     description: str | None
+    arg_conditions: dict[str, str] | None = None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False

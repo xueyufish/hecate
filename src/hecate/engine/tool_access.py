@@ -1,30 +1,33 @@
 """Tool execution security — access policy, risk levels, and approval callback.
 
-Implements three-layer tool execution security:
-1. Rule engine — allow/deny/ask pattern matching (Claude Code style)
-2. Risk-level policy — default enforcement per LOW/MEDIUM/HIGH/CRITICAL
-3. Sandbox routing — integration with DockerSandboxExecutor
+Implements five-layer tool execution security:
+1. Dangerous patterns — built-in deny rules (bypass-immune)
+2. Rule engine — allow/deny/ask pattern matching with argument conditions
+3. Workspace boundary — auto-allow inside workspace, ask outside
+4. Risk-level policy — default enforcement per LOW/MEDIUM/HIGH/CRITICAL
+5. Sandbox routing — integration with DockerSandboxExecutor
 
-Design decisions (see openspec/changes/execution-security/design.md):
-- D24: RiskLevel as StrEnum, storage remains String for backward compat
-- D25: Three-layer evaluation (rules → risk level → sandbox)
-- D26: ToolAccessPolicy in engine layer (zero external dependencies)
-- D27: ApprovalCallback blocking pattern (not Command.interrupt)
-- D28: Two-layer rule storage (workspace ToolPolicyModel + agent guardrail_config)
-- D29: Fail-closed timeout (deny on timeout)
-- D30: ApprovalScope caching (ONCE/SESSION/PROJECT/GLOBAL)
+Design decisions:
+- D24-D30: See openspec/changes/execution-security/design.md
+- D31-D35: See openspec/changes/granular-tool-security/design.md
 """
 
 from __future__ import annotations
 
 import fnmatch
 import logging
+import os.path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
 
 
 class RiskLevel(StrEnum):
@@ -62,6 +65,11 @@ class RuleAction(StrEnum):
     ASK = "ask"
 
 
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class ApprovalDecision:
     """Result of an approval request.
@@ -78,6 +86,23 @@ class ApprovalDecision:
 
 
 @dataclass
+class DangerousPattern:
+    """A built-in dangerous pattern that cannot be overridden by user rules.
+
+    Attributes:
+        tool_pattern: Glob pattern for tool name (e.g. ``"*"`` for all tools).
+        arg_key: Argument key to inspect (e.g. ``"command"``, ``"path"``).
+        arg_pattern: Glob pattern for argument value.
+        description: Human-readable reason for blocking.
+    """
+
+    tool_pattern: str
+    arg_key: str
+    arg_pattern: str
+    description: str
+
+
+@dataclass
 class ToolRule:
     """A single rule in the tool access rule engine.
 
@@ -85,11 +110,65 @@ class ToolRule:
         action: What to do when the pattern matches (ALLOW/DENY/ASK).
         pattern: Glob pattern for tool name matching (e.g. ``"terminal(git:*)"``).
         priority: Sort order within the same action (higher = checked first).
+        arg_conditions: Optional dict mapping argument keys to glob patterns.
+            When set, the rule matches only if the tool name matches AND all
+            argument conditions match their corresponding argument values.
     """
 
     action: RuleAction
     pattern: str
     priority: int = 0
+    arg_conditions: dict[str, str] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Built-in dangerous patterns (D32)
+# ---------------------------------------------------------------------------
+
+DANGEROUS_PATTERNS: list[DangerousPattern] = [
+    # Shell commands — destructive operations
+    DangerousPattern("bash", "command", "rm -rf /", "recursive root delete"),
+    DangerousPattern("bash", "command", "mkfs*", "filesystem format"),
+    DangerousPattern("bash", "command", "dd if=*of=/dev/", "disk overwrite"),
+    DangerousPattern("bash", "command", "*curl*|*sh", "remote code execution"),
+    DangerousPattern("bash", "command", ":()*{*}*", "fork bomb"),
+    DangerousPattern("bash", "command", "rm -rf /*", "recursive root delete"),
+    # Code execution — dangerous builtins
+    DangerousPattern("execute_code", "code", "*os.system*", "OS system call"),
+    DangerousPattern("execute_code", "code", "*subprocess*", "subprocess invocation"),
+    DangerousPattern("execute_code", "code", "*eval(*", "eval execution"),
+    DangerousPattern("execute_code", "code", "*exec(*", "exec execution"),
+    DangerousPattern("execute_code", "code", "*__import__*", "dynamic import"),
+    # Sensitive file writes
+    DangerousPattern("write_file", "path", "*/.ssh/*", "SSH key write"),
+    DangerousPattern("write_file", "path", "*/.env*", "env file write"),
+    DangerousPattern("write_file", "path", "*/.bashrc", "shell config write"),
+    DangerousPattern("write_file", "path", "/etc/*", "system config write"),
+    DangerousPattern("write_file", "path", "*/.git/config", "git config write"),
+    # Sensitive file reads
+    DangerousPattern("read_file", "path", "/etc/passwd", "password file read"),
+    DangerousPattern("read_file", "path", "*/.ssh/id_*", "SSH key read"),
+    DangerousPattern("read_file", "path", "/etc/shadow", "shadow file read"),
+    # SQL dangerous operations (wildcard tool match)
+    DangerousPattern("*", "code", "*DROP TABLE*", "SQL table drop"),
+    DangerousPattern("*", "code", "*DELETE FROM*", "SQL delete"),
+    DangerousPattern("*", "code", "*TRUNCATE*", "SQL truncate"),
+]
+
+# Known path argument keys used by built-in tools (for workspace boundary check)
+_PATH_ARG_KEYS: frozenset[str] = frozenset(
+    {
+        "path",
+        "file_path",
+        "directory",
+        "directory_path",
+    }
+)
+
+
+# ---------------------------------------------------------------------------
+# ABCs
+# ---------------------------------------------------------------------------
 
 
 class ApprovalCallback(ABC):
@@ -122,22 +201,88 @@ class ApprovalCallback(ABC):
         ...
 
 
-class ToolAccessPolicy:
-    """Three-layer tool execution security evaluator.
+# ---------------------------------------------------------------------------
+# WorkspaceBoundaryPolicy (D33)
+# ---------------------------------------------------------------------------
 
-    Layer 1 — Rule Engine: deny/ask/allow rules with glob pattern matching.
-    Layer 2 — Risk Level: default enforcement per LOW/MEDIUM/HIGH/CRITICAL.
-    Layer 3 — Sandbox Routing: sandbox_enabled tools route to sandbox executor.
+
+class WorkspaceBoundaryPolicy:
+    """Checks if file-path arguments resolve within a workspace root.
+
+    Used as a policy layer between user rules and risk-level fallback.
+    Paths inside the workspace are auto-allowed; paths outside require
+    approval.
+    """
+
+    def check(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        workspace_root: str,
+    ) -> AccessDecision | None:
+        """Check if tool operates on files within workspace boundary.
+
+        Args:
+            tool_name: Name of the tool being called (unused, reserved).
+            arguments: Tool call arguments to inspect.
+            workspace_root: Absolute path of the workspace directory.
+
+        Returns:
+            ``EXECUTE`` if path is inside workspace,
+            ``REQUIRE_APPROVAL`` if outside,
+            ``None`` if tool has no path argument.
+        """
+        path_value = self._extract_path(arguments)
+        if path_value is None:
+            return None
+
+        normalized = self._normalize_path(path_value, workspace_root)
+        if normalized.startswith(workspace_root):
+            return AccessDecision.EXECUTE
+        return AccessDecision.REQUIRE_APPROVAL
+
+    def _extract_path(self, arguments: dict[str, Any]) -> str | None:
+        """Extract the first path-like argument value."""
+        for key in _PATH_ARG_KEYS:
+            value = arguments.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return None
+
+    def _normalize_path(self, path_value: str, workspace_root: str) -> str:
+        """Normalize a path, resolving relative paths against workspace root."""
+        if os.path.isabs(path_value):
+            return os.path.normpath(path_value)
+        return os.path.normpath(os.path.join(workspace_root, path_value))
+
+
+# ---------------------------------------------------------------------------
+# ToolAccessPolicy (extended with D31-D35)
+# ---------------------------------------------------------------------------
+
+
+class ToolAccessPolicy:
+    """Five-layer tool execution security evaluator.
+
+    Layer 0 — Dangerous Patterns: built-in DENY rules (bypass-immune).
+    Layer 1 — Rule Engine: deny/ask/allow rules with arg_conditions matching.
+    Layer 2 — Workspace Boundary: auto-allow inside workspace root.
+    Layer 3 — Risk Level: default enforcement per LOW/MEDIUM/HIGH/CRITICAL.
+    Layer 4 — Sandbox Routing: sandbox_enabled tools route to sandbox executor.
 
     This class is a pure evaluator — it does not query the database or call
     services. Rule data is passed in by the caller (ToolWorker).
     """
+
+    def __init__(self) -> None:
+        self._workspace_policy = WorkspaceBoundaryPolicy()
 
     def evaluate(
         self,
         tool_meta: dict[str, Any],
         rules: list[ToolRule],
         context: dict[str, Any],
+        arguments: dict[str, Any] | None = None,
     ) -> AccessDecision:
         """Evaluate tool access policy and return an access decision.
 
@@ -146,14 +291,25 @@ class ToolAccessPolicy:
                 approval_required (bool), sandbox_enabled (bool).
             rules: Ordered list of ToolRule instances from workspace and
                 agent-level configurations.
-            context: Runtime context dict, may contain tool_name.
+            context: Runtime context dict. May contain ``tool_name`` and
+                ``workspace_root``.
+            arguments: Parsed tool call arguments. When provided, argument
+                conditions on rules and dangerous patterns are checked.
+                When ``None``, the method behaves as before (backward
+                compatible).
 
         Returns:
             AccessDecision indicating what to do with the tool call.
         """
         tool_name = context.get("tool_name", "") or tool_meta.get("name", "")
 
-        rule_action = self._match_rules(tool_name, rules)
+        # Layer 0: Dangerous patterns (bypass-immune, cannot be overridden)
+        if arguments and self._match_dangerous_patterns(tool_name, arguments):
+            logger.warning("Dangerous pattern matched for tool '%s'", tool_name)
+            return AccessDecision.DENY
+
+        # Layer 1: User rules (DENY → ASK → ALLOW with arg_conditions)
+        rule_action = self._match_rules(tool_name, rules, arguments)
         if rule_action == RuleAction.DENY:
             return AccessDecision.DENY
         if rule_action == RuleAction.ASK:
@@ -163,24 +319,60 @@ class ToolAccessPolicy:
         if rule_action == RuleAction.ALLOW:
             return AccessDecision.EXECUTE_SANDBOX if sandbox_enabled else AccessDecision.EXECUTE
 
+        # Layer 2: Workspace boundary (if workspace_root in context)
+        if arguments:
+            workspace_root = context.get("workspace_root")
+            if workspace_root:
+                boundary = self._workspace_policy.check(tool_name, arguments, workspace_root)
+                if boundary is not None:
+                    return boundary
+
+        # Layer 3: Risk level fallback
         if tool_meta.get("approval_required", False):
             return AccessDecision.REQUIRE_APPROVAL
 
         return self._risk_level_fallback(tool_meta, sandbox_enabled)
 
+    def _match_dangerous_patterns(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> bool:
+        """Check if any built-in dangerous pattern matches.
+
+        Args:
+            tool_name: Name of the tool being called.
+            arguments: Parsed tool call arguments.
+
+        Returns:
+            True if a dangerous pattern matched.
+        """
+        for pattern in DANGEROUS_PATTERNS:
+            if not fnmatch.fnmatch(tool_name, pattern.tool_pattern):
+                continue
+            arg_value = arguments.get(pattern.arg_key)
+            if arg_value is None:
+                continue
+            if fnmatch.fnmatch(str(arg_value), pattern.arg_pattern):
+                return True
+        return False
+
     def _match_rules(
         self,
         tool_name: str,
         rules: list[ToolRule],
+        arguments: dict[str, Any] | None = None,
     ) -> RuleAction | None:
         """Match tool name against rules, returning the winning action.
 
         Evaluation order: DENY first, then ASK, then ALLOW.
         Within each tier, higher priority rules are checked first.
+        If a rule has ``arg_conditions``, all conditions must also match.
 
         Args:
             tool_name: Tool name to match.
             rules: List of ToolRule instances.
+            arguments: Parsed tool call arguments (optional).
 
         Returns:
             The winning RuleAction, or None if no rule matched.
@@ -189,9 +381,43 @@ class ToolAccessPolicy:
             tier = [r for r in rules if r.action == action]
             tier.sort(key=lambda r: r.priority, reverse=True)
             for rule in tier:
-                if fnmatch.fnmatch(tool_name, rule.pattern):
-                    return action
+                if not fnmatch.fnmatch(tool_name, rule.pattern):
+                    continue
+                # Name matches — check arg_conditions if present
+                if rule.arg_conditions:
+                    if arguments is None:
+                        # No arguments available — treat as name-only match
+                        # (backward compatible with 9.4 behavior)
+                        return action
+                    if self._match_arg_conditions(arguments, rule.arg_conditions):
+                        return action
+                    # arg_conditions present but don't match — skip rule
+                    continue
+                # No arg_conditions — name-only match
+                return action
         return None
+
+    def _match_arg_conditions(
+        self,
+        arguments: dict[str, Any],
+        conditions: dict[str, str],
+    ) -> bool:
+        """Check if all argument conditions match.
+
+        Args:
+            arguments: Tool call arguments dict.
+            conditions: Dict of argument key → glob pattern.
+
+        Returns:
+            True if ALL conditions match their argument values.
+        """
+        for key, pattern in conditions.items():
+            value = arguments.get(key)
+            if value is None:
+                return False
+            if not fnmatch.fnmatch(str(value), pattern):
+                return False
+        return True
 
     def _risk_level_fallback(
         self,
