@@ -319,3 +319,112 @@ class TestToolWorkerAccessPolicy:
             },
         )
         port.tool_execute_sandbox.assert_called_once()
+
+    async def test_dangerous_pattern_blocks_tool(self) -> None:
+        port = _make_port()
+        from hecate.engine.tool_access import ToolAccessPolicy
+
+        worker = ToolWorker(port=port, access_policy=ToolAccessPolicy())
+        result = await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "tc1",
+                                "function": {
+                                    "name": "bash",
+                                    "arguments": {"command": "rm -rf /"},
+                                },
+                            }
+                        ],
+                    }
+                ],
+                "risk_level": "low",
+            },
+        )
+        port.tool_execute.assert_not_called()
+        assert result.channel_updates["messages"][0]["is_error"] is True
+
+    async def test_arg_conditions_ask_triggers_approval(self) -> None:
+        port = _make_port()
+        from hecate.engine.tool_access import (
+            ApprovalCallback,
+            ApprovalDecision,
+            RuleAction,
+            ToolAccessPolicy,
+            ToolRule,
+        )
+
+        class AutoApprove(ApprovalCallback):
+            async def request_approval(self, tool_name, arguments, risk_level, context):
+                return ApprovalDecision(approved=True)
+
+        policy = ToolAccessPolicy()
+        worker = ToolWorker(
+            port=port,
+            access_policy=policy,
+            approval_callback=AutoApprove(),
+        )
+        await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "tc1",
+                                "function": {
+                                    "name": "write_file",
+                                    "arguments": {"path": ".env", "content": "SECRET=123"},
+                                },
+                            }
+                        ],
+                    }
+                ],
+                "risk_level": "low",
+                "tool_rules": [
+                    ToolRule(
+                        RuleAction.ASK,
+                        "write_file",
+                        arg_conditions={"path": "*.env"},
+                    )
+                ],
+            },
+        )
+        port.tool_execute.assert_called_once()
+
+    async def test_workspace_boundary_auto_allows_inside(self) -> None:
+        port = _make_port()
+        from hecate.engine.tool_access import ToolAccessPolicy
+
+        policy = ToolAccessPolicy()
+        worker = ToolWorker(port=port, access_policy=policy)
+        await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "tc1",
+                                "function": {
+                                    "name": "write_file",
+                                    "arguments": {"path": "src/app.py", "content": "x = 1"},
+                                },
+                            }
+                        ],
+                    }
+                ],
+                "risk_level": "high",
+                "workspace_root": "/workspace",
+            },
+        )
+        port.tool_execute.assert_called_once()

@@ -120,7 +120,10 @@ class ToolWorker(Worker):
             "name": tool_name,
         }
         rules: list[ToolRule] = context.get("tool_rules", [])
-        return self._access_policy.evaluate(tool_meta, rules, {"tool_name": tool_name})
+        eval_context: dict[str, Any] = {"tool_name": tool_name}
+        if "workspace_root" in context:
+            eval_context["workspace_root"] = context["workspace_root"]
+        return self._access_policy.evaluate(tool_meta, rules, eval_context, arguments=arguments)
 
     async def _execute_single_tool(
         self,

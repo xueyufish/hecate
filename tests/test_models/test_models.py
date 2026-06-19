@@ -887,3 +887,46 @@ class TestToolPolicyModel:
         await db_session.flush()
         assert p1.rule_action == "deny"
         assert p2.rule_action == "allow"
+
+    @pytest.mark.asyncio
+    async def test_create_with_arg_conditions(self, db_session: AsyncSession) -> None:
+        from hecate.models.tool_policy import ToolPolicyModel
+
+        policy = ToolPolicyModel(
+            workspace_id=uuid.UUID(int=0),
+            rule_action="deny",
+            tool_pattern="write_file",
+            arg_conditions={"path": "*.env"},
+        )
+        db_session.add(policy)
+        await db_session.flush()
+        assert policy.arg_conditions == {"path": "*.env"}
+
+    @pytest.mark.asyncio
+    async def test_create_without_arg_conditions(self, db_session: AsyncSession) -> None:
+        from hecate.models.tool_policy import ToolPolicyModel
+
+        policy = ToolPolicyModel(
+            workspace_id=uuid.UUID(int=0),
+            rule_action="deny",
+            tool_pattern="write_file",
+        )
+        db_session.add(policy)
+        await db_session.flush()
+        assert policy.arg_conditions is None
+
+    @pytest.mark.asyncio
+    async def test_read_schema_from_attributes(self, db_session: AsyncSession) -> None:
+        from hecate.models.tool_policy import ToolPolicyModel, ToolPolicyReadSchema
+
+        policy = ToolPolicyModel(
+            workspace_id=uuid.UUID(int=0),
+            rule_action="ask",
+            tool_pattern="execute_code",
+            arg_conditions={"code": "*subprocess*"},
+        )
+        db_session.add(policy)
+        await db_session.flush()
+        schema = ToolPolicyReadSchema.model_validate(policy)
+        assert schema.rule_action == "ask"
+        assert schema.arg_conditions == {"code": "*subprocess*"}
