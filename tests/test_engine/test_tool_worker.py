@@ -200,3 +200,122 @@ class TestToolWorker:
         )
         assert "clean result" in result.channel_updates["messages"][0]["content"]
         assert result.channel_updates["messages"][0].get("is_error") is None
+
+
+class TestToolWorkerAccessPolicy:
+    async def test_no_policy_backward_compat(self) -> None:
+        port = _make_port()
+        worker = ToolWorker(port=port)
+        await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {"role": "assistant", "tool_calls": [{"id": "tc1", "function": {"name": "test", "arguments": {}}}]}
+                ],
+                "risk_level": "critical",
+                "approval_required": True,
+            },
+        )
+        port.tool_execute.assert_called_once()
+
+    async def test_sandbox_routing(self) -> None:
+        port = _make_port()
+        from hecate.engine.tool_access import ToolAccessPolicy
+
+        worker = ToolWorker(port=port, access_policy=ToolAccessPolicy())
+        await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {"role": "assistant", "tool_calls": [{"id": "tc1", "function": {"name": "test", "arguments": {}}}]}
+                ],
+                "risk_level": "medium",
+                "sandbox_enabled": True,
+            },
+        )
+        port.tool_execute_sandbox.assert_called_once()
+
+    async def test_approval_approved(self) -> None:
+        port = _make_port()
+        from hecate.engine.tool_access import ApprovalCallback, ApprovalDecision, ToolAccessPolicy
+
+        class AutoApprove(ApprovalCallback):
+            async def request_approval(self, tool_name, arguments, risk_level, context):
+                return ApprovalDecision(approved=True)
+
+        worker = ToolWorker(port=port, access_policy=ToolAccessPolicy(), approval_callback=AutoApprove())
+        await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {"role": "assistant", "tool_calls": [{"id": "tc1", "function": {"name": "test", "arguments": {}}}]}
+                ],
+                "risk_level": "high",
+            },
+        )
+        port.tool_execute.assert_called_once()
+
+    async def test_approval_denied(self) -> None:
+        port = _make_port()
+        from hecate.engine.tool_access import ApprovalCallback, ApprovalDecision, ToolAccessPolicy
+
+        class Deny(ApprovalCallback):
+            async def request_approval(self, tool_name, arguments, risk_level, context):
+                return ApprovalDecision(approved=False, reason="No")
+
+        worker = ToolWorker(port=port, access_policy=ToolAccessPolicy(), approval_callback=Deny())
+        result = await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {"role": "assistant", "tool_calls": [{"id": "tc1", "function": {"name": "test", "arguments": {}}}]}
+                ],
+                "risk_level": "high",
+            },
+        )
+        port.tool_execute.assert_not_called()
+        assert result.channel_updates["messages"][0]["is_error"] is True
+
+    async def test_fail_closed_no_callback(self) -> None:
+        port = _make_port()
+        from hecate.engine.tool_access import ToolAccessPolicy
+
+        worker = ToolWorker(port=port, access_policy=ToolAccessPolicy())
+        result = await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {"role": "assistant", "tool_calls": [{"id": "tc1", "function": {"name": "test", "arguments": {}}}]}
+                ],
+                "risk_level": "high",
+            },
+        )
+        port.tool_execute.assert_not_called()
+        assert result.channel_updates["messages"][0]["is_error"] is True
+
+    async def test_critical_sandbox_still_approval(self) -> None:
+        port = _make_port()
+        from hecate.engine.tool_access import ApprovalCallback, ApprovalDecision, ToolAccessPolicy
+
+        class AutoApprove(ApprovalCallback):
+            async def request_approval(self, tool_name, arguments, risk_level, context):
+                return ApprovalDecision(approved=True)
+
+        worker = ToolWorker(port=port, access_policy=ToolAccessPolicy(), approval_callback=AutoApprove())
+        await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {"role": "assistant", "tool_calls": [{"id": "tc1", "function": {"name": "test", "arguments": {}}}]}
+                ],
+                "risk_level": "critical",
+                "sandbox_enabled": True,
+            },
+        )
+        port.tool_execute_sandbox.assert_called_once()

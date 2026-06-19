@@ -20,6 +20,12 @@ from hecate.engine.guardrail import (
     PreToolHook,
 )
 from hecate.engine.ports import EnginePort
+from hecate.engine.tool_access import (
+    AccessDecision,
+    ApprovalCallback,
+    ToolAccessPolicy,
+    ToolRule,
+)
 from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
 
@@ -42,12 +48,16 @@ class ToolWorker(Worker):
         port: EnginePort,
         pre_tool_hook: PreToolHook | None = None,
         post_tool_hook: PostToolHook | None = None,
+        access_policy: ToolAccessPolicy | None = None,
+        approval_callback: ApprovalCallback | None = None,
         event_store: Any = None,
     ) -> None:
         super().__init__(event_store=event_store)
         self._port = port
         self._pre_hook = pre_tool_hook or NoOpPreToolHook()
         self._post_hook = post_tool_hook or NoOpPostToolHook()
+        self._access_policy = access_policy
+        self._approval_callback = approval_callback
 
     async def execute(
         self,
@@ -89,6 +99,29 @@ class ToolWorker(Worker):
                 return msg["tool_calls"]
         return []
 
+    def _check_access(
+        self,
+        tool_name: str,
+        arguments: dict,
+        context: dict,
+    ) -> AccessDecision | None:
+        """Evaluate tool access policy if configured.
+
+        Returns None when no policy is configured (backward compatible),
+        allowing all tools to execute as before.
+        """
+        if self._access_policy is None:
+            return None
+
+        tool_meta: dict[str, Any] = {
+            "risk_level": context.get("risk_level", "low"),
+            "approval_required": context.get("approval_required", False),
+            "sandbox_enabled": context.get("sandbox_enabled", False),
+            "name": tool_name,
+        }
+        rules: list[ToolRule] = context.get("tool_rules", [])
+        return self._access_policy.evaluate(tool_meta, rules, {"tool_name": tool_name})
+
     async def _execute_single_tool(
         self,
         tool_call: dict,
@@ -116,6 +149,41 @@ class ToolWorker(Worker):
                 arguments = json.loads(arguments)
             except json.JSONDecodeError:
                 arguments = {}
+
+        access_decision = self._check_access(name, arguments, context)
+        if access_decision is not None:
+            if access_decision == AccessDecision.DENY:
+                return {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": "Tool denied by access policy",
+                    "is_error": True,
+                }
+            if access_decision == AccessDecision.REQUIRE_APPROVAL:
+                if self._approval_callback is None:
+                    return {
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": "Tool requires approval but no callback configured",
+                        "is_error": True,
+                    }
+                approval = await self._approval_callback.request_approval(
+                    tool_name=name,
+                    arguments=arguments,
+                    risk_level=str(context.get("risk_level", "low")),
+                    context=context,
+                )
+                if not approval.approved:
+                    return {
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": f"Tool call rejected: {approval.reason}",
+                        "is_error": True,
+                    }
+
+        use_sandbox = access_decision == AccessDecision.EXECUTE_SANDBOX
+        if access_decision == AccessDecision.REQUIRE_APPROVAL:
+            use_sandbox = context.get("sandbox_enabled", False)
 
         # Pre-tool hook
         pre_result = await self._pre_hook.on_pre_tool_call(
@@ -148,11 +216,18 @@ class ToolWorker(Worker):
                 )
             )
         try:
-            result = await self._port.tool_execute(
-                name=name,
-                args=arguments,
-                context=context,
-            )
+            if use_sandbox:
+                result = await self._port.tool_execute_sandbox(
+                    name=name,
+                    args=arguments,
+                    context=context,
+                )
+            else:
+                result = await self._port.tool_execute(
+                    name=name,
+                    args=arguments,
+                    context=context,
+                )
         except Exception as e:
             logger.warning("Tool '%s' execution failed: %s", name, e)
             if span_ctx:
