@@ -30,6 +30,7 @@ from hecate.core.database import Base
 from hecate.models import (  # noqa: F401
     agent,
     api_key,
+    approval,
     budget,
     checkpoint,
     conversation,
@@ -44,6 +45,7 @@ from hecate.models import (  # noqa: F401
     organization,
     skill,
     tool,
+    tool_policy,
     trace,
     user,
     workflow,

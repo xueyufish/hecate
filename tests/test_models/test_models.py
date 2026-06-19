@@ -790,3 +790,100 @@ class TestReadSchemaFromAttributes:
         schema = CheckpointReadSchema.model_validate(cp)
         assert schema.metadata == {"interrupted": False}
         assert schema.superstep == 1
+
+
+class TestApprovalRecordModel:
+    @pytest.mark.asyncio
+    async def test_create_with_defaults(self, db_session: AsyncSession) -> None:
+        from hecate.models.approval import ApprovalRecordModel
+
+        record = ApprovalRecordModel(
+            workspace_id=uuid.UUID(int=0),
+            tool_name="terminal",
+            risk_level="high",
+        )
+        db_session.add(record)
+        await db_session.flush()
+        assert record.scope == "once"
+        assert record.status == "pending"
+        assert record.tool_name == "terminal"
+
+    @pytest.mark.asyncio
+    async def test_status_values(self, db_session: AsyncSession) -> None:
+        from hecate.models.approval import ApprovalRecordModel
+
+        for status in ("pending", "approved", "rejected", "expired"):
+            record = ApprovalRecordModel(
+                workspace_id=uuid.UUID(int=0),
+                tool_name=f"tool_{status}",
+                risk_level="medium",
+                status=status,
+            )
+            db_session.add(record)
+            await db_session.flush()
+            assert record.status == status
+
+    def test_read_schema_from_attributes(self) -> None:
+        from datetime import datetime
+
+        from hecate.models.approval import ApprovalReadSchema
+
+        ws_id = uuid.UUID(int=0)
+        record_id = uuid.uuid4()
+        now = datetime.now()
+
+        class FakeRecord:
+            id = record_id
+            workspace_id = ws_id
+            tool_name = "test_tool"
+            session_id = None
+            user_id = None
+            scope = "session"
+            status = "approved"
+            risk_level = "high"
+            reason = "ok"
+            expires_at = None
+            created_at = now
+            updated_at = now
+            deleted = False
+            deleted_at = None
+
+        schema = ApprovalReadSchema.model_validate(FakeRecord())
+        assert schema.tool_name == "test_tool"
+        assert schema.status == "approved"
+
+
+class TestToolPolicyModel:
+    @pytest.mark.asyncio
+    async def test_create_with_defaults(self, db_session: AsyncSession) -> None:
+        from hecate.models.tool_policy import ToolPolicyModel
+
+        policy = ToolPolicyModel(
+            workspace_id=uuid.UUID(int=0),
+            rule_action="deny",
+            tool_pattern="terminal(rm:*)",
+        )
+        db_session.add(policy)
+        await db_session.flush()
+        assert policy.priority == 0
+        assert policy.rule_action == "deny"
+
+    @pytest.mark.asyncio
+    async def test_different_rules_allowed(self, db_session: AsyncSession) -> None:
+        from hecate.models.tool_policy import ToolPolicyModel
+
+        ws_id = uuid.UUID(int=0)
+        p1 = ToolPolicyModel(
+            workspace_id=ws_id,
+            rule_action="deny",
+            tool_pattern="terminal(rm:*)",
+        )
+        p2 = ToolPolicyModel(
+            workspace_id=ws_id,
+            rule_action="allow",
+            tool_pattern="terminal(git:*)",
+        )
+        db_session.add_all([p1, p2])
+        await db_session.flush()
+        assert p1.rule_action == "deny"
+        assert p2.rule_action == "allow"
