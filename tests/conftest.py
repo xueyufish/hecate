@@ -41,6 +41,7 @@ from hecate.models import (  # noqa: F401
     memory,
     message,
     metric,
+    model_pricing,
     model_provider,
     organization,
     skill,

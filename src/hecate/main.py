@@ -28,9 +28,11 @@ from hecate.api.management.agents import router as agents_router
 from hecate.api.management.api_keys import router as api_keys_router
 from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
 from hecate.api.management.conversations import router as conversations_router
+from hecate.api.management.costs import router as costs_router
 from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.memory import router as memory_router
 from hecate.api.management.messages import router as messages_router
+from hecate.api.management.model_pricing import router as model_pricing_router
 from hecate.api.management.model_providers import router as model_providers_router
 from hecate.api.management.monitoring import router as monitoring_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
@@ -236,6 +238,8 @@ app.include_router(workspace_members_router, prefix="/api", tags=["workspace-mem
 app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
 app.include_router(traces_router, prefix="/api", tags=["traces"])
 app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
+app.include_router(model_pricing_router, prefix="/api", tags=["model-pricing"])
+app.include_router(costs_router, prefix="/api", tags=["costs"])
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
