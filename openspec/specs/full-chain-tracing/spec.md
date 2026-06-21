@@ -87,7 +87,7 @@ The system SHALL expose REST API endpoints for querying trace data.
 - **THEN** only traces with `start_time` within the range SHALL be returned
 
 ### Requirement: Span creation in PregelRuntime and Workers
-PregelRuntime and Workers SHALL create spans at execution boundaries via `EnginePort.create_span` and `EnginePort.end_span`.
+PregelRuntime and Workers SHALL create spans at execution boundaries via `EnginePort.create_span` and `EnginePort.end_span`. LLMWorker SHALL additionally instrument time-to-first-token (TTFT) for streaming LLM calls by recording `ttft_ms` in the span's metadata.
 
 #### Scenario: PregelRuntime creates node execution span
 - **WHEN** PregelRuntime starts executing a node
@@ -96,6 +96,10 @@ PregelRuntime and Workers SHALL create spans at execution boundaries via `Engine
 #### Scenario: LLMWorker creates generation span
 - **WHEN** LLMWorker calls `llm_invoke`
 - **THEN** it SHALL create a span with `type="generation"`, `name="llm:{model}"`, and record `usage` (input_tokens, output_tokens) on span end
+
+#### Scenario: LLMWorker records TTFT for streaming responses
+- **WHEN** LLMWorker processes a streaming LLM response and receives the first chunk
+- **THEN** it SHALL record `ttft_ms` (milliseconds from request start to first chunk arrival) in the span's `metadata` field
 
 #### Scenario: ToolWorker creates tool span
 - **WHEN** ToolWorker executes a tool

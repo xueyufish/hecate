@@ -9,6 +9,7 @@ token-level streaming.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -263,6 +264,9 @@ class LLMWorker(Worker):
             attributes={"model": model, "message_count": len(shaped_messages)},
         )
 
+        llm_start = time.monotonic()
+        first_token_time: float | None = None
+
         # LLM invocation (non-streaming via llm_invoke)
         full_response = ""
         if self._event_store and execution_context:
@@ -280,6 +284,8 @@ class LLMWorker(Worker):
                 messages=shaped_messages,
                 config={"model": model, "tools": shaped_tools},
             ):
+                if first_token_time is None:
+                    first_token_time = time.monotonic()
                 full_response += token
         except Exception as e:
             logger.warning("LLM invocation failed for node '%s': %s", node_id, e)
@@ -297,10 +303,18 @@ class LLMWorker(Worker):
                 )
             )
 
+        llm_end = time.monotonic()
+        total_latency_ms = (llm_end - llm_start) * 1000
+        ttft_ms = ((first_token_time - llm_start) * 1000) if first_token_time else total_latency_ms
+
         if span_ctx:
             await self._port.end_span(
                 span_ctx.span_id,
-                output_data={"response_length": len(full_response)},
+                output_data={
+                    "response_length": len(full_response),
+                    "ttft_ms": ttft_ms,
+                    "total_latency_ms": total_latency_ms,
+                },
             )
 
         response_dict: dict[str, Any] = {
@@ -404,6 +418,9 @@ class LLMWorker(Worker):
             attributes={"model": model, "message_count": len(shaped_messages)},
         )
 
+        llm_start = time.monotonic()
+        first_token_time: float | None = None
+
         # LLM invocation (streaming) — yield tokens as they arrive
         full_response = ""
         try:
@@ -411,6 +428,8 @@ class LLMWorker(Worker):
                 messages=shaped_messages,
                 config={"model": model, "tools": shaped_tools},
             ):
+                if first_token_time is None:
+                    first_token_time = time.monotonic()
                 full_response += token
                 yield {"content": token}
         except Exception as e:
@@ -420,10 +439,18 @@ class LLMWorker(Worker):
             yield WorkerResult(node_id=node_id, error=e)
             return
 
+        llm_end = time.monotonic()
+        total_latency_ms = (llm_end - llm_start) * 1000
+        ttft_ms = ((first_token_time - llm_start) * 1000) if first_token_time else total_latency_ms
+
         if span_ctx:
             await self._port.end_span(
                 span_ctx.span_id,
-                output_data={"response_length": len(full_response)},
+                output_data={
+                    "response_length": len(full_response),
+                    "ttft_ms": ttft_ms,
+                    "total_latency_ms": total_latency_ms,
+                },
             )
 
         response_dict: dict[str, Any] = {

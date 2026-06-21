@@ -77,6 +77,20 @@ class Settings(BaseSettings):
     METRICS_PUSH_INTERVAL: int = 5  # seconds between WebSocket metric pushes
     MAX_METRICS_BUFFER_SIZE: int = 100000  # max entries per InMemory ring buffer
 
+    # Alerting configuration
+    ALERT_ENABLED: bool = True
+    ALERT_EVAL_INTERVAL: int = 60  # seconds between alert evaluation cycles
+    ALERT_SMTP_HOST: str = ""
+    ALERT_SMTP_PORT: int = 587
+    ALERT_SMTP_USER: str = ""
+    ALERT_SMTP_PASSWORD: str = ""
+    ALERT_SMTP_FROM: str = "alerts@hecate.local"
+
+    # Quota management configuration
+    QUOTA_ENABLED: bool = True
+    QUOTA_DEFAULT_WORKSPACE_RPM: int = 60
+    QUOTA_CACHE_TTL: int = 60
+
     # Audit configuration
     AUDIT_ENABLED: bool = True
     AUDIT_BATCH_SIZE: int = 50
