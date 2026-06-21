@@ -86,6 +86,11 @@ class Settings(BaseSettings):
     ALERT_SMTP_PASSWORD: str = ""
     ALERT_SMTP_FROM: str = "alerts@hecate.local"
 
+    # Quota management configuration
+    QUOTA_ENABLED: bool = True
+    QUOTA_DEFAULT_WORKSPACE_RPM: int = 60
+    QUOTA_CACHE_TTL: int = 60
+
     # Audit configuration
     AUDIT_ENABLED: bool = True
     AUDIT_BATCH_SIZE: int = 50

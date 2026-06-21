@@ -53,6 +53,7 @@ from hecate.api.management.monitoring import router as monitoring_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
 from hecate.api.management.orgs import router as orgs_router
 from hecate.api.management.prompts import router as prompts_router
+from hecate.api.management.quotas import quotas_router
 from hecate.api.management.sessions import router as sessions_router
 from hecate.api.management.skills import router as skills_router
 from hecate.api.management.tools import router as tools_router
@@ -260,6 +261,7 @@ app.include_router(alert_events_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_silences_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_channels_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_escalation_policies_router, prefix="/api", tags=["alerts"])
+app.include_router(quotas_router, prefix="/api", tags=["quotas"])
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
