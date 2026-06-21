@@ -29,6 +29,7 @@ from hecate.core.auth_context import AuthContext
 from hecate.core.database import Base
 from hecate.models import (  # noqa: F401
     agent,
+    alert,
     api_key,
     approval,
     budget,

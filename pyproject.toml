@@ -81,6 +81,7 @@ observability = [
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "aiosmtplib>=3.0.0",
 ]
 mysql = [
     "aiomysql>=0.2",
@@ -117,6 +118,7 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "S", "SIM"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S607", "S105"]
 "alembic/versions/**" = ["S608"]
+"src/hecate/models/alert.py" = ["S105"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

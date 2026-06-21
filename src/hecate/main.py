@@ -25,6 +25,21 @@ from hecate.api.auth import router as auth_router
 from hecate.api.evaluation import router as evaluation_router
 from hecate.api.management.agent_templates import router as agent_templates_router
 from hecate.api.management.agents import router as agents_router
+from hecate.api.management.alerts import (
+    channels_router as alert_channels_router,
+)
+from hecate.api.management.alerts import (
+    escalation_policies_router as alert_escalation_policies_router,
+)
+from hecate.api.management.alerts import (
+    events_router as alert_events_router,
+)
+from hecate.api.management.alerts import (
+    rules_router as alert_rules_router,
+)
+from hecate.api.management.alerts import (
+    silences_router as alert_silences_router,
+)
 from hecate.api.management.api_keys import router as api_keys_router
 from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
 from hecate.api.management.conversations import router as conversations_router
@@ -240,6 +255,11 @@ app.include_router(traces_router, prefix="/api", tags=["traces"])
 app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
 app.include_router(model_pricing_router, prefix="/api", tags=["model-pricing"])
 app.include_router(costs_router, prefix="/api", tags=["costs"])
+app.include_router(alert_rules_router, prefix="/api", tags=["alerts"])
+app.include_router(alert_events_router, prefix="/api", tags=["alerts"])
+app.include_router(alert_silences_router, prefix="/api", tags=["alerts"])
+app.include_router(alert_channels_router, prefix="/api", tags=["alerts"])
+app.include_router(alert_escalation_policies_router, prefix="/api", tags=["alerts"])
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
