@@ -46,53 +46,26 @@ from hecate.models.evaluation import (
     EvaluationScoreModel,
     EvaluationScoreReadSchema,
 )
+
+# Import evaluators package to trigger registration
+from hecate.services.evaluation import evaluators as _evaluators_pkg  # noqa: F401
 from hecate.services.evaluation.dataset_service import EvaluationDatasetService
 from hecate.services.evaluation.engine import EvaluationEngine
 from hecate.services.evaluation.evaluator import Evaluator
+from hecate.services.evaluation.registry import (
+    get_evaluator as _get_evaluator_cls,
+)
+from hecate.services.evaluation.registry import (
+    list_evaluator_names as _list_evaluator_names,
+)
+from hecate.services.evaluation.registry import (
+    list_evaluators as _list_evaluators,
+)
 from hecate.services.evaluation.types import AnswerSource
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/evaluation", tags=["evaluation"])
-
-# Registry of built-in evaluators keyed by name.
-_EVALUATOR_REGISTRY: dict[str, type[Evaluator]] = {}
-
-
-def _get_evaluator_registry() -> dict[str, type[Evaluator]]:
-    """Lazily populate and return the evaluator registry."""
-    if not _EVALUATOR_REGISTRY:
-        from hecate.services.evaluation.agent_evaluators import (
-            CompletenessEvaluator,
-            CorrectnessEvaluator,
-            RelevancyEvaluator,
-            TaskCompletionEvaluator,
-            ToolCallAccuracyEvaluator,
-        )
-
-        _EVALUATOR_REGISTRY["correctness"] = CorrectnessEvaluator
-        _EVALUATOR_REGISTRY["relevancy"] = RelevancyEvaluator
-        _EVALUATOR_REGISTRY["completeness"] = CompletenessEvaluator
-        _EVALUATOR_REGISTRY["tool_call_accuracy"] = ToolCallAccuracyEvaluator
-        _EVALUATOR_REGISTRY["task_completion"] = TaskCompletionEvaluator
-
-        # RAG evaluators are optional — only register if ragas is available
-        try:
-            from hecate.services.evaluation.rag_evaluators import (
-                AnswerRelevancyEvaluator,
-                ContextPrecisionEvaluator,
-                ContextRecallEvaluator,
-                FaithfulnessEvaluator,
-            )
-
-            _EVALUATOR_REGISTRY["context_precision"] = ContextPrecisionEvaluator
-            _EVALUATOR_REGISTRY["context_recall"] = ContextRecallEvaluator
-            _EVALUATOR_REGISTRY["faithfulness"] = FaithfulnessEvaluator
-            _EVALUATOR_REGISTRY["answer_relevancy"] = AnswerRelevancyEvaluator
-        except ImportError:
-            logger.debug("Ragas not installed — RAG evaluators unavailable")
-
-    return _EVALUATOR_REGISTRY
 
 
 async def _get_dataset_or_404(
@@ -133,6 +106,8 @@ async def create_dataset(
         description=data.description,
         metadata=data.metadata,
         workspace_id=ctx.workspace_id,
+        version=data.version,
+        default_threshold=data.default_threshold,
     )
     return EvaluationDatasetReadSchema.model_validate(ds).model_dump(by_alias=True)
 
@@ -265,10 +240,9 @@ async def create_run(
     await _get_dataset_or_404(data.dataset_id, db)
 
     # Resolve evaluators from names
-    registry = _get_evaluator_registry()
     evaluators: list[Evaluator] = []
     for name in data.evaluators:
-        cls = registry.get(name)
+        cls = _get_evaluator_cls(name)
         if cls is None:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -276,7 +250,7 @@ async def create_run(
                     "error": {
                         "code": "INVALID_EVALUATOR",
                         "message": f"Unknown evaluator: {name!r}",
-                        "details": {"available": list(registry.keys())},
+                        "details": {"available": _list_evaluator_names()},
                     }
                 },
             )
@@ -392,3 +366,123 @@ async def get_run_scores(
         "items": [EvaluationScoreReadSchema.model_validate(s).model_dump() for s in scores],
         "total": total,
     }
+
+
+# ---------------------------------------------------------------------------
+# Evaluator listing API
+# ---------------------------------------------------------------------------
+
+
+@router.get("/evaluators")
+async def list_evaluators(
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    category: str | None = None,
+) -> dict:
+    """List all registered evaluators with metadata."""
+    evaluators = _list_evaluators(category)
+    return {
+        "evaluators": [
+            {
+                "name": name,
+                "category": getattr(cls, "category", "generic"),
+                "description": cls().description,
+            }
+            for name, cls in sorted(evaluators.items())
+        ],
+        "total": len(evaluators),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Run comparison API
+# ---------------------------------------------------------------------------
+
+
+@router.post("/runs/compare")
+async def compare_runs(
+    data: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Compare two evaluation runs and detect regressions."""
+    from hecate.services.regression_service import RegressionService
+
+    baseline_id = uuid.UUID(data["baseline_run_id"])
+    candidate_id = uuid.UUID(data["candidate_run_id"])
+    threshold = data.get("threshold", 0.05)
+
+    svc = RegressionService(db)
+    return await svc.compare_runs(baseline_id, candidate_id, threshold=float(threshold))
+
+
+# ---------------------------------------------------------------------------
+# Regression trigger API
+# ---------------------------------------------------------------------------
+
+
+@router.post("/regression/run")
+async def regression_run(
+    data: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Execute an evaluation run and compare against baseline."""
+    from hecate.services.regression_service import RegressionService
+
+    dataset_id = uuid.UUID(data["dataset_id"])
+    evaluators_list: list[str] = data["evaluators"]
+    tags: list[str] | None = data.get("tags")
+    threshold: float = float(data.get("threshold", 0.05))
+    baseline_run_id = uuid.UUID(data["baseline_run_id"]) if data.get("baseline_run_id") else None
+
+    svc = RegressionService(db)
+    return await svc.run_regression(
+        dataset_id=dataset_id,
+        evaluator_names=evaluators_list,
+        tags=tags,
+        threshold=threshold,
+        baseline_run_id=baseline_run_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Dataset lock/unlock/baseline API
+# ---------------------------------------------------------------------------
+
+
+@router.put("/datasets/{dataset_id}/lock")
+async def lock_dataset(
+    dataset_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Lock a dataset to prevent item modifications."""
+    svc = EvaluationDatasetService(db)
+    ds = await svc.lock_dataset(dataset_id)
+    return EvaluationDatasetReadSchema.model_validate(ds).model_dump(by_alias=True)
+
+
+@router.put("/datasets/{dataset_id}/unlock")
+async def unlock_dataset(
+    dataset_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Unlock a dataset to allow item modifications."""
+    svc = EvaluationDatasetService(db)
+    ds = await svc.unlock_dataset(dataset_id)
+    return EvaluationDatasetReadSchema.model_validate(ds).model_dump(by_alias=True)
+
+
+@router.put("/datasets/{dataset_id}/baseline")
+async def set_baseline(
+    dataset_id: uuid.UUID,
+    data: dict,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Set the baseline run for regression comparison."""
+    svc = EvaluationDatasetService(db)
+    run_id = uuid.UUID(data["baseline_run_id"])
+    ds = await svc.set_baseline_run(dataset_id, run_id)
+    return EvaluationDatasetReadSchema.model_validate(ds).model_dump(by_alias=True)

@@ -94,6 +94,10 @@ class EvalInput:
         generated_answer: The answer produced by the system.
         expected_answer: Ground-truth answer for comparison (optional).
         tool_calls: Tool invocations made by the agent (optional).
+        conversation_history: Full conversation turns for multi-turn evaluation.
+        system_prompt: The system prompt used for the agent (optional).
+        agent_id: UUID of the agent being evaluated (optional).
+        session_id: UUID of the session being evaluated (optional).
         metadata: Arbitrary metadata attached to this evaluation item.
     """
 
@@ -102,6 +106,10 @@ class EvalInput:
     generated_answer: str = ""
     expected_answer: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
+    conversation_history: list[dict[str, Any]] = field(default_factory=list)
+    system_prompt: str | None = None
+    agent_id: uuid.UUID | None = None
+    session_id: uuid.UUID | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 

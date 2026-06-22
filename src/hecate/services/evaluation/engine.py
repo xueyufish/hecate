@@ -47,6 +47,7 @@ class EvaluationEngine:
         evaluators: list[Evaluator],
         dataset_id: uuid.UUID,
         answer_source: AnswerSource = AnswerSource.MANUAL,
+        tags: list[str] | None = None,
     ) -> EvaluationRunResult:
         """Execute all evaluators against all items in a dataset.
 
@@ -86,6 +87,14 @@ class EvaluationEngine:
             )
             result = await self.db.execute(stmt)
             items = result.scalars().all()
+
+            if tags:
+                filtered = []
+                for item in items:
+                    item_tags = item.tags if item.tags else []
+                    if any(t in item_tags for t in tags):
+                        filtered.append(item)
+                items = filtered
 
             item_scores: dict[str, list[Score]] = {}
             all_metric_values: dict[str, list[float]] = {}

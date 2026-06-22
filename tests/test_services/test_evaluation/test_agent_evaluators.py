@@ -29,7 +29,7 @@ class TestToolCallAccuracyEvaluator:
         )
         mock_result = {"score": 0.8, "reasoning": "Good tool usage"}
         with patch(
-            "hecate.services.evaluation.agent_evaluators._call_llm_judge",
+            "hecate.services.evaluation.evaluators.agent._call_llm_judge",
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
@@ -45,7 +45,7 @@ class TestToolCallAccuracyEvaluator:
             tool_calls=[{"name": "tool1"}],
         )
         with patch(
-            "hecate.services.evaluation.agent_evaluators._call_llm_judge",
+            "hecate.services.evaluation.evaluators.agent._call_llm_judge",
             new_callable=AsyncMock,
             side_effect=RuntimeError("API error"),
         ):
@@ -65,7 +65,7 @@ class TestTaskCompletionEvaluator:
         input_data = EvalInput(query="do something", generated_answer="done")
         mock_result = {"score": 0.9, "reasoning": "Task completed well"}
         with patch(
-            "hecate.services.evaluation.agent_evaluators._call_llm_judge",
+            "hecate.services.evaluation.evaluators.agent._call_llm_judge",
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
@@ -77,7 +77,7 @@ class TestTaskCompletionEvaluator:
         evaluator = TaskCompletionEvaluator()
         input_data = EvalInput(query="test", generated_answer="answer")
         with patch(
-            "hecate.services.evaluation.agent_evaluators._call_llm_judge",
+            "hecate.services.evaluation.evaluators.agent._call_llm_judge",
             new_callable=AsyncMock,
             side_effect=RuntimeError("timeout"),
         ):

@@ -53,6 +53,10 @@ class EvaluationDatasetModel(BaseModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    version: Mapped[str] = mapped_column(String(50), nullable=False, default="v1.0")
+    baseline_run_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    is_locked: Mapped[bool] = mapped_column(nullable=False, default=False)
+    default_threshold: Mapped[float | None] = mapped_column(Float, nullable=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
@@ -86,6 +90,8 @@ class EvaluationItemModel(BaseModel):
     expected_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_answer: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     context: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    assertions: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
@@ -180,6 +186,8 @@ class EvaluationDatasetCreateSchema(PydanticBase):
     name: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
     metadata: dict | None = Field(None, alias="metadata_")
+    version: str | None = None
+    default_threshold: float | None = None
 
 
 class EvaluationDatasetUpdateSchema(PydanticBase):
@@ -190,6 +198,10 @@ class EvaluationDatasetUpdateSchema(PydanticBase):
     name: str | None = Field(None, min_length=1, max_length=255)
     description: str | None = None
     metadata: dict | None = Field(None, alias="metadata_")
+    version: str | None = None
+    default_threshold: float | None = None
+    is_locked: bool | None = None
+    baseline_run_id: uuid.UUID | None = None
 
 
 class EvaluationDatasetReadSchema(PydanticBase):
@@ -202,6 +214,10 @@ class EvaluationDatasetReadSchema(PydanticBase):
     description: str | None
     workspace_id: uuid.UUID
     metadata: dict | None = Field(validation_alias="metadata_")
+    version: str
+    baseline_run_id: uuid.UUID | None
+    is_locked: bool
+    default_threshold: float | None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
@@ -222,6 +238,8 @@ class EvaluationItemCreateSchema(PydanticBase):
     expected_answer: str | None = None
     generated_answer: str | None = None
     context: list[str] | None = None
+    assertions: list[dict] | None = None
+    tags: list[str] | None = None
     metadata: dict | None = Field(None, alias="metadata_")
 
 
@@ -236,6 +254,8 @@ class EvaluationItemReadSchema(PydanticBase):
     expected_answer: str | None
     generated_answer: str | None
     context: list | None
+    assertions: list | None
+    tags: list | None
     workspace_id: uuid.UUID
     metadata: dict | None = Field(validation_alias="metadata_")
     created_at: datetime

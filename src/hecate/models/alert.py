@@ -32,6 +32,7 @@ class AlertType(StrEnum):
     COST_MONTHLY_FORECAST = "cost_monthly_forecast"
     TOOL_FAILURE_RATE = "tool_failure_rate"
     SUCCESS_RATE = "success_rate"
+    EVALUATION_REGRESSION = "evaluation_regression"
 
 
 class AlertState(StrEnum):

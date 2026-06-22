@@ -35,6 +35,8 @@ class EvaluationDatasetService:
         description: str | None = None,
         metadata: dict | None = None,
         workspace_id: UUID | None = None,
+        version: str | None = None,
+        default_threshold: float | None = None,
     ) -> EvaluationDatasetModel:
         """Create a new evaluation dataset.
 
@@ -43,6 +45,8 @@ class EvaluationDatasetService:
             description: Optional longer description.
             metadata: Optional JSON metadata.
             workspace_id: Optional workspace ID for tenant isolation.
+            version: Optional version tag (default ``"v1.0"``).
+            default_threshold: Optional default pass/fail threshold for items.
 
         Returns:
             The created dataset model with generated id and timestamps.
@@ -52,6 +56,8 @@ class EvaluationDatasetService:
             description=description,
             metadata_=metadata or {},
             workspace_id=workspace_id or uuid.UUID(int=0),
+            version=version or "v1.0",
+            default_threshold=default_threshold,
         )
         self.db.add(ds)
         await self.db.flush()
@@ -176,6 +182,70 @@ class EvaluationDatasetService:
 
         await self.db.flush()
 
+    async def _check_locked(self, dataset_id: UUID) -> None:
+        """Raise ValueError if dataset is locked.
+
+        Args:
+            dataset_id: UUID of the dataset to check.
+
+        Raises:
+            ValueError: If the dataset is locked.
+        """
+        ds = await self.get_dataset(dataset_id)
+        if ds.is_locked:
+            msg = f"Dataset {dataset_id} is locked"
+            raise ValueError(msg)
+
+    async def lock_dataset(self, dataset_id: UUID) -> EvaluationDatasetModel:
+        """Lock a dataset to prevent item modifications.
+
+        Args:
+            dataset_id: UUID of the dataset to lock.
+
+        Returns:
+            The updated dataset model.
+        """
+        ds = await self.get_dataset(dataset_id)
+        ds.is_locked = True
+        await self.db.flush()
+        await self.db.refresh(ds)
+        return ds
+
+    async def unlock_dataset(self, dataset_id: UUID) -> EvaluationDatasetModel:
+        """Unlock a dataset to allow item modifications.
+
+        Args:
+            dataset_id: UUID of the dataset to unlock.
+
+        Returns:
+            The updated dataset model.
+        """
+        ds = await self.get_dataset(dataset_id)
+        ds.is_locked = False
+        await self.db.flush()
+        await self.db.refresh(ds)
+        return ds
+
+    async def set_baseline_run(
+        self,
+        dataset_id: UUID,
+        run_id: UUID,
+    ) -> EvaluationDatasetModel:
+        """Set the baseline run for regression comparison.
+
+        Args:
+            dataset_id: UUID of the dataset.
+            run_id: UUID of the baseline evaluation run.
+
+        Returns:
+            The updated dataset model.
+        """
+        ds = await self.get_dataset(dataset_id)
+        ds.baseline_run_id = run_id
+        await self.db.flush()
+        await self.db.refresh(ds)
+        return ds
+
     async def add_items(
         self,
         dataset_id: UUID,
@@ -193,9 +263,9 @@ class EvaluationDatasetService:
             Number of items successfully added.
 
         Raises:
-            ValueError: If the dataset is not found.
+            ValueError: If the dataset is not found or is locked.
         """
-        await self.get_dataset(dataset_id)
+        await self._check_locked(dataset_id)
         count = 0
         for item_data in items:
             query = item_data.get("query", "")
@@ -206,6 +276,8 @@ class EvaluationDatasetService:
                 query=str(query),
                 expected_answer=item_data.get("expected_answer"),
                 context=item_data.get("context"),
+                assertions=item_data.get("assertions"),
+                tags=item_data.get("tags"),
                 metadata_=item_data.get("metadata", {}),
             )
             self.db.add(item)
@@ -249,7 +321,7 @@ class EvaluationDatasetService:
             item_id: UUID of the item to delete.
 
         Raises:
-            ValueError: If the item is not found.
+            ValueError: If the item is not found or dataset is locked.
         """
         result = await self.db.execute(
             select(EvaluationItemModel).where(
@@ -261,6 +333,7 @@ class EvaluationDatasetService:
         if item is None:
             msg = f"Item {item_id} not found"
             raise ValueError(msg)
+        await self._check_locked(item.dataset_id)
         item.deleted = True
         item.deleted_at = datetime.now(UTC)
         await self.db.flush()
@@ -279,7 +352,7 @@ class EvaluationDatasetService:
         Returns:
             Dict with total, valid, and skipped counts.
         """
-        await self.get_dataset(dataset_id)
+        await self._check_locked(dataset_id)
         total = len(json_data)
         valid = 0
         skipped = 0
@@ -293,6 +366,8 @@ class EvaluationDatasetService:
                 query=str(query),
                 expected_answer=entry.get("expected_answer"),
                 context=entry.get("context"),
+                assertions=entry.get("assertions"),
+                tags=entry.get("tags"),
                 metadata_=entry.get("metadata", {}),
             )
             self.db.add(item)
@@ -327,6 +402,8 @@ class EvaluationDatasetService:
                 "query": item.query,
                 "expected_answer": item.expected_answer,
                 "context": item.context,
+                "assertions": item.assertions,
+                "tags": item.tags,
                 "metadata": item.metadata_,
             }
             for item in items

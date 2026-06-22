@@ -28,6 +28,8 @@ class Evaluator(ABC):
             evaluators should fall back to a default model.
     """
 
+    category: str = "generic"
+
     def __init__(self, llm_config: LLMConfig | None = None) -> None:
         self.llm_config = llm_config
 
