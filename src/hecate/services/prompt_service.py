@@ -86,6 +86,7 @@ class PromptService:
             template=data.template,
             variables=variables,
             labels=data.labels,
+            commit_message=data.commit_message,
         )
         self.db.add(version)
         await self.db.flush()
@@ -142,18 +143,21 @@ class PromptService:
         self,
         prompt_id: uuid.UUID,
         data: PromptUpdateSchema,
+        user_role: str | None = None,
     ) -> PromptDetailSchema:
         """Update a prompt — create new version if template changed.
 
         Args:
             prompt_id: UUID of the prompt to update.
             data: Update data.
+            user_role: Role of the user for protected label checks.
 
         Returns:
             The updated prompt.
 
         Raises:
             ValueError: If prompt not found or template invalid.
+            PermissionError: If user tries to modify protected labels without admin role.
         """
         result = await self.db.execute(
             select(PromptModel).where(
@@ -175,9 +179,12 @@ class PromptService:
             if variables is None:
                 variables = self.template_engine.extract_variables(data.template)
 
-            # Get current version for labels
+            # Get current version for labels and check protected labels
             current_version = await self._get_version(prompt_id, prompt.current_version)
-            labels = data.labels if data.labels is not None else (current_version.labels if current_version else [])
+            old_labels = current_version.labels if current_version else []
+            new_labels = data.labels if data.labels is not None else old_labels
+            if data.labels is not None:
+                self._check_protected_labels(old_labels, new_labels, user_role)
 
             new_version_num = prompt.current_version + 1
             version = PromptVersionModel(
@@ -185,7 +192,8 @@ class PromptService:
                 version=new_version_num,
                 template=data.template,
                 variables=variables,
-                labels=labels,
+                labels=new_labels,
+                commit_message=data.commit_message,
             )
             self.db.add(version)
             prompt.current_version = new_version_num
@@ -342,6 +350,7 @@ class PromptService:
             template=target.template,
             variables=target.variables,
             labels=target.labels,
+            commit_message=f"Rollback to version {target_version}",
         )
         self.db.add(version)
         prompt.current_version = new_version_num
@@ -412,3 +421,31 @@ class PromptService:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    @staticmethod
+    def _check_protected_labels(
+        old_labels: list[str],
+        new_labels: list[str],
+        user_role: str | None,
+    ) -> None:
+        """Check if protected labels are being modified by a non-admin user.
+
+        Args:
+            old_labels: Previous version labels.
+            new_labels: New version labels.
+            user_role: Role of the user making the change.
+
+        Raises:
+            PermissionError: If a non-admin user modifies protected labels.
+        """
+        from hecate.core.config import settings
+
+        protected = set(settings.PROTECTED_PROMPT_LABELS)
+        old_set = set(old_labels)
+        new_set = set(new_labels)
+        added = new_set - old_set
+        removed = old_set - new_set
+        changed_protected = (added | removed) & protected
+        if changed_protected and user_role != "admin":
+            msg = f"Cannot modify protected labels {changed_protected}: requires admin role"
+            raise PermissionError(msg)

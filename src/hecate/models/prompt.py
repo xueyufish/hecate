@@ -68,6 +68,7 @@ class PromptVersionModel(BaseModel):
     template: Mapped[str] = mapped_column(Text, nullable=False)
     variables: Mapped[list[str]] = mapped_column(JSON, default=list)
     labels: Mapped[list[str]] = mapped_column(JSON, default=list)
+    commit_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
@@ -92,6 +93,7 @@ class PromptCreateSchema(PydanticBase):
     template: str = Field(..., min_length=1)
     variables: list[str] = Field(default_factory=list)
     labels: list[str] = Field(default_factory=list)
+    commit_message: str | None = None
 
 
 class PromptUpdateSchema(PydanticBase):
@@ -102,6 +104,7 @@ class PromptUpdateSchema(PydanticBase):
     template: str | None = Field(None, min_length=1)
     variables: list[str] | None = None
     labels: list[str] | None = None
+    commit_message: str | None = None
 
 
 class PromptReadSchema(PydanticBase):
@@ -130,6 +133,7 @@ class PromptVersionReadSchema(PydanticBase):
     template: str
     variables: list[str]
     labels: list[str]
+    commit_message: str | None
     workspace_id: uuid.UUID
     created_at: datetime
 

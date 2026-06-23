@@ -259,9 +259,17 @@ class LLMWorker(Worker):
         shaped_messages = assembled.get("messages", messages)
         shaped_tools = assembled.get("tools", tools)
 
+        span_attributes: dict[str, Any] = {"model": model, "message_count": len(shaped_messages)}
+        prompt_id = node_config.get("prompt_id")
+        prompt_version = node_config.get("prompt_version")
+        if prompt_id is not None:
+            span_attributes["prompt_id"] = str(prompt_id)
+        if prompt_version is not None:
+            span_attributes["prompt_version"] = prompt_version
+
         span_ctx = await self._port.create_span(
             name=f"llm:{node_id}",
-            attributes={"model": model, "message_count": len(shaped_messages)},
+            attributes=span_attributes,
         )
 
         llm_start = time.monotonic()
