@@ -101,6 +101,9 @@ class Settings(BaseSettings):
     AUDIT_ARCHIVE_STORAGE: str = "minio"
     AUDIT_ARCHIVE_PATH: str = "audit-archives"
 
+    # Prompt management
+    PROTECTED_PROMPT_LABELS: list[str] = ["production"]
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""

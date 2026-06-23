@@ -95,8 +95,13 @@ async def update_prompt(
     """Update an existing prompt."""
     service = PromptService(db)
     try:
-        result = await service.update_prompt(prompt_id, data)
+        result = await service.update_prompt(prompt_id, data, user_role=ctx.role)
         return result.model_dump()
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": {"code": "FORBIDDEN", "message": str(e), "details": None}},
+        ) from e
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -186,3 +191,69 @@ async def get_prompt_by_label(
             detail={"error": {"code": "NOT_FOUND", "message": f"No prompt with label '{label}'", "details": None}},
         )
     return result.model_dump()
+
+
+@router.get("/prompts/{prompt_id}/diff")
+async def diff_prompt_versions(
+    prompt_id: uuid.UUID,
+    from_version: int,
+    to_version: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Compute a line-level diff between two prompt versions."""
+    from hecate.services.prompt_analytics_service import PromptAnalyticsService
+
+    svc = PromptAnalyticsService(db)
+    try:
+        return await svc.compute_diff(prompt_id, from_version, to_version)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
+        ) from e
+
+
+@router.get("/prompts/{prompt_id}/analytics")
+async def get_prompt_analytics(
+    prompt_id: uuid.UUID,
+    version: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    days: Annotated[int, Query(ge=1, le=365)] = 7,
+) -> dict:
+    """Get per-version performance analytics from trace data."""
+    from hecate.services.prompt_analytics_service import PromptAnalyticsService
+
+    svc = PromptAnalyticsService(db)
+    return await svc.get_version_analytics(prompt_id, version, days)
+
+
+@router.get("/prompts/{prompt_id}/compare")
+async def compare_prompt_versions(
+    prompt_id: uuid.UUID,
+    from_version: int,
+    to_version: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    days: Annotated[int, Query(ge=1, le=365)] = 7,
+) -> dict:
+    """Compare analytics for two prompt versions side by side."""
+    from hecate.services.prompt_analytics_service import PromptAnalyticsService
+
+    svc = PromptAnalyticsService(db)
+    return await svc.compare_versions(prompt_id, from_version, to_version, days)
+
+
+@router.post("/prompts/{prompt_id}/versions/{version}/summary")
+async def generate_prompt_summary(
+    prompt_id: uuid.UUID,
+    version: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Generate an AI-assisted change summary for a prompt version."""
+    from hecate.services.prompt_analytics_service import PromptAnalyticsService
+
+    svc = PromptAnalyticsService(db)
+    return await svc.generate_change_summary(prompt_id, version)
