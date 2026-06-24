@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="RAG-Pipeline-L3" id="rag-pipeline-l3">
+    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="520" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;RAG Pipeline — L3 Internal Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="20" y="10" width="500" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ========== ROW 1: INGESTION PIPELINE ========== -->
+        <mxCell id="r1_c" value="Ingestion Pipeline" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="45" width="910" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_doc" value="📄 Document&#xa;(PDF / DOCX / MD / TXT)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="10" y="35" width="150" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_parse" value="🔧 Parser&#xa;(Docling engine)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="195" y="35" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_chunk" value="✂️ Chunker&#xa;(1000 chars, 200 overlap&#xa;sentence-boundary aware)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="370" y="35" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_embed" value="🧮 Embedding&#xa;(BGE-M3: Dense 1024-dim&#xa;+ Sparse lexical weights)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="575" y="35" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_store" value="💾 Vector Store&#xa;(upsert: dense + sparse&#xa;+ payload metadata)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="770" y="35" width="130" height="50" as="geometry" />
+        </mxCell>
+        <!-- Arrows -->
+        <mxCell id="r1_a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2E7D32;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_doc" target="r1_parse"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r1_a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2E7D32;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_parse" target="r1_chunk"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r1_a3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2E7D32;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_chunk" target="r1_embed"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r1_a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#2E7D32;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_embed" target="r1_store"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ROW 2: RETRIEVAL PIPELINE ========== -->
+        <mxCell id="r2_c" value="Retrieval Pipeline" style="swimlane;startSize=26;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="170" width="910" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_query" value="🔍 Query&#xa;(user input)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
+          <mxGeometry x="10" y="35" width="110" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_qembed" value="🧮 Query Embedding&#xa;(BGE-M3 encode_query)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
+          <mxGeometry x="145" y="35" width="140" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_dense" value="Dense Search&#xa;(cosine similarity)&#xa;weight: 0.7" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
+          <mxGeometry x="310" y="30" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_sparse" value="Sparse Search&#xa;(BM25 lexical)&#xa;weight: 0.3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
+          <mxGeometry x="310" y="75" width="140" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_rrf" value="⚡ RRF Fusion&#xa;(k=60, Reciprocal&#xa;Rank Fusion)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="480" y="42" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_results" value="📋 Ranked Results&#xa;(top-k chunks)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
+          <mxGeometry x="635" y="42" width="120" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_cite" value="📎 Citations&#xa;(OpenAI-compatible&#xa;kb_citation annotation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="780" y="35" width="125" height="50" as="geometry" />
+        </mxCell>
+        <!-- Arrows -->
+        <mxCell id="r2_a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1565C0;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_query" target="r2_qembed"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2_a2a" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1565C0;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_qembed" target="r2_dense"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2_a2b" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1565C0;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_qembed" target="r2_sparse"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2_a3a" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1565C0;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_dense" target="r2_rrf"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2_a3b" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1565C0;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_sparse" target="r2_rrf"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2_a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1565C0;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_rrf" target="r2_results"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2_a5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#1565C0;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_results" target="r2_cite"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ROW 3: VECTOR STORE ABSTRACTION ========== -->
+        <mxCell id="r3_c" value="Vector Store Abstraction Layer" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#616161;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="310" width="910" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_abc" value="VectorStore (ABC)&#xa;create_collection · upsert · search · search_sparse · search_hybrid · delete" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="10" y="32" width="440" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_qdrant" value="QdrantVectorStore&#xa;✅ Native hybrid search&#xa;✅ Sparse vector support" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=10;" vertex="1" parent="r3_c">
+          <mxGeometry x="480" y="28" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_chroma" value="ChromaVectorStore&#xa;⚠️ RRF fallback fusion&#xa;📋 Dev only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="r3_c">
+          <mxGeometry x="700" y="28" width="200" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#616161;strokeWidth=1;dashed=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r3_c" source="r3_abc" target="r3_qdrant"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r3_a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#616161;strokeWidth=1;dashed=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r3_c" source="r3_abc" target="r3_chroma"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ROW 4: INTEGRATION ========== -->
+        <mxCell id="r4_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="420" width="910" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_down" value="⤵  EnginePort.knowledge_query() — Agent Engine retrieves chunks and prepends to LLM context" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r4_c">
+          <mxGeometry x="100" y="5" width="710" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- Cross-row edges -->
+        <mxCell id="cross1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;strokeColor=#9E9E9E;strokeWidth=1;dashed=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_results" target="r3_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
