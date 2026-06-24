@@ -323,7 +323,9 @@ Each hook type has a `NoOp` default implementation. Custom hooks are registered 
 
 | Document | Description |
 |----------|-------------|
-| [Architecture](architecture.md) | System overview, design principles, layer descriptions |
+| [Architecture](architecture.md) | System overview, design principles, module architecture |
+| [Security Architecture](security-architecture.md) | Guardrail hooks deep dive, PII anonymization, audit system |
+| [RAG Pipeline Design](rag-pipeline-design.md) | Knowledge retrieval pipeline, hybrid search, citations |
 | [Core Concepts](concepts.md) | Entity definitions, relationships, data model |
 | [ADR Directory](adr/) | Architecture Decision Records |
 | [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition |
