@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Security-L3" id="security-l3">
+    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="620" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;Security Architecture — L3 Internal Flow&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="20" y="10" width="500" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ========== ROW 1: LLM EXECUTION PATH ========== -->
+        <mxCell id="r1_c" value="LLM Execution Path — Guardrail Hook Interception" style="swimlane;startSize=26;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="45" width="910" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_pre" value="🛡️ PreLLMHook&#xa;InputSecurityHook&#xa;(injection · secrets · PII)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="10" y="32" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_llm" value="🧠 LLM API Call&#xa;(via EnginePort.llm_invoke)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="225" y="35" width="190" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_post" value="🛡️ PostLLMHook&#xa;OutputSecurityHook&#xa;(toxicity · PII restore)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="460" y="32" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_stream" value="📡 StreamDeanonymizer&#xa;(token-level PII restore&#xa;for streaming responses)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;" vertex="1" parent="r1_c">
+          <mxGeometry x="675" y="32" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_resp" value="✅ Response&#xa;→ Channel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="860" y="35" width="45" height="44" as="geometry" />
+        </mxCell>
+        <!-- Arrows -->
+        <mxCell id="r1_a1" value="ALLOW" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#C62828;strokeWidth=2;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_pre" target="r1_llm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r1_a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#C62828;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_llm" target="r1_post"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r1_a3" value="ALLOW" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#C62828;strokeWidth=2;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_post" target="r1_stream"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r1_a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#C62828;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_stream" target="r1_resp"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ROW 2: TOOL EXECUTION PATH ========== -->
+        <mxCell id="r2_c" value="Tool Execution Path — Guardrail Hook Interception" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="160" width="910" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_pre" value="🛡️ PreToolHook&#xa;Permission check&#xa;Parameter validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="10" y="32" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_tool" value="🔧 Tool Execution&#xa;(built-in / custom / MCP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="225" y="35" width="190" height="44" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_post" value="🛡️ PostToolHook&#xa;ToolResultSecurityHook&#xa;(PII masking in results)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="460" y="32" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_result" value="✅ Tool Result&#xa;→ Channel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="r2_c">
+          <mxGeometry x="675" y="35" width="160" height="44" as="geometry" />
+        </mxCell>
+        <!-- Arrows -->
+        <mxCell id="r2_a1" value="ALLOW" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00695C;strokeWidth=2;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_pre" target="r2_tool"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2_a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00695C;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_tool" target="r2_post"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r2_a3" value="ALLOW / SANITIZE" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00695C;strokeWidth=2;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r2_c" source="r2_post" target="r2_result"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ROW 3: PII ANONYMIZATION CYCLE ========== -->
+        <mxCell id="r3_c" value="PII Anonymization Cycle (Reversible Masking)" style="swimlane;startSize=26;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="275" width="910" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_input" value="User Input&#xa;&quot;Email john@test.com&quot;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=9;" vertex="1" parent="r3_c">
+          <mxGeometry x="10" y="30" width="140" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_anon" value="PIIAnonymizer.anonymize()&#xa;Regex: email, phone, SSN,&#xa;credit_card, ip_address&#xa;→ [EMAIL_1] [PHONE_1]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=9;fontStyle=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="25" width="190" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_llm" value="LLM processes&#xa;sanitized input&#xa;(PII never leaves system)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=9;" vertex="1" parent="r3_c">
+          <mxGeometry x="410" y="30" width="150" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_deanon" value="PIIAnonymizer.deanonymize()&#xa;Restore [EMAIL_1] → john@test.com&#xa;using mappings dict" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=9;fontStyle=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="600" y="25" width="190" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_output" value="User Output&#xa;PII restored" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;" vertex="1" parent="r3_c">
+          <mxGeometry x="825" y="30" width="75" height="45" as="geometry" />
+        </mxCell>
+        <!-- Arrows -->
+        <mxCell id="r3_a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#E65100;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r3_c" source="r3_input" target="r3_anon"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r3_a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#E65100;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r3_c" source="r3_anon" target="r3_llm"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r3_a3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#E65100;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r3_c" source="r3_llm" target="r3_deanon"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r3_a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#E65100;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r3_c" source="r3_deanon" target="r3_output"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ROW 4: AUTH + AUDIT ========== -->
+        <mxCell id="r4_c" value="Authentication & Audit Trail" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#616161;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="385" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Auth column -->
+        <mxCell id="r4_auth" value="🔐 Authentication" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="10" y="32" width="130" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_jwt" value="JWT Auth&#xa;Access: 30min (HS256)&#xa;Refresh: 7 days&#xa;bcrypt password" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=9;" vertex="1" parent="r4_c">
+          <mxGeometry x="10" y="62" width="130" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_apikey" value="API Key Auth&#xa;hcat_ prefix + SHA-256&#xa;rotate / revoke" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=9;" vertex="1" parent="r4_c">
+          <mxGeometry x="150" y="62" width="130" height="38" as="geometry" />
+        </mxCell>
+        <!-- Audit column -->
+        <mxCell id="r4_audit" value="📋 Audit System" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="310" y="32" width="130" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_batch" value="AuditBatchWriter&#xa;Queue → batch(50) / 2s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=9;" vertex="1" parent="r4_c">
+          <mxGeometry x="310" y="62" width="130" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_policy" value="PolicyEngine&#xa;BulkDelete · OffHours&#xa;UnusualIP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=9;" vertex="1" parent="r4_c">
+          <mxGeometry x="450" y="62" width="130" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_store" value="AuditStore → PostgreSQL&#xa;Archiver → MinIO/S3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=9;" vertex="1" parent="r4_c">
+          <mxGeometry x="590" y="62" width="140" height="38" as="geometry" />
+        </mxCell>
+        <!-- LLM Guard column -->
+        <mxCell id="r4_guard" value="🛡️ LLM Guard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="750" y="32" width="150" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_scan" value="PromptInjection (DeBERTa)&#xa;Anonymize (Presidio)&#xa;Secrets · Toxicity" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=9;" vertex="1" parent="r4_c">
+          <mxGeometry x="750" y="62" width="150" height="38" as="geometry" />
+        </mxCell>
+        <!-- Arrows in audit -->
+        <mxCell id="r4_a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#616161;strokeWidth=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r4_c" source="r4_batch" target="r4_policy"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="r4_a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#616161;strokeWidth=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r4_c" source="r4_policy" target="r4_store"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ROW 5: GUARDRAIL ACTIONS ========== -->
+        <mxCell id="r5_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="510" width="910" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r5_actions" value="GuardrailResult:  ALLOW (proceed)  ·  BLOCK (abort + safety message)  ·  SANITIZE (proceed with modified_data)" style="text;html=1;fontSize=10;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
+          <mxGeometry x="100" y="5" width="710" height="40" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

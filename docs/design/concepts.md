@@ -219,6 +219,8 @@ Several models use field aliases to avoid collisions with SQLAlchemy and Pydanti
 
 | Document | Description |
 |----------|-------------|
-| [Architecture](architecture.md) | System overview, design principles, layer descriptions |
+| [Architecture](architecture.md) | System overview, design principles, module architecture |
 | [Engine Design](engine-design.md) | Pregel runtime, compiler, channels, checkpoints, streaming |
+| [RAG Pipeline Design](rag-pipeline-design.md) | Document ingestion, embedding, hybrid search pipeline |
+| [Security Architecture](security-architecture.md) | Guardrail hooks, PII anonymization, auth, audit trail |
 | [ADR Directory](adr/) | Architecture Decision Records |
