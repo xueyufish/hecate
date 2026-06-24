@@ -14,7 +14,7 @@ Build, orchestrate, and run AI Agent applications on your own infrastructure —
 ## Highlights
 
 - **Graph-First Engine** — Self-built Pregel runtime with JSON DSL, compiler, and channel system. Zero external framework dependencies (not even LangChain).
-- **11 Engine ABCs** — Pluggable interfaces for scheduling, eviction, optimization, conflict resolution, event sourcing, context engine, and guardrails.
+- **15 Pluggable ABCs** — 11 Engine ABCs (scheduling, eviction, optimization, conflict resolution, event sourcing, context engine, guardrails) + 4 Platform SPI ABCs (evaluator, channel, auth provider, notifier).
 - **Visual Canvas** — React Flow-based drag-and-drop workflow builder with 6 multi-agent collaboration patterns, typed edges, and fan-out/merge nodes.
 - **Multi-Agent Orchestration** — Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, and Debate patterns — all unified as Graph templates.
 - **MCP Bidirectional** — Native MCP Client (consume external tools) + MCP Server (expose Hecate as tool provider).
@@ -28,9 +28,9 @@ Build, orchestrate, and run AI Agent applications on your own infrastructure —
 
 | Metric | Value |
 |--------|-------|
-| Features (P1–P5) | 230 total (110 implemented) |
+| Features (P1–P5) | 239 total (123 implemented) |
 | Tests | 1,700+ |
-| Engine ABCs | 11 |
+| ABCs | 15 (11 Engine + 4 Platform SPI) |
 | OpenSpec specs | 86 |
 | Completed changes | 62 |
 | LLM Providers | 100+ via LiteLLM |
@@ -40,35 +40,9 @@ Build, orchestrate, and run AI Agent applications on your own infrastructure —
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Gateway Layer                           │
-│  OpenAI-compatible API  │  Management API  │  WebSocket/SSE    │
-│  Authentication (JWT + API Key)  │  Rate Limiting  │  Multi-Channel │
-├─────────────────────────────────────────────────────────────────┤
-│                      Orchestration Layer                        │
-│  Graph DSL Compiler  │  Visual Canvas (React Flow)              │
-│  Multi-Agent Patterns (6 collaboration templates)               │
-│  Workflow Versioning  │  Human-in-the-Loop (interrupt/Command)  │
-├─────────────────────────────────────────────────────────────────┤
-│                      Execution Engine                           │
-│  Pregel Runtime  │  Channel System (4 types + registry)         │
-│  Checkpoint (PostgreSQL)  │  Worker Pool  │  EventStore         │
-│  11 ABCs: Scheduler, Eviction, Optimization, Conflict,          │
-│  Context, Guardrails (×4), EventStore, Checkpoint               │
-│  Zero external dependencies (jsonschema only)                   │
-├─────────────────────────────────────────────────────────────────┤
-│                    Capability Services                          │
-│  LLM Routing (LiteLLM 100+)  │  RAG Pipeline (Docling + Qdrant) │
-│  Memory System (L1–L4)  │  Context Engineering (6 components)    │
-│  MCP Client + Server  │  Skill Management (SKILL.md)            │
-│  Security (Guardrail Hooks + PII Masking + Sandbox)             │
-├─────────────────────────────────────────────────────────────────┤
-│                      Infrastructure                             │
-│  Multi-DB (PostgreSQL/MySQL/SQLite)  │  Multi-Vector-DB          │
-│  MinIO  │  Docker Compose  │  OTel Tracing  │  Audit Logs       │
-└─────────────────────────────────────────────────────────────────┘
-```
+![Hecate L1 Architecture](docs/design/images/hecate_l1_architecture.png)
+
+> **Legend**: ✅ Green = Implemented | 📋 Yellow dashed = Planned
 
 ## Quick Start
 
@@ -211,7 +185,9 @@ JSON DSL → Compiler (schema validation + optimization passes) → CompiledGrap
                                          (PostgreSQL + memory cache)
 ```
 
-**11 Abstract Base Classes** enable pluggable extensibility:
+**15 Abstract Base Classes** enable pluggable extensibility — 11 Engine + 4 Platform SPI:
+
+**Engine ABCs (11)**:
 
 | ABC | Purpose |
 |-----|---------|
@@ -225,6 +201,15 @@ JSON DSL → Compiler (schema validation + optimization passes) → CompiledGrap
 | `OptimizationPass` | Graph optimization (dead node elimination, parallel detection) |
 | `ConflictResolver` | Concurrent channel update resolution |
 | `Guardrail Hooks (×4)` | Pre/Post LLM/Tool interception |
+
+**Platform SPI ABCs (4)** — 📋 Planned, registered via Plugin SPI Core:
+
+| ABC | Purpose |
+|-----|---------|
+| `EvaluatorABC` | Evaluator interface; 40+ built-in evaluators |
+| `ChannelABC` | Channel adapter; REST/WS/CLI built-in |
+| `AuthProviderABC` | Auth provider; JWT/APIKey built-in |
+| `NotifierABC` | Notifier; Email/Webhook built-in |
 
 ## Documentation
 

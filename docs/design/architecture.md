@@ -10,37 +10,41 @@ Hecate is an open-source, self-hosted, model-agnostic, MCP-first enterprise Agen
 
 Hecate enables enterprises to build, orchestrate, and run AI Agent applications on their own infrastructure. The system is organized into five layers, each with clear responsibilities and well-defined interfaces to adjacent layers.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Gateway Layer                           │
-│  OpenAI-compatible API  │  Management API  │  WebSocket/SSE    │
-│  Authentication (JWT + API Key)  │  Rate Limiting  │  Multi-Channel │
-├─────────────────────────────────────────────────────────────────┤
-│                      Orchestration Layer                        │
-│  Graph DSL Compiler  │  Visual Canvas (React Flow)              │
-│  Multi-Agent Patterns (6 collaboration templates)               │
-│  Workflow Versioning  │  Human-in-the-Loop (interrupt/Command)  │
-├─────────────────────────────────────────────────────────────────┤
-│                      Execution Engine                           │
-│  Pregel Runtime  │  Channel System (4 types + registry)         │
-│  Checkpoint (PostgreSQL)  │  Worker Pool  │  EventStore         │
-│  11 ABCs: Scheduler, Eviction, Optimization, Conflict,          │
-│  Context, Guardrails (×4), EventStore, Checkpoint               │
-│  Zero external dependencies (jsonschema only)                   │
-├─────────────────────────────────────────────────────────────────┤
-│                    Capability Services                          │
-│  LLM Routing (LiteLLM 100+)  │  RAG Pipeline (Docling + Qdrant) │
-│  Memory System (L1–L4)  │  Context Engineering (6 components)    │
-│  MCP Client + Server  │  Skill Management (SKILL.md)            │
-│  Security (Guardrail Hooks + PII Masking + Sandbox)             │
-├─────────────────────────────────────────────────────────────────┤
-│                      Infrastructure                             │
-│  Multi-DB (PostgreSQL/MySQL/SQLite)  │  Multi-Vector-DB          │
-│  MinIO  │  Docker Compose  │  OTel Tracing  │  Audit Logs       │
-└─────────────────────────────────────────────────────────────────┘
-```
+![Hecate L1 Architecture](images/hecate_l1_architecture.png)
 
-The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists snapshots via Checkpoints, and dispatches node execution to a Worker Pool. Eleven abstract base classes provide pluggable extensibility for scheduling, eviction, optimization, conflict resolution, event sourcing, context management, and guardrails.
+> **Legend**: ✅ Green = Implemented | 📋 Yellow dashed = Planned
+>
+> The architecture follows a **Core vs Pluggable** principle: native first-class capabilities (security, multi-tenant, local-deployment, basic evaluation) are built into Core; extension capabilities (channels, evaluators, auth providers, notifiers, i18n) are pluggable via Platform SPI (Service Provider Interface).
+
+**15 pluggable abstract base classes (ABCs)** — 11 Engine + 4 Platform SPI:
+
+**Engine ABCs (11)** — engine-level extensibility:
+
+| ABC | Purpose |
+|-----|---------|
+| `EnginePort` | Service-to-engine adapter (LLM, tools, knowledge, checkpoint) |
+| `Worker` / `WorkerPool` | Node execution dispatch |
+| `CheckpointStore` | State persistence and recovery |
+| `EventStore` | Append-only event logging with replay |
+| `ContextEngine` | Message selection, compression, token estimation |
+| `SchedulerStrategy` | Node scheduling (FIFO default, pluggable) |
+| `EvictionPolicy` | Channel memory management |
+| `OptimizationPass` | Graph optimization (dead node elimination, parallel detection) |
+| `ConflictResolver` | Concurrent channel update resolution |
+| `Guardrail Hooks (×4)` | Pre/Post LLM & Tool interception |
+
+**Platform SPI ABCs (4)** — pluggable extension interfaces (📋 Planned):
+
+| ABC | Purpose |
+|-----|---------|
+| `EvaluatorABC` | Evaluator uniform interface; 40+ built-in evaluators as `BuiltinEvaluator` |
+| `ChannelABC` | Channel adapter interface; REST/WS/CLI as `BuiltinChannel` |
+| `AuthProviderABC` | Auth provider interface; JWT/APIKey as `BuiltinAuthProvider` |
+| `NotifierABC` | Notifier interface; Email/Webhook as `BuiltinNotifier` |
+
+All Platform SPI ABCs depend on `Plugin SPI Core` (PluginRegistry + PluginManifest + PluginLifecycle) for registration and lifecycle management.
+
+The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists snapshots via Checkpoints, and dispatches node execution to a Worker Pool. Fifteen abstract base classes provide pluggable extensibility — 11 for engine internals (scheduling, eviction, optimization, conflict resolution, event sourcing, context management, guardrails) and 4 for platform-level extension (evaluators, channels, auth providers, notifiers).
 
 ---
 
@@ -105,7 +109,7 @@ The Execution Engine is Hecate's core differentiator. It is a self-built runtime
 
 The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → checkpoint state → evaluate conditional edges → repeat until no nodes remain.
 
-Eleven abstract base classes enable pluggable extensibility:
+Eleven engine-level abstract base classes enable pluggable extensibility:
 
 | ABC | Purpose |
 |-----|---------|
@@ -119,6 +123,8 @@ Eleven abstract base classes enable pluggable extensibility:
 | `OptimizationPass` | Graph optimization (dead node elimination, parallel detection) |
 | `ConflictResolver` | Concurrent channel update resolution |
 | `Guardrail Hooks (×4)` | Pre/Post LLM/Tool interception |
+
+Additionally, 4 Platform SPI ABCs (EvaluatorABC, ChannelABC, AuthProviderABC, NotifierABC) provide pluggable extension points for capabilities that sit above the engine — all registered through Plugin SPI Core.
 
 Workers receive read-only Channel snapshots and return results — they never directly modify Channels. This separation keeps the scheduler as the single source of truth for state, while allowing Workers to scale horizontally.
 
