@@ -51,11 +51,11 @@ core/       → Infrastructure: config (pydantic-settings), database (async SQLA
 
 **Engine `__init__.py` is empty** — import directly from submodules: `from hecate.engine.pregel import PregelRuntime`.
 
-## Engine ABC inventory
+## Engine Extension Point Inventory
 
 The engine layer defines these abstract interfaces (all in `src/hecate/engine/`):
 
-| ABC | File | Abstract methods | InMemory impl |
+| Extension Point | File | Abstract methods | InMemory impl |
 |-----|------|-----------------|---------------|
 | EnginePort | `ports.py` | llm_invoke, tool_execute, knowledge_query, checkpoint_save/load, conversation_load/save | — (services provide adapter) |
 | Worker | `worker.py` | execute | AgentWorker in `workers/` |
@@ -113,7 +113,7 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 - **OpenSpec workflow is MANDATORY for ALL changes** — no exceptions. Every change MUST follow: `proposal → design → specs → tasks → implement → verify → archive`. Use `/opsx-propose` to create a change, then `/opsx-apply` to implement tasks, then run verification commands, then `/opsx-archive` to close. Never skip the propose step or implement outside an OpenSpec change directory. Mark tasks complete in `tasks.md` immediately.
 - **OpenSpec commands MUST be triggered by the user manually** — the AI agent SHALL NOT automatically invoke `/opsx-explore`, `/opsx-propose`, `/opsx-apply`, `/opsx-archive`, or any other `/opsx-*` command. The agent may suggest running a command, but MUST wait for explicit user approval.
 - Feature catalog: maintain P1→P5 priority ordering, update counts when features change.
-- **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` (local-only files, not in public repo) before performing the archive move. This includes: updating ✅ markers for completed features, updating statistics counts, updating ABC integration status, and checking off milestone items. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
+- **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` (local-only files, not in public repo) before performing the archive move. This includes: updating ✅ markers for completed features, updating statistics counts, updating extension point integration status, and checking off milestone items. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
 - Run `ruff check` + `ruff format --check` + `mypy` + `pytest` before committing.
 
 ### Coding rules (enforced by ruff E/F/I/N/W/UP/B/SIM)
@@ -153,7 +153,7 @@ We may converse in Chinese, but everything committed to the repository is Englis
 - Engine tests use lightweight stub classes (`SimpleWorker`, `InterruptWorker`) instead of mocking frameworks.
 - No factories — create models inline with `db_session.add()` + `await db_session.flush()`.
 - ruff S101 (assert in tests) is expected — per-file-ignores in pyproject.toml handle it.
-- **Integration tests** (tests that need ChannelManager, PregelRuntime, GraphCompiler, LLMService integration) must wait until the actual integration code is implemented — do not write integration tests for features that are ABC-only.
+- **Integration tests** (tests that need ChannelManager, PregelRuntime, GraphCompiler, LLMService integration) must wait until the actual integration code is implemented — do not write integration tests for features that are interface-only.
 
 ## What to do / What not to do
 
@@ -161,7 +161,7 @@ We may converse in Chinese, but everything committed to the repository is Englis
 - **Do** ensure **0 errors** locally before pushing to GitHub. If any check fails, fix it first.
 - **Do** use `conftest.py`'s `db_session` fixture in all test files that need database access.
 - **Do** add new Python packages to `pyproject.toml` dependencies immediately when installing locally. Never use a package in code without declaring it.
-- **Do** write tests for new engine ABCs: test the ABC is not instantiable, test InMemory implementations, test edge cases. Do NOT write tests that reference integration points (ChannelManager, PregelRuntime, etc.) until those integration points actually exist.
+- **Do** write tests for new engine extension points: test the interface is not instantiable, test InMemory implementations, test edge cases. Do NOT write tests that reference integration points (ChannelManager, PregelRuntime, etc.) until those integration points actually exist.
 - **Don't** renumber feature IDs — use letter suffixes.
 - **Don't** commit PDF files or large binary assets.
 - **Don't** add comments to code unless the logic is non-obvious.

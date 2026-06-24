@@ -14,7 +14,7 @@ Build, orchestrate, and run AI Agent applications on your own infrastructure —
 ## Highlights
 
 - **Graph-First Engine** — Self-built Pregel runtime with JSON DSL, compiler, and channel system. Zero external framework dependencies (not even LangChain).
-- **15 Pluggable ABCs** — 11 Engine ABCs (scheduling, eviction, optimization, conflict resolution, event sourcing, context engine, guardrails) + 4 Platform SPI ABCs (evaluator, channel, auth provider, notifier).
+- **15 Extension Points** — 11 Core extension points (scheduling, eviction, optimization, conflict resolution, event sourcing, context engine, guardrails) + 4 SPI extension points (evaluator, channel, auth provider, notifier).
 - **Visual Canvas** — React Flow-based drag-and-drop workflow builder with 6 multi-agent collaboration patterns, typed edges, and fan-out/merge nodes.
 - **Multi-Agent Orchestration** — Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, and Debate patterns — all unified as Graph templates.
 - **MCP Bidirectional** — Native MCP Client (consume external tools) + MCP Server (expose Hecate as tool provider).
@@ -30,7 +30,7 @@ Build, orchestrate, and run AI Agent applications on your own infrastructure —
 |--------|-------|
 | Features (P1–P5) | 239 total (123 implemented) |
 | Tests | 1,700+ |
-| ABCs | 15 (11 Engine + 4 Platform SPI) |
+| Extension Points | 15 (11 Core + 4 SPI) |
 | OpenSpec specs | 86 |
 | Completed changes | 62 |
 | LLM Providers | 100+ via LiteLLM |
@@ -185,11 +185,11 @@ JSON DSL → Compiler (schema validation + optimization passes) → CompiledGrap
                                          (PostgreSQL + memory cache)
 ```
 
-**15 Abstract Base Classes** enable pluggable extensibility — 11 Engine + 4 Platform SPI:
+**15 Extension Points** enable pluggable extensibility — 11 Core + 4 SPI:
 
-**Engine ABCs (11)**:
+**Core Extension Points (11)**:
 
-| ABC | Purpose |
+| Extension Point | Purpose |
 |-----|---------|
 | `EnginePort` | Service-to-engine adapter (LLM, tools, knowledge, checkpoint) |
 | `Worker` / `WorkerPool` | Node execution dispatch |
@@ -202,14 +202,14 @@ JSON DSL → Compiler (schema validation + optimization passes) → CompiledGrap
 | `ConflictResolver` | Concurrent channel update resolution |
 | `Guardrail Hooks (×4)` | Pre/Post LLM/Tool interception |
 
-**Platform SPI ABCs (4)** — 📋 Planned, registered via Plugin SPI Core:
+**SPI Extension Points (4)** — 🔌 Planned, within the Engine layer:
 
-| ABC | Purpose |
+| Extension Point | Purpose |
 |-----|---------|
-| `EvaluatorABC` | Evaluator interface; 40+ built-in evaluators |
-| `ChannelABC` | Channel adapter; REST/WS/CLI built-in |
-| `AuthProviderABC` | Auth provider; JWT/APIKey built-in |
-| `NotifierABC` | Notifier; Email/Webhook built-in |
+| `Evaluator` | Evaluator interface; 40+ built-in evaluators |
+| `Channel` | Channel adapter; REST/WS/CLI built-in |
+| `AuthProvider` | Auth provider; JWT/APIKey built-in |
+| `Notifier` | Notifier; Email/Webhook built-in |
 
 ## Documentation
 

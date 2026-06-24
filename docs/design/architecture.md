@@ -12,15 +12,15 @@ Hecate enables enterprises to build, orchestrate, and run AI Agent applications 
 
 ![Hecate L1 Architecture](images/hecate_l1_architecture.png)
 
-> **Legend**: ✅ Green = Implemented | 📋 Yellow dashed = Planned
+> **Legend**: ✅ Green = Implemented | 📋 Yellow dashed = Planned | 🔌 Indigo = SPI Extension
 >
-> The architecture follows a **Core vs Pluggable** principle: native first-class capabilities (security, multi-tenant, local-deployment, basic evaluation) are built into Core; extension capabilities (channels, evaluators, auth providers, notifiers, i18n) are pluggable via Platform SPI (Service Provider Interface).
+> Security Shield (left sidebar) and Ecosystem (right sidebar) are cross-cutting concerns that span all platform layers. The architecture follows a **Core vs Pluggable** principle: native first-class capabilities (security, multi-tenant, local-deployment, basic evaluation) are built into Core; extension capabilities (channels, evaluators, auth providers, notifiers, i18n) are pluggable via SPI extension points within the Engine layer.
 
-**15 pluggable abstract base classes (ABCs)** — 11 Engine + 4 Platform SPI:
+**15 pluggable extension points** — 11 Core + 4 SPI:
 
-**Engine ABCs (11)** — engine-level extensibility:
+**Core Extension Points (11)** — engine-level extensibility:
 
-| ABC | Purpose |
+| Extension Point | Purpose |
 |-----|---------|
 | `EnginePort` | Service-to-engine adapter (LLM, tools, knowledge, checkpoint) |
 | `Worker` / `WorkerPool` | Node execution dispatch |
@@ -31,20 +31,20 @@ Hecate enables enterprises to build, orchestrate, and run AI Agent applications 
 | `EvictionPolicy` | Channel memory management |
 | `OptimizationPass` | Graph optimization (dead node elimination, parallel detection) |
 | `ConflictResolver` | Concurrent channel update resolution |
-| `Guardrail Hooks (×4)` | Pre/Post LLM & Tool interception |
+| `Guardrail Hooks (×4)` | Pre/Post LLM/Tool interception |
 
-**Platform SPI ABCs (4)** — pluggable extension interfaces (📋 Planned):
+**SPI Extension Points (4)** — pluggable extension interfaces (📋 Planned):
 
-| ABC | Purpose |
+| Extension Point | Purpose |
 |-----|---------|
-| `EvaluatorABC` | Evaluator uniform interface; 40+ built-in evaluators as `BuiltinEvaluator` |
-| `ChannelABC` | Channel adapter interface; REST/WS/CLI as `BuiltinChannel` |
-| `AuthProviderABC` | Auth provider interface; JWT/APIKey as `BuiltinAuthProvider` |
-| `NotifierABC` | Notifier interface; Email/Webhook as `BuiltinNotifier` |
+| `Evaluator` | Evaluator interface; 40+ built-in evaluators as `BuiltinEvaluator` |
+| `Channel` | Channel adapter; REST/WS/CLI as `BuiltinChannel` |
+| `AuthProvider` | Auth provider; JWT/APIKey as `BuiltinAuthProvider` |
+| `Notifier` | Notifier; Email/Webhook as `BuiltinNotifier` |
 
-All Platform SPI ABCs depend on `Plugin SPI Core` (PluginRegistry + PluginManifest + PluginLifecycle) for registration and lifecycle management.
+All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginManifest + PluginLifecycle) for registration and lifecycle management.
 
-The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists snapshots via Checkpoints, and dispatches node execution to a Worker Pool. Fifteen abstract base classes provide pluggable extensibility — 11 for engine internals (scheduling, eviction, optimization, conflict resolution, event sourcing, context management, guardrails) and 4 for platform-level extension (evaluators, channels, auth providers, notifiers).
+The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists snapshots via Checkpoints, and dispatches node execution to a Worker Pool. Fifteen extension points provide pluggable extensibility — 11 for engine internals (scheduling, eviction, optimization, conflict resolution, event sourcing, context management, guardrails) and 4 for platform-level extension (evaluators, channels, auth providers, notifiers).
 
 ---
 
@@ -109,9 +109,9 @@ The Execution Engine is Hecate's core differentiator. It is a self-built runtime
 
 The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → checkpoint state → evaluate conditional edges → repeat until no nodes remain.
 
-Eleven engine-level abstract base classes enable pluggable extensibility:
+Eleven core extension points enable pluggable extensibility:
 
-| ABC | Purpose |
+| Extension Point | Purpose |
 |-----|---------|
 | `EnginePort` | Service-to-engine adapter (LLM, tools, knowledge, checkpoint) |
 | `Worker` / `WorkerPool` | Node execution dispatch |
@@ -124,7 +124,7 @@ Eleven engine-level abstract base classes enable pluggable extensibility:
 | `ConflictResolver` | Concurrent channel update resolution |
 | `Guardrail Hooks (×4)` | Pre/Post LLM/Tool interception |
 
-Additionally, 4 Platform SPI ABCs (EvaluatorABC, ChannelABC, AuthProviderABC, NotifierABC) provide pluggable extension points for capabilities that sit above the engine — all registered through Plugin SPI Core.
+Additionally, 4 SPI extension points (Evaluator, Channel, AuthProvider, Notifier) provide pluggable extension interfaces within the Engine layer — all registered through Plugin SPI Core. These SPI interfaces define the contract between the Engine and the Capability Services layer, enabling third-party extensions without modifying core engine code.
 
 Workers receive read-only Channel snapshots and return results — they never directly modify Channels. This separation keeps the scheduler as the single source of truth for state, while allowing Workers to scale horizontally.
 

@@ -10,7 +10,7 @@ The execution engine is Hecate's heart. It receives compiled Graphs, executes th
 
 The core design decision is to build a self-contained engine that borrows five design patterns from LangGraph — Channel, Checkpoint, Pregel superstep loop, interrupt/Command, and subgraph composition — without depending on any LangChain code. The engine layer has zero external dependencies except `jsonschema` for DSL validation. This keeps the engine portable, testable, and free from framework coupling.
 
-The engine defines eleven abstract base classes (ABCs) that provide extension points for every pluggable behavior: how nodes are scheduled, how memory is managed, how conflicts are resolved, how events are logged, and how requests are guarded. Default in-memory implementations are provided for each ABC.
+The engine defines eleven extension points that provide pluggable behavior for every aspect of execution: how nodes are scheduled, how memory is managed, how conflicts are resolved, how events are logged, and how requests are guarded. Default in-memory implementations are provided for each extension point.
 
 ---
 
@@ -300,7 +300,7 @@ Clients specify desired stream modes in the `ExecutionRequest`. Multiple modes c
 
 ## Event Store
 
-The `EventStore` ABC provides append-only event logging with replay capability. Twelve event types are defined, covering node execution starts/completions, channel writes, checkpoint saves, interrupts, and error occurrences. Events can be replayed to reconstruct execution state, enabling audit trails and debugging.
+The `EventStore` extension point provides append-only event logging with replay capability. Twelve event types are defined, covering node execution starts/completions, channel writes, checkpoint saves, interrupts, and error occurrences. Events can be replayed to reconstruct execution state, enabling audit trails and debugging.
 
 The default in-memory implementation is suitable for development. A persistent backend can be plugged in for production audit requirements.
 
