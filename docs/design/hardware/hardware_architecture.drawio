@@ -40,11 +40,20 @@
         <mxCell id="eco_c" value="Ecosystem" style="swimlane;startSize=30;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=12;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
           <mxGeometry x="1490" y="90" width="185" height="660" as="geometry" />
         </mxCell>
-        <mxCell id="eco_market" value="📋 Asset Marketplace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;" vertex="1" parent="eco_c">
+        <mxCell id="eco_a2a" value="📋 A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;fontStyle=1;" vertex="1" parent="eco_c">
+          <mxGeometry x="15" y="80" width="155" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="eco_cards" value="📋 Agent Cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;" vertex="1" parent="eco_c">
           <mxGeometry x="15" y="135" width="155" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="eco_market" value="📋 Asset Marketplace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;" vertex="1" parent="eco_c">
+          <mxGeometry x="15" y="190" width="155" height="30" as="geometry" />
         </mxCell>
         <mxCell id="eco_industry" value="📋 Industry Solutions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;" vertex="1" parent="eco_c">
           <mxGeometry x="15" y="300" width="155" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="eco_ap2" value="📋 AP2 Payments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;" vertex="1" parent="eco_c">
+          <mxGeometry x="15" y="410" width="155" height="30" as="geometry" />
         </mxCell>
         <mxCell id="eco_dist" value="📋 Distribution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;" vertex="1" parent="eco_c">
           <mxGeometry x="15" y="465" width="155" height="30" as="geometry" />
@@ -69,16 +78,19 @@
           <mxGeometry x="220" y="90" width="1260" height="80" as="geometry" />
         </mxCell>
         <mxCell id="gw_core" value="✅ Core API Gateway" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11;" vertex="1" parent="gw_c">
-          <mxGeometry x="20" y="38" width="300" height="30" as="geometry" />
+          <mxGeometry x="20" y="38" width="200" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="gw_mcp" value="✅ MCP Server (Streamable HTTP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="gw_c">
+          <mxGeometry x="230" y="38" width="200" height="30" as="geometry" />
         </mxCell>
         <mxCell id="gw_multi_ch" value="📋 Multi-Channel Access" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=11;" vertex="1" parent="gw_c">
-          <mxGeometry x="330" y="38" width="280" height="30" as="geometry" />
+          <mxGeometry x="440" y="38" width="180" height="30" as="geometry" />
         </mxCell>
         <mxCell id="gw_enterprise" value="📋 Enterprise Access (SSO/LDAP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=11;" vertex="1" parent="gw_c">
           <mxGeometry x="630" y="38" width="280" height="30" as="geometry" />
         </mxCell>
         <mxCell id="gw_enduser" value="📋 End-User Apps" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=11;" vertex="1" parent="gw_c">
-          <mxGeometry x="930" y="38" width="280" height="30" as="geometry" />
+          <mxGeometry x="920" y="38" width="280" height="30" as="geometry" />
         </mxCell>
 
         <!-- ========== STUDIO + OPS ROW ========== -->

@@ -63,7 +63,7 @@
         <mxCell id="r2_cli" value="✅ CLI (hecate)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;" vertex="1" parent="r2_c">
           <mxGeometry x="245" y="30" width="190" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_mcp" value="MCP Server" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;dashed=1;fontStyle=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_mcp" value="✅ MCP Server (Streamable HTTP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="460" y="30" width="205" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_sse" value="✅ SSE Streaming" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;" vertex="1" parent="r2_c">
