@@ -94,10 +94,10 @@
           <mxGeometry x="20" y="305" width="910" height="95" as="geometry" />
         </mxCell>
         <!-- 5 × 170 = 850 -->
-        <mxCell id="r3_a2a" value="📋 A2A Protocol" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_a2a" value="📋 A2A Protocol (v1.0 GA)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_selflearn" value="📋 Self-Learning Loop" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_cards" value="📋 Signed Agent Cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_distributed" value="📋 Distributed Execution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
