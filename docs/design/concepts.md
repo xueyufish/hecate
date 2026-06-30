@@ -167,6 +167,43 @@ Prompts are versioned template strings with variable interpolation. Each Prompt 
 
 ---
 
+## Agent Card (A2A Protocol)
+
+An **Agent Card** is a JSON document served at `/.well-known/agent.json` that serves as a digital business card for an agent. It declares the agent's identity, capabilities, skills, supported input/output formats, and security schemes. External agents fetch the card to understand what the remote agent can do before delegating tasks.
+
+Agent Card fields:
+
+- **name** — Agent display name
+- **description** — What the agent does (used for capability matching)
+- **url** — A2A service endpoint
+- **version** — Protocol version
+- **skills** — List of capabilities with descriptions
+- **authentication** — Supported security schemes (APIKey, HTTPAuth, OAuth2, OpenIdConnect, MutualTLS)
+
+Signed Agent Cards (A2A v1.0) include cryptographic signatures that verify the card was issued by the domain owner, preventing card impersonation attacks.
+
+---
+
+## Task Lifecycle (A2A Protocol)
+
+A **Task** is the unit of work in A2A agent-to-agent communication. When a client agent delegates work to a remote agent, the interaction is wrapped in a Task with a well-defined state machine:
+
+```
+submitted → working → completed
+                    → failed
+                    → cancelled
+```
+
+- **submitted** — Task received by remote agent
+- **working** — Remote agent is actively processing
+- **completed** — Task finished successfully, artifacts available
+- **failed** — Task ended with an error
+- **cancelled** — Task cancelled by client or human
+
+Tasks produce **Artifacts** (tangible deliverables) and support streaming updates via SSE for long-running operations. The task lifecycle enables both synchronous (immediate) and asynchronous (hours/days) agent collaboration patterns.
+
+---
+
 ## Resource Versioning
 
 Versionable resources — Agents, Workflows, Prompts, and Skills — share a unified version management mechanism. Each version captures a complete configuration snapshot, a change summary, and the operator who made the change. Previous versions are preserved for rollback and audit.

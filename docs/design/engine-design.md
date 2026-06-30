@@ -319,6 +319,22 @@ Each hook type has a `NoOp` default implementation. Custom hooks are registered 
 
 ---
 
+## A2A Protocol Integration (Planned)
+
+The A2A (Agent-to-Agent) protocol integration will add cross-framework agent communication capabilities to the engine layer:
+
+**A2A Server**: Expose Hecate agents as A2A-compliant services. The engine will register agents with Agent Cards (`/.well-known/agent.json`) and handle incoming task requests via the A2A task lifecycle (submitted→working→completed/failed).
+
+**A2A Client**: Consume external A2A agents as remote sub-agents. The engine will provide a `RemoteA2aAgent` abstraction that handles Agent Card discovery, task delegation, and artifact exchange. This extends the existing sub-agent mechanism (Agent-as-Tool) to work across frameworks.
+
+**Integration Point**: A2A integration will be wired through the `EnginePort` interface, similar to how LLM/Tool/Knowledge integrations work. The engine will not import A2A-specific code directly — the service layer will provide the A2A adapter.
+
+**Task Lifecycle**: A2A tasks map to the engine's existing `Session` concept. A task's state machine (submitted→working→completed/failed) aligns with the session lifecycle (active→interrupted→completed/failed).
+
+See [ADR-011: A2A Protocol Adoption](adr/011-a2a-protocol-adoption.md) for the full decision record.
+
+---
+
 ## Further Reading
 
 | Document | Description |

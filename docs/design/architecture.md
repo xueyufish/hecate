@@ -54,6 +54,8 @@ All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginMan
 
 Hecate supports 100+ LLM providers via LiteLLM, adopts MCP (Model Context Protocol) and A2A (Agent-to-Agent) as first-class integration protocols, and maintains API compatibility with OpenAI's format. No vendor lock-in is the core brand promise.
 
+**Protocol Stack (2026)**: MCP handles agent-to-tool connections (vertical integration, 97M monthly SDK downloads). A2A handles agent-to-agent coordination (horizontal integration, 150+ organizations, Linux Foundation v1.0). Together they form the production baseline for enterprise agent deployments.
+
 ### Composable Over Monolithic
 
 All external capabilities are integrated via MCP, not hardcoded. The execution engine, memory service, RAG pipeline, and tool system are independently replaceable. The three-layer Agent (Guard→Plan→Sub-Agent) is a preset template, not a constraint — users can customize any orchestration topology.
@@ -89,7 +91,7 @@ Each module below corresponds to a block in the [L1 architecture diagram](images
 
 ### Access Channel
 
-The entry point for all external requests. Exposes two API surfaces: an OpenAI-compatible interface at `/v1/` (for seamless integration with existing tools) and a management API at `/api/` (for Agent/Workflow/Session/Knowledge Base CRUD). Handles authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, and multi-channel adaptation including the MCP Server endpoint at `/mcp`.
+The entry point for all external requests. Exposes two API surfaces: an OpenAI-compatible interface at `/v1/` (for seamless integration with existing tools) and a management API at `/api/` (for Agent/Workflow/Session/Knowledge Base CRUD). Handles authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, and multi-channel adaptation including the MCP Server endpoint at `/mcp` (Streamable HTTP transport for standard load balancer compatibility).
 
 ![Access Channel L2](images/access-channel-l2.png)
 
@@ -149,7 +151,7 @@ Cross-cutting security shield spanning all platform layers. Engine-level guardra
 
 ### Ecosystem
 
-Integration and extensibility layer. Native MCP support (Client + Server), webhook notifications, event dispatcher, and OpenAI-compatible API ensure broad interoperability. Planned: plugin system for third-party extensions, asset marketplace for community sharing, A2A protocol for agent-to-agent communication, multi-modal support, streaming API, i18n/L10n, and SDK generation.
+Integration and extensibility layer. Native MCP support (Client + Server with Streamable HTTP transport), webhook notifications, event dispatcher, and OpenAI-compatible API ensure broad interoperability. A2A Protocol (v1.0 GA) enables cross-framework agent communication — Hecate agents can be discovered and invoked by external platforms, and external agents can be used as sub-agents in Hecate workflows. Planned: signed Agent Cards for cryptographic identity verification, plugin system for third-party extensions, asset marketplace for community sharing, AP2 payments protocol, multi-modal support, streaming API, i18n/L10n, and SDK generation.
 
 ![Ecosystem L2](images/ecosystem-l2.png)
 

@@ -310,6 +310,39 @@ These events flow through the same audit pipeline (batch writer → policy engin
 | Engine Post-Tool | ToolResultSecurityHook | After tool returns | PII in tool results |
 | Auth Layer | AuthService + ApiKeyService | Every API request | Unauthorized access |
 | Audit Layer | AuditBatchWriter + Policies | All security events | Compliance, anomaly detection |
+| A2A Layer | Signed Agent Cards | Agent discovery | Card impersonation attacks |
+
+---
+
+## A2A Protocol Security (Planned)
+
+### Signed Agent Cards
+
+A2A v1.0 introduces cryptographic signatures on Agent Cards — the most significant security improvement in the production-grade release. Signatures allow receiving agents to cryptographically verify that the card was issued by the domain owner, closing off card impersonation attacks.
+
+**Mechanism**:
+1. Agent Card is signed with the domain owner's private key
+2. Receiving agent fetches the card and verifies the signature against the public key
+3. Verification happens before any task delegation
+4. Invalid signatures cause the card to be rejected
+
+**Integration with Hecate**:
+- Signed Agent Cards will be part of the A2A server implementation
+- Card signing keys will be managed through the existing secret management system
+- Card verification will happen in the A2A client before task delegation
+
+### Agent-to-Agent Authentication
+
+A2A supports multiple authentication schemes:
+- **APIKey** — Simple key-based authentication
+- **HTTPAuth** — HTTP Basic/Digest authentication
+- **OAuth2** — Token-based authentication with scopes
+- **OpenIdConnect** — Federated identity via OIDC
+- **MutualTLS** — Certificate-based authentication
+
+Hecate will implement the subset of authentication schemes that align with its enterprise security model, starting with APIKey and OAuth2.
+
+See [ADR-011: A2A Protocol Adoption](adr/011-a2a-protocol-adoption.md) for the full decision record.
 
 ---
 
