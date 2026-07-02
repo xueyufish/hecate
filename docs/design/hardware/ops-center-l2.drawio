@@ -1,20 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="drawio" version="26.0.0">
   <diagram name="Ops-Center-L2" id="ops-center-l2">
-    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="380" math="0" shadow="0">
+    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="640" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
         <!-- LEGEND -->
         <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" vertex="1" parent="1">
-          <mxGeometry x="590" y="12" width="175" height="36" as="geometry" />
+          <mxGeometry x="530" y="12" width="235" height="36" as="geometry" />
         </mxCell>
         <mxCell id="legend_done" value="✅ Impl." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="600" y="17" width="70" height="26" as="geometry" />
+          <mxGeometry x="540" y="17" width="70" height="26" as="geometry" />
         </mxCell>
         <mxCell id="legend_plan" value="📋 Planned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="680" y="17" width="78" height="26" as="geometry" />
+          <mxGeometry x="620" y="17" width="78" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_oe" value="📋 OE Enhancement" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="708" y="17" width="50" height="26" as="geometry" />
         </mxCell>
         <!-- TITLE -->
         <mxCell id="title" value="&lt;b&gt;Ops Center — L2 Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
@@ -45,10 +48,10 @@
         <mxCell id="r1_audit" value="✅ Audit Logging" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r1_c">
           <mxGeometry x="225" y="68" width="215" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r1_realtime" value="📋 Real-Time Monitoring" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+        <mxCell id="r1_traceannotate" value="📋 Trace Annotation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
           <mxGeometry x="465" y="68" width="210" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r1_cost" value="📋 Cost Dashboard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+        <mxCell id="r1_decisionlineage" value="📋 Decision Lineage" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
           <mxGeometry x="700" y="68" width="210" height="26" as="geometry" />
         </mxCell>
 
@@ -56,7 +59,7 @@
         <mxCell id="r2_c" value="2. Evaluation &amp; Testing" style="swimlane;startSize=26;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
           <mxGeometry x="20" y="180" width="910" height="95" as="geometry" />
         </mxCell>
-        <!-- 5 × 170 = 850 -->
+        <!-- Sub-row 2a: 5 × 170 = 850 -->
         <mxCell id="r2_eval" value="✅ Evaluation Engine (41)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
         </mxCell>
@@ -72,12 +75,88 @@
         <mxCell id="r2_regression" value="📋 Regression Testing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
           <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-
-        <!-- ROW 3: DOWNSTREAM -->
-        <mxCell id="r3_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="295" width="910" height="50" as="geometry" />
+        <!-- Sub-row 2b: 5 × 170 = 850 -->
+        <mxCell id="r2_objectlog" value="📋 Object Log" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_down" value="⤵  To Agent Engine — Trace / Evaluation / Metrics via EnginePort" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r3_c">
+        <mxCell id="r2_benchmark" value="📋 Agent Benchmarks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_simulateval" value="📋 Simulation Evaluation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_costtrack" value="📋 Cost Tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_multimodel" value="📋 Multi-Model Comparison" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 3: OPS CENTER CONSOLE (NEW - P4) -->
+        <mxCell id="r3_c" value="3. Ops Center Console" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="295" width="910" height="95" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3a: 4 boxes @ 215+220+220+215 = 870 -->
+        <mxCell id="r3_dashboard" value="📋 Unified Dashboard (8.9)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="30" width="215" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_health" value="📋 Health Monitoring (8.9a)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="230" y="30" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_analytics" value="📋 Conversation Analytics (8.9b)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="465" y="30" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_testcenter" value="📋 Testing Center (7.9)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="700" y="30" width="210" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3b: 4 boxes -->
+        <mxCell id="r3_budget" value="📋 Budget Management (10.7)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="68" width="215" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_envmgr" value="📋 Environment Mgmt (13.17)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="230" y="68" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_apimgr" value="📋 API Management (13.18)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="465" y="68" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_compliance" value="📋 Compliance Center (9.9)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="700" y="68" width="210" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 4: OBSERVABILITY & EVALUATION ENHANCEMENT (OE) -->
+        <mxCell id="r4_c" value="4. Observability &amp; Evaluation Enhancement" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="410" width="910" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_cicd" value="📋 CI/CD Eval Gating (8.10)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="0" y="30" width="215" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_otel" value="📋 OTel GenAI Alignment" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="230" y="30" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_online" value="📋 Online Scoring" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="465" y="30" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_lineage" value="📋 Data→Decision Trace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="700" y="30" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_catalog" value="📋 Agent Catalog Gov. (8.12)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="0" y="68" width="215" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_efficiency" value="📋 Reasoning Efficiency Eval" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="230" y="68" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_multitrc" value="📋 Multi-Agent Tracing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="465" y="68" width="220" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_adversarial" value="📋 Adversarial Test Gen" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="700" y="68" width="210" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 5: DOWNSTREAM -->
+        <mxCell id="r5_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="525" width="910" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r5_down" value="⤵  To Observability Backend — Trace / Evaluation / Metrics via EnginePort" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
           <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />
         </mxCell>
 
@@ -85,7 +164,13 @@
         <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#1565C0;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r1_c" target="r2_c">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e2" value="Trace / Metrics" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#1565C0;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
+        <mxCell id="e2" value="Trace / Metrics" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#388E3C;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="Aggregated Data" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7B1FA2;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r3_c" target="r4_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="Enhanced Data" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#7B1FA2;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r4_c" target="r5_c">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
       </root>

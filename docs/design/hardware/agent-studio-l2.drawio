@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="drawio" version="26.0.0">
   <diagram name="Agent-Studio-L2" id="agent-studio-l2">
-    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="420" math="0" shadow="0">
+    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="460" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -23,7 +23,7 @@
 
         <!-- ========== ROW 1: DEVELOPMENT TOOLS (h=105, gap=25) ========== -->
         <mxCell id="r1_c" value="1. Development Tools" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="55" width="910" height="105" as="geometry" />
+          <mxGeometry x="20" y="55" width="910" height="145" as="geometry" />
         </mxCell>
         <!-- Sub-row 1a: 200+225+210+200 = 835, + 3×25 gaps = 910 -->
         <mxCell id="r1_canvas" value="✅ Visual Canvas (React Flow)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
@@ -51,10 +51,23 @@
         <mxCell id="r1_nl2agent" value="📋 NL2Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
           <mxGeometry x="710" y="68" width="200" height="26" as="geometry" />
         </mxCell>
+        <!-- Sub-row 1c: New node types (4 × 200 + 3×25 = 875 ≈ 910) -->
+        <mxCell id="r1_formnode" value="📋 Human Input / Form Node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="106" width="200" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_trigger" value="📋 Trigger Node (Webhook/Schedule/Event)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="225" y="106" width="225" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_objectcr" value="📋 Object CRUD Node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="475" y="106" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_chatcanvas" value="📋 Side-by-side Chat+Canvas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="710" y="106" width="200" height="26" as="geometry" />
+        </mxCell>
 
         <!-- ========== ROW 2: API & SERVICES (h=105, gap=15 for 5 items) ========== -->
         <mxCell id="r2_c" value="2. API &amp; Services" style="swimlane;startSize=26;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="180" width="910" height="105" as="geometry" />
+          <mxGeometry x="20" y="220" width="910" height="105" as="geometry" />
         </mxCell>
         <!-- Sub-row 2a: 5 × 170 = 850, + 4×15 gaps = 910 -->
         <mxCell id="r2_agentapi" value="✅ Agent CRUD API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
@@ -91,7 +104,7 @@
 
         <!-- ========== ROW 3: DOWNSTREAM ========== -->
         <mxCell id="r3_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="305" width="910" height="50" as="geometry" />
+          <mxGeometry x="20" y="345" width="910" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r3_down" value="⤵  To Agent Engine — Graph DSL (Compiler / Pregel Runtime / Channels)" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r3_c">
           <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />

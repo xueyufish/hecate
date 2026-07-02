@@ -1,6 +1,6 @@
 # Security Architecture
 
-> Deep dive into Hecate's multi-layer security system: guardrail hooks, PII anonymization, LLM Guard, authentication, and audit trail. For a system overview, see [Architecture](architecture.md). For RAG pipeline security (PII in documents), see [RAG Pipeline Design](rag-pipeline-design.md).
+> Deep dive into Hecate's multi-layer security system: guardrail hooks, PII anonymization, LLM Guard, authentication, audit trail, agent runtime protection, automated red teaming, and OWASP ASI coverage. For a system overview, see [Architecture](architecture.md). For RAG pipeline security (PII in documents), see [RAG Pipeline Design](rag-pipeline-design.md). For enhancement decisions, see [ADR-026](adr/026-security-shield-enhancement.md).
 
 ---
 
@@ -346,11 +346,189 @@ See [ADR-011: A2A Protocol Adoption](adr/011-a2a-protocol-adoption.md) for the f
 
 ---
 
+## Fine-Grained Permission Control (Planned)
+
+The **Fine-Grained Permission Control** extends the existing RBAC system with granular access control at multiple levels:
+
+### Permission Levels
+
+| Level | Scope | Example |
+|-------|-------|---------|
+| **Workspace** | Current | User can access all data in workspace X |
+| **Object** | Planned | User can access only specific entities (e.g., Customer #123) |
+| **Attribute** | Planned | User can see customer name but not SSN |
+| **Row** | Planned | User can only see their own orders |
+
+### Security Policy Mapping
+
+Fine-grained permissions are mapped to the ontology orchestration engine:
+
+```
+Security Policy
+    ↓
+Ontology Object → Permission Check → Allow/Deny
+    ↓
+Action Execution → Audit Trail
+```
+
+This enables:
+- **Data-level isolation**: Users see only data they're authorized to access
+- **Attribute-level masking**: Sensitive fields are hidden or masked
+- **Action-level control**: Users can only perform authorized operations
+- **Policy inheritance**: Workspace policies cascade to objects and attributes
+
+### Integration with Existing Security
+
+The fine-grained permission system integrates with:
+- **RBAC** (existing): Role-based workspace access
+- **Guardrail Hooks** (existing): AI-level input/output filtering
+- **Audit Trail** (existing): Permission check logging
+- **Ontology Action System** (planned): Action-level permission control
+
+---
+
+## Zero Trust Identity Architecture (Planned)
+
+The current authentication system uses a single-tier identity model — an API Key or JWT identifies "who is calling" without distinguishing server-to-server from user-to-server traffic. The **Zero Trust Identity Architecture** (ADR-018) evolves this to a multi-tier model with unified governance.
+
+### Two-Tier Identity Model
+
+| Tier | Token Type | Scope | Audit |
+|------|-----------|-------|-------|
+| **App-level** | API Key (`hcat_*`) | Application identity | Application-level audit |
+| **User-level** | JWT (Bearer) | End-user identity | Per-user audit |
+| **Combined** | API Key + JWT header | App acting on behalf of user | Dual audit trail |
+
+This distinction enables granular access control: App-level identities have broad service access (server-to-server), while User-level identities carry per-user permissions and audit context.
+
+### Per-Token-Type Auth Pipeline
+
+Different token types route through separate authentication pipelines at the gateway level:
+
+```
+Request → Token Type Detection → ┌─ JWT Pipeline ──→ Verify HS256 + Expiry + RBAC
+                                  ├─ APIKey Pipeline → Verify SHA-256 + Rate Limit
+                                  ├─ PAT Pipeline ───→ Verify Scope + Rotation
+                                  └─ OAuth SSO ──────→ Verify OIDC + Scope Mapping
+```
+
+Each pipeline has distinct verification steps, rate limits, and edition gating (Community vs Enterprise). The gateway-level router determines the pipeline before the request reaches business logic.
+
+### Platform-Level Governance
+
+A unified governance layer enforces 20+ policies across four domains:
+
+| Domain | Policies |
+|--------|----------|
+| **Identity** | Auto API key rotation, JWT auth enforcement, suspicious login detection |
+| **Data** | Real-time sensitive content blocking, PII masking, data residency rules |
+| **API** | Rate limiting, quota enforcement, model routing, fallback chains |
+| **AI Trust** | Prompt injection defense, output toxicity filtering, hallucination detection |
+
+All policies are evaluated at the gateway before the request reaches the Agent Engine — a single choke point for security enforcement (inspired by Salesforce MuleSoft Flex Gateway and Palantir Trust Layer).
+
+### Zero Trust Principles
+
+- **IAM-based service accounts**: Each agent has a unique identity with scoped permissions (principle of least privilege)
+- **Token exchange**: OAuth 2.0 Token Exchange (RFC 8693) for identity propagation across service boundaries
+- **Continuous verification**: Every tool call, LLM invocation, and knowledge query is authenticated — no implicit trust based on network position
+- **A2A integration**: Signed Agent Cards (A2A v1.0) become a natural extension of per-agent identity for cross-framework communication
+
+See [ADR-018: Zero Trust Identity Architecture](adr/018-zero-trust-identity-architecture.md).
+
+---
+
+## Agent Runtime Protection (9.11)
+
+### Problem
+
+Hecate's Guardrail Hooks are **stateless per-invocation** — each hook fires independently without persistent session state. OWASP Top 10 for Agentic Applications (ASI01-ASI10, 2026) defines agent-specific risks that require **stateful monitoring** across the execution trajectory: goal hijack develops over multiple turns, tool chain escalation involves sequence analysis, memory poisoning requires baseline comparison.
+
+### Stateful Runtime Security Layer
+
+Plugs on top of existing per-call Guardrail Hooks, maintaining session state across supersteps within PregelRuntime:
+
+| Detector | ASI Coverage | Method | Action |
+|----------|-------------|--------|--------|
+| **Goal Drift** | ASI01 | Cosine distance between current action embeddings and original task goal embedding | ALERT if > 0.7 |
+| **Tool Chain Escalation** | ASI02 | Forbidden tool sequence pattern matching | BLOCK dangerous combos |
+| **Memory Poisoning** | ASI06 | Z-score anomaly on memory write patterns | ALERT on outliers |
+| **Behavioral Anomaly** | ASI08 | Agent DNA fingerprint vs baseline profile | FLAG novel patterns |
+| **Rogue Agent** | ASI10 | Permission boundary violation detection | BLOCK + quarantine |
+
+---
+
+## Automated Continuous Red Teaming (7.10)
+
+### Problem
+
+Hecate's Security Testing (7.7) is manual — no automated, continuous adversarial testing. Lakera Red and Promptfoo have matured into CI/CD-integrated platforms with 50+ vulnerability types and community threat intelligence.
+
+### CI/CD Integration
+
+Attack categories: prompt injection, jailbreaks, data leakage, business rule violations, insecure tool use (BOLA/BFLA), toxic content, agent-specific attacks (goal hijack, memory poisoning, tool chain abuse). Multi-turn workflows simulate real attacker behavior. Reports as PR comments with severity scoring and remediation guidance.
+
+---
+
+## Injection Type Detection (9.1a Enhancement)
+
+YARA rule-based pattern matching on LLM outputs before they reach downstream systems:
+
+| Injection Type | Pattern Example | Downstream System |
+|---------------|----------------|-------------------|
+| Code (Python) | `exec()`, `eval()`, `__import__` | Code interpreter |
+| SQL | `DROP TABLE`, `UNION SELECT`, `--` | Database query |
+| Template (Jinja) | `{{ config }}`, `{% import %}` | Template renderer |
+| XSS | `<script>`, `onerror=`, `javascript:` | HTML page |
+
+---
+
+## System Prompt Leakage Protection (9.2 Enhancement)
+
+OWASP LLM07:2025. Detects when LLM output reproduces system prompt content. Hash-based + semantic similarity comparison against system prompt fingerprints. Blocks responses reproducing > 20% of confidential instructions, embedded secrets, or security rules.
+
+---
+
+## Security Event SIEM Pipeline (8.7 Enhancement)
+
+Converts internal security events to industry-standard formats:
+
+| Event Type | Format | Severity |
+|-----------|--------|----------|
+| DLP_VIOLATION | CEF | High (7) |
+| INJECTION_ATTEMPT | CEF | High (8) |
+| PERMISSION_DENIED | LEEF | Medium (5) |
+| BEHAVIORAL_ANOMALY | JSON | Medium (4-6) |
+| TRUST_SCORE_CHANGE | JSON | Low (3) |
+
+Real-time streaming via syslog/HTTPS webhook to Splunk/Datadog/Elastic.
+
+---
+
+## Multi-Agent Trust Verification (2.10a Enhancement)
+
+Runtime trust scoring between agents:
+
+```
+trust_score = w1 × signature_valid
+            + w2 × interaction_success_rate
+            + w3 × (1 - anomaly_score)
+            + w4 × permission_alignment
+```
+
+Threshold: < 0.3 → BLOCK interaction; 0.3-0.7 → degrade privileges; > 0.7 → allow. Covers OWASP ASI03 (Identity & Privilege Abuse), ASI07 (Insecure Inter-Agent Communication), ASI09 (Human-Agent Trust Exploitation).
+
+---
+
 ## Further Reading
 
 | Document | Description |
 |----------|-------------|
+| [ADR-026: Security Shield Enhancement](adr/026-security-shield-enhancement.md) | Architecture decisions for SS1-SS6 |
 | [Architecture](architecture.md) | System overview, module architecture |
 | [RAG Pipeline Design](rag-pipeline-design.md) | Document ingestion and retrieval pipeline |
 | [Engine Design](engine-design.md) | Guardrail hooks, Pregel runtime, worker pool |
 | [ADR-008: Security via Hooks](adr/008-security-via-hooks.md) | Decision record for hook-based security architecture |
+| [ADR-018: Zero Trust Identity Architecture](adr/018-zero-trust-identity-architecture.md) | Zero Trust principles and agent identity |
+| [ADR-014: Ontology Action System](adr/014-ontology-action-system.md) | Decision record for action system with security controls |
+| [ADR-018: Zero Trust Identity](adr/018-zero-trust-identity-architecture.md) | Decision record for Two-Tier Identity, Per-Token-Type Auth, and Platform-Level Governance |

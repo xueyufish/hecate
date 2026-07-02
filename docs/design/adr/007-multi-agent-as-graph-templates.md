@@ -18,8 +18,8 @@ Every orchestration pattern can be expressed as a graph topology:
 - **Handoff** = Command(goto)
 - **Pipeline** = linear chain
 - **Broadcast** = fan-out / fan-in
-- **Peer selection** = LLM routing loop
 - **Negotiation** = cyclic message exchange
+- **Debate** = adversarial cyclic exchange with judge resolution
 
 By treating all patterns as graphs, Hecate avoids the complexity of maintaining separate code paths for each pattern. Patterns are progressively added to the template library. Any pattern can be visualized and edited in the canvas — users are not locked into preset topologies.
 

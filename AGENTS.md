@@ -81,7 +81,7 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 | `docs/design/architecture.md` | Top-level architecture overview |
 | `docs/design/engine-design.md` | Execution engine deep dive |
 | `docs/design/concepts.md` | Core entity model and data design |
-| `docs/design/adr/` | Architecture Decision Records (10 ADRs) |
+| `docs/design/adr/` | Architecture Decision Records (20 ADRs) |
 | `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) — bundled in package |
 | `openspec/specs/` | 86 spec directories — the source of truth for each feature |
 | `openspec/changes/archive/` | Completed OpenSpec changes |

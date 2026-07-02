@@ -28,7 +28,7 @@ Build, orchestrate, and run AI Agent applications on your own infrastructure —
 
 | Metric | Value |
 |--------|-------|
-| Features (P1–P5) | 239 total (123 implemented) |
+| Features (P1–P5) | 343 total (123 implemented) |
 | Tests | 1,700+ |
 | Extension Points | 15 (11 Core + 4 SPI) |
 | OpenSpec specs | 86 |
@@ -215,7 +215,7 @@ JSON DSL → Compiler (schema validation + optimization passes) → CompiledGrap
 
 | Document | Location | Description |
 |----------|----------|-------------|
-| Architecture Design | `docs/design/architecture.md` | 5-layer architecture, 10 ADRs, engine design |
+| Architecture Design | `docs/design/architecture.md` | 5-layer architecture, 28 ADRs, engine design |
 | OpenSpec Specs | `openspec/specs/` | 86 feature specifications with requirements and scenarios |
 | OpenSpec Archive | `openspec/changes/archive/` | 62 completed change proposals with design docs |
 | Graph DSL Schema | `src/hecate/engine/graph-dsl.schema.json` | JSON Schema for graph definition |

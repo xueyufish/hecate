@@ -83,8 +83,8 @@ Channels are the state management primitive. Each channel type defines write sem
 | Type | Semantics | Write Behavior | Typical Use |
 |------|-----------|---------------|-------------|
 | `last_value` | Keeps the last value | New value overwrites old value | Current plan, current state |
-| `topic` | Message stream | Append (supports reducer) | Conversation messages, tool call records |
-| `persistent_topic` | Persistent message stream | Append + persistence | Audit log, immutable event stream |
+| `topic` | Message stream | Append (supports reducer) | Conversation messages, tool call records, audit logs |
+| `accumulator` | Accumulator | Aggregate via specified function | Iteration counter, token usage statistics |
 | `accumulator` | Accumulator | Aggregate via specified function | Iteration counter, token usage statistics |
 
 The channel system is managed by a `ChannelManager` with a pluggable `ChannelTypeRegistry`. Writes to unregistered channels are silently skipped; reads from unregistered channels raise `KeyError`. State restoration (from Checkpoint) bypasses write semantics and directly sets the underlying value.
@@ -280,6 +280,18 @@ The engine provides a pluggable strategy system for resilient execution:
 - **Fallback** — Primary model failure triggers automatic fallback to a configured secondary model, then to a default response.
 - **Circuit Breaker** — Per-prefix circuit breaker for LLM routing. Tracks failure rates and transitions between CLOSED → OPEN → HALF_OPEN states. When OPEN, requests fail fast instead of waiting for timeouts.
 
+### RetryStrategy (Extension Point #11)
+
+The `RetryStrategy` abstract base class defines the retry policy as the engine's 11th Core extension point. It is integrated into the Pregel runtime via `RetryExecutor`, which wraps LLM calls and tool executions with retry logic:
+
+| Method | Purpose |
+|--------|---------|
+| `should_retry(exception, attempt) -> bool` | Determine if the operation should be retried based on exception type and attempt count |
+| `get_backoff(attempt) -> float` | Calculate backoff delay (seconds) for the given attempt |
+| `with_config(max_attempts, backoff_strategy, jitter) -> RetryStrategy` | Return a new instance with modified configuration |
+
+The default `NoRetryStrategy` never retries. Built-in implementations include `ExponentialBackoffStrategy` (exponential backoff with jitter) and `LinearBackoffStrategy` (linear backoff with configurable step). Custom predicates allow fine-grained control — for example, retrying only on `RateLimitError` but not on `AuthenticationError`.
+
 ---
 
 ## Streaming Output
@@ -335,13 +347,180 @@ See [ADR-011: A2A Protocol Adoption](adr/011-a2a-protocol-adoption.md) for the f
 
 ---
 
+## Simulation Environment (Planned)
+
+The **Simulation Environment** enables agents to execute and reason without affecting real systems. It provides:
+
+- **Isolated Sandbox**: A copy of the runtime environment where actions can be tested
+- **Dry-Run Execution**: Run workflows and actions without side effects
+- **What-If Analysis**: Test different scenarios and observe outcomes
+- **Validation**: Verify agent behavior before production deployment
+
+The simulation environment builds on the existing Docker sandbox and checkpoint system, adding a "simulation mode" flag that prevents write-back to external systems.
+
+---
+
+## 5-Level Intent Recognition (Planned)
+
+The **5-Level Intent Recognition** system provides hierarchical understanding of user intent:
+
+1. **Atomic Intent** — Single user query (e.g., "show me the report")
+2. **Workflow Intent** — Multi-step complex task (e.g., "generate quarterly report and send to stakeholders")
+3. **Session Intent** — Overall dialogue goal (e.g., "analyze Q4 performance")
+4. **Domain Intent** — Business domain context (e.g., "financial analysis")
+5. **Meta Intent** — Platform-level intent (e.g., "optimize agent performance")
+
+Each level informs the next, enabling more accurate routing and context gathering.
+
+---
+
+## Self-Planning (Planned)
+
+The **Self-Planning** capability enables agents to break down complex tasks into executable plans using formal planning methods:
+
+- **PDDL Integration**: Planning Domain Definition Language for formal task representation
+- **Monte Carlo Tree Search (MCTS)**: Multi-path exploration for optimal plan selection
+- **Tree/Graph of Thought**: Structured reasoning for complex problem decomposition
+- **Ultra-Long Task Planning**: Support for 100+ step execution plans
+
+Self-planning complements the existing Graph DSL by enabling dynamic plan generation rather than static workflow definition.
+
+---
+
+## Agentic RL Integration (Planned)
+
+The engine will integrate with the Agentic RL Framework through:
+
+- **Trace Hooks**: EventStore integration for capturing execution traces
+- **Reward Signals**: Engine exposes success/failure signals for RL training
+- **Policy Evolution**: Engine supports runtime policy updates from RL optimization
+- **A/B Testing**: Engine supports running multiple agent configurations simultaneously for comparison
+
+See [ADR-013: Agentic RL Framework](adr/013-agentic-rl-framework.md).
+
+---
+
+## Knowledge Graph Integration (Planned)
+
+The engine will access structured knowledge via the `GraphStore` ABC (see [ADR-017](adr/017-knowledge-graph-architecture.md)) through the existing `EnginePort.knowledge_query()` interface. This extends the knowledge access layer beyond vector-based RAG:
+
+- **Entity-centric retrieval**: `knowledge_query()` routes entity/relation queries to the GraphStore backend (Neo4j or in-memory)
+- **Multi-hop traversal**: `GraphStore.get_neighbors(entity_id, depth)` enables multi-hop reasoning across connected entities
+- **Community-level retrieval**: `GraphStore.detect_communities(algorithm)` clusters related entities for GraphRAG — broader context than chunk-level retrieval
+- **OAG integration**: The Ontology-Augmented Generation pipeline (ADR-015) combines RAG retrieval + ontology logic + action execution, all routed through `EnginePort`
+
+The engine itself remains graph-database-agnostic — the service layer provides the `Neo4jGraphStore` adapter, and the engine calls only the abstract `GraphStore` interface via `EnginePort`.
+
+---
+
+## Asynchronous Execution Mode (Planned)
+
+The **Asynchronous Execution API Mode** (1.3.11) provides a third execution mode for long-running workflows (minutes to days):
+
+```
+Client → POST /api/workflows/{id}/execute → { task_id, status: "submitted" }
+Client → GET /api/tasks/{task_id} → { status: "running" | "completed" | "failed", result }
+Client → DELETE /api/tasks/{task_id} → { status: "cancelled" }
+```
+
+| Mode | Duration | Connection | Use Case |
+|------|----------|------------|----------|
+| Synchronous | < 60s | Blocking HTTP | Quick Q&A, API calls |
+| Streaming | < 15min | Persistent SSE | Real-time chat, progress display |
+| Asynchronous | 15min - 24h+ | Fire-and-forget + poll/webhook | Batch processing, report generation, multi-round research |
+
+Task lifecycle: `submitted → running → completed/failed/cancelled`. The async mode wraps the existing Pregel runtime in a background task runner — the engine itself is unchanged. See [ADR-020](adr/020-async-execution-distributed-state.md).
+
+---
+
+## Distributed Session State (Planned)
+
+The **Distributed Session State Store** (13.4a) enables multi-replica horizontal scaling with Redis-backed hot-path caching:
+
+```
+Read:  Redis cache (0.5ms) → cache miss → PostgreSQL checkpoint (5ms) → cache in Redis
+Write: Every superstep → PostgreSQL (durable) → Redis cache (hot-path)
+```
+
+`SessionStateStore` ABC with `InMemorySessionStateStore` (development) and `RedisSessionStateStore` (production). Any replica can serve any session — no sticky sessions required. See [ADR-020](adr/020-async-execution-distributed-state.md).
+
+---
+
+## Composable ReAct Loop Middleware (Planned)
+
+The **ReAct Loop Middleware** (E3 enhancement to Deterministic Hooks) adds stackable hooks at the reasoning-acting cycle level, beyond the fixed 4 Guardrail Hook types:
+
+| Middleware Position | Fires When | Example Use |
+|--------------------|-----------|-------------|
+| `on_reasoning` | Before LLM reasoning step | Log reasoning chain, inject context |
+| `on_acting` | Before tool execution | Check resource limits, audit actions |
+| `on_reply` | After agent generates reply | Post-process response, update metrics |
+| `on_model_call` | Before/after each LLM call | Cost tracking, provider-specific shaping |
+
+Middleware chains compose like Python decorators — multiple middlewares can be stacked without modifying the engine. This complements the existing Context Engine Processor Chain (4.13) with reasoning-loop-level hooks.
+
+---
+
+## Saga/Compensation Pattern (Planned)
+
+The **Saga/Compensation Pattern** (E4 enhancement to Temporal Conflict Resolution) provides automatic rollback for failed multi-step workflows:
+
+```
+Step 1: Create User → ✅
+Step 2: Provision Account → ✅
+Step 3: Send Welcome Email → ❌ FAILED
+
+→ Compensation triggered:
+   Step 2 rollback: Unprovision account
+   Step 1 rollback: Delete user
+→ Workflow status: "rolled_back"
+```
+
+Leverages the existing Temporal integration (13.10) to provide saga-level durability — automatic retry with compensation logic, long-running workflow support, and step-level rollback. Each node can declare an optional `compensation` action that executes in reverse order if a downstream node fails.
+
+---
+
+## Checkpoint Branching for What-If Analysis (Planned)
+
+The **Checkpoint Branching** (E5 enhancement to Simulation Environment) creates new execution sessions from historical checkpoints with modified state:
+
+```
+Original Session (Session A):
+  Checkpoint #1 → Checkpoint #2 → Checkpoint #3 → completed
+
+What-If Branch (Session B):
+  Fork from Checkpoint #2 (modify state: change user_input)
+  → New execution path → different outcome
+```
+
+This enables parallel "what-if" scenario testing without affecting the original session. Branches are independent sessions with their own checkpoint chains, referencing the original checkpoint as their fork point.
+
+---
+
+## Worker Pool Auto-Scaling (Planned)
+
+The **Worker Pool Auto-Scaling** (E6 enhancement to Progressive Worker Pool) adds runtime scaling parameters:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `min_workers` | 4 | Minimum number of active workers |
+| `max_workers` | 100 | Maximum number of workers |
+| `scale_up_threshold` | 10 | Queue length that triggers scaling up |
+| `scale_down_idle_time` | 60s | Idle time before scaling down a worker |
+
+Auto-scaling applies to the cross-process and distributed Worker Pool tiers. The in-process thread pool uses a fixed pool size (configurable per session).
+
+---
+
 ## Further Reading
 
 | Document | Description |
 |----------|-------------|
 | [Architecture](architecture.md) | System overview, design principles, module architecture |
+| [Agent Studio Design](agent-studio-design.md) | Visual canvas, multi-agent orchestration, NL2X, visual node types |
 | [Security Architecture](security-architecture.md) | Guardrail hooks deep dive, PII anonymization, audit system |
 | [RAG Pipeline Design](rag-pipeline-design.md) | Knowledge retrieval pipeline, hybrid search, citations |
+| [Access Channel Design](access-channel-design.md) | API surfaces, authentication, gateway control plane |
 | [Core Concepts](concepts.md) | Entity definitions, relationships, data model |
 | [ADR Directory](adr/) | Architecture Decision Records |
 | [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition |

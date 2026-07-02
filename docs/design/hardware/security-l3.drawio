@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="drawio" version="26.0.0">
   <diagram name="Security-L3" id="security-l3">
-    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="620" math="0" shadow="0">
+    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="685" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -83,7 +83,7 @@
         <mxCell id="r3_a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#E65100;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r3_c" source="r3_deanon" target="r3_output"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- ========== ROW 4: AUTH + AUDIT ========== -->
-        <mxCell id="r4_c" value="Authentication & Audit Trail" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#616161;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+        <mxCell id="r4_c" value="Authentication &amp; Audit Trail" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#616161;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
           <mxGeometry x="20" y="385" width="910" height="105" as="geometry" />
         </mxCell>
         <!-- Auth column -->
@@ -120,9 +120,34 @@
         <mxCell id="r4_a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#616161;strokeWidth=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r4_c" source="r4_batch" target="r4_policy"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="r4_a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#616161;strokeWidth=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r4_c" source="r4_policy" target="r4_store"><mxGeometry relative="1" as="geometry" /></mxCell>
 
-        <!-- ========== ROW 5: GUARDRAIL ACTIONS ========== -->
+        <!-- ========== ROW 5: A2A AGENT CARD VERIFICATION (PLANNED) ========== -->
+        <mxCell id="r5_a2a_c" value="A2A Agent Card Verification Flow (Planned)" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="510" width="910" height="95" as="geometry" />
+        </mxCell>
+        <mxCell id="a2a_discover" value="🔍 Agent Card Discovery&#xa;fetch /.well-known/agent.json&#xa;from remote agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r5_a2a_c">
+          <mxGeometry x="10" y="32" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="a2a_verify" value="🔐 Signature Verification&#xa;verify cryptographic signature&#xa;against domain public key" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r5_a2a_c">
+          <mxGeometry x="225" y="32" width="190" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="a2a_auth" value="🔑 Authentication&#xa;APIKey · OAuth2 · mTLS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r5_a2a_c">
+          <mxGeometry x="460" y="32" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="a2a_delegate" value="📋 Task Delegation&#xa;if verified → delegate&#xa;if invalid → reject" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r5_a2a_c">
+          <mxGeometry x="675" y="32" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="a2a_result" value="✅ Task&#xa;Accepted&#xa;→ Channel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;" vertex="1" parent="r5_a2a_c">
+          <mxGeometry x="860" y="35" width="45" height="44" as="geometry" />
+        </mxCell>
+        <!-- Arrows -->
+        <mxCell id="a2a_e1" value="FETCH" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#7B1FA2;strokeWidth=2;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r5_a2a_c" source="a2a_discover" target="a2a_verify"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a2a_e2" value="VERIFY" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#7B1FA2;strokeWidth=2;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r5_a2a_c" source="a2a_verify" target="a2a_auth"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a2a_e3" value="AUTH" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#7B1FA2;strokeWidth=2;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r5_a2a_c" source="a2a_auth" target="a2a_delegate"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="a2a_e4" value="ALLOW" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#7B1FA2;strokeWidth=2;fontSize=8;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r5_a2a_c" source="a2a_delegate" target="a2a_result"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ========== ROW 6: GUARDRAIL ACTIONS ========== -->
         <mxCell id="r5_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="510" width="910" height="50" as="geometry" />
+          <mxGeometry x="20" y="625" width="910" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r5_actions" value="GuardrailResult:  ALLOW (proceed)  ·  BLOCK (abort + safety message)  ·  SANITIZE (proceed with modified_data)" style="text;html=1;fontSize=10;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
           <mxGeometry x="100" y="5" width="710" height="40" as="geometry" />
