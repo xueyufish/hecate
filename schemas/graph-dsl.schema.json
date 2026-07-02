@@ -1,0 +1,165 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Hecate Graph DSL",
+  "description": "Schema for Hecate Agent workflow graph definitions",
+  "type": "object",
+  "required": ["version", "name", "state", "nodes", "edges"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Graph DSL version"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255,
+      "description": "Graph name"
+    },
+    "state": {
+      "type": "object",
+      "description": "Channel declarations",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["last_value", "topic", "persistent_topic", "accumulator"]
+          },
+          "default": {},
+          "initial": {},
+          "reduce": {
+            "type": "string",
+            "enum": ["append", "add"]
+          },
+          "persistent": {
+            "type": "boolean",
+            "description": "Whether the channel persists across sessions (checkpoint). Orthogonal to write semantics."
+          }
+        }
+      }
+    },
+    "nodes": {
+      "type": "object",
+      "description": "Node definitions (key = NodeId)",
+      "not": {
+        "required": ["__start__"]
+      },
+      "propertyNames": {
+        "not": {
+          "const": "__start__"
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["type", "config"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["conversation", "tool-call", "condition", "agent", "knowledge-retrieval", "variable-set", "fan-out", "merge", "suggestion"]
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "model": { "type": "string" },
+              "system_prompt": { "type": "string" },
+              "tool_name": { "type": "string" },
+              "expression": { "type": "string" },
+              "agent_ref": { "type": "string" },
+              "skill_ref": { "type": "string" },
+              "kb_ids": { "type": "array", "items": { "type": "string" } },
+              "query_template": { "type": "string" },
+              "top_k": { "type": "integer" },
+              "variable_name": { "type": "string" },
+              "value": {},
+              "agent_id": { "type": "string", "description": "UUID of the agent to invoke (agent node type)" },
+              "invocation_mode": { "type": "string", "enum": ["direct", "tool"], "description": "How the agent is invoked: direct (execute inline) or tool (expose as callable tool)" },
+              "branches": { "type": "array", "items": { "type": "string" }, "description": "Node IDs of parallel branches (fan-out node type)" },
+              "fan_out_source": { "type": "string", "description": "ID of the upstream FAN_OUT node (merge node type)" },
+              "output_channel": { "type": "string", "description": "Channel name to write aggregated results (merge node type)" },
+              "channels": {
+                "type": "object",
+                "properties": {
+                  "readable": { "type": "array", "items": { "type": "string" } },
+                  "writable": { "type": "array", "items": { "type": "string" } }
+                }
+              },
+              "routing_mode": {
+                "type": "string",
+                "enum": ["condition", "intent", "dynamic"],
+                "description": "Routing mode for CONDITION nodes: condition (expression), intent (pattern+LLM), dynamic (LLM selects speaker)"
+              },
+              "routing_config": {
+                "type": "object",
+                "description": "Configuration for advanced routing modes",
+                "properties": {
+                  "intent_patterns": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["pattern", "target"],
+                      "properties": {
+                        "pattern": { "type": "string", "description": "Regex pattern to match" },
+                        "target": { "type": "string", "description": "Target node ID" }
+                      }
+                    }
+                  },
+                  "candidate_agents": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Candidate agent node IDs for dynamic routing"
+                  },
+                  "routing_prompt": {
+                    "type": "string",
+                    "description": "LLM prompt for routing classification"
+                  },
+                  "allow_repeated_speaker": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Whether to allow the same agent to speak consecutively"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target"],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "oneOf": [
+              { "type": "string" },
+              {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              }
+            ]
+          },
+          "trigger": {
+            "type": ["string", "null"]
+          },
+          "type": {
+            "type": "string",
+            "enum": ["handoff"],
+            "description": "Edge type: handoff indicates control transfer between agents"
+          }
+        }
+      }
+    },
+    "entry": {
+      "type": "string",
+      "description": "Entry point node ID"
+    }
+  }
+}

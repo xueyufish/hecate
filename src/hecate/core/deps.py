@@ -1,0 +1,157 @@
+"""FastAPI dependency injection utilities.
+
+Provides common dependencies used across API endpoints:
+- Database session management (re-exports ``get_db``)
+- Dual authentication: JWT Bearer Token (user) + API Key (service)
+- Current Agent retrieval by path parameter
+
+.. deprecated::
+    The ``verify_api_key`` and ``get_current_user_id`` functions are
+    deprecated. Use ``get_auth_context`` from ``deps_workspace`` instead
+    which returns a full ``AuthContext`` with workspace_id, role, etc.
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from hecate.core.config import settings
+from hecate.core.database import get_db
+from hecate.models.agent import AgentModel
+from hecate.services.auth.token import decode_access_token
+
+logger = logging.getLogger(__name__)
+
+security_scheme = HTTPBearer()
+
+
+async def verify_api_key(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
+) -> str:
+    """Verify the request via API Key or JWT Bearer token.
+
+    .. deprecated::
+        Use ``get_auth_context`` from ``deps_workspace`` instead.
+
+    Accepts both authentication methods for backward compatibility:
+    - API Key: ``Authorization: Bearer <hecate-api-key>``
+    - JWT: ``Authorization: Bearer <jwt-access-token>``
+
+    Args:
+        credentials: The HTTP Bearer credentials from the request header.
+
+    Returns:
+        str: The validated API key or JWT token string.
+
+    Raises:
+        HTTPException: 401 if neither API key nor JWT is valid.
+    """
+    token = credentials.credentials
+
+    if token in settings.api_keys_list:
+        logger.warning("verify_api_key with env-var API key is deprecated. Use get_auth_context instead.")
+        return token
+
+    try:
+        decode_access_token(token)
+        return token
+    except (JWTError, ValueError, KeyError):
+        pass
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={
+            "error": {
+                "code": "UNAUTHORIZED",
+                "message": "Invalid API key or token",
+                "details": None,
+            }
+        },
+    )
+
+
+async def get_current_user_id(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
+) -> uuid.UUID:
+    """Extract the user ID from a JWT Bearer access token or API key.
+
+    .. deprecated::
+        Use ``get_auth_context`` from ``deps_workspace`` instead.
+
+    Tries JWT first; falls back to a placeholder UUID for API key auth.
+
+    Returns:
+        UUID: The authenticated user's ID.
+
+    Raises:
+        HTTPException: 401 if the token is neither a valid JWT nor a valid API key.
+    """
+    token = credentials.credentials
+
+    # Try JWT first
+    try:
+        payload = decode_access_token(token)
+        return uuid.UUID(payload["sub"])
+    except (JWTError, ValueError, KeyError):
+        pass
+
+    # Fallback to API Key — return a system placeholder
+    if token in settings.api_keys_list:
+        logger.warning("get_current_user_id with env-var API key is deprecated. Use get_auth_context instead.")
+        return uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={
+            "error": {
+                "code": "UNAUTHORIZED",
+                "message": "Invalid or expired token",
+                "details": None,
+            }
+        },
+    )
+
+
+async def get_current_agent(
+    agent_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AgentModel:
+    """Retrieve an agent by ID, raising 404 if not found or deleted.
+
+    Args:
+        agent_id: The UUID of the agent to retrieve.
+        db: The async database session.
+
+    Returns:
+        AgentModel: The requested agent.
+
+    Raises:
+        HTTPException: 404 if the agent is not found or has been soft-deleted.
+    """
+    result = await db.execute(
+        select(AgentModel).where(
+            AgentModel.id == agent_id,
+            ~AgentModel.deleted,
+        )
+    )
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "NOT_FOUND",
+                    "message": "Agent not found",
+                    "details": None,
+                }
+            },
+        )
+    return agent

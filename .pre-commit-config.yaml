@@ -1,0 +1,33 @@
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.8
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.8.3
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: .venv/bin/python -m mypy src/
+        language: system
+        pass_filenames: false
+        files: \.py$
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: scripts/smart-pytest.sh
+        language: system
+        pass_filenames: false
+        files: \.py$

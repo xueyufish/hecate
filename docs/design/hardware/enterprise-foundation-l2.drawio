@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Enterprise-Foundation-L2" id="enterprise-foundation-l2">
+    <mxGraphModel dx="3000" dy="2400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="680" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- LEGEND -->
+        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="590" y="12" width="175" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_done" value="✅ Impl." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=9;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="600" y="17" width="70" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_plan" value="📋 Planned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="17" width="78" height="26" as="geometry" />
+        </mxCell>
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;Enterprise Foundation — L2 Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="20" y="15" width="500" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 1: INFRASTRUCTURE & FOUNDATION -->
+        <mxCell id="r1_c" value="1. Infrastructure &amp; Foundation" style="swimlane;startSize=26;fillColor=#EEEEEE;strokeColor=#616161;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="55" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 1a -->
+        <mxCell id="r1_multi" value="✅ Multi-Organization" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="30" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_workspace" value="✅ Multi-Workspace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="235" y="30" width="200" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_database" value="✅ Database (Async SQLAlchemy)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="460" y="30" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_migration" value="✅ Migration (Alembic)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="695" y="30" width="215" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 1b -->
+        <mxCell id="r1_config" value="✅ Pydantic Configuration" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="68" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_secret" value="✅ Secret Management" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="235" y="68" width="200" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_rate" value="✅ Rate Limiting" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="460" y="68" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_sched" value="✅ Async Task Scheduling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize:10;" vertex="1" parent="r1_c">
+          <mxGeometry x="695" y="68" width="215" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 2: SECURITY & COMPLIANCE -->
+        <mxCell id="r2_c" value="2. Security &amp; Compliance" style="swimlane;startSize=26;fillColor=#EEEEEE;strokeColor=#616161;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="180" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 2a -->
+        <mxCell id="r2_guardrail" value="✅ Guardrails (4 Hooks)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_pii" value="✅ PII Masking + Encryption" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_risk" value="✅ 4-Level Risk Authorization" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_dlp" value="📋 Outbound DLP Engine (EF1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_compliance" value="📋 Compliance &amp; Audit Center" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 2b -->
+        <mxCell id="r2_sandbox" value="✅ Docker Sandbox + Pool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;" vertex="1" parent="r2_c">
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_network" value="📋 Network Isolation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_gvisor" value="📋 gVisor / Firecracker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_confidential" value="📋 Confidential Computing (EF6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_zerotrust" value="📋 Zero Trust Architecture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 3: OPERATIONS & DEPLOYMENT -->
+        <mxCell id="r3_c" value="3. Operations &amp; Deployment" style="swimlane;startSize=26;fillColor=#EEEEEE;strokeColor=#616161;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="305" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3a -->
+        <mxCell id="r3_docker" value="✅ Docker Compose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_health" value="✅ Health Checks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_tracing" value="✅ Tracing + Metrics + Logging" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_k8s" value="📋 K8s / Horizontal Scaling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_sovereignty" value="📋 Multi-Region Sovereignty (EF4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3b -->
+        <mxCell id="r3_backup" value="📋 Data Backup &amp; Recovery" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_alm" value="📋 Environment Mgmt / ALM" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_apimgmt" value="📋 API Mgmt / Dev Portal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_edge" value="📋 Edge/Lite (EF6) / PyPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize:10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_lineage" value="📋 Data Lineage Pipeline (EF3)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 4: ENTERPRISE IDENTITY & GOVERNANCE -->
+        <mxCell id="r4_c" value="4. Enterprise Identity &amp; Governance" style="swimlane;startSize=26;fillColor=#EEEEEE;strokeColor=#616161;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="430" width="910" height="65" as="geometry" />
+        </mxCell>
+        <!-- 5 × 170 = 850 -->
+        <mxCell id="r4_auth" value="✅ JWT + API Key Auth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_rbac" value="✅ RBAC + Tenant Isolation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_vault" value="📋 Enterprise Vault (EF2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_retention" value="📋 Zero Data Retention (EF5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_gov" value="📋 Platform-Level Governance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 5: DOWNSTREAM -->
+        <mxCell id="r5_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="515" width="910" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r5_down" value="⤵  To All Service Layers — Infrastructure Foundation &amp; Multi-Tenant Context" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
+          <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- EDGES -->
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#616161;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r1_c" target="r2_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#616161;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#616161;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r3_c" target="r4_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="Foundation" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#616161;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r4_c" target="r5_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

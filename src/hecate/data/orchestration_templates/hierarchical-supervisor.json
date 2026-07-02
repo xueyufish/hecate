@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "name": "Hierarchical Supervisor",
+  "description": "A supervisor agent that delegates tasks to worker agents via tool-based invocation, with a loop for re-delegation.",
+  "category": "delegation",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" },
+    "task_status": { "type": "last_value" }
+  },
+  "nodes": {
+    "supervisor": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "invocation_mode": "tool",
+        "system_prompt": "You are a supervisor agent. Delegate tasks to specialist workers. Use the available agent tools to delegate work.",
+        "channels": { "readable": ["messages"], "writable": ["messages", "task_status"] }
+      }
+    },
+    "check_done": {
+      "type": "condition",
+      "config": {
+        "expression": "task_status == 'done'",
+        "channels": { "readable": ["task_status"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "__start__", "target": "supervisor" },
+    { "source": "supervisor", "target": "check_done" },
+    {
+      "source": "check_done",
+      "target": { "true": "__end__", "false": "supervisor" }
+    }
+  ],
+  "entry": "supervisor"
+}

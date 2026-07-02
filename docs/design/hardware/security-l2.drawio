@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Security-L2" id="security-l2">
+    <mxGraphModel dx="3000" dy="2400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="680" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- LEGEND -->
+        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="590" y="12" width="175" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_done" value="✅ Impl." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=9;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="600" y="17" width="70" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_plan" value="📋 Planned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="17" width="78" height="26" as="geometry" />
+        </mxCell>
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;Security Shield — L2 Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="20" y="15" width="500" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 1: SECURITY LAYERS (FOUNDATION) -->
+        <mxCell id="r1_c" value="1. Security Layers (Foundation)" style="swimlane;startSize=26;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="55" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 1a -->
+        <mxCell id="r1_llmguard" value="✅ LLM Guard" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="30" width="200" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_pii" value="✅ PII Anonymizer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="225" y="30" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_encrypt" value="✅ Encryption Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="460" y="30" width="200" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_auth" value="✅ Auth Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="685" y="30" width="225" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 1b -->
+        <mxCell id="r1_apikey" value="✅ API Key Auth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_rbac" value="✅ RBAC / Organization" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="225" y="68" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_audit" value="✅ Audit Trail + SIEM (SS5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="460" y="68" width="200" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_middleware" value="✅ Security Middleware" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize:10;" vertex="1" parent="r1_c">
+          <mxGeometry x="685" y="68" width="225" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 2: ADVANCED SECURITY -->
+        <mxCell id="r2_c" value="2. Advanced Security" style="swimlane;startSize=26;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="180" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 2a -->
+        <mxCell id="r2_guardhooks" value="✅ Guardrail Hooks (×4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_inout" value="✅ Input/Output Security" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_injtype" value="📋 Injection Type Det. (SS3)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_sysprompt" value="📋 Sys Prompt Leak (SS4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_compliance" value="📋 Compliance &amp; Audit Center" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 2b -->
+        <mxCell id="r2_finegrained" value="📋 Fine-Grained Permissions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_dlp" value="📋 Outbound DLP Engine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_confidential" value="📋 Confidential Computing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_zerotrust" value="📋 Zero Trust Architecture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_vault" value="📋 Enterprise Vault" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 3: AGENT RUNTIME PROTECTION & RED TEAMING (NEW) -->
+        <mxCell id="r3_c" value="3. Agent Runtime Protection &amp; Red Teaming" style="swimlane;startSize=26;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="305" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3a -->
+        <mxCell id="r3_runtime" value="📋 Agent Runtime Protection (SS1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="30" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_redteam" value="📋 Automated Red Teaming (SS2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="235" y="30" width="200" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_goaldrift" value="📋 Goal Drift Detector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="460" y="30" width="130" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_toolchain" value="📋 Tool Chain Detector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize:10;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="610" y="30" width="130" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_mempoison" value="📋 Memory Poison Det." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="760" y="30" width="150" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3b -->
+        <mxCell id="r3_behavior" value="📋 Behavioral Anomaly" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize:10;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_rogue" value="📋 Rogue Agent Detector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize:10;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_trust" value="📋 Multi-Agent Trust (SS6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize:10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_a2acards" value="📋 A2A Signed Cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize:10;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_sandbox" value="✅ Sandbox (Docker/gVisor/Firecracker)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 4: DOWNSTREAM -->
+        <mxCell id="r4_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="430" width="910" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_down" value="⤵  To All Layers — Authentication / Authorization / Audit Trail / Runtime Protection" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r4_c">
+          <mxGeometry x="105" y="5" width="700" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- EDGES -->
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C62828;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r1_c" target="r2_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C62828;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="Security" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C62828;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r3_c" target="r4_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

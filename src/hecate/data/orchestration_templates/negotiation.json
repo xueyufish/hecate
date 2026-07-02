@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "name": "Negotiation",
+  "description": "A proposer and responder negotiate in a loop, checking agreement status each round until accepted or max rounds reached.",
+  "category": "negotiation",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" },
+    "agreement_status": { "type": "last_value" },
+    "negotiation_channel": { "type": "last_value" },
+    "negotiation_round": { "type": "last_value" }
+  },
+  "nodes": {
+    "proposer": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a proposer. Make a proposal for the given task.",
+        "channels": {
+          "readable": ["messages", "agreement_status"],
+          "writable": ["messages", "negotiation_channel"]
+        }
+      }
+    },
+    "responder": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a responder. Evaluate proposals and respond with 'accepted' or a counter-proposal. Set agreement_status to 'accepted' when you agree, or 'counter' for counter-proposal.",
+        "channels": {
+          "readable": ["messages", "negotiation_channel"],
+          "writable": ["messages", "agreement_status"]
+        }
+      }
+    },
+    "check_agreement": {
+      "type": "condition",
+      "config": {
+        "expression": "agreement_status == 'accepted'",
+        "channels": { "readable": ["agreement_status"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "__start__", "target": "proposer" },
+    { "source": "proposer", "target": "responder" },
+    { "source": "responder", "target": "check_agreement" },
+    {
+      "source": "check_agreement",
+      "target": { "true": "__end__", "false": "proposer" }
+    }
+  ],
+  "entry": "proposer"
+}

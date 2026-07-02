@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="Agent-Engine-L2" id="agent-engine-l2">
+    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="660" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- LEGEND -->
+        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" vertex="1" parent="1">
+          <mxGeometry x="590" y="12" width="175" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_done" value="✅ Impl." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="600" y="17" width="70" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="legend_plan" value="📋 Planned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="17" width="78" height="26" as="geometry" />
+        </mxCell>
+        <!-- TITLE -->
+        <mxCell id="title" value="&lt;b&gt;Agent Engine — L2 Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="20" y="15" width="500" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 1: CORE RUNTIME -->
+        <mxCell id="r1_c" value="1. Core Runtime" style="swimlane;startSize=26;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="55" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 1a: 215+210+210+200 = 835 -->
+        <mxCell id="r1_pregel" value="✅ Pregel Runtime" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="30" width="215" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_compiler" value="✅ Graph Compiler" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="240" y="30" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_channel" value="✅ Channel System" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="475" y="30" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_workerpool" value="✅ Worker Pool" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="710" y="30" width="200" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 1b -->
+        <mxCell id="r1_context" value="✅ Context Engine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="68" width="215" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_checkpoint" value="✅ Checkpoint / Event Store" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="240" y="68" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_guardrail" value="✅ Guardrail Hooks (×4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="475" y="68" width="210" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_scheduler" value="✅ Scheduler / Eviction / Retry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r1_c">
+          <mxGeometry x="710" y="68" width="200" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 2: EXTENSION POINTS & SPI -->
+        <mxCell id="r2_c" value="2. Extension Points &amp; SPI" style="swimlane;startSize=26;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="180" width="910" height="105" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 2a: 5 × 170 = 850 -->
+        <mxCell id="r2_engineport" value="✅ EnginePort" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_optimization" value="✅ Optimization Pass" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_conflict" value="✅ Conflict Resolver" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_subgraph" value="✅ Subgraph / Patterns" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_plugin" value="Plugin SPI Core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 2b -->
+        <mxCell id="r2_evaluator" value="Evaluator SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_channelspi" value="Channel SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_authspi" value="Auth Provider SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_notifier" value="Notifier SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_i18n" value="i18n SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 3: ADVANCED FEATURES -->
+        <mxCell id="r3_c" value="3. Advanced Features" style="swimlane;startSize=26;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="305" width="910" height="145" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3a: 5 × 170 = 850 -->
+        <mxCell id="r3_a2a" value="📋 A2A Protocol (v1.0 GA)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_cards" value="📋 Signed Agent Cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_distributed" value="📋 Distributed Execution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_ctxchain" value="📋 Context Processor Chain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_intent" value="📋 5-Level Intent Recognition" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3b: 5 × 170 = 850 -->
+        <mxCell id="r3_simulation" value="📋 Simulation Environment" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_selfplan" value="📋 Self-Planning (PDDL+MCTS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_nl2agent" value="📋 NL2Agent / NL2Flow" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_agenticrl" value="📋 Agentic RL Framework" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_promptopt" value="📋 Prompt Self-Optimization" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3c: Execution Model Enhancements -->
+        <mxCell id="r3_asyncapi" value="📋 Async Execution API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_redis" value="📋 Distributed Session State (Redis)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_saga" value="📋 Saga / Compensation (Temporal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_middleware" value="📋 ReAct Loop Middleware" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_branching" value="📋 Checkpoint Branching" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+
+        <!-- ROW 4: DOWNSTREAM -->
+        <mxCell id="r4_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
+          <mxGeometry x="20" y="470" width="910" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_down" value="⤵  To Services Layer — LLM / Tools / Knowledge / Checkpoint via EnginePort" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r4_c">
+          <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- EDGES -->
+        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#E65100;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r1_c" target="r2_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#E65100;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="EnginePort" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#E65100;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r3_c" target="r4_c">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
