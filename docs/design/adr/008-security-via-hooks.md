@@ -8,7 +8,7 @@ Security is a cross-cutting concern spanning all layers (Gateway → Orchestrati
 
 ## Decision
 
-Implement security through **engine-level guardrail hooks** (PreLLMHook, PostLLMHook, PreToolHook, PostToolHook) and the **Plugin system's Decision and Observe extension points** — not hardcoded in the engine core.
+Implement security through **engine-level guardrail hooks** (PreLLMHook, PostLLMHook, PreToolHook, PostToolHook) and the **Platform SPI's AuthProvider extension point** — not hardcoded in the engine core.
 
 ## Rationale
 
@@ -17,6 +17,8 @@ Security requirements vary widely across deployments. A research lab may want mi
 The four guardrail hooks provide interception at the boundaries of LLM and tool execution — the two highest-risk operations in any agent system. Each hook has a NoOp default; custom hooks are registered at the Worker level.
 
 Tool and Agent entities carry `risk_level` (LOW/MEDIUM/HIGH/CRITICAL) and `approval_scope` (once/session/project/global) fields from the start, providing the data model for authorization decisions.
+
+The AuthProvider SPI (one of 4 Platform SPI extension points alongside Evaluator, Channel, and Notifier) standardizes authentication provider implementations (JWT, APIKey built-in; OAuth2, mTLS planned) so that security policies are pluggable at the gateway level.
 
 ## Consequences
 

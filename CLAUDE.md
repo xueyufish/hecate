@@ -90,9 +90,9 @@ Pydantic schemas follow naming: `XxxCreateSchema` / `XxxUpdateSchema` / `XxxRead
 - `core/database.py` — async engine + session factory; `get_db()` is the FastAPI dependency
 - Tests use in-memory SQLite (`sqlite+aiosqlite://`); never connect to real PostgreSQL in unit tests
 
-### Architecture Decisions (AD-1~AD-10)
+### Architecture Decisions (ADR-001~020)
 
-All 10 decisions finalized: self-built engine, five-layer architecture, checkpoint + memory cache, SKILL.md + multi-source, thread pool → process pool, BGE-M3 RAG, unified graph templates, LLM Guard + NeMo Guardrails, OpenAI compat + Hecate management API, React Flow (P2). See `docs/research/reports/00-architecture-decisions.md` for full details.
+20 ADRs in `docs/design/adr/`: graph-first orchestration, five-layer architecture, checkpoint persistence, skill system, progressive worker pool, four-level memory, unified graph templates, security via hooks, dual API design, React Flow canvas, A2A protocol, MCP Streamable HTTP, Agentic RL, ontology action system, OAG, Platform SPI architecture, knowledge graph architecture, Zero Trust identity, visual workflow node types, async execution + distributed state. See `docs/research/reports/00-architecture-decisions.md` for the original research-phase analysis (AD-1~AD-10, now formalized as ADR-001~010).
 
 ## Coding Conventions
 

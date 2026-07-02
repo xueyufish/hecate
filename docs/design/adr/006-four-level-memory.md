@@ -26,3 +26,4 @@ The BGE-M3 model was selected as the default embedding for its triple hybrid ret
 - Each memory level is independently usable — L2 alone supports conversations, L4 alone supports RAG
 - The compression pipeline prevents token overflow in long conversations
 - L3 extraction runs asynchronously to avoid blocking the response path
+- **P5 evolution**: L3 user memory will incorporate Mem0-inspired importance scoring and multi-signal fusion ranking, MemGPT-inspired LLM-managed memory blocks, and AgentScope-inspired memory clustering. See [knowledge-memory-design.md](../knowledge-memory-design.md) for the full P5 target state

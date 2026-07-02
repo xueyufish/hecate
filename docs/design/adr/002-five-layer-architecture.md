@@ -21,3 +21,4 @@ The capability services layer is separated from the engine to enforce dependency
 - Five layers add conceptual complexity compared to simpler architectures
 - Each layer has a well-defined interface to the layer below
 - The engine layer maintains zero external dependencies (except jsonschema)
+- The conceptual 5-layer model is physically organized as 10 modules (see [architecture.md](../architecture.md) "Module Architecture"): Access Channel, Agent Studio, Agent Engine, Ops Center, Model Hub, Tool Platform, Knowledge & Memory, Enterprise Foundation, Security, and Ecosystem — each mapping to one or more conceptual layers

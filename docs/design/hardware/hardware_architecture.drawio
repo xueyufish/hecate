@@ -18,7 +18,7 @@
         </mxCell>
         <!-- ========== SECURITY SIDEBAR (LEFT, CROSS-CUTTING) ========== -->
         <mxCell id="sec_c" value="Security Shield" style="swimlane;startSize=30;fillColor=#FFEBEE;strokeColor=#B71C1C;fontSize=12;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="25" y="90" width="185" height="660" as="geometry" />
+          <mxGeometry x="25" y="90" width="185" height="720" as="geometry" />
         </mxCell>
         <mxCell id="sec_content" value="✅ Content Security" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#B71C1C;fontSize=10;" vertex="1" parent="sec_c">
           <mxGeometry x="15" y="80" width="155" height="30" as="geometry" />
@@ -35,10 +35,13 @@
         <mxCell id="sec_compliance" value="📋 Compliance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="sec_c">
           <mxGeometry x="15" y="520" width="155" height="30" as="geometry" />
         </mxCell>
+        <mxCell id="sec_a2a" value="📋 A2A Security" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="sec_c">
+          <mxGeometry x="15" y="630" width="155" height="30" as="geometry" />
+        </mxCell>
 
         <!-- ========== ECOSYSTEM SIDEBAR (RIGHT, CROSS-CUTTING) ========== -->
         <mxCell id="eco_c" value="Ecosystem" style="swimlane;startSize=30;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=12;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="1490" y="90" width="185" height="660" as="geometry" />
+          <mxGeometry x="1490" y="90" width="185" height="720" as="geometry" />
         </mxCell>
         <mxCell id="eco_a2a" value="📋 A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;fontStyle=1;" vertex="1" parent="eco_c">
           <mxGeometry x="15" y="80" width="155" height="30" as="geometry" />
@@ -257,10 +260,10 @@
         <mxCell id="k_adv_doc" value="📋 Adv. Doc Processing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="km_c">
           <mxGeometry x="20" y="78" width="125" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="k_adv_search" value="📋 Adv. Retrieval" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="km_c">
+        <mxCell id="k_kg" value="📋 Knowledge Graph" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="km_c">
           <mxGeometry x="155" y="78" width="125" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="k_kb_mgmt" value="📋 Knowledge Mgmt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="km_c">
+        <mxCell id="k_adv_search" value="📋 GraphRAG / OAG" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="km_c">
           <mxGeometry x="290" y="78" width="125" height="30" as="geometry" />
         </mxCell>
 

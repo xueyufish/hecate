@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="drawio" version="26.0.0">
   <diagram name="Access-Channel-L2" id="access-channel-l2">
-    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="640" math="0" shadow="0">
+    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="690" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -38,18 +38,21 @@
         <mxCell id="r1_cli" value="💻 CLI / Script" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1F5FE;strokeColor=#0288D1;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
           <mxGeometry x="685" y="30" width="225" height="26" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1b: 200+195+210+230 = 835 -->
+        <!-- Sub-row 1b: 5 × 170 = 850, + 4×15 gaps = 910 -->
         <mxCell id="r1_im" value="📋 IM Bots" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r1_web" value="📋 Web App" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="68" width="195" height="26" as="geometry" />
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r1_mcp" value="MCP Client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="445" y="68" width="210" height="26" as="geometry" />
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r1_idp" value="📋 Enterprise IdP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="680" y="68" width="230" height="26" as="geometry" />
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_a2a" value="🤖 A2A Remote Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
         </mxCell>
 
         <!-- ========== ROW 2: CHANNEL ADAPTERS (h=105, gap=25) ========== -->
@@ -69,23 +72,26 @@
         <mxCell id="r2_sse" value="✅ SSE Streaming" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=10;" vertex="1" parent="r2_c">
           <mxGeometry x="690" y="30" width="220" height="26" as="geometry" />
         </mxCell>
-        <!-- Sub-row 2b: 205+185+240+205 = 835 -->
+        <!-- Sub-row 2b: 5 × 170 = 850, + 4×15 gaps = 910 -->
         <mxCell id="r2_ws" value="📋 WebSocket Channel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="0" y="68" width="205" height="26" as="geometry" />
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_widget" value="📋 Web Widget" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="230" y="68" width="185" height="26" as="geometry" />
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_im" value="📋 IM Bots (Feishu/Slack/DingTalk/WeCom)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="440" y="68" width="240" height="26" as="geometry" />
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_enterprise" value="📋 Enterprise Gateway (SSO)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="705" y="68" width="205" height="26" as="geometry" />
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_a2a" value="📋 A2A Server" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
         </mxCell>
 
         <!-- ========== ROW 3: GATEWAY CONTROL (h=105, gap=15 for 5 items) ========== -->
         <mxCell id="r3_c" value="3. Gateway Control Plane" style="swimlane;startSize=26;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="305" width="910" height="105" as="geometry" />
+          <mxGeometry x="20" y="305" width="910" height="155" as="geometry" />
         </mxCell>
         <!-- Sub-row 3a: 5 × 170 = 850, + 4×15 gaps = 910 -->
         <mxCell id="r3_auth" value="Auth (JWT + API Key)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r3_c">
@@ -119,41 +125,63 @@
         <mxCell id="r3_scim" value="📋 Enterprise RBAC (SCIM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
         </mxCell>
+        <!-- Sub-row 3c: 5 × 170 = 850, + 4×15 gaps = 910 -->
+        <mxCell id="r3_tokentype" value="📋 Per-Token-Type Auth" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_twotier" value="📋 Two-Tier Identity" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_stream" value="📋 Multi-Stream Modes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_gov" value="📋 Platform-Level Governance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_zerotrust" value="📋 Zero Trust Architecture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
 
         <!-- ========== ROW 4: API SURFACE (h=95, gap=15) ========== -->
         <mxCell id="r4_c" value="4. API Surface" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="430" width="910" height="95" as="geometry" />
+          <mxGeometry x="20" y="480" width="910" height="95" as="geometry" />
         </mxCell>
-        <!-- Sub-row 4: 180+180+150+150+190 = 850 -->
-        <mxCell id="r4_openai" value="✅ OpenAI-Compatible (/v1/)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="0" y="30" width="180" height="26" as="geometry" />
+        <!-- Sub-row 4: 6 × 140 = 840, + 5×14 gaps = 910 -->
+        <mxCell id="r4_openai" value="✅ OpenAI (/v1/)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="0" y="30" width="140" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r4_mgmt" value="✅ Management REST (/api/)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="195" y="30" width="180" height="26" as="geometry" />
+        <mxCell id="r4_mgmt" value="✅ Management (/api/)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="154" y="30" width="140" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r4_health" value="✅ Health (/health)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="r4_c">
-          <mxGeometry x="390" y="30" width="150" height="26" as="geometry" />
+          <mxGeometry x="308" y="30" width="140" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r4_metrics" value="✅ Metrics (/metrics)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="r4_c">
-          <mxGeometry x="555" y="30" width="150" height="26" as="geometry" />
+          <mxGeometry x="462" y="30" width="140" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r4_mcp" value="MCP Server (/mcp)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;dashed=1;fontStyle=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="720" y="30" width="190" height="26" as="geometry" />
+          <mxGeometry x="616" y="30" width="140" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_a2a" value="📋 A2A (/.well-known/)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;dashed=1;fontStyle=1;" vertex="1" parent="r4_c">
+          <mxGeometry x="770" y="30" width="140" height="26" as="geometry" />
         </mxCell>
         <!-- Detail text (left-aligned ok) -->
         <mxCell id="r4_v1_detail" value="POST /v1/chat/completions · GET /v1/models" style="text;html=1;fontSize=8;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#666666;" vertex="1" parent="r4_c">
-          <mxGeometry x="0" y="58" width="180" height="28" as="geometry" />
+          <mxGeometry x="0" y="58" width="140" height="28" as="geometry" />
         </mxCell>
         <mxCell id="r4_api_detail" value="24 resource routers: agents, sessions, kb, workflows..." style="text;html=1;fontSize=8;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#666666;" vertex="1" parent="r4_c">
-          <mxGeometry x="195" y="58" width="180" height="28" as="geometry" />
+          <mxGeometry x="154" y="58" width="140" height="28" as="geometry" />
         </mxCell>
         <mxCell id="r4_mcp_detail" value="if MCP_SERVER_ENABLED=true" style="text;html=1;fontSize=8;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#666666;" vertex="1" parent="r4_c">
-          <mxGeometry x="720" y="58" width="190" height="28" as="geometry" />
+          <mxGeometry x="616" y="58" width="140" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_a2a_detail" value="agent.json + task endpoint" style="text;html=1;fontSize=8;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;fontColor=#666666;" vertex="1" parent="r4_c">
+          <mxGeometry x="770" y="58" width="140" height="28" as="geometry" />
         </mxCell>
 
         <!-- ========== ROW 5: DOWNSTREAM ========== -->
         <mxCell id="r5_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="550" width="910" height="50" as="geometry" />
+          <mxGeometry x="20" y="600" width="910" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r5_down" value="⤵  To Orchestration Layer — Agent Engine (Studio / Ops Center / Execution)" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
           <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />

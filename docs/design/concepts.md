@@ -18,7 +18,8 @@ Organization ─┬── Workspace ─┬── Agent ─┬── has Tools
               │              ├── Workflow ─┬── has Nodes
               │              │             └── has Edges
               │              │
-              │              ├── KnowledgeBase ─── Document ─── Chunk
+              │              ├── KnowledgeBase ─┬── Document ─── Chunk
+              │              │                   └── GraphEntity ─── GraphRelation *(planned)*
               │              │
               │              ├── Prompt (versioned)
               │              │
@@ -161,6 +162,108 @@ A **Message** is an individual entry in a conversation (system/user/assistant/to
 
 ---
 
+## Knowledge Graph (Planned)
+
+The **Knowledge Graph** provides structured, entity-centric knowledge representation that complements the vector-based RAG pipeline. While RAG retrieves text chunks by semantic similarity, the Knowledge Graph captures typed entities and their relationships, enabling multi-hop reasoning and structured retrieval.
+
+### Graph Entities
+
+| Entity | Description | Key Fields |
+|--------|-------------|------------|
+| **GraphEntity** | A typed node in the knowledge graph | `id`, `kb_id`, `type`, `name`, `properties` (JSONB), `embedding` (vector) |
+| **GraphRelation** | A typed edge connecting two entities | `id`, `kb_id`, `source_id`, `target_id`, `type`, `properties` (JSONB), `weight` |
+| **Community** | A cluster of related entities detected by graph algorithms | `id`, `kb_id`, `entity_ids` (list), `summary` (text), `algorithm` (Louvain/Leiden) |
+
+### GraphStore ABC
+
+The `GraphStore` abstract base class defines the contract for graph database backends:
+
+- **Neo4jGraphStore** — Production backend with Cypher query language, full-text search, and graph algorithms (PageRank, Louvain community detection)
+- **InMemoryGraphStore** — Default backend for development and testing using adjacency lists
+
+### Extraction Pipeline
+
+Documents are processed through an LLM-powered extraction pipeline:
+
+```
+Document → Chunk → LLM Entity Extraction → LLM Relation Extraction
+                                                      │
+                                          Entity Resolution (dedup)
+                                                      │
+                                          GraphStore.add_entities()
+                                          GraphStore.add_relations()
+```
+
+### GraphRAG
+
+Community detection (Louvain/Leiden) clusters related entities into communities, enabling **GraphRAG** — retrieval at the community level for broader context. This provides better answers for "big picture" questions than chunk-level retrieval alone.
+
+See [ADR-017: Knowledge Graph Architecture](adr/017-knowledge-graph-architecture.md).
+
+---
+
+
+
+The **Ontology Action System** extends the knowledge graph with executable operations. An Action defines a set of changes to objects, properties, and relationships that an agent (or human) can invoke.
+
+Action types:
+
+- **Simple Actions** — Update a single property value
+- **Compound Actions** — Modify multiple objects in one transaction
+- **External Actions** — Write back to source systems (ERP, CRM, etc.)
+- **LLM-Backed Actions** — Use LLM to determine action parameters
+
+Execution modes:
+
+- **Manual** — Agent proposes action, human approves before execution
+- **Automatic** — Agent executes action directly (for low-risk operations)
+- **Conditional** — Action executes only if conditions are met
+
+See [ADR-014: Ontology Action System](adr/014-ontology-action-system.md).
+
+---
+
+## Ontology-Augmented Generation (Planned)
+
+**OAG (Ontology-Augmented Generation)** evolves the RAG pipeline by combining retrieval, logic, and actions into a complete reasoning loop:
+
+1. **Retrieval** (existing RAG) — find relevant knowledge
+2. **Logic** (ontology functions) — apply business rules and reasoning
+3. **Actions** (ontology actions) — execute decisions and write back
+
+OAG grounds LLM reasoning in a structured knowledge model with executable actions, enabling agents to not just retrieve information but also act on it. See [ADR-015: Ontology-Augmented Generation](adr/015-ontology-augmented-generation.md).
+
+---
+
+## Decision Lineage (Planned)
+
+**Decision Lineage** records the complete chain of reasoning behind every agent action: who (human or agent) decided what, based on which data version, at what time, and with what outcome. This provides auditability for compliance and enables feedback-driven learning.
+
+Decision lineage captures:
+
+- **Who** initiated the decision (human, agent, or automation)
+- **What** action was taken
+- **When** it was executed
+- **Which** data version was used (knowledge graph snapshot)
+- **Why** the decision was made (reasoning trace)
+- **Outcome** of the action (success, failure, rollback)
+
+---
+
+## Agentic RL Framework (Planned)
+
+The **Agentic RL Framework** implements a data flywheel for agent self-optimization:
+
+1. **Trace Collection** — Production traces from EventStore
+2. **Labeling** — Auto-labeling (LLM-as-Judge) + human annotation
+3. **Training Data** — Prompt optimization datasets + RL training sets
+4. **Optimization** — Prompt self-optimization (ACE/GEPA) + optional model fine-tuning
+5. **Validation** — A/B testing against baseline + canary release
+
+See [ADR-013: Agentic RL Framework](adr/013-agentic-rl-framework.md).
+
+---
+
 ## Prompt
 
 Prompts are versioned template strings with variable interpolation. Each Prompt has a name, template body, variable list, version number, and labels (production/staging/development). This enables A/B testing and staged rollout of prompt changes.
@@ -204,7 +307,39 @@ Tasks produce **Artifacts** (tangible deliverables) and support streaming update
 
 ---
 
-## Resource Versioning
+## Zero Trust Identity (Planned)
+
+Hecate's identity model will evolve from a single-tier (API Key or JWT) to a **Two-Tier Identity Model** that distinguishes application-level identity from end-user-level identity.
+
+### Two-Tier Identity Model
+
+| Tier | Token Type | Scope | Use Case |
+|------|-----------|-------|----------|
+| **App-level** | API Key (`hcat_*`) | Application identity | Server-to-server integration, CI/CD pipelines |
+| **User-level** | JWT (Bearer) | End-user identity | Interactive sessions, per-user audit |
+
+Both tiers can be combined: an App-level API Key carries a User-level JWT to represent "application X acting on behalf of user Y," enabling granular access control and dual audit trails.
+
+### Per-Token-Type Auth Pipeline
+
+Different token types route through separate authentication pipelines with distinct verification steps:
+
+- **JWT Pipeline** — Verify HS256 signature + expiry + RBAC scope
+- **APIKey Pipeline** — Verify SHA-256 hash + rate limit + edition gating
+- **PAT Pipeline** — Verify Personal Access Token scope + rotation policy
+- **OAuth SSO Pipeline** — Verify OIDC discovery + scope mapping
+
+### Zero Trust Principles
+
+- **Per-agent identity**: Each agent has a unique identity with scoped permissions (principle of least privilege)
+- **Token exchange**: OAuth 2.0 Token Exchange (RFC 8693) for identity propagation across service boundaries
+- **Continuous verification**: Every tool call, LLM invocation, and knowledge query is authenticated — no implicit trust based on network position
+
+See [ADR-018: Zero Trust Identity Architecture](adr/018-zero-trust-identity-architecture.md).
+
+---
+
+
 
 Versionable resources — Agents, Workflows, Prompts, and Skills — share a unified version management mechanism. Each version captures a complete configuration snapshot, a change summary, and the operator who made the change. Previous versions are preserved for rollback and audit.
 
@@ -234,6 +369,9 @@ Versionable resources — Agents, Workflows, Prompts, and Skills — share a uni
 | User | `users` | id, org_id, email, name, role |
 | Workspace | `workspaces` | id, org_id, name, settings (JSONB) |
 | ResourceVersion | `resource_versions` | resource_type, resource_id, version, snapshot (JSONB), change_summary |
+| GraphEntity | `graph_entities` *(planned)* | id, kb_id, type, name, properties (JSONB), embedding (vector) |
+| GraphRelation | `graph_relations` *(planned)* | id, kb_id, source_id, target_id, type, properties (JSONB), weight |
+| Community | `graph_communities` *(planned)* | id, kb_id, entity_ids (JSONB), summary (TEXT), algorithm |
 
 ### Design Conventions
 
@@ -260,4 +398,5 @@ Several models use field aliases to avoid collisions with SQLAlchemy and Pydanti
 | [Engine Design](engine-design.md) | Pregel runtime, compiler, channels, checkpoints, streaming |
 | [RAG Pipeline Design](rag-pipeline-design.md) | Document ingestion, embedding, hybrid search pipeline |
 | [Security Architecture](security-architecture.md) | Guardrail hooks, PII anonymization, auth, audit trail |
+| [Knowledge & Memory Design](knowledge-memory-design.md) | Memory P5 target state, Knowledge Graph integration |
 | [ADR Directory](adr/) | Architecture Decision Records |

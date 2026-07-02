@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="drawio" version="26.0.0">
   <diagram name="Agent-Engine-L2" id="agent-engine-l2">
-    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="520" math="0" shadow="0">
+    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="660" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -91,9 +91,9 @@
 
         <!-- ROW 3: ADVANCED FEATURES -->
         <mxCell id="r3_c" value="3. Advanced Features" style="swimlane;startSize=26;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="305" width="910" height="95" as="geometry" />
+          <mxGeometry x="20" y="305" width="910" height="145" as="geometry" />
         </mxCell>
-        <!-- 5 × 170 = 850 -->
+        <!-- Sub-row 3a: 5 × 170 = 850 -->
         <mxCell id="r3_a2a" value="📋 A2A Protocol (v1.0 GA)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
         </mxCell>
@@ -106,13 +106,45 @@
         <mxCell id="r3_ctxchain" value="📋 Context Processor Chain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_intent" value="📋 Multi-Level Intent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_intent" value="📋 5-Level Intent Recognition" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3b: 5 × 170 = 850 -->
+        <mxCell id="r3_simulation" value="📋 Simulation Environment" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_selfplan" value="📋 Self-Planning (PDDL+MCTS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_nl2agent" value="📋 NL2Agent / NL2Flow" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_agenticrl" value="📋 Agentic RL Framework" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_promptopt" value="📋 Prompt Self-Optimization" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        </mxCell>
+        <!-- Sub-row 3c: Execution Model Enhancements -->
+        <mxCell id="r3_asyncapi" value="📋 Async Execution API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="0" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_redis" value="📋 Distributed Session State (Redis)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="185" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_saga" value="📋 Saga / Compensation (Temporal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="370" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_middleware" value="📋 ReAct Loop Middleware" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="555" y="106" width="170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_branching" value="📋 Checkpoint Branching" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+          <mxGeometry x="740" y="106" width="170" height="26" as="geometry" />
         </mxCell>
 
         <!-- ROW 4: DOWNSTREAM -->
         <mxCell id="r4_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="420" width="910" height="50" as="geometry" />
+          <mxGeometry x="20" y="470" width="910" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r4_down" value="⤵  To Services Layer — LLM / Tools / Knowledge / Checkpoint via EnginePort" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r4_c">
           <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />

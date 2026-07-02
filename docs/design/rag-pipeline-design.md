@@ -1,6 +1,6 @@
 # RAG Pipeline Design
 
-> Deep dive into the Retrieval-Augmented Generation pipeline: document ingestion, chunking, embedding, hybrid search, and citation system. For a system overview, see [Architecture](architecture.md). For security aspects of RAG, see [Security Architecture](security-architecture.md).
+> Deep dive into the Retrieval-Augmented Generation pipeline: document ingestion, chunking, embedding, hybrid search, citation system, and planned enhancements for GraphRAG, DRIFT search, lazy indexing, temporal memory, and schema-aware traversal. For a system overview, see [Architecture](architecture.md). For security aspects of RAG, see [Security Architecture](security-architecture.md). For enhancement decisions, see [ADR-024](adr/024-knowledge-memory-enhancement.md).
 
 ---
 
@@ -176,11 +176,108 @@ This integration is transparent to the Graph DSL — knowledge retrieval is a ca
 
 ---
 
+## Planned Enhancements
+
+The RAG pipeline will evolve beyond single-shot vector retrieval to support structured knowledge, multi-step reasoning, closed-loop execution, and cost-optimized graph indexing.
+
+### Knowledge Graph & GraphRAG
+
+A **Knowledge Graph** with `GraphStore` ABC (Neo4j + in-memory backends) will complement vector-based retrieval. LLM-powered entity/relation extraction populates typed entities and relationships. Community detection (Leiden) clusters related entities, enabling **GraphRAG** — community-level retrieval that provides broader context for "big picture" questions. See [ADR-017](adr/017-knowledge-graph-architecture.md).
+
+**GraphRAG Query Engine (3.5.4)** will support four search modes:
+
+| Mode | Strategy | Use Case |
+|------|----------|----------|
+| Global | Community summary map-reduce | Holistic questions about entire corpus |
+| Local | Entity neighborhood traversal | Questions about specific entities |
+| Hybrid | Vector + graph traversal fusion | General-purpose queries |
+| **DRIFT** (KM4) | **Entity fanout + community context** | **Multi-hop reasoning with community-aware pruning** |
+
+DRIFT search (KM4) extracts topic entities from the query, fans out to entity neighbors (like Local Search), and at each hop checks if neighbors belong to a community — including community summaries when available. Community-aware pruning prevents uncontrolled expansion in dense graphs.
+
+### Lazy GraphRAG (3.5.14)
+
+Full GraphRAG requires upfront entity extraction, relationship inference, community detection, and community summary generation for the entire corpus. For large enterprise deployments (>100K pages), this is cost-prohibitive.
+
+**Lazy GraphRAG** uses a progressive enrichment pipeline:
+
+```
+Stage 0 (Initial — ~0.1% of full GraphRAG cost):
+  Document → Lightweight NER (spaCy) → Concept Hash → Flat Entity Index
+  No community detection. No LLM-extracted relationships.
+
+Stage 1 (Query-triggered — per-subgraph):
+  Query → Entity Lookup → Subgraph Expansion
+  → On-demand LLM relationship extraction
+  → On-demand mini-community summary
+
+Stage 2 (Progressive — background):
+  Frequently-queried subgraphs → full community summaries
+  Cold paths remain at Stage 0/1 (cost-appropriate)
+```
+
+Cost is proportional to usage. Cold corpora stay cheap; hot subgraphs converge to full GraphRAG quality. Enrichment is idempotent and incremental.
+
+### Schema-Aware Graph Traversal (3.5.10 Enhancement)
+
+Standard GraphRAG traversal uses semantic similarity to guide search. In dense enterprise KGs, high-degree attribute nodes ("semantic supernodes" like `Status: Active` connected to 10,000 entities) cause uncontrolled search expansion.
+
+**Schema-aware traversal** integrates SHACL/ontology constraints as structural gates:
+
+```
+Query → Extract topic entities
+    │
+    ▼
+SHACL Shape Lookup: allowed relationship types per entity type
+    │
+    ▼ (only schema-valid paths traversed)
+Traversal Guards: block paths to high-degree attribute nodes
+    │
+    ▼
+Semantic Scoring: score remaining schema-valid paths
+```
+
+Structure-first retrieval: schema constraints prune the search space BEFORE semantic scoring. This prevents semantic supernodes from causing uncontrolled expansion — a problem identified by SCAIR (ACL 2026) in real enterprise CMDB deployments.
+
+### Ontology-Augmented Generation (OAG)
+
+**OAG** combines three layers into a closed-loop reasoning system:
+
+1. **Retrieval** (existing RAG) — find relevant knowledge
+2. **Logic** (ontology functions) — apply business rules and reasoning
+3. **Actions** (ontology actions) — execute decisions and write back to source systems
+
+This enables agents to not just retrieve information but also act on it, with full decision lineage for compliance. See [ADR-015](adr/015-ontology-augmented-generation.md) and [ADR-014](adr/014-ontology-action-system.md).
+
+### Agentic RAG
+
+**Agentic RAG** transforms retrieval from single-shot search to multi-step retrieval with reasoning:
+
+- **Iterative retrieval**: Agent retrieves, evaluates, and retrieves again based on intermediate results
+- **Query decomposition**: Complex questions are broken into sub-queries, each retrieved independently
+- **Self-correction**: Agent evaluates retrieval quality and reformulates queries if results are insufficient
+- **Cross-source fusion**: Combines vector search, graph traversal, and structured queries
+
+### Advanced Retrieval Techniques
+
+Planned retrieval enhancements to improve relevance and recall:
+
+- **HyDE** (Hypothetical Document Embedding) — Generate a hypothetical answer, embed it, and use it for retrieval
+- **Multi-Query** — LLM generates multiple query variants, retrieves for each, and fuses results
+- **Reranking** — Cross-encoder reranking of initial retrieval results for precision
+- **Contextual Compression** — LLM-based compression of retrieved chunks to extract only relevant portions
+
+---
+
 ## Further Reading
 
 | Document | Description |
 |----------|-------------|
+| [ADR-024: Knowledge & Memory Enhancement](adr/024-knowledge-memory-enhancement.md) | Architecture decisions for KM1-KM6 (temporal memory, lazy GraphRAG, DRIFT search, schema-aware traversal, sleep-time consolidation, work context graph) |
+| [Knowledge & Memory Design](knowledge-memory-design.md) | P5 target state for memory system, KG integration, ontology system, detailed KM1-KM6 sections |
 | [Architecture](architecture.md) | System overview, module architecture |
 | [Security Architecture](security-architecture.md) | PII masking, guardrail hooks for RAG security |
-| [Core Concepts](concepts.md) | KnowledgeBase, Document, Chunk entity definitions |
-| [Engine Design](engine-design.md) | EnginePort interface for knowledge_query |
+| [Core Concepts](concepts.md) | KnowledgeBase, Document, Chunk, Knowledge Graph entity definitions |
+| [Engine Design](engine-design.md) | EnginePort interface for knowledge_query, Knowledge Graph integration |
+| [ADR-015: OAG](adr/015-ontology-augmented-generation.md) | Ontology-Augmented Generation decision record |
+| [ADR-017: Knowledge Graph](adr/017-knowledge-graph-architecture.md) | GraphStore ABC + Neo4j architecture decision |
