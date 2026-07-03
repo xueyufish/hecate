@@ -61,6 +61,17 @@ class PluginRegistry:
                     manifest.name,
                 )
 
+        # Log declared translations (actual loading is done by the plugin
+        # via on_load() or by the registration code that has access to the
+        # plugin's package directory).
+        if manifest.translations:
+            logger.info(
+                "Plugin %s/%s declares translations: %s",
+                manifest.type,
+                manifest.name,
+                manifest.translations,
+            )
+
     def unregister(self, type: str, name: str) -> None:
         """Unregister a plugin by type and name.
 

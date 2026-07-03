@@ -7,8 +7,12 @@ must implement.
 
 from __future__ import annotations
 
+from hecate.auth.provider import AuthProviderABC
+from hecate.channel.adapter import ChannelABC
 from hecate.plugin.spi.evaluator import EvaluatorABC
 
 __all__ = [
+    "AuthProviderABC",
+    "ChannelABC",
     "EvaluatorABC",
 ]

@@ -7,12 +7,15 @@ via HTTP webhook, aiosmtplib email, or WebSocket broadcast.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 
-import httpx
-
+from hecate.channel.notification import (
+    EmailNotificationAdapter,
+    NotificationChannelAdapter,
+    WebhookNotificationAdapter,
+    WebSocketNotificationAdapter,
+)
 from hecate.core.config import settings
 from hecate.models.alert import AlertEventModel, AlertRuleModel, ChannelType, NotificationChannelModel
 
@@ -174,8 +177,43 @@ def render_email(event: AlertEventModel, rule: AlertRuleModel) -> tuple[str, str
     return subject, html
 
 
+# Map ChannelType to render functions
+_RENDER_MAP: dict[str, Any] = {
+    ChannelType.WEBHOOK_FEISHU: render_feishu_card,
+    ChannelType.WEBHOOK_WECOM: render_wecom_markdown,
+    ChannelType.WEBHOOK_DINGTALK: render_dingtalk_markdown,
+    ChannelType.WEBHOOK_SLACK: render_slack_blocks,
+    ChannelType.WEBHOOK_GENERIC: render_generic_webhook,
+}
+
+
+def _build_adapter_map(connection_manager: Any = None) -> dict[str, NotificationChannelAdapter]:
+    """Build a map of channel type to NotificationChannelAdapter."""
+    adapters: dict[str, NotificationChannelAdapter] = {}
+
+    # Webhook adapters
+    for ct, render_fn in _RENDER_MAP.items():
+        adapters[ct] = WebhookNotificationAdapter(
+            channel_name=ct,
+            channel_description=f"{ct} webhook notification channel",
+            render_fn=render_fn,
+        )
+
+    # WebSocket adapter
+    adapters[ChannelType.WEBSOCKET] = WebSocketNotificationAdapter(connection_manager)
+
+    # Email adapter
+    adapters[ChannelType.EMAIL] = EmailNotificationAdapter()
+
+    return adapters
+
+
 class NotificationDispatcher:
     """Dispatches alert notifications to configured channels.
+
+    Uses NotificationChannelAdapter implementations instead of switch/case
+    dispatch. Each channel type has a corresponding adapter that handles
+    the platform-specific payload rendering and delivery.
 
     Args:
         connection_manager: Optional ConnectionManager for WebSocket dispatch.
@@ -183,6 +221,7 @@ class NotificationDispatcher:
 
     def __init__(self, connection_manager: Any = None) -> None:
         self._connection_manager = connection_manager
+        self._adapters = _build_adapter_map(connection_manager)
 
     async def dispatch(
         self,
@@ -212,106 +251,47 @@ class NotificationDispatcher:
         rule: AlertRuleModel,
         channel: NotificationChannelModel,
     ) -> None:
-        """Dispatch to a single channel based on its type."""
+        """Dispatch to a single channel using its adapter."""
         ct = channel.channel_type
-
-        if ct == ChannelType.WEBSOCKET:
-            await self._dispatch_websocket(event, rule)
-        elif ct == ChannelType.EMAIL:
-            await self._dispatch_email(event, rule, channel)
-        elif ct.startswith("webhook_"):
-            await self._dispatch_webhook(event, rule, channel)
-        else:
+        adapter = self._adapters.get(ct)
+        if adapter is None:
             logger.warning("Unknown channel type: %s", ct)
-
-    async def _dispatch_webhook(
-        self,
-        event: AlertEventModel,
-        rule: AlertRuleModel,
-        channel: NotificationChannelModel,
-    ) -> None:
-        """Send webhook with platform-specific payload and retry logic."""
-        ct = channel.channel_type
-        url = channel.config.get("url", "")
-        if not url:
-            logger.warning("Webhook channel %s has no URL configured", channel.id)
             return
 
-        if ct == ChannelType.WEBHOOK_FEISHU:
-            payload: dict[str, Any] = render_feishu_card(event, rule)
-        elif ct == ChannelType.WEBHOOK_WECOM:
-            payload = render_wecom_markdown(event, rule)
-        elif ct == ChannelType.WEBHOOK_DINGTALK:
-            payload = render_dingtalk_markdown(event, rule)
-        elif ct == ChannelType.WEBHOOK_SLACK:
-            payload = render_slack_blocks(event, rule)
+        # Build the adapter-specific response payload
+        if ct == ChannelType.WEBSOCKET:
+            response: dict[str, Any] = {
+                "message": {
+                    "type": "alert_firing",
+                    "event_id": str(event.id),
+                    "rule_name": rule.name,
+                    "severity": rule.severity,
+                    "alert_type": rule.alert_type,
+                    "current_value": event.current_value,
+                    "threshold": rule.threshold,
+                    "fired_at": event.fired_at.isoformat() if event.fired_at else None,
+                }
+            }
+        elif ct == ChannelType.EMAIL:
+            subject, html_body = render_email(event, rule)
+            response = {
+                "subject": subject,
+                "html_body": html_body,
+                "recipients": channel.config.get("recipients", []),
+                "config": {
+                    "smtp_from": settings.ALERT_SMTP_FROM,
+                    "smtp_host": settings.ALERT_SMTP_HOST,
+                    "smtp_port": settings.ALERT_SMTP_PORT,
+                    "smtp_user": settings.ALERT_SMTP_USER,
+                    "smtp_password": settings.ALERT_SMTP_PASSWORD,
+                },
+            }
         else:
-            payload = render_generic_webhook(event, rule)
+            # Webhook channels
+            response = {
+                "event": event,
+                "rule": rule,
+                "url": channel.config.get("url", ""),
+            }
 
-        backoff_times = [1, 2, 4]
-        for attempt in range(3):
-            try:
-                async with httpx.AsyncClient(timeout=10) as client:
-                    resp = await client.post(url, json=payload)
-                    if resp.status_code < 500:
-                        return
-                    logger.warning("Webhook %s returned %d (attempt %d)", url, resp.status_code, attempt + 1)
-            except (httpx.TimeoutException, httpx.HTTPError) as e:
-                logger.warning("Webhook %s failed (attempt %d): %s", url, attempt + 1, e)
-            if attempt < 2:
-                await asyncio.sleep(backoff_times[attempt])
-        logger.error("Webhook %s failed after 3 retries", url)
-
-    async def _dispatch_websocket(self, event: AlertEventModel, rule: AlertRuleModel) -> None:
-        """Broadcast alert via WebSocket to connected clients."""
-        if self._connection_manager is None:
-            return
-        message = {
-            "type": "alert_firing",
-            "event_id": str(event.id),
-            "rule_name": rule.name,
-            "severity": rule.severity,
-            "alert_type": rule.alert_type,
-            "current_value": event.current_value,
-            "threshold": rule.threshold,
-            "fired_at": event.fired_at.isoformat() if event.fired_at else None,
-        }
-        await self._connection_manager.broadcast(message)
-
-    async def _dispatch_email(
-        self,
-        event: AlertEventModel,
-        rule: AlertRuleModel,
-        channel: NotificationChannelModel,
-    ) -> None:
-        """Send email via SMTP."""
-        recipients = channel.config.get("recipients", [])
-        if not recipients:
-            return
-
-        subject, html_body = render_email(event, rule)
-
-        try:
-            from email.mime.multipart import MIMEMultipart
-            from email.mime.text import MIMEText
-
-            import aiosmtplib
-
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = settings.ALERT_SMTP_FROM
-            msg["To"] = ", ".join(recipients)
-            msg.attach(MIMEText(html_body, "html"))
-
-            await aiosmtplib.send(
-                msg,
-                hostname=settings.ALERT_SMTP_HOST,
-                port=settings.ALERT_SMTP_PORT,
-                username=settings.ALERT_SMTP_USER or None,
-                password=settings.ALERT_SMTP_PASSWORD or None,
-                recipients=recipients,
-            )
-        except ImportError:
-            logger.warning("aiosmtplib not installed — email alert skipped")
-        except Exception as e:
-            logger.warning("Email send failed: %s", e)
+        await adapter.respond(str(channel.id), response)

@@ -34,8 +34,11 @@ class PluginManifest:
     min_platform_version: str = ""
     description: str = ""
     permissions: tuple[str, ...] = ()
+    translations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        """Convert permissions list to tuple for immutability."""
+        """Convert list fields to tuples for immutability."""
         if isinstance(self.permissions, list):
             object.__setattr__(self, "permissions", tuple(self.permissions))
+        if isinstance(self.translations, list):
+            object.__setattr__(self, "translations", tuple(self.translations))

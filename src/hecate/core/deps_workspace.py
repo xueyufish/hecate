@@ -6,10 +6,9 @@ with a unified AuthContext resolution mechanism.
 
 Authentication flow:
 1. Extract Bearer token from request header.
-2. Try JWT decode → resolve claims (sub, org_id, workspace_id, role).
-3. Try API key hash lookup in database → resolve scope + workspace.
-4. Fallback to env-var API key (deprecated) → system scope.
-5. Raise 401 if all methods fail.
+2. Try registered auth providers (JWT, API key) via AuthProviderABC.
+3. Fallback to env-var API key (deprecated) → system scope.
+4. Raise 401 if all methods fail.
 """
 
 from __future__ import annotations
@@ -21,71 +20,35 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.auth.api_key_provider import APIKeyAuthProvider
+from hecate.auth.jwt_provider import JWTAuthProvider
+from hecate.auth.resolver import register_auth_providers, resolve_auth_context
 from hecate.core.auth_context import AuthContext
 from hecate.core.config import settings
 from hecate.core.database import get_db
-from hecate.models.api_key import ApiKeyModel, ApiKeyScope
 from hecate.models.workspace_member import WorkspaceRole
-from hecate.services.auth.token import decode_access_token
 
 logger = logging.getLogger(__name__)
 
 security_scheme = HTTPBearer()
 
+# Register built-in auth providers (JWT first, then API key)
+_providers_registered = False
+
+
+def _ensure_providers() -> None:
+    """Register built-in auth providers on first use."""
+    global _providers_registered
+    if not _providers_registered:
+        register_auth_providers(JWTAuthProvider(), APIKeyAuthProvider())
+        _providers_registered = True
+
 
 def _hash_key(raw_key: str) -> str:
     """Compute SHA-256 hash of a raw API key."""
     return hashlib.sha256(raw_key.encode()).hexdigest()
-
-
-async def _resolve_api_key(
-    raw_key: str,
-    db: AsyncSession,
-) -> AuthContext | None:
-    """Attempt to resolve a raw token as a database-backed API key."""
-    key_hash = _hash_key(raw_key)
-    result = await db.execute(
-        select(ApiKeyModel).where(
-            ApiKeyModel.key_hash == key_hash,
-            ApiKeyModel.is_active.is_(True),
-            ApiKeyModel.deleted.is_(False),
-        )
-    )
-    api_key = result.scalar_one_or_none()
-    if api_key is None:
-        return None
-
-    # Check expiration
-    from datetime import UTC, datetime
-
-    if api_key.expires_at is not None and api_key.expires_at < datetime.now(UTC):
-        return None
-
-    # Update last_used_at
-    api_key.last_used_at = datetime.now(UTC)
-    await db.flush()
-
-    if api_key.scope == ApiKeyScope.SYSTEM:
-        return AuthContext(
-            user_id=api_key.created_by,
-            org_id=None,
-            workspace_id=None,
-            role=None,
-            auth_method="api_key",
-            api_key_scope="system",
-        )
-    return AuthContext(
-        user_id=api_key.created_by,
-        org_id=api_key.org_id,
-        workspace_id=api_key.workspace_id,
-        role=WorkspaceRole.ADMIN,
-        auth_method="api_key",
-        api_key_scope="workspace",
-    )
 
 
 async def _resolve_env_api_key(raw_key: str) -> AuthContext | None:
@@ -113,10 +76,9 @@ async def get_auth_context(
 ) -> AuthContext:
     """Resolve the full authentication context for a request.
 
-    Tries, in order:
-    1. JWT access token (workspace-scoped).
-    2. Database-backed API key (system or workspace scoped).
-    3. Environment variable API key (system scope, deprecated).
+    Delegates to registered auth providers (JWT, API key) via the
+    AuthProviderABC framework. Falls back to env-var API key (deprecated)
+    if no provider succeeds.
 
     Returns:
         AuthContext with full identity and authorization state.
@@ -124,33 +86,16 @@ async def get_auth_context(
     Raises:
         HTTPException: 401 if no authentication method succeeds.
     """
-    token = credentials.credentials
+    _ensure_providers()
 
-    # 1. Try JWT
+    # Try registered providers (JWT + API key)
     try:
-        payload = decode_access_token(token)
-        user_id = uuid.UUID(payload["sub"])
-        org_id_raw = payload.get("org_id")
-        workspace_id_raw = payload.get("workspace_id")
-        role_raw = payload.get("role")
-
-        return AuthContext(
-            user_id=user_id,
-            org_id=uuid.UUID(org_id_raw) if org_id_raw else None,
-            workspace_id=uuid.UUID(workspace_id_raw) if workspace_id_raw else None,
-            role=WorkspaceRole(role_raw) if role_raw else None,
-            auth_method="jwt",
-            api_key_scope=None,
-        )
-    except (JWTError, ValueError, KeyError):
+        return await resolve_auth_context(credentials, db)
+    except HTTPException:
         pass
 
-    # 2. Try database API key
-    ctx = await _resolve_api_key(token, db)
-    if ctx is not None:
-        return ctx
-
-    # 3. Try env-var API key (deprecated)
+    # Fallback: env-var API key (deprecated)
+    token = credentials.credentials
     ctx = await _resolve_env_api_key(token)
     if ctx is not None:
         return ctx
