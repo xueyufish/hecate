@@ -1,18 +1,24 @@
 """Abstract base class for all evaluators.
 
 Every evaluator — whether RAG-specific, Agent-specific, or custom — must
-inherit from :class:`Evaluator` and implement the :meth:`evaluate` method.
+inherit from :class:`Evaluator` (alias for :class:`BuiltinEvaluator`) and
+implement the :meth:`evaluate` method.
+
+Builtin evaluators inherit from :class:`EvaluatorABC` (defined in
+``hecate.plugin.spi.evaluator``) and are registered via the
+:class:`PluginRegistry` under type="evaluator".
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
+from hecate.plugin.spi.evaluator import EvaluatorABC
 from hecate.services.evaluation.types import EvalInput, EvalOutput, LLMConfig
 
 
-class Evaluator(ABC):
-    """Abstract base class for evaluation metrics.
+class BuiltinEvaluator(EvaluatorABC):
+    """Base class for built-in evaluation metrics.
 
     Subclasses must define:
 
@@ -54,3 +60,7 @@ class Evaluator(ABC):
             An :class:`EvalOutput` containing one or more :class:`Score` objects.
         """
         ...
+
+
+# Backward compatibility alias — existing code uses `Evaluator`
+Evaluator = BuiltinEvaluator

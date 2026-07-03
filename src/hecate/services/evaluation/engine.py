@@ -3,6 +3,9 @@
 The :class:`EvaluationEngine` accepts a list of evaluators and a dataset,
 runs every evaluator against every dataset item, collects scores, computes
 per-metric averages, and persists results to the database.
+
+Startup registration of built-in evaluators with :class:`PluginRegistry`
+is handled by :func:`register_evaluators`.
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ from hecate.models.evaluation import (
     EvaluationScoreModel,
     RunStatus,
 )
+from hecate.plugin.manifest import PluginManifest
+from hecate.plugin.registry import PluginRegistry
 from hecate.services.evaluation.evaluator import Evaluator
 from hecate.services.evaluation.types import (
     AnswerSource,
@@ -212,3 +217,66 @@ class EvaluationEngine:
         except Exception as e:
             logger.warning("Pipeline answer generation failed: %s", e)
             return ""
+
+
+def register_evaluators(registry: PluginRegistry) -> int:
+    """Register all built-in evaluators with the PluginRegistry.
+
+    Imports and registers all evaluator subclasses under type="evaluator".
+    Should be called once at application startup.
+
+    Args:
+        registry: The PluginRegistry instance to register evaluators with.
+
+    Returns:
+        Number of evaluators registered.
+    """
+    from hecate.services.evaluation.agent_evaluators import (
+        CompletenessEvaluator,
+        CorrectnessEvaluator,
+        RelevancyEvaluator,
+        TaskCompletionEvaluator,
+        ToolCallAccuracyEvaluator,
+    )
+    from hecate.services.evaluation.rag_evaluators import (
+        AnswerRelevancyEvaluator,
+        ContextPrecisionEvaluator,
+        ContextRecallEvaluator,
+        FaithfulnessEvaluator,
+    )
+
+    evaluator_classes = [
+        # RAG evaluators
+        ContextPrecisionEvaluator,
+        ContextRecallEvaluator,
+        FaithfulnessEvaluator,
+        AnswerRelevancyEvaluator,
+        # Agent evaluators
+        CorrectnessEvaluator,
+        RelevancyEvaluator,
+        CompletenessEvaluator,
+        ToolCallAccuracyEvaluator,
+        TaskCompletionEvaluator,
+    ]
+
+    count = 0
+    for cls in evaluator_classes:
+        try:
+            # mypy infers the list as type[BuiltinEvaluator] (abstract);
+            # all 9 entries are concrete subclasses, so this is safe.
+            instance = cls()  # type: ignore[abstract]
+            manifest = PluginManifest(
+                type="evaluator",
+                name=instance.name,
+                version="1.0.0",
+                api_version="1.0",
+                min_platform_version="0.5.0",
+                description=instance.description,
+            )
+            registry.register(manifest, instance)
+            count += 1
+        except Exception:
+            logger.exception("Failed to register evaluator %s", cls.__name__)
+
+    logger.info("Registered %d built-in evaluators", count)
+    return count
