@@ -30,6 +30,7 @@ class UserModel(BaseModel):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     sso_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, unique=True)
+    preferred_locale: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)
 
     __table_args__ = (Index("idx_users_email_unique", "email", unique=True),)
 

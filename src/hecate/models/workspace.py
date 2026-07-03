@@ -35,6 +35,7 @@ class WorkspaceModel(BaseModel):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), nullable=False)
+    default_locale: Mapped[str] = mapped_column(String(10), nullable=False, server_default="en")
     settings: Mapped[dict[str, Any] | None] = mapped_column(
         JSONType,
         nullable=True,
