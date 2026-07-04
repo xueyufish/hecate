@@ -50,6 +50,8 @@ from hecate.api.management.i18n import router as i18n_router
 from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.memory import router as memory_router
 from hecate.api.management.messages import router as messages_router
+from hecate.api.management.model_catalog import router as model_catalog_router
+from hecate.api.management.model_lifecycle import router as model_lifecycle_router
 from hecate.api.management.model_pricing import router as model_pricing_router
 from hecate.api.management.model_providers import router as model_providers_router
 from hecate.api.management.monitoring import router as monitoring_router
@@ -305,6 +307,8 @@ app.include_router(alert_escalation_policies_router, prefix="/api", tags=["alert
 app.include_router(quotas_router, prefix="/api", tags=["quotas"])
 app.include_router(i18n_router, tags=["i18n"])
 app.include_router(budget_router, tags=["budgets"])
+app.include_router(model_catalog_router, tags=["model-catalog"])
+app.include_router(model_lifecycle_router, tags=["model-lifecycle"])
 app.include_router(sso_router, tags=["sso"])
 app.include_router(scim_users_router, tags=["scim"])
 app.include_router(scim_groups_router, tags=["scim"])
