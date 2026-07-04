@@ -11,7 +11,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, EmailStr, Field
-from sqlalchemy import Index, String
+from sqlalchemy import Boolean, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hecate.models.base import BaseModel
@@ -30,6 +30,11 @@ class UserModel(BaseModel):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     sso_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, unique=True)
+    external_id: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True, default=None)
+    given_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+    family_name: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     preferred_locale: Mapped[str | None] = mapped_column(String(10), nullable=True, default=None)
 
     __table_args__ = (Index("idx_users_email_unique", "email", unique=True),)
@@ -61,6 +66,11 @@ class UserReadSchema(PydanticBase):
     id: uuid.UUID
     email: str
     sso_id: str | None = None
+    external_id: str | None = None
+    display_name: str | None = None
+    given_name: str | None = None
+    family_name: str | None = None
+    active: bool = True
     created_at: datetime
 
 

@@ -11,7 +11,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Index, Integer, String
+from sqlalchemy import Date, Float, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hecate.models.base import BaseModel
@@ -75,3 +75,29 @@ class BudgetSnapshotReadSchema(PydanticBase):
     workspace_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+
+
+class BudgetForecastModel(BaseModel):
+    """ORM model for daily cost forecast snapshots.
+
+    Stores daily cost aggregation per scope (org, workspace, agent)
+    for linear trend forecasting and chargeback reports.
+    """
+
+    __tablename__ = "budget_forecasts"
+
+    scope: Mapped[str] = mapped_column(String(16), nullable=False)
+    scope_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    date: Mapped[datetime] = mapped_column(Date, nullable=False)
+    daily_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    daily_input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    daily_output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
+
+    __table_args__ = (
+        Index("idx_budget_forecasts_scope", "scope", "scope_id", "date", unique=True),
+        Index("idx_budget_forecasts_workspace", "workspace_id", "deleted"),
+    )

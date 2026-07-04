@@ -27,7 +27,7 @@ class AuthContext:
         org_id: The active organization UUID (None for system-scope keys).
         workspace_id: The active workspace UUID (None for system-scope keys).
         role: The user's role in the active workspace (None for system-scope keys).
-        auth_method: How the request was authenticated ("jwt" or "api_key").
+        auth_method: How the request was authenticated ("jwt", "api_key", "sso", or "ldap").
         api_key_scope: The API key's scope (None for JWT auth).
     """
 
@@ -35,7 +35,7 @@ class AuthContext:
     org_id: uuid.UUID | None
     workspace_id: uuid.UUID | None
     role: WorkspaceRole | None
-    auth_method: Literal["jwt", "api_key"]
+    auth_method: Literal["jwt", "api_key", "sso", "ldap"]
     api_key_scope: Literal["system", "workspace"] | None
 
     @property

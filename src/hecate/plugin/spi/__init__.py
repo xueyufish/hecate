@@ -10,9 +10,11 @@ from __future__ import annotations
 from hecate.auth.provider import AuthProviderABC
 from hecate.channel.adapter import ChannelABC
 from hecate.plugin.spi.evaluator import EvaluatorABC
+from hecate.vault.provider import SecretProviderABC
 
 __all__ = [
     "AuthProviderABC",
     "ChannelABC",
     "EvaluatorABC",
+    "SecretProviderABC",
 ]

@@ -10,10 +10,12 @@ import logging
 import uuid
 
 from jose import JWTError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.auth.provider import AuthProviderABC
 from hecate.core.auth_context import AuthContext
+from hecate.models.user import UserModel
 from hecate.models.workspace_member import WorkspaceRole
 from hecate.services.auth.token import decode_access_token
 
@@ -51,6 +53,12 @@ class JWTAuthProvider(AuthProviderABC):
             org_id_raw = payload.get("org_id")
             workspace_id_raw = payload.get("workspace_id")
             role_raw = payload.get("role")
+
+            # Reject inactive users
+            result = await db.execute(select(UserModel).where(UserModel.id == user_id))
+            user = result.scalar_one_or_none()
+            if user is None or not user.active:
+                return None
 
             return AuthContext(
                 user_id=user_id,
