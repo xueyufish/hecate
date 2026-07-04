@@ -129,7 +129,12 @@ class Settings(BaseSettings):
     SCIM_ENABLED: bool = False
     SCIM_BEARER_TOKEN: str = ""
 
-    # Vault integration configuration
+    # Router cache configuration
+    ROUTER_CACHE_ENABLED: bool = True
+    ROUTER_CACHE_TTL: int = 300
+    ROUTER_CACHE_REDIS_URL: str = ""
+    ROUTER_CACHE_FALLBACK_TO_MEMORY: bool = True
+    ROUTER_COST_AWARE: bool = True
     VAULT_URL: str = ""
     VAULT_TOKEN: str = ""
     VAULT_ROLE_ID: str = ""
