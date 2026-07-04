@@ -18,6 +18,15 @@ from hecate.engine.ports import EnginePort, SpanContext
 
 logger = logging.getLogger(__name__)
 
+# Module-level holder for quota service — set during app startup
+_quota_service_factory: Any = None
+
+
+def set_quota_service_factory(factory: Any) -> None:
+    """Register the QuotaService factory for cost recording."""
+    global _quota_service_factory
+    _quota_service_factory = factory
+
 
 class _ProductionEnginePort(EnginePort):
     """Production EnginePort adapter wiring engine calls to actual services.
@@ -31,24 +40,25 @@ class _ProductionEnginePort(EnginePort):
         db: AsyncSession,
         llm_service: Any,
         tool_registry: Any = None,
+        workspace_id: UUID | None = None,
+        agent_id: UUID | None = None,
     ) -> None:
         self._db = db
         self._llm_service = llm_service
         self._tool_registry = tool_registry
+        self._workspace_id = workspace_id
+        self._agent_id = agent_id
 
     async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
         """Invoke LLM via LLMService in streaming mode.
 
-        Args:
-            messages: Conversation messages.
-            config: Configuration dict with 'model' and optional 'tools'.
-
-        Yields:
-            Token strings from the LLM.
+        After streaming completes, records cost against quotas for
+        org, workspace, and agent scopes if QuotaService is available.
         """
         model = config.get("model", "gpt-4o")
         tools = config.get("tools")
 
+        token_count = 0
         async for chunk in self._llm_service.chat_stream(
             messages=messages,
             model=model,
@@ -56,7 +66,37 @@ class _ProductionEnginePort(EnginePort):
         ):
             content = chunk.get("content", "")
             if content:
+                token_count += len(content) // 4
                 yield content
+
+        await self._record_cost(model, token_count)
+
+    async def _record_cost(self, model: str, token_count: int) -> None:
+        """Record cost usage against quotas after LLM invocation."""
+        if _quota_service_factory is None or token_count == 0:
+            return
+        try:
+            service = _quota_service_factory(self._db, self._workspace_id)
+            cost_estimate = token_count * 0.00001
+
+            if self._workspace_id:
+                await service.record_usage(
+                    resource_type="cost",
+                    scope="workspace",
+                    scope_id=self._workspace_id,
+                    window_type="monthly",
+                    amount=cost_estimate,
+                )
+            if self._agent_id:
+                await service.record_usage(
+                    resource_type="cost",
+                    scope="agent",
+                    scope_id=self._agent_id,
+                    window_type="monthly",
+                    amount=cost_estimate,
+                )
+        except Exception:
+            logger.debug("Cost recording skipped", exc_info=True)
 
     async def tool_execute(self, name: str, args: dict, context: dict | None = None) -> Any:
         """Execute a tool by name via ToolRegistry.

@@ -10,6 +10,7 @@ Initializes the FastAPI application with:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from contextlib import asynccontextmanager as _asynccontextmanager
@@ -41,6 +42,7 @@ from hecate.api.management.alerts import (
     silences_router as alert_silences_router,
 )
 from hecate.api.management.api_keys import router as api_keys_router
+from hecate.api.management.budget import router as budget_router
 from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.costs import router as costs_router
@@ -66,8 +68,14 @@ from hecate.api.middleware import AuditMiddleware
 from hecate.api.schedules import router as schedules_router
 from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
+from hecate.auth.sso_routes import router as sso_router
 from hecate.core.config import settings as _settings
 from hecate.core.database import engine
+from hecate.scim.discovery import router as scim_discovery_router
+from hecate.scim.groups import router as scim_groups_router
+from hecate.scim.users import router as scim_users_router
+
+logger = logging.getLogger(__name__)
 
 
 class _OTelAttributeMiddleware(BaseHTTPMiddleware):
@@ -112,6 +120,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await session.commit()
         except Exception:
             await session.rollback()
+
+    # Initialize secret providers
+    from hecate.vault.registration import register_secret_providers
+
+    register_secret_providers()
+
+    # Register daily budget forecast snapshot task
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+        from apscheduler.triggers.cron import CronTrigger
+
+        from hecate.core.database import async_session_factory
+
+        scheduler = AsyncIOScheduler()
+
+        async def _record_forecast_snapshots() -> None:
+            async with async_session_factory() as session:
+                from hecate.budget.budget_service import record_all_forecast_snapshots
+
+                await record_all_forecast_snapshots(session)
+
+        scheduler.add_job(
+            _record_forecast_snapshots,
+            trigger=CronTrigger(hour=0, minute=5),
+            id="budget_forecast_snapshot",
+            name="Daily Budget Forecast Snapshot",
+            replace_existing=True,
+        )
+        scheduler.start()
+        logger.info("Budget forecast scheduler started (daily at 00:05 UTC)")
+    except ImportError:
+        logger.info("APScheduler not available — budget forecast scheduling disabled")
 
     # Configure OpenTelemetry tracing
     if _settings.TRACING_ENABLED:
@@ -264,6 +304,11 @@ app.include_router(alert_channels_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_escalation_policies_router, prefix="/api", tags=["alerts"])
 app.include_router(quotas_router, prefix="/api", tags=["quotas"])
 app.include_router(i18n_router, tags=["i18n"])
+app.include_router(budget_router, tags=["budgets"])
+app.include_router(sso_router, tags=["sso"])
+app.include_router(scim_users_router, tags=["scim"])
+app.include_router(scim_groups_router, tags=["scim"])
+app.include_router(scim_discovery_router, tags=["scim"])
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:

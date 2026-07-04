@@ -104,6 +104,48 @@ class Settings(BaseSettings):
     # Prompt management
     PROTECTED_PROMPT_LABELS: list[str] = ["production"]
 
+    # SSO / OIDC configuration
+    SSO_OIDC_CLIENT_ID: str = ""
+    SSO_OIDC_CLIENT_SECRET: str = ""
+    SSO_OIDC_DISCOVERY_URL: str = ""
+    SSO_OIDC_SCOPE: str = "openid profile email"
+
+    # SSO / SAML configuration
+    SSO_SAML_SP_ENTITY_ID: str = ""
+    SSO_SAML_SP_ACS_URL: str = ""
+    SSO_SAML_IDP_ENTITY_ID: str = ""
+    SSO_SAML_IDP_SSO_URL: str = ""
+    SSO_SAML_IDP_X509_CERT: str = ""
+
+    # SSO / LDAP configuration
+    SSO_LDAP_SERVER_URL: str = ""
+    SSO_LDAP_BASE_DN: str = ""
+    SSO_LDAP_BIND_DN: str = ""
+    SSO_LDAP_BIND_PASSWORD: str = ""
+    SSO_LDAP_SEARCH_FILTER: str = "(uid={})"
+    SSO_LDAP_USE_SSL: bool = True
+
+    # SCIM configuration
+    SCIM_ENABLED: bool = False
+    SCIM_BEARER_TOKEN: str = ""
+
+    # Vault integration configuration
+    VAULT_URL: str = ""
+    VAULT_TOKEN: str = ""
+    VAULT_ROLE_ID: str = ""
+    VAULT_SECRET_ID: str = ""
+    VAULT_MOUNT_POINT: str = "secret"
+    VAULT_CACHE_TTL: int = 300
+    VAULT_FALLBACK_TO_SETTINGS: bool = True
+
+    # AWS Secrets Manager
+    AWS_SECRETS_REGION: str = ""
+    AWS_SECRETS_ACCESS_KEY_ID: str = ""
+    AWS_SECRETS_SECRET_ACCESS_KEY: str = ""
+
+    # Azure Key Vault
+    AZURE_KEYVAULT_URL: str = ""
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""

@@ -31,6 +31,8 @@ class QuotaScope(StrEnum):
 
     WORKSPACE = "workspace"
     API_KEY = "api_key"
+    ORG = "org"
+    AGENT = "agent"
 
 
 class QuotaWindowType(StrEnum):

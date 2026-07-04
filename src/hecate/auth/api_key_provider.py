@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.auth.provider import AuthProviderABC
 from hecate.core.auth_context import AuthContext
 from hecate.models.api_key import ApiKeyModel, ApiKeyScope
+from hecate.models.user import UserModel
 from hecate.models.workspace_member import WorkspaceRole
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,12 @@ class APIKeyAuthProvider(AuthProviderABC):
 
         # Check expiration
         if api_key.expires_at is not None and api_key.expires_at < datetime.now(UTC):
+            return None
+
+        # Reject inactive users
+        user_result = await db.execute(select(UserModel).where(UserModel.id == api_key.created_by))
+        user = user_result.scalar_one_or_none()
+        if user is None or not user.active:
             return None
 
         # Update last_used_at
