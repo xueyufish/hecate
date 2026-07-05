@@ -151,6 +151,15 @@ class Settings(BaseSettings):
     # Azure Key Vault
     AZURE_KEYVAULT_URL: str = ""
 
+    # A2A Protocol configuration
+    A2A_SERVER_ENABLED: bool = False
+    A2A_SERVER_URL: str = "http://localhost:8000"
+    A2A_AGENT_NAME: str = "Hecate Agent"
+    A2A_AUTH_MODE: str = "api_key"
+    A2A_SIGNING_ENABLED: bool = False
+    A2A_SIGNING_KEY_PATH: str = ""
+    A2A_JWKS_CACHE_TTL: int = 3600
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""

@@ -54,6 +54,7 @@ class AgentModel(BaseModel):
     tools: Mapped[list] = mapped_column(JSON, default=list)
     skills: Mapped[list] = mapped_column(JSON, default=list)
     knowledge_base_ids: Mapped[list] = mapped_column(JSON, default=list)
+    skill_ids: Mapped[list] = mapped_column(JSON, default=list, nullable=True)
     risk_level: Mapped[str] = mapped_column(String(20), default="LOW")
     opening_remarks: Mapped[str | None] = mapped_column(nullable=True)
     enable_suggestions: Mapped[bool] = mapped_column(default=True)
