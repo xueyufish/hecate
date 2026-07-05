@@ -24,6 +24,7 @@ from starlette.responses import Response as StarletteResponse
 from hecate.api.audit import router as audit_router
 from hecate.api.auth import router as auth_router
 from hecate.api.evaluation import router as evaluation_router
+from hecate.api.management.a2a import router as a2a_management_router
 from hecate.api.management.agent_templates import router as agent_templates_router
 from hecate.api.management.agents import router as agents_router
 from hecate.api.management.alerts import (
@@ -60,6 +61,7 @@ from hecate.api.management.orgs import router as orgs_router
 from hecate.api.management.prompts import router as prompts_router
 from hecate.api.management.quotas import quotas_router
 from hecate.api.management.sessions import router as sessions_router
+from hecate.api.management.skill_registry import router as skill_registry_router
 from hecate.api.management.skills import router as skills_router
 from hecate.api.management.tools import router as tools_router
 from hecate.api.management.traces import router as traces_router
@@ -332,4 +334,31 @@ if _settings.MCP_SERVER_ENABLED:
             yield
 
     app.router.lifespan_context = _combined_lifespan
-    app.mount("/mcp", _mcp_app)
+
+# A2A Server — conditional mount when A2A_SERVER_ENABLED=true
+if _settings.A2A_SERVER_ENABLED:
+    from hecate.a2a.server.app import router as a2a_router
+
+    app.include_router(a2a_router, tags=["a2a"])
+
+app.include_router(a2a_management_router)
+app.include_router(skill_registry_router)
+
+# MCP Server — conditional mount when MCP_SERVER_ENABLED=true
+if _settings.MCP_SERVER_ENABLED:
+    from hecate.services.mcp.server import create_mcp_server
+
+    _mcp = create_mcp_server()
+    _mcp_app = _mcp.http_app(path="/mcp")
+
+    _original_lifespan = app.router.lifespan_context
+
+    @_asynccontextmanager
+    async def _combined_lifespan(app_inner: FastAPI) -> AsyncGenerator[None, None]:
+        async with (
+            _original_lifespan(app_inner),
+            _mcp_app.lifespan(app_inner),
+        ):
+            yield
+
+    app.router.lifespan_context = _combined_lifespan

@@ -271,3 +271,30 @@ class EnginePort(ABC):
             The tool's return value.
         """
         return await self.tool_execute(name, args, context)
+
+    async def workflow_execute(
+        self,
+        workflow_id: UUID,
+        input_data: dict,
+        context: dict | None = None,
+    ) -> dict:
+        """Execute a workflow by ID with the given input (optional).
+
+        Agent-Workflow embedding capability — enables agents to invoke
+        workflows as callable tools via the SkillRegistry.
+
+        Default implementation raises NotImplementedError. Concrete adapters
+        MUST override this method to enable workflow-as-tool invocation.
+
+        Args:
+            workflow_id: UUID of the workflow to execute.
+            input_data: Input data for the workflow.
+            context: Optional execution context (session, parent agent, etc.).
+
+        Returns:
+            Dict with keys: ``output`` (Any), ``status`` (str).
+
+        Raises:
+            ValueError: If the workflow_id does not resolve to a valid workflow.
+        """
+        raise NotImplementedError("workflow_execute requires a concrete EnginePort adapter")

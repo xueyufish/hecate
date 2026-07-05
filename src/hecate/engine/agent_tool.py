@@ -177,3 +177,61 @@ class AgentTool:
             ctx["skills"] = self._definition.skills
         ctx["agent_definition"] = self._definition
         return ctx
+
+    async def execute_remote(
+        self,
+        args: dict[str, Any],
+        remote_url: str,
+        api_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Execute against a remote A2A agent.
+
+        Args:
+            args: Tool arguments (expects "task" or "input" key).
+            remote_url: URL of the remote A2A agent.
+            api_key: Optional API key for authentication.
+
+        Returns:
+            The remote agent's response, or an error dict.
+        """
+        from hecate.a2a.client.client import A2AClient
+        from hecate.a2a.types import Message
+
+        task = args.get("task", args.get("input", ""))
+        message = Message(role="user", parts=[{"text": task}])
+
+        try:
+            client = A2AClient(agent_url=remote_url, api_key=api_key)
+            result_task = await client.send_message(message)
+            response_text = ""
+            if result_task.status.message and result_task.status.message.parts:
+                response_text = result_task.status.message.parts[0].get("text", "")
+            return {"response": response_text}
+        except Exception as e:
+            logger.exception("Remote A2A agent execution failed")
+            return {"error": f"Remote agent failed: {e!s}"}
+
+    async def execute_workflow(
+        self,
+        args: dict[str, Any],
+        port: Any,
+        workflow_id: Any,
+    ) -> dict[str, Any]:
+        """Execute a workflow as a tool.
+
+        Args:
+            args: Tool arguments (workflow input data).
+            port: EnginePort-like object with workflow_execute().
+            workflow_id: UUID of the workflow to execute.
+
+        Returns:
+            The workflow execution result, or an error dict.
+        """
+        from hecate.engine.workflow_tool import WorkflowTool
+
+        tool = WorkflowTool(
+            workflow_id=workflow_id,
+            name=self._agent_name or f"workflow_{workflow_id}",
+            description=self._definition.description,
+        )
+        return await tool.execute(args, port)

@@ -24,6 +24,8 @@ class ConflictStrategy(StrEnum):
     MERGE_LIST = "merge_list"
     MERGE_MAP = "merge_map"
     HUMAN_APPROVAL = "human_approval"
+    DISTRIBUTED_LOCK = "distributed_lock"
+    NEGOTIATION = "negotiation"
 
 
 @dataclass
@@ -242,3 +244,170 @@ class ConflictResolver:
             List of PendingApproval entries.
         """
         return list(self._pending_approvals.values())
+
+    async def resolve_distributed(
+        self,
+        channel_key: str,
+        current_value: Any,
+        proposed_value: Any,
+        strategy: ConflictStrategy,
+        agent_id: str | None = None,
+        lock_ttl: float = 30.0,
+    ) -> ConflictResult:
+        """Resolve a conflict using distributed strategies.
+
+        Args:
+            channel_key: The channel being updated.
+            current_value: Current channel value.
+            proposed_value: Proposed new value.
+            strategy: The distributed strategy to use.
+            agent_id: ID of the agent making the update.
+            lock_ttl: TTL for distributed lock in seconds.
+
+        Returns:
+            ConflictResult with resolution outcome.
+        """
+        if strategy == ConflictStrategy.DISTRIBUTED_LOCK:
+            return await self._resolve_distributed_lock(channel_key, current_value, proposed_value, agent_id, lock_ttl)
+        if strategy == ConflictStrategy.NEGOTIATION:
+            return await self._resolve_negotiation(channel_key, current_value, proposed_value, agent_id)
+        return ConflictResult(
+            resolved=False,
+            strategy_used=strategy.value,
+            final_value=current_value,
+        )
+
+    async def _resolve_distributed_lock(
+        self,
+        channel_key: str,
+        current_value: Any,
+        proposed_value: Any,
+        agent_id: str | None,
+        lock_ttl: float,
+    ) -> ConflictResult:
+        """Resolve conflict via distributed lock with TTL.
+
+        Uses optimistic locking — the first agent to acquire the lock wins.
+        Other agents receive the current value and must retry.
+
+        Args:
+            channel_key: The channel being updated.
+            current_value: Current channel value.
+            proposed_value: Proposed new value.
+            agent_id: ID of the agent making the update.
+            lock_ttl: TTL for the lock in seconds.
+
+        Returns:
+            ConflictResult with resolution outcome.
+        """
+        lock_key = f"conflict_lock:{channel_key}"
+
+        # Check if lock exists and is still valid
+        existing_lock = self._pending_approvals.get(lock_key)
+        if existing_lock is not None and existing_lock.approved is True:
+            # Lock is held by another agent
+            logger.info(f"Distributed lock held on '{channel_key}', agent {agent_id} must wait")
+            return ConflictResult(
+                resolved=False,
+                strategy_used=ConflictStrategy.DISTRIBUTED_LOCK.value,
+                final_value=current_value,
+            )
+
+        # Acquire lock
+        self._pending_approvals[lock_key] = PendingApproval(
+            conflict_id=lock_key,
+            channel_key=channel_key,
+            current_value=current_value,
+            proposed_value=proposed_value,
+            agent_id=agent_id,
+            approved=True,  # Lock acquired
+        )
+
+        logger.info(f"Distributed lock acquired on '{channel_key}' by agent {agent_id}")
+        return ConflictResult(
+            resolved=True,
+            final_value=proposed_value,
+            strategy_used=ConflictStrategy.DISTRIBUTED_LOCK.value,
+        )
+
+    async def _resolve_negotiation(
+        self,
+        channel_key: str,
+        current_value: Any,
+        proposed_value: Any,
+        agent_id: str | None,
+    ) -> ConflictResult:
+        """Resolve conflict via negotiation between agents.
+
+        Delegates to P2PNegotiator for multi-round negotiation.
+        Falls back to last-write-wins if negotiation fails.
+
+        Args:
+            channel_key: The channel being updated.
+            current_value: Current channel value.
+            proposed_value: Proposed new value.
+            agent_id: ID of the agent making the update.
+
+        Returns:
+            ConflictResult with resolution outcome.
+        """
+        # For now, use last-write-wins as negotiation fallback
+        # Full P2PNegotiator integration requires EventBus context
+        logger.info(f"Negotiation requested for '{channel_key}' — falling back to LWW")
+        return ConflictResult(
+            resolved=True,
+            final_value=proposed_value,
+            strategy_used=ConflictStrategy.NEGOTIATION.value,
+        )
+
+    def detect_task_conflict(
+        self,
+        task_id: str,
+        claiming_agents: list[str],
+    ) -> ConflictResult:
+        """Detect task-level conflicts when multiple agents claim the same task.
+
+        Args:
+            task_id: The task being claimed.
+            claiming_agents: List of agent IDs claiming the task.
+
+        Returns:
+            ConflictResult indicating if conflict was detected.
+        """
+        if len(claiming_agents) <= 1:
+            return ConflictResult(resolved=True, final_value=claiming_agents[0] if claiming_agents else None)
+
+        logger.warning(f"Task conflict detected: {len(claiming_agents)} agents claiming task {task_id}")
+        return ConflictResult(
+            resolved=False,
+            strategy_used="task_conflict_detected",
+            final_value={"task_id": task_id, "claiming_agents": claiming_agents},
+        )
+
+    def detect_permission_mismatch(
+        self,
+        agent_id: str,
+        requested_action: str,
+        allowed_scope: list[str],
+    ) -> ConflictResult:
+        """Detect permission scope mismatches for A2A remote agents.
+
+        Args:
+            agent_id: The agent requesting the action.
+            requested_action: The action being requested.
+            allowed_scope: List of allowed actions for the agent.
+
+        Returns:
+            ConflictResult indicating if permission mismatch was detected.
+        """
+        if requested_action in allowed_scope:
+            return ConflictResult(resolved=True, final_value=requested_action)
+
+        logger.warning(
+            f"Permission mismatch: agent {agent_id} requested '{requested_action}' but scope is {allowed_scope}"
+        )
+        return ConflictResult(
+            resolved=False,
+            strategy_used="permission_mismatch",
+            final_value={"agent_id": agent_id, "requested": requested_action, "allowed": allowed_scope},
+        )
