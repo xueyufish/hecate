@@ -49,6 +49,7 @@ class ModelRegistryModel(BaseModel):
     model_type: Mapped[str] = mapped_column(String(50), nullable=False, default="chat")
     capabilities: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     max_context: Mapped[int | None] = mapped_column(nullable=True)
+    model_metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     is_custom: Mapped[bool] = mapped_column(nullable=False, default=False)
     is_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
 
@@ -114,6 +115,29 @@ class ModelProviderReadSchema(PydanticBase):
     updated_at: datetime
 
 
+class ModelMetadataSchema(PydanticBase):
+    """Structured model metadata with modalities, capabilities, and limits.
+
+    Replaces the flat model_type string with a structured representation
+    that supports multi-modal models and capability-aware routing.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    modalities: dict = Field(
+        default_factory=lambda: {"input": ["text"], "output": ["text"]},
+        description="Input/output modality arrays (text, image, audio, video, embedding, code)",
+    )
+    capabilities: dict = Field(
+        default_factory=dict,
+        description="Boolean capability flags (reasoning, tool_call, vision, streaming)",
+    )
+    limits: dict = Field(
+        default_factory=dict,
+        description="Resource limits (context: int, output: int)",
+    )
+
+
 class ModelRegistryReadSchema(PydanticBase):
     """Schema for reading model registry data."""
 
@@ -126,6 +150,7 @@ class ModelRegistryReadSchema(PydanticBase):
     model_type: str
     capabilities: dict
     max_context: int | None
+    model_metadata: dict
     is_custom: bool
     is_enabled: bool
     created_at: datetime

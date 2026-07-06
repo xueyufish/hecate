@@ -46,8 +46,11 @@ from hecate.api.management.api_keys import router as api_keys_router
 from hecate.api.management.budget import router as budget_router
 from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
 from hecate.api.management.conversations import router as conversations_router
+from hecate.api.management.cost_management import router as cost_management_router
 from hecate.api.management.costs import router as costs_router
+from hecate.api.management.fine_tuning import router as fine_tuning_router
 from hecate.api.management.i18n import router as i18n_router
+from hecate.api.management.inference import router as inference_router
 from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.memory import router as memory_router
 from hecate.api.management.messages import router as messages_router
@@ -56,6 +59,7 @@ from hecate.api.management.model_lifecycle import router as model_lifecycle_rout
 from hecate.api.management.model_pricing import router as model_pricing_router
 from hecate.api.management.model_providers import router as model_providers_router
 from hecate.api.management.monitoring import router as monitoring_router
+from hecate.api.management.monitoring_models import router as monitoring_models_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
 from hecate.api.management.orgs import router as orgs_router
 from hecate.api.management.prompts import router as prompts_router
@@ -299,8 +303,10 @@ app.include_router(workspace_members_router, prefix="/api", tags=["workspace-mem
 app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
 app.include_router(traces_router, prefix="/api", tags=["traces"])
 app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
+app.include_router(monitoring_models_router)
 app.include_router(model_pricing_router, prefix="/api", tags=["model-pricing"])
 app.include_router(costs_router, prefix="/api", tags=["costs"])
+app.include_router(cost_management_router)
 app.include_router(alert_rules_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_events_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_silences_router, prefix="/api", tags=["alerts"])
@@ -308,6 +314,8 @@ app.include_router(alert_channels_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_escalation_policies_router, prefix="/api", tags=["alerts"])
 app.include_router(quotas_router, prefix="/api", tags=["quotas"])
 app.include_router(i18n_router, tags=["i18n"])
+app.include_router(inference_router)
+app.include_router(fine_tuning_router)
 app.include_router(budget_router, tags=["budgets"])
 app.include_router(model_catalog_router, tags=["model-catalog"])
 app.include_router(model_lifecycle_router, tags=["model-lifecycle"])

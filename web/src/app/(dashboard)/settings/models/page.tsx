@@ -32,8 +32,28 @@ interface Model {
   model_id: string;
   display_name: string;
   model_type: string;
+  model_metadata?: {
+    modalities?: { input?: string[]; output?: string[] };
+    capabilities?: Record<string, boolean>;
+    limits?: { context?: number; output?: number };
+  };
   is_custom: boolean;
   is_enabled: boolean;
+}
+
+function getCapabilityBadges(metadata?: Model["model_metadata"]): string[] {
+  if (!metadata) return [];
+  const badges: string[] = [];
+  const caps = metadata.capabilities || {};
+  const mods = metadata.modalities || {};
+  const limits = metadata.limits || {};
+  for (const [k, v] of Object.entries(caps)) {
+    if (v) badges.push(k);
+  }
+  if (mods.input?.includes("image")) badges.push("vision");
+  if (mods.input?.includes("audio")) badges.push("audio");
+  if (limits.context && limits.context >= 128000) badges.push(`${Math.floor(limits.context / 1000)}K`);
+  return [...new Set(badges)];
 }
 
 export default function ModelsPage() {
@@ -315,13 +335,14 @@ export default function ModelsPage() {
                             </p>
                           ) : (
                             <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead>Model Name</TableHead>
-                                  <TableHead>Type</TableHead>
-                                  <TableHead className="text-right">Actions</TableHead>
-                                </TableRow>
-                              </TableHeader>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Model Name</TableHead>
+                                    <TableHead>Type</TableHead>
+                                    <TableHead>Capabilities</TableHead>
+                                    <TableHead className="text-right">Actions</TableHead>
+                                  </TableRow>
+                                </TableHeader>
                               <TableBody>
                                 {(models[p.id] || []).map((m) => (
                                   <TableRow key={m.id}>
@@ -329,6 +350,15 @@ export default function ModelsPage() {
                                       {m.display_name}
                                     </TableCell>
                                     <TableCell>{m.model_type}</TableCell>
+                                    <TableCell>
+                                      <div className="flex flex-wrap gap-1">
+                                        {getCapabilityBadges(m.model_metadata).map((badge) => (
+                                          <Badge key={badge} variant="outline" className="text-xs">
+                                            {badge}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    </TableCell>
                                     <TableCell className="text-right">
                                       <Button
                                         variant="ghost"

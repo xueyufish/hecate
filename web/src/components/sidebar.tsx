@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import { Bot, Database, LogOut, Settings, Share2 } from "lucide-react";
+import { Bot, Database, LogOut, Settings, Share2, Activity, DollarSign } from "lucide-react";
 
 export function Sidebar() {
   const { userEmail, logout } = useAuth();
@@ -41,6 +41,20 @@ export function Sidebar() {
         >
           <Settings className="h-4 w-4" />
           Settings
+        </Link>
+        <Link
+          href="/settings/models/monitoring"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <Activity className="h-4 w-4" />
+          Monitoring
+        </Link>
+        <Link
+          href="/settings/models/cost-analysis"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <DollarSign className="h-4 w-4" />
+          Cost Analysis
         </Link>
       </nav>
       <div className="border-t p-3">

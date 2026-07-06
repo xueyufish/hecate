@@ -22,6 +22,10 @@ class RoutingStrategy(Enum):
     BALANCED = "balanced"
 
 
+class NoCapableModelError(Exception):
+    """Raised when no candidate model supports the required modalities or capabilities."""
+
+
 @dataclass
 class ModelInfo:
     """Metadata for a model in the routing pool."""
@@ -33,6 +37,7 @@ class ModelInfo:
     avg_latency_ms: float = 0.0
     capabilities: list[str] = field(default_factory=list)
     max_context_tokens: int = 4096
+    modalities: dict = field(default_factory=lambda: {"input": ["text"], "output": ["text"]})
 
 
 @dataclass
@@ -42,6 +47,7 @@ class _RoutingConstraints:
     max_cost_per_1k: float | None = None
     max_latency_ms: float | None = None
     required_capabilities: list[str] | None = None
+    required_input_modalities: list[str] | None = None
 
 
 class ModelRouter:
@@ -96,6 +102,7 @@ class ModelRouter:
         required_capabilities: list[str] | None = None,
         max_cost_per_1k: float | None = None,
         max_latency_ms: float | None = None,
+        required_input_modalities: list[str] | None = None,
     ) -> ModelInfo | None:
         """Select the best model based on strategy and constraints.
 
@@ -104,18 +111,27 @@ class ModelRouter:
             required_capabilities: Capabilities the model must have.
             max_cost_per_1k: Maximum cost per 1K tokens (input+output avg).
             max_latency_ms: Maximum average latency in milliseconds.
+            required_input_modalities: Input modalities the model must support
+                (e.g., ["text", "image"] for vision requests).
 
         Returns:
             Best matching ModelInfo, or None if no candidate found.
+
+        Raises:
+            NoCapableModelError: When required_input_modalities is set but no
+                candidate supports all required modalities.
         """
         constraints = _RoutingConstraints(
             max_cost_per_1k=max_cost_per_1k,
             max_latency_ms=max_latency_ms,
             required_capabilities=required_capabilities,
+            required_input_modalities=required_input_modalities,
         )
         candidates = self._filter_candidates(constraints)
 
         if not candidates:
+            if required_input_modalities:
+                raise NoCapableModelError(f"No model supports required modalities: {required_input_modalities}")
             logger.warning("No model candidates found for routing")
             return None
 
@@ -134,12 +150,19 @@ class ModelRouter:
         """Filter models by hard constraints.
 
         Args:
-            constraints: Hard limits on cost, latency, and capabilities.
+            constraints: Hard limits on cost, latency, capabilities, and modalities.
 
         Returns:
             List of models meeting all constraints.
         """
         candidates = list(self._models.values())
+
+        if constraints.required_input_modalities:
+            candidates = [
+                m
+                for m in candidates
+                if all(mod in m.modalities.get("input", []) for mod in constraints.required_input_modalities)
+            ]
 
         if constraints.required_capabilities:
             candidates = [
