@@ -206,7 +206,37 @@ class CatalogService:
     ) -> dict[str, Any]:
         """Build a catalog entry from registry and provider models."""
         capabilities = registry.capabilities or {}
-        capability_badges = [k for k, v in capabilities.items() if v is True]
+        model_metadata = registry.model_metadata or {}
+
+        # Compute capability badges from model_metadata (preferred) or legacy capabilities
+        meta_caps = model_metadata.get("capabilities", {})
+        modalities = model_metadata.get("modalities", {})
+        limits = model_metadata.get("limits", {})
+        input_modalities = modalities.get("input", [])
+        output_modalities = modalities.get("output", [])
+
+        capability_badges = set()
+        # From model_metadata.capabilities
+        for k, v in meta_caps.items():
+            if v is True:
+                capability_badges.add(k)
+        # Legacy capabilities field
+        for k, v in capabilities.items():
+            if v is True:
+                capability_badges.add(k)
+        # Derive from modalities
+        if "image" in input_modalities:
+            capability_badges.add("vision")
+        if "audio" in input_modalities:
+            capability_badges.add("audio")
+        if "video" in input_modalities:
+            capability_badges.add("video")
+        if "code" in output_modalities:
+            capability_badges.add("code_generation")
+        # Context size badge
+        ctx = limits.get("context") or registry.max_context
+        if ctx and ctx >= 128000:
+            capability_badges.add(f"{ctx // 1000}K context")
 
         # Get effective pricing
         now = datetime.now(UTC)
@@ -241,8 +271,10 @@ class CatalogService:
             "provider_status": provider.status,
             "model_type": registry.model_type,
             "max_context": registry.max_context,
+            "model_metadata": model_metadata,
+            "modalities": modalities,
             "capabilities": capabilities,
-            "capability_badges": capability_badges,
+            "capability_badges": sorted(capability_badges),
             "effective_pricing": effective_pricing,
             "has_pricing": has_pricing,
             "is_custom": registry.is_custom,

@@ -160,6 +160,10 @@ class Settings(BaseSettings):
     A2A_SIGNING_KEY_PATH: str = ""
     A2A_JWKS_CACHE_TTL: int = 3600
 
+    COST_ANOMALY_THRESHOLD: float = 2.5
+    COST_ROLLING_WINDOW_DAYS: int = 30
+    COST_DEFAULT_POLICY: str = "alert"
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""

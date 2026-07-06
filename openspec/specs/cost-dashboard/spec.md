@@ -1,5 +1,7 @@
-## ADDED Requirements
+## Purpose
 
+The cost dashboard provides model pricing management, cost calculation from token usage, and cost summary/breakdown/timeseries APIs for tracking LLM spend across models, agents, and users.
+## Requirements
 ### Requirement: ModelPricingModel ORM model
 The system SHALL define `ModelPricingModel(BaseModel)` in `models/model_pricing.py` with fields: `model_id` (String 255, the provider model name e.g. "gpt-4o"), `display_name` (String 255), `input_price_per_1k` (Float, cost per 1K input tokens in USD), `output_price_per_1k` (Float, cost per 1K output tokens in USD), `currency` (String 8, default "USD"), `effective_from` (DateTime, when this pricing takes effect), `effective_until` (DateTime nullable, when this pricing expires, NULL means current), `workspace_id` (UUID, default zero UUID).
 
@@ -126,3 +128,15 @@ The system SHALL include an Alembic data migration that pre-populates `ModelPric
 #### Scenario: Migration is idempotent
 - **WHEN** the migration is applied to a database that already has pricing entries
 - **THEN** no duplicate entries are created
+
+### Requirement: Cost dashboard supports per-model cost trend time-series
+The cost dashboard SHALL extend its aggregation API to return per-model cost time-series data suitable for frontend trend chart rendering.
+
+#### Scenario: Get per-model cost trend
+- **WHEN** a client requests `GET /api/cost-dashboard/trends?group_by=model&granularity=daily&days=30`
+- **THEN** the system returns a time-series array with one entry per day containing `{date, model, cost, tokens}` tuples
+
+#### Scenario: Get cost breakdown by model
+- **WHEN** a client requests `GET /api/cost-dashboard/breakdown?group_by=model&period=2026-07`
+- **THEN** the system returns per-model cost totals sorted descending, with percentage of total spend
+
