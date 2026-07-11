@@ -23,6 +23,7 @@ follows the interrupted node in the edge graph.
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -44,6 +45,8 @@ from hecate.engine.types import (
     WorkerResult,
 )
 from hecate.engine.worker import DirectWorkerPool, Worker, WorkerPool
+
+logger = logging.getLogger(__name__)
 
 
 class PregelRuntime:
@@ -186,6 +189,53 @@ class PregelRuntime:
         if execution_mode == "task" and stream_mode == StreamMode.MESSAGES:
             stream_mode = StreamMode.VALUES
 
+        # Create root OTel trace span for session execution.
+        # Child spans from Workers auto-nest via contextvars.
+        _tracer = None
+        try:
+            from opentelemetry import trace as _otel_trace
+
+            _tracer = _otel_trace.get_tracer("hecate.engine")
+        except Exception:
+            logger.debug("OpenTelemetry not available, running without root span")
+
+        if _tracer is not None:
+            with _tracer.start_as_current_span(
+                f"session:{session_id}",
+                attributes={"session.id": str(session_id)},
+            ) as _root_span:
+                async for event in self._execute_inner(
+                    session_id=session_id,
+                    initial_input=initial_input,
+                    stream_mode=stream_mode,
+                    resume_value=resume_value,
+                    trace_id=trace_id,
+                    execution_mode=execution_mode,
+                ):
+                    yield event
+                return
+
+        # Fallback: no OTel available, run without root span
+        async for event in self._execute_inner(
+            session_id=session_id,
+            initial_input=initial_input,
+            stream_mode=stream_mode,
+            resume_value=resume_value,
+            trace_id=trace_id,
+            execution_mode=execution_mode,
+        ):
+            yield event
+
+    async def _execute_inner(
+        self,
+        session_id: uuid.UUID,
+        initial_input: dict | None = None,
+        stream_mode: StreamMode = StreamMode.VALUES,
+        resume_value: Any = None,
+        trace_id: str | None = None,
+        execution_mode: str = "conversational",
+    ) -> AsyncGenerator[dict, None]:
+        """Inner execution logic, extracted from execute() for root span wrapping."""
         if resume_value is not None:
             await self._restore_from_checkpoint(session_id, resume_value)
             current_nodes = self._resolve_next_nodes_after_interrupt()

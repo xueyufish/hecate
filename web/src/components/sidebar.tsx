@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import { Bot, Database, LogOut, Settings, Share2, Activity, DollarSign } from "lucide-react";
+import { Bot, Database, LogOut, Settings, Share2, Activity, DollarSign, Gauge, Users, MessageSquare } from "lucide-react";
 
 export function Sidebar() {
   const { userEmail, logout } = useAuth();
@@ -55,6 +55,27 @@ export function Sidebar() {
         >
           <DollarSign className="h-4 w-4" />
           Cost Analysis
+        </Link>
+        <Link
+          href="/ops-center"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <Gauge className="h-4 w-4" />
+          Ops Center
+        </Link>
+        <Link
+          href="/ops-center/agents"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <Users className="h-4 w-4" />
+          Agent Health
+        </Link>
+        <Link
+          href="/ops-center/conversations"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <MessageSquare className="h-4 w-4" />
+          Conversations
         </Link>
       </nav>
       <div className="border-t p-3">

@@ -25,6 +25,7 @@ from hecate.api.audit import router as audit_router
 from hecate.api.auth import router as auth_router
 from hecate.api.evaluation import router as evaluation_router
 from hecate.api.management.a2a import router as a2a_management_router
+from hecate.api.management.agent_health import router as agent_health_router
 from hecate.api.management.agent_templates import router as agent_templates_router
 from hecate.api.management.agents import router as agents_router
 from hecate.api.management.alerts import (
@@ -45,6 +46,7 @@ from hecate.api.management.alerts import (
 from hecate.api.management.api_keys import router as api_keys_router
 from hecate.api.management.budget import router as budget_router
 from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
+from hecate.api.management.conversation_analytics import router as conversation_analytics_router
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.cost_management import router as cost_management_router
 from hecate.api.management.costs import router as costs_router
@@ -60,6 +62,7 @@ from hecate.api.management.model_pricing import router as model_pricing_router
 from hecate.api.management.model_providers import router as model_providers_router
 from hecate.api.management.monitoring import router as monitoring_router
 from hecate.api.management.monitoring_models import router as monitoring_models_router
+from hecate.api.management.ops_center_overview import router as ops_center_overview_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
 from hecate.api.management.orgs import router as orgs_router
 from hecate.api.management.prompts import router as prompts_router
@@ -67,6 +70,7 @@ from hecate.api.management.quotas import quotas_router
 from hecate.api.management.sessions import router as sessions_router
 from hecate.api.management.skill_registry import router as skill_registry_router
 from hecate.api.management.skills import router as skills_router
+from hecate.api.management.tool_analytics import router as tool_analytics_router
 from hecate.api.management.tools import router as tools_router
 from hecate.api.management.traces import router as traces_router
 from hecate.api.management.workflows import router as workflows_router
@@ -169,6 +173,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         provider = TracerProvider()
         provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+
+        # Register HecateTraceSpanProcessor for DB export
+        if _settings.TRACE_DB_EXPORT_ENABLED:
+            from hecate.services.observability.span_processor import HecateTraceSpanProcessor
+
+            _trace_processor = HecateTraceSpanProcessor()
+            provider.add_span_processor(_trace_processor)
+            _trace_processor._ensure_consumer()
+
         FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
 
     # Start monitoring service
@@ -351,6 +364,10 @@ if _settings.A2A_SERVER_ENABLED:
 
 app.include_router(a2a_management_router)
 app.include_router(skill_registry_router)
+app.include_router(tool_analytics_router)
+app.include_router(agent_health_router)
+app.include_router(conversation_analytics_router)
+app.include_router(ops_center_overview_router)
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
