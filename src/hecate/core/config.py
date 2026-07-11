@@ -72,6 +72,27 @@ class Settings(BaseSettings):
     SEARCH_API_KEY: str = ""
 
     TRACING_ENABLED: bool = True
+    TRACE_DB_EXPORT_ENABLED: bool = True
+    TRACE_DB_QUEUE_MAX_SIZE: int = 10000
+    TRACE_DB_FLUSH_INTERVAL: int = 5  # seconds between TraceModel flush cycles
+
+    # Agent health monitoring thresholds
+    AGENT_HEALTH_ERROR_RATE_WARNING: float = 0.05
+    AGENT_HEALTH_ERROR_RATE_CRITICAL: float = 0.15
+    AGENT_HEALTH_LATENCY_WARNING_MS: int = 10000
+    AGENT_HEALTH_LATENCY_CRITICAL_MS: int = 30000
+    AGENT_HEALTH_SCORE_WEIGHTS: dict = {"error_rate": 0.5, "latency": 0.3, "activity": 0.2}
+
+    # Conversation quality scoring
+    CONVERSATION_QUALITY_SCORING_ENABLED: bool = True
+    CONVERSATION_QUALITY_SAMPLING_RATE: float = 1.0  # 1.0 = 100% of conversations scored
+    CONVERSATION_QUALITY_JUDGE_MODEL: str = "gpt-4o-mini"
+
+    # Conversation topic clustering
+    CONVERSATION_CLUSTERING_ENABLED: bool = True
+    CONVERSATION_CLUSTERING_MIN_CLUSTER_SIZE: int = 10
+    CONVERSATION_CLUSTERING_SIMILARITY_THRESHOLD: float = 0.5  # below this → unclassified
+    CONVERSATION_CLUSTERING_CONFIRMATION_THRESHOLD: float = 0.8  # above this → direct assign
 
     METRICS_STORE_TYPE: str = "in_memory"  # "in_memory" | "timescale"
     METRICS_PUSH_INTERVAL: int = 5  # seconds between WebSocket metric pushes

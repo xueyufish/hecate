@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -21,6 +22,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.config import settings
 from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.memory import MemoryBlockReadSchema, MemoryCreateSchema, MemoryReadSchema
 from hecate.services.context.assembler import ContextAssembler
@@ -320,6 +322,18 @@ class ConversationService:
                         response.content,
                     )
                     result["suggested_questions"] = suggestions
+
+                # Trigger quality scoring if enabled
+                if db:
+                    try:
+                        from hecate.models.session import SessionModel
+
+                        session_q = select(SessionModel).where(SessionModel.id == uuid.UUID(session_id))
+                        session = (await db.execute(session_q)).scalar_one_or_none()
+                        if session and session.conversation_id:
+                            await self._maybe_score_conversation(session.conversation_id, db)
+                    except Exception as e:
+                        logger.debug("Quality scoring trigger failed: %s", e)
 
                 return result
 
@@ -720,6 +734,75 @@ class ConversationService:
                     }
                 )
         return results
+
+    async def _maybe_score_conversation(
+        self,
+        conversation_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> None:
+        """Trigger quality scoring for a completed conversation.
+
+        Called after a conversation turn completes. Uses sampling rate
+        to control what percentage of conversations are scored.
+
+        Args:
+            conversation_id: The conversation UUID.
+            db: Async SQLAlchemy session.
+        """
+        if not settings.CONVERSATION_QUALITY_SCORING_ENABLED:
+            return
+
+        # Sampling: skip if random value exceeds rate
+        if random.random() > settings.CONVERSATION_QUALITY_SAMPLING_RATE:  # noqa: S311
+            return
+
+        # Run scoring in background (non-blocking)
+        asyncio.create_task(self._score_conversation_async(conversation_id, db))
+
+    async def _score_conversation_async(
+        self,
+        conversation_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> None:
+        """Async task to score a conversation and match to topic cluster.
+
+        Args:
+            conversation_id: The conversation UUID.
+            db: Async SQLAlchemy session.
+        """
+        try:
+            from hecate.services.ops_center.conversation_embedding import ConversationEmbeddingService
+            from hecate.services.ops_center.conversation_quality_scorer import ConversationQualityScorer
+            from hecate.services.ops_center.conversation_topic_matcher import ConversationTopicMatcher
+
+            # Step 1: Score all turns
+            scorer = ConversationQualityScorer(db)
+            await scorer.score_conversation(conversation_id)
+
+            # Step 2: Generate embedding
+            if settings.CONVERSATION_CLUSTERING_ENABLED:
+                embedding_service = ConversationEmbeddingService(db)
+                embedding = await embedding_service.generate_embedding(conversation_id)
+
+                # Step 3: Match to topic cluster
+                if embedding:
+                    matcher = ConversationTopicMatcher(db)
+                    cluster = await matcher.match_to_cluster(conversation_id, embedding)
+                    if cluster:
+                        # Update conversation's cluster_id
+                        from hecate.models.conversation import ConversationModel
+
+                        conv_q = select(ConversationModel).where(ConversationModel.id == conversation_id)
+                        conv = (await db.execute(conv_q)).scalar_one_or_none()
+                        if conv:
+                            conv.cluster_id = cluster.id
+                            cluster.conversation_count += 1
+                            await db.flush()
+
+            logger.info("Quality scoring completed for conversation %s", conversation_id)
+
+        except Exception as e:
+            logger.warning("Quality scoring failed for conversation %s: %s", conversation_id, e)
 
 
 conversation_service = ConversationService()

@@ -206,7 +206,7 @@ class ToolWorker(Worker):
         # Execute tool
         span_ctx = await self._port.create_span(
             name=f"tool:{name}",
-            attributes={"tool_name": name, "arguments": str(arguments)[:500]},
+            attributes={"tool_name": name, "gen_ai.tool.name": name, "arguments": str(arguments)[:500]},
         )
         if self._event_store and execution_context:
             await self._event_store.append(
