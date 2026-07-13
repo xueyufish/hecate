@@ -169,3 +169,4 @@ We may converse in Chinese, but everything committed to the repository is Englis
 - **Don't** import from `engine/` in `api/` — route through `services/` + `EnginePort`.
 - **Don't** use `git commit --no-verify` to skip pre-commit hooks.
 - **Don't** assume test failures are "pre-existing" without investigating.
+- **Don't** delegate OpenSpec implementation tasks (`/opsx-apply`) to background agents. Implementation requires full design/specs/tasks context which causes background agent timeouts. Always implement directly as the main agent.

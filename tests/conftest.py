@@ -45,6 +45,7 @@ from hecate.models import (  # noqa: F401
     model_pricing,
     model_provider,
     organization,
+    plugin,
     quota,
     skill,
     tool,

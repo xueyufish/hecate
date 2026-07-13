@@ -65,6 +65,7 @@ from hecate.api.management.monitoring_models import router as monitoring_models_
 from hecate.api.management.ops_center_overview import router as ops_center_overview_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
 from hecate.api.management.orgs import router as orgs_router
+from hecate.api.management.plugins import router as plugins_router
 from hecate.api.management.prompts import router as prompts_router
 from hecate.api.management.quotas import quotas_router
 from hecate.api.management.sessions import router as sessions_router
@@ -137,6 +138,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from hecate.vault.registration import register_secret_providers
 
     register_secret_providers()
+
+    # Discover and register plugins from the plugins directory
+    try:
+        from hecate.services.plugin.service import PluginService
+
+        async with async_session_factory() as plugin_session:
+            plugin_service = PluginService(plugin_session)
+            summary = await plugin_service.register_discovered_plugins(_settings.PLUGINS_DIR)
+            await plugin_session.commit()
+            logger.info(
+                "Plugin discovery: %d discovered, %d registered, %d errors",
+                summary["discovered"],
+                summary["registered"],
+                summary["errors"],
+            )
+    except Exception:
+        logger.exception("Plugin discovery failed")
 
     # Register daily budget forecast snapshot task
     try:
@@ -368,6 +386,7 @@ app.include_router(tool_analytics_router)
 app.include_router(agent_health_router)
 app.include_router(conversation_analytics_router)
 app.include_router(ops_center_overview_router)
+app.include_router(plugins_router)
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
