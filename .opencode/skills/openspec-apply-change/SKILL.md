@@ -147,6 +147,8 @@ What would you like to do?
 - Update task checkbox immediately after completing each task
 - Pause on errors, blockers, or unclear requirements - don't guess
 - Use contextFiles from CLI output, don't assume specific file names
+- **Never delegate implementation tasks to background agents (run_in_background=true)**. Implementation requires full design/specs/tasks context which causes background agent timeouts. Always implement directly as the main agent.
+- **Never delegate implementation tasks to background agents (run_in_background=true)**. Implementation requires full design/specs/tasks context which causes background agent timeouts. Always implement directly as the main agent.
 
 **Fluid Workflow Integration**
 

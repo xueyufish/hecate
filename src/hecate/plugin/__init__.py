@@ -29,9 +29,19 @@ from __future__ import annotations
 from hecate.plugin.lifecycle import PluginLifecycle
 from hecate.plugin.manifest import PluginManifest
 from hecate.plugin.registry import PluginRegistry
+from hecate.plugin.sdk import PluginContext
+from hecate.plugin.types.extension import ExtensionPluginABC
+from hecate.plugin.types.model import ModelPluginABC
+from hecate.plugin.types.tool import ToolPluginABC
+from hecate.plugin.types.trigger import TriggerPluginABC
 
 __all__ = [
+    "ExtensionPluginABC",
+    "ModelPluginABC",
+    "PluginContext",
     "PluginLifecycle",
     "PluginManifest",
     "PluginRegistry",
+    "ToolPluginABC",
+    "TriggerPluginABC",
 ]

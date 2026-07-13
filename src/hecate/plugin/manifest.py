@@ -6,7 +6,8 @@ discover, and manage a plugin within the PluginRegistry.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,11 @@ class PluginManifest:
         api_version: API version this plugin targets.
         min_platform_version: Minimum platform version required.
         description: Human-readable description of the plugin.
+        entry: Loading strategy (e.g., "python:module:Class" or
+            "mcp://endpoint").
         permissions: Required permissions (e.g., ["network:https"]).
+        config_schema: JSON Schema for plugin configuration, or None
+            if the plugin requires no configuration.
     """
 
     type: str
@@ -33,8 +38,10 @@ class PluginManifest:
     api_version: str = ""
     min_platform_version: str = ""
     description: str = ""
+    entry: str = ""
     permissions: tuple[str, ...] = ()
     translations: tuple[str, ...] = ()
+    config_schema: dict[str, Any] | None = field(default=None)
 
     def __post_init__(self) -> None:
         """Convert list fields to tuples for immutability."""

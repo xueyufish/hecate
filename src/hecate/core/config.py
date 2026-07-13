@@ -67,6 +67,9 @@ class Settings(BaseSettings):
 
     FERNET_KEY: str = ""
 
+    PLUGINS_DIR: str = "./plugins"
+    HOT_RELOAD: bool = False
+
     WORKSPACE_ROOT: str = "./workspace"
     SEARCH_PROVIDER: str = "duckduckgo"
     SEARCH_API_KEY: str = ""
