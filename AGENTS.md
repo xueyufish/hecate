@@ -2,7 +2,7 @@
 
 ## What this repo is
 
-Hecate is an **enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform** built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. P1 (19 features) and P2 (63 features) are 100% complete. P3 in progress (28/89).
+Hecate is an **enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform** — supporting cloud SaaS deployment and self-hosted private deployment. Built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async.
 
 ## Commands
 

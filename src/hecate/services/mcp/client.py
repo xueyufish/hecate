@@ -1,7 +1,8 @@
 """MCP (Model Context Protocol) client for tool discovery and execution.
 
 Provides real MCP server connections using the official ``mcp`` Python SDK,
-supporting Streamable HTTP and stdio transports.
+supporting Streamable HTTP and stdio transports. Includes health check
+support and per-request timeout.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ class HecateMCPClient:
     """Production MCP client wrapping the official ``mcp`` SDK.
 
     Supports connecting to MCP servers via Streamable HTTP or stdio transport,
-    discovering available tools, and executing tool calls.
+    discovering available tools, executing tool calls, and health checks.
 
     Args:
         timeout: Connection and request timeout in seconds.
@@ -129,6 +130,21 @@ class HecateMCPClient:
                 return texts[0]
             return texts
         return None
+
+    async def health_check(self) -> bool:
+        """Perform a health check by calling list_tools.
+
+        Returns:
+            True if the server responds to list_tools, False otherwise.
+        """
+        if not self.connected or self._session is None:
+            return False
+        try:
+            await self._session.list_tools()
+            return True
+        except Exception:
+            logger.debug("Health check failed for MCP client", exc_info=True)
+            return False
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server and clean up resources."""

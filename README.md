@@ -5,9 +5,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196.svg)](https://conventionalcommits.org)
 
-**Enterprise-grade, self-hosted, model-agnostic, MCP-first Agent platform.**
+**Enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform.**
 
-Build, orchestrate, and run AI Agent applications on your own infrastructure — no vendor lock-in.
+Build, orchestrate, and run AI Agent applications on cloud SaaS or self-hosted infrastructure — no vendor lock-in.
 
 ---
 

@@ -59,6 +59,17 @@ class Settings(BaseSettings):
     MCP_AUTH_TYPE: str = "api_key"
     MCP_TRANSPORT: str = "http"
     MCP_CLIENT_TIMEOUT: int = 30
+    MCP_POOL_MIN_SIZE: int = 1
+    MCP_POOL_MAX_SIZE: int = 5
+    MCP_BORROW_TIMEOUT: int = 5
+    MCP_HEALTH_CHECK_INTERVAL: int = 30
+    MCP_RECONNECT_MAX_RETRIES: int = 5
+    MCP_RECONNECT_BASE_DELAY: float = 1.0
+    MCP_RECONNECT_MAX_DELAY: float = 60.0
+    MCP_REQUEST_TIMEOUT: int = 30
+    MCP_TOOL_CACHE_TTL: int = 300
+    MCP_CIRCUIT_BREAKER_THRESHOLD: int = 5
+    MCP_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = 30
 
     TEMPORAL_SERVER_URL: str = "localhost:7233"
     TEMPORAL_TASK_QUEUE: str = "hecate-workers"
