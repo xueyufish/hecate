@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     MCP_CIRCUIT_BREAKER_THRESHOLD: int = 5
     MCP_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = 30
 
+    TOOL_CACHE_ENABLED: bool = True
+    TOOL_CACHE_DEFAULT_TTL: int = 300
+    TOOL_CACHE_MAX_ENTRIES: int = 10000
+    TOOL_CACHE_SESSION_SCOPED: bool = True
+
     TEMPORAL_SERVER_URL: str = "localhost:7233"
     TEMPORAL_TASK_QUEUE: str = "hecate-workers"
     TEMPORAL_HEARTBEAT_TIMEOUT: int = 30

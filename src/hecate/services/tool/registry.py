@@ -18,6 +18,7 @@ from hecate.services.tool.builtin import BUILTIN_TOOL_DEFINITIONS, BuiltInToolEx
 
 if TYPE_CHECKING:
     from hecate.services.mcp.connection import MCPClientManager
+    from hecate.services.tool.cache import ToolCache
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +39,12 @@ class ToolRegistry:
         db: AsyncSession,
         builtin_executor: BuiltInToolExecutor,
         mcp_manager: MCPClientManager | None = None,
+        cache: ToolCache | None = None,
     ) -> None:
         self._db = db
         self._builtin = builtin_executor
         self._mcp_manager = mcp_manager
+        self._cache = cache
         self._builtin_names: set[str] = set(BUILTIN_TOOL_DEFINITIONS.keys())
 
     async def execute(
@@ -66,7 +69,7 @@ class ToolRegistry:
         """
         # Fast path: builtin tools resolved without DB query
         if name in self._builtin_names:
-            return await self._builtin.execute(name, args)
+            return await self._maybe_cache(name, args, context, lambda: self._builtin.execute(name, args), None)
 
         # DB lookup for non-builtin tools
         result = await self._db.execute(
@@ -80,7 +83,7 @@ class ToolRegistry:
             raise ValueError(f"Tool '{name}' not found")
 
         if tool.source == "builtin":
-            return await self._builtin.execute(name, args)
+            return await self._maybe_cache(name, args, context, lambda: self._builtin.execute(name, args), tool)
         if tool.source == "custom":
             raise NotImplementedError(f"Custom tool execution not yet implemented for '{name}'")
         if tool.source == "mcp":
@@ -90,8 +93,65 @@ class ToolRegistry:
             mcp_tool_name = tool.mcp_tool_name or name
             if server_name is None:
                 raise ValueError(f"MCP tool '{name}' has no mcp_server configured")
-            return await self._mcp_manager.call_tool(server_name, mcp_tool_name, args)
+            return await self._maybe_cache(
+                name,
+                args,
+                context,
+                lambda: self._mcp_manager.call_tool(server_name, mcp_tool_name, args),
+                tool,
+            )
         raise ValueError(f"Unknown tool source: {tool.source!r} for tool '{name}'")
+
+    async def _maybe_cache(
+        self,
+        name: str,
+        args: dict[str, Any],
+        context: dict[str, Any] | None,
+        execute_fn: Any,
+        tool: ToolModel | None,
+    ) -> Any:
+        """Check cache before executing, store result after.
+
+        Args:
+            name: Tool name.
+            args: Tool arguments.
+            context: Optional execution context (for session_id).
+            execute_fn: Async callable that executes the tool.
+            tool: Optional ToolModel for cache metadata.
+
+        Returns:
+            Tool result (cached or fresh).
+        """
+        if self._cache is None:
+            return await execute_fn()
+
+        from hecate.services.tool.cache import is_cacheable
+
+        tool_meta: dict[str, Any] = {"name": name, "risk_level": "low"}
+        if tool is not None:
+            tool_meta.update(
+                {
+                    "risk_level": tool.risk_level,
+                    "sandbox_enabled": tool.sandbox_enabled,
+                    "cacheable": tool.cacheable,
+                }
+            )
+
+        if not is_cacheable(tool_meta):
+            return await execute_fn()
+
+        session_id = (context or {}).get("session_id") or (context or {}).get("_session_id")
+        key = self._cache.make_key(name, args, session_id)
+
+        cached = self._cache.get(key)
+        if cached is not None:
+            logger.debug("Cache hit for tool '%s'", name)
+            return cached
+
+        result = await execute_fn()
+        ttl = tool.cache_ttl if tool and tool.cache_ttl else None
+        self._cache.set(key, result, ttl, tool_name=name)
+        return result
 
 
 async def seed_builtin_tools(db: AsyncSession) -> int:

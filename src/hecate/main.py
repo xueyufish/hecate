@@ -73,6 +73,7 @@ from hecate.api.management.sessions import router as sessions_router
 from hecate.api.management.skill_registry import router as skill_registry_router
 from hecate.api.management.skills import router as skills_router
 from hecate.api.management.tool_analytics import router as tool_analytics_router
+from hecate.api.management.tool_cache import router as tool_cache_router
 from hecate.api.management.tool_policies import router as tool_policies_router
 from hecate.api.management.tools import router as tools_router
 from hecate.api.management.traces import router as traces_router
@@ -391,6 +392,7 @@ app.include_router(ops_center_overview_router)
 app.include_router(plugins_router)
 app.include_router(mcp_router)
 app.include_router(tool_policies_router)
+app.include_router(tool_cache_router)
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:

@@ -521,6 +521,8 @@ class TestToolModel:
             deleted=False,
             deleted_at=None,
             available_when="user_role == 'admin'",
+            cacheable=None,
+            cache_ttl=None,
         )
         assert schema.available_when == "user_role == 'admin'"
 
