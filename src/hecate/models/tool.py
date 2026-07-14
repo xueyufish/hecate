@@ -13,7 +13,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Boolean, Index, String
+from sqlalchemy import Boolean, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -58,6 +58,8 @@ class ToolModel(BaseModel):
     mcp_server: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mcp_tool_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     available_when: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cacheable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    cache_ttl: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     __table_args__ = (
         Index(
@@ -88,6 +90,8 @@ class ToolCreateSchema(PydanticBase):
     mcp_server: str | None = None
     mcp_tool_name: str | None = None
     available_when: str | None = None
+    cacheable: bool | None = None
+    cache_ttl: int | None = None
 
 
 class ToolReadSchema(PydanticBase):
@@ -109,6 +113,8 @@ class ToolReadSchema(PydanticBase):
     mcp_server: str | None
     mcp_tool_name: str | None
     available_when: str | None
+    cacheable: bool | None
+    cache_ttl: int | None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
