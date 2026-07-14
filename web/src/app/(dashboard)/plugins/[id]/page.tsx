@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ArrowLeft, CheckCircle, XCircle, AlertTriangle, Save } from "lucide-react";
+import { MCPStatusPanel } from "./mcp-status";
 
 interface Plugin {
   id: string;
@@ -196,6 +197,11 @@ export default function PluginDetailPage() {
             )}
           </CardContent>
         </Card>
+
+        {/* MCP Status Panel — only for mcp:// plugins */}
+        {plugin.entry.startsWith("mcp://") && (
+          <MCPStatusPanel pluginName={plugin.name} />
+        )}
 
         {/* Config Form */}
         {configFields.length > 0 && (

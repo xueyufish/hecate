@@ -54,6 +54,7 @@ from hecate.api.management.fine_tuning import router as fine_tuning_router
 from hecate.api.management.i18n import router as i18n_router
 from hecate.api.management.inference import router as inference_router
 from hecate.api.management.knowledge import router as knowledge_router
+from hecate.api.management.mcp import router as mcp_router
 from hecate.api.management.memory import router as memory_router
 from hecate.api.management.messages import router as messages_router
 from hecate.api.management.model_catalog import router as model_catalog_router
@@ -387,6 +388,7 @@ app.include_router(agent_health_router)
 app.include_router(conversation_analytics_router)
 app.include_router(ops_center_overview_router)
 app.include_router(plugins_router)
+app.include_router(mcp_router)
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:

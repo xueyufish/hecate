@@ -62,6 +62,20 @@ class PluginService:
             raise ValueError(msg)
         plugin.status = "enabled"
         await self._db.flush()
+
+        # Register MCP server if plugin entry starts with mcp://
+        if plugin.entry and plugin.entry.startswith("mcp://"):
+            from hecate.api.management.mcp import get_mcp_manager
+
+            manager = get_mcp_manager()
+            endpoint = plugin.entry.removeprefix("mcp://")
+            manager.register_server(
+                name=plugin.name,
+                endpoint=endpoint,
+                transport="http",
+                workspace_id=str(plugin.workspace_id) if plugin.workspace_id else None,
+            )
+
         return plugin
 
     async def disable_plugin(self, plugin_id: uuid.UUID) -> PluginModel:
@@ -71,6 +85,14 @@ class PluginService:
             raise ValueError(msg)
         plugin.status = "disabled"
         await self._db.flush()
+
+        # Unregister MCP server if plugin entry starts with mcp://
+        if plugin.entry and plugin.entry.startswith("mcp://"):
+            from hecate.api.management.mcp import get_mcp_manager
+
+            manager = get_mcp_manager()
+            manager.unregister_server(plugin.name)
+
         return plugin
 
     async def update_config(self, plugin_id: uuid.UUID, config: dict[str, Any]) -> PluginModel:
