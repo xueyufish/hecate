@@ -28,12 +28,12 @@ async def test_mcp_client_manager_init() -> None:
     """Test MCPClientManager initialization."""
     manager = MCPClientManager(default_timeout=30)
     assert manager._default_timeout == 30
-    assert len(manager._clients) == 0
+    assert len(manager.list_servers()) == 0
 
 
 @pytest.mark.asyncio
 async def test_mcp_client_manager_get_nonexistent() -> None:
     """Test MCPClientManager returns None for nonexistent server."""
     manager = MCPClientManager()
-    client = manager.get_client("nonexistent")
-    assert client is None
+    info = manager.get_server_info("nonexistent")
+    assert info is None
