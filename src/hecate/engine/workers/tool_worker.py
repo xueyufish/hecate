@@ -26,6 +26,7 @@ from hecate.engine.tool_access import (
     ToolAccessPolicy,
     ToolRule,
 )
+from hecate.engine.tool_matcher import ToolMatcher
 from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
 
@@ -188,20 +189,21 @@ class ToolWorker(Worker):
         if access_decision == AccessDecision.REQUIRE_APPROVAL:
             use_sandbox = context.get("sandbox_enabled", False)
 
-        # Pre-tool hook
-        pre_result = await self._pre_hook.on_pre_tool_call(
-            name=name,
-            arguments=arguments,
-            context=context,
-        )
-        if pre_result.action == GuardrailAction.BLOCK:
-            logger.info("PreToolHook blocked tool '%s': %s", name, pre_result.reason)
-            return {
-                "role": "tool",
-                "tool_call_id": tc_id,
-                "content": f"Tool blocked: {pre_result.reason}",
-                "is_error": True,
-            }
+        # Pre-tool hook (with matcher filtering)
+        if ToolMatcher.match(name, self._pre_hook.matcher):
+            pre_result = await self._pre_hook.on_pre_tool_call(
+                name=name,
+                arguments=arguments,
+                context=context,
+            )
+            if pre_result.action == GuardrailAction.BLOCK:
+                logger.info("PreToolHook blocked tool '%s': %s", name, pre_result.reason)
+                return {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": f"Tool blocked: {pre_result.reason}",
+                    "is_error": True,
+                }
 
         # Execute tool
         span_ctx = await self._port.create_span(
@@ -258,24 +260,25 @@ class ToolWorker(Worker):
                 output_data={"result_length": len(str(result))},
             )
 
-        # Post-tool hook
-        post_result = await self._post_hook.on_post_tool_call(
-            name=name,
-            result=result,
-            context=context,
-        )
-        if post_result.action == GuardrailAction.BLOCK:
-            logger.info("PostToolHook sanitized tool '%s': %s", name, post_result.reason)
-            return {
-                "role": "tool",
-                "tool_call_id": tc_id,
-                "content": f"Result sanitized: {post_result.reason}",
-            }
-        if post_result.action == GuardrailAction.SANITIZE:
-            if post_result.modified_data and "result" in post_result.modified_data:
-                result = post_result.modified_data["result"]
-            else:
-                logger.warning("SANITIZE without modified_data for tool '%s'", name)
+        # Post-tool hook (with matcher filtering)
+        if ToolMatcher.match(name, self._post_hook.matcher):
+            post_result = await self._post_hook.on_post_tool_call(
+                name=name,
+                result=result,
+                context=context,
+            )
+            if post_result.action == GuardrailAction.BLOCK:
+                logger.info("PostToolHook sanitized tool '%s': %s", name, post_result.reason)
+                return {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": f"Result sanitized: {post_result.reason}",
+                }
+            if post_result.action == GuardrailAction.SANITIZE:
+                if post_result.modified_data and "result" in post_result.modified_data:
+                    result = post_result.modified_data["result"]
+                else:
+                    logger.warning("SANITIZE without modified_data for tool '%s'", name)
 
         return {
             "role": "tool",
