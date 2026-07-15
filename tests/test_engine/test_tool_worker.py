@@ -136,6 +136,7 @@ class TestToolWorker:
     async def test_pre_hook_blocks(self) -> None:
         port = _make_port()
         pre_hook = MagicMock()
+        pre_hook.matcher = None
         pre_hook.on_pre_tool_call = AsyncMock(
             return_value=GuardrailResult(action=GuardrailAction.BLOCK, reason="Dangerous tool")
         )
@@ -160,6 +161,7 @@ class TestToolWorker:
     async def test_post_hook_sanitizes(self) -> None:
         port = _make_port("sensitive data")
         post_hook = MagicMock()
+        post_hook.matcher = None
         post_hook.on_post_tool_call = AsyncMock(
             return_value=GuardrailResult(action=GuardrailAction.BLOCK, reason="PII detected")
         )
@@ -183,6 +185,7 @@ class TestToolWorker:
     async def test_post_hook_allows(self) -> None:
         port = _make_port("clean result")
         post_hook = MagicMock()
+        post_hook.matcher = None
         post_hook.on_post_tool_call = AsyncMock(return_value=GuardrailResult(action=GuardrailAction.ALLOW))
         worker = ToolWorker(port=port, post_tool_hook=post_hook)
         result = await worker.execute(

@@ -170,7 +170,13 @@ class PreToolHook(ABC):
 
     Use cases: tool authorization, argument validation, dangerous operation
     blocking.
+
+    Class attributes:
+        matcher: Optional tool name pattern (exact, pipe-separated, or regex).
+            Only tools matching this pattern trigger the hook. None means all tools.
     """
+
+    matcher: str | None = None
 
     @abstractmethod
     async def on_pre_tool_call(
@@ -223,7 +229,13 @@ class PostToolHook(ABC):
     """Hook that intercepts after a tool has been executed.
 
     Use cases: result validation, evidence tracking, output sanitization.
+
+    Class attributes:
+        matcher: Optional tool name pattern (exact, pipe-separated, or regex).
+            Only tools matching this pattern trigger the hook. None means all tools.
     """
+
+    matcher: str | None = None
 
     @abstractmethod
     async def on_post_tool_call(
