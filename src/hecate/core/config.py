@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     HOOK_SHELL_ENABLED: bool = False
     HOOK_SHELL_TIMEOUT: int = 30
 
+    AGENT_ENV_ENABLED: bool = True
+    AGENT_ENV_TTL: int = 86400
+
     TEMPORAL_SERVER_URL: str = "localhost:7233"
     TEMPORAL_TASK_QUEUE: str = "hecate-workers"
     TEMPORAL_HEARTBEAT_TIMEOUT: int = 30
