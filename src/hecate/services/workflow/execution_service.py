@@ -116,6 +116,7 @@ class WorkflowExecutionService:
         post_llm_hook: PostLLMHook | None = None,
         pre_tool_hook: PreToolHook | None = None,
         post_tool_hook: PostToolHook | None = None,
+        environment_manager: Any = None,
     ) -> None:
         self._port = port
         self._db = db
@@ -124,6 +125,7 @@ class WorkflowExecutionService:
         self._post_llm_hook = post_llm_hook
         self._pre_tool_hook = pre_tool_hook
         self._post_tool_hook = post_tool_hook
+        self._environment_manager = environment_manager
 
     async def execute(
         self,
@@ -196,6 +198,13 @@ class WorkflowExecutionService:
                 )
                 system_prompt = f"{persona}\n\n{skills_block}" if skills_block else persona
 
+        # Get or create environment for agent
+        environment_root = None
+        if agent_id and self._environment_manager:
+            agent_str = str(agent_id) if isinstance(agent_id, uuid.UUID) else agent_id
+            env = await self._environment_manager.get_or_create(agent_str)
+            environment_root = str(env.root_path)
+
         # Resolve graph config based on mode
         execution_mode = "conversational"
         if agent_mode == "chat":
@@ -236,6 +245,8 @@ class WorkflowExecutionService:
             "_user_id": str(user_id) if user_id else "",
             "_turn_index": 0,
         }
+        if environment_root:
+            initial_input["_environment_root"] = environment_root
         if kb_ids:
             initial_input["_kb_ids"] = kb_ids
         if tools:

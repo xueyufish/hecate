@@ -50,6 +50,7 @@ from hecate.api.management.conversation_analytics import router as conversation_
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.cost_management import router as cost_management_router
 from hecate.api.management.costs import router as costs_router
+from hecate.api.management.environment import router as environment_router
 from hecate.api.management.fine_tuning import router as fine_tuning_router
 from hecate.api.management.hooks import router as hooks_router
 from hecate.api.management.i18n import router as i18n_router
@@ -395,6 +396,7 @@ app.include_router(mcp_router)
 app.include_router(tool_policies_router)
 app.include_router(tool_cache_router)
 app.include_router(hooks_router)
+app.include_router(environment_router)
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
