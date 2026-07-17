@@ -38,6 +38,8 @@ from hecate.engine.workers.suggestion_worker import SuggestionWorker
 from hecate.engine.workers.tool_worker import ToolWorker
 from hecate.engine.workers.variable_set_worker import VariableSetWorker
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
+from hecate.services.state.state import AgentState
+from hecate.services.state.store import AgentStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +119,7 @@ class WorkflowExecutionService:
         pre_tool_hook: PreToolHook | None = None,
         post_tool_hook: PostToolHook | None = None,
         environment_manager: Any = None,
+        state_store: AgentStateStore | None = None,
     ) -> None:
         self._port = port
         self._db = db
@@ -126,6 +129,7 @@ class WorkflowExecutionService:
         self._pre_tool_hook = pre_tool_hook
         self._post_tool_hook = post_tool_hook
         self._environment_manager = environment_manager
+        self._state_store = state_store
 
     async def execute(
         self,
@@ -205,6 +209,19 @@ class WorkflowExecutionService:
             env = await self._environment_manager.get_or_create(agent_str)
             environment_root = str(env.root_path)
 
+        # Load or create AgentState
+        agent_state: AgentState | None = None
+        if self._state_store and agent_id:
+            agent_uuid = agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id))
+            agent_state = await self._state_store.load(agent_uuid, session_id)
+        if agent_state is None:
+            agent_uuid = (
+                agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id)) if agent_id else uuid.uuid4()
+            )
+            agent_state = AgentState(session_id=session_id, agent_id=agent_uuid)
+        if environment_root:
+            agent_state.environment_root = environment_root
+
         # Resolve graph config based on mode
         execution_mode = "conversational"
         if agent_mode == "chat":
@@ -244,6 +261,7 @@ class WorkflowExecutionService:
             "_agent_id": str(agent_id) if agent_id else "",
             "_user_id": str(user_id) if user_id else "",
             "_turn_index": 0,
+            "_agent_state": agent_state,
         }
         if environment_root:
             initial_input["_environment_root"] = environment_root
@@ -270,9 +288,14 @@ class WorkflowExecutionService:
         stream_mode = StreamMode.MESSAGES if stream else StreamMode.VALUES
 
         if stream:
-            return self._stream_execute(runtime, session_id, initial_input, stream_mode, execution_mode)
+            return self._stream_execute(runtime, session_id, initial_input, stream_mode, execution_mode, agent_state)
 
-        return await self._non_stream_execute(runtime, session_id, initial_input, execution_mode)
+        response = await self._non_stream_execute(runtime, session_id, initial_input, execution_mode)
+        # Save AgentState after non-streaming execution
+        if self._state_store and agent_id:
+            agent_uuid = agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id))
+            await self._state_store.save(agent_uuid, session_id, agent_state)
+        return response
 
     async def _non_stream_execute(
         self,
@@ -328,6 +351,7 @@ class WorkflowExecutionService:
         initial_input: dict,
         stream_mode: StreamMode,
         execution_mode: str = "conversational",
+        agent_state: AgentState | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Execute streaming and yield events.
 
@@ -337,6 +361,7 @@ class WorkflowExecutionService:
             initial_input: Channel initial values.
             stream_mode: Stream mode for PregelRuntime.
             execution_mode: Execution mode (conversational or task).
+            agent_state: AgentState to save after stream completes.
 
         Yields:
             Event dicts from PregelRuntime.
@@ -348,6 +373,9 @@ class WorkflowExecutionService:
             execution_mode=execution_mode,
         ):
             yield event
+        # Save AgentState after streaming completes
+        if self._state_store and agent_state:
+            await self._state_store.save(agent_state.agent_id, session_id, agent_state)
 
     def _create_composite_worker(
         self,
