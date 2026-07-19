@@ -360,3 +360,144 @@ async def test_compiler_accepts_valid_invocation_mode():
     compiler = GraphCompiler()
     compiled = compiler.compile(config)
     assert compiled.nodes["agent_1"].config["invocation_mode"] == "tool"
+
+
+@pytest.mark.asyncio
+async def test_agent_execute_injects_handoff_tool(db_session):
+    """AgentExecutionPort injects handoff tool when handoff_targets present."""
+    agent = _make_agent(tools=["web_search"])
+    db_session.add(agent)
+    tool = _make_tool("web_search")
+    db_session.add(tool)
+    await db_session.flush()
+
+    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+
+    port = AgentExecutionPort(db=db_session)
+
+    mock_response = MagicMock()
+    mock_response.content = "Hello"
+    mock_response.usage = {"total_tokens": 100}
+    mock_response.model = "gpt-4o"
+    mock_response.tool_calls = None
+
+    with patch("hecate.services.llm.service.llm_service") as mock_llm:
+        mock_llm.chat = AsyncMock(return_value=mock_response)
+
+        result = await port.agent_execute(
+            agent_id=agent.id,
+            messages=[{"role": "user", "content": "help"}],
+            channel_snapshot={},
+            context={"node_id": "router", "handoff_targets": [{"node_id": "billing", "description": "Billing agent"}]},
+        )
+
+    assert "response" in result
+    assert result["response"] == "Hello"
+
+
+@pytest.mark.asyncio
+async def test_agent_execute_no_handoff_tool_without_targets(db_session):
+    """AgentExecutionPort does not inject handoff tool when no handoff_targets."""
+    agent = _make_agent(tools=["web_search"])
+    db_session.add(agent)
+    tool = _make_tool("web_search")
+    db_session.add(tool)
+    await db_session.flush()
+
+    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+
+    port = AgentExecutionPort(db=db_session)
+
+    mock_response = MagicMock()
+    mock_response.content = "Hello"
+    mock_response.usage = {"total_tokens": 100}
+    mock_response.model = "gpt-4o"
+    mock_response.tool_calls = None
+
+    with patch("hecate.services.llm.service.llm_service") as mock_llm:
+        mock_llm.chat = AsyncMock(return_value=mock_response)
+
+        result = await port.agent_execute(
+            agent_id=agent.id,
+            messages=[{"role": "user", "content": "help"}],
+            channel_snapshot={},
+            context={"node_id": "router"},
+        )
+
+    assert "handoff_to" not in result
+
+
+@pytest.mark.asyncio
+async def test_agent_execute_detects_handoff_call(db_session):
+    """AgentExecutionPort detects handoff_to_agent tool call and returns handoff_to."""
+    agent = _make_agent(tools=["web_search"])
+    db_session.add(agent)
+    tool = _make_tool("web_search")
+    db_session.add(tool)
+    await db_session.flush()
+
+    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+
+    port = AgentExecutionPort(db=db_session)
+
+    mock_tc = MagicMock()
+    mock_tc.name = "handoff_to_agent"
+    mock_tc.arguments = {"target": "billing"}
+    mock_tc.id = "call_123"
+
+    mock_response = MagicMock()
+    mock_response.content = None
+    mock_response.usage = {"total_tokens": 100}
+    mock_response.model = "gpt-4o"
+    mock_response.tool_calls = [mock_tc]
+
+    with patch("hecate.services.llm.service.llm_service") as mock_llm:
+        mock_llm.chat = AsyncMock(return_value=mock_response)
+
+        result = await port.agent_execute(
+            agent_id=agent.id,
+            messages=[{"role": "user", "content": "billing question"}],
+            channel_snapshot={},
+            context={"node_id": "router", "handoff_targets": [{"node_id": "billing", "description": "Billing"}]},
+        )
+
+    assert result["handoff_to"] == "billing"
+    assert result["_handoff_tool_call_id"] == "call_123"
+
+
+@pytest.mark.asyncio
+async def test_agent_execute_invalid_handoff_target(db_session):
+    """AgentExecutionPort rejects invalid handoff target."""
+    agent = _make_agent(tools=["web_search"])
+    db_session.add(agent)
+    tool = _make_tool("web_search")
+    db_session.add(tool)
+    await db_session.flush()
+
+    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+
+    port = AgentExecutionPort(db=db_session)
+
+    mock_tc = MagicMock()
+    mock_tc.name = "handoff_to_agent"
+    mock_tc.arguments = {"target": "unknown"}
+    mock_tc.id = "call_123"
+
+    mock_response = MagicMock()
+    mock_response.content = None
+    mock_response.usage = {"total_tokens": 100}
+    mock_response.model = "gpt-4o"
+    mock_response.tool_calls = [mock_tc]
+
+    with patch("hecate.services.llm.service.llm_service") as mock_llm:
+        mock_llm.chat = AsyncMock(return_value=mock_response)
+
+        result = await port.agent_execute(
+            agent_id=agent.id,
+            messages=[{"role": "user", "content": "billing question"}],
+            channel_snapshot={},
+            context={"node_id": "router", "handoff_targets": [{"node_id": "billing", "description": "Billing"}]},
+        )
+
+    assert "handoff_to" not in result
+    assert "Invalid handoff target" in result["response"]

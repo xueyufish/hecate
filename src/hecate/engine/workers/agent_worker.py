@@ -14,7 +14,7 @@ from typing import Any
 from uuid import UUID
 
 from hecate.engine.agent_tool import AgentDefinition, AgentTool
-from hecate.engine.types import WorkerResult
+from hecate.engine.types import Command, WorkerResult
 from hecate.engine.worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -174,11 +174,41 @@ class AgentWorker(Worker):
             logger.warning("Agent execution failed for node '%s': %s", node_id, e)
             return WorkerResult(node_id=node_id, error=e)
 
+        handoff_to: str | None = result.get("handoff_to")
+        if handoff_to:
+            from hecate.services.orchestration.handoff import build_handoff_channel_updates
+
+            handoff_config = node_config.get("handoff") or {}
+            context_mode = handoff_config.get("context_mode", "inherited")
+            tool_call_id: str = result.get("_handoff_tool_call_id", "")
+            tool_call_message = result.get("_handoff_messages_snapshot")
+
+            handoff_messages = build_handoff_channel_updates(
+                messages_snapshot=messages,
+                source_node_id=node_id,
+                target_node_id=handoff_to,
+                context_mode=context_mode,
+                tool_call_id=tool_call_id,
+                llm_tool_call_message=tool_call_message,
+            )
+
+            updates: dict[str, Any] = {
+                "messages": handoff_messages,
+            }
+            if "usage" in result:
+                updates["_agent_usage"] = result["usage"]
+
+            return WorkerResult(
+                node_id=node_id,
+                channel_updates=updates,
+                command=Command(goto=handoff_to),
+            )
+
         response_content = result.get("response", "")
-        channel_updates: dict[str, Any] = {
+        result_updates: dict[str, Any] = {
             "messages": [{"role": "assistant", "content": response_content}],
         }
         if "usage" in result:
-            channel_updates["_agent_usage"] = result["usage"]
+            result_updates["_agent_usage"] = result["usage"]
 
-        return WorkerResult(node_id=node_id, channel_updates=channel_updates)
+        return WorkerResult(node_id=node_id, channel_updates=result_updates)

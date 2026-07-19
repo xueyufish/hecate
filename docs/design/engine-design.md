@@ -512,6 +512,105 @@ Auto-scaling applies to the cross-process and distributed Worker Pool tiers. The
 
 ---
 
+## Multi-Agent Handoff
+
+The system supports **dynamic agent handoff** — a source AGENT node delegates control to a target AGENT node at runtime. The LLM decides which specialist agent should continue the conversation by calling a special `handoff_to_agent` tool.
+
+### Execution Path
+
+```
+PregelRuntime._dispatch_node()
+  │  Checks compiled edges for handoff/dynamic_handoff triggers
+  │  Injects handoff_targets into execution_context
+  ▼
+AgentWorker._handle_direct_mode()
+  │  Passes handoff_targets via context to port
+  ▼
+AgentExecutionPort.agent_execute()
+  │  Injects handoff_to_agent tool into LLM tool list
+  │  Tool has target enum = list of valid target node IDs
+  ▼
+LLM responds with handoff_to_agent(target="billing_agent")
+  │
+  ▼
+AgentExecutionPort validates target, returns handoff_to
+  │
+  ▼
+AgentWorker detects handoff_to, calls build_handoff_channel_updates()
+  │  Returns WorkerResult(command=Command(goto=target))
+  ▼
+PregelRuntime reads Command(goto=...), dispatches target node next superstep
+```
+
+### Context Mode Strategies
+
+The `handoff.context_mode` field on the source AGENT node config controls how much conversation context the downstream agent receives:
+
+| Mode | Default | Behavior |
+|------|---------|----------|
+| `inherited` | ✅ | Full message history passed through unchanged. Downstream agent sees everything. |
+| `isolated` | — | Only the AIMessage + ToolMessage handoff pair plus a `"Handed off from {source}"` system note. Fresh start. |
+| `summarized` | — | Prior history collapsed into a single system message with structured fields: `from`, `intent`, `key_facts`, `open_questions`. |
+
+**Default**: When `handoff.context_mode` is absent, the runtime treats it as `"inherited"`.
+
+### AIMessage + ToolMessage Pairing Contract
+
+Every handoff produces exactly two messages written to the `messages` channel:
+
+1. **AIMessage** — the LLM's original tool-call message with `tool_call_id` preserved
+2. **ToolMessage** — a synthetic acknowledgment with matching `tool_call_id` and content `"Handed off to {target_node_id}"`
+
+This pairing ensures downstream agent APIs see a well-formed conversation (no orphaned tool calls). If the LLM provider returns duplicate `tool_call_id` values, the second occurrence is renamed with a UUID suffix.
+
+### DSL Example
+
+```json
+{
+  "nodes": {
+    "triage": {
+      "type": "agent",
+      "config": {
+        "agent_id": "uuid-triage",
+        "handoff": {
+          "context_mode": "summarized",
+          "description": "Route to the right specialist"
+        }
+      }
+    },
+    "billing": {
+      "type": "agent",
+      "config": {
+        "agent_id": "uuid-billing"
+      }
+    },
+    "tech": {
+      "type": "agent",
+      "config": {
+        "agent_id": "uuid-tech"
+      }
+    }
+  },
+  "edges": [
+    {"source": "triage", "target": "billing", "trigger": "handoff"},
+    {"source": "triage", "target": "tech", "trigger": "handoff"}
+  ]
+}
+```
+
+### Static vs Dynamic Handoff
+
+| Aspect | Static (`trigger: "handoff"`) | Dynamic (`trigger: "dynamic_handoff"`) |
+|--------|------|---------|
+| Target | Single node ID | Dict of `{source_label: target_node_id}` |
+| Tool enum | One value | Multiple values (all dict values) |
+| Per-target description | Single fallback | Each target gets its own description |
+| Use case | Fixed routing | LLM selects from multiple specialists |
+
+The per-target description priority is: `handoff.description` (node-level override) > `AgentModel.description` > node `name`.
+
+---
+
 ## Further Reading
 
 | Document | Description |

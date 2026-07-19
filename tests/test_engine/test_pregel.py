@@ -695,3 +695,76 @@ class TestEventStoreIntegration:
             pass
 
         assert runtime._event_store is None
+
+
+class TestHandoffTargets:
+    """Tests for PregelRuntime populating handoff_targets in execution_context."""
+
+    def test_build_handoff_targets_static(self) -> None:
+        """Static handoff edge populates one target."""
+        graph = CompiledGraph(
+            nodes={
+                "router": NodeConfig(id="router", type=NodeType.AGENT, config={"agent_id": "uuid-r"}),
+                "billing": NodeConfig(
+                    id="billing",
+                    type=NodeType.AGENT,
+                    config={"agent_id": "uuid-b", "description": "Billing agent"},
+                ),
+            },
+            edges=[Edge(source="router", target="billing", trigger="handoff")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            entry_point="router",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore())
+        targets = runtime._build_handoff_targets("router", NodeType.AGENT)
+        assert len(targets) == 1
+        assert targets[0]["node_id"] == "billing"
+        assert targets[0]["description"] == "Billing agent"
+
+    def test_build_handoff_targets_dynamic(self) -> None:
+        """Dynamic handoff edge with dict target populates all values."""
+        graph = CompiledGraph(
+            nodes={
+                "triage": NodeConfig(id="triage", type=NodeType.AGENT, config={"agent_id": "uuid-t"}),
+                "billing": NodeConfig(id="billing", type=NodeType.AGENT, config={"agent_id": "uuid-b"}),
+                "tech": NodeConfig(id="tech", type=NodeType.AGENT, config={"agent_id": "uuid-t2"}),
+            },
+            edges=[Edge(source="triage", target={"billing": "billing", "tech": "tech"}, trigger="dynamic_handoff")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            entry_point="triage",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore())
+        targets = runtime._build_handoff_targets("triage", NodeType.AGENT)
+        assert len(targets) == 2
+        node_ids = {t["node_id"] for t in targets}
+        assert node_ids == {"billing", "tech"}
+
+    def test_build_handoff_targets_non_agent(self) -> None:
+        """Non-AGENT nodes return empty list."""
+        graph = CompiledGraph(
+            nodes={
+                "conv": NodeConfig(id="conv", type=NodeType.CONVERSATION, config={"model": "gpt-4o"}),
+                "agent": NodeConfig(id="agent", type=NodeType.AGENT, config={"agent_id": "uuid-a"}),
+            },
+            edges=[Edge(source="conv", target="agent", trigger="handoff")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            entry_point="conv",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore())
+        targets = runtime._build_handoff_targets("conv", NodeType.CONVERSATION)
+        assert targets == []
+
+    def test_build_handoff_targets_no_handoff_edges(self) -> None:
+        """AGENT node without handoff edges returns empty list."""
+        graph = CompiledGraph(
+            nodes={
+                "a": NodeConfig(id="a", type=NodeType.AGENT, config={"agent_id": "uuid-a"}),
+                "b": NodeConfig(id="b", type=NodeType.AGENT, config={"agent_id": "uuid-b"}),
+            },
+            edges=[Edge(source="a", target="b")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            entry_point="a",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore())
+        targets = runtime._build_handoff_targets("a", NodeType.AGENT)
+        assert targets == []

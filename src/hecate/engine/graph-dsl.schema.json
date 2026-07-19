@@ -76,6 +76,22 @@
               "value": {},
               "agent_id": { "type": "string", "description": "UUID of the agent to invoke (agent node type)" },
               "invocation_mode": { "type": "string", "enum": ["direct", "tool"], "default": "direct", "description": "How the agent is invoked: 'direct' (execute inline via nested graph or port, default) or 'tool' (expose as callable tool via AgentDefinition)" },
+              "handoff": {
+                "type": "object",
+                "description": "Handoff configuration for agent nodes with outgoing handoff/dynamic_handoff edges.",
+                "properties": {
+                  "context_mode": {
+                    "type": "string",
+                    "enum": ["inherited", "isolated", "summarized"],
+                    "default": "inherited",
+                    "description": "How to pass conversation history to the downstream agent: 'inherited' (full history, default), 'isolated' (fresh context), 'summarized' (collapsed summary)"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "Override description for the handoff_to_agent tool. When set, replaces the auto-generated per-target descriptions."
+                  }
+                }
+              },
               "branches": { "type": "array", "items": { "type": "string" }, "description": "Node IDs of parallel branches (fan-out node type)" },
               "fan_out_source": { "type": "string", "description": "ID of the upstream FAN_OUT node (merge node type)" },
               "output_channel": { "type": "string", "description": "Channel name to write aggregated results (merge node type)" },

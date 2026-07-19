@@ -848,3 +848,79 @@ class TestDynamicHandoff:
         )
         with pytest.raises(GraphValidationError, match="agent node"):
             GraphCompiler().compile(graph)
+
+
+class TestHandoffContextMode:
+    """Tests for handoff.context_mode validation on AGENT nodes."""
+
+    def test_valid_context_mode_compiles(self) -> None:
+        """AGENT node with valid context_mode compiles successfully."""
+        for mode in ("inherited", "isolated", "summarized"):
+            graph = parse_graph(
+                {
+                    "version": "1.0",
+                    "name": "test",
+                    "state": {"messages": {"type": "topic"}},
+                    "nodes": {
+                        "a": {
+                            "type": "agent",
+                            "config": {
+                                "agent_id": "uuid-a",
+                                "handoff": {"context_mode": mode},
+                            },
+                        },
+                        "b": {"type": "agent", "config": {"agent_id": "uuid-b"}},
+                    },
+                    "edges": [
+                        {"source": "a", "target": "b", "trigger": "handoff"},
+                    ],
+                    "entry": "a",
+                }
+            )
+            compiled = GraphCompiler().compile(graph)
+            assert compiled is not None
+
+    def test_invalid_context_mode_rejected(self) -> None:
+        """AGENT node with invalid context_mode raises GraphValidationError."""
+        with pytest.raises(GraphValidationError, match="is not one of"):
+            parse_graph(
+                {
+                    "version": "1.0",
+                    "name": "test",
+                    "state": {"messages": {"type": "topic"}},
+                    "nodes": {
+                        "a": {
+                            "type": "agent",
+                            "config": {
+                                "agent_id": "uuid-a",
+                                "handoff": {"context_mode": "secure"},
+                            },
+                        },
+                        "b": {"type": "agent", "config": {"agent_id": "uuid-b"}},
+                    },
+                    "edges": [
+                        {"source": "a", "target": "b", "trigger": "handoff"},
+                    ],
+                    "entry": "a",
+                }
+            )
+
+    def test_no_handoff_config_compiles(self) -> None:
+        """AGENT node without handoff block compiles successfully."""
+        graph = parse_graph(
+            {
+                "version": "1.0",
+                "name": "test",
+                "state": {"messages": {"type": "topic"}},
+                "nodes": {
+                    "a": {"type": "agent", "config": {"agent_id": "uuid-a"}},
+                    "b": {"type": "agent", "config": {"agent_id": "uuid-b"}},
+                },
+                "edges": [
+                    {"source": "a", "target": "b", "trigger": "handoff"},
+                ],
+                "entry": "a",
+            }
+        )
+        compiled = GraphCompiler().compile(graph)
+        assert compiled is not None

@@ -28,6 +28,11 @@ from hecate.engine.ports import EnginePort, SpanContext
 from hecate.models.agent import AgentModel
 from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.tool import ToolModel
+from hecate.services.orchestration.handoff import (
+    inject_handoff_tools_from_targets,
+    is_handoff_tool_call,
+    validate_handoff_target_from_list,
+)
 from hecate.services.rag.service import knowledge_base_service
 
 logger = logging.getLogger(__name__)
@@ -118,6 +123,16 @@ class AgentExecutionPort(EnginePort):
             if allowed is not None:
                 tools = [t for t in tools if t.get("name", "") in allowed]
 
+        # Inject handoff tool if handoff_targets are present in context
+        handoff_targets: list[dict[str, str]] = []
+        if context is not None:
+            handoff_targets = context.get("handoff_targets", [])
+        if handoff_targets:
+            handoff_desc = None
+            if context is not None:
+                handoff_desc = context.get("handoff_description")
+            tools = inject_handoff_tools_from_targets(tools, handoff_targets, source_description=handoff_desc)
+
         # Query agent's knowledge bases and inject as context
         kb_ids = agent.knowledge_base_ids or []
         if kb_ids:
@@ -162,6 +177,58 @@ class AgentExecutionPort(EnginePort):
             model=model_name,
             tools=shaped_tools if shaped_tools else None,
         )
+
+        # Check for handoff tool call in LLM response
+        if handoff_targets and hasattr(response, "tool_calls") and response.tool_calls:
+            for tool_call in response.tool_calls:
+                tc_name = tool_call.get("name", "") if isinstance(tool_call, dict) else getattr(tool_call, "name", "")
+                if not is_handoff_tool_call(tc_name):
+                    continue
+
+                if isinstance(tool_call, dict):
+                    args = tool_call.get("arguments", {})
+                else:
+                    args = getattr(tool_call, "arguments", {})
+                if isinstance(args, str):
+                    import json
+
+                    try:
+                        args = json.loads(args)
+                    except json.JSONDecodeError:
+                        args = {}
+                target = args.get("target", "") if isinstance(args, dict) else ""
+
+                try:
+                    validate_handoff_target_from_list(handoff_targets, target)
+                except ValueError:
+                    logger.warning("Invalid handoff target '%s' from node", target)
+                    valid = ", ".join(t["node_id"] for t in handoff_targets)
+                    return {
+                        "response": f"Invalid handoff target '{target}'. Please choose from: {valid}",
+                        "usage": response.usage,
+                        "model": model_name,
+                    }
+
+                tc_id = tool_call.get("id", "") if isinstance(tool_call, dict) else getattr(tool_call, "id", "")
+                return {
+                    "response": "",
+                    "usage": response.usage,
+                    "model": model_name,
+                    "handoff_to": target,
+                    "_handoff_tool_call_id": tc_id,
+                    "_handoff_tool_call_message": {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": tc_id,
+                                "type": "function",
+                                "function": {"name": "handoff_to_agent", "arguments": f'{{"target": "{target}"}}'},
+                            }
+                        ],
+                    },
+                    "_handoff_messages_snapshot": list(full_messages),
+                }
 
         response_dict: dict[str, Any] = {
             "content": response.content,

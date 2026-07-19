@@ -69,6 +69,7 @@ class GraphCompiler:
         self._validate_channel_access(config)
         self._validate_routing_config(config)
         self._validate_agent_invocation_mode(config)
+        self._validate_agent_handoff_config(config)
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
@@ -161,6 +162,30 @@ class GraphCompiler:
                     f"AGENT node '{node_id}' has invalid invocation_mode '{invocation_mode}'. "
                     f"Must be one of: {', '.join(sorted(valid_modes))}",
                     field=f"nodes[{node_id}].config.invocation_mode",
+                )
+
+    def _validate_agent_handoff_config(self, config: GraphConfig) -> None:
+        """Validate handoff.context_mode field on AGENT nodes.
+
+        When present, context_mode must be 'inherited', 'isolated', or 'summarized'.
+        Defaults to 'inherited' when absent (handled at runtime).
+
+        Raises:
+            GraphValidationError: if context_mode is not a valid value.
+        """
+        valid_modes = {"inherited", "isolated", "summarized"}
+        for node_id, node in config.nodes.items():
+            if node.type.value != "agent":
+                continue
+            handoff_cfg = node.config.get("handoff")
+            if handoff_cfg is None:
+                continue
+            context_mode = handoff_cfg.get("context_mode")
+            if context_mode is not None and context_mode not in valid_modes:
+                raise GraphValidationError(
+                    f"AGENT node '{node_id}' has invalid handoff.context_mode '{context_mode}'. "
+                    f"Must be one of: {', '.join(sorted(valid_modes))}",
+                    field=f"nodes[{node_id}].config.handoff.context_mode",
                 )
 
     def _build_channel_access(self, config: GraphConfig) -> dict[str, ChannelAccess]:
