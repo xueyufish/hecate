@@ -68,6 +68,7 @@ class GraphCompiler:
         self._validate_execution_mode(config, execution_mode)
         self._validate_channel_access(config)
         self._validate_routing_config(config)
+        self._validate_agent_invocation_mode(config)
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
@@ -140,6 +141,27 @@ class GraphCompiler:
                             f"CONDITION node '{node_id}' candidate_agent '{candidate}' is not a declared node",
                             field=f"nodes[{node_id}].config.routing_config.candidate_agents",
                         )
+
+    def _validate_agent_invocation_mode(self, config: GraphConfig) -> None:
+        """Validate invocation_mode field on AGENT nodes.
+
+        When present, invocation_mode must be 'direct' or 'tool'.
+        Defaults to 'direct' when absent (handled at runtime).
+
+        Raises:
+            GraphValidationError: if invocation_mode is not a valid value.
+        """
+        valid_modes = {"direct", "tool"}
+        for node_id, node in config.nodes.items():
+            if node.type.value != "agent":
+                continue
+            invocation_mode = node.config.get("invocation_mode")
+            if invocation_mode is not None and invocation_mode not in valid_modes:
+                raise GraphValidationError(
+                    f"AGENT node '{node_id}' has invalid invocation_mode '{invocation_mode}'. "
+                    f"Must be one of: {', '.join(sorted(valid_modes))}",
+                    field=f"nodes[{node_id}].config.invocation_mode",
+                )
 
     def _build_channel_access(self, config: GraphConfig) -> dict[str, ChannelAccess]:
         """Build per-node channel access map from node configurations."""

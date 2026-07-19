@@ -17,9 +17,17 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.engine.guardrail import (
+    GuardrailAction,
+    NoOpPostLLMHook,
+    NoOpPreLLMHook,
+    PostLLMHook,
+    PreLLMHook,
+)
 from hecate.engine.ports import EnginePort, SpanContext
 from hecate.models.agent import AgentModel
 from hecate.models.knowledge import KnowledgeBaseModel
+from hecate.models.tool import ToolModel
 from hecate.services.rag.service import knowledge_base_service
 
 logger = logging.getLogger(__name__)
@@ -32,15 +40,26 @@ class AgentExecutionPort(EnginePort):
     1. Loading the AgentModel from the database by ID.
     2. Building an isolated context using the agent's persona, model config,
        tools, and knowledge bases.
-    3. Invoking the LLM via LLMService (fallback for sub-agent execution).
-    4. Returning the response.
+    3. Applying guard hooks (PreLLMHook / PostLLMHook).
+    4. Calling context_assemble for context engineering.
+    5. Invoking the LLM with tools via LLMService.
+    6. Returning the response.
 
     Also implements ``knowledge_query`` by delegating to the KnowledgeBaseService
     for hybrid search (dense + sparse vectors).
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        pre_hook: PreLLMHook | None = None,
+        post_hook: PostLLMHook | None = None,
+        context_engine: Any | None = None,
+    ) -> None:
         self._db = db
+        self._pre_hook = pre_hook or NoOpPreLLMHook()
+        self._post_hook = post_hook or NoOpPostLLMHook()
+        self._context_engine = context_engine
 
     async def agent_execute(
         self,
@@ -50,7 +69,10 @@ class AgentExecutionPort(EnginePort):
         context: dict | None = None,
         agent_definition: Any | None = None,
     ) -> dict:
-        """Execute an agent by ID with isolated context.
+        """Execute an agent by ID with full pipeline.
+
+        Loads tools, queries knowledge bases, applies guard hooks,
+        calls context_assemble, and invokes the LLM with tools.
 
         Args:
             agent_id: UUID of the agent to execute.
@@ -66,6 +88,7 @@ class AgentExecutionPort(EnginePort):
             ValueError: If agent_id does not resolve to a valid agent.
         """
         from hecate.services.llm.service import llm_service
+        from hecate.services.skill.loader import SkillLoader
 
         agent = await self._load_agent(agent_id)
         if agent is None:
@@ -75,10 +98,8 @@ class AgentExecutionPort(EnginePort):
             agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"
         )
 
+        # Build system prompt from persona + skills
         persona = agent.persona or "You are a helpful assistant."
-
-        from hecate.services.skill.loader import SkillLoader
-
         loader = SkillLoader(self._db)
         skills_block = await loader.format_skills(
             agent_id=agent_id,
@@ -88,17 +109,116 @@ class AgentExecutionPort(EnginePort):
         system_message = {"role": "system", "content": system_content}
         full_messages = [system_message] + messages
 
-        response = await llm_service.chat(
+        # Load agent tools from database
+        tools = await self._load_agent_tools(agent.tools)
+
+        # Apply AgentDefinition tool filtering (whitelist/blacklist)
+        if agent_definition is not None and hasattr(agent_definition, "tools"):
+            allowed = agent_definition.tools
+            if allowed is not None:
+                tools = [t for t in tools if t.get("name", "") in allowed]
+
+        # Query agent's knowledge bases and inject as context
+        kb_ids = agent.knowledge_base_ids or []
+        if kb_ids:
+            query_text = messages[-1].get("content", "") if messages else ""
+            kb_chunks = await self.knowledge_query(query_text, [UUID(kb_id) for kb_id in kb_ids])
+            if kb_chunks:
+                kb_context = "\n\n".join(chunk.get("content", "") for chunk in kb_chunks[:5])
+                full_messages.insert(1, {"role": "system", "content": f"Relevant context:\n{kb_context}"})
+
+        # PreLLMHook
+        pre_result = await self._pre_hook.on_pre_llm_call(
             messages=full_messages,
             model=model_name,
-            tools=None,
+            tools=tools if tools else None,
+        )
+        if pre_result.action == GuardrailAction.BLOCK:
+            return {
+                "response": f"I cannot process this request: {pre_result.reason}",
+                "usage": {},
+                "model": model_name,
+            }
+        if (
+            pre_result.action == GuardrailAction.SANITIZE
+            and pre_result.modified_data
+            and "messages" in pre_result.modified_data
+        ):
+            full_messages = pre_result.modified_data["messages"]
+
+        # Context assembly
+        assembled = await self.context_assemble(
+            messages=full_messages,
+            tools=tools if tools else None,
+            session_id=channel_snapshot.get("_session_id", agent_id),
+            model=model_name,
+        )
+        shaped_messages = assembled.get("messages", full_messages)
+        shaped_tools = assembled.get("tools", tools if tools else None)
+
+        # LLM invocation
+        response = await llm_service.chat(
+            messages=shaped_messages,
+            model=model_name,
+            tools=shaped_tools if shaped_tools else None,
         )
 
+        response_dict: dict[str, Any] = {
+            "content": response.content,
+            "model": response.model or model_name,
+        }
+
+        # PostLLMHook
+        post_result = await self._post_hook.on_post_llm_call(
+            response=response_dict,
+            messages=shaped_messages,
+        )
+        if post_result.action == GuardrailAction.BLOCK:
+            return {
+                "response": "I cannot provide that response due to safety policy.",
+                "usage": response.usage,
+                "model": model_name,
+            }
+        if (
+            post_result.action == GuardrailAction.SANITIZE
+            and post_result.modified_data
+            and "response" in post_result.modified_data
+        ):
+            response_dict = post_result.modified_data["response"]
+
         return {
-            "response": response.content,
+            "response": response_dict.get("content", response.content),
             "usage": response.usage,
             "model": response.model or model_name,
         }
+
+    async def _load_agent_tools(self, tool_names: list[str]) -> list[dict[str, Any]]:
+        """Load tool definitions from the database by name.
+
+        Args:
+            tool_names: List of tool names from AgentModel.tools.
+
+        Returns:
+            List of tool definition dicts with name, description, parameters.
+        """
+        if not tool_names:
+            return []
+
+        result = await self._db.execute(
+            select(ToolModel).where(
+                ToolModel.name.in_(tool_names),
+                ~ToolModel.deleted,
+            )
+        )
+        tool_models = result.scalars().all()
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "parameters": tool.parameters or {"type": "object", "properties": {}},
+            }
+            for tool in tool_models
+        ]
 
     async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
         """Query knowledge bases in parallel and return relevant document chunks.

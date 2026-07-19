@@ -1,9 +1,10 @@
-"""Agent worker for executing AGENT-type nodes via nested graph execution.
+"""Agent worker for executing AGENT-type nodes.
 
-Resolves the sub-agent by agent_id from config, packages parent channel context
-(messages, variables) as initial_input, and calls WorkflowExecutionService for
-nested graph execution (NOT direct agent_execute). This enables graph-within-graph
-execution and keeps the door open for P3 Agent-Workflow composability.
+Supports two invocation modes:
+- ``direct`` (default): Execute the agent inline via nested graph execution
+  or port-based agent_execute.
+- ``tool``: Expose the agent as a callable tool via AgentDefinition for
+  hierarchical delegation. The parent LLM can invoke the agent as a tool.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from hecate.engine.agent_tool import AgentDefinition, AgentTool
 from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
 
@@ -19,15 +21,17 @@ logger = logging.getLogger(__name__)
 
 
 class AgentWorker(Worker):
-    """Worker that executes AGENT-type nodes via nested graph execution.
+    """Worker that executes AGENT-type nodes.
 
-    Resolves the sub-agent by ID, packages parent channel context as
-    initial_input, and delegates to the workflow execution service for
-    nested graph execution. This approach (Decision 9) ensures sub-agents
-    get full template resolution, compilation, and guard hook injection.
+    Supports two invocation modes controlled by ``invocation_mode`` in
+    node config:
 
-    The execution service is injected at construction time to avoid circular
-    imports between engine and services layers.
+    - ``"direct"`` (default): Delegates to WorkflowExecutionService for
+      nested graph execution, or falls back to port.agent_execute().
+    - ``"tool"``: Creates an AgentTool from agent_definition and registers
+      it for the parent LLM to invoke as a callable tool.
+
+    The execution service and port are injected at construction time.
     """
 
     def __init__(self, execution_service: Any = None, port: Any = None, event_store: Any = None) -> None:
@@ -57,11 +61,82 @@ class AgentWorker(Worker):
                 error=ValueError(f"AGENT node '{node_id}' has invalid agent_id: {e}"),
             )
 
+        invocation_mode = node_config.get("invocation_mode", "direct")
+
+        if invocation_mode == "tool":
+            return self._handle_tool_mode(node_id, node_config, agent_id)
+
+        return await self._handle_direct_mode(node_id, node_config, agent_id, channel_snapshot)
+
+    def _handle_tool_mode(
+        self,
+        node_id: str,
+        node_config: dict,
+        agent_id: UUID,
+    ) -> WorkerResult:
+        """Handle tool invocation mode — expose agent as callable tool.
+
+        Creates an AgentTool from the agent_definition in node config
+        and registers it by writing the tool info to the _agent_tools channel.
+        """
+        agent_definition_raw = node_config.get("agent_definition")
+        if agent_definition_raw and isinstance(agent_definition_raw, dict):
+            definition = AgentDefinition(
+                agent_id=agent_id,
+                description=agent_definition_raw.get("description", "A specialist agent"),
+                prompt_override=agent_definition_raw.get("prompt_override"),
+                tools=agent_definition_raw.get("tools"),
+                disallowed_tools=agent_definition_raw.get("disallowed_tools", ["agent_execute"]),
+                skills=agent_definition_raw.get("skills"),
+                model_override=agent_definition_raw.get("model_override"),
+                context_mode=agent_definition_raw.get("context_mode", "inherited"),
+                max_turns=agent_definition_raw.get("max_turns"),
+                timeout_seconds=agent_definition_raw.get("timeout_seconds"),
+            )
+        else:
+            definition = AgentDefinition(
+                agent_id=agent_id,
+                description=node_config.get("description", "A specialist agent"),
+            )
+
+        agent_tool = AgentTool(definition=definition, agent_name=node_config.get("name", ""))
+        tool_schema = {
+            "type": "function",
+            "function": {
+                "name": agent_tool.name,
+                "description": agent_tool.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task": {
+                            "type": "string",
+                            "description": "The task to delegate to this agent",
+                        },
+                    },
+                    "required": ["task"],
+                },
+            },
+            "_agent_id": str(agent_id),
+            "_invocation_mode": "tool",
+        }
+
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"_agent_tools": [tool_schema]},
+        )
+
+    async def _handle_direct_mode(
+        self,
+        node_id: str,
+        node_config: dict,
+        agent_id: UUID,
+        channel_snapshot: dict,
+    ) -> WorkerResult:
+        """Handle direct invocation mode — execute agent inline (existing behavior)."""
         messages = channel_snapshot.get("messages", [])
         if not isinstance(messages, list):
             messages = []
 
-        # Extract parent context for nested execution
         initial_input = {
             "messages": messages,
             "_parent_session_id": channel_snapshot.get("_session_id"),

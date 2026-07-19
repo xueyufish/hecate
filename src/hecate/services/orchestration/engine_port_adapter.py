@@ -42,12 +42,18 @@ class _ProductionEnginePort(EnginePort):
         tool_registry: Any = None,
         workspace_id: UUID | None = None,
         agent_id: UUID | None = None,
+        pre_hook: Any = None,
+        post_hook: Any = None,
+        context_engine: Any = None,
     ) -> None:
         self._db = db
         self._llm_service = llm_service
         self._tool_registry = tool_registry
         self._workspace_id = workspace_id
         self._agent_id = agent_id
+        self._pre_hook = pre_hook
+        self._post_hook = post_hook
+        self._context_engine = context_engine
 
     async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
         """Invoke LLM via LLMService in streaming mode.
@@ -212,7 +218,12 @@ class _ProductionEnginePort(EnginePort):
         """
         from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
 
-        port = AgentExecutionPort(self._db)
+        port = AgentExecutionPort(
+            self._db,
+            pre_hook=self._pre_hook,
+            post_hook=self._post_hook,
+            context_engine=self._context_engine,
+        )
         return await port.agent_execute(agent_id, messages, channel_snapshot, context, agent_definition)
 
 
@@ -220,6 +231,9 @@ def create_engine_port(
     db: AsyncSession,
     llm_service: Any,
     tool_registry: Any = None,
+    pre_hook: Any = None,
+    post_hook: Any = None,
+    context_engine: Any = None,
 ) -> EnginePort:
     """Create a production EnginePort adapter.
 
@@ -227,8 +241,18 @@ def create_engine_port(
         db: Database session for service lookups.
         llm_service: The LLMService instance for LLM invocations.
         tool_registry: Optional ToolRegistry for tool execution.
+        pre_hook: Optional PreLLMHook for input safety checks.
+        post_hook: Optional PostLLMHook for output safety checks.
+        context_engine: Optional ContextEngine for message selection/compression.
 
     Returns:
         A concrete EnginePort wired to production services.
     """
-    return _ProductionEnginePort(db=db, llm_service=llm_service, tool_registry=tool_registry)
+    return _ProductionEnginePort(
+        db=db,
+        llm_service=llm_service,
+        tool_registry=tool_registry,
+        pre_hook=pre_hook,
+        post_hook=post_hook,
+        context_engine=context_engine,
+    )

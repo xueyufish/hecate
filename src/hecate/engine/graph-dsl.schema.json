@@ -75,7 +75,7 @@
               "variable_name": { "type": "string" },
               "value": {},
               "agent_id": { "type": "string", "description": "UUID of the agent to invoke (agent node type)" },
-              "invocation_mode": { "type": "string", "enum": ["direct", "tool"], "description": "How the agent is invoked: direct (execute inline) or tool (expose as callable tool)" },
+              "invocation_mode": { "type": "string", "enum": ["direct", "tool"], "default": "direct", "description": "How the agent is invoked: 'direct' (execute inline via nested graph or port, default) or 'tool' (expose as callable tool via AgentDefinition)" },
               "branches": { "type": "array", "items": { "type": "string" }, "description": "Node IDs of parallel branches (fan-out node type)" },
               "fan_out_source": { "type": "string", "description": "ID of the upstream FAN_OUT node (merge node type)" },
               "output_channel": { "type": "string", "description": "Channel name to write aggregated results (merge node type)" },
