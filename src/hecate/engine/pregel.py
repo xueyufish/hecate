@@ -304,13 +304,19 @@ class PregelRuntime:
                     per_node_strategy = self._retry_executor.strategy.with_config(**node_retry_cfg)
                     retry_executor = RetryExecutor(per_node_strategy)
 
+                # Build per-node execution_context with handoff_targets for AGENT nodes
+                node_execution_context = execution_context
+                handoff_targets = self._build_handoff_targets(node_id, node_type)
+                if handoff_targets:
+                    node_execution_context = {**execution_context, "handoff_targets": handoff_targets}
+
                 if stream_mode == StreamMode.MESSAGES:
                     async for item in retry_executor.execute_stream(
                         self._worker.execute_stream,
                         node_id,
                         node.config,
                         snapshot,
-                        execution_context=execution_context,
+                        execution_context=node_execution_context,
                     ):
                         if isinstance(item, WorkerResult):
                             results.append(item)
@@ -323,7 +329,7 @@ class PregelRuntime:
                         node_id,
                         node.config,
                         snapshot,
-                        execution_context=execution_context,
+                        execution_context=node_execution_context,
                     )
                     results.append(result)
 
@@ -433,6 +439,55 @@ class PregelRuntime:
         self._interrupt_updates = checkpoint.get("metadata", {}).get("interrupt_updates", {})
         if resume_value is not None:
             self._channel_manager.write("_resume_value", resume_value)
+
+    def _build_handoff_targets(self, node_id: str, node_type: NodeType | None) -> list[dict[str, str]]:
+        """Build handoff target list for an AGENT node.
+
+        Scans outgoing edges of ``node_id`` for ``handoff`` or ``dynamic_handoff``
+        triggers. For each such edge, extracts target node IDs and resolves
+        descriptions from the target node's config (``description`` field) or
+        falls back to the target node's name (the dict key in ``nodes``).
+
+        Only returns a non-empty list for AGENT-type nodes with handoff edges.
+        For all other node types, returns an empty list (no injection).
+
+        Args:
+            node_id: The source node to inspect.
+            node_type: The NodeType of the source node (if known).
+
+        Returns:
+            A list of ``{"node_id": str, "description": str}`` dicts, one per
+            reachable target. Empty list if the node has no handoff edges or is
+            not an AGENT node.
+        """
+        if node_type != NodeType.AGENT:
+            return []
+
+        targets: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for edge in self._graph.edges:
+            if edge.source != node_id or edge.trigger not in ("handoff", "dynamic_handoff"):
+                continue
+            if isinstance(edge.target, str):
+                target_ids = [edge.target]
+            elif isinstance(edge.target, dict):
+                target_ids = list(edge.target.values())
+            else:
+                continue
+
+            for target_id in target_ids:
+                if target_id in seen:
+                    continue
+                seen.add(target_id)
+                target_node = self._graph.nodes.get(target_id)
+                desc = ""
+                if target_node:
+                    desc = target_node.config.get("description", target_node.config.get("name", ""))
+                if not desc:
+                    desc = target_id
+                targets.append({"node_id": target_id, "description": desc})
+
+        return targets
 
     def _resolve_conditional_target(self, target_map: dict, route_value: str) -> str | None:
         """Resolve a conditional edge target using the route value as the dict key.
