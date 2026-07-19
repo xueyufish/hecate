@@ -8,12 +8,16 @@ from hecate.engine.compiler import GraphCompiler
 from hecate.engine.graph_dsl import GraphValidationError, parse_graph
 from hecate.engine.types import ChannelDef, ChannelType, CompiledGraph, Edge, NodeConfig, NodeType
 from hecate.services.orchestration.handoff import (
+    build_handoff_channel_updates,
     build_handoff_tool_schema,
     create_handoff_worker_result,
+    filter_messages_for_handoff,
     get_handoff_targets_for_node,
     inject_handoff_tools,
+    inject_handoff_tools_from_targets,
     is_handoff_tool_call,
     validate_handoff_target,
+    validate_handoff_target_from_list,
 )
 
 
@@ -249,3 +253,118 @@ def test_mixed_handoff_and_dynamic_handoff():
 
     targets = get_handoff_targets_for_node(compiled, "router")
     assert set(targets) == {"billing", "technical"}
+
+
+def test_build_handoff_tool_schema_with_descriptions():
+    """Per-target descriptions are included in the tool description."""
+    schema = build_handoff_tool_schema(
+        ["billing", "technical"],
+        descriptions_by_target={"billing": "Handles billing inquiries", "technical": "Tech support"},
+    )
+    desc = schema["function"]["description"]
+    assert "billing: Handles billing inquiries" in desc
+    assert "technical: Tech support" in desc
+
+
+def test_build_handoff_tool_schema_with_source_description():
+    """Source description overrides the auto-generated description."""
+    schema = build_handoff_tool_schema(
+        ["billing"],
+        source_description="Custom handoff description",
+    )
+    assert schema["function"]["description"] == "Custom handoff description"
+
+
+def test_inject_handoff_tools_from_targets():
+    """inject_handoff_tools_from_targets adds handoff tool using target list."""
+    targets = [
+        {"node_id": "billing", "description": "Billing specialist"},
+        {"node_id": "tech", "description": "Tech support"},
+    ]
+    tools = [{"name": "existing_tool", "description": "A tool", "parameters": {}}]
+    result = inject_handoff_tools_from_targets(tools, targets)
+    assert len(result) == 2
+    assert result[0]["name"] == "existing_tool"
+    assert result[1]["function"]["name"] == "handoff_to_agent"
+
+
+def test_inject_handoff_tools_from_targets_empty():
+    """inject_handoff_tools_from_targets returns tools unchanged when no targets."""
+    tools = [{"name": "existing_tool", "description": "A tool", "parameters": {}}]
+    result = inject_handoff_tools_from_targets(tools, [])
+    assert result == tools
+
+
+def test_validate_handoff_target_from_list_valid():
+    """validate_handoff_target_from_list accepts valid target."""
+    targets = [{"node_id": "billing", "description": "desc"}, {"node_id": "tech", "description": "desc"}]
+    assert validate_handoff_target_from_list(targets, "billing") == "billing"
+
+
+def test_validate_handoff_target_from_list_invalid():
+    """validate_handoff_target_from_list rejects invalid target."""
+    targets = [{"node_id": "billing", "description": "desc"}]
+    with pytest.raises(ValueError, match="Invalid handoff target"):
+        validate_handoff_target_from_list(targets, "unknown")
+
+
+def test_filter_messages_for_handoff_inherited():
+    """inherited mode passes full history."""
+    messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}]
+    result = filter_messages_for_handoff(messages, "inherited", "src", "tgt")
+    assert result == messages
+
+
+def test_filter_messages_for_handoff_isolated():
+    """isolated mode returns only system note."""
+    messages = [{"role": "user", "content": "hello"}]
+    result = filter_messages_for_handoff(messages, "isolated", "src", "tgt")
+    assert len(result) == 1
+    assert result[0]["role"] == "system"
+    assert "Handed off from src" in result[0]["content"]
+
+
+def test_filter_messages_for_handoff_summarized():
+    """summarized mode returns structured summary."""
+    messages = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}]
+    result = filter_messages_for_handoff(messages, "summarized", "src", "tgt")
+    assert len(result) == 1
+    assert result[0]["role"] == "system"
+    assert "src" in result[0]["content"]
+
+
+def test_filter_messages_for_handoff_invalid_mode():
+    """Invalid context_mode raises ValueError."""
+    with pytest.raises(ValueError, match="Invalid context_mode"):
+        filter_messages_for_handoff([], "secure", "src", "tgt")
+
+
+def test_build_handoff_channel_updates_inherited():
+    """inherited mode includes full history + AIMessage + ToolMessage."""
+    messages = [{"role": "user", "content": "hello"}]
+    result = build_handoff_channel_updates(messages, "src", "tgt", "inherited", "call_123")
+    assert len(result) == 3  # user + AIMessage + ToolMessage
+    assert result[0]["role"] == "user"
+    assert result[1]["role"] == "assistant"
+    assert result[1]["tool_calls"][0]["id"] == "call_123"
+    assert result[2]["role"] == "tool"
+    assert result[2]["tool_call_id"] == "call_123"
+
+
+def test_build_handoff_channel_updates_isolated():
+    """isolated mode includes only system note + AIMessage + ToolMessage."""
+    messages = [{"role": "user", "content": "hello"}]
+    result = build_handoff_channel_updates(messages, "src", "tgt", "isolated", "call_123")
+    assert len(result) == 3  # system + AIMessage + ToolMessage
+    assert result[0]["role"] == "system"
+    assert result[1]["role"] == "assistant"
+    assert result[2]["role"] == "tool"
+
+
+def test_build_handoff_channel_updates_preserves_tool_call_id():
+    """tool_call_id is preserved exactly on both AIMessage and ToolMessage."""
+    result = build_handoff_channel_updates([], "src", "tgt", "inherited", "call_xyz")
+    aimessage = result[-2]
+    toolmessage = result[-1]
+    assert aimessage["tool_calls"][0]["id"] == "call_xyz"
+    assert toolmessage["tool_call_id"] == "call_xyz"
