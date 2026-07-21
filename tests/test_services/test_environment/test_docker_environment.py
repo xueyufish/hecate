@@ -15,8 +15,12 @@ from hecate.services.environment.environment import LocalEnvironment
 from hecate.services.environment.manager import EnvironmentManager
 
 
-def _check_docker_daemon() -> bool:
-    """Check if Docker daemon is actually reachable."""
+def _check_docker_available() -> bool:
+    """Check if aiodocker and Docker daemon are available."""
+    try:
+        import aiodocker  # noqa: F401
+    except ImportError:
+        return False
     if not shutil.which("docker"):
         return False
     import subprocess
@@ -33,9 +37,9 @@ def _check_docker_daemon() -> bool:
         return False
 
 
-_DOCKER_AVAILABLE = _check_docker_daemon()
+_DOCKER_AVAILABLE = _check_docker_available()
 
-docker_skip = pytest.mark.skipif(not _DOCKER_AVAILABLE, reason="Docker daemon not available")
+docker_skip = pytest.mark.skipif(not _DOCKER_AVAILABLE, reason="aiodocker or Docker daemon not available")
 
 
 # ---------------------------------------------------------------------------
