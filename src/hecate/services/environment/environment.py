@@ -6,11 +6,15 @@ managing agent's persistent execution context (files, memory, skills).
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
 from hecate.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -30,6 +34,21 @@ class FileInfo:
     size: int
     modified_at: float
     is_dir: bool
+
+
+@dataclass
+class ExecResult:
+    """Result of a shell command execution in the environment.
+
+    Attributes:
+        exit_code: Process exit code (-1 indicates timeout or transport error).
+        stdout: Captured stdout output as bytes.
+        stderr: Captured stderr output as bytes.
+    """
+
+    exit_code: int
+    stdout: bytes
+    stderr: bytes
 
 
 class AgentEnvironment(ABC):
@@ -114,6 +133,28 @@ class AgentEnvironment(ABC):
         Creates: sessions/, files/, memory/, skills/
         """
 
+    @abstractmethod
+    async def exec_shell(
+        self,
+        command: list[str],
+        *,
+        cwd: str | None = None,
+        timeout: float | None = None,
+    ) -> ExecResult:
+        """Execute a shell command inside the environment.
+
+        Args:
+            command: Executable path/name followed by its arguments.
+            cwd: Working directory relative to the environment root.
+                When ``None``, the environment's default working
+                directory is used.
+            timeout: Maximum seconds to wait before terminating the
+                command. When ``None``, the call waits indefinitely.
+
+        Returns:
+            ``ExecResult`` with exit code, stdout, and stderr.
+        """
+
 
 class LocalEnvironment(AgentEnvironment):
     """Local filesystem implementation of AgentEnvironment.
@@ -185,6 +226,45 @@ class LocalEnvironment(AgentEnvironment):
     async def ensure_dirs(self) -> None:
         for subdir in self.SUBDIRS:
             (self._root / subdir).mkdir(parents=True, exist_ok=True)
+
+    async def exec_shell(
+        self,
+        command: list[str],
+        *,
+        cwd: str | None = None,
+        timeout: float | None = None,
+    ) -> ExecResult:
+        if not command:
+            return ExecResult(exit_code=-1, stdout=b"", stderr=b"empty command")
+
+        working_dir = self._resolve(cwd) if cwd else self._root
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *command,
+                cwd=str(working_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError as exc:
+            return ExecResult(exit_code=-1, stdout=b"", stderr=str(exc).encode())
+
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            return ExecResult(
+                exit_code=-1,
+                stdout=b"",
+                stderr=f"command timed out after {timeout}s".encode(),
+            )
+
+        return ExecResult(
+            exit_code=proc.returncode if proc.returncode is not None else -1,
+            stdout=stdout or b"",
+            stderr=stderr or b"",
+        )
 
     def _resolve(self, path: str) -> Path:
         """Resolve a relative path to an absolute path within the environment.

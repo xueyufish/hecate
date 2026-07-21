@@ -81,6 +81,13 @@ class Settings(BaseSettings):
 
     AGENT_ENV_ENABLED: bool = True
     AGENT_ENV_TTL: int = 86400
+    AGENT_ENV_BACKEND: str = "local"  # "local" or "docker"
+
+    DOCKER_AGENT_IMAGE: str = "python:3.12-slim"
+    DOCKER_RUNTIME: str = "runc"  # "runc" (namespace) or "runsc" (gVisor user-space kernel)
+    DOCKER_NETWORK_MODE: str = "none"  # Docker network mode: "none", "bridge", "host"
+    DOCKER_WARM_POOL_SIZE: int = 10
+    DOCKER_WARM_POOL_IDLE_TIMEOUT: int = 3600
 
     TEMPORAL_SERVER_URL: str = "localhost:7233"
     TEMPORAL_TASK_QUEUE: str = "hecate-workers"
