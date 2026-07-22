@@ -38,6 +38,7 @@ from hecate.engine.workers.suggestion_worker import SuggestionWorker
 from hecate.engine.workers.tool_worker import ToolWorker
 from hecate.engine.workers.variable_set_worker import VariableSetWorker
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
+from hecate.services.context.offloader import ContextOffloader
 from hecate.services.state.state import AgentState
 from hecate.services.state.store import AgentStateStore
 
@@ -204,10 +205,11 @@ class WorkflowExecutionService:
 
         # Get or create environment for agent
         environment_root = None
+        agent_env = None
         if agent_id and self._environment_manager:
             agent_str = str(agent_id) if isinstance(agent_id, uuid.UUID) else agent_id
-            env = await self._environment_manager.get_or_create(agent_str)
-            environment_root = str(env.root_path)
+            agent_env = await self._environment_manager.get_or_create(agent_str)
+            environment_root = str(agent_env.root_path)
 
         # Load or create AgentState
         agent_state: AgentState | None = None
@@ -277,12 +279,24 @@ class WorkflowExecutionService:
 
         # Execute
         checkpoint_store = InMemoryCheckpointStore()
+
+        context_offloader: ContextOffloader | None = None
+        if agent_env is not None and self._environment_manager:
+            from hecate.core.config import settings
+
+            if settings.CONTEXT_OFFLOAD_ENABLED:
+                context_offloader = ContextOffloader(
+                    environment=agent_env,
+                    threshold_tokens=settings.CONTEXT_OFFLOAD_THRESHOLD_TOKENS,
+                )
+
         runtime = PregelRuntime(
             graph=compiled,
             worker=composite,
             checkpoint_store=checkpoint_store,
             max_supersteps=max_iterations * 3 + 5,
             context_engine=InMemoryContextEngine(),
+            context_offloader=context_offloader,
         )
 
         stream_mode = StreamMode.MESSAGES if stream else StreamMode.VALUES

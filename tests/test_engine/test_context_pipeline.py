@@ -194,3 +194,125 @@ class TestContextPipeline:
         tool_msg = [m for m in shaped_messages if m.get("role") == "tool"]
         if tool_msg:
             assert "[... truncated]" in tool_msg[0]["content"]
+
+
+class TestContextOffloadPipeline:
+    """Tests for the offload step in the 5-step context pipeline."""
+
+    async def test_offload_triggers_when_threshold_met(self, tmp_path) -> None:
+        from hecate.services.context.offloader import ContextOffloader
+        from hecate.services.environment.environment import LocalEnvironment
+
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        ctx_engine = InMemoryContextEngine(chars_per_token=1)
+        env = LocalEnvironment(agent_id="test-agent", root=str(tmp_path))
+        offloader = ContextOffloader(environment=env, threshold_tokens=50)
+        big_messages = [{"role": "user", "content": "x" * 200} for _ in range(20)]
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "max_tokens": 100},
+            channel_snapshot={"messages": big_messages},
+            execution_context={
+                "session_id": "s1",
+                "superstep": 1,
+                "context_engine": ctx_engine,
+                "context_offloader": offloader,
+            },
+        )
+        shaped_messages = port.context_assemble.call_args.kwargs["messages"]
+        stubs = [m for m in shaped_messages if m.get("role") == "system"]
+        assert len(stubs) >= 1
+        assert "offloaded_" in stubs[0]["content"]
+
+    async def test_offload_skipped_when_offloader_absent(self) -> None:
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        ctx_engine = InMemoryContextEngine(chars_per_token=1)
+        big_messages = [{"role": "user", "content": "x" * 200} for _ in range(20)]
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "max_tokens": 100},
+            channel_snapshot={"messages": big_messages},
+            execution_context={
+                "session_id": "s1",
+                "superstep": 1,
+                "context_engine": ctx_engine,
+            },
+        )
+        shaped_messages = port.context_assemble.call_args.kwargs["messages"]
+        stubs = [m for m in shaped_messages if m.get("role") == "system"]
+        assert len(stubs) == 0
+
+    async def test_offload_skipped_when_threshold_not_met(self, tmp_path) -> None:
+        from hecate.services.context.offloader import ContextOffloader
+        from hecate.services.environment.environment import LocalEnvironment
+
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        ctx_engine = InMemoryContextEngine(chars_per_token=1)
+        env = LocalEnvironment(agent_id="test-agent", root=str(tmp_path))
+        offloader = ContextOffloader(environment=env, threshold_tokens=999999)
+        big_messages = [{"role": "user", "content": "x" * 200} for _ in range(20)]
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "max_tokens": 100},
+            channel_snapshot={"messages": big_messages},
+            execution_context={
+                "session_id": "s1",
+                "superstep": 1,
+                "context_engine": ctx_engine,
+                "context_offloader": offloader,
+            },
+        )
+        shaped_messages = port.context_assemble.call_args.kwargs["messages"]
+        stubs = [m for m in shaped_messages if m.get("role") == "system"]
+        assert len(stubs) == 0
+
+    async def test_offload_falls_back_to_compress_when_still_over(self, tmp_path) -> None:
+        from hecate.services.context.offloader import ContextOffloader
+        from hecate.services.environment.environment import LocalEnvironment
+
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        ctx_engine = InMemoryContextEngine(max_messages=2, chars_per_token=1)
+        env = LocalEnvironment(agent_id="test-agent", root=str(tmp_path))
+        offloader = ContextOffloader(environment=env, threshold_tokens=10)
+        big_messages = [{"role": "user", "content": "x" * 500} for _ in range(50)]
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "max_tokens": 100},
+            channel_snapshot={"messages": big_messages},
+            execution_context={
+                "session_id": "s1",
+                "superstep": 1,
+                "context_engine": ctx_engine,
+                "context_offloader": offloader,
+            },
+        )
+        shaped_messages = port.context_assemble.call_args.kwargs["messages"]
+        assert len(shaped_messages) <= 3
+
+    async def test_offload_channel_messages_unchanged(self, tmp_path) -> None:
+        from hecate.services.context.offloader import ContextOffloader
+        from hecate.services.environment.environment import LocalEnvironment
+
+        port = _make_port(["OK"])
+        worker = LLMWorker(port=port)
+        ctx_engine = InMemoryContextEngine(chars_per_token=1)
+        env = LocalEnvironment(agent_id="test-agent", root=str(tmp_path))
+        offloader = ContextOffloader(environment=env, threshold_tokens=50)
+        big_messages = [{"role": "user", "content": "x" * 200} for _ in range(20)]
+        original_count = len(big_messages)
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "max_tokens": 100},
+            channel_snapshot={"messages": big_messages},
+            execution_context={
+                "session_id": "s1",
+                "superstep": 1,
+                "context_engine": ctx_engine,
+                "context_offloader": offloader,
+            },
+        )
+        assert len(big_messages) == original_count

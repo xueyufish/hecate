@@ -82,6 +82,7 @@ class PregelRuntime:
         event_bus: EventBus | None = None,
         context_engine: ContextEngine | None = None,
         retry_strategy: RetryStrategy | None = None,
+        context_offloader: Any = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
@@ -97,6 +98,7 @@ class PregelRuntime:
         self._event_store = event_store
         self._event_bus = event_bus
         self._context_engine = context_engine
+        self._context_offloader = context_offloader
         self._retry_executor = RetryExecutor(retry_strategy)
         self._superstep = 0
         self._interrupted = False
@@ -140,6 +142,8 @@ class PregelRuntime:
             ctx["event_bus"] = self._event_bus
         if self._context_engine is not None:
             ctx["context_engine"] = self._context_engine
+        if self._context_offloader is not None:
+            ctx["context_offloader"] = self._context_offloader
         return ctx
 
     async def execute(

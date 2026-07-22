@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     DOCKER_WARM_POOL_SIZE: int = 10
     DOCKER_WARM_POOL_IDLE_TIMEOUT: int = 3600
 
+    # Context Offloading (1.3.15b): overflow messages are written to the
+    # AgentEnvironment filesystem instead of being discarded by compression.
+    CONTEXT_OFFLOAD_ENABLED: bool = True
+    CONTEXT_OFFLOAD_THRESHOLD_TOKENS: int = 6000
+
     TEMPORAL_SERVER_URL: str = "localhost:7233"
     TEMPORAL_TASK_QUEUE: str = "hecate-workers"
     TEMPORAL_HEARTBEAT_TIMEOUT: int = 30
