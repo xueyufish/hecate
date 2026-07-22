@@ -144,7 +144,7 @@ class LLMWorker(Worker):
         self._tool_gate = ToolGateEvaluator()
 
     @staticmethod
-    def _apply_context_pipeline(
+    async def _apply_context_pipeline(
         messages: list[dict[str, Any]],
         node_config: dict,
         execution_context: dict | None,
@@ -154,11 +154,17 @@ class LLMWorker(Worker):
         Non-destructive: returns a new filtered list. Does not modify
         the original messages list or the channel snapshot.
 
-        Steps:
+        Steps (5-step pipeline):
         1. Tool result truncation (cap oversized outputs)
         2. Token estimation against budget
         3. Message selection (if over budget)
-        4. Compression (if still over budget)
+        4. Context offloading (if offloader present and dropped tokens meet
+           threshold) — writes dropped messages to the environment filesystem
+           and replaces them with a compact reference stub. Offload happens
+           BEFORE compression so the agent can recover dropped content via
+           ``read_file``. Only proceeds when ``context_offloader`` is in the
+           execution_context and exposes ``is_enabled()`` / ``offload(...)``.
+        5. Compression (last resort, only if stub + selected still over budget)
         """
         ctx_engine: ContextEngine | None = None
         if execution_context:
@@ -174,12 +180,43 @@ class LLMWorker(Worker):
 
         budget = _resolve_budget(node_config, execution_context)
         estimated = ctx_engine.estimate_tokens(filtered)
-        if estimated > budget:
-            filtered = ctx_engine.select_messages(filtered, budget)
-            if ctx_engine.estimate_tokens(filtered) > budget:
-                filtered = ctx_engine.compress(filtered)
+        if estimated <= budget:
+            return filtered
 
-        return filtered
+        # Step 3: message selection (keeps most-recent window that fits budget)
+        selected = ctx_engine.select_messages(filtered, budget)
+
+        # Step 4: context offloading — preserve dropped messages to environment
+        # so the agent can read_file them later. Done before compression (step 5)
+        # because compression is lossy; offload is not.
+        offloader: Any | None = execution_context.get("context_offloader") if execution_context else None
+        if (
+            offloader is not None
+            and getattr(offloader, "is_enabled", lambda: False)()
+            and len(selected) < len(filtered)
+        ):
+            # select_messages preserves order and returns the suffix; the dropped
+            # block is the leading prefix of filtered.
+            dropped = filtered[: len(filtered) - len(selected)]
+            dropped_tokens = ctx_engine.estimate_tokens(dropped)
+            threshold = getattr(offloader, "threshold_tokens", 0)
+            if dropped_tokens >= threshold:
+                session_id = ""
+                if execution_context:
+                    raw_sid = execution_context.get("session_id")
+                    if raw_sid is not None:
+                        session_id = str(raw_sid)
+                try:
+                    stub = await offloader.offload(dropped, session_id)
+                    selected = [stub, *selected]
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Context offload failed, falling back to compress: %s", e)
+
+        # Step 5: compression as last resort
+        if ctx_engine.estimate_tokens(selected) > budget:
+            selected = ctx_engine.compress(selected)
+
+        return selected
 
     def _filter_tools(
         self,
@@ -247,7 +284,7 @@ class LLMWorker(Worker):
                 )
 
         # Context pipeline (non-destructive message filtering)
-        messages = self._apply_context_pipeline(messages, node_config, execution_context)
+        messages = await self._apply_context_pipeline(messages, node_config, execution_context)
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -413,7 +450,7 @@ class LLMWorker(Worker):
                 )
 
         # Context pipeline (non-destructive message filtering)
-        messages = self._apply_context_pipeline(messages, node_config, execution_context)
+        messages = await self._apply_context_pipeline(messages, node_config, execution_context)
 
         # Context assembly
         assembled = await self._port.context_assemble(

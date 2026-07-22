@@ -10,6 +10,13 @@ This module provides context management capabilities:
   provenance tracking and importance scoring.
 - **Provider Shaping** — Adapts assembled context to target LLM provider
   requirements (OpenAI, Anthropic, etc.).
+- **ContextOffloader** — Writes overflow conversation messages to the
+  AgentEnvironment filesystem so the agent can retrieve them via ``read_file``
+  instead of losing them to context compression.
 """
 
 from __future__ import annotations
+
+from hecate.services.context.offloader import ContextOffloader
+
+__all__ = ["ContextOffloader"]
