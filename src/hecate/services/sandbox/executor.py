@@ -34,6 +34,7 @@ class SandboxConfig:
     timeout_seconds: int = _DEFAULT_TIMEOUT
     read_only_fs: bool = True
     env_vars: dict[str, str] = field(default_factory=dict)
+    volumes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -131,6 +132,12 @@ class SandboxExecutor:
 
         for key, val in cfg.env_vars.items():
             docker_args.extend(["--env", f"{key}={val}"])
+
+        from hecate.core.config import settings
+
+        mount_mode = settings.SANDBOX_MOUNT_MODE
+        for host_path, container_path in cfg.volumes.items():
+            docker_args.extend(["--volume", f"{host_path}:{container_path}:{mount_mode}"])
 
         docker_args.append(cfg.image)
 

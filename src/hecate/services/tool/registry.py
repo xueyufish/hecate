@@ -69,7 +69,9 @@ class ToolRegistry:
         """
         # Fast path: builtin tools resolved without DB query
         if name in self._builtin_names:
-            return await self._maybe_cache(name, args, context, lambda: self._builtin.execute(name, args), None)
+            return await self._maybe_cache(
+                name, args, context, lambda: self._builtin.execute(name, args, context), None
+            )
 
         # DB lookup for non-builtin tools
         result = await self._db.execute(
@@ -83,7 +85,9 @@ class ToolRegistry:
             raise ValueError(f"Tool '{name}' not found")
 
         if tool.source == "builtin":
-            return await self._maybe_cache(name, args, context, lambda: self._builtin.execute(name, args), tool)
+            return await self._maybe_cache(
+                name, args, context, lambda: self._builtin.execute(name, args, context), tool
+            )
         if tool.source == "custom":
             raise NotImplementedError(f"Custom tool execution not yet implemented for '{name}'")
         if tool.source == "mcp":
