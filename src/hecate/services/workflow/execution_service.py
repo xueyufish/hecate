@@ -297,6 +297,7 @@ class WorkflowExecutionService:
             max_supersteps=max_iterations * 3 + 5,
             context_engine=InMemoryContextEngine(),
             context_offloader=context_offloader,
+            environment=agent_env,
         )
 
         stream_mode = StreamMode.MESSAGES if stream else StreamMode.VALUES

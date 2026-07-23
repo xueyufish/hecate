@@ -222,10 +222,15 @@ class ToolWorker(Worker):
             )
         try:
             if use_sandbox:
+                from hecate.services.sandbox.environment_bridge import resolve_environment_volumes
+
+                sandbox_context = dict(context) if context else {}
+                env = execution_context.get("environment") if execution_context else None
+                sandbox_context["_sandbox_volumes"] = resolve_environment_volumes(env)
                 result = await self._port.tool_execute_sandbox(
                     name=name,
                     args=arguments,
-                    context=context,
+                    context=sandbox_context,
                 )
             else:
                 result = await self._port.tool_execute(

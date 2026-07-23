@@ -121,12 +121,15 @@ class BuiltInToolExecutor:
         self._workspace = Path(workspace_root).resolve()
         self._workspace.mkdir(parents=True, exist_ok=True)
 
-    async def execute(self, name: str, args: dict[str, Any]) -> Any:
+    async def execute(self, name: str, args: dict[str, Any], context: dict[str, Any] | None = None) -> Any:
         """Execute a built-in tool by name.
 
         Args:
             name: Tool name (must be a key in BUILTIN_TOOL_DEFINITIONS).
             args: Tool arguments.
+            context: Optional execution context. For execute_code, may
+                contain ``_sandbox_volumes`` (dict[str, str]) for environment
+                mounting.
 
         Returns:
             Tool-specific result.
@@ -139,8 +142,10 @@ class BuiltInToolExecutor:
             "read_file": self._read_file,
             "write_file": self._write_file,
             "list_files": self._list_files,
-            "execute_code": self._execute_code,
         }.get(name)
+
+        if name == "execute_code":
+            return await self._execute_code(args, context)
 
         if handler is None:
             raise ValueError(f"Unknown built-in tool: {name!r}")
@@ -195,11 +200,15 @@ class BuiltInToolExecutor:
             raise ValueError(f"Not a directory: {rel_path}")
         return sorted(entry.name for entry in path.iterdir())
 
-    async def _execute_code(self, args: dict[str, Any]) -> dict[str, Any]:
+    async def _execute_code(
+        self,
+        args: dict[str, Any],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Execute code tool via SandboxExecutor."""
         code = args["code"]
         try:
-            from hecate.services.sandbox.executor import SandboxExecutor
+            from hecate.services.sandbox.executor import SandboxConfig, SandboxExecutor
         except ImportError:
             return {
                 "stdout": "",
@@ -208,7 +217,11 @@ class BuiltInToolExecutor:
                 "timed_out": False,
             }
 
-        executor = SandboxExecutor()
+        volumes: dict[str, str] = {}
+        if context:
+            volumes = context.get("_sandbox_volumes", {})
+
+        executor = SandboxExecutor(config=SandboxConfig(volumes=volumes))
         result = await executor.execute(tool_name="execute_code", args={"code": code})
         return {
             "stdout": result.stdout,

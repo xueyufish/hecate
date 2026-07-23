@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     CONTEXT_OFFLOAD_ENABLED: bool = True
     CONTEXT_OFFLOAD_THRESHOLD_TOKENS: int = 6000
 
+    # Sandbox Environment Mount (1.3.15c): mount agent environment into sandbox
+    # containers at /mnt/env. Mode "rw" (default) allows sandbox to write output
+    # files; "ro" restricts to read-only.
+    SANDBOX_MOUNT_MODE: str = "rw"
+
     TEMPORAL_SERVER_URL: str = "localhost:7233"
     TEMPORAL_TASK_QUEUE: str = "hecate-workers"
     TEMPORAL_HEARTBEAT_TIMEOUT: int = 30
