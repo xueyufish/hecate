@@ -520,6 +520,85 @@ Threshold: < 0.3 → BLOCK interaction; 0.3-0.7 → degrade privileges; > 0.7 �
 
 ---
 
+## Environment Security P0 (Feature 5.9)
+
+Closes four critical security gaps in agent execution environments: no network egress control, unenforced sandbox decisions, unstructured audit events, and globally visible credentials.
+
+### Architecture
+
+```
+ToolPolicyPipeline (5 layers)
+  │
+  ├─ evaluate_visibility() ──audit──→ SecurityAuditEmitter
+  │
+  └─ evaluate_execution() ──audit──→ SecurityAuditEmitter
+        │
+        └─ ToolAccessPolicy.evaluate() ──audit──→ SecurityAuditEmitter
+              │
+              └─ SandboxEnforcementRouter
+                    ├─ EXECUTE_SANDBOX + shell tool → DockerEnvironment.exec_shell()
+                    ├─ EXECUTE_SANDBOX + Python tool → port.tool_execute() (direct)
+                    └─ container exit verification → SecurityAuditEmitter (anomaly)
+
+DockerEnvironment
+  ├─ NetworkEgressPolicy: allow_all / deny_all
+  │     └─ deny_all → internal Docker network (no internet gateway)
+  └─ CredentialScope: strip secrets, inject per-tool credentials
+        └─ exec_shell() → sanitized environment passed to container
+```
+
+### 9.12 Network Egress Control
+
+`NetworkEgressPolicy` controls outbound network from DockerEnvironment containers:
+- `allow_all` (default): unrestricted network — backward compatible
+- `deny_all`: only whitelisted domains reachable; container attached to internal Docker network
+
+Configuration: `AGENT_ENV_NETWORK_POLICY=allow_all|deny_all`
+
+### 9.13 Sandbox Enforcement Integration
+
+`SandboxEnforcementRouter` guarantees `EXECUTE_SANDBOX` decisions route shell/exec tools to `DockerEnvironment.exec_shell()` instead of the generic sandbox executor:
+- Shell tools (`bash`, `exec_shell`, `execute_code`) → container
+- MCP tools with `sandbox_enabled=True` → container
+- Python built-in tools → direct (governed by WorkspaceBoundaryPolicy)
+- Container exit verification with anomaly audit events
+
+Configuration: `AGENT_ENV_SANDBOX_ENFORCEMENT=false` (default off)
+
+### 9.14 Structured Security Audit Pipeline
+
+`SecurityAuditEvent` captures every policy evaluation as a queryable record:
+- Fields: agent_id, workspace_id, session_id, tool_name, arguments_hash (SHA-256), decision, reason, policy_version, on_behalf_of_user, layer_results
+- Async batch writer: 50 events or 5 seconds → flush to `SecurityAuditModel` table
+- REST API: `GET /api/security/audit` with filtering (agent, workspace, decision, time range)
+- Auto-cleanup: configurable retention (default 30 days)
+- Emission points: `evaluate_visibility()`, `evaluate_execution()`, `ToolAccessPolicy.evaluate()`
+
+Configuration: `AGENT_ENV_AUDIT_ENABLED=true` (default on — observation only)
+
+### 9.15 Per-Execution Credential Scoping
+
+`CredentialScope` strips secret environment variables before tool execution:
+- Pattern detection: `*_KEY`, `*_SECRET`, `*_TOKEN`, `*_PASSWORD`, `*_API_KEY`, `*_PWD`
+- Prefix marking: `HECATE_SECRET_*` always stripped
+- System whitelist: `PATH`, `HOME`, `LANG`, `LC_*`, `TMPDIR`, `USER`, `SHELL`, `HOSTNAME`, `TERM`, `PWD` always preserved
+- Per-tool credential injection via `tool_credentials` mapping
+
+Configuration: `AGENT_ENV_CREDENTIAL_SCOPING=false` (default off)
+
+### LocalEnvironment Limitations
+
+| Feature | DockerEnvironment | LocalEnvironment |
+|---------|-------------------|------------------|
+| 9.12 Network Egress | ✅ Internal Docker network | ⚠️ WARNING logged |
+| 9.13 Sandbox Enforcement | ✅ exec_shell routing | ⚠️ WARNING logged |
+| 9.14 Audit Pipeline | ✅ Full support | ✅ Full support |
+| 9.15 Credential Scoping | ✅ env sanitization | ⚠️ WARNING logged |
+
+**LocalEnvironment is documented as development-only, not for production use.**
+
+---
+
 ## Further Reading
 
 | Document | Description |

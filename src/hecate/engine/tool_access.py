@@ -15,12 +15,16 @@ Design decisions:
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+import json
 import logging
 import os.path
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+
+from hecate.engine.audit_sink import audit_emitter
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +290,8 @@ class ToolAccessPolicy:
     ) -> AccessDecision:
         """Evaluate tool access policy and return an access decision.
 
+        Wraps the internal evaluation with structured audit emission.
+
         Args:
             tool_meta: Tool metadata dict with keys: risk_level (str),
                 approval_required (bool), sandbox_enabled (bool).
@@ -301,6 +307,38 @@ class ToolAccessPolicy:
         Returns:
             AccessDecision indicating what to do with the tool call.
         """
+        decision = self._evaluate_impl(tool_meta, rules, context, arguments)
+
+        tool_name = context.get("tool_name", "") or tool_meta.get("name", "")
+        args_hash = ""
+        if arguments:
+            args_hash = hashlib.sha256(
+                json.dumps(arguments, sort_keys=True, default=str).encode(),
+            ).hexdigest()
+
+        audit_emitter.emit(
+            audit_emitter.build_event(
+                agent_id=context.get("agent_id"),
+                workspace_id=context.get("workspace_id"),
+                tool_name=tool_name,
+                decision=decision.value,
+                reason=f"ToolAccessPolicy: {decision.value}",
+                arguments_hash=args_hash,
+                session_id=context.get("session_id"),
+                on_behalf_of_user=context.get("on_behalf_of_user"),
+            )
+        )
+
+        return decision
+
+    def _evaluate_impl(
+        self,
+        tool_meta: dict[str, Any],
+        rules: list[ToolRule],
+        context: dict[str, Any],
+        arguments: dict[str, Any] | None = None,
+    ) -> AccessDecision:
+        """Internal evaluation logic (see :meth:`evaluate`)."""
         tool_name = context.get("tool_name", "") or tool_meta.get("name", "")
 
         # Layer 0: Dangerous patterns (bypass-immune, cannot be overridden)

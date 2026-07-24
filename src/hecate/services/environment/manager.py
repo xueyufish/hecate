@@ -8,6 +8,7 @@ backend, a warm pool of idle containers is maintained for reuse.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from typing import Protocol
@@ -55,10 +56,60 @@ class EnvironmentManager:
     def _create_environment(self, agent_id: str) -> AgentEnvironment:
         """Create a new environment instance based on the configured backend."""
         if self._backend == "docker":
+            from hecate.services.environment.credential_scope import CredentialScope
             from hecate.services.environment.docker_environment import DockerEnvironment
+            from hecate.services.environment.network_policy import (
+                NetworkEgressPolicy,
+                NetworkPolicyMode,
+            )
 
-            return DockerEnvironment(agent_id)
+            network_policy = NetworkEgressPolicy(
+                mode=NetworkPolicyMode(settings.AGENT_ENV_NETWORK_POLICY),
+            )
+            credential_scope = CredentialScope(
+                enabled=settings.AGENT_ENV_CREDENTIAL_SCOPING,
+            )
+            return DockerEnvironment(
+                agent_id,
+                network_policy=network_policy,
+                credential_scope=credential_scope,
+            )
+
+        if settings.AGENT_ENV_NETWORK_POLICY == "deny_all":
+            logger.warning(
+                "Network egress control not available on LocalEnvironment (AGENT_ENV_NETWORK_POLICY=deny_all ignored)",
+            )
+        if settings.AGENT_ENV_CREDENTIAL_SCOPING:
+            logger.warning(
+                "Credential scoping not available on LocalEnvironment (AGENT_ENV_CREDENTIAL_SCOPING ignored)",
+            )
+
         return LocalEnvironment(agent_id, self._root)
+
+    @staticmethod
+    def _compute_security_config_hash() -> str:
+        """Compute a hash of the effective security configuration.
+
+        When this hash changes, warm pool containers are invalidated
+        to ensure they pick up the new security settings.
+        """
+        parts = [
+            settings.AGENT_ENV_NETWORK_POLICY,
+            str(settings.AGENT_ENV_CREDENTIAL_SCOPING),
+            str(settings.AGENT_ENV_SANDBOX_ENFORCEMENT),
+        ]
+        return hashlib.sha256("|".join(parts).encode()).hexdigest()[:16]
+
+    def invalidate_agent(self, agent_id: str) -> None:
+        """Invalidate cached and warm pool entries for an agent.
+
+        Called when an agent's security configuration changes.
+        Destroys warm pool containers so the next get_or_create()
+        creates a fresh container with updated config.
+        """
+        self._cache.pop(agent_id, None)
+        self._warm_pool.pop(agent_id, None)
+        logger.info("Invalidated environments for agent '%s'", agent_id)
 
     async def get_or_create(self, agent_id: str) -> AgentEnvironment:
         """Get an existing environment or create a new one (lazy creation).
@@ -84,20 +135,40 @@ class EnvironmentManager:
 
             warm_entry = self._warm_pool.pop(agent_id, None)
             if warm_entry is not None:
-                logger.info("Reusing warm container for agent '%s'", agent_id)
-                env = warm_entry.environment
-                if self._backend == "docker":
-                    from hecate.services.environment.docker_environment import DockerEnvironment
+                current_hash = self._compute_security_config_hash()
+                if warm_entry.security_config_hash != current_hash:
+                    logger.info(
+                        "Security config changed for agent '%s', destroying stale warm container",
+                        agent_id,
+                    )
+                    if self._backend == "docker":
+                        from hecate.services.environment.docker_environment import (
+                            DockerEnvironment,
+                        )
 
-                    if isinstance(env, DockerEnvironment):
-                        await env.start()
-                await env.ensure_dirs()
-                self._cache[agent_id] = _CacheEntry(environment=env)
-                return env
+                        if isinstance(warm_entry.environment, DockerEnvironment):
+                            await warm_entry.environment.remove()
+                else:
+                    logger.info("Reusing warm container for agent '%s'", agent_id)
+                    env = warm_entry.environment
+                    if self._backend == "docker":
+                        from hecate.services.environment.docker_environment import (
+                            DockerEnvironment,
+                        )
+
+                        if isinstance(env, DockerEnvironment):
+                            await env.start()
+                    await env.ensure_dirs()
+                    entry = _CacheEntry(environment=env)
+                    entry.security_config_hash = current_hash
+                    self._cache[agent_id] = entry
+                    return env
 
             env = self._create_environment(agent_id)
             await env.ensure_dirs()
-            self._cache[agent_id] = _CacheEntry(environment=env)
+            entry = _CacheEntry(environment=env)
+            entry.security_config_hash = self._compute_security_config_hash()
+            self._cache[agent_id] = entry
             logger.info("Created %s environment for agent '%s'", self._backend, agent_id)
             return env
 
@@ -185,6 +256,7 @@ class _CacheEntry:
     def __init__(self, environment: AgentEnvironment) -> None:
         self.environment = environment
         self._last_access = time.monotonic()
+        self.security_config_hash: str = ""
 
     def touch(self) -> None:
         """Reset the last access time."""

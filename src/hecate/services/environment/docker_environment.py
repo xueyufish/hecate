@@ -21,10 +21,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hecate.core.config import settings
+from hecate.services.environment.credential_scope import CredentialScope
 from hecate.services.environment.environment import (
     AgentEnvironment,
     ExecResult,
     FileInfo,
+)
+from hecate.services.environment.network_policy import (
+    NetworkEgressPolicy,
+    NetworkPolicyMode,
 )
 
 if TYPE_CHECKING:
@@ -60,6 +65,8 @@ class DockerEnvironment(AgentEnvironment):
         runtime: str | None = None,
         network_mode: str | None = None,
         docker_url: str | None = None,
+        network_policy: NetworkEgressPolicy | None = None,
+        credential_scope: CredentialScope | None = None,
     ) -> None:
         self._agent_id = agent_id
         self._image = image or settings.DOCKER_AGENT_IMAGE
@@ -71,6 +78,13 @@ class DockerEnvironment(AgentEnvironment):
         self._client: aiodocker.Docker | None = None
         self._container: Any = None
         self._started = False
+        self._network_policy = network_policy or NetworkEgressPolicy(
+            mode=NetworkPolicyMode(settings.AGENT_ENV_NETWORK_POLICY),
+        )
+        self._credential_scope = credential_scope or CredentialScope(
+            enabled=settings.AGENT_ENV_CREDENTIAL_SCOPING,
+        )
+        self._internal_network_name: str | None = None
 
     @property
     def environment_id(self) -> str:
@@ -119,6 +133,11 @@ class DockerEnvironment(AgentEnvironment):
         except Exception as exc:
             logger.debug("Volume %s may already exist: %s", self._volume_name, exc)
 
+        effective_network = self._network_mode
+        if self._network_policy.mode == NetworkPolicyMode.DENY_ALL:
+            await self._ensure_internal_network()
+            effective_network = self._internal_network_name or self._network_mode
+
         create_config: dict[str, Any] = {
             "Image": self._image,
             "Cmd": ["sleep", "infinity"],
@@ -131,7 +150,7 @@ class DockerEnvironment(AgentEnvironment):
                         "Target": _CONTAINER_WORKDIR,
                     },
                 ],
-                "NetworkMode": self._network_mode,
+                "NetworkMode": effective_network,
             },
         }
 
@@ -143,7 +162,35 @@ class DockerEnvironment(AgentEnvironment):
             config=create_config,
         )
         await self._container.start()
-        logger.info("Created container %s for agent %s", self._container_name, self._agent_id)
+        logger.info(
+            "Created container %s for agent %s (network=%s, policy=%s)",
+            self._container_name,
+            self._agent_id,
+            effective_network,
+            self._network_policy.mode.value,
+        )
+
+    async def _ensure_internal_network(self) -> None:
+        """Create an internal Docker network with no internet gateway."""
+        if self._client is None:
+            raise RuntimeError("Docker client not initialized")
+        if self._internal_network_name:
+            return
+
+        net_name = f"hecate-internal-{self._agent_id[:12]}"
+        try:
+            await self._client.networks.create(
+                {
+                    "Name": net_name,
+                    "Internal": True,
+                    "Driver": "bridge",
+                },
+            )
+            self._internal_network_name = net_name
+            logger.info("Created internal network %s for deny_all policy", net_name)
+        except Exception as exc:
+            logger.debug("Network %s may already exist: %s", net_name, exc)
+            self._internal_network_name = net_name
 
     async def read_file(self, path: str) -> bytes:
         await self._ensure_started()
@@ -255,13 +302,23 @@ class DockerEnvironment(AgentEnvironment):
 
         workdir = posixpath.join(_CONTAINER_WORKDIR, cwd) if cwd else _CONTAINER_WORKDIR
 
-        try:
-            exec_obj = await self._container.exec(
-                cmd=command,
-                workdir=workdir,
-                stdout=True,
-                stderr=True,
+        exec_kwargs: dict[str, Any] = {
+            "cmd": command,
+            "workdir": workdir,
+            "stdout": True,
+            "stderr": True,
+        }
+
+        if self._credential_scope.enabled:
+            import os
+
+            sanitized_env = self._credential_scope.sanitize_environment(
+                dict(os.environ),
             )
+            exec_kwargs["env"] = sanitized_env
+
+        try:
+            exec_obj = await self._container.exec(**exec_kwargs)
         except Exception as exc:
             return ExecResult(exit_code=-1, stdout=b"", stderr=str(exc).encode())
 

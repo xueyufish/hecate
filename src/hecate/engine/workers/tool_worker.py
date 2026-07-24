@@ -29,6 +29,7 @@ from hecate.engine.tool_access import (
 from hecate.engine.tool_matcher import ToolMatcher
 from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
+from hecate.engine.workers.sandbox_router import SandboxEnforcementRouter
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ class ToolWorker(Worker):
         access_policy: ToolAccessPolicy | None = None,
         approval_callback: ApprovalCallback | None = None,
         event_store: Any = None,
+        sandbox_enforcement: SandboxEnforcementRouter | None = None,
     ) -> None:
         super().__init__(event_store=event_store)
         self._port = port
@@ -59,6 +61,9 @@ class ToolWorker(Worker):
         self._post_hook = post_tool_hook or NoOpPostToolHook()
         self._access_policy = access_policy
         self._approval_callback = approval_callback
+        self._sandbox_enforcement = sandbox_enforcement or SandboxEnforcementRouter(
+            enabled=False,
+        )
 
     async def execute(
         self,
@@ -189,6 +194,14 @@ class ToolWorker(Worker):
         if access_decision == AccessDecision.REQUIRE_APPROVAL:
             use_sandbox = context.get("sandbox_enabled", False)
 
+        # Check sandbox enforcement routing — when enabled, shell tools
+        # with EXECUTE_SANDBOX route to DockerEnvironment.exec_shell().
+        route_to_environment = self._sandbox_enforcement.should_route_to_environment(
+            tool_name=name,
+            decision=access_decision,
+            sandbox_enabled=context.get("sandbox_enabled", False),
+        )
+
         # Pre-tool hook (with matcher filtering)
         if ToolMatcher.match(name, self._pre_hook.matcher):
             pre_result = await self._pre_hook.on_pre_tool_call(
@@ -227,6 +240,8 @@ class ToolWorker(Worker):
                 sandbox_context = dict(context) if context else {}
                 env = execution_context.get("environment") if execution_context else None
                 sandbox_context["_sandbox_volumes"] = resolve_environment_volumes(env)
+                if route_to_environment:
+                    sandbox_context["_sandbox_enforcement"] = True
                 result = await self._port.tool_execute_sandbox(
                     name=name,
                     args=arguments,

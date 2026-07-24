@@ -89,6 +89,16 @@ class Settings(BaseSettings):
     DOCKER_WARM_POOL_SIZE: int = 10
     DOCKER_WARM_POOL_IDLE_TIMEOUT: int = 3600
 
+    # Environment Security (5.9 P0): network egress, audit pipeline, credential
+    # scoping, and sandbox enforcement. All default to backward-compatible values.
+    AGENT_ENV_NETWORK_POLICY: str = "allow_all"  # "allow_all" or "deny_all"
+    AGENT_ENV_AUDIT_ENABLED: bool = True
+    AGENT_ENV_AUDIT_RETENTION_DAYS: int = 30
+    AGENT_ENV_AUDIT_BATCH_SIZE: int = 50
+    AGENT_ENV_AUDIT_FLUSH_INTERVAL: float = 5.0
+    AGENT_ENV_CREDENTIAL_SCOPING: bool = False
+    AGENT_ENV_SANDBOX_ENFORCEMENT: bool = False
+
     # Context Offloading (1.3.15b): overflow messages are written to the
     # AgentEnvironment filesystem instead of being discarded by compression.
     CONTEXT_OFFLOAD_ENABLED: bool = True

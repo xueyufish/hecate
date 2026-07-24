@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+from hecate.engine.audit_sink import audit_emitter
+
 logger = logging.getLogger(__name__)
 
 
@@ -141,14 +143,24 @@ class ToolPolicyPipeline:
             hidden = False
             for layer in self._layers:
                 decision = layer.evaluate(tool, context)
-                if decision in (PolicyDecision.HIDE, PolicyDecision.DENY):
-                    logger.debug(
-                        "Visibility: layer '%s' hid/denied tool '%s'",
-                        layer.name,
-                        tool.name,
+            if decision in (PolicyDecision.HIDE, PolicyDecision.DENY):
+                logger.debug(
+                    "Visibility: layer '%s' hid/denied tool '%s'",
+                    layer.name,
+                    tool.name,
+                )
+                audit_emitter.emit(
+                    audit_emitter.build_event(
+                        agent_id=context.agent_id,
+                        workspace_id=context.workspace_id,
+                        tool_name=tool.name,
+                        decision=decision.value,
+                        reason=f"Hidden by layer '{layer.name}' during visibility evaluation",
+                        layer_results=[{"layer": layer.name, "decision": decision.value}],
                     )
-                    hidden = True
-                    break
+                )
+                hidden = True
+                break
             if not hidden:
                 visible.append(tool_def)
         return visible
@@ -188,6 +200,17 @@ class ToolPolicyPipeline:
             tool.name,
             final_decision,
             [(r.layer_name, r.decision.value) for r in results],
+        )
+
+        audit_emitter.emit(
+            audit_emitter.build_event(
+                agent_id=context.agent_id,
+                workspace_id=context.workspace_id,
+                tool_name=tool.name,
+                decision=final_decision.value,
+                reason=f"Pipeline evaluation: {final_decision.value}",
+                layer_results=[{"layer": r.layer_name, "decision": r.decision.value} for r in results],
+            )
         )
 
         return final_decision, results
