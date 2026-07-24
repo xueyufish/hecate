@@ -84,6 +84,7 @@ from hecate.api.management.workspace_members import router as workspace_members_
 from hecate.api.management.workspaces import router as workspaces_router
 from hecate.api.middleware import AuditMiddleware
 from hecate.api.schedules import router as schedules_router
+from hecate.api.security_audit import router as security_audit_router
 from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
 from hecate.auth.sso_routes import router as sso_router
@@ -225,7 +226,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     audit_writer = AuditBatchWriter(DatabaseAuditStore(), audit_queue)
     await audit_writer.start()
 
+    # Security audit pipeline (5.9 P0): structured security audit events
+    from hecate.api.security_audit import set_security_audit_service
+    from hecate.engine.audit_sink import audit_emitter
+    from hecate.services.security.audit_service import SecurityAuditService
+
+    if _settings.AGENT_ENV_AUDIT_ENABLED:
+        security_audit_svc = SecurityAuditService()
+        await security_audit_svc.start()
+        audit_emitter.set_sink(security_audit_svc)
+        set_security_audit_service(security_audit_svc)
+    else:
+        security_audit_svc = None
+
     yield
+    # Shutdown: stop security audit service
+    if security_audit_svc:
+        audit_emitter.disable()
+        await security_audit_svc.stop()
     # Shutdown: stop audit writer
     await audit_writer.stop()
     # Shutdown: stop monitoring service
@@ -315,6 +333,7 @@ async def metrics() -> PlainTextResponse:
 
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(audit_router, prefix="/api", tags=["audit"])
+app.include_router(security_audit_router, prefix="/api", tags=["security"])
 app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(evaluation_router, prefix="/api", tags=["evaluation"])
 app.include_router(chat_router, prefix="/v1", tags=["chat"])

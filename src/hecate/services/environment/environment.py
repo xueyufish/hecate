@@ -2,6 +2,13 @@
 
 Provides AgentEnvironment ABC and LocalEnvironment implementation for
 managing agent's persistent execution context (files, memory, skills).
+
+**LocalEnvironment is intended for development and testing only.** It
+provides no network isolation, no sandbox enforcement, and no credential
+scoping. For production deployments, use DockerEnvironment with
+``AGENT_ENV_BACKEND=docker``. Security features (9.12, 9.13, 9.15)
+log warnings and are no-ops on LocalEnvironment. Only the structured
+audit pipeline (9.14) works on both backends.
 """
 
 from __future__ import annotations
