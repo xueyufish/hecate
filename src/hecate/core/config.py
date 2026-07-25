@@ -92,12 +92,33 @@ class Settings(BaseSettings):
     # Environment Security (5.9 P0): network egress, audit pipeline, credential
     # scoping, and sandbox enforcement. All default to backward-compatible values.
     AGENT_ENV_NETWORK_POLICY: str = "allow_all"  # "allow_all" or "deny_all"
-    AGENT_ENV_AUDIT_ENABLED: bool = True
-    AGENT_ENV_AUDIT_RETENTION_DAYS: int = 30
-    AGENT_ENV_AUDIT_BATCH_SIZE: int = 50
-    AGENT_ENV_AUDIT_FLUSH_INTERVAL: float = 5.0
+    AGENT_ENV_DECISION_ENABLED: bool = True
+    AGENT_ENV_DECISION_RETENTION_DAYS: int = 30
+    AGENT_ENV_DECISION_BATCH_SIZE: int = 50
+    AGENT_ENV_DECISION_FLUSH_INTERVAL: float = 5.0
     AGENT_ENV_CREDENTIAL_SCOPING: bool = False
     AGENT_ENV_SANDBOX_ENFORCEMENT: bool = False
+
+    # SIEM Export Pipeline (8.7): security event export to external SIEM.
+    SIEM_ENABLED: bool = False
+    SIEM_EXPORTERS: str = ""  # comma-separated: "webhook,syslog,ocsf"
+    SIEM_FILTER_EVENT_TYPES: str = ""  # comma-separated: "api,tool_policy,anomaly"
+    SIEM_MIN_SEVERITY: str = "info"  # info | low | medium | high | critical
+    SIEM_BATCH_SIZE: int = 50
+    SIEM_FLUSH_INTERVAL: float = 5.0
+    # Webhook exporter
+    SIEM_WEBHOOK_URL: str = ""
+    SIEM_WEBHOOK_TOKEN: str = ""
+    SIEM_WEBHOOK_FORMAT: str = "json"  # "json" or "splunk_hec"
+    SIEM_WEBHOOK_HEADERS: str = ""  # JSON string of extra headers
+    # Syslog exporter
+    SIEM_SYSLOG_HOST: str = "localhost"
+    SIEM_SYSLOG_PORT: int = 514
+    SIEM_SYSLOG_PROTOCOL: str = "tcp"  # "tcp" or "udp"
+    SIEM_SYSLOG_TLS: bool = False
+    SIEM_SYSLOG_FACILITY: int = 4  # security/authorization
+    # Security Finding retention
+    SECURITY_FINDING_RETENTION_DAYS: int = 90
 
     # Context Offloading (1.3.15b): overflow messages are written to the
     # AgentEnvironment filesystem instead of being discarded by compression.

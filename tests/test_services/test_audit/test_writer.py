@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from hecate.services.audit.policy import PolicyEngine, UnusualIPDetectionPolicy
+from hecate.services.audit.policy import FindingEngine, UnusualIPRule
 from hecate.services.audit.store import AuditEvent, AuditStore
 from hecate.services.audit.writer import AuditBatchWriter, WriterConfig
 
@@ -77,8 +77,8 @@ class TestAuditBatchWriter:
     async def test_policy_engine_integration(self) -> None:
         store = InMemoryAuditStore()
         queue: asyncio.Queue[AuditEvent] = asyncio.Queue()
-        engine = PolicyEngine()
-        engine.register(UnusualIPDetectionPolicy())
+        engine = FindingEngine()
+        engine.register(UnusualIPRule())
         writer = AuditBatchWriter(store, queue, config=WriterConfig(batch_size=1), policy_engine=engine)
 
         event = AuditEvent(

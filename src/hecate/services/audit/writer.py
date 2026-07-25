@@ -2,13 +2,14 @@
 
 The :class:`AuditBatchWriter` runs a background drain loop that collects
 audit events from an ``asyncio.Queue``, evaluates them against security
-policies via the :class:`PolicyEngine`, and persists them via an
+policies via the :class:`FindingEngine`, and persists them via an
 :class:`AuditStore` in batches.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING
 from hecate.services.audit.store import AuditEvent, AuditStore
 
 if TYPE_CHECKING:
-    from hecate.services.audit.policy import PolicyEngine
+    from hecate.services.audit.policy import FindingEngine
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class WriterConfig:
 class AuditBatchWriter:
     """Background writer that drains audit events from an async queue.
 
-    Optionally accepts a :class:`PolicyEngine` to evaluate each event
+    Optionally accepts a :class:`FindingEngine` to evaluate each event
     for security policy violations before persistence.
 
     Typical usage::
@@ -61,7 +62,7 @@ class AuditBatchWriter:
         store: AuditStore,
         queue: asyncio.Queue[AuditEvent],
         config: WriterConfig | None = None,
-        policy_engine: PolicyEngine | None = None,
+        policy_engine: FindingEngine | None = None,
     ) -> None:
         self._store = store
         self._queue = queue
@@ -132,31 +133,92 @@ class AuditBatchWriter:
         for event in batch:
             try:
                 await self._store.write(event)
+                self._emit_audit_to_siem(event)
             except Exception as e:
                 logger.error("Failed to write audit event (action=%s): %s", event.action, e)
+
+    def _emit_audit_to_siem(self, event: AuditEvent) -> None:
+        """Emit an audit event to the SIEM export pipeline."""
+        with contextlib.suppress(Exception):
+            from hecate.services.security.siem.collector import emit_to_siem
+            from hecate.services.security.siem.event import from_audit_log
+
+            siem_event = from_audit_log(
+                action=event.action,
+                success=event.success,
+                response_status=event.response_status,
+                user_id=str(event.user_id) if event.user_id else None,
+                org_id=str(event.org_id) if event.org_id else None,
+                workspace_id=str(event.workspace_id) if event.workspace_id else None,
+                request_method=event.request_method,
+                request_path=event.request_path,
+                ip_address=event.ip_address,
+                timestamp=event.timestamp,
+            )
+            emit_to_siem(siem_event)
 
     async def _evaluate_policies(self, batch: list[AuditEvent]) -> None:
         """Evaluate security policies against each event in the batch.
 
-        Policy violations are logged as warnings but do **not** block
-        persistence.  This keeps the audit trail complete while still
-        surfacing suspicious activity for alerting.
+        Findings are persisted to the ``security_findings`` table via
+        ``SecurityFindingModel``. Persistence failures are logged but do
+        not block audit event writing.
         """
         engine = self._policy_engine
         if engine is None:
             return
 
-        from hecate.services.audit.policy import PolicyContext
+        from hecate.core.database import async_session_factory
+        from hecate.models.security_finding import SecurityFindingModel
+        from hecate.services.audit.policy import DetectionContext
 
         for event in batch:
-            ctx = PolicyContext()
+            ctx = DetectionContext()
             violations = await engine.evaluate(event, ctx)
-            for violation in violations:
-                logger.warning(
-                    "Audit policy violation: policy=%s severity=%s user=%s action=%s reason=%s",
-                    violation.policy_name,
-                    violation.severity.value,
+            for finding in violations:
+                logger.debug(
+                    "Audit finding: rule=%s severity=%s user=%s action=%s",
+                    finding.rule_name,
+                    finding.severity.value,
                     event.user_id,
                     event.action,
-                    violation.message,
                 )
+                try:
+                    async with async_session_factory() as session:
+                        row = SecurityFindingModel(
+                            org_id=event.org_id,
+                            workspace_id=event.workspace_id,
+                            user_id=event.user_id,
+                            rule_name=finding.rule_name,
+                            severity=finding.severity.value,
+                            message=finding.message,
+                            source_event={
+                                "action": event.action,
+                                "resource_type": event.resource_type,
+                                "resource_id": str(event.resource_id) if event.resource_id else None,
+                            },
+                            metadata_=finding.metadata,
+                        )
+                        session.add(row)
+                        await session.commit()
+                except Exception:
+                    logger.exception(
+                        "Failed to persist security finding (rule=%s)",
+                        finding.rule_name,
+                    )
+
+                # Emit finding to SIEM export pipeline
+                with contextlib.suppress(Exception):
+                    from hecate.services.security.siem.collector import emit_to_siem
+                    from hecate.services.security.siem.event import from_security_finding
+
+                    siem_event = from_security_finding(
+                        rule_name=finding.rule_name,
+                        severity=finding.severity.value,
+                        message=finding.message,
+                        org_id=str(event.org_id) if event.org_id else None,
+                        workspace_id=str(event.workspace_id) if event.workspace_id else None,
+                        user_id=str(event.user_id) if event.user_id else None,
+                        finding_metadata=finding.metadata,
+                    )
+                    emit_to_siem(siem_event)

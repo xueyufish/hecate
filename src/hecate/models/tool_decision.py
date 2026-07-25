@@ -1,12 +1,12 @@
-"""Security audit event ORM model and Pydantic schemas.
+"""Tool decision audit event ORM model and Pydantic schemas.
 
-Stores structured security audit events emitted by ToolPolicyPipeline,
+Stores structured tool policy decision events emitted by ToolPolicyPipeline,
 ToolAccessPolicy, and SandboxEnforcementRouter. Each event captures the
 full decision context: tool name, arguments hash, decision, reason,
 policy version, per-layer breakdown, and actor attribution.
 
-The async batch writer (SecurityAuditService) flushes events to this
-table every AGENT_ENV_AUDIT_BATCH_SIZE events or AGENT_ENV_AUDIT_FLUSH_INTERVAL
+The async batch writer (ToolDecisionService) flushes events to this
+table every AGENT_ENV_DECISION_BATCH_SIZE events or AGENT_ENV_DECISION_FLUSH_INTERVAL
 seconds, whichever comes first.
 """
 
@@ -24,19 +24,19 @@ from sqlalchemy.types import JSON
 from hecate.models.base import BaseModel
 
 
-class SecurityAuditModel(BaseModel):
-    """ORM table for structured security audit events.
+class ToolDecisionModel(BaseModel):
+    """ORM table for structured tool policy decision events.
 
     Records every policy evaluation in the tool execution pipeline.
-    Designed for compliance auditing and the future SIEM export pipeline
-    (8.7 SS5). Uses async batch writing to amortize I/O cost.
+    Designed for compliance auditing and the SIEM export pipeline.
+    Uses async batch writing to amortize I/O cost.
     """
 
-    __tablename__ = "security_audit_events"
+    __tablename__ = "tool_decisions"
     __table_args__ = (
-        Index("ix_security_audit_agent_ts", "agent_id", "timestamp"),
-        Index("ix_security_audit_workspace_ts", "workspace_id", "timestamp"),
-        Index("ix_security_audit_decision_ts", "decision", "timestamp"),
+        Index("ix_tool_decision_agent_ts", "agent_id", "timestamp"),
+        Index("ix_tool_decision_workspace_ts", "workspace_id", "timestamp"),
+        Index("ix_tool_decision_decision_ts", "decision", "timestamp"),
     )
 
     agent_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -58,7 +58,7 @@ class SecurityAuditModel(BaseModel):
 
     def __repr__(self) -> str:
         return (
-            f"SecurityAuditModel(id={self.id}, agent_id={self.agent_id}, "
+            f"ToolDecisionModel(id={self.id}, agent_id={self.agent_id}, "
             f"tool={self.tool_name}, decision={self.decision})"
         )
 
@@ -68,8 +68,8 @@ class SecurityAuditModel(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class SecurityAuditReadSchema(PydanticBase):
-    """Schema for reading a security audit event."""
+class ToolDecisionReadSchema(PydanticBase):
+    """Schema for reading a tool decision event."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -87,8 +87,8 @@ class SecurityAuditReadSchema(PydanticBase):
     timestamp: datetime
 
 
-class SecurityAuditQuerySchema(PydanticBase):
-    """Query parameters for filtering security audit events."""
+class ToolDecisionQuerySchema(PydanticBase):
+    """Query parameters for filtering tool decision events."""
 
     agent_id: str | None = None
     workspace_id: str | None = None

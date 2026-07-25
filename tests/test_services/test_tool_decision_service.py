@@ -1,14 +1,14 @@
-"""Tests for SecurityAuditService batch writer and query."""
+"""Tests for ToolDecisionService batch writer and query."""
 
 from __future__ import annotations
 
-from hecate.models.security_audit import SecurityAuditQuerySchema
-from hecate.services.security.audit_service import SecurityAuditService
+from hecate.models.tool_decision import ToolDecisionQuerySchema
+from hecate.services.security.decision_service import ToolDecisionService
 
 
-class TestSecurityAuditServiceEmit:
+class TestToolDecisionServiceEmit:
     async def test_emit_buffers_event(self):
-        svc = SecurityAuditService(batch_size=100, flush_interval=999)
+        svc = ToolDecisionService(batch_size=100, flush_interval=999)
         svc.emit(
             {
                 "agent_id": "a1",
@@ -24,25 +24,25 @@ class TestSecurityAuditServiceEmit:
         assert not svc._queue.empty()
 
     async def test_emit_drops_on_queue_full(self):
-        svc = SecurityAuditService(batch_size=1, flush_interval=999)
+        svc = ToolDecisionService(batch_size=1, flush_interval=999)
         svc._queue = svc._queue.__class__(maxsize=1)
         svc.emit({"agent_id": "a1", "workspace_id": "w1", "tool_name": "t", "decision": "d"})
         svc.emit({"agent_id": "a2", "workspace_id": "w2", "tool_name": "t", "decision": "d"})
         assert svc._queue.qsize() == 1
 
 
-class TestSecurityAuditServiceQuery:
+class TestToolDecisionServiceQuery:
     async def test_query_returns_empty_when_no_data(self, db_session):
-        svc = SecurityAuditService()
-        params = SecurityAuditQuerySchema(agent_id="nonexistent")
+        svc = ToolDecisionService()
+        params = ToolDecisionQuerySchema(agent_id="nonexistent")
         events, total = await svc.query(params, session=db_session)
         assert events == []
         assert total == 0
 
     async def test_query_returns_events(self, db_session):
-        from hecate.models.security_audit import SecurityAuditModel
+        from hecate.models.tool_decision import ToolDecisionModel
 
-        row = SecurityAuditModel(
+        row = ToolDecisionModel(
             agent_id="agent-test",
             workspace_id="ws-test",
             tool_name="bash",
@@ -55,8 +55,8 @@ class TestSecurityAuditServiceQuery:
         db_session.add(row)
         await db_session.flush()
 
-        svc = SecurityAuditService()
-        params = SecurityAuditQuerySchema(agent_id="agent-test")
+        svc = ToolDecisionService()
+        params = ToolDecisionQuerySchema(agent_id="agent-test")
         events, total = await svc.query(params, session=db_session)
         assert total == 1
         assert len(events) == 1
@@ -65,11 +65,11 @@ class TestSecurityAuditServiceQuery:
         assert events[0].decision == "allow"
 
     async def test_query_filters_by_decision(self, db_session):
-        from hecate.models.security_audit import SecurityAuditModel
+        from hecate.models.tool_decision import ToolDecisionModel
 
         for i in range(3):
             db_session.add(
-                SecurityAuditModel(
+                ToolDecisionModel(
                     agent_id=f"agent-{i}",
                     workspace_id="ws-test",
                     tool_name="bash",
@@ -82,18 +82,18 @@ class TestSecurityAuditServiceQuery:
             )
         await db_session.flush()
 
-        svc = SecurityAuditService()
-        params = SecurityAuditQuerySchema(decision="deny")
+        svc = ToolDecisionService()
+        params = ToolDecisionQuerySchema(decision="deny")
         events, total = await svc.query(params, session=db_session)
         assert total == 1
         assert events[0].decision == "deny"
 
     async def test_query_pagination(self, db_session):
-        from hecate.models.security_audit import SecurityAuditModel
+        from hecate.models.tool_decision import ToolDecisionModel
 
         for i in range(5):
             db_session.add(
-                SecurityAuditModel(
+                ToolDecisionModel(
                     agent_id=f"agent-{i}",
                     workspace_id="ws-test",
                     tool_name="bash",
@@ -106,8 +106,8 @@ class TestSecurityAuditServiceQuery:
             )
         await db_session.flush()
 
-        svc = SecurityAuditService()
-        params = SecurityAuditQuerySchema(limit=2, offset=0)
+        svc = ToolDecisionService()
+        params = ToolDecisionQuerySchema(limit=2, offset=0)
         events, total = await svc.query(params, session=db_session)
         assert total == 5
         assert len(events) == 2

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from hecate.engine.audit_sink import audit_emitter
+from hecate.engine.decision_sink import decision_emitter
 
 logger = logging.getLogger(__name__)
 
@@ -316,8 +316,8 @@ class ToolAccessPolicy:
                 json.dumps(arguments, sort_keys=True, default=str).encode(),
             ).hexdigest()
 
-        audit_emitter.emit(
-            audit_emitter.build_event(
+        decision_emitter.emit(
+            decision_emitter.build_event(
                 agent_id=context.get("agent_id"),
                 workspace_id=context.get("workspace_id"),
                 tool_name=tool_name,
