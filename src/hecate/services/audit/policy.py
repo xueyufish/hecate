@@ -2,11 +2,11 @@
 
 Provides three built-in policies:
 
-- :class:`BulkDeleteProtectionPolicy` — blocks bulk delete within a time window
-- :class:`OffHoursSensitiveOpsPolicy` — flags sensitive ops outside business hours
-- :class:`UnusualIPDetectionPolicy` — flags actions from unrecognized IPs
+- :class:`BulkDeleteRule` — blocks bulk delete within a time window
+- :class:`OffHoursRule` — flags sensitive ops outside business hours
+- :class:`UnusualIPRule` — flags actions from unrecognized IPs
 
-The :class:`PolicyEngine` evaluates all policies against each audit event.
+The :class:`FindingEngine` evaluates all policies against each audit event.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from hecate.services.audit.store import AuditEvent
 logger = logging.getLogger(__name__)
 
 
-class PolicySeverity(StrEnum):
+class FindingSeverity(StrEnum):
     """Severity level for policy violations."""
 
     LOW = "low"
@@ -33,25 +33,25 @@ class PolicySeverity(StrEnum):
 
 
 @dataclass
-class PolicyViolation:
+class SecurityFinding:
     """A single policy violation detected from an audit event.
 
     Attributes:
-        policy_name: Which policy triggered.
+        rule_name: Which policy triggered.
         severity: How serious the violation is.
         message: Human-readable description.
         event: The triggering audit event.
         metadata: Additional context (e.g., thresholds exceeded).
     """
 
-    policy_name: str
-    severity: PolicySeverity
+    rule_name: str
+    severity: FindingSeverity
     message: str
     event: AuditEvent
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class AuditSecurityPolicy(ABC):
+class DetectionRule(ABC):
     """Abstract base class for audit security policies."""
 
     @property
@@ -65,7 +65,7 @@ class AuditSecurityPolicy(ABC):
         """Human-readable policy description."""
 
     @abstractmethod
-    async def evaluate(self, event: AuditEvent, context: PolicyContext) -> PolicyViolation | None:
+    async def evaluate(self, event: AuditEvent, context: DetectionContext) -> SecurityFinding | None:
         """Evaluate the policy against an event.
 
         Args:
@@ -73,12 +73,12 @@ class AuditSecurityPolicy(ABC):
             context: Historical context for cross-event analysis.
 
         Returns:
-            A PolicyViolation if the policy is triggered, or None.
+            A SecurityFinding if the policy is triggered, or None.
         """
 
 
 @dataclass
-class PolicyContext:
+class DetectionContext:
     """Context provided to policies for cross-event analysis.
 
     Attributes:
@@ -96,7 +96,7 @@ class PolicyContext:
         return self.now or datetime.now()
 
 
-class BulkDeleteProtectionPolicy(AuditSecurityPolicy):
+class BulkDeleteRule(DetectionRule):
     """Flag when a user performs more than N delete operations within a time window.
 
     Default: 5 deletes within 10 minutes triggers a MEDIUM violation.
@@ -106,7 +106,7 @@ class BulkDeleteProtectionPolicy(AuditSecurityPolicy):
         self,
         max_deletes: int = 5,
         window_minutes: int = 10,
-        severity: PolicySeverity = PolicySeverity.MEDIUM,
+        severity: FindingSeverity = FindingSeverity.MEDIUM,
     ) -> None:
         self._max_deletes = max_deletes
         self._window_minutes = window_minutes
@@ -120,7 +120,7 @@ class BulkDeleteProtectionPolicy(AuditSecurityPolicy):
     def description(self) -> str:
         return f"Flags users performing more than {self._max_deletes} deletes in {self._window_minutes} minutes"
 
-    async def evaluate(self, event: AuditEvent, context: PolicyContext) -> PolicyViolation | None:
+    async def evaluate(self, event: AuditEvent, context: DetectionContext) -> SecurityFinding | None:
         if not event.action.endswith(".delete"):
             return None
 
@@ -133,8 +133,8 @@ class BulkDeleteProtectionPolicy(AuditSecurityPolicy):
         ]
 
         if len(recent_deletes) + 1 > self._max_deletes:
-            return PolicyViolation(
-                policy_name=self.name,
+            return SecurityFinding(
+                rule_name=self.name,
                 severity=self._severity,
                 message=(
                     f"User performed {len(recent_deletes) + 1} delete operations within {self._window_minutes} minutes"
@@ -145,7 +145,7 @@ class BulkDeleteProtectionPolicy(AuditSecurityPolicy):
         return None
 
 
-class OffHoursSensitiveOpsPolicy(AuditSecurityPolicy):
+class OffHoursRule(DetectionRule):
     """Flag sensitive operations performed outside business hours.
 
     Business hours: Mon-Fri 09:00-18:00 (configurable).
@@ -162,7 +162,7 @@ class OffHoursSensitiveOpsPolicy(AuditSecurityPolicy):
         self,
         business_start_hour: int = 9,
         business_end_hour: int = 18,
-        severity: PolicySeverity = PolicySeverity.LOW,
+        severity: FindingSeverity = FindingSeverity.LOW,
     ) -> None:
         self._start_hour = business_start_hour
         self._end_hour = business_end_hour
@@ -176,15 +176,15 @@ class OffHoursSensitiveOpsPolicy(AuditSecurityPolicy):
     def description(self) -> str:
         return f"Flags sensitive operations outside business hours ({self._start_hour}:00-{self._end_hour}:00)"
 
-    async def evaluate(self, event: AuditEvent, context: PolicyContext) -> PolicyViolation | None:
+    async def evaluate(self, event: AuditEvent, context: DetectionContext) -> SecurityFinding | None:
         is_sensitive = any(event.action.startswith(prefix) for prefix in self._SENSITIVE_PREFIXES)
         if not is_sensitive:
             return None
 
         now = context.get_now()
         if now.weekday() >= 5:  # Saturday=5, Sunday=6
-            return PolicyViolation(
-                policy_name=self.name,
+            return SecurityFinding(
+                rule_name=self.name,
                 severity=self._severity,
                 message=f"Sensitive operation '{event.action}' performed on weekend",
                 event=event,
@@ -192,8 +192,8 @@ class OffHoursSensitiveOpsPolicy(AuditSecurityPolicy):
             )
 
         if now.hour < self._start_hour or now.hour >= self._end_hour:
-            return PolicyViolation(
-                policy_name=self.name,
+            return SecurityFinding(
+                rule_name=self.name,
                 severity=self._severity,
                 message=f"Sensitive operation '{event.action}' performed outside business hours",
                 event=event,
@@ -202,13 +202,13 @@ class OffHoursSensitiveOpsPolicy(AuditSecurityPolicy):
         return None
 
 
-class UnusualIPDetectionPolicy(AuditSecurityPolicy):
+class UnusualIPRule(DetectionRule):
     """Flag when a user performs actions from an unrecognized IP address.
 
     An IP is "unrecognized" if it's not in the user's known IP set.
     """
 
-    def __init__(self, severity: PolicySeverity = PolicySeverity.LOW) -> None:
+    def __init__(self, severity: FindingSeverity = FindingSeverity.LOW) -> None:
         self._severity = severity
 
     @property
@@ -219,7 +219,7 @@ class UnusualIPDetectionPolicy(AuditSecurityPolicy):
     def description(self) -> str:
         return "Flags actions from IP addresses not previously seen for this user"
 
-    async def evaluate(self, event: AuditEvent, context: PolicyContext) -> PolicyViolation | None:
+    async def evaluate(self, event: AuditEvent, context: DetectionContext) -> SecurityFinding | None:
         if event.ip_address is None:
             return None
 
@@ -227,8 +227,8 @@ class UnusualIPDetectionPolicy(AuditSecurityPolicy):
         if not context.user_known_ips or event.ip_address in context.user_known_ips:
             return None
 
-        return PolicyViolation(
-            policy_name=self.name,
+        return SecurityFinding(
+            rule_name=self.name,
             severity=self._severity,
             message=f"Action from unrecognized IP: {event.ip_address}",
             event=event,
@@ -236,37 +236,37 @@ class UnusualIPDetectionPolicy(AuditSecurityPolicy):
         )
 
 
-class PolicyEngine:
+class FindingEngine:
     """Evaluate all registered security policies against audit events.
 
     Usage::
 
-        engine = PolicyEngine()
-        engine.register(BulkDeleteProtectionPolicy())
-        engine.register(OffHoursSensitiveOpsPolicy())
-        engine.register(UnusualIPDetectionPolicy())
+        engine = FindingEngine()
+        engine.register(BulkDeleteRule())
+        engine.register(OffHoursRule())
+        engine.register(UnusualIPRule())
 
         violations = await engine.evaluate(event, context)
     """
 
     def __init__(self) -> None:
-        self._policies: list[AuditSecurityPolicy] = []
+        self._policies: list[DetectionRule] = []
 
-    def register(self, policy: AuditSecurityPolicy) -> None:
+    def register(self, policy: DetectionRule) -> None:
         """Register a security policy."""
         self._policies.append(policy)
 
     @property
-    def policies(self) -> list[AuditSecurityPolicy]:
+    def policies(self) -> list[DetectionRule]:
         """Return registered policies."""
         return list(self._policies)
 
-    async def evaluate(self, event: AuditEvent, context: PolicyContext) -> list[PolicyViolation]:
+    async def evaluate(self, event: AuditEvent, context: DetectionContext) -> list[SecurityFinding]:
         """Evaluate all policies against the given event.
 
         Returns all violations (an event can trigger multiple policies).
         """
-        violations: list[PolicyViolation] = []
+        violations: list[SecurityFinding] = []
         for policy in self._policies:
             try:
                 violation = await policy.evaluate(event, context)

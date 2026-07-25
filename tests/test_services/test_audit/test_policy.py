@@ -6,12 +6,12 @@ import uuid
 from datetime import datetime
 
 from hecate.services.audit.policy import (
-    BulkDeleteProtectionPolicy,
-    OffHoursSensitiveOpsPolicy,
-    PolicyContext,
-    PolicyEngine,
-    PolicySeverity,
-    UnusualIPDetectionPolicy,
+    BulkDeleteRule,
+    DetectionContext,
+    FindingEngine,
+    FindingSeverity,
+    OffHoursRule,
+    UnusualIPRule,
 )
 from hecate.services.audit.store import AuditEvent
 
@@ -31,130 +31,130 @@ def _make_event(
     )
 
 
-class TestBulkDeleteProtectionPolicy:
+class TestBulkDeleteRule:
     async def test_no_violation_under_threshold(self) -> None:
-        policy = BulkDeleteProtectionPolicy(max_deletes=5)
+        policy = BulkDeleteRule(max_deletes=5)
         event = _make_event(action="api.agents.delete")
-        ctx = PolicyContext()
+        ctx = DetectionContext()
         result = await policy.evaluate(event, ctx)
         assert result is None
 
     async def test_violation_over_threshold(self) -> None:
-        policy = BulkDeleteProtectionPolicy(max_deletes=3)
+        policy = BulkDeleteRule(max_deletes=3)
         now = datetime.now()
         recent = [_make_event(action="api.agents.delete", timestamp=now) for _ in range(3)]
-        ctx = PolicyContext(recent_user_actions=recent, now=now)
+        ctx = DetectionContext(recent_user_actions=recent, now=now)
         event = _make_event(action="api.agents.delete", timestamp=now)
         result = await policy.evaluate(event, ctx)
         assert result is not None
-        assert result.severity == PolicySeverity.MEDIUM
+        assert result.severity == FindingSeverity.MEDIUM
         assert "delete" in result.message.lower()
 
     async def test_non_delete_action_skipped(self) -> None:
-        policy = BulkDeleteProtectionPolicy()
+        policy = BulkDeleteRule()
         event = _make_event(action="api.agents.create")
-        ctx = PolicyContext()
+        ctx = DetectionContext()
         result = await policy.evaluate(event, ctx)
         assert result is None
 
 
-class TestOffHoursSensitiveOpsPolicy:
+class TestOffHoursRule:
     async def test_weekend_sensitive_op_flagged(self) -> None:
-        policy = OffHoursSensitiveOpsPolicy()
+        policy = OffHoursRule()
         saturday = datetime(2025, 1, 4, 10, 0)
         event = _make_event(action="auth.permission.update")
-        ctx = PolicyContext(now=saturday)
+        ctx = DetectionContext(now=saturday)
         result = await policy.evaluate(event, ctx)
         assert result is not None
         assert "weekend" in result.message.lower()
 
     async def test_business_hours_sensitive_op_ok(self) -> None:
-        policy = OffHoursSensitiveOpsPolicy()
+        policy = OffHoursRule()
         tuesday = datetime(2025, 1, 7, 10, 0)
         event = _make_event(action="auth.permission.update")
-        ctx = PolicyContext(now=tuesday)
+        ctx = DetectionContext(now=tuesday)
         result = await policy.evaluate(event, ctx)
         assert result is None
 
     async def test_non_sensitive_action_skipped(self) -> None:
-        policy = OffHoursSensitiveOpsPolicy()
+        policy = OffHoursRule()
         saturday = datetime(2025, 1, 4, 10, 0)
         event = _make_event(action="api.agents.create")
-        ctx = PolicyContext(now=saturday)
+        ctx = DetectionContext(now=saturday)
         result = await policy.evaluate(event, ctx)
         assert result is None
 
 
-class TestUnusualIPDetectionPolicy:
+class TestUnusualIPRule:
     async def test_known_ip_no_violation(self) -> None:
-        policy = UnusualIPDetectionPolicy()
+        policy = UnusualIPRule()
         event = _make_event(ip_address="192.168.1.1")
-        ctx = PolicyContext(user_known_ips={"192.168.1.1"})
+        ctx = DetectionContext(user_known_ips={"192.168.1.1"})
         result = await policy.evaluate(event, ctx)
         assert result is None
 
     async def test_unknown_ip_flagged(self) -> None:
-        policy = UnusualIPDetectionPolicy()
+        policy = UnusualIPRule()
         event = _make_event(ip_address="10.0.0.1")
-        ctx = PolicyContext(user_known_ips={"192.168.1.1"})
+        ctx = DetectionContext(user_known_ips={"192.168.1.1"})
         result = await policy.evaluate(event, ctx)
         assert result is not None
         assert "unrecognized" in result.message.lower()
 
     async def test_no_ip_skipped(self) -> None:
-        policy = UnusualIPDetectionPolicy()
+        policy = UnusualIPRule()
         event = _make_event(ip_address=None)
-        ctx = PolicyContext(user_known_ips={"192.168.1.1"})
+        ctx = DetectionContext(user_known_ips={"192.168.1.1"})
         result = await policy.evaluate(event, ctx)
         assert result is None
 
     async def test_first_action_no_violation(self) -> None:
-        policy = UnusualIPDetectionPolicy()
+        policy = UnusualIPRule()
         event = _make_event(ip_address="10.0.0.1")
-        ctx = PolicyContext(user_known_ips=set())
+        ctx = DetectionContext(user_known_ips=set())
         result = await policy.evaluate(event, ctx)
         assert result is None
 
 
-class TestPolicyEngine:
+class TestFindingEngine:
     async def test_evaluate_all_policies(self) -> None:
-        engine = PolicyEngine()
-        engine.register(BulkDeleteProtectionPolicy())
-        engine.register(OffHoursSensitiveOpsPolicy())
-        engine.register(UnusualIPDetectionPolicy())
+        engine = FindingEngine()
+        engine.register(BulkDeleteRule())
+        engine.register(OffHoursRule())
+        engine.register(UnusualIPRule())
 
         event = _make_event(action="api.agents.create")
-        ctx = PolicyContext()
+        ctx = DetectionContext()
         violations = await engine.evaluate(event, ctx)
         assert isinstance(violations, list)
 
     async def test_multiple_violations_possible(self) -> None:
-        engine = PolicyEngine()
-        engine.register(UnusualIPDetectionPolicy())
-        engine.register(OffHoursSensitiveOpsPolicy())
+        engine = FindingEngine()
+        engine.register(UnusualIPRule())
+        engine.register(OffHoursRule())
 
         saturday = datetime(2025, 1, 4, 10, 0)
         event = _make_event(action="auth.api_key.create", ip_address="10.0.0.1")
-        ctx = PolicyContext(user_known_ips={"192.168.1.1"}, now=saturday)
+        ctx = DetectionContext(user_known_ips={"192.168.1.1"}, now=saturday)
         violations = await engine.evaluate(event, ctx)
         assert len(violations) == 2
 
     async def test_policy_error_does_not_crash_engine(self) -> None:
         """A failing policy should not prevent other policies from running."""
 
-        class BrokenPolicy(UnusualIPDetectionPolicy):
+        class BrokenPolicy(UnusualIPRule):
             @property
             def name(self) -> str:
                 return "broken"
 
-            async def evaluate(self, event: AuditEvent, context: PolicyContext) -> object:
+            async def evaluate(self, event: AuditEvent, context: DetectionContext) -> object:
                 raise RuntimeError("intentional error")
 
-        engine = PolicyEngine()
+        engine = FindingEngine()
         engine.register(BrokenPolicy())
-        engine.register(UnusualIPDetectionPolicy())
+        engine.register(UnusualIPRule())
 
         event = _make_event(ip_address="10.0.0.1")
-        ctx = PolicyContext(user_known_ips={"192.168.1.1"})
+        ctx = DetectionContext(user_known_ips={"192.168.1.1"})
         violations = await engine.evaluate(event, ctx)
         assert len(violations) == 1

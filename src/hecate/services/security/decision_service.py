@@ -1,7 +1,7 @@
-"""Security audit service — batch writer and query for SecurityAuditEvent.
+"""Tool decision service — batch writer and query for ToolDecisionEvent.
 
-Implements ``AuditSink`` from the engine layer, buffering events in an
-async queue and flushing to ``SecurityAuditModel`` in batches. Provides
+Implements ``DecisionSink`` from the engine layer, buffering events in an
+async queue and flushing to ``ToolDecisionModel`` in batches. Provides
 query API for the REST endpoint.
 """
 
@@ -18,20 +18,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.config import settings
 from hecate.core.database import async_session_factory
-from hecate.engine.audit_sink import AuditSink
-from hecate.models.security_audit import (
-    SecurityAuditModel,
-    SecurityAuditQuerySchema,
-    SecurityAuditReadSchema,
+from hecate.engine.decision_sink import DecisionSink
+from hecate.models.tool_decision import (
+    ToolDecisionModel,
+    ToolDecisionQuerySchema,
+    ToolDecisionReadSchema,
 )
 
 logger = logging.getLogger(__name__)
 
 
-class SecurityAuditService(AuditSink):
-    """Service for writing and querying structured security audit events.
+class ToolDecisionService(DecisionSink):
+    """Service for writing and querying structured tool policy decision events.
 
-    Implements ``AuditSink`` for engine-layer emission (via ``emit()``)
+    Implements ``DecisionSink`` for engine-layer emission (via ``emit()``)
     and provides query methods for the REST API.
 
     Args:
@@ -46,9 +46,9 @@ class SecurityAuditService(AuditSink):
         flush_interval: float | None = None,
         retention_days: int | None = None,
     ) -> None:
-        self._batch_size = batch_size or settings.AGENT_ENV_AUDIT_BATCH_SIZE
-        self._flush_interval = flush_interval or settings.AGENT_ENV_AUDIT_FLUSH_INTERVAL
-        self._retention_days = retention_days or settings.AGENT_ENV_AUDIT_RETENTION_DAYS
+        self._batch_size = batch_size or settings.AGENT_ENV_DECISION_BATCH_SIZE
+        self._flush_interval = flush_interval or settings.AGENT_ENV_DECISION_FLUSH_INTERVAL
+        self._retention_days = retention_days or settings.AGENT_ENV_DECISION_RETENTION_DAYS
         self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
             maxsize=settings.AUDIT_QUEUE_MAX_SIZE,
         )
@@ -56,23 +56,41 @@ class SecurityAuditService(AuditSink):
         self._cleanup_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------
-    # AuditSink implementation (called from engine, must be non-blocking)
+    # DecisionSink implementation (called from engine, must be non-blocking)
     # ------------------------------------------------------------------
 
     def emit(self, event: dict[str, Any]) -> None:
-        """Buffer an audit event for async batch write.
+        """Buffer a tool decision event for async batch write.
 
         Non-blocking: uses ``put_nowait``. If queue is full, logs a warning
         and drops the event (fail-open to avoid blocking tool execution).
+        Also emits to SIEM collector if enabled.
         """
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
             logger.warning(
-                "Security audit queue full (%d events), dropping event for tool '%s'",
+                "Tool decision queue full (%d events), dropping event for tool '%s'",
                 self._queue.maxsize,
                 event.get("tool_name", "?"),
             )
+
+        # Emit to SIEM export pipeline
+        from hecate.services.security.siem.collector import emit_to_siem
+        from hecate.services.security.siem.event import from_tool_decision
+
+        siem_event = from_tool_decision(
+            agent_id=event.get("agent_id"),
+            workspace_id=event.get("workspace_id"),
+            tool_name=event.get("tool_name", ""),
+            decision=event.get("decision", ""),
+            reason=event.get("reason", ""),
+            session_id=event.get("session_id"),
+            on_behalf_of_user=event.get("on_behalf_of_user"),
+            arguments_hash=event.get("arguments_hash", ""),
+            policy_version=event.get("policy_version", ""),
+        )
+        emit_to_siem(siem_event)
 
     # ------------------------------------------------------------------
     # Background tasks
@@ -85,7 +103,7 @@ class SecurityAuditService(AuditSink):
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
         logger.info(
-            "SecurityAuditService started (batch_size=%d, flush=%.1fs, retention=%dd)",
+            "ToolDecisionService started (batch_size=%d, flush=%.1fs, retention=%dd)",
             self._batch_size,
             self._flush_interval,
             self._retention_days,
@@ -99,7 +117,7 @@ class SecurityAuditService(AuditSink):
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
         await self._flush_batch()
-        logger.info("SecurityAuditService stopped")
+        logger.info("ToolDecisionService stopped")
 
     async def _drain_loop(self) -> None:
         """Background loop that drains the queue in batches."""
@@ -110,7 +128,7 @@ class SecurityAuditService(AuditSink):
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Security audit drain loop error")
+                logger.exception("Tool decision drain loop error")
                 await asyncio.sleep(1.0)
 
     async def _flush_batch(self) -> None:
@@ -131,7 +149,7 @@ class SecurityAuditService(AuditSink):
         try:
             async with async_session_factory() as session:
                 for event in batch:
-                    row = SecurityAuditModel(
+                    row = ToolDecisionModel(
                         agent_id=event.get("agent_id", ""),
                         workspace_id=event.get("workspace_id", ""),
                         session_id=event.get("session_id"),
@@ -145,9 +163,9 @@ class SecurityAuditService(AuditSink):
                     )
                     session.add(row)
                 await session.commit()
-            logger.debug("Flushed %d security audit events", len(batch))
+                logger.debug("Flushed %d tool decision events", len(batch))
         except Exception:
-            logger.exception("Failed to flush %d security audit events", len(batch))
+            logger.exception("Failed to flush %d tool decision events", len(batch))
 
     async def _cleanup_loop(self) -> None:
         """Daily cleanup of expired audit events."""
@@ -156,18 +174,18 @@ class SecurityAuditService(AuditSink):
                 await asyncio.sleep(86400)  # 24 hours
                 cutoff = datetime.now(UTC) - timedelta(days=self._retention_days)
                 async with async_session_factory() as session:
-                    stmt = delete(SecurityAuditModel).where(
-                        SecurityAuditModel.timestamp < cutoff,
+                    stmt = delete(ToolDecisionModel).where(
+                        ToolDecisionModel.timestamp < cutoff,
                     )
                     result = await session.execute(stmt)
                     await session.commit()
                     deleted = result.rowcount
                     if deleted:
-                        logger.info("Cleaned up %d expired security audit events", deleted)
+                        logger.info("Cleaned up %d expired tool decision events", deleted)
             except asyncio.CancelledError:
                 break
             except Exception:
-                logger.exception("Security audit cleanup error")
+                logger.exception("Tool decision cleanup error")
                 await asyncio.sleep(3600)
 
     # ------------------------------------------------------------------
@@ -176,10 +194,10 @@ class SecurityAuditService(AuditSink):
 
     async def query(
         self,
-        params: SecurityAuditQuerySchema,
+        params: ToolDecisionQuerySchema,
         session: AsyncSession | None = None,
-    ) -> tuple[list[SecurityAuditReadSchema], int]:
-        """Query security audit events with filtering.
+    ) -> tuple[list[ToolDecisionReadSchema], int]:
+        """Query tool decision events with filtering.
 
         Args:
             params: Query filter parameters.
@@ -197,34 +215,34 @@ class SecurityAuditService(AuditSink):
     async def _query_with_session(
         self,
         session: AsyncSession,
-        params: SecurityAuditQuerySchema,
-    ) -> tuple[list[SecurityAuditReadSchema], int]:
-        stmt = select(SecurityAuditModel)
+        params: ToolDecisionQuerySchema,
+    ) -> tuple[list[ToolDecisionReadSchema], int]:
+        stmt = select(ToolDecisionModel)
 
         if params.agent_id:
-            stmt = stmt.where(SecurityAuditModel.agent_id == params.agent_id)
+            stmt = stmt.where(ToolDecisionModel.agent_id == params.agent_id)
         if params.workspace_id:
-            stmt = stmt.where(SecurityAuditModel.workspace_id == params.workspace_id)
+            stmt = stmt.where(ToolDecisionModel.workspace_id == params.workspace_id)
         if params.session_id:
-            stmt = stmt.where(SecurityAuditModel.session_id == params.session_id)
+            stmt = stmt.where(ToolDecisionModel.session_id == params.session_id)
         if params.decision:
-            stmt = stmt.where(SecurityAuditModel.decision == params.decision)
+            stmt = stmt.where(ToolDecisionModel.decision == params.decision)
         if params.tool_name:
-            stmt = stmt.where(SecurityAuditModel.tool_name == params.tool_name)
+            stmt = stmt.where(ToolDecisionModel.tool_name == params.tool_name)
         if params.start:
-            stmt = stmt.where(SecurityAuditModel.timestamp >= params.start)
+            stmt = stmt.where(ToolDecisionModel.timestamp >= params.start)
         if params.end:
-            stmt = stmt.where(SecurityAuditModel.timestamp <= params.end)
+            stmt = stmt.where(ToolDecisionModel.timestamp <= params.end)
 
         # Exclude soft-deleted
-        stmt = stmt.where(SecurityAuditModel.deleted == False)  # noqa: E712
+        stmt = stmt.where(ToolDecisionModel.deleted == False)  # noqa: E712
 
         count_stmt = select(func.count()).select_from(stmt.subquery())
         total = (await session.execute(count_stmt)).scalar_one()
 
-        stmt = stmt.order_by(SecurityAuditModel.timestamp.desc()).limit(params.limit).offset(params.offset)
+        stmt = stmt.order_by(ToolDecisionModel.timestamp.desc()).limit(params.limit).offset(params.offset)
         result = await session.execute(stmt)
         rows = result.scalars().all()
-        events = [SecurityAuditReadSchema.model_validate(row) for row in rows]
+        events = [ToolDecisionReadSchema.model_validate(row) for row in rows]
 
         return events, total

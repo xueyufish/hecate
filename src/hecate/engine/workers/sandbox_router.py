@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from hecate.engine.audit_sink import audit_emitter
+from hecate.engine.decision_sink import decision_emitter
 from hecate.engine.tool_access import AccessDecision
 
 if TYPE_CHECKING:
@@ -105,8 +105,8 @@ class SandboxEnforcementRouter:
         # Exit code -1 from ExecResult indicates timeout or transport error.
         # Negative exit codes may indicate signals (OOM killer, segfault).
         if exit_code < 0:
-            audit_emitter.emit(
-                audit_emitter.build_event(
+            decision_emitter.emit(
+                decision_emitter.build_event(
                     agent_id=None,
                     workspace_id=None,
                     tool_name="sandbox_verification",

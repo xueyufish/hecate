@@ -599,6 +599,63 @@ Configuration: `AGENT_ENV_CREDENTIAL_SCOPING=false` (default off)
 
 ---
 
+## SIEM Export Pipeline (8.7)
+
+### Three-Layer Audit Architecture
+
+Hecate uses a three-layer audit architecture aligned with industry standards (AWS CloudTrail / GuardDuty / Security Hub, OCSF schema classes):
+
+| Layer | Name | Captures | OCSF Class |
+|-------|------|----------|------------|
+| API operations | **AuditLog** | Every HTTP request (who/what/when) | Activity (4001) |
+| Tool decisions | **ToolDecision** | Every tool policy evaluation (ALLOW/DENY/SANDBOX) | Authorization (2201) |
+| Anomaly detection | **SecurityFinding** | Behavioral anomalies (bulk delete, off-hours, unusual IP) | Security Finding (2001) |
+
+### Naming Alignment (siem-security-pipeline change)
+
+Previous naming caused confusion. Renamed for clarity:
+
+| Old Name | New Name | Rationale |
+|----------|----------|-----------|
+| SecurityAuditModel | ToolDecisionModel | Precise: captures tool policy decisions, not general security |
+| PolicyEngine | FindingEngine | "Policy" was overloaded (3 meanings); aligns with GuardDuty Finding |
+| PolicyViolation | SecurityFinding | Aligns with OCSF Finding class |
+| AuditSecurityPolicy | DetectionRule | Describes what it does: anomaly detection |
+| `/api/security/audit` | `/api/security/decisions` | Clearer API path |
+| `AGENT_ENV_AUDIT_*` | `AGENT_ENV_DECISION_*` | Descriptive config keys |
+
+### SIEM Export Components
+
+```
+AuditLog ──┐
+ToolDecision ──→ SecurityEventCollector ──→ SIEMExporter(s)
+SecurityFinding ──┘    (normalize + filter)    ├── Webhook (Splunk HEC / JSON)
+                                               ├── Syslog (RFC 5424 TCP/UDP/TLS)
+                                               └── OCSF Formatter (v1.5 JSON)
+```
+
+**SecurityEventCollector**: Subscribes to all three sources, normalizes into unified `SecurityEvent`, applies configurable filtering (event type + severity threshold), batches and flushes to registered exporters.
+
+**Exporters**: Disabled by default (`SIEM_ENABLED=false`). When enabled, auto-initializes from config.
+
+### Configuration
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `SIEM_ENABLED` | false | Master switch |
+| `SIEM_EXPORTERS` | "" | Comma-separated: webhook, syslog, ocsf |
+| `SIEM_MIN_SEVERITY` | info | Minimum severity to export |
+| `SIEM_FILTER_EVENT_TYPES` | "" | Comma-separated types to export (empty=all) |
+| `SIEM_BATCH_SIZE` | 50 | Events per flush |
+| `SIEM_FLUSH_INTERVAL` | 5.0 | Seconds between flushes |
+| `SIEM_WEBHOOK_URL` | "" | Webhook endpoint |
+| `SIEM_WEBHOOK_FORMAT` | json | json or splunk_hec |
+| `SIEM_SYSLOG_HOST/PORT` | localhost:514 | Syslog server |
+| `SIEM_SYSLOG_PROTOCOL` | tcp | tcp or udp |
+| `SIEM_SYSLOG_TLS` | false | TLS for TCP |
+
+---
+
 ## Further Reading
 
 | Document | Description |

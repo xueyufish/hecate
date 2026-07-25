@@ -1,6 +1,6 @@
 """Audit service — facade for audit log operations.
 
-Wraps :class:`AuditStore` and :class:`PolicyEngine` behind a single
+Wraps :class:`AuditStore` and :class:`FindingEngine` behind a single
 service interface consumed by the API layer.
 """
 
@@ -11,10 +11,10 @@ from datetime import datetime
 
 from hecate.models.audit import AuditLogQuerySchema, AuditLogReadSchema
 from hecate.services.audit.policy import (
-    BulkDeleteProtectionPolicy,
-    OffHoursSensitiveOpsPolicy,
-    PolicyEngine,
-    UnusualIPDetectionPolicy,
+    BulkDeleteRule,
+    FindingEngine,
+    OffHoursRule,
+    UnusualIPRule,
 )
 from hecate.services.audit.store import AuditStore, DatabaseAuditStore
 
@@ -32,7 +32,7 @@ class AuditService:
     def __init__(
         self,
         store: AuditStore | None = None,
-        policy_engine: PolicyEngine | None = None,
+        policy_engine: FindingEngine | None = None,
     ) -> None:
         self._store = store or DatabaseAuditStore()
         self._policy_engine = policy_engine
@@ -55,15 +55,15 @@ class AuditService:
         return self._store
 
     @property
-    def policy_engine(self) -> PolicyEngine | None:
+    def policy_engine(self) -> FindingEngine | None:
         """Return the policy engine, if configured."""
         return self._policy_engine
 
 
 def create_default_audit_service() -> AuditService:
     """Create an AuditService with default policies registered."""
-    engine = PolicyEngine()
-    engine.register(BulkDeleteProtectionPolicy())
-    engine.register(OffHoursSensitiveOpsPolicy())
-    engine.register(UnusualIPDetectionPolicy())
+    engine = FindingEngine()
+    engine.register(BulkDeleteRule())
+    engine.register(OffHoursRule())
+    engine.register(UnusualIPRule())
     return AuditService(policy_engine=engine)

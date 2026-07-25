@@ -69,15 +69,32 @@ The system SHALL support configuring a retention threshold (default 365 days). P
 - **THEN** the system SHALL export the partition data to MinIO and drop the partition from PostgreSQL
 
 ### Requirement: Audit security policy engine
-The system SHALL implement a rule-based security policy engine that evaluates audit events against configurable policies. The system SHALL include 3 built-in policies: `bulk_delete_protection` (alert when same user deletes 5+ resources in 1 minute), `off_hours_sensitive_ops` (alert when sensitive operations occur outside configured business hours), `unusual_ip_detection` (alert when login from IP not in user's recent history). Policy violations SHALL be logged as structured warnings.
+The system SHALL implement a rule-based `FindingEngine` (renamed from `PolicyEngine`) that evaluates audit events against configurable `DetectionRule`s (renamed from `AuditSecurityPolicy`). The system SHALL include 3 built-in rules: `BulkDeleteRule` (renamed from `BulkDeleteProtectionPolicy`) which alerts when same user deletes 5+ resources in 1 minute, `OffHoursRule` (renamed from `OffHoursSensitiveOpsPolicy`) which alerts when sensitive operations occur outside configured business hours, and `UnusualIPRule` (renamed from `UnusualIPDetectionPolicy`) which alerts when login from IP not in user's recent history. Rule violations SHALL be persisted as `SecurityFinding` records (renamed from `PolicyViolation`) to the `security_findings` table instead of being discarded via `log.warning()`. The `FindingSeverity` enum (renamed from `PolicySeverity`) defines levels: LOW, MEDIUM, HIGH, CRITICAL.
 
-#### Scenario: Bulk delete detected
+#### Scenario: Bulk delete detected and persisted
 - **WHEN** a user performs 5 or more delete operations within 1 minute
-- **THEN** the system SHALL log a security warning with policy name `"bulk_delete_protection"` and the user's details
+- **THEN** the FindingEngine creates a SecurityFinding with `rule_name="bulk_delete_rule"` and `severity="medium"`
+- **AND** the finding is persisted to the `security_findings` table
+- **AND** the finding is queryable via `GET /api/security/findings`
 
-#### Scenario: Off-hours sensitive operation
+#### Scenario: Off-hours sensitive operation detected
 - **WHEN** a workspace delete operation occurs at 2:00 AM on a Sunday
-- **THEN** the system SHALL log a security warning with policy name `"off_hours_sensitive_ops"`
+- **THEN** the FindingEngine creates a SecurityFinding with `rule_name="off_hours_rule"` and `severity="low"`
+- **AND** the finding is persisted to the `security_findings` table
+
+#### Scenario: Unusual IP detected
+- **WHEN** a user performs an action from an IP address not in their known IP set
+- **THEN** the FindingEngine creates a SecurityFinding with `rule_name="unusual_ip_rule"` and `severity="low"`
+- **AND** the finding is persisted to the `security_findings` table
+
+#### Scenario: FindingEngine failure does not block audit
+- **WHEN** the FindingEngine encounters a database error during persistence
+- **THEN** the error is logged and the audit pipeline continues processing
+- **AND** no exception propagates to the AuditMiddleware
+
+#### Scenario: Custom DetectionRule registration
+- **WHEN** a user implements a custom `DetectionRule` subclass
+- **THEN** the rule can be registered with `FindingEngine.register(rule)` and evaluated alongside built-in rules
 
 ### Requirement: Audit log statistics API
 The system SHALL provide `GET /api/audit-logs/stats` with `group_by` parameter (action, user, resource_type) and time range filters. Returns aggregated counts per group.

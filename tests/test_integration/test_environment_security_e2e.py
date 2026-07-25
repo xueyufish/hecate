@@ -11,7 +11,7 @@ Most tests are marked as integration tests requiring running services.
 
 from __future__ import annotations
 
-from hecate.engine.audit_sink import SecurityAuditEmitter
+from hecate.engine.decision_sink import ToolDecisionEmitter
 from hecate.engine.tool_access import AccessDecision
 from hecate.engine.workers.sandbox_router import SandboxEnforcementRouter
 from hecate.services.environment.credential_scope import CredentialScope
@@ -43,22 +43,22 @@ class TestEndToEndDefaultBehavior:
         env = {"PATH": "/usr/bin", "OPENAI_API_KEY": "sk-xxx"}
         assert scope.sanitize_environment(env) == env
 
-    def test_audit_emitter_default_is_disabled(self):
-        emitter = SecurityAuditEmitter()
+    def test_decision_emitter_default_is_disabled(self):
+        emitter = ToolDecisionEmitter()
         assert not emitter.enabled
 
 
 class TestEndToEndAuditPipeline:
     """Task 6.4: Audit pipeline works on both environments."""
 
-    def test_audit_emitter_collects_events(self):
+    def test_decision_emitter_collects_events(self):
         collected: list[dict] = []
 
         class CollectingSink:
             def emit(self, event: dict) -> None:
                 collected.append(event)
 
-        emitter = SecurityAuditEmitter()
+        emitter = ToolDecisionEmitter()
         emitter.set_sink(CollectingSink())
 
         emitter.emit(
@@ -74,14 +74,14 @@ class TestEndToEndAuditPipeline:
         assert collected[0]["agent_id"] == "agent-1"
         assert collected[0]["decision"] == "deny"
 
-    def test_audit_emitter_captures_layer_results(self):
+    def test_decision_emitter_captures_layer_results(self):
         collected: list[dict] = []
 
         class CollectingSink:
             def emit(self, event: dict) -> None:
                 collected.append(event)
 
-        emitter = SecurityAuditEmitter()
+        emitter = ToolDecisionEmitter()
         emitter.set_sink(CollectingSink())
 
         emitter.emit(
@@ -143,7 +143,7 @@ class TestEndToEndSandboxAndAuditIntegration:
             def emit(self, event: dict) -> None:
                 collected.append(event)
 
-        emitter = SecurityAuditEmitter()
+        emitter = ToolDecisionEmitter()
         emitter.set_sink(CollectingSink())
 
         emitter.emit(
@@ -171,7 +171,7 @@ class TestEndToEndContainerExitVerification:
             def emit(self, event: dict) -> None:
                 collected.append(event)
 
-        emitter = SecurityAuditEmitter()
+        emitter = ToolDecisionEmitter()
         emitter.set_sink(CollectingSink())
 
         result = router.verify_container_exit(-1, b"OOM killed")

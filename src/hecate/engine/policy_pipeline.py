@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from hecate.engine.audit_sink import audit_emitter
+from hecate.engine.decision_sink import decision_emitter
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +149,8 @@ class ToolPolicyPipeline:
                     layer.name,
                     tool.name,
                 )
-                audit_emitter.emit(
-                    audit_emitter.build_event(
+                decision_emitter.emit(
+                    decision_emitter.build_event(
                         agent_id=context.agent_id,
                         workspace_id=context.workspace_id,
                         tool_name=tool.name,
@@ -202,8 +202,8 @@ class ToolPolicyPipeline:
             [(r.layer_name, r.decision.value) for r in results],
         )
 
-        audit_emitter.emit(
-            audit_emitter.build_event(
+        decision_emitter.emit(
+            decision_emitter.build_event(
                 agent_id=context.agent_id,
                 workspace_id=context.workspace_id,
                 tool_name=tool.name,
