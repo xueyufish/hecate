@@ -64,33 +64,98 @@ class SandboxExecutor:
         tool_name: str,
         args: dict[str, Any],
         config: SandboxConfig | None = None,
+        *,
+        container_id: str | None = None,
     ) -> SandboxResult:
         """Execute a tool inside a Docker container.
+
+        If ``container_id`` is provided, runs the tool inside that existing
+        container via ``docker exec`` (the container is NOT destroyed after).
+        Otherwise, creates a new per-execution container via ``docker run``
+        (existing behavior).
 
         Args:
             tool_name: Name of the tool to execute.
             args: Arguments to pass to the tool.
             config: Optional per-execution config override.
+            container_id: Optional existing container to execute inside.
 
         Returns:
             SandboxResult with exit code, stdout, and stderr.
         """
         cfg = config or self.config
-        container_id = None
+        if container_id:
+            return await self._exec_in_container(container_id, tool_name, args, cfg)
 
+        new_container_id = None
         try:
-            container_id = await self._create_container(tool_name, args, cfg)
-            return await self._wait_container(container_id, cfg.timeout_seconds)
+            new_container_id = await self._create_container(tool_name, args, cfg)
+            return await self._wait_container(new_container_id, cfg.timeout_seconds)
         except TimeoutError:
-            if container_id:
-                await self._destroy_container(container_id)
+            if new_container_id:
+                await self._destroy_container(new_container_id)
             return SandboxResult(exit_code=-1, stdout="", stderr="Execution timed out", timed_out=True)
         except Exception as e:
             logger.error(f"Sandbox execution failed for {tool_name}: {e}")
             return SandboxResult(exit_code=-1, stdout="", stderr=str(e))
         finally:
-            if container_id:
-                await self._destroy_container(container_id)
+            if new_container_id:
+                await self._destroy_container(new_container_id)
+
+    async def _exec_in_container(
+        self,
+        container_id: str,
+        tool_name: str,
+        args: dict[str, Any],
+        cfg: SandboxConfig,
+    ) -> SandboxResult:
+        """Execute a tool inside an existing running container via ``docker exec``.
+
+        Args:
+            container_id: ID of the running container.
+            tool_name: Tool to execute.
+            args: Tool arguments.
+            cfg: Sandbox configuration.
+
+        Returns:
+            SandboxResult with execution output.
+        """
+        cmd_args = json.dumps({"tool": tool_name, "args": args})
+
+        docker_args = [
+            "docker",
+            "exec",
+            "--env",
+            f"TOOL_INPUT={cmd_args}",
+        ]
+
+        for key, val in cfg.env_vars.items():
+            docker_args.extend(["--env", f"{key}={val}"])
+
+        docker_args.append(container_id)
+
+        proc = await asyncio.create_subprocess_exec(
+            *docker_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=cfg.timeout_seconds)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.warning(f"docker exec timed out after {cfg.timeout_seconds}s in container {container_id[:12]}")
+            return SandboxResult(exit_code=-1, stdout="", stderr="Execution timed out", timed_out=True)
+
+        exit_code = proc.returncode if proc.returncode is not None else -1
+        logger.debug(f"Executed {tool_name} in container {container_id[:12]}: exit={exit_code}")
+
+        return SandboxResult(
+            exit_code=exit_code,
+            stdout=stdout.decode(errors="replace"),
+            stderr=stderr.decode(errors="replace"),
+        )
 
     async def _create_container(
         self,
