@@ -130,6 +130,16 @@ class Settings(BaseSettings):
     # files; "ro" restricts to read-only.
     SANDBOX_MOUNT_MODE: str = "rw"
 
+    # Sandbox Container Pool (9.4d): pre-warmed Docker container pool for sandboxed
+    # tool execution. Disabled by default; opt-in via SANDBOX_POOL_ENABLED=true.
+    SANDBOX_POOL_ENABLED: bool = False
+    SANDBOX_POOL_SIZE: int = 3
+    SANDBOX_MAX_USES: int = 50
+    SANDBOX_POOL_IDLE_TIMEOUT: int = 300  # seconds before trimming excess idle containers
+    SANDBOX_POOL_ACQUIRE_TIMEOUT: int = 30  # seconds to wait when pool exhausted (wait strategy)
+    SANDBOX_POOL_BUSY_TTL: int = 1800  # seconds before force-releasing stale in_use containers
+    SANDBOX_POOL_EXHAUSTION_STRATEGY: str = "wait"  # "wait" or "temporary"
+
     TEMPORAL_SERVER_URL: str = "localhost:7233"
     TEMPORAL_TASK_QUEUE: str = "hecate-workers"
     TEMPORAL_HEARTBEAT_TIMEOUT: int = 30

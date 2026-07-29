@@ -257,10 +257,8 @@ class EnginePort(ABC):
     ) -> Any:
         """Execute a tool inside a sandboxed Docker container (optional).
 
-        Sandbox capability — isolates tool execution with resource limits
-        and timeout handling for untrusted or high-risk tools.
-
-        Default implementation falls back to regular tool_execute.
+        When the sandbox container pool is enabled, executes inside a
+        pooled container. Otherwise falls back to regular tool_execute.
 
         Args:
             name: The registered tool name.
@@ -270,6 +268,22 @@ class EnginePort(ABC):
         Returns:
             The tool's return value.
         """
+        from hecate.services.sandbox import get_sandbox_pool
+
+        pool = get_sandbox_pool()
+        if pool is not None:
+            from hecate.services.sandbox.executor import SandboxConfig
+
+            volumes = context.get("_sandbox_volumes", {}) if context else {}
+            cfg = SandboxConfig(volumes=volumes)
+            result = await pool.execute(name, args, cfg)
+            return {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "exit_code": result.exit_code,
+                "timed_out": result.timed_out,
+            }
+
         return await self.tool_execute(name, args, context)
 
     async def workflow_execute(

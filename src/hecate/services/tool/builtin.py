@@ -205,7 +205,7 @@ class BuiltInToolExecutor:
         args: dict[str, Any],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Execute code tool via SandboxExecutor."""
+        """Execute code tool via SandboxPool (when enabled) or SandboxExecutor."""
         code = args["code"]
         try:
             from hecate.services.sandbox.executor import SandboxConfig, SandboxExecutor
@@ -221,8 +221,17 @@ class BuiltInToolExecutor:
         if context:
             volumes = context.get("_sandbox_volumes", {})
 
-        executor = SandboxExecutor(config=SandboxConfig(volumes=volumes))
-        result = await executor.execute(tool_name="execute_code", args={"code": code})
+        cfg = SandboxConfig(volumes=volumes)
+
+        from hecate.services.sandbox import get_sandbox_pool
+
+        pool = get_sandbox_pool()
+        if pool is not None:
+            result = await pool.execute("execute_code", {"code": code}, cfg)
+        else:
+            executor = SandboxExecutor(config=cfg)
+            result = await executor.execute(tool_name="execute_code", args={"code": code})
+
         return {
             "stdout": result.stdout,
             "stderr": result.stderr,

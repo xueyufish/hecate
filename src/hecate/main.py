@@ -227,6 +227,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     audit_writer = AuditBatchWriter(DatabaseAuditStore(), audit_queue)
     await audit_writer.start()
 
+    # Sandbox Container Pool (9.4d): prewarm pool on startup
+    sandbox_pool = None
+    if _settings.SANDBOX_POOL_ENABLED:
+        from hecate.services.sandbox import get_sandbox_pool
+
+        sandbox_pool = get_sandbox_pool()
+        if sandbox_pool:
+            await sandbox_pool.prewarm()
+            logger.info("Sandbox container pool prewarmed: %d containers", sandbox_pool.total_count)
+
     # Tool decision pipeline (5.9 P0): structured tool policy decision events
     from hecate.api.tool_decisions import set_tool_decision_service
     from hecate.engine.decision_sink import decision_emitter
@@ -261,6 +271,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("SIEM export pipeline started")
 
     yield
+    # Shutdown: stop sandbox container pool
+    if sandbox_pool:
+        await sandbox_pool.shutdown()
     # Shutdown: stop SIEM collector
     if siem_collector:
         await siem_collector.stop()
