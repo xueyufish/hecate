@@ -139,9 +139,11 @@ Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCas
 
 ### Language
 
-All **code** artifacts — code, docstrings, comments, specs, design docs, proposals, tasks — **SHALL be written in English**.
+All **code** artifacts — Python/TypeScript code, docstrings, comments, inline annotations — **SHALL be written in English**.
 
-We may converse in Chinese, but everything committed to the repository is English unless explicitly noted.
+**OpenSpec change artifacts** — `proposal.md`, `design.md`, `tasks.md`, and `specs/*.md` in `openspec/changes/` — **SHALL be written in Chinese by default** (prose content). Business terms, entity names, data table names, code classes/fields/properties, file paths, environment variables, and technology names (e.g. Docker, PostgreSQL, FastAPI, LangGraph) SHALL remain in English.
+
+We may converse in Chinese. Code artifacts are always English; OpenSpec change documents default to Chinese unless explicitly noted otherwise.
 
 ## Testing
 
