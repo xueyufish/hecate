@@ -1,19 +1,19 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: CollaborationEventType supports A2A-specific events
-The engine SHALL extend the `CollaborationEventType` enum with A2A-specific values: `A2A_TASK_DELEGATED`, `A2A_TASK_RECEIVED`, `A2A_ARTIFACT_SENT`, `A2A_ARTIFACT_RECEIVED`, `A2A_AGENT_DISCOVERED`.
+### Requirement: CollaborationEventType 支持 A2A 特定事件 — CollaborationEventType supports A2A-specific events
+引擎应在 `CollaborationEventType` 枚举中扩展特定于 A2A 的值：`A2A_TASK_DELEGATED`、`A2A_TASK_RECEIVED`、`A2A_ARTIFACT_SENT`、`A2A_ARTIFACT_RECEIVED`、`A2A_AGENT_DISCOVERED`。
 
-#### Scenario: Publish A2A task delegated event
-- **WHEN** an A2A client delegates a task to a remote agent
-- **THEN** the EventBus SHALL support publishing an event with `event_type: CollaborationEventType.A2A_TASK_DELEGATED` containing the remote agent URL and task ID in the payload
+#### Scenario: 发布 A2A 任务委托事件 — Publish A2A task delegated event
+- **WHEN** A2A 客户端将任务委托给远程 Agent
+- **THEN** EventBus 应支持发布 `event_type: CollaborationEventType.A2A_TASK_DELEGATED` 的事件，负载中包含远程 Agent URL 和任务 ID
 
-#### Scenario: Subscribe to A2A artifact events
-- **WHEN** a handler subscribes to topic `"a2a_artifacts"`
-- **THEN** the handler SHALL receive events with `event_type: CollaborationEventType.A2A_ARTIFACT_RECEIVED` when artifacts arrive from remote A2A agents
+#### Scenario: 订阅 A2A artifact 事件 — Subscribe to A2A artifact events
+- **WHEN** 处理器订阅主题 `"a2a_artifacts"`
+- **THEN** 当来自远程 A2A Agent 的 artifacts 到达时，处理器应接收 `event_type: CollaborationEventType.A2A_ARTIFACT_RECEIVED` 的事件
 
-### Requirement: EventBus supports A2A task correlation
-The EventBus SHALL allow correlating A2A task IDs with local collaboration topics, enabling event handlers to filter events by A2A task context.
+### Requirement: EventBus 支持 A2A 任务关联 — EventBus supports A2A task correlation
+EventBus 应允许将 A2A 任务 ID 与本地协作主题关联，使事件处理器能够按 A2A 任务上下文过滤事件。
 
-#### Scenario: Correlate A2A task with local topic
-- **WHEN** an A2A task with ID `task-123` is received and local execution publishes events to topic `"agent_worker"`
-- **THEN** the events SHALL include `a2a_task_id: "task-123"` in the payload metadata, allowing correlation queries
+#### Scenario: 将 A2A 任务与本地主题关联 — Correlate A2A task with local topic
+- **WHEN** 接收到 ID 为 `task-123` 的 A2A 任务，且本地执行向主题 `"agent_worker"` 发布事件
+- **THEN** 事件的负载元数据中应包含 `a2a_task_id: "task-123"`，允许进行关联查询

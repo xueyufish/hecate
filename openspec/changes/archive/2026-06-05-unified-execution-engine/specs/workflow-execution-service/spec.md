@@ -1,34 +1,34 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Unified execution entry point for all agent modes
-The `WorkflowExecutionService` SHALL accept an AgentModel, resolve the appropriate graph template based on `agent.mode`, compile the graph, instantiate production Workers, and execute via PregelRuntime. All three modes (chat, three_layer, workflow) SHALL route through this service.
+### Requirement: 所有 agent 模式的统一执行入口点 — Unified execution entry point for all agent modes
+`WorkflowExecutionService` 应接受 AgentModel，根据 `agent.mode` 解析相应的图模板，编译图，实例化生产级 Workers，并通过 PregelRuntime 执行。所有三种模式（chat、three_layer、workflow）都应通过此服务路由。
 
-#### Scenario: Chat mode execution
-- **WHEN** `execute(agent_mode="chat", messages=[...], model="gpt-4o", ...)` is called
-- **THEN** the service SHALL call `build_chat_graph()` to produce a GraphConfig, compile it, create production Workers, and run PregelRuntime.execute()
+#### Scenario: 聊天模式执行 — Chat mode execution
+- **当** `execute(agent_mode="chat", messages=[...], model="gpt-4o", ...)` 被调用
+- **则** 服务应调用 `build_chat_graph()` 生成 GraphConfig，编译它，创建生产级 Workers，并运行 PregelRuntime.execute()
 
-#### Scenario: Three_layer mode execution
-- **WHEN** `execute(agent_mode="three_layer", messages=[...], ...)` is called
-- **THEN** the service SHALL call `build_three_layer_graph()` to produce a GraphConfig, compile it, create production Workers, and run PregelRuntime.execute()
+#### Scenario: Three_layer 模式执行 — Three_layer mode execution
+- **当** `execute(agent_mode="three_layer", messages=[...], ...)` 被调用
+- **则** 服务应调用 `build_three_layer_graph()` 生成 GraphConfig，编译它，创建生产级 Workers，并运行 PregelRuntime.execute()
 
-#### Scenario: Workflow mode execution
-- **WHEN** `execute(agent_mode="workflow", workflow_id=<uuid>, messages=[...], ...)` is called
-- **THEN** the service SHALL load the workflow's current version from database, call `parse_graph(version.graph_dsl)` to produce a GraphConfig, compile it, create production Workers, and run PregelRuntime.execute()
+#### Scenario: Workflow 模式执行 — Workflow mode execution
+- **当** `execute(agent_mode="workflow", workflow_id=<uuid>, messages=[...], ...)` 被调用
+- **则** 服务应从数据库加载工作流的当前版本，调用 `parse_graph(version.graph_dsl)` 生成 GraphConfig，编译它，创建生产级 Workers，并运行 PregelRuntime.execute()
 
-### Requirement: Streaming support through execution service
-The `WorkflowExecutionService` SHALL support both streaming and non-streaming execution modes, mapping to PregelRuntime's StreamMode.
+### Requirement: 通过执行服务的流式支持 — Streaming support through execution service
+`WorkflowExecutionService` 应支持流式和非流式执行模式，映射到 PregelRuntime 的 StreamMode。
 
-#### Scenario: Streaming execution
-- **WHEN** `execute(stream=True)` is called
-- **THEN** the service SHALL return an AsyncGenerator yielding events from PregelRuntime with StreamMode.MESSAGES
+#### Scenario: 流式执行 — Streaming execution
+- **当** `execute(stream=True)` 被调用
+- **则** 服务应返回一个 AsyncGenerator，yield 来自 PregelRuntime 的事件，使用 StreamMode.MESSAGES
 
-#### Scenario: Non-streaming execution
-- **WHEN** `execute(stream=False)` is called
-- **THEN** the service SHALL consume PregelRuntime's generator and return the final channel state as a response dict
+#### Scenario: 非流式执行 — Non-streaming execution
+- **当** `execute(stream=False)` 被调用
+- **则** 服务应消费 PregelRuntime 的生成器并将最终的通道状态作为响应字典返回
 
-### Requirement: Session and evidence metadata propagation
-The `WorkflowExecutionService` SHALL propagate session_id, agent_id, user_id, and turn_index through channel state so Workers can access them for evidence tracking, memory operations, and suggestion generation.
+### Requirement: 会话和证据元数据传播 — Session and evidence metadata propagation
+`WorkflowExecutionService` 应通过通道状态传播 session_id、agent_id、user_id 和 turn_index，以便 Workers 能够访问它们以进行证据跟踪、记忆操作和建议生成。
 
-#### Scenario: Metadata in channels
-- **WHEN** execute is called with session_id, agent_id, user_id
-- **THEN** the service SHALL inject `{"_session_id": ..., "_agent_id": ..., "_user_id": ..., "_turn_index": 0}` into initial_input channels before PregelRuntime execution
+#### Scenario: 通道中的元数据 — Metadata in channels
+- **当** 使用 session_id、agent_id、user_id 调用 execute
+- **则** 服务应在 PregelRuntime 执行前将 `{"_session_id": ..., "_agent_id": ..., "_user_id": ..., "_turn_index": 0}` 注入到 initial_input 通道中

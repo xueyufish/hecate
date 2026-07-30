@@ -1,33 +1,33 @@
-## Why
+## Why — 为什么
 
-The A2A protocol (Google's Agent-to-Agent) has become the de facto industry standard for inter-agent communication, with 150+ organizations running it in production (July 2026) and 8 platinum Linux Foundation members (AWS, Cisco, Google, IBM, Microsoft, Salesforce, SAP, ServiceNow) on the governing TSC. All competing protocols (IBM ACP, AGNTCY ACP) have converged into A2A. Hecate's current multi-agent capabilities (6 collaboration patterns, EventBus, TaskAllocator, P2P Negotiator) are process-local — there is no protocol layer for cross-platform agent discovery and delegation.
+A2A 协议（Google 的 Agent-to-Agent）已成为 Agent 间通信的事实行业标准，150+ 组织在生产中使用（2026 年 7 月），8 个 Linux Foundation 白金成员（AWS、Cisco、Google、IBM、Microsoft、Salesforce、SAP、ServiceNow）在管理 TSC 中。所有竞争协议（IBM ACP、AGNTCY ACP）已汇聚到 A2A。Hecate 当前的多 Agent 能力（6 种协作模式、EventBus、TaskAllocator、P2P Negotiator）都是进程内完成的——没有用于跨平台 Agent 发现和委托的协议层。
 
-Meanwhile, Hecate's skill/tool/knowledge/workflow associations are fragmented: tools and skills use name strings, knowledge bases use UUIDs, workflows use a single UUID reference. No platform in the industry has unified these as a single "Skill" abstraction — this is Hecate's differentiation opportunity. Agent-Workflow mutual embedding is one-directional today (AGENT nodes exist in DAGs, but agents cannot invoke workflows as skills).
+同时，Hecate 的技能/工具/知识/工作流关联是分散的：工具和技能使用名称字符串，知识库使用 UUID，工作流使用单个 UUID 引用。行业中没有一个平台将这些统一为单一的"Skill"抽象——这是 Hecate 的差异化机会。Agent-工作流相互嵌入目前是单向的（AGENT 节点存在于 DAG 中，但 Agent 不能将工作流作为技能调用）。
 
-## What Changes
+## What Changes — 变更内容
 
-- **A2A Protocol (2.10)**: New `a2a/` module implementing A2A v1.2 — Hecate as both A2A server (AgentCard, JSON-RPC task lifecycle, SSE streaming, artifacts) and A2A client (agent discovery, task submission, push notification receiver). Uses official `a2a-sdk` Python package.
-- **Signed Agent Cards (2.10a)**: JWS signatures with ES256 algorithm, RFC 8785 JSON Canonicalization, JWKS public key distribution at `/.well-known/jwks.json`, algorithm pinning to prevent downgrade attacks.
-- **Unified Skill Registry (2.9)**: `SkillRegistry` service unifying Tools, Skills, Knowledge Bases, Workflows, and Agents as a single `SkillRef` abstraction with `resolve()`, `invoke()`, `format_for_llm()`. Zero data migration — reads from existing tables.
-- **Agent-Workflow Mutual Embedding (2.9a)**: Agent → Workflow invocation as a tool (extends EnginePort with `workflow_execute()`); Workflow → Agent (AGENT node type already exists). Recursive nesting with `max_depth=3` (IBM anti-pattern guidance).
-- **Collaborative Conflict Handling (2.8)**: Extends existing `ConflictResolver` with distributed lock coordination, task-level conflict detection, permission scope mismatch handling for A2A agents, integration with `P2PNegotiator`.
+- **A2A 协议 (2.10)**：新的 `a2a/` 模块，实现 A2A v1.2——Hecate 同时作为 A2A 服务器（AgentCard、JSON-RPC 任务生命周期、SSE 流式、artifacts）和 A2A 客户端（Agent 发现、任务提交、推送通知接收器）。使用官方 `a2a-sdk` Python 包。
+- **签名 Agent Card (2.10a)**：使用 ES256 算法的 JWS 签名、RFC 8785 JSON 规范化、在 `/.well-known/jwks.json` 的 JWKS 公钥分发、算法固定以防止降级攻击。
+- **统一技能注册表 (2.9)**：`SkillRegistry` 服务，将 Tools、Skills、Knowledge Bases、Workflows 和 Agents 统一为单一的 `SkillRef` 抽象，包含 `resolve()`、`invoke()`、`format_for_llm()`。零数据迁移——从现有表读取。
+- **Agent-工作流相互嵌入 (2.9a)**：Agent → 工作流作为工具调用（扩展 EnginePort，添加 `workflow_execute()`）；工作流 → Agent（AGENT 节点类型已存在）。递归嵌套，`max_depth=3`（IBM 反模式指南）。
+- **协作冲突处理 (2.8)**：扩展现有的 `ConflictResolver`，添加分布式锁协调、任务级冲突检测、A2A Agent 的权限范围不匹配处理、与 `P2PNegotiator` 集成。
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `a2a-protocol`: A2A v1.2 server (AgentCard, JSON-RPC, SSE, task lifecycle, artifacts, push notifications) and client (discovery, task submission) implementation
-- `signed-agent-cards`: JWS signature generation and verification for Agent Cards with JWKS key distribution
-- `unified-skill-registry`: SkillRegistry service abstracting Tools, Skills, Knowledge Bases, Workflows, and Agents as unified SkillRef entries
-- `agent-workflow-embedding`: Bidirectional Agent ↔ Workflow invocation with recursive nesting (max_depth=3)
+### 新能力
+- `a2a-protocol`：A2A v1.2 服务器（AgentCard、JSON-RPC、SSE、任务生命周期、artifacts、推送通知）和客户端（发现、任务提交）实现
+- `signed-agent-cards`：Agent Card 的 JWS 签名生成和验证，带 JWKS 密钥分发
+- `unified-skill-registry`：SkillRegistry 服务，将 Tools、Skills、Knowledge Bases、Workflows 和 Agents 抽象为统一的 SkillRef 条目
+- `agent-workflow-embedding`：双向 Agent ↔ 工作流调用，带递归嵌套（max_depth=3）
 
-### Modified Capabilities
-- `event-bus`: Add A2A-specific CollaborationEventType entries (A2A_TASK_DELEGATED, A2A_ARTIFACT_RECEIVED) for cross-protocol event correlation
-- `agent-tool`: Extend AgentTool to support A2A remote agents as invocation targets (not just local agent_execute)
+### 修改的能力
+- `event-bus`：添加 A2A 特定的 CollaborationEventType 条目（A2A_TASK_DELEGATED、A2A_ARTIFACT_RECEIVED），用于跨协议事件关联
+- `agent-tool`：扩展 AgentTool，支持 A2A 远程 Agent 作为调用目标（不仅是本地的 agent_execute）
 
-## Impact
+## Impact — 影响
 
-- **New code**: `src/hecate/a2a/` module (server, client, signing), `src/hecate/skill_registry/` module, workflow embedding service
-- **Modified code**: `engine/eventbus.py` (new event types), `engine/agent_tool.py` (A2A target support), `engine/temporal/conflict.py` (distributed conflicts), `services/orchestration/agent_execution_port.py` (workflow_execute), `models/agent.py` (unified skill_ids field), `api/` (A2A endpoints + skill registry API)
-- **New dependencies**: `a2a-sdk` (official Python SDK), `cryptography` (already present via auth module)
-- **Migrations**: Add `agent_card_keys` table for signing key pairs, `a2a_tasks` table for task lifecycle persistence
-- **Config**: New `A2A_*` settings (server URL, signing key path, JWKS URL), `SKILL_REGISTRY_*` settings
+- **新代码**：`src/hecate/a2a/` 模块（server、client、signing）、`src/hecate/skill_registry/` 模块、工作流嵌入服务
+- **修改的代码**：`engine/eventbus.py`（新事件类型）、`engine/agent_tool.py`（A2A 目标支持）、`engine/temporal/conflict.py`（分布式冲突）、`services/orchestration/agent_execution_port.py`（workflow_execute）、`models/agent.py`（统一的 skill_ids 字段）、`api/`（A2A 端点 + 技能注册表 API）
+- **新依赖**：`a2a-sdk`（官方 Python SDK）、`cryptography`（已通过 auth 模块存在）
+- **迁移**：添加 `agent_card_keys` 表用于签名密钥对，`a2a_tasks` 表用于任务生命周期持久化
+- **配置**：新的 `A2A_*` 设置（服务器 URL、签名密钥路径、JWKS URL）、`SKILL_REGISTRY_*` 设置

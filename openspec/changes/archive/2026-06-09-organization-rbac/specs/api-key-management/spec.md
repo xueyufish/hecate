@@ -1,75 +1,75 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: API key database model
-The system SHALL store API keys in an `ApiKeyModel` database table with the following fields: `id` (UUID PK), `name` (string, user-friendly label), `key_hash` (SHA-256 hash of the raw key), `key_prefix` (first 8 characters for display), `scope` (enum: `system` or `workspace`), `org_id` (nullable FK to OrganizationModel), `workspace_id` (nullable FK to WorkspaceModel), `created_by` (FK to UserModel), `last_used_at` (nullable datetime), `expires_at` (nullable datetime), `is_active` (boolean), plus inherited BaseModel fields (timestamps, soft delete).
+### 需求：API 密钥数据库模型
+系统应将 API 密钥存储在 `ApiKeyModel` 数据库表中，包含以下字段：`id`（UUID PK）、`name`（字符串，用户友好标签）、`key_hash`（原始密钥的 SHA-256 哈希）、`key_prefix`（显示用的前 8 个字符）、`scope`（枚举：`system` 或 `workspace`）、`org_id`（可空 FK 指向 OrganizationModel）、`workspace_id`（可空 FK 指向 WorkspaceModel）、`created_by`（FK 指向 UserModel）、`last_used_at`（可空日期时间）、`expires_at`（可空日期时间）、`is_active`（布尔值），外加继承的 BaseModel 字段（时间戳、软删除）。
 
-#### Scenario: API key model fields
-- **WHEN** an API key is created with `scope: "workspace"`
-- **THEN** `org_id` and `workspace_id` are required and set to the specified organization and workspace
+#### 场景：API 密钥模型字段
+- **当** 使用 `scope: "workspace"` 创建 API 密钥
+- **则** `org_id` 和 `workspace_id` 为必填，设置为指定的组织和工区域
 
-#### Scenario: System-scope key has no workspace binding
-- **WHEN** an API key is created with `scope: "system"`
-- **THEN** `org_id` and `workspace_id` are null
+#### 场景：系统级密钥无工作区绑定
+- **当** 使用 `scope: "system"` 创建 API 密钥
+- **则** `org_id` 和 `workspace_id` 为 null
 
-### Requirement: API key generation
-The system SHALL generate API keys in the format `hcat_<base62_32chars>`. The raw key SHALL be shown to the user exactly once at creation time and never stored in plaintext. Only the SHA-256 hash SHALL be persisted.
+### 需求：API 密钥生成
+系统应生成格式为 `hcat_<base62_32chars>` 的 API 密钥。原始密钥应在创建时仅向用户展示一次，绝不以明文存储。仅持久化 SHA-256 哈希。
 
-#### Scenario: Create workspace API key
-- **WHEN** a workspace admin sends POST `/api/api-keys` with `{name: "Production Key", scope: "workspace", workspace_id: "..."}`
-- **THEN** the system generates a key, stores its SHA-256 hash and prefix, returns `201` with `{id, name, key: "hcat_...", scope, workspace_id, created_at}`. The raw key is not stored.
+#### 场景：创建工作区 API 密钥
+- **当** 工作区管理员发送 POST `/api/api-keys`，包含 `{name: "Production Key", scope: "workspace", workspace_id: "..."}`
+- **则** 系统生成密钥，存储其 SHA-256 哈希和前缀，返回 `201` 及 `{id, name, key: "hcat_...", scope, workspace_id, created_at}`。原始密钥不存储。
 
-#### Scenario: Create system API key
-- **WHEN** a user sends POST `/api/api-keys` with `{name: "Admin Key", scope: "system"}`
-- **THEN** the system generates a system-scope key, returns `201` with the raw key
+#### 场景：创建系统 API 密钥
+- **当** 用户发送 POST `/api/api-keys`，包含 `{name: "Admin Key", scope: "system"}`
+- **则** 系统生成系统级密钥，返回 `201` 及原始密钥
 
-#### Scenario: Key shown only once
-- **WHEN** a user creates an API key and subsequently calls GET `/api/api-keys/{id}`
-- **THEN** the response includes `{id, name, key_prefix: "hcat_abcd...", scope, ...}` but NOT the full raw key
+#### 场景：密钥仅展示一次
+- **当** 用户创建 API 密钥后调用 GET `/api/api-keys/{id}`
+- **则** 响应包含 `{id, name, key_prefix: "hcat_abcd...", scope, ...}` 但不包含完整的原始密钥
 
-### Requirement: API key verification
-The system SHALL verify API keys by computing SHA-256 of the incoming bearer token and comparing against stored `key_hash`. On successful verification, the system SHALL update `last_used_at` and return the full key context (scope, org_id, workspace_id).
+### 需求：API 密钥验证
+系统应通过计算传入 Bearer 令牌的 SHA-256 并与存储的 `key_hash` 进行比较来验证 API 密钥。验证成功后，系统应更新 `last_used_at` 并返回完整的密钥上下文（scope、org_id、workspace_id）。
 
-#### Scenario: Valid workspace key
-- **WHEN** a request arrives with `Authorization: Bearer hcat_<valid_workspace_key>`
-- **THEN** the system resolves the key to its workspace context and injects `{org_id, workspace_id, scope: "workspace"}` into the auth context
+#### 场景：有效的工作区密钥
+- **当** 请求到达时带有 `Authorization: Bearer hcat_<valid_workspace_key>`
+- **则** 系统将密钥解析为其工作区上下文，并将 `{org_id, workspace_id, scope: "workspace"}` 注入认证上下文
 
-#### Scenario: Valid system key
-- **WHEN** a request arrives with a valid system-scope key
-- **THEN** the system injects `{scope: "system", org_id: null, workspace_id: null}` into the auth context
+#### 场景：有效的系统密钥
+- **当** 请求到达时带有有效的系统级密钥
+- **则** 系统将 `{scope: "system", org_id: null, workspace_id: null}` 注入认证上下文
 
-#### Scenario: Invalid or revoked key
-- **WHEN** a request arrives with a key whose hash matches no active record
-- **THEN** the system returns `401 Unauthorized`
+#### 场景：无效或已撤销的密钥
+- **当** 请求到达时密钥的哈希与任何活动记录不匹配
+- **则** 系统返回 `401 Unauthorized`
 
-#### Scenario: Expired key
-- **WHEN** a request arrives with a key where `expires_at` is in the past
-- **THEN** the system returns `401 Unauthorized` with detail "API key expired"
+#### 场景：已过期的密钥
+- **当** 请求到达时密钥的 `expires_at` 已过
+- **则** 系统返回 `401 Unauthorized` 并提示 "API key expired"
 
-### Requirement: API key rotation
-The system SHALL support API key rotation by creating a replacement key and immediately revoking the old key.
+### 需求：API 密钥轮换
+系统应支持通过创建替换密钥并立即撤销旧密钥来轮换 API 密钥。
 
-#### Scenario: Rotate API key
-- **WHEN** a user sends POST `/api/api-keys/{id}/rotate`
-- **THEN** the system creates a new key with the same scope and bindings, sets the old key `is_active = false`, returns `200` with the new raw key. The old key is immediately invalid.
+#### 场景：轮换 API 密钥
+- **当** 用户发送 POST `/api/api-keys/{id}/rotate`
+- **则** 系统创建具有相同作用域和绑定的新密钥，设置旧密钥 `is_active = false`，返回 `200` 及新的原始密钥。旧密钥立即失效。
 
-### Requirement: API key revocation
-The system SHALL support explicit API key revocation (soft delete). Revoked keys are no longer valid for authentication.
+### 需求：API 密钥撤销
+系统应支持明确的 API 密钥撤销（软删除）。已撤销的密钥不再有效用于认证。
 
-#### Scenario: Revoke API key
-- **WHEN** a user sends DELETE `/api/api-keys/{id}`
-- **THEN** the system sets `is_active = false` on the key, returns `204`
+#### 场景：撤销 API 密钥
+- **当** 用户发送 DELETE `/api/api-keys/{id}`
+- **则** 系统设置密钥的 `is_active = false`，返回 `204`
 
-#### Scenario: List API keys
-- **WHEN** a user sends GET `/api/api-keys`
-- **THEN** the system returns paginated list of API keys created by the user, showing `{id, name, key_prefix, scope, is_active, last_used_at, expires_at, created_at}`
+#### 场景：列出 API 密钥
+- **当** 用户发送 GET `/api/api-keys`
+- **则** 系统返回用户创建的分页 API 密钥列表，显示 `{id, name, key_prefix, scope, is_active, last_used_at, expires_at, created_at}`
 
-### Requirement: Environment variable API key deprecation
-The system SHALL continue to support the `HECATE_API_KEYS` environment variable during a deprecation period, logging a warning on each use. Env-var keys are treated as system-scope keys.
+### 需求：环境变量 API 密钥弃用
+系统应在弃用期内继续支持 `HECATE_API_KEYS` 环境变量，每次使用时记录警告。环境变量密钥被视为系统级密钥。
 
-#### Scenario: Env-var key still works with warning
-- **WHEN** a request authenticates with a key from `HECATE_API_KEYS` env var
-- **THEN** the system accepts the key, logs a deprecation warning, and treats it as system-scope
+#### 场景：环境变量密钥仍可用但带警告
+- **当** 请求使用来自 `HECATE_API_KEYS` 环境变量的密钥进行认证
+- **则** 系统接受该密钥，记录弃用警告，并将其视为系统级密钥
 
-#### Scenario: DB key takes precedence
-- **WHEN** a key exists in both env var and database
-- **THEN** the system resolves the DB record first, ignoring the env var match
+#### 场景：数据库密钥优先
+- **当** 密钥同时存在于环境变量和数据库中
+- **则** 系统优先解析数据库记录，忽略环境变量匹配

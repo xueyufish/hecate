@@ -1,30 +1,30 @@
-## Why
+## Why — 动机
 
-Hecate's multi-agent orchestration supports 6 collaboration patterns (2.7a) and a rich canvas UI, but agents currently have no enforced channel access boundaries — any agent can read or write any channel. Additionally, routing between agents is limited to static condition expressions and handoff edges. Enterprise platforms (Google ADK, AutoGen, Huawei AgentArts) provide intent-based and dynamic LLM-driven routing as first-class features. Without channel access control and advanced routing, multi-agent graphs cannot express real-world isolation boundaries or intelligent routing decisions.
+Hecate 的多 agent 编排支持 6 种协作模式（2.7a）和丰富的画布 UI，但当前 agent 之间没有强制性的通道访问边界 — 任何 agent 都可以读或写任何通道。此外，agent 之间的路由仅限于静态条件表达式和 handoff 边。企业平台（Google ADK、AutoGen、华为 AgentArts）将基于意图的和动态 LLM 驱动的路由作为一等公民功能提供。没有通道访问控制和高级路由，多 agent 图谱无法表达现实的隔离边界或智能路由决策。
 
-## What Changes
+## What Changes — 变更内容
 
-- **Channel access validation**: Compiler enforces that each node's `readable`/`writable` channel config is consistent with declared graph channels. Runtime warns on unauthorized channel access.
-- **Broadcast mode UX**: ChannelSelector enhanced to show broadcast participation (TOPIC channel opt-in) and channel access summary per agent.
-- **Intent-based routing**: New `routing_mode: "intent"` on condition nodes — LLM classifies user intent and routes to the matching target via configurable `intent_patterns`.
-- **Dynamic routing**: New `routing_mode: "dynamic"` on condition nodes — LLM selects the next speaker from a candidate agent list at runtime, inspired by AutoGen's SelectorGroupChat.
-- **Dynamic handoff edge**: New edge trigger `"dynamic_handoff"` where the LLM decides the handoff target at runtime (inspired by Google ADK's transfer_to_agent).
+- **通道访问验证**：编译器强制执行每个节点的 `readable`/`writable` 通道配置与声明的图谱通道一致。运行时对未授权的通道访问发出警告。
+- **广播模式 UX**：增强 ChannelSelector 以显示广播参与（TOPIC 通道选择加入）和每个 agent 的通道访问摘要。
+- **基于意图的路由**：condition 节点上新增 `routing_mode: "intent"` — LLM 分类用户意图并通过可配置的 `intent_patterns` 路由到匹配目标。
+- **动态路由**：condition 节点上新增 `routing_mode: "dynamic"` — LLM 在运行时从候选 agent 列表中选择下一个发言者，灵感来自 AutoGen 的 SelectorGroupChat。
+- **动态 handoff 边**：新增边触发器 `"dynamic_handoff"`，LLM 在运行时决定 handoff 目标（灵感来自 Google ADK 的 transfer_to_agent）。
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `channel-access-control`: Compile-time validation and runtime enforcement of per-node channel read/write access boundaries
-- `advanced-routing-modes`: Intent-based and dynamic LLM-driven routing modes extending the condition node
+### 新能力
+- `channel-access-control`：每节点通道读/写访问边界的编译时验证和运行时执行
+- `advanced-routing-modes`：扩展 condition 节点的基于意图和动态 LLM 驱动的路由模式
 
-### Modified Capabilities
-- `graph-dsl`: Add `routing_mode` and `routing_config` fields to CONDITION node config; add `"dynamic_handoff"` edge trigger
-- `multi-agent-canvas`: Enhanced ChannelSelector with broadcast mode UX; routing mode configuration panel for condition nodes
-- `agent-handoff`: Support dynamic handoff edges where LLM selects target at runtime
+### 修改的能力
+- `graph-dsl`：向 CONDITION 节点配置添加 `routing_mode` 和 `routing_config` 字段；添加 `"dynamic_handoff"` 边触发器
+- `multi-agent-canvas`：增强的 ChannelSelector（带广播模式 UX）；condition 节点的路由模式配置面板
+- `agent-handoff`：支持 LLM 在运行时选择目标的动态 handoff 边
 
-## Impact
+## Impact — 影响范围
 
-- **Engine**: `compiler.py` gains channel access validation pass and routing mode compilation; `pregel.py` gains runtime channel access warning and dynamic routing evaluation via `EnginePort.llm_invoke()`
-- **Graph DSL schema**: `schemas/graph-dsl.schema.json` — add `routing_mode`, `routing_config`, `intent_patterns`, `candidate_agents` to CONDITION node config; add `"dynamic_handoff"` to edge trigger enum
-- **API**: Graph validation endpoints gain channel access checks and routing config validation
-- **Frontend**: `channel-selector.tsx` enhanced with broadcast mode and access summary; new routing config panel in condition node config; `edge-type-selector.tsx` gains dynamic handoff option
-- **Tests**: New test files for channel access validation, routing mode compilation, dynamic routing evaluation
+- **引擎**：`compiler.py` 获得通道访问验证通行和路由模式编译；`pregel.py` 获得运行时通道访问警告和通过 `EnginePort.llm_invoke()` 的动态路由求值
+- **Graph DSL 模式**：`schemas/graph-dsl.schema.json` — 向 CONDITION 节点配置添加 `routing_mode`、`routing_config`、`intent_patterns`、`candidate_agents`；向边触发器枚举添加 `"dynamic_handoff"`
+- **API**：图谱验证端点获得通道访问检查和路由配置验证
+- **前端**：`channel-selector.tsx` 增强（带广播模式和访问摘要）；condition 节点配置中新增路由配置面板；`edge-type-selector.tsx` 获得动态 handoff 选项
+- **测试**：通道访问验证、路由模式编译、动态路由求值的新测试文件

@@ -1,58 +1,36 @@
-## Why
+## Why — 动机
 
-The current Graph DSL supports 6 node types (CONVERSATION, TOOL_CALL, CONDITION, AGENT, KNOWLEDGE_RETRIEVAL, VARIABLE_SET) but lacks two essential patterns for deterministic multi-step pipelines:
+当前 Graph DSL 支持 6 种节点类型（CONVERSATION、TOOL_CALL、CONDITION、AGENT、KNOWLEDGE_RETRIEVAL、VARIABLE_SET），但缺少确定性多步骤管道的两种基本模式：
 
-1. **Parallel execution (Fan-out/Fan-in)** — there is no way to express "run A, B, C simultaneously and merge their results". The Pregel runtime already supports executing multiple nodes per superstep (via `current_nodes` list), but no node type or edge semantics formalize parallel dispatch and result aggregation.
+1. **并行执行（Fan-out/Fan-in）** —— 无法表达"同时运行 A、B、C 并合并它们的结果"。Pregel 运行时已经支持每个 superstep 执行多个节点（通过 `current_nodes` 列表），但没有节点类型或边语义将并行分发和结果聚合形式化。
 
-2. **Deterministic conditional branching** — while CONDITION nodes exist, they rely on expression evaluation against channel state. There is no first-class support for variable-based If/Else routing that evaluates a channel value against a threshold or matches against a set of keys (e.g., `score > 80 → approve`, otherwise → reject). The current `_route` key mechanism only supports true/false string branching.
+2. **子图组合** —— 复杂管道必须作为单一平面节点列表定义，没有嵌套或可重用性。无法定义一个节点集作为一个可组合单元进行管理的"子管道"。
 
-3. **Template coverage** — only 3 orchestration templates exist (Router, Pipeline, Supervisor). Common patterns like parallel processing and iterative refinement loops are missing.
+此次变更通过 4 个互补的特性填补了这些空白：扇出/合并节点、子图、多代理编排模式和类型化边。
 
-These gaps were identified through competitive analysis against Versatile (AgentArts), Dify, n8n, and Coze, all of which support parallel branches and variable-based conditional routing natively.
+## What Changes — 变更内容
 
-## What Changes
+- 向 DSL 添加 **Fan-out 和 Merge** 节点类型：Fan-out 节点将消息分发到多个并行分支；Merge 节点使用可配置的 reducer（concat、select_first、custom）聚合结果。
+- 向 DSL 添加 **Subgraph** 节点类型：允许将节点组封装为一个可重用的子图，具有自己的输入/输出通道映射。
+- 通过模板添加 **多代理编排模式**：层级（manager → worker）、交接（agent 传递）、管道（顺序阶段）、广播（扇出到所有）、协商（agent 辩论——限制为 100 轮收敛）、辩论（意见交换）。
+- 向边定义添加 **类型化边**：消息边（数据流）、条件边（分支）、控制边（执行顺序）、订阅边（事件驱动触发）。
+- 更新 Graph DSL JSON Schema 以反映所有 4 个变更。
 
-- Add `FAN_OUT` node type to `NodeType` enum — a dispatch node that splits execution into multiple parallel branches, each writing to isolated sub-channels.
-- Add `MERGE` node type to `NodeType` enum — an aggregation node that collects results from all parallel branches and combines them into a unified output.
-- Enhance `CONDITION` node semantics to support multi-key routing (not just true/false) — e.g., `{"high": "node_a", "medium": "node_b", "low": "node_c"}`.
-- Update `PregelRuntime.execute()` to dispatch FAN_OUT branches concurrently via `asyncio.gather`, then collect results at MERGE nodes.
-- Update `GraphCompiler` to validate FAN_OUT/MERGE pairs (every FAN_OUT must have a matching MERGE).
-- Update `schemas/graph-dsl.schema.json` to include the new node types.
-- Add 3 new JSON templates: `fan-out-pipeline.json`, `conditional-pipeline.json`, `reflection-loop.json`.
-- Add corresponding Python factory functions in `templates.py`.
+## Capabilities — 能力变更
 
-## Capabilities
+### 新增能力
+- `fan-out-merge`: Fan-out/Merge 节点，用于 DSL 中的并行执行
+- `subgraph`: DSL 中可组合、可重用的子图
+- `multi-agent-patterns`: 通过图模板编排 6 种多代理模式
+- `typed-edges`: 4 种边类型（消息、条件、控制、订阅）
 
-### New Capabilities
-- `fan-out-merge`: Parallel dispatch (FAN_OUT) and result aggregation (MERGE) node types with concurrent execution in PregelRuntime
-- `multi-route-condition`: Enhanced CONDITION node supporting multi-key conditional routing beyond true/false branching
+### 修改的能力
+- `graph-dsl`: 扩展 DSL Schema 以包含新的节点类型和边属性
 
-### Modified Capabilities
-- `engine-types`: Add FAN_OUT and MERGE to NodeType enum; update ChannelType semantics for fan-out sub-channels
-- `graph-dsl`: Update JSON Schema to include new node types; update compiler to validate FAN_OUT/MERGE pair constraints
-- `pregel-runtime`: Implement concurrent dispatch for FAN_OUT branches via asyncio.gather; add MERGE aggregation logic
-- `orchestration-templates`: Add 3 new templates (fan-out-pipeline, conditional-pipeline, reflection-loop)
+## Impact — 影响范围
 
-## Impact
-
-**Engine layer** (`src/hecate/engine/`):
-- `types.py` — 2 new NodeType enum values (FAN_OUT, MERGE)
-- `compiler.py` — new validation for FAN_OUT/MERGE structural constraints
-- `pregel.py` — concurrent dispatch logic for FAN_OUT, aggregation logic for MERGE
-- `templates.py` — 3 new factory functions
-- `graph_dsl.py` — no changes (already handles string enum parsing via NodeType)
-
-**Schema** (`schemas/`):
-- `graph-dsl.schema.json` — add "fan-out" and "merge" to node type enum
-
-**Data** (`src/hecate/data/orchestration_templates/`):
-- 3 new JSON template files
-
-**Tests** (`tests/`):
-- New test file for FAN_OUT/MERGE execution
-- New test file for multi-key CONDITION routing
-- Tests for 3 new templates
-
-**API/Services**: No changes — existing orchestration-templates API already discovers templates from the data directory.
-
-**Breaking changes**: None — all new node types are additive. Existing graphs continue to work unchanged.
+- **新文件**: `src/hecate/engine/graph_dsl.py` 中的 fan_out、merge、subgraph 节点处理代码；模式模板（单独的 `patterns/` 模块或图 DSL 中的工厂方法）；类型化边枚举
+- **修改的文件**: `src/hecate/engine/graph_dsl.py`（编译器——detect_fan_out、detect_merge、resolve_subgraphs、边类型解析），`src/hecate/engine/pregel.py`（运行时——Fan-out/Merge 的 superstep 调度增强），Graph DSL JSON Schema（所有 4 个新特性）
+- **新测试**: 扇出/合并、子图编译、模式模板生成、边类型验证的测试
+- **无破坏性变更**: 所有现有图保持向后兼容
+- **无新依赖**: 所有特性仅使用 stdlib

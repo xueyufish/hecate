@@ -1,47 +1,47 @@
-## Why
+## Why — 为什么
 
-Hecate's agent interaction is currently hardcoded to REST API (`api/v1/chat.py`). Adding a new platform (Feishu, Slack, Discord, Telegram) requires modifying core code. The notification system (`NotificationDispatcher`) uses switch/case on channel types, making it equally rigid. Authentication is a monolithic `get_auth_context()` function that can't be extended without editing it. And there is zero i18n infrastructure.
+Hecate 的 Agent 交互目前硬编码为 REST API（`api/v1/chat.py`）。添加新平台（飞书、Slack、Discord、Telegram）需要修改核心代码。通知系统（`NotificationDispatcher`）使用基于通道类型的 switch/case，同样僵化。认证是一个单体 `get_auth_context()` 函数，不编辑就无法扩展。而且零 i18n 基础设施。
 
-This change introduces the Platform SPI layer — a plugin-based architecture for external platform adapters, authentication providers, and internationalization — following the Salesforce "build once, deploy everywhere" pattern and the EvaluatorABC precedent.
+本次变更引入了 Platform SPI 层——一个基于插件的架构，用于外部平台适配器、认证提供者和国际化——遵循 Salesforce 的"一次构建，随处部署"模式和 EvaluatorABC 先例。
 
-## What Changes
+## What Changes — 变更内容
 
-- **ChannelABC** (new SPI): Abstract interface for external platform adapters. Each Channel adapts a specific platform (Feishu, Slack, Telegram, Email, Webhook) to a canonical message format. The existing REST API, CLI, and NotificationDispatcher become Channel implementations.
-- **Gateway** (new layer): Sits between channels and the agent runtime. Handles session routing, message normalization, and delegates to WorkflowExecutionService. REST API routes are preserved — Gateway is additive, not a replacement.
-- **AuthProviderABC** (new SPI): Abstract interface for authentication providers. Built-in: JWTAuthProvider, APIKeyAuthProvider. The existing `get_auth_context()` iterates registered providers. Future: SAML, LDAP, OAuth2.
-- **i18n SPI** (new): Locale detection, message catalog loading, `t()` translation function, plugin translation registration, management API for translation files, runtime language switching.
-- **NotifierABC merged into ChannelABC**: Notification dispatchers (Email, Feishu card, Slack Block Kit) become Channel adapters. PluginRegistry uses unified `type="channel"`.
+- **ChannelABC**（新 SPI）：外部平台适配器的抽象接口。每个 Channel 将特定平台（飞书、Slack、Telegram、Email、Webhook）适配为规范消息格式。现有的 REST API、CLI 和 NotificationDispatcher 成为 Channel 实现。
+- **Gateway**（新层）：位于通道和 Agent 运行时之间。处理会话路由、消息标准化，并委托给 WorkflowExecutionService。REST API 路由保留——Gateway 是新增的，而非替代品。
+- **AuthProviderABC**（新 SPI）：认证提供者的抽象接口。内置：JWTAuthProvider、APIKeyAuthProvider。现有的 `get_auth_context()` 遍历已注册的提供者。未来：SAML、LDAP、OAuth2。
+- **i18n SPI**（新增）：语言检测、消息目录加载、`t()` 翻译函数、插件翻译注册、翻译文件管理 API、运行时语言切换。
+- **NotifierABC 合并到 ChannelABC**：通知分发器（Email、飞书卡片、Slack Block Kit）成为 Channel 适配器。PluginRegistry 使用统一的 `type="channel"`。
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
+### 新能力
 
-- `channel-adapter`: ChannelABC interface for external platform adapters, Gateway layer for session routing and message normalization, CanonicalMessage format, ChannelCapabilities declaration
-- `auth-provider`: AuthProviderABC interface for pluggable authentication, built-in JWT and APIKey providers, provider registration and iteration in auth flow
-- `i18n-spi`: Locale detection (request header / user preference / workspace setting), MessageCatalog loading (JSON/YAML), `t()` translation function, plugin translation registration, management API for translation file upload, runtime language switching
+- `channel-adapter`：用于外部平台适配器的 ChannelABC 接口、用于会话路由和消息标准化的 Gateway 层、CanonicalMessage 格式、ChannelCapabilities 声明
+- `auth-provider`：用于可插拔认证的 AuthProviderABC 接口、内置 JWT 和 APIKey 提供者、认证流程中的提供者注册和迭代
+- `i18n-spi`：语言检测（请求头 / 用户偏好 / 工作区设置）、MessageCatalog 加载（JSON/YAML）、`t()` 翻译函数、插件翻译注册、翻译文件上传的管理 API、运行时语言切换
 
-### Modified Capabilities
+### 修改的能力
 
-- `builtin-evaluators`: No requirement changes — only implementation reference for pattern consistency
+- `builtin-evaluators`：需求无变化——仅作为模式一致性的实现参考
 
-## Impact
+## Impact — 影响
 
-**Zero breaking changes.** All existing code continues to work unchanged:
+**零破坏性变更。** 所有现有代码继续不变地工作：
 
-| Component | Impact |
+| 组件 | 影响 |
 |-----------|--------|
-| PregelRuntime | None — engine internals untouched |
-| WorkflowExecutionService | None — business logic layer untouched |
-| Auth system | None — `get_auth_context()` preserved, providers added alongside |
-| Management APIs | None — these are management endpoints, not agent interaction channels |
-| REST API (`api/v1/chat.py`) | Gradual migration — becomes a Channel Adapter, but API contract preserved |
-| CLI (`cli/client.py`) | Gradual migration — becomes a Channel Adapter |
-| `notification_dispatcher.py` | Gradual migration — becomes outbound Channel Adapter pattern |
+| PregelRuntime | 无——引擎内部不受影响 |
+| WorkflowExecutionService | 无——业务逻辑层不受影响 |
+| 认证系统 | 无——`get_auth_context()` 保留，提供者并行添加 |
+| 管理 API | 无——这些是管理端点，非 Agent 交互通道 |
+| REST API（`api/v1/chat.py`） | 渐进式迁移——成为 Channel Adapter，但 API 契约保留 |
+| CLI（`cli/client.py`） | 渐进式迁移——成为 Channel Adapter |
+| `notification_dispatcher.py` | 渐进式迁移——成为出站 Channel Adapter 模式 |
 
-**New code locations:**
-- `src/hecate/gateway/` — Gateway, CanonicalMessage, session routing
-- `src/hecate/channel/` — ChannelAdapter ABC, built-in adapters
-- `src/hecate/auth/` — AuthProviderABC, built-in providers
-- `src/hecate/i18n/` — LocaleResolver, MessageCatalog, `t()` function
+**新代码位置：**
+- `src/hecate/gateway/` — Gateway、CanonicalMessage、会话路由
+- `src/hecate/channel/` — ChannelAdapter ABC、内置适配器
+- `src/hecate/auth/` — AuthProviderABC、内置提供者
+- `src/hecate/i18n/` — LocaleResolver、MessageCatalog、`t()` 函数
 
-**Dependencies:** Plugin SPI Core (5.5a) — completed and merged.
+**依赖：** Plugin SPI Core (5.5a)——已完成并合并。

@@ -1,114 +1,114 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: CacheStrategyABC abstract interface
-The system SHALL define `CacheStrategyABC` in `model_hub/cache.py` with `get(key: str) -> dict | None`, `set(key: str, value: dict, ttl: int) -> None`, `invalidate(pattern: str) -> int`, and `stats() -> dict` abstract methods.
+### Requirement: CacheStrategyABC 抽象接口 — CacheStrategyABC abstract interface
+系统应在 `model_hub/cache.py` 中定义 `CacheStrategyABC`，包含 `get(key: str) -> dict | None`、`set(key: str, value: dict, ttl: int) -> None`、`invalidate(pattern: str) -> int` 和 `stats() -> dict` 抽象方法。
 
-#### Scenario: CacheStrategyABC is abstract
-- **WHEN** code attempts to instantiate `CacheStrategyABC()` directly
-- **THEN** a `TypeError` SHALL be raised
+#### Scenario: CacheStrategyABC 是抽象的 — CacheStrategyABC is abstract
+- **WHEN** 代码尝试直接实例化 `CacheStrategyABC()`
+- **THEN** 应抛出 `TypeError`
 
-#### Scenario: Concrete subclass implements all methods
-- **WHEN** a subclass implements `get`, `set`, `invalidate`, and `stats`
-- **THEN** the subclass SHALL be instantiable
+#### Scenario: 具体子类实现所有方法 — Concrete subclass implements all methods
+- **WHEN** 子类实现了 `get`、`set`、`invalidate` 和 `stats`
+- **THEN** 该子类应可实例化
 
-### Requirement: InMemoryCacheStrategy built-in
-The system SHALL define `InMemoryCacheStrategy(CacheStrategyABC)` using a dict with TTL-based expiry.
+### Requirement: InMemoryCacheStrategy 内置 — InMemoryCacheStrategy built-in
+系统应定义 `InMemoryCacheStrategy(CacheStrategyABC)`，使用带 TTL 过期机制的字典。
 
-#### Scenario: Cache miss
-- **WHEN** `get("nonexistent")` is called
-- **THEN** the system SHALL return None
+#### Scenario: 缓存未命中 — Cache miss
+- **WHEN** 调用 `get("nonexistent")`
+- **THEN** 系统应返回 None
 
-#### Scenario: Cache hit within TTL
-- **WHEN** `set("key", {"response": "..."}, ttl=300)` is called, then `get("key")` within 300 seconds
-- **THEN** the system SHALL return the cached value
+#### Scenario: TTL 内缓存命中 — Cache hit within TTL
+- **WHEN** 调用 `set("key", {"response": "..."}, ttl=300)`，然后在 300 秒内调用 `get("key")`
+- **THEN** 系统应返回缓存值
 
-#### Scenario: Cache expiry after TTL
-- **WHEN** the TTL has expired
-- **THEN** `get("key")` SHALL return None and remove the expired entry
+#### Scenario: TTL 后的缓存过期 — Cache expiry after TTL
+- **WHEN** TTL 已过期
+- **THEN** `get("key")` 应返回 None 并移除过期条目
 
-#### Scenario: Pattern invalidation
-- **WHEN** `invalidate("gpt-4o:*")` is called
-- **THEN** all keys matching the pattern SHALL be removed and the count returned
+#### Scenario: 模式失效 — Pattern invalidation
+- **WHEN** 调用 `invalidate("gpt-4o:*")`
+- **THEN** 匹配模式的所有键应被移除，并返回计数
 
-#### Scenario: Cache stats
-- **WHEN** `stats()` is called
-- **THEN** the system SHALL return `{"hits": N, "misses": M, "size": K, "hit_rate": 0.XX}`
+#### Scenario: 缓存统计 — Cache stats
+- **WHEN** 调用 `stats()`
+- **THEN** 系统应返回 `{"hits": N, "misses": M, "size": K, "hit_rate": 0.XX}`
 
-### Requirement: RedisCacheStrategy optional
-The system SHALL define `RedisCacheStrategy(CacheStrategyABC)` that requires `redis` package and a configured Redis URL.
+### Requirement: RedisCacheStrategy 可选 — RedisCacheStrategy optional
+系统应定义 `RedisCacheStrategy(CacheStrategyABC)`，需要 `redis` 包和配置的 Redis URL。
 
-#### Scenario: Redis cache initialization
-- **WHEN** RedisCacheStrategy is created with `redis_url="redis://localhost:6379/0"`
-- **THEN** the strategy SHALL connect to Redis and verify connectivity
+#### Scenario: Redis 缓存初始化 — Redis cache initialization
+- **WHEN** 使用 `redis_url="redis://localhost:6379/0"` 创建 RedisCacheStrategy
+- **THEN** 该策略应连接到 Redis 并验证连接
 
-#### Scenario: Redis unavailable fallback
-- **WHEN** Redis is unreachable and `ROUTER_CACHE_FALLBACK_TO_MEMORY=True`
-- **THEN** the strategy SHALL log a warning and fall back to InMemoryCacheStrategy
+#### Scenario: Redis 不可达回退 — Redis unavailable fallback
+- **WHEN** Redis 不可达且 `ROUTER_CACHE_FALLBACK_TO_MEMORY=True`
+- **THEN** 该策略应记录警告并回退到 InMemoryCacheStrategy
 
-#### Scenario: Redis not configured
-- **WHEN** no Redis URL is configured
-- **THEN** the system SHALL use InMemoryCacheStrategy as default
+#### Scenario: Redis 未配置 — Redis not configured
+- **WHEN** 未配置 Redis URL
+- **THEN** 系统应默认使用 InMemoryCacheStrategy
 
-### Requirement: Cache key generation
-The system SHALL generate deterministic cache keys from model invocation parameters using SHA-256 hash.
+### Requirement: 缓存键生成 — Cache key generation
+系统应使用 SHA-256 哈希从模型调用参数生成确定性缓存键。
 
-#### Scenario: Same parameters produce same key
-- **WHEN** `generate_cache_key(model="gpt-4o", messages=[{"role": "user", "content": "Hello"}], temperature=0.7)` is called twice with identical inputs
-- **THEN** both calls SHALL return the same cache key
+#### Scenario: 相同参数产生相同键 — Same parameters produce same key
+- **WHEN** 使用相同输入两次调用 `generate_cache_key(model="gpt-4o", messages=[{"role": "user", "content": "Hello"}], temperature=0.7)`
+- **THEN** 两次调用应返回相同的缓存键
 
-#### Scenario: Different temperature produces different key
-- **WHEN** the same messages are used with temperature=0.7 vs temperature=0.0
-- **THEN** the cache keys SHALL differ
+#### Scenario: 不同温度产生不同键 — Different temperature produces different key
+- **WHEN** 相同的消息使用 temperature=0.7 vs temperature=0.0
+- **THEN** 缓存键应不同
 
-#### Scenario: Key includes model prefix
-- **WHEN** a cache key is generated for model "gpt-4o"
-- **THEN** the key SHALL be prefixed with "gpt-4o:" for pattern-based invalidation
+#### Scenario: 键包含模型前缀 — Key includes model prefix
+- **WHEN** 为模型 "gpt-4o" 生成缓存键
+- **THEN** 键应以 "gpt-4o:" 为前缀，用于基于模式的失效
 
-### Requirement: Router cache integration
-The system SHALL integrate caching into the LLM invocation path via ModelRouter, checking cache before calling the LLM and storing responses after.
+### Requirement: 路由器缓存集成 — Router cache integration
+系统应将缓存集成到 LLM 调用路径中，通过 ModelRouter 在调用 LLM 前检查缓存，并在调用后存储响应。
 
-#### Scenario: Cache hit skips LLM call
-- **WHEN** a request matches a cached entry
-- **THEN** the system SHALL return the cached response without invoking the LLM
+#### Scenario: 缓存命中跳过 LLM 调用 — Cache hit skips LLM call
+- **WHEN** 请求匹配缓存条目
+- **THEN** 系统应返回缓存的响应，而不调用 LLM
 
-#### Scenario: Cache miss invokes LLM and stores result
-- **WHEN** a request does not match any cached entry
-- **THEN** the system SHALL invoke the LLM, store the response in cache with configured TTL, and return the response
+#### Scenario: 缓存未命中调用 LLM 并存储结果 — Cache miss invokes LLM and stores result
+- **WHEN** 请求不匹配任何缓存条目
+- **THEN** 系统应调用 LLM，将响应以配置的 TTL 存储到缓存中，并返回响应
 
-#### Scenario: Cache disabled by config
+#### Scenario: 通过配置禁用缓存 — Cache disabled by config
 - **WHEN** `ROUTER_CACHE_ENABLED=False`
-- **THEN** the system SHALL skip all cache lookups and always invoke the LLM
+- **THEN** 系统应跳过所有缓存查找，始终调用 LLM
 
-### Requirement: Cost-aware routing
-The system SHALL extend ModelRouter to optionally consult BudgetService before selecting a model, routing to cheaper models when remaining budget is low.
+### Requirement: 成本感知路由 — Cost-aware routing
+系统应扩展 ModelRouter，在选择模型前可选地咨询 BudgetService，在剩余预算低时路由到更便宜的模型。
 
-#### Scenario: Budget healthy uses normal strategy
-- **WHEN** remaining workspace budget is above 50% of limit
-- **THEN** the router SHALL use the configured routing strategy (e.g., BALANCED)
+#### Scenario: 预算健康使用正常策略 — Budget healthy uses normal strategy
+- **WHEN** 工作区剩余预算高于限制的 50%
+- **THEN** 路由器应使用配置的路由策略（例如 BALANCED）
 
-#### Scenario: Budget low switches to cost strategy
-- **WHEN** remaining workspace budget falls below 20% of limit
-- **THEN** the router SHALL switch to COST strategy, selecting the cheapest capable model
+#### Scenario: 预算低时切换到成本策略 — Budget low switches to cost strategy
+- **WHEN** 工作区剩余预算降至限制的 20% 以下
+- **THEN** 路由器应切换到 COST 策略，选择最便宜的可用模型
 
-#### Scenario: Budget exhausted blocks expensive models
-- **WHEN** workspace budget hard limit is reached
-- **THEN** the router SHALL reject the request with HTTP 429 "Budget exceeded"
+#### Scenario: 预算耗尽阻止昂贵模型 — Budget exhausted blocks expensive models
+- **WHEN** 达到工作区预算硬限制
+- **THEN** 路由器应拒绝请求，返回 HTTP 429 "Budget exceeded"
 
-### Requirement: Cache and router configuration
-The system SHALL add router cache settings to the Settings class.
+### Requirement: 缓存和路由器配置 — Cache and router configuration
+系统应向 Settings 类添加路由器缓存设置。
 
-#### Scenario: Enable cache
-- **WHEN** Settings includes `ROUTER_CACHE_ENABLED=True` (default)
-- **THEN** the router SHALL use the configured cache strategy
+#### Scenario: 启用缓存 — Enable cache
+- **WHEN** Settings 包含 `ROUTER_CACHE_ENABLED=True`（默认）
+- **THEN** 路由器应使用配置的缓存策略
 
-#### Scenario: Cache TTL
-- **WHEN** Settings includes `ROUTER_CACHE_TTL=300` (default 300 seconds)
-- **THEN** cached entries SHALL expire after the configured TTL
+#### Scenario: 缓存 TTL — Cache TTL
+- **WHEN** Settings 包含 `ROUTER_CACHE_TTL=300`（默认 300 秒）
+- **THEN** 缓存条目应在配置的 TTL 后过期
 
-#### Scenario: Redis URL
-- **WHEN** Settings includes `ROUTER_CACHE_REDIS_URL="redis://localhost:6379/0"`
-- **THEN** the system SHALL use RedisCacheStrategy
+#### Scenario: Redis URL — Redis URL
+- **WHEN** Settings 包含 `ROUTER_CACHE_REDIS_URL="redis://localhost:6379/0"`
+- **THEN** 系统应使用 RedisCacheStrategy
 
-#### Scenario: Cost-aware routing toggle
-- **WHEN** Settings includes `ROUTER_COST_AWARE=True` (default)
-- **THEN** the router SHALL consult BudgetService for cost-aware model selection
+#### Scenario: 成本感知路由开关 — Cost-aware routing toggle
+- **WHEN** Settings 包含 `ROUTER_COST_AWARE=True`（默认）
+- **THEN** 路由器应咨询 BudgetService 进行成本感知的模型选择

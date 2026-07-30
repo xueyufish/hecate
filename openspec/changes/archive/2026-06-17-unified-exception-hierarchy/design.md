@@ -1,79 +1,79 @@
-## Context
+## Context — 背景
 
-Hecate's engine layer currently uses generic Python exceptions (ValueError, KeyError, RuntimeError) with no domain-specific types. The existing `ErrorClassifier` in `services/validation/retry_policy.py` classifies errors via string keyword matching (checking for "timeout", "rate limit", "429" etc. in error messages).
+Hecate 的 engine 层目前使用泛型 Python 异常（ValueError、KeyError、RuntimeError），没有领域特定类型。现有的 `ErrorClassifier` 位于 `services/validation/retry_policy.py` 中，通过字符串关键字匹配（检查错误消息中是否包含 "timeout"、"rate limit"、"429" 等）来分类错误。
 
-The original spec for 1.3.5g called for a full hierarchy: `HecateError → LLMError/ToolError/EngineError/SecurityError/ChannelError` with ~15 exception subtypes. However, research across 10 platforms shows this approach is not industry practice:
+原始 1.3.5g 规范要求完整的异常层级：`HecateError → LLMError/ToolError/EngineError/SecurityError/ChannelError`，包含约 15 个异常子类型。然而，对 10 个平台的研究表明，这种做法并非行业实践：
 
-- **0/10 platforms** wrap provider exceptions into their own LLMError tree
-- OpenAI SDK uses status-code-based hierarchy (RateLimitError=429, AuthenticationError=401)
-- LiteLLM extends OpenAI's hierarchy directly
-- LangChain uses dual-inheritance mapping (e.g., `OpenAIContextOverflowError(openai.BadRequestError, ContextOverflowError)`)
-- Google ADK lets Gemini errors pass through unwrapped, uses `ToolErrorType` enum for semantics
-- LangGraph defines only graph-specific errors (GraphRecursionError, NodeTimeoutError, InvalidUpdateError)
+- **0/10 平台** 将提供商异常包装到自己的 LLMError 树中
+- OpenAI SDK 使用基于状态码的层级（RateLimitError=429, AuthenticationError=401）
+- LiteLLM 直接扩展 OpenAI 的层级
+- LangChain 使用双重继承映射（例如 `OpenAIContextOverflowError(openai.BadRequestError, ContextOverflowError)`）
+- Google ADK 让 Gemini 错误未经包装直接通过，使用 `ToolErrorType` 枚举进行语义分类
+- LangGraph 只定义图形特定错误（GraphRecursionError, NodeTimeoutError, InvalidUpdateError）
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Define `HecateError` base class with Hecate-specific exception categories
-- Replace generic exceptions (RuntimeError, KeyError) with typed Hecate exceptions
-- Define `ErrorCategory` enum for semantic error classification
-- Upgrade `ErrorClassifier` to support isinstance-based matching alongside string fallback
-- Maintain full backward compatibility — all existing except blocks continue to work
+**目标：**
+- 定义 `HecateError` 基类，包含 Hecate 特定的异常类别
+- 用类型化的 Hecate 异常替换泛型异常（RuntimeError, KeyError）
+- 定义 `ErrorCategory` 枚举用于语义错误分类
+- 升级 `ErrorClassifier` 以支持基于 isinstance 的匹配及字符串回退
+- 保持完全向后兼容——所有现有的 except 块继续工作
 
-**Non-Goals:**
-- LLMError/ToolError exception tree (deferred — industry consensus is to let provider exceptions pass through)
-- Dual-inheritance provider mapping (P4 — LangChain pattern, requires provider-specific classes)
-- Framework-Level Auto-Retry (1.3.5h — separate change, depends on this one)
-- Platform-Level Tool Gating (1.3.5f — independent)
-- Refactoring API layer error handling (separate change)
+**非目标：**
+- LLMError/ToolError 异常树（推迟——行业共识是让提供商异常直接通过）
+- 双重继承提供商映射（P4——LangChain 模式，需要提供商特定类）
+- 框架级自动重试（1.3.5h——单独变更，依赖此变更）
+- 平台级工具门控（1.3.5f——独立）
+- 重构 API 层错误处理（单独变更）
 
-## Decisions
+## Decisions — 决策
 
-### D1: Only define Hecate-specific exceptions, not LLM/Tool wrappers
+### D1: 只定义 Hecate 特定异常，不定义 LLM/Tool 包装器
 
-**Choice**: Define `HecateError → EngineError/ChannelError/SecurityError` only. Do not create LLMError or ToolError exception trees.
+**选择**：仅定义 `HecateError → EngineError/ChannelError/SecurityError`。不创建 LLMError 或 ToolError 异常树。
 
-**Rationale**: 10-platform research shows zero platforms wrap provider exceptions. Hecate uses LiteLLM which already inherits OpenAI's typed exceptions (RateLimitError, AuthenticationError, etc.). Wrapping them in `LLMRateLimitError` adds a layer with no value — `isinstance(e, openai.RateLimitError)` already works.
+**理由**：10 个平台的研究显示，零个平台包装提供商异常。Hecate 使用 LiteLLM，它已经继承了 OpenAI 的类型化异常（RateLimitError, AuthenticationError 等）。将它们包装在 `LLMRateLimitError` 中增加了一层无价值的抽象——`isinstance(e, openai.RateLimitError)` 已经可以工作。
 
-**Alternatives considered**:
-- Full tree (spec original): Rejected — no industry precedent, engine layer can't import provider SDKs (layer constraint)
-- Dual-inheritance (LangChain pattern): Deferred to P4 — requires provider-specific mapping classes in services layer
+**考虑的替代方案**：
+- 完整树（原始规范）：拒绝——没有行业先例，engine 层无法导入提供商 SDK（层级约束）
+- 双重继承（LangChain 模式）：推迟到 P4——需要在 services 层提供提供商特定的映射类
 
-### D2: ErrorCategory enum replaces LLMError/ToolError for classification
+### D2: ErrorCategory 枚举取代 LLMError/ToolError 进行分类
 
-**Choice**: Define `ErrorCategory` StrEnum with semantic categories for all error sources (LLM, Tool, Engine, Security, Channel). `ErrorClassifier.classify()` returns `ErrorCategory` instead of bool.
+**选择**：定义 `ErrorCategory` StrEnum，包含所有错误源（LLM, Tool, Engine, Security, Channel）的语义类别。`ErrorClassifier.classify()` 返回 `ErrorCategory` 而不是 bool。
 
-**Rationale**: Google ADK's `ToolErrorType` enum proves that semantic categorization via enum is sufficient for retry decisions, observability, and error reporting. It avoids the complexity of a full exception tree while providing the same classification power.
+**理由**：Google ADK 的 `ToolErrorType` 枚举证明，通过枚举进行语义分类足以支持重试决策、可观测性和错误报告。它避免了完整异常树的复杂性，同时提供相同的分类能力。
 
-### D3: ErrorClassifier upgraded in-place, backward compatible
+### D3: ErrorClassifier 原地升级，向后兼容
 
-**Choice**: Extend existing `ErrorClassifier` in `services/validation/retry_policy.py` with new `classify(error) -> ErrorCategory` method. Existing `is_retryable(error_string)` method preserved with string fallback.
+**选择**：扩展 `services/validation/retry_policy.py` 中现有的 `ErrorClassifier`，新增 `classify(error) -> ErrorCategory` 方法。保留现有的 `is_retryable(error_string)` 方法及字符串回退。
 
-**Rationale**: ErrorClassifier is already used by RetryPolicy and CircuitBreaker. The upgrade adds isinstance checks before falling back to string matching. No breaking change to existing callers.
+**理由**：ErrorClassifier 已被 RetryPolicy 和 CircuitBreaker 使用。升级在回退到字符串匹配之前增加了 isinstance 检查。对现有调用者没有破坏性变更。
 
-### D4: GraphValidationError inheritance change
+### D4: GraphValidationError 继承变更
 
-**Choice**: Change `GraphValidationError(Exception)` to `GraphValidationError(EngineError)`.
+**选择**：将 `GraphValidationError(Exception)` 改为 `GraphValidationError(EngineError)`。
 
-**Rationale**: EngineError inherits from HecateError inherits from Exception. Python's exception handling checks inheritance chains, so `except GraphValidationError` and `except Exception` both continue to work. The only behavioral change: `except EngineError` now also catches GraphValidationError (desired).
+**理由**：EngineError 继承自 HecateError 继承自 Exception。Python 的异常处理会检查继承链，因此 `except GraphValidationError` 和 `except Exception` 都继续工作。唯一的行为变化：`except EngineError` 现在也会捕获 GraphValidationError（这正是期望的行为）。
 
-### D5: MaxSuperstepsError and ChannelNotFoundError replace generic exceptions
+### D5: MaxSuperstepsError 和 ChannelNotFoundError 替换泛型异常
 
-**Choice**: Replace `raise RuntimeError(...)` in pregel.py with `raise MaxSuperstepsError(...)`. Replace `raise KeyError(...)` in channel.py with `raise ChannelNotFoundError(...)`.
+**选择**：将 `pregel.py` 中的 `raise RuntimeError(...)` 替换为 `raise MaxSuperstepsError(...)`。将 `channel.py` 中的 `raise KeyError(...)` 替换为 `raise ChannelNotFoundError(...)`。
 
-**Rationale**: LangGraph uses `GraphRecursionError(RecursionError)` and `InvalidUpdateError` for similar situations. Typed exceptions allow API layer to catch specific engine errors for appropriate HTTP status mapping.
+**理由**：LangGraph 对类似情况使用 `GraphRecursionError(RecursionError)` 和 `InvalidUpdateError`。类型化异常允许 API 层捕获特定的 engine 错误以进行适当的 HTTP 状态映射。
 
-### D6: GuardrailBlockedError vs existing GuardrailAction.BLOCK
+### D6: GuardrailBlockedError 与现有的 GuardrailAction.BLOCK
 
-**Choice**: Define `GuardrailBlockedError(SecurityError)` as an optional exception that can be raised by guardrail hooks, while preserving the existing `GuardrailResult(action=BLOCK)` return-based pattern.
+**选择**：定义 `GuardrailBlockedError(SecurityError)` 作为可选的异常，可由 guardrail hook 抛出，同时保留现有的基于 `GuardrailResult(action=BLOCK)` 返回值的模式。
 
-**Rationale**: The current return-based pattern (PreLLMHook returns GuardrailResult with action=BLOCK) is the primary mechanism. GuardrailBlockedError provides an alternative for code paths that prefer exception-based control flow. Both patterns coexist.
+**理由**：当前基于返回值的模式（PreLLMHook 返回带有 action=BLOCK 的 GuardrailResult）是主要机制。GuardrailBlockedError 为偏好基于异常的控制流的代码路径提供了替代方案。两种模式共存。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-| Risk | Mitigation |
+| 风险 | 缓解措施 |
 |------|------------|
-| GraphValidationError inheritance change could break isinstance checks | Python inheritance chain: GraphValidationError → EngineError → HecateError → Exception. All existing except blocks work. |
-| ErrorClassifier isinstance checks require importing provider SDKs | Classifier lives in services/ layer (not engine/), so importing openai/litellm is allowed. |
-| ErrorCategory enum may not cover all edge cases | UNKNOWN category as fallback. String-based matching preserved for unrecognized errors. |
-| GuardrailBlockedError duplicates GuardrailAction.BLOCK | Both coexist by design — return-based for hooks, exception-based for direct calls. |
+| GraphValidationError 继承变更可能破坏 isinstance 检查 | Python 继承链：GraphValidationError → EngineError → HecateError → Exception。所有现有的 except 块都能工作。 |
+| ErrorClassifier 的 isinstance 检查需要导入提供商 SDK | Classifier 位于 services/ 层（不是 engine/），因此导入 openai/litellm 是允许的。 |
+| ErrorCategory 枚举可能无法覆盖所有边界情况 | UNKNOWN 类别作为回退。保留基于字符串的匹配以处理未识别的错误。 |
+| GuardrailBlockedError 与 GuardrailAction.BLOCK 重复 | 两者按设计共存——基于返回值的方式用于 hook，基于异常的方式用于直接调用。 |

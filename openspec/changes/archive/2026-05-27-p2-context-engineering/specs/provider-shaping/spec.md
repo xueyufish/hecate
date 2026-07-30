@@ -1,49 +1,49 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Provider Strategy shapes context for target LLM
-The system SHALL apply a provider-specific strategy to the assembled context before passing it to the LLM service, adapting message format, tool definitions, and system prompt structure to the target provider's preferences.
+### 需求：Provider 策略为目标 LLM 适配上下文
+系统须在将组装后的上下文传递给 LLM 服务之前，应用 provider 特定的策略，根据目标 provider 的偏好适配消息格式、工具定义和 system prompt 结构。
 
-#### Scenario: OpenAI provider strategy
-- **WHEN** the target model starts with "gpt-" and the context contains a system message longer than 2000 tokens
-- **THEN** the OpenAI strategy SHALL truncate the system message to 2000 tokens and append a note indicating truncation
+#### 场景：OpenAI provider 策略
+- **当** 目标模型以 "gpt-" 开头且上下文中包含超过 2000 token 的 system 消息
+- **则** OpenAI 策略须将 system 消息截断至 2000 token 并附加截断说明
 
-#### Scenario: Anthropic provider strategy
-- **WHEN** the target model starts with "claude-" and the context contains tool definitions
-- **THEN** the Anthropic strategy SHALL format tool definitions using Anthropic's native tool format (input_schema instead of parameters) if different from OpenAI format
+#### 场景：Anthropic provider 策略
+- **当** 目标模型以 "claude-" 开头且上下文中包含工具定义
+- **则** Anthropic 策略须使用 Anthropic 原生工具格式（input_schema 替代 parameters）格式化工具定义
 
-#### Scenario: Unknown provider uses default strategy
-- **WHEN** the target model does not match any known provider prefix
-- **THEN** the default strategy SHALL pass the context through unchanged
+#### 场景：未知 provider 使用默认策略
+- **当** 目标模型不匹配任何已知 provider 前缀
+- **则** 默认策略须原样传递上下文，不做修改
 
-### Requirement: Strategy selection by model name
-The system SHALL automatically select the appropriate provider strategy based on the model identifier.
+### 需求：按模型名称选择策略
+系统须根据模型标识符自动选择合适的 provider 策略。
 
-#### Scenario: Model name mapping
-- **WHEN** the model is "gpt-4o"
-- **THEN** the system SHALL select `OpenAIStrategy`
+#### 场景：模型名称映射
+- **当** 模型为 "gpt-4o"
+- **则** 系统须选择 `OpenAIStrategy`
 
-#### Scenario: Model name mapping for Claude
-- **WHEN** the model is "claude-3-5-sonnet-20241022"
-- **THEN** the system SHALL select `AnthropicStrategy`
+#### 场景：Claude 的模型名称映射
+- **当** 模型为 "claude-3-5-sonnet-20241022"
+- **则** 系统须选择 `AnthropicStrategy`
 
-#### Scenario: Fallback to default
-- **WHEN** the model is "qwen-plus" and no Qwen-specific strategy is registered
-- **THEN** the system SHALL select `DefaultStrategy`
+#### 场景：回退到默认
+- **当** 模型为 "qwen-plus" 且未注册 Qwen 专属策略
+- **则** 系统须选择 `DefaultStrategy`
 
-### Requirement: Provider-specific system message handling
-The system SHALL adapt the system message construction based on provider requirements.
+### 需求：Provider 特定的 system 消息处理
+系统须根据 provider 要求适配 system 消息的构建方式。
 
-#### Scenario: Anthropic system message as top-level parameter
-- **WHEN** the target provider is Anthropic
-- **THEN** the strategy SHALL extract the system message from the messages array and ensure it is passed as the top-level `system` parameter (Anthropic API convention)
+#### 场景：Anthropic system 消息作为顶级参数
+- **当** 目标 provider 为 Anthropic
+- **则** 策略须从 messages 数组中提取 system 消息，并确保作为顶级 `system` 参数传递（Anthropic API 约定）
 
-#### Scenario: OpenAI system message stays in messages array
-- **WHEN** the target provider is OpenAI
-- **THEN** the strategy SHALL keep the system message as the first element in the messages array
+#### 场景：OpenAI system 消息保留在 messages 数组中
+- **当** 目标 provider 为 OpenAI
+- **则** 策略须将 system 消息作为 messages 数组的第一个元素保留
 
-### Requirement: Provider strategy is extensible
-The system SHALL allow registration of custom provider strategies without modifying existing code.
+### 需求：Provider 策略可扩展
+系统须允许在不修改现有代码的情况下注册自定义 provider 策略。
 
-#### Scenario: Registering a custom strategy
-- **WHEN** a user registers a custom strategy for model prefix "deepseek-"
-- **THEN** subsequent calls with a model starting with "deepseek-" SHALL use the custom strategy instead of the default
+#### 场景：注册自定义策略
+- **当** 用户为模型前缀 "deepseek-" 注册自定义策略
+- **则** 后续使用以 "deepseek-" 开头的模型的调用须使用自定义策略而非默认策略

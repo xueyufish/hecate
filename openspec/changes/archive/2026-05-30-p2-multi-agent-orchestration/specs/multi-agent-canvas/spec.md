@@ -1,56 +1,56 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Agent palette in workflow canvas
-The system SHALL display an agent palette in the workflow canvas sidebar listing all available agents. Users SHALL be able to drag agents from the palette onto the canvas to create AGENT nodes.
+### 需求：工作流画布中的 Agent 调色板
+系统须在工作流画布侧边栏显示 Agent 调色板，列出所有可用 Agent。用户须能够将 Agent 从调色板拖入画布，创建 AGENT 节点。
 
-#### Scenario: Agent palette displays available agents
-- **WHEN** the user opens the workflow canvas editor
-- **THEN** the sidebar shows an "Agents" section listing all non-deleted agents with name and mode
+#### 场景：Agent 调色板显示可用 Agent
+- **当** 用户打开工作流画布编辑器
+- **则** 侧边栏显示"Agents"部分，列出所有未删除的 Agent，包含名称和模式
 
-#### Scenario: Drag agent to canvas creates AGENT node
-- **WHEN** the user drags an agent from the palette onto the canvas
-- **THEN** a new AGENT node is created with the agent's ID and name, positioned at the drop location
+#### 场景：将 Agent 拖入画布创建 AGENT 节点
+- **当** 用户将 Agent 从调色板拖到画布上
+- **则** 创建新的 AGENT 节点，包含该 Agent 的 ID 和名称，定位在放置位置
 
-### Requirement: Edge type differentiation in canvas
-The system SHALL render handoff edges differently from standard edges. Handoff edges SHALL use a dashed line style. Standard (invoke-as-tool) edges SHALL use a solid line style.
+### 需求：画布中的边类型区分
+系统须以不同于标准边的方式渲染 handoff 边。Handoff 边须使用虚线样式。标准（invoke-as-tool）边须使用实线样式。
 
-#### Scenario: Handoff edge rendered as dashed
-- **WHEN** a graph contains an edge with `type: "handoff"` between two agent nodes
-- **THEN** the canvas renders the edge as a dashed line
+#### 场景：Handoff 边渲染为虚线
+- **当** 图中包含两个 agent 节点之间带有 `type: "handoff"` 的边
+- **则** 画布将该边渲染为虚线
 
-#### Scenario: Standard edge rendered as solid
-- **WHEN** a graph contains a standard edge (no type or `type: "default"`)
-- **THEN** the canvas renders the edge as a solid line
+#### 场景：标准边渲染为实线
+- **当** 图中包含标准边（无 type 或 `type: "default"`）
+- **则** 画布将该边渲染为实线
 
-### Requirement: Edge type selection when connecting nodes
-The system SHALL allow users to choose the edge type (handoff vs invoke-as-tool) when connecting two agent nodes. The connection dialog SHALL present both options.
+### 需求：连接节点时的边类型选择
+系统须允许用户在连接两个 agent 节点时选择边类型（handoff vs invoke-as-tool）。连接对话框须呈现两个选项。
 
-#### Scenario: User creates handoff connection
-- **WHEN** the user connects agent node A to agent node B and selects "Handoff" in the connection dialog
-- **THEN** the graph DSL stores the edge with `type: "handoff"` (rendered as `trigger: "handoff"`)
+#### 场景：用户创建 handoff 连接
+- **当** 用户连接 agent 节点 A 到 agent 节点 B，并在连接对话框中选择"Handoff"
+- **则** Graph DSL 存储该边为 `type: "handoff"`（渲染为 `trigger: "handoff"`）
 
-#### Scenario: User creates invoke-as-tool connection
-- **WHEN** the user connects agent node A to agent node B and selects "Invoke as Tool" in the connection dialog
-- **THEN** the graph DSL stores the edge without type (standard data flow)
+#### 场景：用户创建 invoke-as-tool 连接
+- **当** 用户连接 agent 节点 A 到 agent 节点 B，并在连接对话框中选择"Invoke as Tool"
+- **则** Graph DSL 存储该边不带类型（标准数据流）
 
-### Requirement: Orchestration template picker
-The system SHALL provide a template picker accessible from the workflow canvas toolbar. Users SHALL be able to select a pre-built orchestration template which populates the canvas with the template's graph.
+### 需求：编排模板选择器
+系统须提供可从工作流画布工具栏访问的模板选择器。用户须能够选择预构建的编排模板，用模板的图填充画布。
 
-#### Scenario: User loads triage template
-- **WHEN** the user opens the template picker and selects "Customer Service Triage"
-- **THEN** the canvas is populated with a router agent connected to 3 specialist agents via handoff edges
+#### 场景：用户加载分类模板
+- **当** 用户打开模板选择器并选择"Customer Service Triage"
+- **则** 画布被填充：一个路由器 agent 通过 handoff 边连接到 3 个专业 agent
 
-#### Scenario: Template replaces current canvas
-- **WHEN** the user loads a template and the canvas already has nodes
-- **THEN** the system prompts for confirmation before replacing the current canvas content
+#### 场景：模板替换当前画布
+- **当** 用户加载模板而画布已有节点
+- **则** 系统在替换当前画布内容前提示确认
 
-### Requirement: Multi-agent execution visualization
-The system SHALL highlight the currently executing agent node during workflow test runs. The canvas SHALL visually distinguish completed, executing, and pending agent nodes.
+### 需求：多 Agent 执行可视化
+系统须在工作流测试运行期间高亮当前正在执行的 agent 节点。画布须在视觉上区分已完成、执行中和待处理的 agent 节点。
 
-#### Scenario: Test run highlights executing agent
-- **WHEN** a workflow test run is in progress and agent node "specialist" is executing
-- **THEN** the "specialist" node is highlighted with a pulsing animation
+#### 场景：测试运行高亮执行中的 Agent
+- **当** 工作流测试运行正在进行，agent 节点 "specialist" 正在执行
+- **则** "specialist" 节点以脉冲动画高亮
 
-#### Scenario: Test run shows completed agents
-- **WHEN** a workflow test run has completed agent nodes
-- **THEN** those nodes show a green checkmark overlay
+#### 场景：测试运行显示已完成的 Agent
+- **当** 工作流测试运行已完成 agent 节点
+- **则** 这些节点显示绿色勾选覆盖标记

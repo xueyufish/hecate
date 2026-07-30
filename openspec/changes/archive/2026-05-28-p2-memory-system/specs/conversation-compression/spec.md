@@ -1,52 +1,52 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Snip low-value messages
-The system SHALL remove messages with low information density when the context exceeds the token budget.
+### 需求：裁剪低价值消息
+系统须在上下文超出 token 预算时移除信息密度低的消息。
 
-#### Scenario: Remove system notifications
-- **WHEN** the context exceeds budget and contains system notification messages
-- **THEN** the system SHALL remove those messages first
+#### 场景：移除系统通知
+- **当** 上下文超出预算且包含系统通知消息
+- **则** 系统须优先移除这些消息
 
-#### Scenario: Preserve recent messages
-- **WHEN** applying snip
-- **THEN** the system SHALL preserve the most recent N messages (configurable, default 6)
+#### 场景：保留近期消息
+- **当** 应用裁剪时
+- **则** 系统须保留最近 N 条消息（可配置，默认 6）
 
-### Requirement: Microcompact consecutive messages
-The system SHALL merge consecutive messages from the same role into a single message.
+### 需求：微压缩连续消息
+系统须将来自同一角色的连续消息合并为单条消息。
 
-#### Scenario: Merge consecutive user messages
-- **WHEN** there are 3 consecutive user messages
-- **THEN** the system SHALL merge them into a single user message with combined content
+#### 场景：合并连续用户消息
+- **当** 有 3 条连续的用户消息
+- **则** 系统须将它们合并为一条包含合并内容的用户消息
 
-#### Scenario: Preserve message boundaries
-- **WHEN** merging messages
-- **THEN** the system SHALL add separators between merged content
+#### 场景：保留消息边界
+- **当** 合并消息时
+- **则** 系统须在合并内容之间添加分隔符
 
-### Requirement: Autocompact with LLM summary
-The system SHALL use the LLM to generate a summary of older messages when snip and microcompact are insufficient.
+### 需求：使用 LLM 摘要的自动压缩
+系统须在裁剪和微压缩不足以满足预算时使用 LLM 生成较早消息的摘要。
 
-#### Scenario: Generate summary
-- **WHEN** snip and microcompact cannot reduce context below budget
-- **THEN** the system SHALL call the LLM to summarize messages older than the recent window
+#### 场景：生成摘要
+- **当** 裁剪和微压缩无法将上下文降至预算以下
+- **则** 系统须调用 LLM 摘要早于近期窗口的消息
 
-#### Scenario: Summary replaces old messages
-- **WHEN** a summary is generated
-- **THEN** the system SHALL replace the summarized messages with a single summary message
+#### 场景：摘要替换旧消息
+- **当** 生成摘要后
+- **则** 系统须将摘要后的消息替换为单条摘要消息
 
-### Requirement: Compression pipeline integration
-The system SHALL integrate the compression pipeline into the context assembly process.
+### 需求：压缩管道集成
+系统须将压缩管道集成到上下文组装流程中。
 
-#### Scenario: Compression applied before LLM call
-- **WHEN** context is assembled and exceeds budget
-- **THEN** the system SHALL apply snip → microcompact → autocompact in order until within budget
+#### 场景：LLM 调用前应用压缩
+- **当** 组装上下文且超出预算
+- **则** 系统须按顺序应用 snip → microcompact → autocompact 直到符合预算
 
-#### Scenario: Compression skips recent messages
-- **WHEN** applying compression
-- **THEN** the system SHALL not compress messages within the recent window
+#### 场景：压缩跳过近期消息
+- **当** 应用压缩时
+- **则** 系统须不压缩近期窗口内的消息
 
-### Requirement: Compression metadata
-The system SHALL track compression statistics for observability.
+### 需求：压缩元数据
+系统须跟踪压缩统计信息用于可观测性。
 
-#### Scenario: Track compression events
-- **WHEN** compression is applied
-- **THEN** the system SHALL record: original token count, compressed token count, compression level applied, messages affected
+#### 场景：跟踪压缩事件
+- **当** 应用压缩时
+- **则** 系统须记录：原始 token 数、压缩后 token 数、应用的压缩级别、受影响的消息数

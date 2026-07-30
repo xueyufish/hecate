@@ -1,34 +1,34 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Configurable retry policy
-The system SHALL support configurable retry policies for tool execution.
+### 需求：可配置的重试策略
+系统须支持工具执行的可配置重试策略。
 
-#### Scenario: Exponential backoff
-- **WHEN** a tool fails with a retryable error
-- **THEN** the system retries with exponential backoff (1s, 2s, 4s, ...)
+#### 场景：指数退避
+- **当** 工具因可重试错误失败
+- **则** 系统使用指数退避重试（1s, 2s, 4s, ...）
 
-#### Scenario: Max retries exceeded
-- **WHEN** a tool fails after max retries
-- **THEN** the system returns error result
+#### 场景：超过最大重试次数
+- **当** 工具在达到最大重试次数后仍失败
+- **则** 系统返回错误结果
 
-### Requirement: Error classification
-The system SHALL classify errors as retryable or non-retryable.
+### 需求：错误分类
+系统须将错误分类为可重试或不可重试。
 
-#### Scenario: Retryable error (network timeout)
-- **WHEN** a tool fails with network timeout
-- **THEN** the system retries
+#### 场景：可重试错误（网络超时）
+- **当** 工具因网络超时失败
+- **则** 系统重试
 
-#### Scenario: Non-retryable error (invalid input)
-- **WHEN** a tool fails with invalid input error
-- **THEN** the system does not retry
+#### 场景：不可重试错误（无效输入）
+- **当** 工具因无效输入错误失败
+- **则** 系统不重试
 
-### Requirement: Circuit breaker
-The system SHALL implement circuit breaker pattern for tools with high failure rates.
+### 需求：熔断器
+系统须为高失败率的工具实现熔断器模式。
 
-#### Scenario: Circuit opens
-- **WHEN** a tool fails 5 times in 1 minute
-- **THEN** the circuit opens and subsequent calls fail immediately for 30 seconds
+#### 场景：熔断器打开
+- **当** 工具在 1 分钟内失败 5 次
+- **则** 熔断器打开，后续调用立即失败 30 秒
 
-#### Scenario: Circuit half-open
-- **WHEN** the circuit is open and 30 seconds pass
-- **THEN** the circuit allows one test call
+#### 场景：熔断器半开
+- **当** 熔断器处于打开状态且 30 秒已过
+- **则** 熔断器允许一次测试调用

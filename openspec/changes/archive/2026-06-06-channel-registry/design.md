@@ -1,35 +1,35 @@
-## Context
+## Context — 背景
 
-Channel write semantics are scattered across the engine layer. `Channel._initial_value()` and `Channel.write()` use `if/elif` chains against `ChannelType` enum values. `ChannelManager.write()` checks `ChannelType.TOPIC | PERSISTENT_TOPIC` for eviction eligibility. `ConflictResolver.resolve()` uses raw string comparison (`"last_value"`, `"topic"`, `"accumulator"`) with no reference to the enum at all. Adding a new channel type requires coordinated changes in 4 locations across 3 files with no structural guarantee of consistency.
+Channel 写入语义分散在 engine 层中。`Channel._initial_value()` 和 `Channel.write()` 使用针对 `ChannelType` 枚举值的 `if/elif` 链。`ChannelManager.write()` 检查 `ChannelType.TOPIC | PERSISTENT_TOPIC` 以判断驱逐资格。`ConflictResolver.resolve()` 使用原始字符串比较（`"last_value"`、`"topic"`、`"accumulator"`），完全没有引用枚举。添加新的 channel 类型需要在 3 个文件的 4 个位置进行协调修改，且没有结构性的保证来确保一致性。
 
-Additionally, `PERSISTENT_TOPIC` is a separate enum value that has identical runtime behavior to `TOPIC` — persistence semantics are not implemented. Persistence is orthogonal to write behavior and should not be a separate type.
+此外，`PERSISTENT_TOPIC` 是一个独立的枚举值，但其运行时行为与 `TOPIC` 完全相同——持久化语义并未实现。持久化与写入行为是正交的，不应作为单独的类型存在。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Consolidate all channel-type-specific behavior (initial value, write, eviction eligibility, conflict resolution) into a single `ChannelBehavior` ABC
-- Provide a `ChannelTypeRegistry` that maps type name strings to `ChannelBehavior` instances
-- Pre-register the 3 semantically distinct types (LAST_VALUE, TOPIC, ACCUMULATOR)
-- Separate persistence from write semantics — `ChannelDef` gains `persistent: bool`
-- Maintain backward compatibility for existing graph definitions using `"persistent_topic"`
+**目标：**
+- 将所有 channel 类型特定行为（初始值、写入、驱逐资格、冲突解决）整合到单个 `ChannelBehavior` ABC 中
+- 提供将类型名称字符串映射到 `ChannelBehavior` 实例的 `ChannelTypeRegistry`
+- 预注册 3 个语义上不同的类型（LAST_VALUE、TOPIC、ACCUMULATOR）
+- 将持久化与写入语义分离 — `ChannelDef` 新增 `persistent: bool`
+- 保持对使用 `"persistent_topic"` 的现有图定义的向后兼容
 
-**Non-Goals:**
-- Implementing actual persistence semantics for `persistent=True` channels (P2)
-- Building a plugin loading system for third-party channel behaviors
-- Changing the `Channel` serialization/deserialization format beyond the PERSISTENT_TOPIC migration
+**非目标：**
+- 实现 `persistent=True` 通道的实际持久化语义（P2）
+- 构建用于第三方 channel 行为的插件加载系统
+- 改变 `Channel` 序列化/反序列化格式（PERSISTENT_TOPIC 迁移除外）
 
-## Decisions
+## Decisions — 设计决策
 
-### D1: ChannelBehavior is an ABC (not Protocol)
+### D1: ChannelBehavior 是 ABC（而非 Protocol）
 
-**Choice**: Use engine's existing ABC pattern (`abc.ABC`, `@abstractmethod`).
+**选择**：使用 engine 现有的 ABC 模式（`abc.ABC`、`@abstractmethod`）。
 
-**Alternatives considered**:
-- `typing.Protocol` — lighter weight but inconsistent with engine conventions (all other extensibility points use ABC: EnginePort, Worker, CheckpointStore, etc.)
+**考虑的替代方案**：
+- `typing.Protocol` — 更轻量，但与 engine 约定不一致（所有其他扩展点都使用 ABC：EnginePort、Worker、CheckpointStore 等）
 
-**Rationale**: Consistency with existing engine ABC inventory. ChannelBehavior follows the same abstract/concrete pattern as EvictionPolicy, OptimizationPass, etc.
+**理由**：与现有的 engine ABC 清单保持一致。ChannelBehavior 遵循与 EvictionPolicy、OptimizationPass 等相同的抽象/具体模式。
 
-### D2: ChannelBehavior has 4 abstract methods
+### D2: ChannelBehavior 有 4 个抽象方法
 
 ```python
 class ChannelBehavior(ABC):
@@ -46,45 +46,45 @@ class ChannelBehavior(ABC):
     def resolve_conflict(self, current: Any, proposed: Any) -> Any: ...
 ```
 
-**Rationale**: These 4 methods cover every place channel type is currently checked. `write()` returns the new value (immutable-style) rather than mutating in place, which is cleaner for testing and conflict resolution.
+**理由**：这 4 个方法覆盖了当前检查 channel 类型的每一个位置。`write()` 返回新值（不可变风格），而不是原地修改，这样更利于测试和冲突解决。
 
-### D3: ChannelTypeRegistry is a module-level singleton
+### D3: ChannelTypeRegistry 是模块级单例
 
-**Choice**: Module-level `_REGISTRY: dict[str, ChannelBehavior]` with `register()`, `get()`, and `list_types()` functions.
+**选择**：模块级 `_REGISTRY: dict[str, ChannelBehavior]`，带有 `register()`、`get()` 和 `list_types()` 函数。
 
-**Alternatives considered**:
-- Class-based singleton — unnecessary indirection for what is essentially a dict
-- Instance on ChannelManager — each manager would need to accept and forward the registry
+**考虑的替代方案**：
+- 基于类的单例 — 对于本质上就是一个 dict 的情况来说，增加了不必要的间接层
+- ChannelManager 上的实例 — 每个 manager 都需要接收和转发 registry
 
-**Rationale**: Matches the existing `_STRATEGY_REGISTRY` pattern in `services/context/provider_shaping.py`. Module-level registry is simple, testable, and consistent with the project's existing patterns.
+**理由**：与 `services/context/provider_shaping.py` 中的现有 `_STRATEGY_REGISTRY` 模式匹配。模块级 registry 简单、可测试，且与项目现有模式一致。
 
-### D4: PERSISTENT_TOPIC becomes a deprecated alias
+### D4: PERSISTENT_TOPIC 成为已弃用的别名
 
-**Choice**: `parse_graph()` auto-migrates `"persistent_topic"` to `"topic"` with `persistent=True`. The `ChannelType` enum retains `PERSISTENT_TOPIC = "persistent_topic"` for backward compatibility but it maps to `TopicBehavior` in the registry.
+**选择**：`parse_graph()` 自动将 `"persistent_topic"` 迁移为 `"topic"` 并附带 `persistent=True`。`ChannelType` 枚举保留 `PERSISTENT_TOPIC = "persistent_topic"` 以保持向后兼容，但它在 registry 中映射到 `TopicBehavior`。
 
-**Alternatives considered**:
-- Remove `PERSISTENT_TOPIC` entirely (BREAKING without migration path)
-- Keep `PERSISTENT_TOPIC` as separate behavior (doesn't solve the conflation problem)
+**考虑的替代方案**：
+- 完全移除 `PERSISTENT_TOPIC`（BREAKING 变更，没有迁移路径）
+- 保留 `PERSISTENT_TOPIC` 作为独立行为（无法解决混为一谈的问题）
 
-**Rationale**: Migration path preserves existing graph definitions. The enum value still exists so code that references it compiles, but the registry maps it to the same behavior as TOPIC.
+**理由**：迁移路径保留了现有的图定义。枚举值仍然存在，因此引用它的代码可以编译，但 registry 将其映射到与 TOPIC 相同的行为。
 
-### D5: ChannelDef gains persistent: bool
+### D5: ChannelDef 新增 persistent: bool
 
-**Choice**: Add `persistent: bool = False` to the `ChannelDef` dataclass. JSON Schema gains a `"persistent"` boolean property. Eviction, write, and conflict resolution ignore this flag (persistence is handled by checkpoint layer).
+**选择**：在 `ChannelDef` 数据类中添加 `persistent: bool = False` 字段。JSON Schema 新增 `"persistent"` 布尔属性。驱逐、写入和冲突解决忽略此标志（持久化由 checkpoint 层处理）。
 
-**Rationale**: Persistence is a storage concern, not a write-semantics concern. Separating them allows any channel type to be persistent in the future.
+**理由**：持久化是一个存储问题，而不是写入语义问题。将它们分离后，任何 channel 类型都可以在将来支持持久化。
 
-### D6: ConflictResolver delegates to ChannelBehavior
+### D6: ConflictResolver 委托给 ChannelBehavior
 
-**Choice**: `ConflictResolver.resolve()` accepts a `ChannelBehavior` instead of `channel_type: str`. The caller (PregelRuntime) looks up the behavior from the registry.
+**选择**：`ConflictResolver.resolve()` 接受 `ChannelBehavior` 而不是 `channel_type: str`。调用者（PregelRuntime）从 registry 中查找行为。
 
-**Rationale**: Eliminates the string-based dispatch that duplicates channel type logic. Conflict resolution is now driven by the same behavior objects that drive writes.
+**理由**：消除了重复 channel 类型逻辑的字符串分发。冲突解决现在由驱动写入的相同行为对象驱动。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险与权衡
 
-| Risk | Mitigation |
-|------|-----------|
-| Behavior objects are stateless — `write()` takes `(current, value, defn)` and returns new value. Channel must store the result. | Clean functional interface; easy to test |
-| Module-level singleton makes testing slightly harder | Tests can call `register()` to override; or use a test-specific setup |
-| `persistent_topic` migration in `parse_graph()` adds complexity | One-time auto-migration with deprecation warning; simple string substitution |
-| ~10 test files need ChannelType reference updates | Mechanical changes; each test just uses the new API |
+| 风险 | 缓解措施 |
+|------|---------|
+| 行为对象是无状态的 — `write()` 接受 `(current, value, defn)` 并返回新值。Channel 必须存储结果。 | 干净的函数式接口；易于测试 |
+| 模块级单例使测试稍显困难 | 测试可以调用 `register()` 覆盖；或使用测试特定的设置 |
+| `parse_graph()` 中的 `persistent_topic` 迁移增加了复杂性 | 一次性自动迁移，附带弃用警告；简单的字符串替换 |
+| ~10 个测试文件需要更新 ChannelType 引用 | 机械性修改；每个测试只需使用新 API |

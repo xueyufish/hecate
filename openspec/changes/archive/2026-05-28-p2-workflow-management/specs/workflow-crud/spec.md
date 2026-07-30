@@ -1,64 +1,64 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Create workflow
-The system SHALL provide an API endpoint `POST /api/workflows` that accepts a workflow definition (name, graph_dsl) and creates a new workflow with an initial version.
+### 需求：创建工作流
+系统须提供 API 端点 `POST /api/workflows`，接受工作流定义（name, graph_dsl）并创建带有初始版本的新工作流。
 
-#### Scenario: Successful creation
-- **WHEN** a user sends a POST request with valid name and graph_dsl
-- **THEN** the system creates a WorkflowModel and WorkflowVersionModel (version=1), returns 201 with the workflow data
+#### 场景：成功创建
+- **当** 用户发送带有有效 name 和 graph_dsl 的 POST 请求
+- **则** 系统创建 WorkflowModel 和 WorkflowVersionModel（version=1），返回 201 及工作流数据
 
-#### Scenario: Invalid graph_dsl
-- **WHEN** a user sends a POST request with graph_dsl that fails GraphCompiler validation
-- **THEN** the system returns 422 with the validation error details
+#### 场景：无效的 graph_dsl
+- **当** 用户发送的 POST 请求中 graph_dsl 未通过 GraphCompiler 验证
+- **则** 系统返回 422 及验证错误详情
 
-#### Scenario: Missing required fields
-- **WHEN** a user sends a POST request without name or graph_dsl
-- **THEN** the system returns 422 with field validation errors
+#### 场景：缺少必填字段
+- **当** 用户发送的 POST 请求缺少 name 或 graph_dsl
+- **则** 系统返回 422 及字段验证错误
 
-### Requirement: Read workflow
-The system SHALL provide an API endpoint `GET /api/workflows/{id}` that returns the workflow basic info and current version details.
+### 需求：读取工作流
+系统须提供 API 端点 `GET /api/workflows/{id}`，返回工作流基本信息和当前版本详情。
 
-#### Scenario: Workflow exists
-- **WHEN** a user sends a GET request with a valid workflow ID
-- **THEN** the system returns 200 with the workflow data including current version's graph_dsl
+#### 场景：工作流存在
+- **当** 用户使用有效的工作流 ID 发送 GET 请求
+- **则** 系统返回 200 及包含当前版本 graph_dsl 的工作流数据
 
-#### Scenario: Workflow not found
-- **WHEN** a user sends a GET request with a non-existent workflow ID
-- **THEN** the system returns 404
+#### 场景：工作流不存在
+- **当** 用户使用不存在的工作流 ID 发送 GET 请求
+- **则** 系统返回 404
 
-### Requirement: Update workflow
-The system SHALL provide an API endpoint `PUT /api/workflows/{id}` that updates the workflow name and/or creates a new version with updated graph_dsl.
+### 需求：更新工作流
+系统须提供 API 端点 `PUT /api/workflows/{id}`，更新工作流名称和/或用更新后的 graph_dsl 创建新版本。
 
-#### Scenario: Update name only
-- **WHEN** a user sends a PUT request with only name changed
-- **THEN** the system updates the workflow name, returns 200
+#### 场景：仅更新名称
+- **当** 用户发送的 PUT 请求中仅名称变更
+- **则** 系统更新工作流名称，返回 200
 
-#### Scenario: Update graph_dsl creates new version
-- **WHEN** a user sends a PUT request with updated graph_dsl
-- **THEN** the system creates a new WorkflowVersionModel with incremented version number, returns 200
+#### 场景：更新 graph_dsl 创建新版本
+- **当** 用户发送的 PUT 请求中包含更新后的 graph_dsl
+- **则** 系统创建版本号递增的新 WorkflowVersionModel，返回 200
 
-#### Scenario: Invalid graph_dsl on update
-- **WHEN** a user sends a PUT request with invalid graph_dsl
-- **THEN** the system returns 422 with validation error, no changes persisted
+#### 场景：更新时 graph_dsl 无效
+- **当** 用户发送的 PUT 请求中包含无效的 graph_dsl
+- **则** 系统返回 422 及验证错误，不持久化任何更改
 
-### Requirement: Delete workflow
-The system SHALL provide an API endpoint `DELETE /api/workflows/{id}` that soft-deletes the workflow.
+### 需求：删除工作流
+系统须提供 API 端点 `DELETE /api/workflows/{id}`，软删除工作流。
 
-#### Scenario: Successful deletion
-- **WHEN** a user sends a DELETE request with a valid workflow ID
-- **THEN** the system sets deleted_at on the workflow, returns 204
+#### 场景：成功删除
+- **当** 用户使用有效的工作流 ID 发送 DELETE 请求
+- **则** 系统在工作流上设置 deleted_at，返回 204
 
-#### Scenario: Workflow not found
-- **WHEN** a user sends a DELETE request with a non-existent workflow ID
-- **THEN** the system returns 404
+#### 场景：工作流不存在
+- **当** 用户使用不存在的工作流 ID 发送 DELETE 请求
+- **则** 系统返回 404
 
-### Requirement: List workflows
-The system SHALL provide an API endpoint `GET /api/workflows` that returns a paginated list of workflows.
+### 需求：列出工作流
+系统须提供 API 端点 `GET /api/workflows`，返回分页的工作流列表。
 
-#### Scenario: List with pagination
-- **WHEN** a user sends a GET request with page and page_size parameters
-- **THEN** the system returns 200 with paginated workflow list
+#### 场景：带分页列出
+- **当** 用户发送带有 page 和 page_size 参数的 GET 请求
+- **则** 系统返回 200 及分页的工作流列表
 
-#### Scenario: List excludes deleted workflows
-- **WHEN** a user lists workflows
-- **THEN** soft-deleted workflows SHALL NOT appear in the results
+#### 场景：列表排除已删除的工作流
+- **当** 用户列出工作流时
+- **则** 软删除的工作流不应出现在结果中

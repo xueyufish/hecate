@@ -1,93 +1,93 @@
-## Context
+## Context — 背景
 
-Change 1 (`otel-trace-bridge-tool-analytics`) bridged OTel spans to TraceModel and built `ToolAnalyticsService`. TraceModel now receives real execution data: root session spans (`type="trace"`, `name="session:{id}"`), LLM spans (`type="generation"`), and tool spans (`type="tool"`). Every span carries `agent_id`, `status` (started/completed/error), `start_time`, `end_time`, and `session_id`.
+变更 1（`otel-trace-bridge-tool-analytics`）将 OTel spans 桥接到了 TraceModel 并构建了 `ToolAnalyticsService`。TraceModel 现在接收真实的执行数据：根会话 spans（`type="trace"`、`name="session:{id}"`）、LLM spans（`type="generation"`）和工具 spans（`type="tool"`）。每个 span 都带有 `agent_id`、`status`（started/completed/error）、`start_time`、`end_time` 和 `session_id`。
 
-The existing `ToolAnalyticsService` (`services/ops_center/tool_analytics.py`) demonstrates the SQL-aggregation pattern: constructor takes `AsyncSession`, methods run `func.count()` / `func.max()` queries with `~TraceModel.deleted` filter, P95 computed in Python for cross-dialect compatibility, all methods return `dict[str, Any]`.
+现有的 `ToolAnalyticsService`（`services/ops_center/tool_analytics.py`）展示了 SQL 聚合模式：构造函数接受 `AsyncSession`，方法运行 `func.count()` / `func.max()` 查询并带 `~TraceModel.deleted` 过滤器，P95 在 Python 中计算以实现跨方言兼容性，所有方法返回 `dict[str, Any]`。
 
-`ModelMonitoringService` (`services/monitoring/`) follows a similar pattern for per-model metrics from TraceModel.
+`ModelMonitoringService`（`services/monitoring/`）对来自 TraceModel 的每个模型指标遵循类似的模式。
 
-**Key data source**: Root trace spans (`type="trace"`) represent full agent session executions. Each has `agent_id`, `status`, `start_time`, `end_time`. These are the primary signal for agent health.
+**关键数据源**：根追踪 spans（`type="trace"`）代表完整的 agent 会话执行。每个都有 `agent_id`、`status`、`start_time`、`end_time`。这些是 agent 健康的主要信号。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
+**Goals（目标）：**
 
-- Per-agent health metrics derived from TraceModel: total sessions, error rate, avg/P95 session latency, success rate, last active timestamp
-- Three-level health status taxonomy: `healthy` / `warning` / `critical` with configurable thresholds
-- Configurable health score (0–100) combining error rate and latency
-- SLA breach detection: flag agents exceeding threshold boundaries
-- Fleet overview: aggregate distribution (N healthy/warning/critical), top degraded agents
-- Per-agent drill-down: time-series trends, recent traces, score breakdown
-- REST API + frontend dashboard following `ToolAnalyticsService` pattern
+- 基于 TraceModel 的每个 agent 健康指标：总会话数、错误率、平均/P95 会话延迟、成功率、最后活跃时间戳
+- 三级健康状态分类：`healthy` / `warning` / `critical`，具有可配置阈值
+- 可配置的健康评分（0-100），结合错误率和延迟
+- SLA 违规检测：标记超出阈值边界的 agent
+- 集群概览：聚合分布（N healthy/warning/critical），最差的 agent
+- 每个 agent 的向下钻取：时间序列趋势、最近的追踪、分数分解
+- REST API + 前端仪表板，遵循 `ToolAnalyticsService` 模式
 
-**Non-Goals:**
+**Non-Goals（非目标）：**
 
-- User satisfaction score / escalation rate — depend on conversation feedback infrastructure (Change 3: `conversation-analytics`). Health score formula has a placeholder weight reserved for future satisfaction data.
-- Real-time WebSocket push — REST polling only (same as tool analytics)
-- Alerting integration — existing AlertService handles alert routing; health metrics are read-only queries
-- Unified Ops Center Dashboard (8.9) — Change 4 aggregates 8.9a/b/c data sources
-- Conversation quality scoring (8.9b v2) — separate change
+- 用户满意度分数 / 升级率 — 依赖于对话反馈基础设施（变更 3：`conversation-analytics`）。健康评分公式为未来的满意度数据保留了占位权重。
+- 实时 WebSocket 推送 — 仅 REST 轮询（与工具分析相同）
+- 告警集成 — 现有的 AlertService 处理告警路由；健康指标是只读查询
+- 统一 Ops Center 仪表板（8.9） — 变更 4 聚合 8.9a/b/c 数据源
+- 对话质量评分（8.9b v2） — 单独变更
 
-## Decisions
+## Decisions — 决策
 
-### Decision 1: SQL-derived health metrics from root trace spans
+### Decision 1: SQL-derived health metrics from root trace spans — 决策 1：从根追踪 spans 的 SQL 派生健康指标
 
-**Choice**: Query TraceModel where `type="trace"` (root session spans) for per-agent session-level metrics. Each root span represents one full agent execution with `agent_id`, `status`, `start_time`, `end_time`.
+**选择**：查询 `type="trace"` 的 TraceModel（根会话 spans）以获取每个 agent 的会话级指标。每个根 span 代表一次完整的 agent 执行，包含 `agent_id`、`status`、`start_time`、`end_time`。
 
-**Rationale**: Root trace spans are created by `PregelRuntime.execute()` (Change 1). They carry `agent_id` from the execution context. Counting root spans = session count; error root spans = failed sessions. This is the same data source as `ToolAnalyticsService` and `ModelMonitoringService` — no new infrastructure needed.
+**理由**：根追踪 spans 由 `PregelRuntime.execute()`（变更 1）创建。它们从执行上下文中携带 `agent_id`。计算根 span = 会话计数；错误根 span = 失败会话。这与 `ToolAnalyticsService` 和 `ModelMonitoringService` 使用相同的数据源 — 无需新基础设施。
 
-**Alternatives considered**:
-- **Query all span types per agent**: Too noisy. Tool and LLM spans are child-level signals; session-level (root trace) is the right granularity for fleet health.
-- **Use MetricsStore (real-time-monitoring)**: Different paradigm (time-windowed counters vs. SQL aggregation). Would require wiring MetricsStore recording into PregelRuntime. Over-engineering for a dashboard.
+**考虑的替代方案**：
+- **查询每个 agent 的所有 span 类型**：噪音太大。工具和 LLM spans 是子级信号；会话级（根追踪）是集群健康的正确粒度。
+- **使用 MetricsStore（实时监控）**：不同的范式（时间窗口计数器 vs. SQL 聚合）。需要在 PregelRuntime 中接入 MetricsStore 记录。对于仪表板来说过度设计。
 
-### Decision 2: Three-level health status taxonomy with configurable thresholds
+### Decision 2: Three-level health status taxonomy with configurable thresholds — 决策 2：具有可配置阈值的三级健康状态分类
 
-**Choice**: Compute `healthy` / `warning` / `critical` status per agent based on two dimensions:
-- Error rate: warning at >5%, critical at >15% (configurable)
-- P95 session latency: warning at >10s, critical at >30s (configurable)
+**选择**：基于两个维度计算每个 agent 的 `healthy` / `warning` / `critical` 状态：
+- 错误率：>5% 时 warning，>15% 时 critical（可配置）
+- P95 会话延迟：>10s 时 warning，>30s 时 critical（可配置）
 
-Status = worst of the two dimensions (if either dimension is critical, agent is critical).
+状态 = 两个维度中更差的那个（如果任一维度为 critical，agent 为 critical）。
 
-**Rationale**: Two-dimensional status avoids false positives (e.g., high latency but zero errors = warning, not critical). Worst-of-dimension is the industry standard (Salesforce Agentforce uses composite health score with per-dimension thresholds).
+**理由**：二维状态避免了误报（例如，高延迟但零错误 = warning，不是 critical）。最差维度是行业标准（Salesforce Agentforce 使用每个维度阈值的综合健康评分）。
 
-**Alternatives considered**:
-- **Single health score threshold**: Less actionable. Operators can't tell if degradation is latency-driven or error-driven.
-- **Machine-learning anomaly detection**: Over-engineering for v1. The existing `ModelMonitoringService` uses z-score drift detection — that's model-level. Agent-level starts with threshold-based, can add z-score later.
+**考虑的替代方案**：
+- **单一健康评分阈值**：可操作性较低。操作员无法判断降级是延迟驱动还是错误驱动。
+- **机器学习异常检测**：v1 过度设计。现有的 `ModelMonitoringService` 使用 z-score 漂移检测 — 那是模型级的。Agent 级从基于阈值开始，以后可以添加 z-score。
 
-### Decision 3: Weighted health score formula (0–100)
+### Decision 3: Weighted health score formula (0–100) — 决策 3：加权健康评分公式（0-100）
 
-**Choice**: Health score = weighted sum of dimension scores:
-- Error rate dimension (weight: 50%): `max(0, 100 - error_rate * 500)` — 0% errors = 100, 20% errors = 0
-- Latency dimension (weight: 30%): `max(0, 100 - (p95_latency_ms / critical_threshold_ms) * 100)` — under warning = ~100, at critical = 0
-- Activity dimension (weight: 20%): `min(100, session_count / expected_sessions * 100)` — normalized to recent baseline
+**选择**：健康评分 = 维度评分的加权和：
+- 错误率维度（权重：50%）：`max(0, 100 - error_rate * 500)` — 0% 错误 = 100，20% 错误 = 0
+- 延迟维度（权重：30%）：`max(0, 100 - (p95_latency_ms / critical_threshold_ms) * 100)` — 低于 warning = ~100，达到 critical = 0
+- 活动维度（权重：20%）：`min(100, session_count / expected_sessions * 100)` — 根据最近基线归一化
 
-All weights configurable via `AGENT_HEALTH_SCORE_WEIGHTS` setting (JSON dict).
+所有权重可通过 `AGENT_HEALTH_SCORE_WEIGHTS` 设置（JSON 字典）配置。
 
-**Rationale**: Weighted scoring is transparent and tunable. Operators can adjust weights without code changes. The 50/30/20 default prioritizes error rate (most impactful), then latency, then activity. This matches Salesforce Agentforce's "composite health score" approach.
+**理由**：加权评分透明且可调优。操作员无需代码更改即可调整权重。50/30/20 的默认值优先考虑错误率（影响最大），然后是延迟，最后是活动。这与 Salesforce Agentforce 的"综合健康评分"方法一致。
 
-**Alternatives considered**:
-- **Pure threshold status (no score)**: Less granular. Score enables sorting agents by degradation severity in the fleet view.
-- **ML-based scoring**: Black box. Configurable formula is auditable and debuggable.
+**考虑的替代方案**：
+- **纯阈值状态（无评分）**：粒度不够。评分使得在集群视图中按降级严重性对 agent 排序成为可能。
+- **基于 ML 的评分**：黑盒。可配置公式是可审计和可调试的。
 
-### Decision 4: Fleet overview as aggregate query
+### Decision 4: Fleet overview as aggregate query — 决策 4：集群概览作为聚合查询
 
-**Choice**: `get_fleet_overview()` runs a single SQL query grouping root traces by `agent_id`, computing per-agent aggregates in SQL, then classifying status and counting distribution in Python.
+**选择**：`get_fleet_overview()` 运行单个 SQL 查询，按 `agent_id` 分组根追踪，在 SQL 中计算每个 agent 的聚合，然后在 Python 中对状态进行分类并计数分布。
 
-**Rationale**: Single round-trip for the fleet view. Follows `ToolAnalyticsService.get_overview()` pattern (SQL aggregate + Python post-processing for P95 and derived metrics).
+**理由**：集群视图的单个往返。遵循 `ToolAnalyticsService.get_overview()` 模式（SQL 聚合 + Python 后处理 P95 和派生指标）。
 
-### Decision 5: No persistence — compute on demand
+### Decision 5: No persistence — compute on demand — 决策 5：不持久化 — 按需计算
 
-**Choice**: Health status and score are computed on every API request. No health snapshot table, no background refresh job.
+**选择**：健康状况和评分在每个 API 请求时计算。没有健康快照表，没有后台刷新任务。
 
-**Rationale**: TraceModel queries with indexed `agent_id` + `type` + `start_time` columns are fast (<100ms for 100K rows). Dashboard polling interval is 30–60s. Adding a snapshot table + refresh job is premature optimization. If performance degrades at scale, a materialized view or cache layer can be added later without API changes.
+**理由**：使用索引 `agent_id` + `type` + `start_time` 列的 TraceModel 查询很快（10 万行 <100ms）。仪表板轮询间隔为 30-60 秒。添加快照表 + 刷新任务是过早优化。如果性能在大规模下降，可以稍后添加物化视图或缓存层，无需更改 API。
 
-**Alternatives considered**:
-- **Background health snapshot job**: Adds complexity (scheduler, snapshot table, stale data). Not needed at current scale.
-- **Redis cache**: Same trade-off. Keep it simple for v1.
+**考虑的替代方案**：
+- **后台健康快照任务**：增加复杂性（调度器、快照表、过期数据）。当前规模不需要。
+- **Redis 缓存**：相同的权衡。v1 保持简单。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Risk] Missing satisfaction/escalation metrics** → Health score uses only error rate + latency + activity. Satisfaction score weight (currently 0%) is reserved for future integration with Change 3 (conversation-analytics). Documented in Non-Goals.
-- **[Risk] Agents with zero recent activity** → Agents with no root traces in the time window get `status=unknown`, `score=None`, excluded from fleet distribution counts. Prevents skewing the healthy count.
-- **[Trade-off] Python-side P95 computation** → Same as ToolAnalyticsService. Cross-dialect compatible (SQLite/PostgreSQL/MySQL). At 100K+ traces per agent, consider SQL percentile functions. Not a concern for v1.
-- **[Trade-off] No historical health tracking** → No time-series of health score over time. Fleet trends endpoint shows underlying metrics (error rate, latency) but not the computed score. Adding a health history table is a future enhancement.
+- **[风险] 缺少满意度/升级指标** → 健康评分仅使用错误率 + 延迟 + 活动。满意度评分权重（当前 0%）保留用于将来与变更 3（conversation-analytics）集成。在非目标中记录。
+- **[风险] 近期零活动的 agent** → 在时间窗口内没有根追踪的 agent 获得 `status=unknown`、`score=None`，从集群分布计数中排除。防止扭曲健康计数。
+- **[权衡] Python 端 P95 计算** → 与 ToolAnalyticsService 相同。跨方言兼容（SQLite/PostgreSQL/MySQL）。每个 agent 超过 10 万条追踪时，考虑使用 SQL 百分位函数。v1 不关注此问题。
+- **[权衡] 无历史健康追踪** → 没有健康评分随时间变化的时间序列。集群趋势端点显示底层指标（错误率、延迟）但不显示计算出的评分。添加健康历史表是未来的增强。

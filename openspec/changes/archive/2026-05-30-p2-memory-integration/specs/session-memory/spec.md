@@ -1,64 +1,64 @@
-# Session Memory — In-Session Memory Integration
+# Session Memory — 会话内记忆集成
 
-## Overview
+## Overview — 概述
 
-Wire the existing three-layer memory services (L1 working memory, L2 conversation compression, L3 user memory) into ConversationService, giving Agents full memory capabilities in every conversation turn.
+将现有的三层记忆服务（L1 工作记忆、L2 对话压缩、L3 用户记忆）接入 ConversationService，使 Agent 在每次对话轮次中都拥有完整的记忆能力。
 
-## Requirements
+## Requirements — 需求
 
-### REQ-1: L1 Working Memory Injection
+### REQ-1: L1 工作记忆注入
 
-- ConversationService calls `WorkingMemoryService.list_blocks(agent_id)` before each `assemble()` to load all memory blocks for that Agent
-- Pass the block list to `ContextAssembler.assemble(memory_blocks=...)`
-- Agents can update memory blocks via the `update_memory_block(label, content)` tool
+- ConversationService 在每次 `assemble()` 前调用 `WorkingMemoryService.list_blocks(agent_id)` 加载该 Agent 的所有记忆块
+- 将块列表传递给 `ContextAssembler.assemble(memory_blocks=...)`
+- Agent 可通过 `update_memory_block(label, content)` 工具更新记忆块
 
-### REQ-2: L2 Conversation Compression
+### REQ-2: L2 对话压缩
 
-- ConversationService checks the current message token count during `assemble()`
-- When token count exceeds `compression_threshold` (default 4000), call `CompressionPipeline.compress()` to compress history
-- Compressed messages replace original messages when sent to the LLM; original messages are kept in DB
-- Compression history is queryable after session ends (compression level, tokens saved)
+- ConversationService 在 `assemble()` 期间检查当前消息的 token 数
+- 当 token 数超过 `compression_threshold`（默认 4000）时，调用 `CompressionPipeline.compress()` 压缩历史
+- 压缩后的消息在发送给 LLM 时替换原始消息；原始消息保留在 DB 中
+- 压缩历史可在会话结束后查询（压缩级别、节省的 token）
 
-### REQ-3: L3 User Memory Extraction and Retrieval
+### REQ-3: L3 用户记忆提取和检索
 
-- After Assistant response, call `UserMemoryService.extract_facts(user_id, messages)` to extract new facts from the conversation
-- Call `store_memory()` to persist extracted facts
-- On the next turn, call `retrieve_memories(user_id, query)` to get relevant user memories and inject into context
+- 在 Assistant 响应后，调用 `UserMemoryService.extract_facts(user_id, messages)` 从对话中提取新事实
+- 调用 `store_memory()` 持久化提取的事实
+- 在下一轮中，调用 `retrieve_memories(user_id, query)` 获取相关用户记忆并注入上下文
 
-### REQ-4: Memory Tool Registration
+### REQ-4: 记忆工具注册
 
-- Register `update_memory_block` tool in Agent tool list (when Agent has working memory configured)
-- Register `search_user_memory` tool (when user has L3 memory enabled)
+- 在 Agent 工具列表中注册 `update_memory_block` 工具（当 Agent 配置了工作记忆时）
+- 注册 `search_user_memory` 工具（当用户启用了 L3 记忆时）
 
-## Scenarios
+## Scenarios — 场景
 
-### Scenario 1: Long Conversation Auto-Compression
-
-```
-Given Agent has 20 turns of conversation history (~6000 tokens)
-When User sends a new message
-Then System detects token count exceeds threshold
-And Calls CompressionPipeline to auto-compress history
-And Uses compressed context to call LLM
-And Original messages are preserved in DB
-```
-
-### Scenario 2: Cross-Session User Preference Memory
+### 场景 1: 长对话自动压缩
 
 ```
-Given User mentions "I like using Python" in session A
-When System extracts and stores user memory {fact: "User likes Python", category: "preference"}
-And User asks "Help me write a script" in session B
-Then System retrieves user preference, injects into context
-And Agent writes the script in Python
+假设 Agent 有 20 轮对话历史（~6000 tokens）
+当 用户发送新消息
+则 系统检测到 token 数超过阈值
+且 调用 CompressionPipeline 自动压缩历史
+且 使用压缩后的上下文调用 LLM
+且 原始消息保留在 DB 中
 ```
 
-### Scenario 3: Agent Proactively Updates Working Memory
+### 场景 2: 跨会话用户偏好记忆
 
 ```
-Given Agent has working memory block "current_task"
-When Agent detects task change during execution
-And Agent calls update_memory_block("current_task", "new task description")
-Then Working memory block is updated
-And Agent can read the updated memory in the next turn
+假设 用户在会话 A 中提到"我喜欢用 Python"
+当 系统提取并存储用户记忆 {fact: "User likes Python", category: "preference"}
+且 用户在会话 B 中问"帮我写个脚本"
+则 系统检索用户偏好，注入上下文
+且 Agent 用 Python 编写脚本
+```
+
+### 场景 3: Agent 主动更新工作记忆
+
+```
+假设 Agent 有工作记忆块 "current_task"
+当 Agent 在执行期间检测到任务变更
+且 Agent 调用 update_memory_block("current_task", "new task description")
+则 工作记忆块被更新
+且 Agent 可在下一轮读取更新后的记忆
 ```

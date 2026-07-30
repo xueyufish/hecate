@@ -1,38 +1,38 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Fan-out Pipeline template
-The system SHALL include a pre-built "Fan-out Pipeline" orchestration template demonstrating parallel processing with a researcher agent fanning out to multiple analyst agents and merging results.
+### Requirement: 扇出管道模板 — 扇出管道模板
+系统 SHALL 包含一个预构建的"扇出管道"编排模板，演示一个研究员代理扇出到多个分析师代理并合并结果的并行处理。
 
-#### Scenario: Fan-out template structure
-- **WHEN** the Fan-out Pipeline template is loaded
-- **THEN** the graph SHALL contain 1 researcher AGENT node, 1 FAN_OUT node, 3 analyst AGENT nodes (analyst_a, analyst_b, analyst_c), 1 MERGE node, and 1 summarizer AGENT node
+#### Scenario: 扇出模板结构
+- **WHEN** 加载扇出管道模板
+- **THEN** 图 SHALL 包含 1 个研究员 AGENT 节点、1 个 FAN_OUT 节点、3 个分析师 AGENT 节点（analyst_a、analyst_b、analyst_c）、1 个 MERGE 节点和 1 个汇总 AGENT 节点
 
-#### Scenario: Fan-out template edges
-- **WHEN** the template is compiled
-- **THEN** edges SHALL be: researcher→fanout, fanout→[analyst_a, analyst_b, analyst_c], analyst_*→merge, merge→summarizer, summarizer→__end__
+#### Scenario: 扇出模板边
+- **WHEN** 模板被编译
+- **THEN** 边 SHALL 为：researcher→fanout、fanout→[analyst_a、analyst_b、analyst_c]、analyst_*→merge、merge→summarizer、summarizer→__end__
 
-### Requirement: Conditional Pipeline template
-The system SHALL include a pre-built "Conditional Pipeline" orchestration template demonstrating multi-key conditional routing based on classification.
+### Requirement: 条件管道模板 — 条件管道模板
+系统 SHALL 包含一个预构建的"条件管道"编排模板，演示基于分类的多键条件路由。
 
-#### Scenario: Conditional template structure
-- **WHEN** the Conditional Pipeline template is loaded
-- **THEN** the graph SHALL contain 1 classifier AGENT node, 1 CONDITION node, and 3 specialist AGENT nodes (finance_agent, tech_agent, legal_agent) with multi-key conditional edge routing
+#### Scenario: 条件模板结构
+- **WHEN** 加载条件管道模板
+- **THEN** 图 SHALL 包含 1 个分类器 AGENT 节点、1 个 CONDITION 节点和 3 个专家 AGENT 节点（finance_agent、tech_agent、legal_agent），具有多键条件边路由
 
-#### Scenario: Conditional template routing
-- **WHEN** the classifier agent outputs a category
-- **THEN** the CONDITION node SHALL route to the matching specialist based on the category value
+#### Scenario: 条件模板路由
+- **WHEN** 分类器代理输出一个类别
+- **THEN** CONDITION 节点 SHALL 根据类别值路由到匹配的专家
 
-### Requirement: Reflection Loop template
-The system SHALL include a pre-built "Reflection Loop" orchestration template demonstrating iterative refinement with a quality check loop.
+### Requirement: 反思循环模板 — 反思循环模板
+系统 SHALL 包含一个预构建的"反思循环"编排模板，演示具有质量检查循环的迭代优化。
 
-#### Scenario: Reflection template structure
-- **WHEN** the Reflection Loop template is loaded
-- **THEN** the graph SHALL contain 1 drafter AGENT node, 1 reviewer AGENT node, 1 CONDITION node, and 1 reviser AGENT node with a loop edge from reviser back to reviewer
+#### Scenario: 反思模板结构
+- **WHEN** 加载反思循环模板
+- **THEN** 图 SHALL 包含 1 个起草 AGENT 节点、1 个评审 AGENT 节点、1 个 CONDITION 节点和 1 个修订 AGENT 节点，从修订节点回到评审节点有一条循环边
 
-#### Scenario: Reflection loop iteration
-- **WHEN** the reviewer determines quality is insufficient
-- **THEN** the CONDITION node SHALL route to the reviser, which then routes back to the reviewer for re-evaluation
+#### Scenario: 反思循环迭代
+- **WHEN** 评审者判定质量不足
+- **THEN** CONDITION 节点 SHALL 路由到修订者，然后路由回评审者进行重新评估
 
-#### Scenario: Reflection loop termination
-- **WHEN** the reviewer determines quality is approved
-- **THEN** the CONDITION node SHALL route to __end__
+#### Scenario: 反思循环终止
+- **WHEN** 评审者判定质量合格
+- **THEN** CONDITION 节点 SHALL 路由到 __end__

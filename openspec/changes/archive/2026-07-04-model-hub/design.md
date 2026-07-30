@@ -1,115 +1,115 @@
-## Context
+## Context — 背景
 
-Hecate already has a solid model management foundation:
+Hecate 已经拥有坚实的模型管理基础：
 
-- **ModelProviderModel** — provider registry with encrypted API keys, base_url, config, status
-- **ModelRegistryModel** — registered models linked to providers with capabilities (JSON), max_context, model_type
-- **ModelPricingModel** — time-ranged pricing with workspace isolation
-- **LLMService** — LiteLLM wrapper with streaming, tool calling, fallback models
-- **ModelRouter** — 4 routing strategies (COST, LATENCY, CAPABILITY, BALANCED) with constraints
-- **CircuitBreakerManager** — per-prefix circuit breaker (CLOSED → OPEN → HALF_OPEN)
-- **CostService** — pricing CRUD, cost aggregation from TraceModel.usage
+- **ModelProviderModel** — 提供者注册表，包含加密 API 密钥、base_url、config、status
+- **ModelRegistryModel** — 已注册模型，链接到提供者，包含能力（JSON）、max_context、model_type
+- **ModelPricingModel** — 带时间范围的定价，具有工作区隔离
+- **LLMService** — LiteLLM 包装器，支持流式、工具调用、回退模型
+- **ModelRouter** — 4 种路由策略（COST、LATENCY、CAPABILITY、BALANCED）带约束
+- **CircuitBreakerManager** — 每个前缀的断路器（CLOSED → OPEN → HALF_OPEN）
+- **CostService** — 定价 CRUD，来自 TraceModel.usage 的成本聚合
 
-What's missing: a unified catalog view, lifecycle management (staging channels, promotion), and intelligent caching. The Model Hub adds these three capabilities on top of the existing infrastructure.
+缺少的是：统一的目录视图、生命周期管理（暂存通道、提升）和智能缓存。Model Hub 在现有基础设施之上增加了这三项能力。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Build a browseable model catalog API that aggregates registry + pricing data with search, filter, and comparison
-- Add staging channels (dev/staging/prod) to models with promotion workflows and audit trail
-- Add semantic caching to the intelligent router for cost and latency optimization
-- Add deprecation scheduling with automated sunset notifications
-- Integrate with existing BudgetService for cost-aware routing
+**目标：**
+- 构建可浏览的模型目录 API，聚合注册表和定价数据，支持搜索、过滤和比较
+- 为模型添加暂存通道（dev/staging/prod），带提升工作流和审计跟踪
+- 为智能路由器添加语义缓存，用于成本和延迟优化
+- 添加弃用调度，带自动日落通知
+- 与现有的 BudgetService 集成，实现成本感知路由
 
-**Non-Goals:**
-- Model fine-tuning pipeline (6.6 — separate feature, L effort)
-- Self-hosted inference / managed model deployment (6.5 — separate feature, infrastructure-heavy)
-- Model Management Console UI (O10+G4 — frontend, separate change)
-- Multi-modal model classification (6.11 — separate feature)
-- A/B testing framework for model comparison (future enhancement)
-- Model performance benchmarking suite (future enhancement)
+**非目标：**
+- 模型微调流水线（6.6 — 独立功能，大工作量）
+- 自托管推理 / 托管模型部署（6.5 — 独立功能，基础设施密集型）
+- 模型管理控制台 UI（O10+G4 — 前端，独立变更）
+- 多模态模型分类（6.11 — 独立功能）
+- A/B 测试框架用于模型比较（未来增强）
+- 模型性能基准测试套件（未来增强）
 
-## Decisions
+## Decisions — 决策
 
-### Decision 1: Catalog as read-only aggregation layer, not new table
+### Decision 1: 目录作为只读聚合层，而非新表
 
-**Choice**: Model Catalog is a service-layer aggregation of ModelRegistryModel + ModelPricingModel + ModelProviderModel, not a separate database table.
+**选择**：Model Catalog 是 ModelRegistryModel + ModelPricingModel + ModelProviderModel 的服务层聚合，而非单独的数据库表。
 
-**Rationale**: The data already exists across three tables. A catalog table would duplicate data and cause sync issues. Instead, CatalogService joins the three tables and enriches with computed fields (effective pricing, capability badges, provider status).
+**理由**：数据已存在于三个表中。目录表会重复数据并导致同步问题。相反，CatalogService 连接三个表并通过计算字段（有效定价、能力徽章、提供者状态）进行丰富。
 
-**Alternatives considered**:
-- Separate CatalogModel table — duplicates data, sync complexity
-- Materialized view — PostgreSQL-specific, not portable to SQLite/MySQL
+**备选方案**：
+- 单独的 CatalogModel 表 — 数据重复，同步复杂
+- 物化视图 — 特定于 PostgreSQL，不适用于 SQLite/MySQL
 
-### Decision 2: Staging channels via ModelDeploymentModel, not ModelRegistryModel column
+### Decision 2: 通过 ModelDeploymentModel 实现暂存通道，而非 ModelRegistryModel 列
 
-**Choice**: Create a separate `ModelDeploymentModel` table to track staging channel assignments (dev/staging/prod) per model, rather than adding a `channel` column to ModelRegistryModel.
+**选择**：创建一个单独的 `ModelDeploymentModel` 表，用于跟踪每个模型的暂存通道分配（dev/staging/prod），而不是向 ModelRegistryModel 添加 `channel` 列。
 
-**Rationale**: A model can exist in multiple channels simultaneously (e.g., gpt-4o in prod for agents, gpt-4o-mini in dev for testing). A separate deployment table allows many-to-many relationships between models and channels with audit trail (who promoted, when, approval status).
+**理由**：一个模型可以同时存在于多个通道中（例如，gpt-4o 用于 Agent 的 prod，gpt-4o-mini 用于测试的 dev）。单独的部署表允许模型和通道之间的多对多关系，带审计跟踪（谁提升的、何时、审批状态）。
 
-**Alternatives considered**:
-- Single `channel` column on ModelRegistryModel — limits one model to one channel
-- ModelVersionModel with embedded channel — conflates versioning with deployment
+**备选方案**：
+- ModelRegistryModel 上的单个 `channel` 列 — 限制一个模型只能有一个通道
+- 嵌入通道的 ModelVersionModel — 将版本控制与部署混为一谈
 
-### Decision 3: Semantic caching via hash-based CacheStrategy ABC
+### Decision 3: 通过基于哈希的 CacheStrategy ABC 实现语义缓存
 
-**Choice**: Define `CacheStrategyABC` in `model_hub/cache.py` with `get(key)`, `set(key, value, ttl)`, `invalidate(pattern)` abstract methods. Implement `InMemoryCacheStrategy` (dict with TTL) and `RedisCacheStrategy` (optional, requires redis).
+**选择**：在 `model_hub/cache.py` 中定义 `CacheStrategyABC`，包含 `get(key)`、`set(key, value, ttl)`、`invalidate(pattern)` 抽象方法。实现 `InMemoryCacheStrategy`（带 TTL 的字典）和 `RedisCacheStrategy`（可选，需要 redis）。
 
-**Rationale**: Follows the existing ABC pattern (AuthProviderABC, SecretProviderABC). Cache key is SHA-256 hash of (model + messages + temperature). Semantic similarity is a future enhancement — initial implementation uses exact hash matching.
+**理由**：遵循现有的 ABC 模式（AuthProviderABC、SecretProviderABC）。缓存键是 (model + messages + temperature) 的 SHA-256 哈希。语义相似性是未来增强——初始实现使用精确哈希匹配。
 
-**Alternatives considered**:
-- GPTCache / semantic similarity cache — adds heavy dependency, premature for initial release
-- LiteLLM built-in caching — limited configuration, no custom invalidation
+**备选方案**：
+- GPTCache / 语义相似性缓存 — 添加沉重依赖，对于初始版本为时过早
+- LiteLLM 内置缓存 — 配置有限，无自定义失效
 
-### Decision 4: Promotion workflow with approval gates
+### Decision 4: 带审批关卡的工作流提升
 
-**Choice**: Model promotion (dev → staging → prod) requires approval from workspace admin. `ModelDeploymentModel` tracks `approval_status` (pending/approved/rejected) and `approved_by`.
+**选择**：模型提升（dev → staging → prod）需要工作区管理员审批。`ModelDeploymentModel` 跟踪 `approval_status`（pending/approved/rejected）和 `approved_by`。
 
-**Rationale**: Enterprise customers require controlled model rollouts. The approval gate prevents accidental production model changes. The audit trail (who approved, when) satisfies compliance requirements.
+**理由**：企业客户需要受控的模型发布。审批关卡防止意外的生产模型变更。审计跟踪（谁批准的、何时）满足合规要求。
 
-**Alternatives considered**:
-- Automatic promotion (no approval) — risky for production environments
-- External approval system (Jenkins, ArgoCD) — infrastructure complexity
+**备选方案**：
+- 自动提升（无需审批）— 对生产环境有风险
+- 外部审批系统（Jenkins、ArgoCD）— 基础设施复杂性
 
-### Decision 5: Deprecation scheduling with sunset date
+### Decision 5: 带日落日期的弃用调度
 
-**Choice**: Add `deprecated_at` and `sunset_at` fields to ModelDeploymentModel. When `sunset_at` passes, the model is automatically disabled.
+**选择**：向 ModelDeploymentModel 添加 `deprecated_at` 和 `sunset_at` 字段。当 `sunset_at` 过后，模型自动禁用。
 
-**Rationale**: Gives operators a grace period to migrate agents to new models. The sunset date triggers AlertService notifications at 30/7/1 day intervals.
+**理由**：给操作员一个宽限期来将 Agent 迁移到新模型。日落日期触发 AlertService 通知，间隔为 30/7/1 天。
 
-**Alternatives considered**:
-- Immediate deprecation (no grace period) — breaks running agents
-- Separate DeprecationScheduleModel — over-engineering for a simple date field
+**备选方案**：
+- 立即弃用（无宽限期）— 破坏正在运行的 Agent
+- 单独的 DeprecationScheduleModel — 对于一个简单的日期字段来说过度工程
 
-### Decision 6: Cost-aware routing via BudgetService integration
+### Decision 6: 通过 BudgetService 集成实现成本感知路由
 
-**Choice**: Extend ModelRouter to optionally consult BudgetService before selecting a model. If remaining budget is low, route to cheaper models.
+**选择**：扩展 ModelRouter，在选择模型前可选地咨询 BudgetService。如果剩余预算低，则路由到更便宜的模型。
 
-**Rationale**: BudgetService already tracks spending against quotas. The router can check `budget_remaining` and switch to a cost-optimized strategy when budget is constrained.
+**理由**：BudgetService 已经跟踪配额消耗。路由器可以检查 `budget_remaining` 并在预算受限时切换到成本优化策略。
 
-**Alternatives considered**:
-- Separate budget router — duplicates routing logic
-- No budget integration — misses cost optimization opportunity
+**备选方案**：
+- 单独的预算路由器 — 重复路由逻辑
+- 无预算集成 — 错过成本优化机会
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Cache invalidation complexity]** → Use model_id + version as cache key prefix for targeted invalidation; TTL as safety net
-- **[Catalog query performance]** → Add database indexes on model_id + provider_id; consider pagination defaults (50 per page)
-- **[Promotion bottleneck]** → Allow workspace admins to self-approve in single-workspace mode; require org admin for multi-workspace
-- **[Redis dependency]** → InMemoryCache as default; RedisCache only when configured; no crash if Redis unavailable
-- **[Model deprecation breaking agents]** → Sunset notifications via AlertService 30/7/1 days before; agents fallback to default model on deprecation
+- **[缓存失效复杂性]** → 使用 model_id + version 作为缓存键前缀进行针对性失效；TTL 作为安全网
+- **[目录查询性能]** → 添加 model_id + provider_id 的数据库索引；考虑分页默认值（每页 50 条）
+- **[提升瓶颈]** → 允许工作区管理员在单工作区模式中自我审批；多工作区需要组织管理员
+- **[Redis 依赖]** → InMemoryCache 作为默认；RedisCache 仅当配置时；Redis 不可用时不崩溃
+- **[模型弃用破坏 Agent]** → 通过 AlertService 在 30/7/1 天前发送日落通知；Agent 在弃用时回退到默认模型
 
-## Migration Plan
+## Migration Plan — 迁移计划
 
-1. **Phase 1: Catalog** — CatalogService read-only aggregation. No schema changes. New `/api/models/catalog` endpoints.
-2. **Phase 2: Lifecycle** — ModelDeploymentModel table + migration. ModelRegistryModel unchanged. New deployment/promotion/deprecation endpoints.
-3. **Phase 3: Caching** — CacheStrategyABC + InMemoryCache. Integrate into LLMService via ModelRouter. No schema changes.
-4. **Phase 4: Cost-aware routing** — BudgetService integration into ModelRouter. No schema changes.
+1. **阶段 1：目录** — CatalogService 只读聚合。无模式变更。新增 `/api/models/catalog` 端点。
+2. **阶段 2：生命周期** — ModelDeploymentModel 表 + 迁移。ModelRegistryModel 不变。新增部署/提升/弃用端点。
+3. **阶段 3：缓存** — CacheStrategyABC + InMemoryCache。通过 ModelRouter 集成到 LLMService。无模式变更。
+4. **阶段 4：成本感知路由** — BudgetService 集成到 ModelRouter。无模式变更。
 
-**Rollback**: Each phase is independent. Catalog endpoints can be unmounted. Deployment table can be dropped. Cache can be disabled via config flag.
+**回滚**：每个阶段独立。目录端点可卸载。部署表可删除。缓存可通过配置标志禁用。
 
-## Open Questions
+## Open Questions — 开放问题
 
-- Should the catalog support **model recommendation** (suggest best model for a task)? Initial: no, future enhancement.
-- Should caching support **streaming responses**? Initial: no, cache only non-streaming completions. Streaming caching is complex (partial responses).
-- Should promotion workflow support **canary deployment** (percentage-based traffic splitting)? Initial: no, future enhancement with ModelRouter traffic splitting.
+- 目录是否应支持**模型推荐**（为任务建议最佳模型）？初始：否，未来增强。
+- 缓存是否应支持**流式响应**？初始：否，仅缓存非流式完成。流式缓存复杂（部分响应）。
+- 提升工作流是否应支持**金丝雀部署**（基于百分比的流量拆分）？初始：否，未来通过 ModelRouter 流量拆分增强。

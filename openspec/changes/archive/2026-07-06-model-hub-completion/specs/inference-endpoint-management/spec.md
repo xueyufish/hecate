@@ -1,56 +1,56 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: System registers external inference endpoints
-The system SHALL allow administrators to register external inference endpoints with URL, model_id, backend_type (vllm/ollama/openai-compatible/custom), and optional authentication credentials.
+### Requirement: 系统注册外部推理端点 — System registers external inference endpoints
+系统应允许管理员注册外部推理端点，包含 URL、model_id、backend_type（vllm/ollama/openai-compatible/custom）和可选的认证凭据。
 
-#### Scenario: Register vLLM endpoint
-- **WHEN** an administrator registers an endpoint `{url: "http://gpu-node:8000", model_id: "llama-3-70b", backend_type: "vllm"}`
-- **THEN** the system stores the endpoint and begins periodic health checks
+#### Scenario: 注册 vLLM 端点 — Register vLLM endpoint
+- **WHEN** 管理员注册端点 `{url: "http://gpu-node:8000", model_id: "llama-3-70b", backend_type: "vllm"}`
+- **THEN** 系统存储该端点并开始定期健康检查
 
-#### Scenario: Register Ollama endpoint
-- **WHEN** an administrator registers an endpoint `{url: "http://localhost:11434", model_id: "llama3", backend_type: "ollama"}`
-- **THEN** the system stores the endpoint with Ollama-specific health check configuration
+#### Scenario: 注册 Ollama 端点 — Register Ollama endpoint
+- **WHEN** 管理员注册端点 `{url: "http://localhost:11434", model_id: "llama3", backend_type: "ollama"}`
+- **THEN** 系统存储该端点，并附带 Ollama 特定的健康检查配置
 
-### Requirement: System polls endpoint health periodically
-The system SHALL poll each registered endpoint's `/health` endpoint at a configurable interval (default 30 seconds) and record health status (healthy/degraded/unreachable).
+### Requirement: 系统定期轮询端点健康状态 — System polls endpoint health periodically
+系统应以可配置的间隔（默认 30 秒）轮询每个已注册端点的 `/health` 端点，并记录健康状态（healthy/degraded/unreachable）。
 
-#### Scenario: Healthy endpoint
-- **WHEN** the health check receives HTTP 200 from `/health` within the timeout
-- **THEN** the endpoint status SHALL be `healthy`
+#### Scenario: 健康端点 — Healthy endpoint
+- **WHEN** 健康检查在超时时间内从 `/health` 收到 HTTP 200
+- **THEN** 端点状态应为 `healthy`
 
-#### Scenario: Degraded endpoint
-- **WHEN** the health check receives a response but `/v1/models` does not list the expected model
-- **THEN** the endpoint status SHALL be `degraded` with a message indicating model not loaded
+#### Scenario: 降级端点 — Degraded endpoint
+- **WHEN** 健康检查收到响应，但 `/v1/models` 未列出预期的模型
+- **THEN** 端点状态应为 `degraded`，附带指示模型未加载的消息
 
-#### Scenario: Unreachable endpoint
-- **WHEN** the health check times out after 3 retry attempts
-- **THEN** the endpoint status SHALL be `unreachable` and an alert event SHALL be emitted
+#### Scenario: 不可达端点 — Unreachable endpoint
+- **WHEN** 健康检查在 3 次重试后超时
+- **THEN** 端点状态应为 `unreachable`，并应发出告警事件
 
-### Requirement: System collects inference metrics from endpoints
-The system SHALL collect Prometheus-compatible metrics from endpoints that expose them (TTFT, throughput, error rate, KV cache hit rate) and store time-series data for monitoring.
+### Requirement: 系统从端点收集推理指标 — System collects inference metrics from endpoints
+系统应从暴露 Prometheus 兼容指标的端点收集数据（TTFT、吞吐量、错误率、KV 缓存命中率），并存储时间序列数据用于监控。
 
-#### Scenario: Collect vLLM metrics
-- **WHEN** a vLLM endpoint exposes `/metrics` in Prometheus format
-- **THEN** the system SHALL scrape and store TTFT, time-between-tokens, requests-per-second, and GPU memory utilization
+#### Scenario: 收集 vLLM 指标 — Collect vLLM metrics
+- **WHEN** vLLM 端点以 Prometheus 格式暴露 `/metrics`
+- **THEN** 系统应抓取并存储 TTFT、token 间时间、每秒请求数和 GPU 内存利用率
 
-#### Scenario: Endpoint without metrics
-- **WHEN** an endpoint does not expose Prometheus metrics (e.g., commercial API)
-- **THEN** the system SHALL skip metrics collection and rely on TraceModel data for performance monitoring
+#### Scenario: 无指标的端点 — Endpoint without metrics
+- **WHEN** 端点未暴露 Prometheus 指标（例如商业 API）
+- **THEN** 系统应跳过指标收集，并依赖 TraceModel 数据进行性能监控
 
-### Requirement: System routes requests to healthy endpoints
-The system SHALL route model invocation requests to healthy endpoints only, avoiding degraded or unreachable endpoints.
+### Requirement: 系统将请求路由到健康端点 — System routes requests to healthy endpoints
+系统应仅将模型调用请求路由到健康端点，避免使用降级或不可达的端点。
 
-#### Scenario: Route to healthy endpoint
-- **WHEN** a model has 2 registered endpoints, one `healthy` and one `unreachable`
-- **THEN** requests SHALL route to the healthy endpoint only
+#### Scenario: 路由到健康端点 — Route to healthy endpoint
+- **WHEN** 一个模型有 2 个已注册端点，一个 `healthy` 和一个 `unreachable`
+- **THEN** 请求应仅路由到健康端点
 
-#### Scenario: All endpoints unreachable
-- **WHEN** all endpoints for a model are `unreachable`
-- **THEN** the system SHALL fall back to alternative providers or return a clear error indicating no available inference endpoint
+#### Scenario: 所有端点不可达 — All endpoints unreachable
+- **WHEN** 模型的所有端点都不可达
+- **THEN** 系统应回退到替代提供商，或返回清晰错误，指示没有可用的推理端点
 
-### Requirement: InferenceBackendABC defines endpoint interaction interface
-The system SHALL define `InferenceBackendABC` with `health_check(endpoint)` and `invoke(endpoint, request)` abstract methods, with a `OpenAICompatibleBackend` builtin implementation.
+### Requirement: InferenceBackendABC 定义端点交互接口 — InferenceBackendABC defines endpoint interaction interface
+系统应定义 `InferenceBackendABC`，包含 `health_check(endpoint)` 和 `invoke(endpoint, request)` 抽象方法，并附带内置的 `OpenAICompatibleBackend` 实现。
 
-#### Scenario: OpenAI-compatible backend
-- **WHEN** an endpoint has `backend_type: "vllm"` or `"ollama"` or `"openai-compatible"`
-- **THEN** the `OpenAICompatibleBackend` SHALL handle health checks via `/health` and invocations via `/v1/chat/completions`
+#### Scenario: OpenAI 兼容后端 — OpenAI-compatible backend
+- **WHEN** 端点的 `backend_type: "vllm"` 或 `"ollama"` 或 `"openai-compatible"`
+- **THEN** `OpenAICompatibleBackend` 应通过 `/health` 处理健康检查，通过 `/v1/chat/completions` 处理调用

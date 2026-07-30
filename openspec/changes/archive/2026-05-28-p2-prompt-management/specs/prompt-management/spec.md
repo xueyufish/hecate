@@ -1,54 +1,54 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Create prompt
-The system SHALL provide an API endpoint `POST /api/prompts` that creates a new prompt with initial version.
+### 需求：创建 Prompt
+系统须提供 API 端点 `POST /api/prompts`，创建带有初始版本的新 prompt。
 
-#### Scenario: Successful creation
-- **WHEN** a user sends a POST request with name, template, and variables
-- **THEN** the system creates a PromptModel and PromptVersionModel (version=1), returns 201
+#### 场景：成功创建
+- **当** 用户发送带有 name, template 和 variables 的 POST 请求
+- **则** 系统创建 PromptModel 和 PromptVersionModel（version=1），返回 201
 
-### Requirement: Read prompt
-The system SHALL provide `GET /api/prompts/{id}` that returns the prompt with current version.
+### 需求：读取 Prompt
+系统须提供 `GET /api/prompts/{id}`，返回带有当前版本的 prompt。
 
-#### Scenario: Prompt exists
-- **WHEN** a user sends a GET request with valid prompt ID
-- **THEN** the system returns 200 with prompt data including template and variables
+#### 场景：Prompt 存在
+- **当** 用户使用有效的 prompt ID 发送 GET 请求
+- **则** 系统返回 200 及包含 template 和 variables 的 prompt 数据
 
-### Requirement: Update prompt
-The system SHALL provide `PUT /api/prompts/{id}` that updates the prompt and creates a new version.
+### 需求：更新 Prompt
+系统须提供 `PUT /api/prompts/{id}`，更新 prompt 并创建新版本。
 
-#### Scenario: Update creates new version
-- **WHEN** a user sends a PUT request with updated template
-- **THEN** the system creates a new version with incremented version number
+#### 场景：更新创建新版本
+- **当** 用户发送带有更新后 template 的 PUT 请求
+- **则** 系统创建版本号递增的新版本
 
-### Requirement: Delete prompt
-The system SHALL provide `DELETE /api/prompts/{id}` that soft-deletes the prompt.
+### 需求：删除 Prompt
+系统须提供 `DELETE /api/prompts/{id}`，软删除 prompt。
 
-#### Scenario: Successful deletion
-- **WHEN** a user sends a DELETE request
-- **THEN** the system sets deleted_at, returns 204
+#### 场景：成功删除
+- **当** 用户发送 DELETE 请求
+- **则** 系统设置 deleted_at，返回 204
 
-### Requirement: List prompts
-The system SHALL provide `GET /api/prompts` that returns paginated prompts.
+### 需求：列出 Prompts
+系统须提供 `GET /api/prompts`，返回分页的 prompts。
 
-#### Scenario: List with pagination
-- **WHEN** a user sends a GET request with page and page_size
-- **THEN** the system returns paginated prompt list
+#### 场景：带分页列出
+- **当** 用户发送带有 page 和 page_size 的 GET 请求
+- **则** 系统返回分页的 prompt 列表
 
-### Requirement: Version management
-The system SHALL provide version management endpoints for prompts.
+### 需求：版本管理
+系统须为 prompts 提供版本管理端点。
 
-#### Scenario: List versions
-- **WHEN** a user sends GET /api/prompts/{id}/versions
-- **THEN** the system returns all versions ordered by version number
+#### 场景：列出版本
+- **当** 用户发送 GET /api/prompts/{id}/versions
+- **则** 系统返回按版本号排序的所有版本
 
-#### Scenario: Rollback to version
-- **WHEN** a user sends POST /api/prompts/{id}/rollback/{version}
-- **THEN** the system creates a new version with target version's template
+#### 场景：回滚到版本
+- **当** 用户发送 POST /api/prompts/{id}/rollback/{version}
+- **则** 系统使用目标版本的 template 创建新版本
 
-### Requirement: Label deployment
-The system SHALL support labels (production/staging/development) for prompt deployment.
+### 需求：标签部署
+系统须支持标签（production/staging/development）用于 prompt 部署。
 
-#### Scenario: Get prompt by label
-- **WHEN** a user sends GET /api/prompts/by-label/production
-- **THEN** the system returns the prompt with the "production" label
+#### 场景：按标签获取 prompt
+- **当** 用户发送 GET /api/prompts/by-label/production
+- **则** 系统返回带有"production"标签的 prompt

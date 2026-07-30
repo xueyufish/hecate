@@ -1,38 +1,38 @@
-## Why
+## Why — 为什么
 
-Hecate's agent execution data is scattered across 4 storage backends (PostgreSQL, MinIO, Qdrant, filesystem) with no unified abstraction. Agents cannot manage their own files, memory is not workspace-scoped, and there's no lifecycle management for agent execution environments. Research across 14 platforms (Bedrock AgentCore, AgentScope, Dify, Claude Code, Google Gemini, Salesforce Agentforce, Palantir AIP, Huawei AgentArts) shows that all mature platforms have a unified agent execution environment abstraction. This feature introduces `AgentEnvironment` — the agent's persistent execution context — distinct from `WorkspaceModel` (multi-tenant isolation boundary).
+Hecate 的 Agent 执行数据分散在 4 个存储后端（PostgreSQL、MinIO、Qdrant、文件系统），没有统一的抽象。Agent 无法管理自己的文件，内存不是工作空间范围内的，也没有 Agent 执行环境的生命周期管理。对 14 个平台（Bedrock AgentCore、AgentScope、Dify、Claude Code、Google Gemini、Salesforce Agentforce、Palantir AIP、Huawei AgentArts）的研究表明，所有成熟平台都有统一的 Agent 执行环境抽象。此特性引入了 `AgentEnvironment` — Agent 的持久执行上下文 — 区别于 `WorkspaceModel`（多租户隔离边界）。
 
-## What Changes
+## What Changes — 变更内容
 
-- **AgentEnvironment ABC**: Unified abstraction for agent execution environment with file management, lifecycle, and session association. `AgentEnvironment` (execution context) is conceptually distinct from `WorkspaceModel` (tenant isolation boundary).
-- **LocalEnvironment**: Filesystem-backed implementation storing agent data at `{WORKSPACE_ROOT}/{agent_id}/` with subdirectories: `sessions/`, `files/`, `memory/`, `skills/`.
-- **EnvironmentManager**: Lifecycle manager with lazy creation, TTL-based eviction (24h default, resets on each interaction), and multi-tenant cache.
-- **File CRUD API**: REST endpoints for listing, reading, writing, and deleting files in an agent's environment.
-- **Session auto-association**: Sessions automatically associate with the agent's environment via `agent_id` — no manual environment ID management needed.
-- **WorkflowExecutionService integration**: Environment is created lazily on first use, info passed via `execution_context` to workers.
+- **AgentEnvironment ABC**：统一的 Agent 执行环境抽象，包含文件管理、生命周期和会话关联。`AgentEnvironment`（执行上下文）在概念上区别于 `WorkspaceModel`（租户隔离边界）。
+- **LocalEnvironment**：基于文件系统的实现，将 Agent 数据存储在 `{WORKSPACE_ROOT}/{agent_id}/`，包含子目录：`sessions/`、`files/`、`memory/`、`skills/`。
+- **EnvironmentManager**：生命周期管理器，支持懒创建、基于 TTL 的驱逐（默认 24 小时，每次交互重置）和多租户缓存。
+- **文件 CRUD API**：用于在 Agent 环境中列出、读取、写入和删除文件的 REST 端点。
+- **会话自动关联**：会话通过 `agent_id` 自动关联到 Agent 的环境 — 无需手动管理环境 ID。
+- **WorkflowExecutionService 集成**：环境在首次使用时懒创建，信息通过 `execution_context` 传递给 Worker。
 
-**Naming rationale**: "AgentEnvironment" (not "AgentWorkspace") to avoid conceptual collision with `WorkspaceModel` (multi-tenant isolation boundary). Industry comparison: Dify uses "Tenant" + "AgentRuntimeSession", Bedrock uses "Tenant" + "Agent Runtime", AgentScope uses "Workspace" (but has no tenant model).
+**命名理由**："AgentEnvironment"（而非 "AgentWorkspace"）旨在避免与 `WorkspaceModel`（多租户隔离边界）的概念冲突。行业对比：Dify 使用 "Tenant" + "AgentRuntimeSession"，Bedrock 使用 "Tenant" + "Agent Runtime"，AgentScope 使用 "Workspace"（但其没有租户模型）。
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
+### 新能力
 
-- `agent-environment`: AgentEnvironment ABC, LocalEnvironment, EnvironmentManager (TTL eviction), file CRUD API, session auto-association, WorkflowExecutionService integration
+- `agent-environment`：AgentEnvironment ABC、LocalEnvironment、EnvironmentManager（TTL 驱逐）、文件 CRUD API、会话自动关联、WorkflowExecutionService 集成
 
-### Modified Capabilities
+### 修改的能力
 
-- _(none — this is additive; existing session/conversation system unchanged)_
+- _(无 — 此为新增功能；现有的会话/对话系统保持不变)_
 
-## Impact
+## Impact — 影响
 
-- **New files**:
+- **新文件**：
   - `src/hecate/services/environment/__init__.py`
   - `src/hecate/services/environment/environment.py` — AgentEnvironment ABC + LocalEnvironment
   - `src/hecate/services/environment/manager.py` — EnvironmentManager
   - `src/hecate/api/management/environment.py` — REST API
-  - `tests/test_services/test_environment/` — tests
-- **Modified files**:
-  - `src/hecate/core/config.py` — new settings: `AGENT_ENV_TTL`, `AGENT_ENV_ENABLED`
-  - `src/hecate/main.py` — register environment router
-- **Dependencies**: None new
-- **Migration**: None (no DB model changes in MVP)
+  - `tests/test_services/test_environment/` — 测试
+- **修改的文件**：
+  - `src/hecate/core/config.py` — 新设置：`AGENT_ENV_TTL`、`AGENT_ENV_ENABLED`
+  - `src/hecate/main.py` — 注册环境路由
+- **依赖**：无新依赖
+- **迁移**：无（MVP 中无 DB 模型变更）

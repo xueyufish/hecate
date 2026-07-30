@@ -1,16 +1,16 @@
-## MODIFIED Requirements
+## 修改的需求
 
-### Requirement: Agent-as-Tool dynamic registration
-The system SHALL support an `invocation_mode` field in AGENT node configuration. When `invocation_mode: "tool"`, the target agent SHALL be registered as a callable tool in the parent agent's tool list during execution, using an `AgentDefinition` for permission scoping when provided.
+### 需求：Agent-as-Tool 动态注册
+系统应在 AGENT 节点配置中支持 `invocation_mode` 字段。当设置 `invocation_mode: "tool"` 时，目标智能体应在父智能体的执行工具列表中注册为可调用工具，并在提供时使用 `AgentDefinition` 进行权限范围限定。
 
-#### Scenario: Agent exposed as tool with AgentDefinition
-- **WHEN** an AGENT node has config `{"agent_id": "uuid-of-specialist", "invocation_mode": "tool", "agent_definition": {"tools": ["web_search"], "context_mode": "isolated"}}`
-- **THEN** the parent agent's tool list includes a tool named `agent_{specialist_name}` with the AgentDefinition's tool filter and context isolation applied
+#### 场景：通过 AgentDefinition 将智能体暴露为工具
+- **当** 一个 AGENT 节点配置为 `{"agent_id": "uuid-of-specialist", "invocation_mode": "tool", "agent_definition": {"tools": ["web_search"], "context_mode": "isolated"}}`
+- **则** 父智能体的工具列表包含名为 `agent_{specialist_name}` 的工具，并应用了 AgentDefinition 的工具过滤和上下文隔离
 
-#### Scenario: Agent exposed as tool without AgentDefinition (existing behavior)
-- **WHEN** an AGENT node has config `{"agent_id": "uuid-of-specialist", "invocation_mode": "tool"}` (no agent_definition)
-- **THEN** the parent agent's tool list includes a tool named `agent_{specialist_name}` with full tool inheritance (existing behavior unchanged)
+#### 场景：不带 AgentDefinition 将智能体暴露为工具（现有行为）
+- **当** 一个 AGENT 节点配置为 `{"agent_id": "uuid-of-specialist", "invocation_mode": "tool"}`（无 agent_definition）
+- **则** 父智能体的工具列表包含名为 `agent_{specialist_name}` 的工具，并继承完整工具集（现有行为不变）
 
-#### Scenario: Agent tool invocation with filtered tools
-- **WHEN** the parent LLM calls the `agent_{specialist_name}` tool with arguments `{"task": "analyze this data"}`
-- **THEN** the system executes the specialist agent with only the tools specified in the AgentDefinition, not the specialist's full tool list
+#### 场景：使用过滤工具调用智能体工具
+- **当** 父 LLM 使用参数 `{"task": "analyze this data"}` 调用 `agent_{specialist_name}` 工具
+- **则** 系统应仅使用 AgentDefinition 中指定的工具执行专家智能体，而非该专家的完整工具列表

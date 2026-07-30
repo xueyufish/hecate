@@ -1,49 +1,49 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Budget Manager tracks token usage per session
-The system SHALL maintain a `BudgetManager` that tracks cumulative token usage per session and enforces a configurable token budget for the context window.
+### 需求：预算管理器按 session 跟踪 token 使用量
+系统须维护 `BudgetManager`，跟踪每个 session 的累积 token 使用量，并对上下文窗口执行可配置的 token 预算限制。
 
-#### Scenario: Budget allocation on session start
-- **WHEN** a new session is created for an agent with a configured context budget of 8000 tokens
-- **THEN** the budget manager SHALL allocate 8000 tokens as the session budget and begin tracking usage
+#### 场景：会话开始时分配预算
+- **当** 为配置了 8000 token 上下文预算的 agent 创建新 session
+- **则** 预算管理器须分配 8000 token 作为会话预算并开始跟踪使用量
 
-#### Scenario: Default budget when not configured
-- **WHEN** an agent has no explicit context budget configured
-- **THEN** the budget manager SHALL use a default budget based on the model's context window size minus 1024 tokens reserved for generation
+#### 场景：未配置时的默认预算
+- **当** agent 没有显式配置上下文预算
+- **则** 预算管理器须使用基于模型上下文窗口大小减去 1024 个生成预留 token 的默认预算
 
-### Requirement: Budget check before LLM invocation
-The system SHALL compute the token count of the assembled context before each LLM call and trigger degradation if the count exceeds the session budget.
+### 需求：LLM 调用前检查预算
+系统须在每次 LLM 调用前计算组装后上下文的 token 数量，如果超出会话预算则触发降级。
 
-#### Scenario: Context within budget
-- **WHEN** the assembled context token count is 6000 and the session budget is 8000
-- **THEN** the budget manager SHALL allow the context to pass through unchanged
+#### 场景：上下文在预算内
+- **当** 组装后上下文的 token 数为 6000，会话预算为 8000
+- **则** 预算管理器须允许上下文原样通过，不做修改
 
-#### Scenario: Context exceeds budget triggers degradation
-- **WHEN** the assembled context token count is 9000 and the session budget is 8000
-- **THEN** the budget manager SHALL execute the degradation strategy to reduce the context to within budget
+#### 场景：上下文超出预算触发降级
+- **当** 组装后上下文的 token 数为 9000，会话预算为 8000
+- **则** 预算管理器须执行降级策略以减少上下文至预算范围内
 
-### Requirement: Three-level degradation strategy
-The system SHALL implement three degradation levels applied sequentially until the context fits within budget:
+### 需求：三级降级策略
+系统须实现三个降级级别，按顺序应用直到上下文符合预算：
 
-- Level 1 (DROP): Remove messages with priority "low"
-- Level 2 (COMPRESS): Compress messages with priority "medium" into a short summary
-- Level 3 (EMERGENCY): Replace all message history with a single emergency summary
+- Level 1（DROP）：移除优先级为"low"的消息
+- Level 2（COMPRESS）：将优先级为"medium"的消息压缩为简短摘要
+- Level 3（EMERGENCY）：将所有消息历史替换为单一紧急摘要
 
-#### Scenario: Level 1 degradation sufficient
-- **WHEN** the context exceeds budget by 1000 tokens and removing low-priority messages saves 1200 tokens
-- **THEN** the budget manager SHALL remove only low-priority messages and return the trimmed context within budget
+#### 场景：Level 1 降级足够
+- **当** 上下文超出预算 1000 token，且移除低优先级消息可节省 1200 token
+- **则** 预算管理器须仅移除低优先级消息，返回在预算内的修剪后上下文
 
-#### Scenario: Level 1 insufficient, Level 2 applied
-- **WHEN** removing low-priority messages saves 500 tokens but the deficit is 2000 tokens
-- **THEN** the budget manager SHALL additionally compress medium-priority messages into a summary paragraph until the context fits
+#### 场景：Level 1 不足，应用 Level 2
+- **当** 移除低优先级消息节省 500 token，但赤字为 2000 token
+- **则** 预算管理器须额外将中等优先级消息压缩为摘要段落，直到上下文符合预算
 
-#### Scenario: Level 1 and 2 insufficient, Level 3 applied
-- **WHEN** both drop and compress fail to bring the context within budget
-- **THEN** the budget manager SHALL replace the entire message history with a single emergency summary message containing: original objective, key decisions made, and current state
+#### 场景：Level 1 和 2 不足，应用 Level 3
+- **当** 丢弃和压缩均无法将上下文控制在预算内
+- **则** 预算管理器须将整个消息历史替换为包含以下内容的单一紧急摘要消息：原始目标、已做出的关键决策和当前状态
 
-### Requirement: Budget usage reporting
-The system SHALL expose budget usage metrics (allocated, used, remaining, degradation events) for observability integration.
+### 需求：预算使用报告
+系统须暴露预算使用指标（已分配、已使用、剩余、降级事件）用于可观测性集成。
 
-#### Scenario: Budget snapshot after each turn
-- **WHEN** an LLM call completes and returns token usage data
-- **THEN** the budget manager SHALL record a snapshot containing: total budget, tokens used by the call, cumulative tokens used, remaining budget, degradation level applied (if any)
+#### 场景：每轮后的预算快照
+- **当** LLM 调用完成并返回 token 使用数据
+- **则** 预算管理器须记录包含以下内容的快照：总预算、本次调用使用的 token、累积使用的 token、剩余预算、应用的降级级别（如果有）

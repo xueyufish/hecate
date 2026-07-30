@@ -1,120 +1,120 @@
-## Context
+## Context — 背景
 
-Hecate has two Docker-based subsystems that currently operate in isolation:
+Hecate 有两个基于 Docker 的子系统，目前独立运行：
 
-**SandboxExecutor** (`services/sandbox/executor.py`): Creates ephemeral Docker containers for code execution via `execute_code` tool. Containers are created with `docker run --rm` and destroyed after each execution. No persistent storage, no volume mounts, no awareness of the agent's environment.
+**SandboxExecutor**（`services/sandbox/executor.py`）：通过 `execute_code` 工具创建用于代码执行的临时 Docker 容器。容器使用 `docker run --rm` 创建，每次执行后销毁。没有持久存储，没有卷挂载，不了解 Agent 的环境。
 
-**AgentEnvironment** (`services/environment/`): Long-lived containers (DockerEnvironment) or host directories (LocalEnvironment) with per-agent persistent storage at `/env` containing `sessions/`, `files/`, `memory/`, `skills/`. Agents write files via `write_file()` and execute commands via `exec_shell()`.
+**AgentEnvironment**（`services/environment/`）：长运行容器（DockerEnvironment）或主机目录（LocalEnvironment），每个 Agent 在 `/env` 下有持久存储，包含 `sessions/`、`files/`、`memory/`、`skills/`。Agent 通过 `write_file()` 写入文件，通过 `exec_shell()` 执行命令。
 
-The gap: an agent cannot write `solution.py` to its environment and then execute `python solution.py` in an isolated sandbox. The two systems have no connection.
+差距：Agent 无法将 `solution.py` 写入其环境，然后在隔离的沙箱中执行 `python solution.py`。两个系统没有连接。
 
-**Industry patterns** (from research):
-- Amazon Bedrock AgentCore: `/mnt/workspace` shared volume, 14-day TTL
-- deer-flow: `/mnt/user-data/workspace/` bind mount per thread
-- private-gpt: `SessionMountDef` with canonical paths (`/home/agent/workspace/`)
-- OpenHands: `/workspace` bind mount per session
-- Sage (bwrap): `--ro-bind sandbox_agent_workspace`
+**行业模式**（来自研究）：
+- Amazon Bedrock AgentCore：`/mnt/workspace` 共享卷，14 天 TTL
+- deer-flow：每个线程的 `/mnt/user-data/workspace/` bind mount
+- private-gpt：`SessionMountDef`，使用规范路径（`/home/agent/workspace/`）
+- OpenHands：每个会话的 `/workspace` bind mount
+- Sage（bwrap）：`--ro-bind sandbox_agent_workspace`
 
-All use bind mount or shared volume to connect the agent's persistent files to the sandbox's execution context.
+所有方案都使用 bind mount 或共享卷将 Agent 的持久文件连接到沙箱的执行上下文。
 
-**Constraints:**
-- SandboxExecutor is in `services/`, AgentEnvironment is in `services/` — same layer, no layering violation.
-- Engine layer (`engine/workers/tool_worker.py`) calls the tool service which creates SandboxExecutor — the bridge must be wired at the service layer, not engine layer.
-- DockerEnvironment uses a named Docker volume (`agent-{agent_id}`); LocalEnvironment uses a host directory (`{WORKSPACE_ROOT}/{agent_id}/`). The bridge must handle both.
-- The SandboxExecutor uses `docker run` CLI, not `aiodocker`. Volume mounts must be expressed as `--volume` CLI args.
+**约束条件：**
+- SandboxExecutor 在 `services/`，AgentEnvironment 在 `services/` — 同一层，没有分层违规。
+- 引擎层（`engine/workers/tool_worker.py`）调用创建 SandboxExecutor 的工具服务 — 桥接必须在服务层而非引擎层进行。
+- DockerEnvironment 使用命名 Docker 卷（`agent-{agent_id}`）；LocalEnvironment 使用主机目录（`{WORKSPACE_ROOT}/{agent_id}/`）。桥接必须同时处理两者。
+- SandboxExecutor 使用 `docker run` CLI，而非 `aiodocker`。卷挂载必须表示为 `--volume` CLI 参数。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Allow SandboxExecutor to mount the agent's environment volume/directory at `/mnt/env` inside sandbox containers
-- Support both DockerEnvironment (shared Docker volume) and LocalEnvironment (host bind mount)
-- Mount as `rw` by default so sandbox can write output files back to the environment
-- Make volume mount opt-in per execution (not all sandbox calls need environment access)
-- Keep SandboxConfig backward compatible — existing callers without volumes work unchanged
+**目标：**
+- 允许 SandboxExecutor 将 Agent 的环境卷/目录挂载到沙箱容器内的 `/mnt/env`
+- 同时支持 DockerEnvironment（共享 Docker 卷）和 LocalEnvironment（主机 bind mount）
+- 默认 `rw` 挂载，以便沙箱可以将输出文件写回环境
+- 每次执行可选加入卷挂载（并非所有沙箱调用都需要环境访问）
+- 保持 SandboxConfig 向后兼容 — 没有卷的现有调用者不受影响
 
-**Non-Goals:**
-- Mounting environment into non-Docker sandbox backends (bwrap, macOS sandbox-exec) — future work
-- Read-only mounts — defaulting to `rw` for code execution use cases; `ro` support deferred
-- Sandbox warm pool integration with environment — the pool manages containers, not volumes
-- Changing the SandboxExecutor's container lifecycle (still ephemeral `--rm`) — only adding volume mounts
+**非目标：**
+- 将环境挂载到非 Docker 沙箱后端（bwrap、macOS sandbox-exec）— 未来工作
+- 只读挂载 — 默认 `rw` 用于代码执行用例；`ro` 支持推迟
+- 沙箱热池与环境集成 — 池管理的是容器，而非卷
+- 更改 SandboxExecutor 的容器生命周期（仍然是临时 `--rm`）— 仅添加卷挂载
 
-## Decisions
+## Decisions — 决策
 
-### Decision 1: Add `volumes` dict to SandboxConfig
+### 决策 1：向 SandboxConfig 添加 volumes 字典
 
-**Choice:** Add `volumes: dict[str, str]` to `SandboxConfig` where keys are host paths or volume names and values are container mount paths.
+**选择：** 向 `SandboxConfig` 添加 `volumes: dict[str, str]`，其中键是主机路径或卷名，值是容器挂载路径。
 
-**Rationale:** This is the minimal, Docker-native abstraction. `--volume host_path:container_path` is the standard Docker mount syntax. A dict naturally expresses the mapping.
+**理由：** 这是最小、Docker 原生的抽象。`--volume host_path:container_path` 是标准的 Docker 挂载语法。字典自然表达了映射关系。
 
-**Alternatives considered:**
-- *Separate `environment_volume` field*: Less flexible; can't mount multiple volumes. Rejected.
-- *String list `["agent-x:/mnt/env"]`*: Harder to programmatically compose. Rejected.
-- *Dedicated `MountSpec` dataclass*: Over-engineering for a dict. Rejected for now.
+**考虑的替代方案：**
+- *单独的 `environment_volume` 字段*：灵活性较低；无法挂载多个卷。拒绝。
+- *字符串列表 `["agent-x:/mnt/env"]`*：难以编程式组合。拒绝。
+- *专用的 `MountSpec` 数据类*：对字典来说过度设计。暂时拒绝。
 
-### Decision 2: Bridge via `environment_bridge.py` module
+### 决策 2：通过 `environment_bridge.py` 模块桥接
 
-**Choice:** Create `services/sandbox/environment_bridge.py` with a `resolve_environment_volumes()` function that takes an `AgentEnvironment` and returns a `dict[str, str]` volume mapping.
+**选择：** 创建 `services/sandbox/environment_bridge.py`，其中包含 `resolve_environment_volumes()` 函数，接受 `AgentEnvironment` 并返回 `dict[str, str]` 卷映射。
 
-**Rationale:** The logic for resolving an AgentEnvironment to a Docker volume mount differs between DockerEnvironment (volume name) and LocalEnvironment (host path). A dedicated module encapsulates this without polluting SandboxExecutor or AgentEnvironment.
+**理由：** 将 AgentEnvironment 解析为 Docker 卷挂载的逻辑在 DockerEnvironment（卷名）和 LocalEnvironment（主机路径）之间有所不同。专用模块封装了这一点，而不污染 SandboxExecutor 或 AgentEnvironment。
 
-**Resolution logic:**
-- DockerEnvironment → `{"agent-{agent_id}": "/mnt/env"}` (Docker named volume)
-- LocalEnvironment → `{"{root_path}": "/mnt/env"}` (host bind mount)
-- None → `{}` (no mount)
+**解析逻辑：**
+- DockerEnvironment → `{"agent-{agent_id}": "/mnt/env"}`（Docker 命名卷）
+- LocalEnvironment → `{"{root_path}": "/mnt/env"}`（主机 bind mount）
+- None → `{}`（不挂载）
 
-### Decision 3: Mount path is `/mnt/env`
+### 决策 3：挂载路径为 `/mnt/env`
 
-**Choice:** All environment mounts go to `/mnt/env` inside the sandbox container.
+**选择：** 所有环境挂载都指向沙箱容器内的 `/mnt/env`。
 
-**Rationale:**
-- Consistent with Bedrock's `/mnt/workspace` convention
-- Doesn't conflict with the sandbox image's working directory
-- Agents/tools can reference `/mnt/env/files/solution.py` uniformly regardless of backend
+**理由：**
+- 与 Bedrock 的 `/mnt/workspace` 约定一致
+- 不与沙箱镜像的工作目录冲突
+- Agent/工具可以统一引用 `/mnt/env/files/solution.py`，无论使用哪种后端
 
-### Decision 4: Mount mode defaults to `rw`
+### 决策 4：挂载模式默认为 rw
 
-**Choice:** `SANDBOX_MOUNT_MODE` config setting defaults to `"rw"`. Passed as `:rw` suffix to `--volume` args.
+**选择：** `SANDBOX_MOUNT_MODE` 配置设置默认值为 `"rw"`。作为 `:rw` 后缀传递给 `--volume` 参数。
 
-**Rationale:** Code execution needs to write output files. Bedrock, private-gpt, and deer-flow all use read-write mounts. Read-only is the exception, not the default.
+**理由：** 代码执行需要写入输出文件。Bedrock、private-gpt 和 deer-flow 都使用读写挂载。只读是例外，而非默认。
 
-### Decision 5: Bridge is wired at tool execution layer
+### 决策 5：桥接在工具执行层进行
 
-**Choice:** `BuiltinTools._execute_code()` resolves the environment mount and passes it to SandboxExecutor.
+**选择：** `BuiltinTools._execute_code()` 解析环境挂载并将其传递给 SandboxExecutor。
 
-**Rationale:** This is where `SandboxExecutor` is constructed today. The tool layer already has access to the environment (via WorkflowExecutionService). No engine-layer changes needed.
+**理由：** 这是今天构造 `SandboxExecutor` 的地方。工具层已经可以访问环境（通过 WorkflowExecutionService）。无需引擎层更改。
 
-**Flow:**
+**流程：**
 ```
 ToolWorker.execute()
   → BuiltinTools._execute_code(args, environment=env)
     → volumes = resolve_environment_volumes(env)
     → SandboxExecutor(config=SandboxConfig(volumes=volumes))
-      → _create_container() adds --volume args
+      → _create_container() 添加 --volume 参数
 ```
 
-### Decision 6: No engine-layer changes
+### 决策 6：无需引擎层更改
 
-**Choice:** PregelRuntime, LLMWorker, and ToolWorker remain unchanged. The bridge is entirely in the services layer.
+**选择：** PregelRuntime、LLMWorker 和 ToolWorker 保持不变。桥接完全在服务层。
 
-**Rationale:** Engine has zero external deps (AGENTS.md). SandboxExecutor is a service. The bridge must live in services/ and be wired by the services layer that constructs SandboxExecutor.
+**理由：** 引擎零外部依赖（AGENTS.md）。SandboxExecutor 是一个服务。桥接必须位于 services/ 并由构造 SandboxExecutor 的服务层进行布线。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Docker volume name collision]** If two agents share a volume name prefix, cross-contamination is possible. → Mitigation: volume names are `agent-{agent_id}` with UUID — collision probability near zero.
-- **[rw mount allows sandbox to corrupt environment]** A malicious or buggy sandbox execution could modify agent files. → Mitigation: this matches Bedrock's design; future work can add `ro` mode or filesystem-level restrictions.
-- **[LocalEnvironment bind mount only works when sandbox runs on same host]** In a multi-host deployment, the host path won't exist on the sandbox machine. → Mitigation: this is a known limitation; multi-host deployments must use DockerEnvironment.
-- **[SandboxExecutor uses `docker run` CLI, not aiodocker]** Volume args must be formatted as CLI strings. → Mitigation: straightforward string formatting in `_create_container()`.
-- **[No sandbox spec exists to modify]** The proposal lists `sandbox-executor` as a modified capability, but no main spec exists. → Mitigation: create the `sandbox-environment-mount` new capability spec only; the sandbox-executor change is implementation-only.
+- **[Docker 卷名冲突]** 如果两个 Agent 共享卷名前缀，可能发生交叉污染。→ 缓解：卷名是 `agent-{agent_id}` 带 UUID — 冲突概率接近零。
+- **[rw 挂载允许沙箱破坏环境]** 恶意或有 Bug 的沙箱执行可能修改 Agent 文件。→ 缓解：与 Bedrock 的设计一致；未来的工作可以添加 `ro` 模式或文件系统级限制。
+- **[LocalEnvironment bind mount 仅在沙箱与主机同一节点时有效]** 在多主机部署中，主机路径在沙箱机器上可能不存在。→ 缓解：这是已知的限制；多主机部署必须使用 DockerEnvironment。
+- **[SandboxExecutor 使用 `docker run` CLI，而非 aiodocker]** 卷参数必须格式化为 CLI 字符串。→ 缓解：在 `_create_container()` 中进行直接的字符串格式化。
+- **[不存在要修改的沙箱 spec]** 提案将 `sandbox-executor` 列为修改的能力，但没有主 spec 存在。→ 缓解：仅创建 `sandbox-environment-mount` 新能力 spec；sandbox-executor 的更改仅是实现层面的。
 
-## Migration Plan
+## Migration Plan — 迁移计划
 
-No migration required. This is purely additive:
-1. `SandboxConfig.volumes` defaults to `{}` — no volume mounts when not specified.
-2. Existing `BuiltinTools._execute_code()` callers continue to work unchanged.
-3. Environment mount is opt-in: only activated when an AgentEnvironment is available.
+无需迁移。这纯粹是增量添加：
+1. `SandboxConfig.volumes` 默认为 `{}` — 未指定时不挂载卷。
+2. 现有的 `BuiltinTools._execute_code()` 调用者继续工作不变。
+3. 环境挂载是可选的：仅在 AgentEnvironment 可用时激活。
 
-**Rollback:** Remove the `volumes` field from SandboxConfig. Sandbox containers revert to no-mount behavior.
+**回滚：** 从 SandboxConfig 中删除 `volumes` 字段。沙箱容器恢复为无挂载行为。
 
-## Open Questions
+## Open Questions — 开放问题
 
-None — all design decisions are resolved during exploration.
+无 — 所有设计决策在探索期间已解决。

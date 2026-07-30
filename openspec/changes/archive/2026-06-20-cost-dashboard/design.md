@@ -1,59 +1,59 @@
-## Context
+## Context — 背景
 
-The platform already records token usage per LLM call in `TraceModel.usage` (JSON: `{prompt_tokens, completion_tokens, total_tokens}`). The `MetricsStore` tracks real-time `tokens.input` / `tokens.output` counters. What's missing is a pricing layer to convert tokens into monetary cost, and aggregation APIs to answer "how much did we spend, broken down by X?"
+该平台已经在 `TraceModel.usage` 中记录了每次 LLM 调用的 token 使用情况（JSON：`{prompt_tokens, completion_tokens, total_tokens}`）。`MetricsStore` 跟踪实时的 `tokens.input` / `tokens.output` 计数器。缺少的是一个将 token 转换为货币成本的价格层，以及回答"我们花了多少钱，按 X 分类？"的聚合 API。
 
-LangFuse uses a separate `prices` table with per-usage-type pricing and calculates cost at ingestion time. LiteLLM uses config-file pricing (`input_cost_per_token`). Neither approach handles price changes over time correctly for historical data.
+LangFuse 使用一个单独的 `prices` 表，具有每使用类型定价，并在摄取时计算成本。LiteLLM 使用配置文件定价（`input_cost_per_token`）。这两种方法都不能正确处理历史数据的价格变化。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- DB-backed model pricing management with time-ranged validity (prices change, historical costs must remain accurate)
-- Cost calculation from existing TraceModel token data × ModelPricingModel rates
-- Multi-dimensional aggregation: by user, agent, session, model, time range
-- REST API endpoints for cost summary, breakdown, and timeseries
+**目标：**
+- 基于数据库的模型定价管理，具有时间范围有效性（价格变化，历史成本必须保持准确）
+- 基于现有 TraceModel token 数据 × ModelPricingModel 费率的成本计算
+- 多维聚合：按用户、Agent、会话、模型、时间范围
+- 用于成本汇总、分类和时间序列的 REST API 端点
 
-**Non-Goals:**
-- Real-time cost alerting (covered by future 8.6 Alerting feature)
-- Budget enforcement / request blocking (LiteLLM proxy handles this)
-- UI dashboard rendering (API-only; frontend consumes endpoints)
-- Prompt caching cost adjustments (future enhancement)
+**非目标：**
+- 实时成本告警（由未来的 8.6 通知功能涵盖）
+- 预算执行/请求阻断（LiteLLM 代理处理此问题）
+- UI 仪表板渲染（仅 API；前端消费端点）
+- 提示缓存成本调整（未来增强）
 
-## Decisions
+## Decisions — 决策
 
-### D1: Separate ModelPricingModel with time-ranged pricing
+### D1: 具有时间范围定价的独立 ModelPricingModel
 
-**Choice**: New `ModelPricingModel` table with `effective_from` / `effective_until` datetime fields.
+**选择**：新的 `ModelPricingModel` 表，包含 `effective_from` / `effective_until` 日期时间字段。
 
-**Rationale**: Model prices change frequently (OpenAI adjusts pricing, new models launch). Time-ranged pricing ensures historical cost calculations remain accurate even after price updates. This matches LangFuse's approach but with explicit time validity instead of "new prices only apply to new traces."
+**理由**：模型价格经常变化（OpenAI 调整定价，新模型发布）。时间范围定价确保历史成本计算即使在价格更新后仍然准确。这与 LangFuse 的方法匹配，但使用显式时间有效性而不是"新价格仅适用于新跟踪"。
 
-**Alternatives considered**:
-- *Extend ModelRegistryModel with price columns*: Simpler, but cannot handle price changes — historical costs would be wrong after an update.
-- *Config-file pricing (LiteLLM style)*: No DB management, but not queryable via API and harder to update at runtime.
+**考虑的替代方案**：
+- *扩展 ModelRegistryModel 以包含价格列*：更简单，但无法处理价格变化——更新后历史成本将不正确。
+- *配置文件定价（LiteLLM 风格）*：无需数据库管理，但无法通过 API 查询且运行时更新更困难。
 
-### D2: Query-time cost calculation
+### D2: 查询时成本计算
 
-**Choice**: Calculate cost at query time by JOIN-ing TraceModel with ModelPricingModel on model name + time range.
+**选择**：通过在模型名称 + 时间范围上将 TraceModel 与 ModelPricingModel 进行 JOIN，在查询时计算成本。
 
-**Rationale**: Since pricing is time-ranged, storing pre-calculated cost in TraceModel would require backfilling when prices change. Query-time calculation is always accurate and the trace table is not excessively large for typical workloads.
+**理由**：由于定价是有时间范围的，在 TraceModel 中存储预先计算的成本需要价格变化时回填。查询时计算始终准确，并且对于典型工作负载，跟踪表不会过大。
 
-**Alternatives considered**:
-- *Write-time calculation (LangFuse)*: Faster queries, but requires backfill on price changes and loses historical accuracy.
-- *Hybrid (write-time + periodic recalculation)*: Over-engineering for current scale.
+**考虑的替代方案**：
+- *写入时计算（LangFuse）*：查询更快，但需要价格变化时回填，并且失去历史准确性。
+- *混合（写入时 + 定期重新计算）*：对于当前规模来说过度设计。
 
-### D3: Model name as the join key
+### D3: 模型名称作为连接键
 
-**Choice**: Join TraceModel to ModelPricingModel using the model name extracted from trace metadata/usage.
+**选择**：使用从跟踪元数据/使用情况中提取的模型名称将 TraceModel 连接到 ModelPricingModel。
 
-**Rationale**: TraceModel doesn't have a dedicated `model` column — the model name is stored in trace `name` or `metadata`. The cost service will accept an explicit `model` parameter in queries, sourced from trace metadata at the service layer. ModelPricingModel uses `model_id` (string, e.g., "gpt-4o") as the natural key within a workspace.
+**理由**：TraceModel 没有专用的 `model` 列——模型名称存储在跟踪 `name` 或 `metadata` 中。成本服务将在查询中接受显式的 `model` 参数，该参数在服务层从跟踪元数据中提取。ModelPricingModel 使用 `model_id`（字符串，例如 "gpt-4o"）作为工作空间内的自然键。
 
-### D4: Seed pricing via Alembic data migration
+### D4: 通过 Alembic 数据迁移的种子定价
 
-**Choice**: Pre-populate ModelPricingModel with current pricing for common models (gpt-4o, gpt-4o-mini, claude-3.5-sonnet, claude-3.5-haiku, deepseek-chat, etc.) in the migration.
+**选择**：在迁移中预先填充常见模型（gpt-4o、gpt-4o-mini、claude-3.5-sonnet、claude-3.5-haiku、deepseek-chat 等）的 ModelPricingModel。
 
-**Rationale**: Out-of-the-box cost tracking without requiring manual pricing setup. Users can override or add custom models via API.
+**理由**：开箱即用的成本跟踪，无需手动设置定价。用户可以通过 API 覆盖或添加自定义模型。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **Query performance on large trace tables** → Mitigation: Add indexes on TraceModel(session_id, agent_id, start_time). For very large deployments, future enhancement can add a pre-aggregated cost snapshot table.
-- **Model name mismatch between trace and pricing** → Mitigation: Cost service returns `unpriced_tokens` count alongside priced cost, so administrators can identify models without pricing configured.
-- **Pricing data staleness** → Mitigation: Seed migration covers common models; API allows runtime updates. Future enhancement: sync from LiteLLM's model cost map.
+- **大型跟踪表上的查询性能** → 缓解：在 TraceModel(session_id, agent_id, start_time) 上添加索引。对于非常大的部署，未来增强可以添加预聚合的成本快照表。
+- **跟踪和定价之间的模型名称不匹配** → 缓解：成本服务在定价成本旁边返回 `unpriced_tokens` 计数，以便管理员可以识别未配置定价的模型。
+- **定价数据过时** → 缓解：种子迁移涵盖常见模型；API 允许运行时更新。未来增强：从 LiteLLM 的模型成本映射同步。

@@ -1,39 +1,42 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: ContextEngine ABC defines pluggable context management
-The engine SHALL define a `ContextEngine` ABC in `engine/context.py` with methods: `select_messages`, `compress`, `estimate_tokens`.
+### Requirement：ContextEngine ABC 定义可插拔的上下文管理 — ContextEngine ABC 定义可插拔的上下文管理
+引擎 SHALL 在 `engine/context.py` 中定义一个 `ContextEngine` ABC，包含方法：`select_messages`、`compress`、`estimate_tokens`。
 
-#### Scenario: Select messages within budget
-- **WHEN** `select_messages(history, budget)` is called with message history and token budget
-- **THEN** it SHALL return a list of messages that fit within the budget
+#### Scenario：在预算内选择消息
+- **WHEN** 使用消息历史和 token 预算调用 `select_messages(history, budget)`
+- **THEN** 它 SHALL 返回一个在预算内的消息列表
 
-#### Scenario: Compress messages
-- **WHEN** `compress(messages)` is called with a list of messages
-- **THEN** it SHALL return a compressed version of the messages (fewer tokens)
+#### Scenario：压缩消息
+- **WHEN** 使用消息列表调用 `compress(messages)`
+- **THEN** 它 SHALL 返回消息的压缩版本（更少的 token）
 
-#### Scenario: Estimate token count
-- **WHEN** `estimate_tokens(messages)` is called with a list of messages
-- **THEN** it SHALL return an integer estimate of the total token count
+#### Scenario：估算 token 数量
+- **WHEN** 使用消息列表调用 `estimate_tokens(messages)`
+- **THEN** 它 SHALL 返回 token 总数的整数估算值
 
-### Requirement: InMemoryContextEngine provides default implementation
-An `InMemoryContextEngine` SHALL implement ContextEngine using simple heuristics suitable for testing and single-machine deployment.
+### Requirement：InMemoryContextEngine 提供默认实现 — InMemoryContextEngine 提供默认实现
+一个 `InMemoryContextEngine` SHALL 使用适用于测试和单机部署的简单启发式方法实现 ContextEngine。
 
-#### Scenario: Select recent messages within budget
-- **WHEN** `select_messages(history, budget)` is called with 10 messages and budget allows 5
-- **THEN** it SHALL return the 5 most recent messages
+#### Scenario：在预算内选择最近的消息
+- **WHEN** 使用 10 条消息且预算允许 5 条调用 `select_messages(history, budget)`
+- **THEN** 它 SHALL 返回最近的 5 条消息
 
-#### Scenario: Compress by truncating oldest
-- **WHEN** `compress(messages)` is called with messages exceeding threshold
-- **THEN** it SHALL return messages with oldest ones removed or summarized
+#### Scenario：通过截断最旧的来压缩
+- **WHEN** 使用超过阈值且预算为 5 的 10 条消息调用 `select_messages(history, budget)`
+- **THEN** 它 SHALL 返回最近的 5 条消息
 
-#### Scenario: Simple token estimation
-- **WHEN** `estimate_tokens(messages)` is called
-- **THEN** it SHALL return an estimate based on character count (approximately 4 chars per token)
+#### Scenario：简单的 token 估算
+- **WHEN** 使用消息列表调用 `estimate_tokens(messages)`
+- **THEN** 它 SHALL 基于字符数返回整数估算（`len(text) // 4`）
 
-#### Scenario: Empty message list
-- **WHEN** `select_messages([], 1000)` is called
-- **THEN** it SHALL return `[]`
+#### Scenario：空列表的 token 估算
+- **WHEN** 使用空列表调用 `estimate_tokens([])`
+- **THEN** 它 SHALL 返回 `0`
 
-#### Scenario: Zero budget
-- **WHEN** `select_messages(history, 0)` is called
-- **THEN** it SHALL return `[]`
+### Requirement：ContextEngine ABC 不可直接实例化 — ContextEngine ABC 不可直接实例化
+直接实例化 ContextEngine SHALL 引发 TypeError。
+
+#### Scenario：直接实例化失败
+- **WHEN** 调用 `ContextEngine()`
+- **THEN** 它 SHALL 引发 `TypeError`

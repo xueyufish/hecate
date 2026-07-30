@@ -1,160 +1,160 @@
-## Context
+## Context — 背景
 
-Hecate's LLMWorker passes the full tool list to the LLM on every invocation via `node_config.get("tools")` → `context_assemble` → `llm_invoke`. There is no mechanism to conditionally hide tools based on runtime state. This causes context bloat when agents have many tools, and prevents business-rule enforcement (e.g., "admin tools only visible to admins").
+Hecate 的 LLMWorker 通过 `node_config.get("tools")` → `context_assemble` → `llm_invoke` 在每次调用时将完整的工具列表传递给 LLM。没有机制可以根据运行时状态有条件地隐藏工具。这导致当 Agent 拥有许多工具时上下文膨胀，并阻止业务规则执行（例如，"管理员工具仅对管理员可见"）。
 
-10-platform research findings:
-- **Salesforce Agentforce** uses `available when` with a custom DSL (`@variables.verified == True`) — soft gate, per-invocation, platform-evaluated
-- **Google ADK** uses `ToolPredicate` (Python callable) — soft gate, per-invocation
-- **Alibaba AgentScope** uses Tool Group + Meta Tool — LLM self-manages group activation
-- **OpenClaw** uses multi-layer policy system (profile → allow/deny → provider → sandbox)
-- **All platforms use soft gate only** — no execution-layer hard block
-- **Dify** has open issue #27887 requesting this exact feature
+10 平台研究发现：
+- **Salesforce Agentforce** 使用带自定义 DSL（`@variables.verified == True`）的 `available when`——软门控，每次调用，平台评估
+- **Google ADK** 使用 `ToolPredicate`（Python 可调用对象）——软门控，每次调用
+- **Alibaba AgentScope** 使用工具组 + 元工具——LLM 自行管理组激活
+- **OpenClaw** 使用多层策略系统（profile → allow/deny → provider → sandbox）
+- **所有平台仅使用软门控**——无执行层硬阻断
+- **Dify** 有一个开放的 issue #27887 请求此确切功能
 
-Current codebase injection point: `LLMWorker.execute()` line 191 (`tools = node_config.get("tools")`) and `execute_stream()` line 330.
+当前代码库注入点：`LLMWorker.execute()` 第 191 行（`tools = node_config.get("tools")`）和 `execute_stream()` 第 330 行。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Add `available_when` field to ToolModel for declarative tool visibility conditions
-- Evaluate conditions per-invocation before LLM call (soft gate)
-- Support Python-safe expression language with runtime context variables
-- Zero new external dependencies (use Python built-in `eval()` with restricted namespace)
-- Backward compatible — tools without `available_when` behave exactly as before
+**目标：**
+- 向 ToolModel 添加 `available_when` 字段，用于声明性工具可见性条件
+- 在 LLM 调用前每次调用评估条件（软门控）
+- 支持 Python 安全的表达式语言，带运行时上下文变量
+- 零新外部依赖（使用 Python 内置 `eval()` 带受限命名空间）
+- 向后兼容——没有 `available_when` 的工具行为完全不变
 
-**Non-Goals:**
-- Hard gate at execution layer (10-platform consensus: not needed)
-- LLM self-management of tool groups (AgentScope pattern — deferred to future feature)
-- Tool search / deferred loading (Claude pattern — orthogonal concern)
-- Visual canvas UI for editing `available_when` expressions (future enhancement)
-- Migration of existing tools (field is nullable, defaults to None = always available)
+**非目标：**
+- 执行层硬门控（10 平台共识：不需要）
+- LLM 自行管理工具组（AgentScope 模式——推迟到未来功能）
+- 工具搜索/延迟加载（Claude 模式——正交关注点）
+- 用于编辑 `available_when` 表达式的可视化画布 UI（未来增强）
+- 现有工具的迁移（字段可为空，默认为 None = 始终可用）
 
-## Decisions
+## Decisions — 决策
 
-### Decision 1: Expression Language — Python-safe `eval()` with restricted namespace
+### Decision 1: 表达式语言——带受限命名空间的 Python 安全 `eval()`
 
-**Choice**: Use Python's built-in `eval()` with a restricted namespace (`__builtins__: {}`, no `__import__`).
+**选择**：使用 Python 内置的 `eval()`，带受限命名空间（`__builtins__: {}`，无 `__import__`）。
 
-**Rationale**: 
-- Salesforce uses a custom DSL; Google ADK uses Python callables; IBM uses natural language
-- Python expressions are immediately familiar to Hecate's developer audience
-- No new dependency (unlike CEL which needs `cel-python`)
-- The `eval()` namespace is restricted to only the provided context variables — no builtins, no imports, no attribute access to dangerous objects
+**理由**：
+- Salesforce 使用自定义 DSL；Google ADK 使用 Python 可调用对象；IBM 使用自然语言
+- Python 表达式对 Hecate 的开发人员群体来说立即可理解
+- 无新依赖（不像 CEL 需要 `cel-python`）
+- `eval()` 命名空间仅限于提供的上下文变量——没有内置函数，没有导入，无法访问危险对象的属性
 
-**Expression examples**:
+**表达式示例**：
 ```python
-# Simple equality
+# 简单相等
 "user_role == 'admin'"
 
-# Compound with and/or
+# 带 and/or 的复合
 "phase == 'EXECUTE' and budget_remaining > 1000"
 
-# Membership check
+# 成员检查
 "'delete' in user_permissions"
 
-# Negation
+# 否定
 "not user_role == 'guest'"
 ```
 
-**Alternatives considered**:
-- **CEL (Common Expression Language)**: Google's expression language. Safe, well-specified, but adds `cel-python` dependency. Overkill for simple conditions.
-- **JSON Logic**: Structured JSON conditions. Safe but verbose and hard to read/write. Example: `{"and": [{"==": [{"var": "phase"}, "EXECUTE"]}, {">": [{"var": "budget_remaining"}, 1000]}]}`
-- **ast.literal_eval**: Too restrictive — only supports literals, no comparisons or boolean logic.
+**考虑的替代方案**：
+- **CEL（通用表达式语言）**：Google 的表达式语言。安全、规范，但增加了 `cel-python` 依赖。对于简单条件来说过于复杂。
+- **JSON Logic**：结构化的 JSON 条件。安全但冗长且难以读写。示例：`{"and": [{"==": [{"var": "phase"}, "EXECUTE"]}, {">": [{"var": "budget_remaining"}, 1000]}]}`
+- **ast.literal_eval**：限制太多——只支持字面量，不支持比较或布尔逻辑。
 
-### Decision 2: Injection Point — LLMWorker `_filter_tools()` method
+### Decision 2: 注入点——LLMWorker `_filter_tools()` 方法
 
-**Choice**: Add a private `_filter_tools(tools, execution_context, channel_snapshot)` method in `LLMWorker`, called after `tools = node_config.get("tools")` and before `PreLLMHook`.
+**选择**：在 `LLMWorker` 中添加一个私有 `_filter_tools(tools, execution_context, channel_snapshot)` 方法，在 `tools = node_config.get("tools")` 之后和 `PreLLMHook` 之前调用。
 
 ```
 LLMWorker.execute()
-  ① tools = node_config.get("tools")              ← L191 extract
-  ② tools = self._filter_tools(tools, ...)         ← NEW: evaluate available_when
-  ③ PreLLMHook.on_pre_llm_call(tools=tools)        ← L196 hook sees filtered list
-  ④ context_assemble(tools=tools)                  ← L224 shape filtered list
-  ⑤ llm_invoke(tools=shaped_tools)                 ← L251 LLM sees filtered list
+  ① tools = node_config.get("tools")              ← L191 提取
+  ② tools = self._filter_tools(tools, ...)         ← 新：评估 available_when
+  ③ PreLLMHook.on_pre_llm_call(tools=tools)        ← L196 hook 看到过滤后的列表
+  ④ context_assemble(tools=tools)                  ← L224 塑造过滤后的列表
+  ⑤ llm_invoke(tools=shaped_tools)                 ← L251 LLM 看到过滤后的列表
 ```
 
-**Rationale**: 
-- Filtering before PreLLMHook means hooks see the already-filtered list (consistent)
-- All platforms filter before LLM call — this is the earliest sensible point
-- Only LLMWorker needs the filter — ToolWorker already uses PreToolHook as execution-level guard
+**理由**：
+- 在 PreLLMHook 之前过滤意味着 hooks 看到已经过滤的列表（一致）
+- 所有平台在 LLM 调用前过滤——这是最早合理的注入点
+- 只有 LLMWorker 需要过滤器——ToolWorker 已经使用 PreToolHook 作为执行级守卫
 
-**Alternatives considered**:
-- **Extend PreLLMHook to modify tools**: Would require changing GuardrailResult to support tool list modification. Adds complexity to the hook contract for a single use case.
-- **New ToolGateHook ABC**: Over-engineered for a simple filter. Would be the 6th hook type.
-- **Filter in ToolRegistry**: Too late — ToolRegistry handles execution routing, not LLM visibility. Tools need to be filtered before the LLM sees them.
+**考虑的替代方案**：
+- **扩展 PreLLMHook 以修改工具**：需要改变 GuardrailResult 以支持工具列表修改。为单个用例增加 hook 合同的复杂性。
+- **新的 ToolGateHook ABC**：对于简单的过滤器来说过度设计。将是第 6 种 hook 类型。
+- **在 ToolRegistry 中过滤**：太晚了——ToolRegistry 处理执行路由，而不是 LLM 可见性。工具需要在 LLM 看到它们之前被过滤。
 
-### Decision 3: ToolGateEvaluator — standalone evaluator class
+### Decision 3: ToolGateEvaluator——独立评估器类
 
-**Choice**: Implement `ToolGateEvaluator` as a standalone class in `engine/tool_gate.py` (not an ABC).
+**选择**：在 `engine/tool_gate.py` 中将 `ToolGateEvaluator` 实现为独立类（不是 ABC）。
 
 ```python
 class ToolGateEvaluator:
-    """Evaluates available_when expressions against runtime context."""
+    """针对运行时上下文评估 available_when 表达式。"""
 
     def evaluate(self, expression: str, context: dict) -> bool:
-        """Evaluate a single available_when expression. Returns True if tool is available."""
+        """评估单个 available_when 表达式。如果工具可用则返回 True。"""
 
     def filter_tools(
         self, tools: list[dict], context: dict
     ) -> list[dict]:
-        """Filter tool list, removing tools whose available_when evaluates to False."""
+        """过滤工具列表，移除 available_when 评估为 False 的工具。"""
 ```
 
-**Rationale**:
-- Keeps expression evaluation logic in one place (testable, reusable)
-- Not an ABC because there's only one evaluation strategy (Python eval with restricted namespace)
-- Follows engine layer zero-deps rule
-- If we later want pluggable evaluators (CEL, JSON Logic), this class can become an ABC
+**理由**：
+- 将表达式评估逻辑保持在一个地方（可测试、可重用）
+- 不是 ABC，因为只有一种评估策略（带受限命名空间的 Python eval）
+- 遵循引擎层零依赖规则
+- 如果我们以后想要可插拔的评估器（CEL、JSON Logic），这个类可以变成 ABC
 
-**Alternatives considered**:
-- **Inline in LLMWorker**: Simpler but harder to test in isolation and duplicates logic between `execute()` and `execute_stream()`.
-- **New engine ABC**: Over-engineered. No need for pluggability at this stage. Can extract ABC later if needed.
+**考虑的替代方案**：
+- **在 LLMWorker 中内联**：更简单但更难隔离测试，并在 `execute()` 和 `execute_stream()` 之间重复逻辑。
+- **新的引擎 ABC**：过度设计。现阶段不需要可插拔性。如果需要，稍后可以提取 ABC。
 
-### Decision 4: Context Variables — flat dict from execution_context + channel_snapshot
+### Decision 4: 上下文变量——来自 execution_context + channel_snapshot 的扁平字典
 
-**Choice**: Build a flat context dict by merging:
-- `execution_context` keys: `session_id`, `superstep`, `trace_id`
-- `channel_snapshot` keys: `_user_id`, `_agent_id`, `_turn_index`
-- Derived values: `phase` (from Task Phase Detection 4.9), `budget_remaining` (from Token Budget 4.10), `user_role` (from RBAC context)
+**选择**：通过合并以下内容构建扁平上下文字典：
+- `execution_context` 键：`session_id`、`superstep`、`trace_id`
+- `channel_snapshot` 键：`_user_id`、`_agent_id`、`_turn_index`
+- 派生值：`phase`（来自任务阶段检测 4.9）、`budget_remaining`（来自 Token 预算 4.10）、`user_role`（来自 RBAC 上下文）
 
 ```python
 context = {
     "session_id": "...",
     "superstep": 3,
     "user_id": "...",
-    "user_role": "admin",        # from RBAC
+    "user_role": "admin",        # 来自 RBAC
     "turn_index": 5,
-    "phase": "EXECUTE",           # from Task Phase Detection
-    "budget_remaining": 8000,     # from Token Budget
+    "phase": "EXECUTE",           # 来自任务阶段检测
+    "budget_remaining": 8000,     # 来自 Token 预算
 }
 ```
 
-**Rationale**:
-- Flat namespace is simplest for expression authors (`user_role == 'admin'` vs `context.user.role == 'admin'`)
-- Variables that aren't available (e.g., no RBAC context) simply aren't in the dict — expression referencing them raises NameError, which is caught and treated as "tool unavailable" (fail-closed)
+**理由**：
+- 扁平命名空间对表达式作者来说最简单（`user_role == 'admin'` vs `context.user.role == 'admin'`）
+- 不可用的变量（例如，没有 RBAC 上下文）只是不在字典中——引用它们的表达式抛出 NameError，被捕获并视为"工具不可用"（故障关闭）
 
-**Alternatives considered**:
-- **Nested context object** (`context.user.role`): More structured but verbose for expression authors and requires a context object class.
-- **Prefixed variables** (`@variables.user_role` like Salesforce): Adds DSL complexity without benefit in a Python-native system.
+**考虑的替代方案**：
+- **嵌套上下文对象**（`context.user.role`）：更结构化但对表达式作者来说冗长，需要一个上下文对象类。
+- **带前缀的变量**（`@variables.user_role` 像 Salesforce）：在 Python 原生系统中增加了 DSL 复杂性而没有好处。
 
-### Decision 5: Fail-closed on evaluation errors
+### Decision 5: 评估错误时故障关闭
 
-**Choice**: If `available_when` expression raises any exception (NameError, SyntaxError, TypeError), the tool is treated as **unavailable** (filtered out).
+**选择**：如果 `available_when` 表达式抛出任何异常（NameError、SyntaxError、TypeError），该工具被视为**不可用**（被过滤掉）。
 
-**Rationale**:
-- Security-first: if we can't determine a tool is safe, hide it
-- Prevents error-driven tool exposure (malformed expression accidentally showing sensitive tools)
-- Logs a WARNING so developers can debug their expressions
+**理由**：
+- 安全优先：如果我们不能确定工具是安全的，就隐藏它
+- 防止错误驱动的工具暴露（格式错误的表达式意外显示敏感工具）
+- 记录 WARNING 以便开发人员调试其表达式
 
-**Alternatives considered**:
-- **Fail-open** (show tool on error): More permissive but risky for security-sensitive tools. One typo could expose admin tools.
+**考虑的替代方案**：
+- **故障开放**（出错时显示工具）：更宽松但对安全敏感的工具风险较大。一个拼写错误可能暴露管理工具。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-| Risk | Mitigation |
+| 风险 | 缓解措施 |
 |------|------------|
-| **`eval()` security**: Malicious expression could attempt to access dangerous functions | Restricted namespace (`__builtins__: {}`, no `__import__`). Only context variables are in scope. Expression authors are developers with code access anyway. |
-| **Performance**: Evaluating expressions per-tool per-invocation adds overhead | Expressions are short (< 100 chars typically). `eval()` on simple expressions is microsecond-level. For 20 tools, total overhead < 1ms. Negligible vs LLM latency. |
-| **Derived variables unavailable**: `phase`, `budget_remaining`, `user_role` may not always be populated | Fail-closed: missing variables cause NameError → tool hidden. Developers must ensure context is populated before relying on it. |
-| **Expression debugging**: Developers may struggle with expression syntax errors | Log WARNING on evaluation failure with expression text and available variables. Future: dry-run validator in tool config UI. |
-| **No hard gate**: LLM could theoretically hallucinate a call to a gated tool | PreToolHook in ToolWorker serves as execution-level guard. ToolRegistry.execute() also checks tool existence. Two layers of defense. |
+| **`eval()` 安全**：恶意表达式可能尝试访问危险函数 | 受限命名空间（`__builtins__: {}`，无 `__import__`）。只有上下文变量在作用域中。表达式作者无论如何都是具有代码访问权限的开发人员。 |
+| **性能**：每次调用对每个工具评估表达式会增加开销 | 表达式通常很短（< 100 字符）。对简单表达式的 `eval()` 是微秒级的。对于 20 个工具，总开销 < 1ms。相比 LLM 延迟可以忽略不计。 |
+| **派生变量不可用**：`phase`、`budget_remaining`、`user_role` 可能并不总是填充 | 故障关闭：缺失变量导致 NameError → 工具隐藏。开发人员必须确保上下文在依赖它之前被填充。 |
+| **表达式调试**：开发人员可能在表达式语法错误上遇到困难 | 评估失败时记录 WARNING，包含表达式文本和可用变量。未来：工具配置 UI 中的干运行验证器。 |
+| **无硬门控**：LLM 理论上可能幻觉调用被门控的工具 | ToolWorker 中的 PreToolHook 作为执行级守卫。ToolRegistry.execute() 也检查工具是否存在。两层防御。 |

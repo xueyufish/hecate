@@ -1,29 +1,29 @@
-## Why
+## Why — 原因
 
-Hecate has organization management (10.1) and RBAC (10.2) implemented, but 14 resource models still lack `workspace_id` — meaning conversations, messages, sessions, documents, checkpoints, evidence, workflow versions/runs, prompt versions, and evaluation data have no tenant boundary. Any authenticated user with a valid agent_id can query cross-tenant data. Vector stores (Qdrant/Chroma) also lack `workspace_id` payload filtering, relying solely on indirect knowledge-base scoping. This is the last gap before the multi-tenant data layer is complete.
+Hecate 已实现组织管理（10.1）和 RBAC（10.2），但 14 个资源模型仍然缺少 `workspace_id`——这意味着对话、消息、会话、文档、检查点、证据、工作流版本/运行、提示版本和评估数据没有租户边界。任何拥有有效 `agent_id` 的认证用户都可以查询跨租户数据。向量存储（Qdrant/Chroma）也缺少 `workspace_id` 负载过滤，仅依赖间接的知识库作用域。这是多租户数据层完成前的最后一个缺口。
 
-## What Changes
+## What Changes — 变更内容
 
-- Add `workspace_id` UUID FK column to 14 models: ConversationModel, MessageModel, SessionModel, DocumentModel, EvidenceModel, CheckpointModel, BudgetSnapshotModel, WorkflowVersionModel, WorkflowRunModel, PromptVersionModel, EvaluationDatasetModel, EvaluationItemModel, EvaluationRunModel, EvaluationScoreModel.
-- Add Alembic migration with backfill via parent entity relationships (e.g., `conversation.workspace_id ← agent.workspace_id`).
-- Add `workspace_id` payload field to all Qdrant/Chroma vector insertions and filter on all search queries.
-- Update all service-layer queries for the 14 newly-scoped models to filter by `workspace_id`.
-- Update feature catalog to scope 10.5 to data-only isolation (compute/network deferred to 9.4c/9.4d/9.7).
+- 向 14 个模型添加 `workspace_id` UUID FK 列：ConversationModel、MessageModel、SessionModel、DocumentModel、EvidenceModel、CheckpointModel、BudgetSnapshotModel、WorkflowVersionModel、WorkflowRunModel、PromptVersionModel、EvaluationDatasetModel、EvaluationItemModel、EvaluationRunModel、EvaluationScoreModel
+- 通过父实体关系（例如 `conversation.workspace_id ← agent.workspace_id`）添加带回填的 Alembic 迁移
+- 在所有 Qdrant/Chroma 向量插入中添加 `workspace_id` 负载字段，并在所有搜索查询中添加过滤
+- 更新 14 个新限定模型的所有服务层查询，以按 `workspace_id` 过滤
+- 更新功能目录，将 10.5 的范围限定为仅数据隔离（计算/网络延迟到 9.4c/9.4d/9.7）
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `tenant-data-isolation`: Workspace-scoped data isolation across all resource models and vector stores — every query enforces workspace_id, every vector payload includes workspace_id.
+### New Capabilities — 新增能力
+- `tenant-data-isolation`：所有资源模型和向量存储的工作区限定数据隔离——每个查询强制使用 workspace_id，每个向量负载包含 workspace_id
 
-### Modified Capabilities
-- `data-models`: Add workspace_id FK to 14 resource models (ConversationModel, MessageModel, SessionModel, DocumentModel, EvidenceModel, CheckpointModel, BudgetSnapshotModel, WorkflowVersionModel, WorkflowRunModel, PromptVersionModel, EvaluationDatasetModel, EvaluationItemModel, EvaluationRunModel, EvaluationScoreModel).
-- `memory-isolation`: Add workspace_id payload filter to Qdrant/Chroma vector store operations (currently spec only covers SQL-level isolation, not vector DB).
+### Modified Capabilities — 修改的能力
+- `data-models`：向 14 个资源模型添加 workspace_id FK（ConversationModel、MessageModel、SessionModel、DocumentModel、EvidenceModel、CheckpointModel、BudgetSnapshotModel、WorkflowVersionModel、WorkflowRunModel、PromptVersionModel、EvaluationDatasetModel、EvaluationItemModel、EvaluationRunModel、EvaluationScoreModel）
+- `memory-isolation`：在 Qdrant/Chroma 向量存储操作中添加 workspace_id 负载过滤器（当前规范仅涵盖 SQL 级隔离，未涉及向量数据库）
 
-## Impact
+## Impact — 影响
 
-- **Models**: 14 ORM models gain new column + index + FK.
-- **Services**: ConversationService, WorkflowExecutionService, EvaluationDatasetService, and all services touching the 14 models must add workspace_id parameter and filter.
-- **API**: All endpoints touching conversations, messages, sessions, documents, evidence, checkpoints, workflow versions/runs, prompt versions, and evaluation data must pass workspace_id from AuthContext.
-- **Vector DB**: Qdrant and Chroma store adapters must inject workspace_id into payloads and filter on search.
-- **Migration**: Single Alembic migration adding 14 columns with backfill. Existing rows get workspace_id from parent entity (agent/knowledge-base).
-- **Tests**: New tests for cross-tenant isolation (tenant A cannot read tenant B's data) across all affected models and vector stores.
+- **Models**：14 个 ORM 模型新增列 + 索引 + FK
+- **Services**：ConversationService、WorkflowExecutionService、EvaluationDatasetService 以及所有涉及 14 个模型的服务必须添加 workspace_id 参数和过滤器
+- **API**：所有涉及对话、消息、会话、文档、证据、检查点、工作流版本/运行、提示版本和评估数据的端点必须从 AuthContext 传递 workspace_id
+- **Vector DB**：Qdrant 和 Chroma 存储适配器必须将 workspace_id 注入负载并在搜索时进行过滤
+- **Migration**：单个 Alembic 迁移添加 14 个列并回填。现有行从父实体（agent/knowledge-base）获取 workspace_id
+- **Tests**：针对所有受影响的模型和向量存储的跨租户隔离新测试（租户 A 不能读取租户 B 的数据）

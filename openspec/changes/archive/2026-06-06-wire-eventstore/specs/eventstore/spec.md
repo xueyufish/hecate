@@ -1,47 +1,47 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: PregelRuntime accepts optional EventStore
-PregelRuntime SHALL accept an optional `event_store: EventStore | None = None` parameter in its constructor. When provided, the runtime SHALL record execution events at key lifecycle points.
+### Requirement: PregelRuntime 接受可选的 EventStore — PregelRuntime 接受可选的 EventStore
+PregelRuntime SHALL 在构造函数中接受可选的 `event_store: EventStore | None = None` 参数。当提供时，运行时 SHALL 在关键生命周期点记录执行事件。
 
-#### Scenario: Default no event recording
-- **WHEN** PregelRuntime is created without event_store
-- **THEN** it SHALL execute without recording events (current behavior)
+#### Scenario: 默认无事件记录
+- **WHEN** PregelRuntime 在没有 event_store 的情况下创建
+- **THEN** 它 SHALL 在不记录事件的情况下执行（当前行为）
 
-#### Scenario: With EventStore
-- **WHEN** PregelRuntime is created with `event_store=InMemoryEventStore()`
-- **THEN** it SHALL record NODE_START, NODE_END, CHANNEL_WRITE, and SUPERSTEP_END events during execution
+#### Scenario: 带 EventStore
+- **WHEN** PregelRuntime 使用 `event_store=InMemoryEventStore()` 创建
+- **THEN** 它 SHALL 在执行期间记录 NODE_START、NODE_END、CHANNEL_WRITE 和 SUPERSTEP_END 事件
 
-#### Scenario: Session start event
-- **WHEN** PregelRuntime.execute() starts with initial_input
-- **THEN** it SHALL record a CUSTOM event with `payload.event_name="SESSION_START"`
+#### Scenario: 会话开始事件
+- **WHEN** PregelRuntime.execute() 以 initial_input 开始
+- **THEN** 它 SHALL 记录一个 `payload.event_name="SESSION_START"` 的 CUSTOM 事件
 
-#### Scenario: Resume event
-- **WHEN** PregelRuntime.execute() starts with resume_value
-- **THEN** it SHALL record a RESUME event with the interrupted node ID in payload
+#### Scenario: 恢复事件
+- **WHEN** PregelRuntime.execute() 以 resume_value 开始
+- **THEN** 它 SHALL 记录一个 RESUME 事件，载荷中包含被中断的节点 ID
 
-#### Scenario: Interrupt event
-- **WHEN** a worker returns Command(interrupt=...)
-- **THEN** it SHALL record an INTERRUPT event before saving checkpoint
+#### Scenario: 中断事件
+- **WHEN** 一个 worker 返回 Command(interrupt=...)
+- **THEN** 它 SHALL 在保存 checkpoint 前记录一个 INTERRUPT 事件
 
-#### Scenario: Error event
-- **WHEN** a worker returns a result with error
-- **THEN** it SHALL record an ERROR event before raising the error
+#### Scenario: 错误事件
+- **WHEN** 一个 worker 返回包含错误的结果
+- **THEN** 它 SHALL 在抛出错误前记录一个 ERROR 事件
 
-### Requirement: Worker accepts optional EventStore
-Worker ABC SHALL accept an optional `event_store: EventStore | None = None` parameter in its constructor. Worker.execute() SHALL accept an optional `execution_context: dict | None = None` parameter containing `session_id`, `superstep`, and `event_store`.
+### Requirement: Worker 接受可选的 EventStore — Worker 接受可选的 EventStore
+Worker ABC SHALL 在其构造函数中接受可选的 `event_store: EventStore | None = None` 参数。Worker.execute() SHALL 接受可选的 `execution_context: dict | None = None` 参数，包含 `session_id`、`superstep` 和 `event_store`。
 
-#### Scenario: Default no event recording
-- **WHEN** Worker is created without event_store
-- **THEN** it SHALL execute without recording events (current behavior)
+#### Scenario: 默认无事件记录
+- **WHEN** Worker 在没有 event_store 的情况下创建
+- **THEN** 它 SHALL 在不记录事件的情况下执行（当前行为）
 
-#### Scenario: Execution context passed by PregelRuntime
-- **WHEN** PregelRuntime dispatches a worker
-- **THEN** it SHALL pass `execution_context={"session_id": UUID, "superstep": int, "event_store": EventStore}`
+#### Scenario: PregelRuntime 传递执行上下文
+- **WHEN** PregelRuntime 分发一个 worker
+- **THEN** 它 SHALL 传递 `execution_context={"session_id": UUID, "superstep": int, "event_store": EventStore}`
 
-#### Scenario: LLMWorker records LLM events
-- **WHEN** LLMWorker executes with event_store in execution_context
-- **THEN** it SHALL record LLM_REQUEST before the LLM call and LLM_RESPONSE after
+#### Scenario: LLMWorker 记录 LLM 事件
+- **WHEN** LLMWorker 使用 execution_context 中的 event_store 执行
+- **THEN** 它 SHALL 在 LLM 调用前记录 LLM_REQUEST，在调用后记录 LLM_RESPONSE
 
-#### Scenario: ToolWorker records tool events
-- **WHEN** ToolWorker executes with event_store in execution_context
-- **THEN** it SHALL record TOOL_CALL before the tool invocation and TOOL_RESULT after
+#### Scenario: ToolWorker 记录工具事件
+- **WHEN** ToolWorker 使用 execution_context 中的 event_store 执行
+- **THEN** 它 SHALL 在工具调用前记录 TOOL_CALL，在调用后记录 TOOL_RESULT

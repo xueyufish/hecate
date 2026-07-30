@@ -1,35 +1,35 @@
-## Why
+## Why — 动机
 
-Hecate positions itself as an "MCP-first Agent platform" but currently only consumes MCP tools (Client, feature 5.3) — and that client is a mock stub with no real SDK integration. Without MCP Server mode, Hecate cannot be discovered or used by external AI tools (Claude Code, Cursor, VS Code, Google ADK agents), limiting its ecosystem reach. Meanwhile, every major platform — Google ADK (fastmcp), Salesforce Agentforce (MCP registry), Dify, Langflow — now exposes agent capabilities as MCP tools. MCP Server mode completes the bidirectional MCP architecture and is the final item in the Sprint 2 Infrastructure Extensibility chain (13.13 ✅ → 3.1.7 ✅ → 5.9a).
+Hecate 将自己定位为"MCP-first Agent 平台"，但目前仅消费 MCP 工具（Client，feature 5.3）——而且该客户端是一个带有 mock 桩的实现，没有真正的 SDK 集成。没有 MCP Server 模式，Hecate 无法被外部 AI 工具（Claude Code、Cursor、VS Code、Google ADK agents）发现或使用，限制了其生态覆盖范围。与此同时，每个主要平台——Google ADK（fastmcp）、Salesforce Agentforce（MCP registry）、Dify、Langflow——现在都将 agent 能力暴露为 MCP 工具。MCP Server 模式完成了双向 MCP 架构，是 Sprint 2 基础设施可扩展性链中的最后一项（13.13 ✅ → 3.1.7 ✅ → 5.9a）。
 
-## What Changes
+## What Changes — 变更内容
 
-- Add `fastmcp` dependency and build an MCP Server that exposes Hecate's capabilities as MCP tools, resources, and prompts via Streamable HTTP transport
-- MCP Server tools cover both runtime operations (agent execution, knowledge search, tool invocation, session management) and CRUD operations (create/list/update/delete agents, knowledge bases, tools, sessions)
-- Fix the existing MCP Client (feature 5.3) — replace the mock `MCPClient` with a real implementation using the `mcp` Python SDK, supporting Streamable HTTP and stdio transports
-- Mount the MCP Server onto the existing FastAPI app at `/mcp` using `fastmcp`'s ASGI integration
-- Add configuration: `MCP_SERVER_ENABLED`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_AUTH_TYPE`, `MCP_TRANSPORT`
-- Auth: reuse existing `HECATE_API_KEYS` for MCP tool access; support JWT Bearer tokens
+- 添加 `fastmcp` 依赖，构建一个通过 Streamable HTTP 传输将 Hecate 的能力暴露为 MCP 工具、资源和 prompts 的 MCP Server
+- MCP Server 工具涵盖运行时操作（agent 执行、知识搜索、工具调用、session 管理）和 CRUD 操作（创建/列出/更新/删除 agents、知识库、工具、sessions）
+- 修复现有 MCP Client（feature 5.3）——用使用 `mcp` Python SDK 的真实实现替换 mock `MCPClient`，支持 Streamable HTTP 和 stdio 传输
+- 使用 `fastmcp` 的 ASGI 集成将 MCP Server 挂载到现有 FastAPI 应用的 `/mcp` 路径
+- 添加配置：`MCP_SERVER_ENABLED`、`MCP_SERVER_HOST`、`MCP_SERVER_PORT`、`MCP_AUTH_TYPE`、`MCP_TRANSPORT`
+- 认证：复用现有的 `HECATE_API_KEYS` 用于 MCP 工具访问；支持 JWT Bearer tokens
 
-## Capabilities
+## Capabilities — 能力变更
 
-### New Capabilities
+### 新增能力
 
-- `mcp-server`: MCP Server mode — expose Hecate's full capability surface (agents, knowledge bases, tools, sessions, conversations) as MCP tools/resources/prompts via Streamable HTTP transport, integrated with FastAPI via fastmcp
-- `mcp-client-real`: Real MCP Client — replace mock MCPClient/MCPManager with actual `mcp` SDK ClientSession supporting Streamable HTTP and stdio transports, enabling Hecate agents to consume real external MCP tools
+- `mcp-server`: MCP Server 模式——通过 Streamable HTTP 传输，将 Hecate 的完整能力面（agents、知识库、工具、sessions、conversations）暴露为 MCP 工具/资源/prompts，通过 fastmcp 与 FastAPI 集成
+- `mcp-client-real`: 真实的 MCP Client——用实际的 `mcp` SDK ClientSession（支持 Streamable HTTP 和 stdio 传输）替换 mock MCPClient/MCPManager，使 Hecate agents 能够消费真实的外部 MCP 工具
 
-### Modified Capabilities
+### 修改的能力
 
-- `core-infrastructure`: Add MCP Server/Client configuration settings (`MCP_SERVER_ENABLED`, `MCP_SERVER_HOST`, `MCP_SERVER_PORT`, `MCP_AUTH_TYPE`, `MCP_TRANSPORT`, `MCP_CLIENT_TIMEOUT`) to `Settings` class
-- `tool-registry`: Wire MCP tool execution path — when `source="mcp"`, route `ToolRegistry.execute()` through the real MCP Client instead of raising `NotImplementedError`
-- `data-models`: Add `mcp_server_url` and `mcp_enabled` fields to ToolModel to support MCP Client tool registration; update schemas accordingly
+- `core-infrastructure`: 向 `Settings` 类添加 MCP Server/Client 配置设置（`MCP_SERVER_ENABLED`、`MCP_SERVER_HOST`、`MCP_SERVER_PORT`、`MCP_AUTH_TYPE`、`MCP_TRANSPORT`、`MCP_CLIENT_TIMEOUT`）
+- `tool-registry`: 接入 MCP 工具执行路径——当 `source="mcp"` 时，通过真实的 MCP Client 路由 `ToolRegistry.execute()`，而不是抛出 `NotImplementedError`
+- `data-models`: 向 ToolModel 添加 `mcp_server_url` 和 `mcp_enabled` 字段以支持 MCP Client 工具注册；相应更新 schemas
 
-## Impact
+## Impact — 影响范围
 
-- **New dependency**: `fastmcp` (latest stable) added to `pyproject.toml` base dependencies; `mcp` (official SDK) added as base dependency for Client
-- **Services layer**: New `services/mcp/server.py` (MCP Server), refactor `services/mcp/client.py` (real Client), new `services/mcp/session_manager.py` (MCP session → Hecate session mapping)
-- **API layer**: MCP endpoint mounted at `/mcp` on existing FastAPI app via ASGI mount; no new REST routes needed
-- **Config**: 5 new env vars in `core/config.py` + `.env.example`
-- **Engine layer**: No changes — MCP Server operates at services layer, calling into existing service interfaces
-- **Tests**: New `tests/test_services/test_mcp/` directory with tests for server tools, client integration, and session management
-- **Migration**: No Alembic migration needed (field additions to ToolModel are additive, handled in existing migration path)
+- **新依赖**: `fastmcp`（最新稳定版）添加到 `pyproject.toml` 基础依赖；`mcp`（官方 SDK）作为 Client 的基础依赖
+- **Services 层**: 新建 `services/mcp/server.py`（MCP Server），重构 `services/mcp/client.py`（真实 Client），新建 `services/mcp/session_manager.py`（MCP session → Hecate session 映射）
+- **API 层**: MCP 端点通过 ASGI 挂载到现有 FastAPI 应用的 `/mcp` 路径；无需新的 REST 路由
+- **配置**: `core/config.py` + `.env.example` 中的 5 个新环境变量
+- **Engine 层**: 无变更——MCP Server 在 services 层运行，调用现有服务接口
+- **测试**: 新建 `tests/test_services/test_mcp/` 目录，包含服务端工具、客户端集成和会话管理的测试
+- **迁移**: 无需 Alembic 迁移（ToolModel 的字段添加是增量的，在现有迁移路径中处理）

@@ -1,61 +1,61 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Model catalog aggregation service
-The system SHALL define `CatalogService` in `model_hub/catalog_service.py` that aggregates ModelRegistryModel, ModelProviderModel, and ModelPricingModel into a unified catalog view with computed fields.
+### Requirement: 模型目录聚合服务 — Model catalog aggregation service
+系统应在 `model_hub/catalog_service.py` 中定义 `CatalogService`，聚合 ModelRegistryModel、ModelProviderModel 和 ModelPricingModel 为统一的目录视图，带计算字段。
 
-#### Scenario: List catalog entries
-- **WHEN** `list_models()` is called with optional filters (provider, capability, model_type, min_context, max_cost)
-- **THEN** the service SHALL return a list of catalog entries, each containing model_id, display_name, provider_name, capabilities, max_context, effective_pricing, and provider_status
+#### Scenario: 列出目录条目 — List catalog entries
+- **WHEN** 调用 `list_models()`，带可选过滤器（provider、capability、model_type、min_context、max_cost）
+- **THEN** 服务应返回目录条目列表，每个条目包含 model_id、display_name、provider_name、capabilities、max_context、effective_pricing 和 provider_status
 
-#### Scenario: Get single catalog entry
-- **WHEN** `get_model(model_id)` is called
-- **THEN** the service SHALL return a detailed catalog entry with all metadata including pricing history, capability badges, and provider information
+#### Scenario: 获取单个目录条目 — Get single catalog entry
+- **WHEN** 调用 `get_model(model_id)`
+- **THEN** 服务应返回详细的目录条目，包含所有元数据，包括定价历史、能力徽章和提供者信息
 
-#### Scenario: Search models by capability
-- **WHEN** `search_models(capabilities=["vision", "function_calling"])` is called
-- **THEN** the service SHALL filter ModelRegistryModel where the `capabilities` JSON field contains all requested capabilities
+#### Scenario: 按能力搜索模型 — Search models by capability
+- **WHEN** 调用 `search_models(capabilities=["vision", "function_calling"])`
+- **THEN** 服务应过滤 ModelRegistryModel，其中 `capabilities` JSON 字段包含所有请求的能力
 
-#### Scenario: Compare models
-- **WHEN** `compare_models(model_ids=["gpt-4o", "claude-3.5-sonnet"])` is called
-- **THEN** the service SHALL return a comparison matrix with pricing, context window, capabilities, and provider for each model side-by-side
+#### Scenario: 比较模型 — Compare models
+- **WHEN** 调用 `compare_models(model_ids=["gpt-4o", "claude-3.5-sonnet"])`
+- **THEN** 服务应返回比较矩阵，包含每个模型的定价、上下文窗口、能力和提供者信息
 
-### Requirement: Model catalog REST API
-The system SHALL expose `/api/models/catalog` endpoints for browsing, searching, and comparing models.
+### Requirement: 模型目录 REST API — Model catalog REST API
+系统应在 `/api/models/catalog` 暴露端点，用于浏览、搜索和比较模型。
 
-#### Scenario: List catalog with pagination
-- **WHEN** GET `/api/models/catalog?page=1&page_size=20&provider=openai&capability=vision` is received
-- **THEN** the system SHALL return paginated catalog entries matching the filters with total count
+#### Scenario: 带分页的目录列表 — List catalog with pagination
+- **WHEN** 收到 GET `/api/models/catalog?page=1&page_size=20&provider=openai&capability=vision`
+- **THEN** 系统应返回匹配过滤器的分页目录条目，包含总数
 
-#### Scenario: Get model details
-- **WHEN** GET `/api/models/catalog/{model_id}` is received
-- **THEN** the system SHALL return the full catalog entry with pricing history and provider details
+#### Scenario: 获取模型详情 — Get model details
+- **WHEN** 收到 GET `/api/models/catalog/{model_id}`
+- **THEN** 系统应返回完整的目录条目，包含定价历史和提供者详情
 
-#### Scenario: Compare models
-- **WHEN** GET `/api/models/catalog/compare?model_ids=gpt-4o,claude-3.5-sonnet` is received
-- **THEN** the system SHALL return a comparison matrix
+#### Scenario: 比较模型 — Compare models
+- **WHEN** 收到 GET `/api/models/catalog/compare?model_ids=gpt-4o,claude-3.5-sonnet`
+- **THEN** 系统应返回比较矩阵
 
-#### Scenario: Filter by pricing tier
-- **WHEN** GET `/api/models/catalog?max_input_price=0.01` is received
-- **THEN** the system SHALL return only models with effective input pricing at or below the threshold
+#### Scenario: 按定价层级过滤 — Filter by pricing tier
+- **WHEN** 收到 GET `/api/models/catalog?max_input_price=0.01`
+- **THEN** 系统应仅返回有效输入定价低于或等于阈值的模型
 
-### Requirement: Capability badges
-The system SHALL compute capability badges from ModelRegistryModel.capabilities JSON field and present them as structured tags in the catalog.
+### Requirement: 能力徽章 — Capability badges
+系统应从 ModelRegistryModel.capabilities JSON 字段计算能力徽章，并在目录中呈现为结构化标签。
 
-#### Scenario: Vision-capable model
-- **WHEN** a model has `{"vision": true}` in its capabilities JSON
-- **THEN** the catalog entry SHALL include `"capability_badges": ["vision"]`
+#### Scenario: 支持视觉的模型 — Vision-capable model
+- **WHEN** 模型在其 capabilities JSON 中有 `{"vision": true}`
+- **THEN** 目录条目应包含 `"capability_badges": ["vision"]`
 
-#### Scenario: Multi-capability model
-- **WHEN** a model has `{"vision": true, "function_calling": true, "streaming": true}` in capabilities
-- **THEN** the catalog entry SHALL include `"capability_badges": ["vision", "function_calling", "streaming"]`
+#### Scenario: 多能力模型 — Multi-capability model
+- **WHEN** 模型在 capabilities 中有 `{"vision": true, "function_calling": true, "streaming": true}`
+- **THEN** 目录条目应包含 `"capability_badges": ["vision", "function_calling", "streaming"]`
 
-### Requirement: Effective pricing computation
-The system SHALL compute effective pricing for each catalog entry by querying ModelPricingModel for the currently active pricing record.
+### Requirement: 有效定价计算 — Effective pricing computation
+系统应通过查询 ModelPricingModel 获取当前活动的定价记录，计算每个目录条目的有效定价。
 
-#### Scenario: Model with active pricing
-- **WHEN** a model has a pricing entry where `effective_from <= now < effective_until` (or effective_until is NULL)
-- **THEN** the catalog entry SHALL include `effective_pricing: {input_per_1k, output_per_1k, currency}`
+#### Scenario: 具有活动定价的模型 — Model with active pricing
+- **WHEN** 模型具有满足 `effective_from <= now < effective_until`（或 effective_until 为 NULL）的定价条目
+- **THEN** 目录条目应包含 `effective_pricing: {input_per_1k, output_per_1k, currency}`
 
-#### Scenario: Model without pricing
-- **WHEN** a model has no matching pricing entry
-- **THEN** the catalog entry SHALL include `effective_pricing: null` and `has_pricing: false`
+#### Scenario: 无定价的模型 — Model without pricing
+- **WHEN** 模型没有匹配的定价条目
+- **THEN** 目录条目应包含 `effective_pricing: null` 和 `has_pricing: false`

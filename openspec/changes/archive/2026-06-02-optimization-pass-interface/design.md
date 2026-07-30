@@ -1,60 +1,35 @@
-## Context
+## Context — 背景
 
-GraphCompiler performs structural validation (entry, edges, reachability) and produces a CompiledGraph. For large graphs, there are optimization opportunities:
-- Unreachable nodes waste memory and confuse debugging
-- Parallel branches could be detected for concurrent execution
-- Dead channels waste memory
+图编译器将根据当前 DSL 结构的每个规范生产一次性执行计划。执行一次后，一些节点可能变得空闲或无法访问。目前没有机制来细化执行计划——每次执行都使用完全相同的拓扑结构。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Define `OptimizationPass` ABC with `optimize(graph) -> CompiledGraph`
-- Provide `DeadNodeElimination` (removes unreachable nodes)
-- Provide `ParallelBranchDetection` (marks parallel branches in metadata)
-- Make optimization an optional GraphCompiler parameter
-- Keep engine zero-dependency
+**目标：**
+- 定义包含 `optimize(plan: GraphPlan) -> GraphPlan` 方法的 `OptimizationPass` ABC
+- 提供 `DeadNodeElimination`（移除不可达节点）和 `ParallelBranchDetection`（标记并行区域）实现
+- 在计划执行之间应用优化
 
-**Non-Goals:**
-- Modifying graph semantics (optimization is semantics-preserving)
-- Distributed optimization
-- Runtime optimization (compile-time only)
+**非目标：**
+- 跨运行的状态累积（P3）
+- 节点重写或图变异（P3+）
 
-## Decisions
+## Decisions — 设计决策
 
-### D1: OptimizationPass is engine-internal
+### D1：OptimizationPass 操作于 GraphPlan
 
-**Choice**: Create `engine/optimization.py` parallel to `engine/compiler.py`.
+**选择**：优化在图已编译为 `GraphPlan` 之后操作，在执行之前（或之后）运行优化以细化共享的计划结构。
 
-**Rationale**: Optimization is a compiler concern, not a service boundary.
+**理由**：计划是执行准备就绪的工件。优化它避免了触及编译器层面的数据结构。
 
-### D2: Passes return new CompiledGraph (immutable)
+### D2：组合性的优化
 
-**Choice**: `optimize(graph: CompiledGraph) -> CompiledGraph` returns a new graph, does not modify input.
+**选择**：允许多个优化链式应用于计划，而不是拥有一个单一的集成优化器。
 
-**Rationale**: Functional style is safer and allows passes to be composed.
+**理由**：不同的阶段解决不同的问题。可组合性使得开发者能够混合搭配与他们运行方式相关的优化。
 
-### D3: DeadNodeElimination removes unreachable nodes
+## Risks / Trade-offs — 风险与权衡
 
-**Choice**: Use the existing `_detect_unreachable` logic, but actually remove the nodes from the graph.
-
-**Rationale**: Unreachable nodes are dead code. Removing them reduces memory and improves debuggability.
-
-### D4: ParallelBranchDetection marks branches in metadata
-
-**Choice**: Add `metadata["parallel_branches"]` to CompiledGraph with groups of nodes that can run in parallel.
-
-**Rationale**: Detection is compile-time; actual parallelism is runtime (WorkerPool's job).
-
-### D5: Compiler accepts optional pass list
-
-**Choice**: `GraphCompiler(passes: list[OptimizationPass] | None = None)`.
-
-**Rationale**: Opt-in behavior. Default is no optimization (backward compatible).
-
-## Risks / Trade-offs
-
-| Risk | Mitigation |
-|------|-----------|
-| DeadNodeElimination changes graph structure | Only removes truly unreachable nodes (validated by BFS) |
-| ParallelBranchDetection may be conservative | Mark as metadata hint, not enforcement |
-| Pass ordering matters | Document that passes run in list order |
+| 风险 | 缓解措施 |
+|------|---------|
+| 过于激进的优化可能破坏语义 | 默认不启用优化；DeadNodeElimination 仅移除经过证明不可达的节点 |
+| 优化增加编译开销 | 在修改后的图小于未优化图时，一次性的成本是有益的 |

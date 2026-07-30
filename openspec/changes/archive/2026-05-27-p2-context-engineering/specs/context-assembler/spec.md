@@ -1,49 +1,49 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Context Assembler assembles context before LLM invocation
-The system SHALL provide a `ContextAssembler` that accepts raw messages, tools, knowledge chunks, and session metadata, and returns an `AssembledContext` containing the final messages list, tool definitions, and metadata to pass to the LLM service.
+### 需求：上下文组装器在 LLM 调用前组装上下文
+系统须提供 `ContextAssembler`，接收原始消息、工具、知识块和会话元数据，返回包含最终消息列表、工具定义和元数据的 `AssembledContext`，供 LLM 服务使用。
 
-#### Scenario: Simple pass-through when context engineering is disabled
-- **WHEN** context engineering is not enabled for the agent
-- **THEN** the assembler SHALL return the original messages and tools unchanged
+#### 场景：上下文工程禁用时的简单透传
+- **当** agent 未启用上下文工程
+- **则** 组装器须原样返回原始消息和工具，不做修改
 
-#### Scenario: Assembly with task phase detection
-- **WHEN** context engineering is enabled and messages contain a conversation history of 10+ turns
-- **THEN** the assembler SHALL detect the current task phase (explore, converge, execute, verify) based on the recent message pattern and annotate the assembled context with the detected phase
+#### 场景：带任务阶段检测的组装
+- **当** 上下文工程已启用且消息包含 10 轮以上的对话历史
+- **则** 组装器须基于近期消息模式检测当前任务阶段（explore, converge, execute, verify），并在组装后的上下文中标注检测到的阶段
 
-### Requirement: Dynamic capability view filters available tools per turn
-The system SHALL filter the tool list presented to the LLM based on the current task phase and agent configuration, rather than always presenting all tools.
+### 需求：动态能力视图按轮次过滤可用工具
+系统须根据当前任务阶段和 agent 配置过滤呈现给 LLM 的工具列表，而非始终展示所有工具。
 
-#### Scenario: Explore phase tool filtering
-- **WHEN** the detected task phase is "explore" and the agent has 20 registered tools
-- **THEN** the assembler SHALL include only tools tagged as relevant for exploration (search, read, list) and exclude execution tools (write, delete, deploy)
+#### 场景：探索阶段工具过滤
+- **当** 检测到的任务阶段为"explore"且 agent 有 20 个注册工具
+- **则** 组装器须仅包含标记为探索相关（search, read, list）的工具，排除执行类工具（write, delete, deploy）
 
-#### Scenario: All tools available in execute phase
-- **WHEN** the detected task phase is "execute"
-- **THEN** the assembler SHALL include all tools available to the agent without filtering
+#### 场景：执行阶段所有工具可用
+- **当** 检测到的任务阶段为"execute"
+- **则** 组装器须包含 agent 所有可用工具，不做过滤
 
-#### Scenario: No phase filtering when phases not configured
-- **WHEN** the agent has no phase-to-tool mapping configured
-- **THEN** the assembler SHALL pass all tools through without filtering
+#### 场景：阶段未配置时不进行过滤
+- **当** agent 未配置阶段-工具映射
+- **则** 组装器须透传所有工具，不做过滤
 
-### Requirement: Task work panel structures context for the current task
-The system SHALL construct a structured task work panel that replaces raw message history with a focused context window containing: current objective, relevant prior decisions, active evidence, and pending actions.
+### 需求：任务工作面板为当前任务结构化上下文
+系统须构建结构化任务工作面板，用聚焦的上下文窗口替代原始消息历史，包含：当前目标、相关先前决策、活跃证据和待处理操作。
 
-#### Scenario: Work panel for multi-turn task
-- **WHEN** a conversation has 15 turns and the current task involves tool calling
-- **THEN** the assembler SHALL construct a work panel containing: (1) the original objective from the first user message, (2) the last 3 assistant-user exchanges, (3) the most recent tool call and result, (4) a summary of older messages
+#### 场景：多轮任务的工作面板
+- **当** 对话已达 15 轮且当前任务涉及工具调用
+- **则** 组装器须构建包含以下内容的工作面板：(1) 来自第一条用户消息的原始目标，(2) 最近 3 轮 assistant-user 交流，(3) 最近的工具调用和结果，(4) 较早消息的摘要
 
-#### Scenario: Work panel falls back to full history for short conversations
-- **WHEN** a conversation has 3 or fewer turns
-- **THEN** the assembler SHALL pass all messages through without constructing a work panel
+#### 场景：短对话时工作面板回退为完整历史
+- **当** 对话不超过 3 轮
+- **则** 组装器须透传所有消息，不构建工作面板
 
-### Requirement: Context priority assignment
-The system SHALL assign a priority level (critical, high, medium, low) to each message in the conversation history for use by the budget governance module.
+### 需求：上下文优先级分配
+系统须为对话历史中的每条消息分配优先级级别（critical, high, medium, low），供预算治理模块使用。
 
-#### Scenario: Priority assignment rules
-- **WHEN** messages are processed by the assembler
-- **THEN** system messages and the current user message SHALL be marked "critical"; the last 3 assistant-user exchanges SHALL be marked "high"; tool results within the last 2 turns SHALL be marked "high"; older messages SHALL be marked "medium" or "low" based on recency
+#### 场景：优先级分配规则
+- **当** 消息被组装器处理时
+- **则** system 消息和当前用户消息须标记为"critical"；最近 3 轮 assistant-user 交流须标记为"high"；最近 2 轮内的工具结果须标记为"high"；较早消息根据时间远近标记为"medium"或"low"
 
-#### Scenario: Priority preserved in assembled output
-- **WHEN** the assembler returns an AssembledContext
-- **THEN** each message SHALL include a `priority` field accessible to downstream consumers (budget manager, evidence tracker)
+#### 场景：组装输出中保留优先级
+- **当** 组装器返回 AssembledContext
+- **则** 每条消息须包含 `priority` 字段，供下游消费者（预算管理器、证据追踪器）访问

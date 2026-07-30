@@ -1,24 +1,24 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: NodeType enum defines 6 execution behaviors
-The `NodeType` enum SHALL define: CONVERSATION, TOOL_CALL, CONDITION, AGENT, KNOWLEDGE_RETRIEVAL, VARIABLE_SET, FAN_OUT, MERGE.
+### Requirement: NodeType 枚举定义 6 种执行行为 — NodeType 枚举定义 6 种执行行为
+`NodeType` 枚举 SHALL 定义：CONVERSATION、TOOL_CALL、CONDITION、AGENT、KNOWLEDGE_RETRIEVAL、VARIABLE_SET、FAN_OUT、MERGE。
 
-#### Scenario: Conversation node
-- **WHEN** a node has type CONVERSATION
-- **THEN** the worker SHALL invoke an LLM with the current channel state
+#### Scenario: 对话节点
+- **WHEN** 节点的类型为 CONVERSATION
+- **THEN** worker SHALL 使用当前通道状态调用 LLM
 
-#### Scenario: Condition node
-- **WHEN** a node has type CONDITION
-- **THEN** the worker SHALL evaluate an expression against channel state to determine routing
+#### Scenario: 条件节点
+- **WHEN** 节点的类型为 CONDITION
+- **THEN** worker SHALL 根据通道状态求值表达式以确定路由
 
-#### Scenario: Agent node
-- **WHEN** a node has type AGENT
-- **THEN** the worker SHALL delegate execution to a sub-graph representing another agent
+#### Scenario: 代理节点
+- **WHEN** 节点的类型为 AGENT
+- **THEN** worker SHALL 将执行委托给表示另一个代理的子图
 
-#### Scenario: Fan-out node
-- **WHEN** a node has type FAN_OUT
-- **THEN** the runtime SHALL dispatch all branch nodes concurrently without invoking a worker on the FAN_OUT node itself
+#### Scenario: 扇出节点
+- **WHEN** 节点的类型为 FAN_OUT
+- **THEN** 运行时 SHALL 并发分发所有分支节点，而不在 FAN_OUT 节点本身上调用 worker
 
-#### Scenario: Merge node
-- **WHEN** a node has type MERGE
-- **THEN** the worker SHALL collect results from all fan-out branch sub-channels and produce an aggregated output
+#### Scenario: 合并节点
+- **WHEN** 节点的类型为 MERGE
+- **THEN** worker SHALL 从所有扇出分支子通道收集结果并生成聚合输出

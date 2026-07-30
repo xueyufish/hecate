@@ -1,4 +1,4 @@
-## Context
+## Context — 背景
 
 Hecate 当前的模型管理存在两个核心问题：
 
@@ -13,9 +13,9 @@ Step 1 已完成基础产品循环（注册→登录→创建 Agent→对话）�
 - `src/hecate/services/llm/service.py` — LiteLLM wrapper，`_resolve_model()` 解析模型名
 - `web/src/app/(dashboard)/agents/new/page.tsx` — 模型下拉选择
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
+**目标：**
 - 数据库存储 Provider 和模型，替代纯 env 配置
 - 后台 UI 管理 Provider（CRUD + 测试连通）
 - 按 Provider 分组展示模型选择
@@ -24,13 +24,13 @@ Step 1 已完成基础产品循环（注册→登录→创建 Agent→对话）�
 - Provider 级 timeout/retry/rate limit 配置
 - Provider 状态变化时更新 Agent fallback 链
 
-**Non-Goals:**
+**非目标：**
 - 多租户/权限隔离（P3）
 - 模型路由/成本追踪（P3）
 - 自托管推理（P4）
 - 模型精调（P4）
 
-## Decisions
+## Decisions — 决策
 
 ### D1: 数据库存储 vs 环境变量
 
@@ -95,7 +95,7 @@ Step 1 已完成基础产品循环（注册→登录→创建 Agent→对话）�
 - shadcn/ui 的 Table、Dialog、Select 组件满足需求
 - 分组下拉用 Radix UI 的 `OptGroup` 模式
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
 **[R1] Fernet 加密密钥丢失** → 密钥丢失无法解密 API Key。缓解：生产环境密钥管理交给运维，文档说明密钥备份重要性。
 

@@ -1,45 +1,45 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Save checkpoint to PostgreSQL
-The system SHALL persist checkpoints to PostgreSQL using the existing CheckpointModel ORM.
+### 需求：将 checkpoint 保存到 PostgreSQL
+系统须使用现有的 CheckpointModel ORM 将 checkpoint 持久化到 PostgreSQL。
 
-#### Scenario: Save checkpoint
-- **WHEN** `save()` is called with session_id, superstep, node_id, channel_state
-- **THEN** the system creates a CheckpointModel record and returns the checkpoint ID
+#### 场景：保存 checkpoint
+- **当** 使用 session_id, superstep, node_id, channel_state 调用 `save()`
+- **则** 系统创建 CheckpointModel 记录并返回 checkpoint ID
 
-#### Scenario: Save with metadata
-- **WHEN** `save()` is called with metadata (e.g., interrupt info)
-- **THEN** the metadata SHALL be stored in the metadata JSONB column
+#### 场景：带元数据保存
+- **当** 使用元数据（例如中断信息）调用 `save()`
+- **则** 元数据须存储在 metadata JSONB 列中
 
-### Requirement: Load checkpoint from PostgreSQL
-The system SHALL load checkpoints from PostgreSQL, supporting both latest and specific checkpoint retrieval.
+### 需求：从 PostgreSQL 加载 checkpoint
+系统须从 PostgreSQL 加载 checkpoint，支持最新和特定 checkpoint 的检索。
 
-#### Scenario: Load latest checkpoint
-- **WHEN** `load(session_id)` is called without checkpoint_id
-- **THEN** the system returns the checkpoint with the highest superstep for that session
+#### 场景：加载最新 checkpoint
+- **当** 不带 checkpoint_id 调用 `load(session_id)`
+- **则** 系统返回该 session 中 superstep 最高的 checkpoint
 
-#### Scenario: Load specific checkpoint
-- **WHEN** `load(session_id, checkpoint_id)` is called
-- **THEN** the system returns the exact checkpoint matching that ID
+#### 场景：加载特定 checkpoint
+- **当** 调用 `load(session_id, checkpoint_id)`
+- **则** 系统返回与该 ID 完全匹配的 checkpoint
 
-#### Scenario: No checkpoint found
-- **WHEN** `load()` is called for a session with no checkpoints
-- **THEN** the system returns None
+#### 场景：未找到 checkpoint
+- **当** 为没有 checkpoint 的 session 调用 `load()`
+- **则** 系统返回 None
 
-### Requirement: List checkpoints
-The system SHALL list checkpoints for a session ordered by superstep descending.
+### 需求：列出 checkpoint
+系统须按 superstep 降序列出 session 的 checkpoint。
 
-#### Scenario: List with limit
-- **WHEN** `list_checkpoints(session_id, limit=10)` is called
-- **THEN** the system returns the 10 most recent checkpoints
+#### 场景：带 limit 列出
+- **当** 调用 `list_checkpoints(session_id, limit=10)`
+- **则** 系统返回 10 个最近的 checkpoint
 
-### Requirement: Memory cache for hot path
-The system SHALL cache the most recent checkpoint per session in memory.
+### 需求：热路径的内存缓存
+系统须在内存中缓存每个 session 最近的 checkpoint。
 
-#### Scenario: Cache hit on load
-- **WHEN** `load()` is called for a session that was recently saved
-- **THEN** the system returns the cached checkpoint without querying the database
+#### 场景：加载时缓存命中
+- **当** 为最近保存过的 session 调用 `load()`
+- **则** 系统返回缓存的 checkpoint，无需查询数据库
 
-#### Scenario: Cache invalidation on save
-- **WHEN** `save()` is called for a session
-- **THEN** the cache for that session SHALL be updated with the new checkpoint
+#### 场景：保存时缓存失效
+- **当** 为某个 session 调用 `save()`
+- **则** 该 session 的缓存须用新 checkpoint 更新

@@ -1,64 +1,64 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: System supports hierarchical cost budgets
-The system SHALL support cost budgets at three levels: workspace (global cap), agent (per-agent cap), and user (per-user cap). Each budget specifies a limit amount, period (daily/weekly/monthly), and currency.
+### Requirement: 系统支持分层成本预算 — System supports hierarchical cost budgets
+系统应在三个层级支持成本预算：工作区（全局上限）、Agent（每个 Agent 上限）和用户（每个用户上限）。每个预算指定额度、周期（daily/weekly/monthly）和货币。
 
-#### Scenario: Create workspace-level budget
-- **WHEN** an administrator creates a budget with `scope: "workspace"`, `limit: 100.0`, `period: "monthly"`, `currency: "USD"`
-- **THEN** the system stores the budget and enforces it for all model invocations within that workspace
+#### Scenario: 创建工作区级预算 — Create workspace-level budget
+- **WHEN** 管理员创建预算，`scope: "workspace"`、`limit: 100.0`、`period: "monthly"`、`currency: "USD"`
+- **THEN** 系统存储该预算，并对该工作区内的所有模型调用强制执行
 
-#### Scenario: Agent-level budget overrides workspace budget
-- **WHEN** an agent has a `$50/month` budget and the workspace has a `$100/month` budget
-- **THEN** the agent SHALL be capped at `$50` regardless of the workspace limit
+#### Scenario: Agent 级预算覆盖工作区预算 — Agent-level budget overrides workspace budget
+- **WHEN** Agent 的预算为 `$50/month`，工作区的预算为 `$100/month`
+- **THEN** Agent 的支出上限应为 `$50`，不受工作区限制的影响
 
-#### Scenario: Budget period reset
-- **WHEN** a monthly budget period ends
-- **THEN** the spent counter SHALL reset to zero and the next period begins automatically
+#### Scenario: 预算周期重置 — Budget period reset
+- **WHEN** 月度预算周期结束
+- **THEN** 已花费计数器应重置为零，下一个周期自动开始
 
-### Requirement: System detects cost anomalies using z-score
-The system SHALL compute daily spend per model and per workspace, then apply z-score anomaly detection (rolling 30-day window, configurable threshold default 2.5 standard deviations) to flag unusual spending patterns.
+### Requirement: 系统使用 Z-score 检测成本异常 — System detects cost anomalies using z-score
+系统应按模型和工作区计算每日支出，然后应用 Z-score 异常检测（滚动 30 天窗口，可配置阈值，默认 2.5 个标准差）来标记异常的消费模式。
 
-#### Scenario: Normal spend not flagged
-- **WHEN** daily spend is within 2.5 standard deviations of the 30-day rolling mean
-- **THEN** no anomaly is recorded
+#### Scenario: 正常消费不被标记 — Normal spend not flagged
+- **WHEN** 每日支出在 30 天滚动均值的 2.5 个标准差范围内
+- **THEN** 不记录异常
 
-#### Scenario: Spending spike detected
-- **WHEN** daily spend exceeds 2.5 standard deviations above the 30-day rolling mean
-- **THEN** the system records an anomaly with severity (`info` / `warn` / `critical` based on z-score magnitude), the affected model, and the actual vs expected spend
+#### Scenario: 消费高峰被检测到 — Spending spike detected
+- **WHEN** 每日支出超过 30 天滚动均值的 2.5 个标准差以上
+- **THEN** 系统记录异常，包含严重性（基于 Z-score 幅度的 `info`/`warn`/`critical`）、受影响的模型以及实际支出与预期支出的对比
 
-#### Scenario: Cold start period
-- **WHEN** fewer than 7 days of historical data exists
-- **THEN** anomaly detection SHALL be skipped until sufficient baseline data accumulates
+#### Scenario: 冷启动期 — Cold start period
+- **WHEN** 不足 7 天的历史数据可用
+- **THEN** 在积累足够基线数据之前，应跳过异常检测
 
-### Requirement: System enforces configurable budget policy
-The system SHALL support two enforcement policies per budget: `"alert"` (log + notify, requests proceed) and `"block"` (PreLLMHook intercepts, request rejected with `BudgetExceededError`).
+### Requirement: 系统强制执行可配置的预算策略 — System enforces configurable budget policy
+系统应为每个预算支持两种执行策略：`"alert"`（记录 + 通知，请求继续）和 `"block"`（PreLLMHook 拦截，请求被拒绝并返回 `BudgetExceededError`）。
 
-#### Scenario: Alert policy on budget exceeded
-- **WHEN** spend reaches the budget limit and policy is `"alert"`
-- **THEN** the system SHALL emit an alert event and continue processing requests normally
+#### Scenario: 超预算时的告警策略 — Alert policy on budget exceeded
+- **WHEN** 支出达到预算上限且策略为 `"alert"`
+- **THEN** 系统应发出告警事件，并正常继续处理请求
 
-#### Scenario: Block policy on budget exceeded
-- **WHEN** spend reaches the budget limit and policy is `"block"`
-- **THEN** subsequent LLM invocations SHALL be intercepted by PreLLMHook and rejected with `BudgetExceededError` containing the budget details and remaining amount (zero)
+#### Scenario: 超预算时的阻断策略 — Block policy on budget exceeded
+- **WHEN** 支出达到预算上限且策略为 `"block"`
+- **THEN** 后续的 LLM 调用被 PreLLMHook 拦截，并拒绝返回 `BudgetExceededError`，包含预算详情和剩余额度（零）
 
-#### Scenario: Block policy allows non-LLM operations
-- **WHEN** budget is exceeded with `"block"` policy
-- **THEN** non-LLM operations (tool calls, knowledge queries) SHALL proceed normally — only LLM invocations are blocked
+#### Scenario: 阻断策略允许非 LLM 操作 — Block policy allows non-LLM operations
+- **WHEN** 预算超限且策略为 `"block"`
+- **THEN** 非 LLM 操作（工具调用、知识查询）应正常进行——只有 LLM 调用被阻断
 
-### Requirement: System forecasts monthly spend
-The system SHALL project end-of-period spend using linear regression on daily spend data, returning projected amount, confidence interval, and projected overrun (projected minus budget).
+### Requirement: 系统预测月度支出 — System forecasts monthly spend
+系统应使用每日支出数据的线性回归预测期末支出，返回预测金额、置信区间和预测超支（预测值减去预算）。
 
-#### Scenario: Forecast under budget
-- **WHEN** projected monthly spend is `$80` against a `$100` budget
-- **THEN** the forecast SHALL return `{projected: 80.0, status: "healthy", overrun: 0.0}`
+#### Scenario: 预测在预算内 — Forecast under budget
+- **WHEN** 预测月度支出为 `$80`，预算是 `$100`
+- **THEN** 预测应返回 `{projected: 80.0, status: "healthy", overrun: 0.0}`
 
-#### Scenario: Forecast over budget
-- **WHEN** projected monthly spend is `$120` against a `$100` budget
-- **THEN** the forecast SHALL return `{projected: 120.0, status: "warning", overrun: 20.0}`
+#### Scenario: 预测超预算 — Forecast over budget
+- **WHEN** 预测月度支出为 `$120`，预算是 `$100`
+- **THEN** 预测应返回 `{projected: 120.0, status: "warning", overrun: 20.0}`
 
-### Requirement: System generates chargeback reports
-The system SHALL aggregate costs by team/project/customer dimension and generate chargeback reports with per-dimension totals, top model contributors, and period-over-period comparison.
+### Requirement: 系统生成费用分摊报告 — System generates chargeback reports
+系统应按团队/项目/客户维度聚合成本，生成费用分摊报告，包含每个维度的总计、主要模型贡献者和环比比较。
 
-#### Scenario: Generate monthly chargeback
-- **WHEN** an administrator requests a chargeback report for period `2026-07`
-- **THEN** the system returns per-agent cost breakdown with model-level detail, total workspace spend, and comparison to previous month
+#### Scenario: 生成月度费用分摊报告 — Generate monthly chargeback
+- **WHEN** 管理员请求 2026 年 7 月的费用分摊报告
+- **THEN** 系统返回每个 Agent 的成本分解，包含模型级详情、工作区总支出以及与上月的比较

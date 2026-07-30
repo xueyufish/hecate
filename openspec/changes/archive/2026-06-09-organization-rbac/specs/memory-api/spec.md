@@ -1,32 +1,32 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: Authentication & Authorization
+### 需求：认证与授权
 
-- All endpoints SHALL require authentication via `get_auth_context()` dependency, replacing the previous `verify_api_key` dependency
-- Agent memory blocks SHALL be accessible to users with `editor` or `admin` role in the agent's workspace
-- User memories SHALL only be accessible to the user themselves
-- workspace_id for memory operations SHALL be resolved from the authenticated workspace context (JWT claims or API key scope), not from request parameters
-- System-scope API keys SHALL bypass workspace ownership checks
+- 所有端点应通过 `get_auth_context()` 依赖项要求认证，替换之前的 `verify_api_key` 依赖
+- 代理内存块应对代理工作区内具有 `editor` 或 `admin` 角色的用户可访问
+- 用户内存应仅对用户本人可访问
+- 内存操作的 workspace_id 应从认证的工作区上下文（JWT 声明或 API 密钥作用域）解析，而非从请求参数获取
+- 系统级 API 密钥应绕过工作区所有权检查
 
-#### Scenario: Workspace-scoped memory access
-- **WHEN** a user with `editor` role in workspace W1 sends GET `/api/agents/{agent_id}/memory/blocks` where the agent belongs to workspace W1
-- **THEN** the system returns the memory blocks
+#### 场景：工作区限定的内存访问
+- **当** 工作区 W1 中具有 `editor` 角色的用户发送 GET `/api/agents/{agent_id}/memory/blocks`，且代理属于工作区 W1
+- **则** 系统返回内存块
 
-#### Scenario: Cross-workspace memory access denied
-- **WHEN** a user with `editor` role in workspace W1 tries to access memory blocks of an agent in workspace W2
-- **THEN** the system returns `403 Forbidden`
+#### 场景：跨工作区内存访问被拒绝
+- **当** 工作区 W1 中具有 `editor` 角色的用户尝试访问工作区 W2 中代理的内存块
+- **则** 系统返回 `403 Forbidden`
 
-#### Scenario: Workspace context from auth
-- **WHEN** a memory endpoint is called with workspace context from JWT or API key
-- **THEN** the system uses the authenticated workspace_id for all queries, ignoring any workspace_id in the request body
+#### 场景：来自认证的工作区上下文
+- **当** 使用来自 JWT 或 API 密钥的工作区上下文调用内存端点
+- **则** 系统对所有查询使用认证的 workspace_id，忽略请求体中的任何 workspace_id
 
-### Requirement: Workspace Isolation
+### 需求：工作区隔离
 
-- All existing memory endpoints SHALL enforce workspace isolation via `workspace_id` resolved from the auth context, not from agent lookup or request parameter
-- `workspace_id` SHALL be resolved automatically by the `get_auth_context()` dependency
-- Service layer methods SHALL receive `workspace_id` from the auth context, not from direct parameters
-- Queries SHALL include a `workspace_id` filter matching the authenticated workspace
+- 所有现有内存端点应通过从认证上下文（而非代理查找或请求参数）解析的 `workspace_id` 强制实施工作区隔离
+- `workspace_id` 应由 `get_auth_context()` 依赖项自动解析
+- 服务层方法应从认证上下文接收 `workspace_id`，而非直接参数
+- 查询应包含与认证工作区匹配的 `workspace_id` 过滤条件
 
-#### Scenario: Memory query uses auth workspace
-- **WHEN** a user accesses memory endpoints with workspace W1 in auth context
-- **THEN** all queries filter by `workspace_id = W1.id` regardless of any workspace_id in request body
+#### 场景：内存查询使用认证工作区
+- **当** 用户访问内存端点时认证上下文中带有工作区 W1
+- **则** 无论请求体中是否有任何 workspace_id，所有查询均按 `workspace_id = W1.id` 过滤

@@ -1,55 +1,55 @@
-## 1. Engine Layer — DangerousPattern and DANGEROUS_PATTERNS
+## 1. 引擎层 — DangerousPattern 和 DANGEROUS_PATTERNS
 
-- [x] 1.1 Define `DangerousPattern` dataclass in `engine/tool_access.py` with fields: `tool_pattern` (str), `arg_key` (str), `arg_pattern` (str), `description` (str)
-- [x] 1.2 Define `DANGEROUS_PATTERNS` module-level constant list with shell command patterns: `rm -rf /`, `mkfs*`, `dd if=*of=/dev/`, `*curl*|*sh`, fork bomb
-- [x] 1.3 Add code execution patterns: `*os.system*`, `*subprocess*`, `*eval(*`, `*exec(*` for `execute_code` tool
-- [x] 1.4 Add sensitive file patterns: `.ssh`, `.env`, `.bashrc`, `/etc/passwd`, SSH key access for `write_file` and `read_file` tools
-- [x] 1.5 Add SQL dangerous patterns: `*DROP TABLE*`, `*DELETE FROM*` for wildcard tool with `code` argument
+- [x] 1.1 在 `engine/tool_access.py` 中定义 `DangerousPattern` 数据类，字段：`tool_pattern`（str）、`arg_key`（str）、`arg_pattern`（str）、`description`（str）
+- [x] 1.2 定义模块级常量列表 `DANGEROUS_PATTERNS`，包含 shell 命令模式：`rm -rf /`、`mkfs*`、`dd if=*of=/dev/`、`*curl*|*sh`、fork 炸弹
+- [x] 1.3 添加代码执行模式：针对 `execute_code` 工具的 `*os.system*`、`*subprocess*`、`*eval(*`、`*exec(*`
+- [x] 1.4 添加敏感文件模式：针对 `write_file` 和 `read_file` 工具的 `.ssh`、`.env`、`.bashrc`、`/etc/passwd`、SSH 密钥访问
+- [x] 1.5 添加 SQL 危险模式：针对通配符工具且 `code` 参数的 `*DROP TABLE*`、`*DELETE FROM*`
 
-## 2. Engine Layer — ToolRule arg_conditions Extension
+## 2. 引擎层 — ToolRule arg_conditions 扩展
 
-- [x] 2.1 Add `arg_conditions: dict[str, str] | None = None` field to `ToolRule` dataclass
-- [x] 2.2 Add `from __future__ import annotations` check — ensure all existing code using ToolRule still works (backward compatible)
-- [x] 2.3 Write unit tests: ToolRule construction with and without arg_conditions
+- [x] 2.1 向 `ToolRule` 数据类添加 `arg_conditions: dict[str, str] | None = None` 字段
+- [x] 2.2 添加 `from __future__ import annotations` 检查——确保所有使用 ToolRule 的现有代码仍能工作（向后兼容）
+- [x] 2.3 编写单元测试：带和不带 arg_conditions 的 ToolRule 构造
 
-## 3. Engine Layer — ToolAccessPolicy arg_conditions Matching
+## 3. 引擎层 — ToolAccessPolicy arg_conditions 匹配
 
-- [x] 3.1 Extend `evaluate()` signature to accept optional `arguments: dict[str, Any] | None = None` parameter
-- [x] 3.2 Implement `_match_dangerous_patterns(tool_name, arguments)` method — returns `True` if any dangerous pattern matches
-- [x] 3.3 Integrate dangerous pattern check at the START of evaluate() — before user rules, returns DENY if matched
-- [x] 3.4 Extend `_match_rules()` to check `arg_conditions` after tool-name match — if rule has arg_conditions, all must match via fnmatch; if no arg_conditions, match on name only (backward compatible)
-- [x] 3.5 Write unit tests: dangerous pattern detection (shell, code, file, SQL patterns)
-- [x] 3.6 Write unit tests: arg_conditions matching (single condition, multiple conditions, no match, backward compat)
-- [x] 3.7 Write unit tests: dangerous pattern overrides user ALLOW rules
+- [x] 3.1 扩展 `evaluate()` 签名以接受可选参数 `arguments: dict[str, Any] | None = None`
+- [x] 3.2 实现 `_match_dangerous_patterns(tool_name, arguments)` 方法——如果任何危险模式匹配则返回 `True`
+- [x] 3.3 在 evaluate() 的 START 处集成危险模式检查——在用户规则之前，如果匹配则返回 DENY
+- [x] 3.4 扩展 `_match_rules()` 以在工具名称匹配后检查 `arg_conditions`——如果规则有 arg_conditions，所有必须通过 fnmatch 匹配；如果没有 arg_conditions，仅按名称匹配（向后兼容）
+- [x] 3.5 编写单元测试：危险模式检测（shell、代码、文件、SQL 模式）
+- [x] 3.6 编写单元测试：arg_conditions 匹配（单条件、多条件、不匹配、向后兼容）
+- [x] 3.7 编写单元测试：危险模式覆盖用户 ALLOW 规则
 
-## 4. Engine Layer — WorkspaceBoundaryPolicy
+## 4. 引擎层 — WorkspaceBoundaryPolicy
 
-- [x] 4.1 Define `WorkspaceBoundaryPolicy` class with `check(tool_name, arguments, workspace_root) -> AccessDecision | None` method
-- [x] 4.2 Implement path extraction — check if `arguments` dict contains known path keys (`path`, `file_path`, `directory`, `directory_path`)
-- [x] 4.3 Implement path normalization using `os.path.normpath` and `os.path.join` to resolve relative paths and detect traversal (`../`)
-- [x] 4.4 Implement boundary check — return `EXECUTE` if normalized path starts with `workspace_root`, `REQUIRE_APPROVAL` if outside, `None` if no path argument
-- [x] 4.5 Integrate workspace boundary into `evaluate()` — after user rules, before risk-level fallback, only when `context["workspace_root"]` is set
-- [x] 4.6 Write unit tests: path inside workspace (EXECUTE), outside workspace (REQUIRE_APPROVAL), traversal attack, no path argument (None), no workspace_root (skipped)
+- [x] 4.1 定义 `WorkspaceBoundaryPolicy` 类，包含 `check(tool_name, arguments, workspace_root) -> AccessDecision | None` 方法
+- [x] 4.2 实现路径提取——检查 `arguments` 字典是否包含已知的路径键（`path`、`file_path`、`directory`、`directory_path`）
+- [x] 4.3 使用 `os.path.normpath` 和 `os.path.join` 实现路径规范化，以解析相对路径和检测遍历（`../`）
+- [x] 4.4 实现边界检查——如果规范化路径以 `workspace_root` 开头则返回 `EXECUTE`，如果在外部则返回 `REQUIRE_APPROVAL`，如果没有路径参数则返回 `None`
+- [x] 4.5 将工作空间边界集成到 `evaluate()`——在用户规则之后、风险级别回退之前，仅在设置了 `context["workspace_root"]` 时
+- [x] 4.6 编写单元测试：工作空间内路径（EXECUTE）、工作空间外路径（REQUIRE_APPROVAL）、遍历攻击、无路径参数（None）、无 workspace_root（跳过）
 
-## 5. Models Layer — ToolPolicyModel arg_conditions Column
+## 5. 模型层 — ToolPolicyModel arg_conditions 列
 
-- [x] 5.1 Add `arg_conditions: Mapped[dict | None]` JSON column to `ToolPolicyModel` in `models/tool_policy.py`
-- [x] 5.2 Add `arg_conditions: dict[str, str] | None` field to `ToolPolicyCreateSchema`
-- [x] 5.3 Add `arg_conditions: dict[str, str] | None` field to `ToolPolicyReadSchema`
-- [x] 5.4 Create Alembic migration to add `arg_conditions` column to `tool_policies` table (nullable, default None)
-- [x] 5.5 Write model tests: create with arg_conditions, create without arg_conditions, ReadSchema from attributes
-- [x] 5.6 Update `tests/conftest.py` if needed — ensure tool_policy model import already exists
+- [x] 5.1 向 `models/tool_policy.py` 中的 `ToolPolicyModel` 添加 `arg_conditions: Mapped[dict | None]` JSON 列
+- [x] 5.2 向 `ToolPolicyCreateSchema` 添加 `arg_conditions: dict[str, str] | None` 字段
+- [x] 5.3 向 `ToolPolicyReadSchema` 添加 `arg_conditions: dict[str, str] | None` 字段
+- [x] 5.4 创建 Alembic 迁移以向 `tool_policies` 表添加 `arg_conditions` 列（可为空，默认 None）
+- [x] 5.5 编写模型测试：带 arg_conditions 创建、不带 arg_conditions 创建、从属性的 ReadSchema
+- [x] 5.6 如果需要，更新 `tests/conftest.py`——确保 tool_policy 模型导入已存在
 
-## 6. ToolWorker Integration
+## 6. ToolWorker 集成
 
-- [x] 6.1 Extend `ToolWorker._check_access()` to pass `arguments` to `ToolAccessPolicy.evaluate()`
-- [x] 6.2 Ensure backward compatibility — when no policy configured, return None as before
-- [x] 6.3 Write integration tests: argument forwarding to policy, dangerous pattern blocks tool call, arg_conditions ASK triggers approval, workspace boundary auto-allows inside path
+- [x] 6.1 扩展 `ToolWorker._check_access()` 以传递 `arguments` 给 `ToolAccessPolicy.evaluate()`
+- [x] 6.2 确保向后兼容——当未配置策略时，像以前一样返回 None
+- [x] 6.3 编写集成测试：参数转发给策略、危险模式阻止工具调用、arg_conditions ASK 触发批准、工作空间边界自动允许内部路径
 
-## 7. Verification
+## 7. 验证
 
-- [x] 7.1 Run `ruff check src/hecate/ tests/` — zero errors
-- [x] 7.2 Run `ruff format --check src/ tests/` — zero issues
-- [x] 7.3 Run `mypy src/` — zero errors
-- [x] 7.4 Run `python -m pytest tests/ -q` — all tests passing
-- [x] 7.5 Verify engine/tool_access.py has zero imports beyond stdlib (`__future__`, `abc`, `dataclasses`, `enum`, `fnmatch`, `logging`, `os.path`, `typing`)
+- [x] 7.1 运行 `ruff check src/hecate/ tests/`——零错误
+- [x] 7.2 运行 `ruff format --check src/ tests/`——零问题
+- [x] 7.3 运行 `mypy src/`——零错误
+- [x] 7.4 运行 `python -m pytest tests/ -q`——所有测试通过
+- [x] 7.5 验证 engine/tool_access.py 除标准库外无导入（`__future__`、`abc`、`dataclasses`、`enum`、`fnmatch`、`logging`、`os.path`、`typing`）

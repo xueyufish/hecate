@@ -1,102 +1,102 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Per-prefix circuit breaker management
-The system SHALL maintain a separate `CircuitBreaker` instance per routing prefix extracted from LiteLLM model names. The prefix is the first segment before `"/"` (e.g., `"openai"` from `"openai/gpt-4o"`). For model names without a slash, the system SHALL resolve the prefix via a static mapping table (`gpt→openai`, `claude→anthropic`, `gemini→gemini`, `deepseek→deepseek`). Unmapped names SHALL default to `"unknown"`.
+### Requirement：每个前缀的熔断器管理 — 每个前缀的熔断器管理
+系统 SHALL 为从 LiteLLM 模型名称中提取的每个路由前缀维护一个单独的 `CircuitBreaker` 实例。前缀是 `"/"` 之前的第一个段（例如，`"openai/gpt-4o"` 中的 `"openai"`）。对于没有斜杠的模型名称，系统 SHALL 通过静态映射表解析前缀（`gpt→openai`、`claude→anthropic`、`gemini→gemini`、`deepseek→deepseek`）。未映射的名称 SHALL 默认为 `"unknown"`。
 
-#### Scenario: Prefix extraction with slash
-- **WHEN** model name is `"openai/gpt-4o"`
-- **THEN** prefix is `"openai"`
+#### Scenario：带斜杠的前缀提取
+- **WHEN** 模型名称为 `"openai/gpt-4o"`
+- **THEN** 前缀为 `"openai"`
 
-#### Scenario: Prefix extraction without slash
-- **WHEN** model name is `"gpt-4o"`
-- **THEN** prefix is `"openai"` (via mapping table)
+#### Scenario：不带斜杠的前缀提取
+- **WHEN** 模型名称为 `"gpt-4o"`
+- **THEN** 前缀为 `"openai"`（通过映射表）
 
-#### Scenario: Unknown short name
-- **WHEN** model name is `"some-new-model"` and no mapping exists
-- **THEN** prefix is `"unknown"`
+#### Scenario：未知的短名称
+- **WHEN** 模型名称为 `"some-new-model"` 且没有映射
+- **THEN** 前缀为 `"unknown"`
 
-#### Scenario: Lazy breaker creation
-- **WHEN** a prefix is seen for the first time
-- **THEN** a new `CircuitBreaker` instance is created for that prefix with default thresholds
+#### Scenario：懒创建熔断器
+- **WHEN** 首次看到某个前缀
+- **THEN** 为该前缀创建一个新的 `CircuitBreaker` 实例，使用默认阈值
 
-### Requirement: Circuit breaker state machine
-Each per-prefix breaker SHALL follow the standard three-state machine: CLOSED (requests pass through), OPEN (requests are rejected), HALF_OPEN (one probe request allowed). The breaker SHALL transition from CLOSED to OPEN when `failure_threshold` consecutive failures are recorded. The breaker SHALL transition from OPEN to HALF_OPEN after `recovery_timeout` seconds have elapsed. The breaker SHALL transition from HALF_OPEN to CLOSED on probe success, or back to OPEN on probe failure.
+### Requirement：熔断器状态机 — 熔断器状态机
+每个前缀的熔断器 SHALL 遵循标准的三态机：CLOSED（请求通过）、OPEN（请求被拒绝）、HALF_OPEN（允许一个探测请求）。当记录到 `failure_threshold` 次连续失败时，熔断器 SHALL 从 CLOSED 转换到 OPEN。在 `recovery_timeout` 秒过后，熔断器 SHALL 从 OPEN 转换到 HALF_OPEN。熔断器 SHALL 在探测成功时从 HALF_OPEN 转换到 CLOSED，或在探测失败时回到 OPEN。
 
-#### Scenario: CLOSED to OPEN on consecutive failures
-- **WHEN** 5 consecutive failures (default threshold) are recorded for prefix `"openai"`
-- **THEN** breaker state transitions to OPEN
+#### Scenario：连续失败时 CLOSED 到 OPEN
+- **WHEN** 为前缀 `"openai"` 记录了 5 次连续失败（默认阈值）
+- **THEN** 熔断器状态转换到 OPEN
 
-#### Scenario: OPEN to HALF_OPEN after timeout
-- **WHEN** breaker is OPEN and `recovery_timeout` (default 30s) has elapsed
-- **THEN** breaker state becomes HALF_OPEN
+#### Scenario：超时后 OPEN 到 HALF_OPEN
+- **WHEN** 熔断器为 OPEN 且 `recovery_timeout`（默认 30 秒）已过
+- **THEN** 熔断器状态变为 HALF_OPEN
 
-#### Scenario: HALF_OPEN to CLOSED on success
-- **WHEN** breaker is HALF_OPEN and a probe request succeeds
-- **THEN** breaker state transitions to CLOSED and failure count resets
+#### Scenario：成功时 HALF_OPEN 到 CLOSED
+- **WHEN** 熔断器为 HALF_OPEN 且探测请求成功
+- **THEN** 熔断器状态转换到 CLOSED，失败计数重置
 
-#### Scenario: HALF_OPEN to OPEN on failure
-- **WHEN** breaker is HALF_OPEN and a probe request fails
-- **THEN** breaker state transitions back to OPEN and `recovery_timeout` restarts
+#### Scenario：失败时 HALF_OPEN 到 OPEN
+- **WHEN** 熔断器为 HALF_OPEN 且探测请求失败
+- **THEN** 熔断器状态回到 OPEN，`recovery_timeout` 重新开始
 
-### Requirement: Single-probe HALF_OPEN with asyncio.Lock
-When a prefix breaker is in HALF_OPEN state, the system SHALL allow exactly one concurrent request to pass through as a probe. All other concurrent requests for the same prefix SHALL skip to fallback immediately. The probe request SHALL acquire an `asyncio.Lock` before executing.
+### Requirement：使用 asyncio.Lock 的单探测 HALF_OPEN — 使用 asyncio.Lock 的单探测 HALF_OPEN
+当前缀熔断器处于 HALF_OPEN 状态时，系统 SHALL 允许恰好一个并发请求作为探测通过。同一前缀的所有其他并发请求 SHALL 立即跳到回退。探测请求 SHALL 在执行前获取一个 `asyncio.Lock`。
 
-#### Scenario: Single probe passes through
-- **WHEN** breaker is HALF_OPEN and a request arrives
-- **THEN** the lock is acquired, the request calls the LLM, and the breaker records the result
+#### Scenario：单个探测通过
+- **WHEN** 熔断器为 HALF_OPEN 且一个请求到达
+- **THEN** 锁被获取，请求调用 LLM，熔断器记录结果
 
-#### Scenario: Concurrent requests skip to fallback
-- **WHEN** breaker is HALF_OPEN and a probe is already in progress
-- **THEN** other requests for the same prefix skip to fallback without waiting
+#### Scenario：并发请求跳到回退
+- **WHEN** 熔断器为 HALF_OPEN 且探测正在进行中
+- **THEN** 同一前缀的其他请求跳到回退，不等待
 
-### Requirement: Fallback chain filtering
-When the fallback chain is traversed (`_try_fallback` / `_try_fallback_stream`), the system SHALL skip any model whose prefix breaker is in OPEN state. Models whose prefix breaker is CLOSED or HALF_OPEN SHALL be attempted normally.
+### Requirement：回退链过滤 — 回退链过滤
+当遍历回退链时（`_try_fallback` / `_try_fallback_stream`），系统 SHALL 跳过任何其前缀熔断器处于 OPEN 状态的模型。其前缀熔断器为 CLOSED 或 HALF_OPEN 的模型 SHALL 正常尝试。
 
-#### Scenario: Skip OPEN prefix in fallback
-- **WHEN** fallback chain is `["openai/gpt-4o-mini", "anthropic/claude-3.5"]` and `"openai"` breaker is OPEN
-- **THEN** `"openai/gpt-4o-mini"` is skipped and `"anthropic/claude-3.5"` is attempted
+#### Scenario：在回退中跳过 OPEN 前缀
+- **WHEN** 回退链为 `["openai/gpt-4o-mini", "anthropic/claude-3.5"]` 且 `"openai"` 熔断器为 OPEN
+- **THEN** `"openai/gpt-4o-mini"` 被跳过，`"anthropic/claude-3.5"` 被尝试
 
-#### Scenario: All prefixes OPEN
-- **WHEN** all fallback models have OPEN breakers
-- **THEN** `RuntimeError("All models failed")` is raised
+#### Scenario：所有前缀均为 OPEN
+- **WHEN** 所有回退模型都具有 OPEN 熔断器
+- **THEN** 引发 `RuntimeError("All models failed")`
 
-#### Scenario: CLOSED prefix in fallback
-- **WHEN** fallback model has a CLOSED breaker
-- **THEN** the model is attempted normally
+#### Scenario：回退中 CLOSED 的前缀
+- **WHEN** 回退模型具有 CLOSED 熔断器
+- **THEN** 该模型正常尝试
 
-### Requirement: LLMService integration
-`LLMService` SHALL accept an optional `CircuitBreakerManager` in its constructor. When present, `chat()` and `chat_stream()` SHALL check breaker state before calling LiteLLM. If the primary model's prefix breaker is OPEN, the call SHALL skip directly to fallback. After each LiteLLM call (success or failure), the breaker SHALL record the result.
+### Requirement：LLMService 集成 — LLMService 集成
+`LLMService` SHALL 在其构造函数中接受一个可选的 `CircuitBreakerManager`。当存在时，`chat()` 和 `chat_stream()` SHALL 在调用 LiteLLM 前检查熔断器状态。如果主模型的前缀熔断器为 OPEN，调用 SHALL 直接跳到回退。每次 LiteLLM 调用（成功或失败）后，熔断器 SHALL 记录结果。
 
-#### Scenario: Primary model prefix is OPEN
-- **WHEN** `chat()` is called with model `"openai/gpt-4o"` and `"openai"` breaker is OPEN
-- **THEN** LiteLLM is not called; fallback chain is traversed immediately
+#### Scenario：主模型前缀为 OPEN
+- **WHEN** 使用模型 `"openai/gpt-4o"` 调用 `chat()` 且 `"openai"` 熔断器为 OPEN
+- **THEN** LiteLLM 不被调用；立即遍历回退链
 
-#### Scenario: Successful call records success
-- **WHEN** LiteLLM call succeeds for model `"openai/gpt-4o"`
-- **THEN** `record_success("openai/gpt-4o")` is called on the breaker
+#### Scenario：成功调用记录成功
+- **WHEN** 模型 `"openai/gpt-4o"` 的 LiteLLM 调用成功
+- **THEN** 在熔断器上调用 `record_success("openai/gpt-4o")`
 
-#### Scenario: Failed call records failure
-- **WHEN** LiteLLM call fails for model `"openai/gpt-4o"`
-- **THEN** `record_failure("openai/gpt-4o")` is called on the breaker
+#### Scenario：失败调用记录失败
+- **WHEN** 模型 `"openai/gpt-4o"` 的 LiteLLM 调用失败
+- **THEN** 在熔断器上调用 `record_failure("openai/gpt-4o")`
 
-#### Scenario: No breaker configured
-- **WHEN** `LLMService` is constructed without a `CircuitBreakerManager`
-- **THEN** behavior is identical to the current implementation (no breaker checks)
+#### Scenario：未配置熔断器
+- **WHEN** 构建 `LLMService` 时没有 `CircuitBreakerManager`
+- **THEN** 行为与当前实现相同（无熔断器检查）
 
-### Requirement: State-change callback hook
-`CircuitBreakerManager` SHALL accept an optional `on_state_change` callback of type `Callable[[str, CircuitState, CircuitState], None]`. When any prefix breaker transitions state, the callback SHALL be invoked with `(prefix, old_state, new_state)`. If no callback is provided, state transitions occur silently.
+### Requirement：状态变更回调钩子 — 状态变更回调钩子
+`CircuitBreakerManager` SHALL 接受一个可选的 `on_state_change` 回调，类型为 `Callable[[str, CircuitState, CircuitState], None]`。当任何前缀熔断器状态转换时，SHALL 使用 `(prefix, old_state, new_state)` 调用该回调。如果未提供回调，状态转换静默发生。
 
-#### Scenario: Callback invoked on state change
-- **WHEN** `"openai"` breaker transitions from CLOSED to OPEN
-- **THEN** `on_state_change("openai", CircuitState.CLOSED, CircuitState.OPEN)` is called
+#### Scenario：状态变更时调用回调
+- **WHEN** `"openai"` 熔断器从 CLOSED 转换到 OPEN
+- **THEN** 调用 `on_state_change("openai", CircuitState.CLOSED, CircuitState.OPEN)`
 
-#### Scenario: No callback configured
-- **WHEN** `on_state_change` is `None` and a breaker transitions
-- **THEN** no callback is invoked; breaker transitions normally
+#### Scenario：未配置回调
+- **WHEN** `on_state_change` 为 `None` 且熔断器转换
+- **THEN** 不调用回调；熔断器正常转换
 
-### Requirement: Thread safety
-`CircuitBreakerManager` SHALL be safe for concurrent use in an async context. Breaker creation for new prefixes SHALL be protected against race conditions (two concurrent requests creating duplicate breakers for the same prefix).
+### Requirement：线程安全 — 线程安全
+`CircuitBreakerManager` SHALL 在异步上下文中可安全并发使用。新前缀的熔断器创建 SHALL 受到保护，防止竞态条件（两个并发请求为同一前缀创建重复的熔断器）。
 
-#### Scenario: Concurrent requests for new prefix
-- **WHEN** two requests arrive simultaneously for a prefix with no existing breaker
-- **THEN** exactly one breaker instance is created for that prefix
+#### Scenario：新前缀的并发请求
+- **WHEN** 两个请求同时到达同一没有现有熔断器的前缀
+- **THEN** 恰好为该前缀创建一个熔断器实例

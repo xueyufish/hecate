@@ -1,52 +1,52 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Custom Input Form
-The workflow editor SHALL provide an input form for test runs. Users SHALL be able to specify input data (messages array and/or custom variables) before clicking Run Test.
+### Requirement: Custom Input Form — 需求：自定义输入表单
+工作流编辑器应为测试运行提供输入表单。用户应在点击 Run Test 之前能够指定输入数据（messages 数组和/或自定义变量）。
 
-#### Scenario: Custom input
-- **WHEN** the user opens the input form and enters custom messages
-- **THEN** the test run SHALL use the custom messages instead of the default "test" message
+#### Scenario: Custom input — 场景：自定义输入
+- **WHEN** 用户打开输入表单并输入自定义消息
+- **THEN** 测试运行应使用自定义消息，而非默认的"test"消息
 
-#### Scenario: Default input
-- **WHEN** the user runs a test without modifying the input form
-- **THEN** the test run SHALL use the default input: `{messages: [{role: "user", content: "test"}]}`
+#### Scenario: Default input — 场景：默认输入
+- **WHEN** 用户不修改输入表单直接运行测试
+- **THEN** 测试运行应使用默认输入：`{messages: [{role: "user", content: "test"}]}`
 
-### Requirement: Node Output Panel
-After a test run, clicking a node on the canvas SHALL open a side panel showing that node's input data, output data, error message (if any), and execution duration.
+### Requirement: Node Output Panel — 需求：节点输出面板
+测试运行后，点击画布上的节点应打开一个侧面板，显示该节点的输入数据、输出数据、错误消息（如有）和执行耗时。
 
-#### Scenario: View node output
-- **WHEN** the user clicks a completed node after a test run
-- **THEN** the system SHALL display a panel with: node_id, input, output (truncated to 1000 chars with expand), error, duration_ms
+#### Scenario: View node output — 场景：查看节点输出
+- **WHEN** 用户测试运行后点击一个已完成的节点
+- **THEN** 系统应显示面板，包含：node_id、input、output（截断至 1000 字符，可展开）、error、duration_ms
 
-#### Scenario: View failed node
-- **WHEN** the user clicks a failed node after a test run
-- **THEN** the system SHALL display the error_message prominently with the node's input data
+#### Scenario: View failed node — 场景：查看失败节点
+- **WHEN** 用户测试运行后点击一个失败的节点
+- **THEN** 系统应突出显示 error_message，并显示节点的输入数据
 
-### Requirement: Execution Logs Panel
-The workflow editor SHALL display an execution logs panel after a test run. The panel SHALL show per-node logs with timestamps and execution order.
+### Requirement: Execution Logs Panel — 需求：执行日志面板
+工作流编辑器应在测试运行后显示执行日志面板。面板应显示每个节点的带时间戳日志和执行顺序。
 
-#### Scenario: View execution logs
-- **WHEN** a test run completes
-- **THEN** the system SHALL display logs showing each node's execution order, start time, end time, and status
+#### Scenario: View execution logs — 场景：查看执行日志
+- **WHEN** 测试运行完成
+- **THEN** 系统应显示日志，展示每个节点的执行顺序、开始时间、结束时间和状态
 
-### Requirement: Node Status Badges
-During and after a test run, each node on the canvas SHALL display a status badge indicating its state: pending (gray), running (yellow), completed (green), failed (red).
+### Requirement: Node Status Badges — 需求：节点状态徽章
+测试运行期间和之后，画布上的每个节点应显示状态徽章，指示其状态：pending（灰色）、running（黄色）、completed（绿色）、failed（红色）。
 
-#### Scenario: Node status after run
-- **WHEN** a test run completes
-- **THEN** each node SHALL display a colored badge: green for completed, red for failed
+#### Scenario: Node status after run — 场景：运行后的节点状态
+- **WHEN** 测试运行完成
+- **THEN** 每个节点应显示彩色徽章：绿色表示完成，红色表示失败
 
-#### Scenario: Clear status
-- **WHEN** the user closes the test result panel
-- **THEN** all node status badges SHALL be removed
+#### Scenario: Clear status — 场景：清除状态
+- **WHEN** 用户关闭测试结果面板
+- **THEN** 所有节点状态徽章应被移除
 
-### Requirement: Run History
-The workflow editor SHALL maintain a list of the last 10 test runs in memory. Users SHALL be able to view previous run results and compare outputs.
+### Requirement: Run History — 需求：运行历史
+工作流编辑器应在内存中维护最近 10 次测试运行的列表。用户应能查看之前的运行结果并比较输出。
 
-#### Scenario: View run history
-- **WHEN** the user clicks "History" button
-- **THEN** the system SHALL display a list of previous test runs with timestamp, status, and duration
+#### Scenario: View run history — 场景：查看运行历史
+- **WHEN** 用户点击"History"按钮
+- **THEN** 系统应显示之前测试运行的列表，包含时间戳、状态和耗时
 
-#### Scenario: Load previous run
-- **WHEN** the user clicks a previous run in the history
-- **THEN** the system SHALL display that run's results (node outputs, logs)
+#### Scenario: Load previous run — 场景：加载之前的运行
+- **WHEN** 用户点击历史中的某次运行
+- **THEN** 系统应显示该次运行的结果（节点输出、日志）

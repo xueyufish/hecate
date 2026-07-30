@@ -1,126 +1,126 @@
-## 1. Setup — Dependencies and Entry Point
+## 1. 设置 — 依赖和入口点
 
-- [x] 1.1 Add `typer>=0.15.0` and `rich>=13.0.0` to main dependencies in pyproject.toml
-- [x] 1.2 Add `[project.scripts]` entry point: `hecate = "hecate.cli.main:app"`
-- [x] 1.3 Install new dependencies: `uv pip install -e ".[dev]"`
-- [x] 1.4 Create `src/hecate/cli/__init__.py` (empty)
-- [x] 1.5 Create `src/hecate/cli/commands/__init__.py` (empty)
+- [x] 1.1 将 `typer>=0.15.0` 和 `rich>=13.0.0` 添加到 pyproject.toml 的主要依赖中
+- [x] 1.2 添加 `[project.scripts]` 入口点：`hecate = "hecate.cli.main:app"`
+- [x] 1.3 安装新依赖：`uv pip install -e ".[dev]"`
+- [x] 1.4 创建 `src/hecate/cli/__init__.py`（空）
+- [x] 1.5 创建 `src/hecate/cli/commands/__init__.py`（空）
 
-## 2. Core Infrastructure
+## 2. 核心基础设施
 
-- [x] 2.1 Implement `src/hecate/cli/config.py` — TOML config loader, profile management, `get_config()`, `set_config()`, `get_active_profile()`, config file creation on first run
-- [x] 2.2 Implement `src/hecate/cli/client.py` — HecateClient class with httpx sync client, auth header injection, error handling, connection check
-- [x] 2.3 Implement `src/hecate/cli/output.py` — `format_table()` using rich Table, `format_json()` for --json output, `display_error()` for API errors, `confirm_delete()` for destructive actions
-- [x] 2.4 Implement `src/hecate/cli/main.py` — Root typer app, `--profile` option, `--json` global flag, `--version` flag, register all subcommand groups
+- [x] 2.1 实现 `src/hecate/cli/config.py` — TOML 配置加载器、配置文件管理、`get_config()`、`set_config()`、`get_active_profile()`、首次运行时创建配置文件
+- [x] 2.2 实现 `src/hecate/cli/client.py` — HecateClient 类，包含 httpx 同步客户端、auth 标头注入、错误处理、连接检查
+- [x] 2.3 实现 `src/hecate/cli/output.py` — 使用 rich Table 的 `format_table()`、用于 --json 输出的 `format_json()`、用于 API 错误的 `display_error()`、用于破坏性操作的 `confirm_delete()`
+- [x] 2.4 实现 `src/hecate/cli/main.py` — 根 typer app、`--profile` 选项、`--json` 全局标志、`--version` 标志、注册所有子命令组
 
-## 3. Config and Auth Commands
+## 3. 配置和认证命令
 
-- [x] 3.1 Implement `hecate config set <key> <value>` — write to active profile in config.toml
-- [x] 3.2 Implement `hecate config get <key>` — display single config value
-- [x] 3.3 Implement `hecate config show` — display all config values with api_key masked
-- [x] 3.4 Implement `hecate auth login --email <email>` — call POST /api/auth/login, store tokens in profile
-- [x] 3.5 Implement `hecate auth whoami` — call GET /api/auth/me, display user info
-- [x] 3.6 Implement JWT auto-refresh in client.py — check token expiry, call POST /api/auth/refresh when needed
+- [x] 3.1 实现 `hecate config set <key> <value>` — 写入 config.toml 中的活动配置文件
+- [x] 3.2 实现 `hecate config get <key>` — 显示单个配置值
+- [x] 3.3 实现 `hecate config show` — 显示所有配置值，api_key 被屏蔽
+- [x] 3.4 实现 `hecate auth login --email <email>` — 调用 POST /api/auth/login，将 token 存储到配置文件
+- [x] 3.5 实现 `hecate auth whoami` — 调用 GET /api/auth/me，显示用户信息
+- [x] 3.6 在 client.py 中实现 JWT 自动刷新 — 检查 token 过期时间，必要时调用 POST /api/auth/refresh
 
-## 4. Agent Commands
+## 4. Agent 命令
 
-- [x] 4.1 Implement `hecate agent list` — GET /api/agents, table output with id/name/mode/model
-- [x] 4.2 Implement `hecate agent create` — POST /api/agents with --name, --model, --mode, --persona, --tools, --kb-ids
-- [x] 4.3 Implement `hecate agent get <id>` — GET /api/agents/{id}, detailed display
-- [x] 4.4 Implement `hecate agent update <id>` — PUT /api/agents/{id} with optional --name, --persona, --tools, --kb-ids
-- [x] 4.5 Implement `hecate agent delete <id>` — DELETE /api/agents/{id} with confirmation prompt
+- [x] 4.1 实现 `hecate agent list` — GET /api/agents，表格输出包含 id/name/mode/model
+- [x] 4.2 实现 `hecate agent create` — POST /api/agents，带 --name、--model、--mode、--persona、--tools、--kb-ids
+- [x] 4.3 实现 `hecate agent get <id>` — GET /api/agents/{id}，详细显示
+- [x] 4.4 实现 `hecate agent update <id>` — PUT /api/agents/{id}，带可选的 --name、--persona、--tools、--kb-ids
+- [x] 4.5 实现 `hecate agent delete <id>` — DELETE /api/agents/{id}，带确认提示
 
-## 5. Session Commands
+## 5. Session 命令
 
-- [x] 5.1 Implement `hecate session create --agent-id <id>` — POST /api/sessions
-- [x] 5.2 Implement `hecate session list` — GET /api/sessions, table output
-- [x] 5.3 Implement `hecate session get <id>` — GET /api/sessions/{id}
-- [x] 5.4 Implement `hecate session resume <id> --message <msg>` — POST /api/sessions/{id}/resume
+- [x] 5.1 实现 `hecate session create --agent-id <id>` — POST /api/sessions
+- [x] 5.2 实现 `hecate session list` — GET /api/sessions，表格输出
+- [x] 5.3 实现 `hecate session get <id>` — GET /api/sessions/{id}
+- [x] 5.4 实现 `hecate session resume <id> --message <msg>` — POST /api/sessions/{id}/resume
 
-## 6. Chat Commands (Core Experience)
+## 6. 聊天命令（核心体验）
 
-- [x] 6.1 Implement `hecate chat send <agent_id> <message>` — POST /v1/chat/completions (non-streaming), display response
-- [x] 6.2 Implement SSE streaming parser in client.py — parse `data: {...}` lines, extract delta content
-- [x] 6.3 Implement `hecate chat interactive <agent_id>` — REPL loop with streaming, slash commands (/clear, /exit, /history)
-- [x] 6.4 Implement interactive chat context management — maintain conversation_id across turns, support --session-id for resuming
+- [x] 6.1 实现 `hecate chat send <agent_id> <message>` — POST /v1/chat/completions（非流式），显示响应
+- [x] 6.2 在 client.py 中实现 SSE 流式解析器 — 解析 `data: {...}` 行，提取 delta 内容
+- [x] 6.3 实现 `hecate chat interactive <agent_id>` — REPL 循环，带流式、斜杠命令（/clear、/exit、/history）
+- [x] 6.4 实现交互式聊天上下文管理 — 跨轮次维护 conversation_id，支持 --session-id 用于恢复
 
-## 7. Knowledge Base Commands
+## 7. 知识库命令
 
-- [x] 7.1 Implement `hecate kb list` — GET /api/knowledge-bases, table output
-- [x] 7.2 Implement `hecate kb create` — POST /api/knowledge-bases with --name, --description, --embedding-model, --chunk-strategy
-- [x] 7.3 Implement `hecate kb upload <kb_id> <file>` — POST /api/knowledge-bases/{id}/documents with multipart upload
-- [x] 7.4 Implement `hecate kb documents <kb_id>` — GET /api/knowledge-bases/{id}/documents, table with parsing status
+- [x] 7.1 实现 `hecate kb list` — GET /api/knowledge-bases，表格输出
+- [x] 7.2 实现 `hecate kb create` — POST /api/knowledge-bases，带 --name、--description、--embedding-model、--chunk-strategy
+- [x] 7.3 实现 `hecate kb upload <kb_id> <file>` — POST /api/knowledge-bases/{id}/documents，带 multipart 上传
+- [x] 7.4 实现 `hecate kb documents <kb_id>` — GET /api/knowledge-bases/{id}/documents，表格包含解析状态
 
-## 8. Tool Commands
+## 8. 工具命令
 
-- [x] 8.1 Implement `hecate tool list` — GET /api/tools with optional --source filter
-- [x] 8.2 Implement `hecate tool get <id>` — GET /api/tools/{id}
+- [x] 8.1 实现 `hecate tool list` — GET /api/tools，带可选的 --source 过滤器
+- [x] 8.2 实现 `hecate tool get <id>` — GET /api/tools/{id}
 
-## 9. Skill Commands
+## 9. 技能命令
 
-- [x] 9.1 Implement `hecate skill list` — GET /api/skills, table output
-- [x] 9.2 Implement `hecate skill create` — POST /api/skills with --name, --content, --source
-- [x] 9.3 Implement `hecate skill get <id>` — GET /api/skills/{id}
-- [x] 9.4 Implement `hecate skill update <id>` — PUT /api/skills/{id}
-- [x] 9.5 Implement `hecate skill delete <id>` — DELETE /api/skills/{id} with confirmation
-- [x] 9.6 Implement `hecate skill import <file>` — POST /api/skills/import with file upload
+- [x] 9.1 实现 `hecate skill list` — GET /api/skills，表格输出
+- [x] 9.2 实现 `hecate skill create` — POST /api/skills，带 --name、--content、--source
+- [x] 9.3 实现 `hecate skill get <id>` — GET /api/skills/{id}
+- [x] 9.4 实现 `hecate skill update <id>` — PUT /api/skills/{id}
+- [x] 9.5 实现 `hecate skill delete <id>` — DELETE /api/skills/{id}，带确认
+- [x] 9.6 实现 `hecate skill import <file>` — POST /api/skills/import，带文件上传
 
-## 10. Workflow Commands
+## 10. 工作流命令
 
-- [x] 10.1 Implement `hecate workflow list` — GET /api/workflows, table output
-- [x] 10.2 Implement `hecate workflow create` — POST /api/workflows with --name, --graph-dsl (JSON string or file path)
-- [x] 10.3 Implement `hecate workflow get <id>` — GET /api/workflows/{id}
-- [x] 10.4 Implement `hecate workflow update <id>` — PUT /api/workflows/{id}
-- [x] 10.5 Implement `hecate workflow delete <id>` — DELETE /api/workflows/{id} with confirmation
-- [x] 10.6 Implement `hecate workflow validate <id>` — POST /api/workflows/{id}/validate
-- [x] 10.7 Implement `hecate workflow test-run <id>` — POST /api/workflows/{id}/test-run
-- [x] 10.8 Implement `hecate workflow versions <id>` — GET /api/workflows/{id}/versions
-- [x] 10.9 Implement `hecate workflow runs <id>` — GET /api/workflows/{id}/runs
+- [x] 10.1 实现 `hecate workflow list` — GET /api/workflows，表格输出
+- [x] 10.2 实现 `hecate workflow create` — POST /api/workflows，带 --name、--graph-dsl（JSON 字符串或文件路径）
+- [x] 10.3 实现 `hecate workflow get <id>` — GET /api/workflows/{id}
+- [x] 10.4 实现 `hecate workflow update <id>` — PUT /api/workflows/{id}
+- [x] 10.5 实现 `hecate workflow delete <id>` — DELETE /api/workflows/{id}，带确认
+- [x] 10.6 实现 `hecate workflow validate <id>` — POST /api/workflows/{id}/validate
+- [x] 10.7 实现 `hecate workflow test-run <id>` — POST /api/workflows/{id}/test-run
+- [x] 10.8 实现 `hecate workflow versions <id>` — GET /api/workflows/{id}/versions
+- [x] 10.9 实现 `hecate workflow runs <id>` — GET /api/workflows/{id}/runs
 
-## 11. Prompt Commands
+## 11. Prompt 命令
 
-- [x] 11.1 Implement `hecate prompt list` — GET /api/prompts, table output
-- [x] 11.2 Implement `hecate prompt create` — POST /api/prompts with --name, --content, --label
-- [x] 11.3 Implement `hecate prompt get <id>` — GET /api/prompts/{id}
-- [x] 11.4 Implement `hecate prompt update <id>` — PUT /api/prompts/{id}
-- [x] 11.5 Implement `hecate prompt delete <id>` — DELETE /api/prompts/{id} with confirmation
-- [x] 11.6 Implement `hecate prompt versions <id>` — GET /api/prompts/{id}/versions
-- [x] 11.7 Implement `hecate prompt by-label <label>` — GET /api/prompts/by-label/{label}
+- [x] 11.1 实现 `hecate prompt list` — GET /api/prompts，表格输出
+- [x] 11.2 实现 `hecate prompt create` — POST /api/prompts，带 --name、--content、--label
+- [x] 11.3 实现 `hecate prompt get <id>` — GET /api/prompts/{id}
+- [x] 11.4 实现 `hecate prompt update <id>` — PUT /api/prompts/{id}
+- [x] 11.5 实现 `hecate prompt delete <id>` — DELETE /api/prompts/{id}，带确认
+- [x] 11.6 实现 `hecate prompt versions <id>` — GET /api/prompts/{id}/versions
+- [x] 11.7 实现 `hecate prompt by-label <label>` — GET /api/prompts/by-label/{label}
 
-## 12. Memory Commands
+## 12. Memory 命令
 
-- [x] 12.1 Implement `hecate memory blocks <agent_id>` — GET /api/agents/{id}/memory-blocks
-- [x] 12.2 Implement `hecate memory blocks create <agent_id>` — POST /api/agents/{id}/memory-blocks with --label, --content
-- [x] 12.3 Implement `hecate memory blocks update <agent_id> <block_id>` — PUT /api/agents/{id}/memory-blocks/{block_id}
-- [x] 12.4 Implement `hecate memory blocks delete <agent_id> <block_id>` — DELETE with confirmation
-- [x] 12.5 Implement `hecate memory list` — GET /api/memory, user memories table
-- [x] 12.6 Implement `hecate memory search <query>` — GET /api/memory?q=<query>
+- [x] 12.1 实现 `hecate memory blocks <agent_id>` — GET /api/agents/{id}/memory-blocks
+- [x] 12.2 实现 `hecate memory blocks create <agent_id>` — POST /api/agents/{id}/memory-blocks，带 --label、--content
+- [x] 12.3 实现 `hecate memory blocks update <agent_id> <block_id>` — PUT /api/agents/{id}/memory-blocks/{block_id}
+- [x] 12.4 实现 `hecate memory blocks delete <agent_id> <block_id>` — DELETE 带确认
+- [x] 12.5 实现 `hecate memory list` — GET /api/memory，用户记忆表格
+- [x] 12.6 实现 `hecate memory search <query>` — GET /api/memory?q=<query>
 
-## 13. Template Commands
+## 13. 模板命令
 
-- [x] 13.1 Implement `hecate template agents` — GET /api/agent-templates
-- [x] 13.2 Implement `hecate template agents instantiate <id>` — POST /api/agent-templates/{id}/instantiate
-- [x] 13.3 Implement `hecate template orchestration` — GET /api/orchestration-templates
+- [x] 13.1 实现 `hecate template agents` — GET /api/agent-templates
+- [x] 13.2 实现 `hecate template agents instantiate <id>` — POST /api/agent-templates/{id}/instantiate
+- [x] 13.3 实现 `hecate template orchestration` — GET /api/orchestration-templates
 
-## 14. Conversation Commands
+## 14. Conversation 命令
 
-- [x] 14.1 Implement `hecate conversation list` — GET /api/conversations, table output
-- [x] 14.2 Implement `hecate conversation get <id>` — GET /api/conversations/{id}, display messages
+- [x] 14.1 实现 `hecate conversation list` — GET /api/conversations，表格输出
+- [x] 14.2 实现 `hecate conversation get <id>` — GET /api/conversations/{id}，显示消息
 
-## 15. Model Commands
+## 15. 模型命令
 
-- [x] 15.1 Implement `hecate model list` — GET /v1/models, table output
-- [x] 15.2 Implement `hecate model providers list` — GET /api/model-providers
-- [x] 15.3 Implement `hecate model providers create` — POST /api/model-providers
-- [x] 15.4 Implement `hecate model providers test <id>` — POST /api/model-providers/{id}/test
+- [x] 15.1 实现 `hecate model list` — GET /v1/models，表格输出
+- [x] 15.2 实现 `hecate model providers list` — GET /api/model-providers
+- [x] 15.3 实现 `hecate model providers create` — POST /api/model-providers
+- [x] 15.4 实现 `hecate model providers test <id>` — POST /api/model-providers/{id}/test
 
-## 16. Message Commands
+## 16. 消息命令
 
-- [x] 16.1 Implement `hecate message citations <message_id>` — GET /api/messages/{id}/citations
+- [x] 16.1 实现 `hecate message citations <message_id>` — GET /api/messages/{id}/citations
 
-## 17. Verification
+## 17. 验证
 
-- [x] 17.1 Run `ruff check src/hecate/ tests/` — zero errors
-- [x] 17.2 Run `ruff format --check src/ tests/` — zero errors
-- [x] 17.3 Run `mypy src/` — zero errors
-- [x] 17.4 Run `python -m pytest tests/ -q` — all tests pass
+- [x] 17.1 运行 `ruff check src/hecate/ tests/` — 零错误
+- [x] 17.2 运行 `ruff format --check src/ tests/` — 零错误
+- [x] 17.3 运行 `mypy src/` — 零错误
+- [x] 17.4 运行 `python -m pytest tests/ -q` — 所有测试通过

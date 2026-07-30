@@ -1,35 +1,35 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: ToolWorker sandbox routing
-ToolWorker SHALL route tools based on `ToolAccessPolicy.evaluate()` decision. When `AGENT_ENV_SANDBOX_ENFORCEMENT=true` and the decision is `EXECUTE_SANDBOX`, ToolWorker SHALL route shell/exec tools and `sandbox_enabled=True` MCP tools to `DockerEnvironment.exec_shell()` for container-isolated execution. Python built-in tools with `EXECUTE_SANDBOX` decision SHALL execute directly (governed by WorkspaceBoundaryPolicy). When `AGENT_ENV_SANDBOX_ENFORCEMENT=false` (default), `EXECUTE_SANDBOX` is treated as `EXECUTE` (backward compatible).
+### 需求：ToolWorker 沙箱路由
+ToolWorker 应基于 `ToolAccessPolicy.evaluate()` 决策路由工具。当 `AGENT_ENV_SANDBOX_ENFORCEMENT=true` 且决策为 `EXECUTE_SANDBOX` 时，ToolWorker 应将 shell/exec 工具和 `sandbox_enabled=True` 的 MCP 工具路由到 `DockerEnvironment.exec_shell()` 进行容器隔离执行。具有 `EXECUTE_SANDBOX` 决策的 Python 内置工具应直接执行（由 WorkspaceBoundaryPolicy 管理）。当 `AGENT_ENV_SANDBOX_ENFORCEMENT=false`（默认）时，`EXECUTE_SANDBOX` 被视为 `EXECUTE`（向后兼容）。
 
-#### Scenario: Sandbox-enabled tool routes to sandbox executor
-- **WHEN** ToolWorker executes a tool call with `sandbox_enabled=True` and `AGENT_ENV_SANDBOX_ENFORCEMENT=false`
-- **THEN** `port.tool_execute_sandbox()` is called (existing behavior preserved)
+#### 场景：启用沙箱的工具路由到沙箱执行器
+- **当** ToolWorker 执行 `sandbox_enabled=True` 的工具调用且 `AGENT_ENV_SANDBOX_ENFORCEMENT=false` 时
+- **则** 调用 `port.tool_execute_sandbox()`（保留现有行为）
 
-#### Scenario: EXECUTE_SANDBOX routes shell tool to DockerEnvironment
-- **WHEN** `AGENT_ENV_SANDBOX_ENFORCEMENT=true` and `ToolAccessPolicy.evaluate()` returns `EXECUTE_SANDBOX` for tool `bash`
-- **THEN** the tool executes inside the agent's DockerEnvironment container via `exec_shell()`
-- **AND** `port.tool_execute_sandbox()` is NOT called for shell tools
+#### 场景：EXECUTE_SANDBOX 将 shell 工具路由到 DockerEnvironment
+- **当** `AGENT_ENV_SANDBOX_ENFORCEMENT=true` 且 `ToolAccessPolicy.evaluate()` 为工具 `bash` 返回 `EXECUTE_SANDBOX` 时
+- **则** 工具通过 `exec_shell()` 在 Agent 的 DockerEnvironment 容器内执行
+- **且** shell 工具不调用 `port.tool_execute_sandbox()`
 
-#### Scenario: Non-sandbox tool routes to normal executor
-- **WHEN** ToolWorker executes a tool call with decision `EXECUTE`
-- **THEN** `port.tool_execute()` is called as before
+#### 场景：非沙箱工具路由到正常执行器
+- **当** ToolWorker 执行决策为 `EXECUTE` 的工具调用时
+- **则** 像之前一样调用 `port.tool_execute()`
 
-#### Scenario: Sandbox does not bypass approval
-- **WHEN** a tool has `sandbox_enabled=True` and `risk_level="critical"`
-- **AND** no approval has been granted
-- **THEN** the tool is NOT executed (REQUIRE_APPROVAL takes precedence)
+#### 场景：沙箱不绕过审批
+- **当** 工具的 `sandbox_enabled=True` 且 `risk_level="critical"` 时
+- **且** 未授予审批
+- **则** 工具不执行（REQUIRE_APPROVAL 优先）
 
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: SecurityAuditEvent emission from ToolAccessPolicy
-ToolAccessPolicy.evaluate() SHALL emit a SecurityAuditEvent for each evaluation, capturing the tool name, access decision, matched rules, risk level, and policy version. Emission SHALL occur through an AuditSink interface to maintain engine layer zero-dependency constraint.
+### 需求：从 ToolAccessPolicy 发出 SecurityAuditEvent
+ToolAccessPolicy.evaluate() 应为每次评估发出一个 SecurityAuditEvent，捕获工具名、访问决策、匹配规则、风险级别和策略版本。发射应通过 AuditSink 接口进行，以保持引擎层零依赖约束。
 
-#### Scenario: REQUIRE_APPROVAL decision emits audit event
-- **WHEN** `ToolAccessPolicy.evaluate()` returns `REQUIRE_APPROVAL`
-- **THEN** a SecurityAuditEvent is emitted with decision="require_approval", matched rule, and risk level
+#### 场景：REQUIRE_APPROVAL 决策发出审计事件
+- **当** `ToolAccessPolicy.evaluate()` 返回 `REQUIRE_APPROVAL` 时
+- **则** 发出带有 decision="require_approval"、匹配规则和风险级别的 SecurityAuditEvent
 
-#### Scenario: DENY decision emits audit event
-- **WHEN** `ToolAccessPolicy.evaluate()` returns `DENY` due to dangerous pattern match
-- **THEN** a SecurityAuditEvent is emitted with decision="deny", reason="dangerous_pattern_matched"
+#### 场景：DENY 决策发出审计事件
+- **当** `ToolAccessPolicy.evaluate()` 因危险模式匹配返回 `DENY` 时
+- **则** 发出带有 decision="deny"、reason="dangerous_pattern_matched" 的 SecurityAuditEvent

@@ -1,38 +1,31 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Sparse vector generation from text
-The system SHALL generate sparse vectors (token_id → weight mapping) from text input using BGE-M3's sparse encoding capability, alongside the existing dense vector generation.
+### 需求：关键词搜索引擎
+系统须提供关键词搜索引擎，使用 BM25 算法实现。引擎须支持按知识库索引文档，搜索查询，及移除文档。
 
-#### Scenario: Encode text produces both dense and sparse vectors
-- **WHEN** `EmbeddingService.encode(texts)` is called with a list of texts
-- **THEN** each returned `EmbeddingResult` SHALL have a non-empty `sparse` field containing a `dict[int, float]` mapping token IDs to weights
+#### 场景：对文档索引执行关键词搜索
+- **当** 调用 `KeywordSearchEngine.search(kb_id="kb-1", query="refund policy", top_k=3)`
+- **则** 返回按 BM25 分值降序排列的最多 3 个匹配文档，包含 `passage_id`、`excerpt`、`score`
+- **则** 精确匹配（"refund"、"policy"）比语义相似术语获得更高排名
 
-#### Scenario: Encode query produces both dense and sparse vectors
-- **WHEN** `EmbeddingService.encode_query(query)` is called with a single query string
-- **THEN** the returned `EmbeddingResult` SHALL have both `dense` (1024-dim) and `sparse` (dict) fields populated
+#### 场景：空结果
+- **当** 查询无文档匹配
+- **则** 返回空列表 `[]`
 
-#### Scenario: Mock embedding generates deterministic sparse vectors
-- **WHEN** the embedding model is not available (mock mode)
-- **THEN** `EmbeddingResult.sparse` SHALL contain a deterministic mock sparse vector for testing
+#### 场景：知识库隔离
+- **当** 搜索 `knowledge_base_id="kb-1"`
+- **则** 仅返回该知识库中的文档
 
-### Requirement: Qdrant collection supports sparse vectors
-The system SHALL create Qdrant collections with both dense and sparse vector configurations, enabling hybrid search on indexed documents.
+### 需求：关键词文档索引
+系统须在文档添加到知识库时索引到关键词引擎。索引过程须对文档进行分词，构建 BM25 倒排索引。
 
-#### Scenario: Create collection with sparse vector config
-- **WHEN** `QdrantIndexer.create_collection(collection_name, vector_size)` is called
-- **THEN** the collection SHALL be created with both `vectors_config` (dense) and `sparse_vectors_config` (sparse named "sparse")
+#### 场景：索引文档
+- **当** 文档添加到知识库
+- **则** `KeywordSearchEngine.index_documents(kb_id, documents)` 处理文档并更新倒排索引以备搜索
 
-#### Scenario: Existing collection without sparse config
-- **WHEN** a collection already exists without sparse vector configuration
-- **THEN** the indexer SHALL detect the missing config and log a warning suggesting re-indexing
+### 需求：关键词索引重建
+系统须提供管理端点，用于按知识库重建关键词搜索索引。当向量存储中存在文档但缺少关键词索引时，此操作用于同步。
 
-### Requirement: Sparse vector indexing
-The system SHALL store sparse vectors alongside dense vectors when indexing documents, enabling later retrieval via sparse similarity search.
-
-#### Scenario: Upsert with sparse vectors
-- **WHEN** `QdrantIndexer.upsert_vectors()` is called with both dense and sparse vectors
-- **THEN** each point SHALL be stored with both vector types in the Qdrant collection
-
-#### Scenario: Upsert without sparse vectors (backward compatible)
-- **WHEN** `QdrantIndexer.upsert_vectors()` is called with only dense vectors (sparse=None)
-- **THEN** the point SHALL be stored with dense vector only, maintaining backward compatibility
+#### 场景：重建索引
+- **当** 调用 `POST /api/knowledge-bases/{id}/rebuild-keyword-index`
+- **则** 系统从向量存储获取该知识库的所有文档，并将其重新索引到关键词引擎

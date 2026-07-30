@@ -1,19 +1,19 @@
-## Why
+## Why — 为什么
 
-Hecate has three security audit sources (API-level AuditLog, tool-level SecurityAudit, anomaly-detection PolicyEngine) but **no way to export events to external SIEM systems**. Additionally, PolicyEngine violations are only `log.warning()` — they are lost entirely. The naming is also confusing: "SecurityAudit" and "AuditLog" both contain "Audit" but capture fundamentally different things, and "Policy" is overloaded across ToolPolicyPipeline, ToolAccessPolicy, and PolicyEngine with three different meanings.
+Hecate 有三个安全审计源（API 级的 AuditLog、工具级的 SecurityAudit、异常检测的 PolicyEngine），但**无法将事件导出到外部 SIEM 系统**。此外，PolicyEngine 违规仅 `log.warning()` — 完全丢失。命名也令人困惑："SecurityAudit" 和 "AuditLog" 都包含 "Audit" 但捕获的是根本不同的内容，"Policy" 在 ToolPolicyPipeline、ToolAccessPolicy 和 PolicyEngine 之间被过度使用，具有三种不同的含义。
 
-This change unifies the three sources into a coherent SIEM export pipeline, fixes the finding-persistence gap, and aligns naming with industry standards (AWS CloudTrail / GuardDuty / Security Hub, OCSF schema classes).
+此变更将三个源统一为连贯的 SIEM 导出管道，修复了发现结果持久化的缺口，并使命名与行业标准（AWS CloudTrail / GuardDuty / Security Hub、OCSF schema classes）对齐。
 
-## What Changes
+## What Changes — 变更内容
 
-### Naming Refactor (BREAKING — 9.14 just merged, no external consumers)
+### 命名重构（破坏性 — 9.14 刚合并，无外部消费者）
 
-- `SecurityAuditModel` → **`ToolDecisionModel`** (table `security_audit_events` → `tool_decisions`)
+- `SecurityAuditModel` → **`ToolDecisionModel`**（表 `security_audit_events` → `tool_decisions`）
 - `SecurityAuditEmitter` / `AuditSink` → **`ToolDecisionEmitter`** / **`DecisionSink`**
 - `SecurityAuditService` → **`ToolDecisionService`**
 - `SecurityAuditReadSchema` / `SecurityAuditQuerySchema` → **`ToolDecisionReadSchema`** / **`ToolDecisionQuerySchema`**
-- API: `GET /api/security/audit` → **`GET /api/security/decisions`**
-- Config: `AGENT_ENV_AUDIT_*` → **`AGENT_ENV_DECISION_*`**
+- API：`GET /api/security/audit` → **`GET /api/security/decisions`**
+- 配置：`AGENT_ENV_AUDIT_*` → **`AGENT_ENV_DECISION_*`**
 - `PolicyViolation` → **`SecurityFinding`**
 - `PolicyEngine` → **`FindingEngine`**
 - `AuditSecurityPolicy` ABC → **`DetectionRule`** ABC
@@ -23,62 +23,62 @@ This change unifies the three sources into a coherent SIEM export pipeline, fixe
 - `OffHoursSensitiveOpsPolicy` → **`OffHoursRule`**
 - `UnusualIPDetectionPolicy` → **`UnusualIPRule`**
 
-### Finding Persistence (fixes lost violations)
+### 发现结果持久化（修复丢失的违规）
 
-- New `SecurityFindingModel` table — persists FindingEngine violations instead of discarding them via `log.warning()`
-- REST API: `GET /api/security/findings` for querying persisted findings
-- Findings feed into the SIEM export pipeline as high-severity events
+- 新的 `SecurityFindingModel` 表 — 持久化 FindingEngine 违规，而非通过 `log.warning()` 丢弃
+- REST API：`GET /api/security/findings` 用于查询持久化的发现结果
+- 发现结果作为高严重级别事件馈送到 SIEM 导出管道
 
-### SIEM Export Pipeline (new capability)
+### SIEM 导出管道（新能力）
 
-- **`SecurityEvent`** unified dataclass — normalizes AuditLog + ToolDecision + SecurityFinding into one schema
-- **`SIEMExporter`** ABC — pluggable export sink interface
-- **`WebhookSIEMExporter`** — HTTPS POST (Splunk HEC, Datadog, Elastic, generic JSON)
-- **`SyslogSIEMExporter`** — RFC 5424 over TCP/UDP with optional TLS
-- **`OCSFFormatter`** — OCSF v1.5 schema mapping (Activity class 4001, Authorization class 2201, Finding class 2001)
-- **`SecurityEventCollector`** — subscribes to all three sources, normalizes, applies configurable filtering (event types + severity threshold), routes to registered exporters
-- Config: `SIEM_ENABLED`, `SIEM_EXPORTERS`, `SIEM_WEBHOOK_URL`, `SIEM_SYSLOG_HOST/PORT/PROTOCOL`, `SIEM_MIN_SEVERITY`, `SIEM_FILTER_EVENT_TYPES`, `SIEM_BATCH_SIZE`, `SIEM_FLUSH_INTERVAL`
+- **`SecurityEvent`** 统一数据类 — 将 AuditLog + ToolDecision + SecurityFinding 归一化为一个模式
+- **`SIEMExporter`** ABC — 可插拔的导出接收器接口
+- **`WebhookSIEMExporter`** — HTTPS POST（Splunk HEC、Datadog、Elastic、通用 JSON）
+- **`SyslogSIEMExporter`** — 通过 TCP/UDP 带可选 TLS 的 RFC 5424
+- **`OCSFFormatter`** — OCSF v1.5 模式映射（Activity class 4001、Authorization class 2201、Finding class 2001）
+- **`SecurityEventCollector`** — 订阅所有三个源，归一化，应用可配置过滤（事件类型 + 严重级别阈值），路由到注册的导出器
+- 配置：`SIEM_ENABLED`、`SIEM_EXPORTERS`、`SIEM_WEBHOOK_URL`、`SIEM_SYSLOG_HOST/PORT/PROTOCOL`、`SIEM_MIN_SEVERITY`、`SIEM_FILTER_EVENT_TYPES`、`SIEM_BATCH_SIZE`、`SIEM_FLUSH_INTERVAL`
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
+### 新能力
 
-- `tool-decision-log`: Tool policy decision audit — renamed from structured-security-audit. Captures ALLOW/DENY/SANDBOX decisions from ToolPolicyPipeline and ToolAccessPolicy. Persists to `tool_decisions` table with async batch writer.
-- `security-findings`: Anomaly detection finding persistence — stores FindingEngine violations (bulk delete, off-hours ops, unusual IP) in `security_findings` table. Provides REST query API. Replaces the current `log.warning()` discard pattern.
-- `siem-export`: SIEM export pipeline — unifies AuditLog, ToolDecision, and SecurityFinding events into normalized SecurityEvent stream. Exports via Webhook (JSON), Syslog (RFC 5424), and OCSF v1.5 formatter. Configurable filtering by event type and severity.
+- `tool-decision-log`：工具策略决策审计 — 从 structured-security-audit 重命名。捕获来自 ToolPolicyPipeline 和 ToolAccessPolicy 的 ALLOW/DENY/SANDBOX 决策。通过异步批量写入器持久化到 `tool_decisions` 表。
+- `security-findings`：异常检测发现结果持久化 — 将 FindingEngine 违规（批量删除、非工作时间操作、异常 IP）存储在 `security_findings` 表中。提供 REST 查询 API。替换当前的 `log.warning()` 丢弃模式。
+- `siem-export`：SIEM 导出管道 — 将 AuditLog、ToolDecision 和 SecurityFinding 事件统一为归一化的 SecurityEvent 流。通过 Webhook（JSON）、Syslog（RFC 5424）和 OCSF v1.5 格式化器导出。可配置的事件类型和严重级别过滤。
 
-### Modified Capabilities
+### 修改的能力
 
-- `audit-logs`: Rename PolicyEngine → FindingEngine, PolicyViolation → SecurityFinding, AuditSecurityPolicy → DetectionRule, PolicyContext → DetectionContext, PolicySeverity → FindingSeverity. Built-in rules renamed (BulkDeleteProtectionPolicy → BulkDeleteRule, etc.). FindingEngine now persists violations to SecurityFindingModel instead of logging and discarding.
+- `audit-logs`：将 PolicyEngine 重命名为 FindingEngine，PolicyViolation 重命名为 SecurityFinding，AuditSecurityPolicy 重命名为 DetectionRule，PolicyContext 重命名为 DetectionContext，PolicySeverity 重命名为 FindingSeverity。内置规则重命名（BulkDeleteProtectionPolicy → BulkDeleteRule 等）。FindingEngine 现在将违规持久化到 SecurityFindingModel 而非记录日志并丢弃。
 
-## Impact
+## Impact — 影响
 
-**Files created (~15):**
-- `src/hecate/models/tool_decision.py` (rename from security_audit.py)
-- `src/hecate/models/security_finding.py` (new)
-- `src/hecate/engine/decision_sink.py` (rename from audit_sink.py)
-- `src/hecate/services/security/decision_service.py` (rename from audit_service.py)
-- `src/hecate/services/security/finding_service.py` (new)
-- `src/hecate/services/security/siem/event.py` (new — SecurityEvent)
-- `src/hecate/services/security/siem/exporter.py` (new — SIEMExporter ABC)
-- `src/hecate/services/security/siem/webhook.py` (new)
-- `src/hecate/services/security/siem/syslog.py` (new)
-- `src/hecate/services/security/siem/ocsf.py` (new)
-- `src/hecate/services/security/siem/collector.py` (new)
-- `src/hecate/api/tool_decisions.py` (rename from security_audit.py)
-- `src/hecate/api/security_findings.py` (new)
-- `alembic/versions/xxx_rename_security_audit_to_tool_decisions.py` (migration)
-- `alembic/versions/yyy_add_security_findings.py` (migration)
+**创建的文件（约 15 个）：**
+- `src/hecate/models/tool_decision.py`（从 security_audit.py 重命名）
+- `src/hecate/models/security_finding.py`（新建）
+- `src/hecate/engine/decision_sink.py`（从 audit_sink.py 重命名）
+- `src/hecate/services/security/decision_service.py`（从 audit_service.py 重命名）
+- `src/hecate/services/security/finding_service.py`（新建）
+- `src/hecate/services/security/siem/event.py`（新建 — SecurityEvent）
+- `src/hecate/services/security/siem/exporter.py`（新建 — SIEMExporter ABC）
+- `src/hecate/services/security/siem/webhook.py`（新建）
+- `src/hecate/services/security/siem/syslog.py`（新建）
+- `src/hecate/services/security/siem/ocsf.py`（新建）
+- `src/hecate/services/security/siem/collector.py`（新建）
+- `src/hecate/api/tool_decisions.py`（从 security_audit.py 重命名）
+- `src/hecate/api/security_findings.py`（新建）
+- `alembic/versions/xxx_rename_security_audit_to_tool_decisions.py`（迁移）
+- `alembic/versions/yyy_add_security_findings.py`（迁移）
 
-**Files modified (~10):**
-- `src/hecate/core/config.py` — rename AGENT_ENV_AUDIT_* → AGENT_ENV_DECISION_*, add SIEM_* settings
-- `src/hecate/engine/policy_pipeline.py` — update emitter references
-- `src/hecate/engine/tool_access.py` — update emitter references
-- `src/hecate/engine/workers/tool_worker.py` — update emitter references
-- `src/hecate/services/audit/policy.py` — rename to finding.py or keep with updated names
-- `src/hecate/services/audit/service.py` — update FindingEngine references
-- `src/hecate/main.py` — update DI wiring for renamed services + SIEM collector startup
-- `.env.example` — rename config keys, add SIEM settings
-- `docs/design/security-architecture.md` — update naming
+**修改的文件（约 10 个）：**
+- `src/hecate/core/config.py` — 重命名 AGENT_ENV_AUDIT_* → AGENT_ENV_DECISION_*，添加 SIEM_* 设置
+- `src/hecate/engine/policy_pipeline.py` — 更新 emitter 引用
+- `src/hecate/engine/tool_access.py` — 更新 emitter 引用
+- `src/hecate/engine/workers/tool_worker.py` — 更新 emitter 引用
+- `src/hecate/services/audit/policy.py` — 重命名为 finding.py 或保留使用更新后的名称
+- `src/hecate/services/audit/service.py` — 更新 FindingEngine 引用
+- `src/hecate/main.py` — 更新重命名服务的 DI 注入 + SIEM collector 启动
+- `.env.example` — 重命名配置键，添加 SIEM 设置
+- `docs/design/security-architecture.md` — 更新命名
 
-**Dependencies:** None new. Uses existing httpx (webhook), standard library logging (syslog), and Pydantic (event models).
+**依赖：** 无新依赖。使用现有的 httpx（webhook）、标准库日志记录（syslog）和 Pydantic（事件模型）。

@@ -1,33 +1,33 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Node selection activates ConfigPanel in right-side panel
-When a user clicks a node on the workflow canvas, the system SHALL display the ConfigPanel component in the right-side panel (300px width), populated with that node's current configuration.
+### Requirement: 节点选择在右侧面板激活 ConfigPanel — 节点选择在右侧面板激活 ConfigPanel
+当用户点击工作流画布上的节点时，系统 SHALL 在右侧面板（300px 宽度）中显示 ConfigPanel 组件，并填充该节点的当前配置。
 
-#### Scenario: Click a node to open configuration
-- **WHEN** user clicks a conversation node on the canvas
-- **THEN** the right-side panel displays ConfigPanel with the node's model and system_prompt fields pre-filled
+#### Scenario: 点击节点打开配置
+- **WHEN** 用户点击画布上的对话节点
+- **THEN** 右侧面板显示 ConfigPanel，节点的 model 和 system_prompt 字段预先填充
 
-#### Scenario: Click canvas background to deselect
-- **WHEN** user clicks empty canvas area (no node)
-- **THEN** the right-side panel displays placeholder text "Select a node to configure" and the selected node state is cleared
+#### Scenario: 点击画布背景取消选择
+- **WHEN** 用户点击空白画布区域（无节点）
+- **THEN** 右侧面板显示占位文本"Select a node to configure"，选中节点状态被清除
 
-### Requirement: ConfigPanel edits propagate to canvas and auto-save
-When a user edits a node property in ConfigPanel, the change SHALL update the node data on the canvas and trigger the existing auto-save mechanism (2-second debounce to API).
+### Requirement: ConfigPanel 编辑传播到画布并自动保存 — ConfigPanel 编辑传播到画布并自动保存
+当用户在 ConfigPanel 中编辑节点属性时，变更 SHALL 更新画布上的节点数据并触发现有的自动保存机制（2 秒去抖到 API）。
 
-#### Scenario: Edit model name in conversation node
-- **WHEN** user changes the model field from "gpt-4o" to "gpt-4o-mini" in ConfigPanel
-- **THEN** the node's data.config.model updates on the canvas, and after 2 seconds the change is saved to the backend via PUT /api/workflows/{id}
+#### Scenario: 编辑对话节点中的模型名称
+- **WHEN** 用户在 ConfigPanel 中将模型字段从 "gpt-4o" 改为 "gpt-4o-mini"
+- **THEN** 画布上的 node.data.config.model 更新，2 秒后变更通过 PUT /api/workflows/{id} 保存到后端
 
-### Requirement: Right-side panel width is 300px
-The right-side panel SHALL have a fixed width of 300px, matching the ConfigPanel component's built-in width.
+### Requirement: 右侧面板宽度为 300px — 右侧面板宽度为 300px
+右侧面板 SHALL 具有固定的 300px 宽度，与 ConfigPanel 组件内置宽度匹配。
 
-#### Scenario: Panel width consistency
-- **WHEN** the workflow editor page loads
-- **THEN** the right-side panel renders at exactly 300px width
+#### Scenario: 面板宽度一致性
+- **WHEN** 工作流编辑器页面加载
+- **THEN** 右侧面板渲染为正好 300px 宽
 
-### Requirement: Test-run results remain in bottom panel
-The right-side panel SHALL be used exclusively for node configuration editing. Test-run input form and execution results SHALL remain in the existing bottom panel and right-side result display area.
+### Requirement: 测试运行结果保持在底部面板 — 测试运行结果保持在底部面板
+右侧面板 SHALL 专用于节点配置编辑。测试运行输入表单和执行结果 SHALL 保持在现有的底部面板和右侧结果显示区域中。
 
-#### Scenario: Test-run result display after clicking a node
-- **WHEN** user has a test-run result and clicks a node to configure it
-- **THEN** the right-side panel shows ConfigPanel, and test-run results remain accessible in the bottom panel
+#### Scenario: 点击节点后测试运行结果显示
+- **WHEN** 用户有测试运行结果并点击节点进行配置
+- **THEN** 右侧面板显示 ConfigPanel，测试运行结果在底部面板中仍然可访问

@@ -1,91 +1,91 @@
-## Context
+## Context — 上下文
 
-Hecate's engine layer provides graph-based agent orchestration via PregelRuntime (BSP execution loop), a ChannelManager for state, template-based graph construction, and WorkerPool dispatch. Multi-agent support currently includes:
+Hecate 的引擎层通过 PregelRuntime（BSP 执行循环）、用于状态的 ChannelManager、基于模板的图构建和 WorkerPool 分发提供基于图的多智能体编排。当前的多智能体支持包括：
 
-- **AgentWorker** (`engine/workers/agent_worker.py`): Executes AGENT-type nodes via nested graph execution, delegating to either `execution_service` or `port.agent_execute()`.
-- **Agent Invocation** (`agent-invocation` spec): `EnginePort.agent_execute()` for sub-agent execution with context isolation.
-- **Agent Handoff** (`agent-handoff` spec): `handoff_to_agent` tool injection and `Command(goto=)` for control transfer.
-- **Templates** (`engine/templates.py`): `build_chat_graph`, `build_three_layer_graph`, `build_fan_out_pipeline`, `build_conditional_pipeline`, `build_reflection_loop`, `build_sequential_pipeline`, `build_broadcast_pipeline`.
-- **EventStore** (`engine/eventstore.py`): Append-only audit log with 11 event types, integrated with PregelRuntime.
+- **AgentWorker**（`engine/workers/agent_worker.py`）：通过嵌套图执行来执行 AGENT 类型节点，委托给 `execution_service` 或 `port.agent_execute()`。
+- **智能体调用**（`agent-invocation` 规约）：`EnginePort.agent_execute()` 用于带上下文隔离的子智能体执行。
+- **智能体交接**（`agent-handoff` 规约）：`handoff_to_agent` 工具注入和 `Command(goto=)` 用于控制转移。
+- **模板**（`engine/templates.py`）：`build_chat_graph`、`build_three_layer_graph`、`build_fan_out_pipeline`、`build_conditional_pipeline`、`build_reflection_loop`、`build_sequential_pipeline`、`build_broadcast_pipeline`。
+- **EventStore**（`engine/eventstore.py`）：带 11 种事件类型的仅追加审计日志，与 PregelRuntime 集成。
 
-What's missing: real-time inter-agent messaging, runtime negotiation, intelligent task allocation, and controlled agent-as-tool invocation. These are the four primitives needed for P2 multi-agent orchestration and P3 Distributed Team Orchestration (13.15).
+缺少的：实时智能体间消息传递、运行时协商、智能任务分配和受控的智能体即工具调用。这些是 P2 多智能体编排和 P3 分布式团队编排（13.15）所需的四个原语。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Provide an EventBus ABC for session-scoped pub/sub messaging between agents during graph execution
-- Add negotiation and debate graph templates following existing template conventions
-- Implement a TaskAllocator ABC with LLM-based semantic matching for best-fit agent selection
-- Create an AgentTool that wraps an agent as a callable tool with per-invocation permission control
-- Ensure all P2 implementations use in-memory data structures with no external dependencies
-- Reserve ABC interfaces for P3 evolution (RedisEventBus, dynamic agent creation)
+**Goals — 目标：**
+- 提供一个 EventBus ABC，用于图执行期间会话范围的发布/订阅消息传递
+- 添加遵循现有模板约定的协商和辩论图模板
+- 实现带基于 LLM 的语义匹配的 TaskAllocator ABC，用于最合适的智能体选择
+- 创建一个 AgentTool，将智能体包装为可调用工具，带每次调用的权限控制
+- 确保所有 P2 实现使用内存数据结构，无外部依赖
+- 为 P3 演进预留 ABC 接口（RedisEventBus、动态智能体创建）
 
-**Non-Goals:**
-- Cross-session or cross-process EventBus (P3 — feature 13.15)
-- Distributed agent discovery or registration (P3 — feature 13.15)
-- Dynamic agent creation during runtime (P3 — `create_if_not_found=True`)
-- A2A Protocol compliance (P3 — feature 2.10)
-- UI changes for negotiation/task allocation configuration
-- Changes to the existing EventStore (append-only audit log remains unchanged)
+**Non-Goals — 非目标：**
+- 跨会话或跨进程 EventBus（P3——功能 13.15）
+- 分布式智能体发现或注册（P3——功能 13.15）
+- 运行时动态智能体创建（P3——`create_if_not_found=True`）
+- A2A 协议合规（P3——功能 2.10）
+- 协商/任务分配配置的 UI 变更
+- 对现有 EventStore 的变更（仅追加审计日志保持不变）
 
-## Decisions
+## Decisions — 决策
 
-### D1: EventBus parallel to EventStore, not extending it
+### D1: EventBus 与 EventStore 并行，而非扩展它
 
-**Decision**: Create a separate `EventBus` ABC alongside the existing `EventStore`. EventStore remains an append-only audit log for observability. EventBus is a real-time pub/sub for agent coordination.
+**Decision — 决策**：创建与现有 EventStore 并行的独立 `EventBus` ABC。EventStore 保持为用于可观测性的仅追加审计日志。EventBus 是用于智能体协调的实时发布/订阅。
 
-**Rationale**: EventStore's semantics (append, get_events, replay, versioned) are fundamentally different from pub/sub (publish, subscribe, unsubscribe, filter). Combining them would violate single responsibility and complicate both. JiuwenSwarm follows the same separation.
+**Rationale — 理由**：EventStore 的语义（追加、获取事件、重放、版本化）与发布/订阅（发布、订阅、取消订阅、过滤）根本不同。组合它们会违反单一职责并使两者复杂化。JiuwenSwarm 遵循相同的分离。
 
-**Alternative considered**: Extending EventStore with subscribe() — rejected because EventStore is append-only by design and subscribers would need to poll.
+**Alternative considered — 考虑的替代方案**：用 subscribe() 扩展 EventStore——被拒绝，因为 EventStore 是设计上仅追加的，订阅者需要轮询。
 
-### D2: EventBus integrated via PregelRuntime execution_context
+### D2: EventBus 通过 PregelRuntime execution_context 集成
 
-**Decision**: Add `event_bus: EventBus | None = None` to PregelRuntime's constructor. Pass it to workers via `execution_context` dict alongside existing `event_store`.
+**Decision — 决策**：向 PregelRuntime 的构造函数添加 `event_bus: EventBus | None = None`。通过 `execution_context` 字典将其传递给工作器，与现有的 `event_store` 一起。
 
-**Rationale**: This follows the established pattern for EventStore integration. Workers that need pub/sub (e.g., AgentWorker during negotiation) access EventBus via `execution_context["event_bus"]`. No changes to the Worker ABC signature.
+**Rationale — 理由**：这遵循了已建立的 EventStore 集成模式。需要发布/订阅的工作器（例如，协商期间的 AgentWorker）通过 `execution_context["event_bus"]` 访问 EventBus。无需更改 Worker ABC 签名。
 
-### D3: Negotiation templates produce standard GraphConfig
+### D3: 协商模板生成标准 GraphConfig
 
-**Decision**: `build_negotiation_graph()` and `build_debate_graph()` return `GraphConfig` instances, same as all other template functions. They use standard AGENT nodes with EventBus-aware channel configurations.
+**Decision — 决策**：`build_negotiation_graph()` 和 `build_debate_graph()` 返回 `GraphConfig` 实例，与所有其他模板函数相同。它们使用带 EventBus 感知通道配置的标准 AGENT 节点。
 
-**Rationale**: GraphConfig → GraphCompiler → PregelRuntime is the established pipeline. Negotiation graphs are just specialized graph topologies — no special runtime support needed. The graph itself encodes the negotiation protocol (round structure, termination conditions, message routing).
+**Rationale — 理由**：GraphConfig → GraphCompiler → PregelRuntime 是已建立的管道。协商图只是专门的图拓扑——无需特殊的运行时支持。图本身编码了协商协议（轮次结构、终止条件、消息路由）。
 
-### D4: TaskAllocator uses LLM semantic matching, not embedding similarity
+### D4: TaskAllocator 使用 LLM 语义匹配，而非嵌入相似度
 
-**Decision**: `SemanticTaskAllocator` calls `port.llm_invoke()` to analyze task descriptions against candidate agent descriptions, producing a scored ranking. No embedding model dependency.
+**Decision — 决策**：`SemanticTaskAllocator` 调用 `port.llm_invoke()` 来分析任务描述与候选智能体描述的匹配，生成评分排名。无嵌入模型依赖。
 
-**Rationale**: Adding an embedding model (e.g., via sentence-transformers) would introduce a new ML dependency and require model management. LLM-based matching reuses the existing `llm_invoke()` port and provides richer semantic understanding. AutoGen's SelectorGroupChat uses the same approach.
+**Rationale — 理由**：添加嵌入模型（例如，通过 sentence-transformers）会引入新的 ML 依赖并需要模型管理。基于 LLM 的匹配重用现有的 `llm_invoke()` 端口，并提供更丰富的语义理解。AutoGen 的 SelectorGroupChat 使用相同的方法。
 
-**Alternative considered**: Embedding cosine similarity — rejected due to new dependency and lower quality for short agent descriptions.
+**Alternative considered — 考虑的替代方案**：嵌入余弦相似度——由于新依赖和对短智能体描述的质量较低而被拒绝。
 
-### D5: Agent-as-Tool uses whitelist + blacklist dual-track (Deer-flow pattern)
+### D5: Agent-as-Tool 使用双轨白名单+黑名单（Deer-flow 模式）
 
-**Decision**: `AgentDefinition` specifies `tools: list[str] | None` (whitelist, None=inherit all) and `disallowed_tools: list[str]` (blacklist, default excludes `["agent_execute"]` to prevent nesting).
+**Decision — 决策**：`AgentDefinition` 指定 `tools: list[str] | None`（白名单，None=继承全部）和 `disallowed_tools: list[str]`（黑名单，默认排除 `["agent_execute"]` 以防止嵌套）。
 
-**Rationale**: Deer-flow (ByteDance) validates this pattern in production. Whitelist-only (Claude Code) is too rigid for enterprise scenarios where different callers need different permissions. Blacklist-only (none of the surveyed platforms) is insufficient for precise control. The dual-track handles both "only these tools" and "all tools except these" scenarios.
+**Rationale — 理由**：Deer-flow（字节跳动）在生产中验证了此模式。仅白名单（Claude Code）对于不同调用者需要不同权限的企业场景过于僵化。仅黑名单（调研的平台中没有一个采用）不足以实现精确控制。双轨机制同时处理"仅这些工具"和"除这些外的所有工具"场景。
 
-**Resolution order**: If `tools` is not None → use whitelist minus blacklist. If `tools` is None → inherit all minus blacklist.
+**Resolution order — 解析顺序**：如果 `tools` 不为 None → 使用白名单减去黑名单。如果 `tools` 为 None → 继承全部减去黑名单。
 
-### D6: AgentDefinition is per-invocation, not per-AgentModel
+### D6: AgentDefinition 是每次调用的，而非每个 AgentModel 的
 
-**Decision**: `AgentDefinition` is passed at tool invocation time, not stored on `AgentModel`. The same agent can be invoked with different permission sets by different callers.
+**Decision — 决策**：`AgentDefinition` 在工具调用时传递，而非存储在 `AgentModel` 上。同一个智能体可以被不同的调用者以不同的权限集调用。
 
-**Rationale**: In a multi-agent graph, Agent A may need to call "researcher" with read-only tools, while Agent B calls the same "researcher" with full tool access. Per-AgentModel definitions would be global and inflexible.
+**Rationale — 理由**：在多智能体图中，智能体 A 可能需要用只读工具调用"研究员"，而智能体 B 用完全工具访问调用同一个"研究员"。每个 AgentModel 的定义将是全局的和僵化的。
 
-### D7: context_mode supports "inherited" and "isolated"
+### D7: context_mode 支持"inherited"和"isolated"
 
-**Decision**: `AgentDefinition.context_mode` field: `"inherited"` (default) shares the parent's messages channel with the sub-agent; `"isolated"` creates a fresh message context for the sub-agent.
+**Decision — 决策**：`AgentDefinition.context_mode` 字段：`"inherited"`（默认）与子智能体共享父级的消息通道；`"isolated"` 为子智能体创建新的消息上下文。
 
-**Rationale**: Claude Code uses context isolation by default (subagents start fresh). For Hecate's graph-based execution, inherited context is more common (sub-agents need conversation history), but isolated mode is essential for expert agents that should only see the specific task, not the full conversation.
+**Rationale — 理由**：Claude Code 默认使用上下文隔离（子智能体从空白开始）。对于 Hecate 的基于图的执行，继承上下文更常见（子智能体需要对话历史），但对于只应看到特定任务而非完整对话的专家智能体，隔离模式至关重要。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-**[LLM cost for TaskAllocator]** → SemanticTaskAllocator calls LLM on every allocation, adding latency and cost. Mitigation: cache allocation results for identical task descriptions within a session; allow fallback to round-robin allocator for cost-sensitive deployments.
+**[TaskAllocator 的 LLM 成本]** → SemanticTaskAllocator 每次分配都调用 LLM，增加了延迟和成本。缓解措施：在会话内缓存相同任务描述的分配结果；允许对成本敏感的部署回退到轮询分配器。
 
-**[EventBus memory usage]** → InMemoryEventBus stores all published events in memory until subscribers consume them. Mitigation: per-topic queue size limits with oldest-drop policy; events are session-scoped and GC'd when session ends.
+**[EventBus 内存使用]** → InMemoryEventBus 将所有发布的事件存储在内存中，直到订阅者消费它们。缓解措施：每个主题队列大小限制，采用最旧丢弃策略；事件是会话范围的，在会话结束时被 GC。
 
-**[Negotiation graph complexity]** → Negotiation templates produce multi-round graphs that may run for many supersteps. Mitigation: configurable max_rounds parameter in template builders; PregelRuntime's existing max_supersteps guard.
+**[协商图复杂性]** → 协商模板生成可能运行许多超步的多轮图。缓解措施：模板构建器中的可配置 max_rounds 参数；PregelRuntime 现有的 max_supersteps 保护。
 
-**[Agent-as-Tool recursion]** → Agent A calls Agent B as tool, Agent B calls Agent A as tool. Mitigation: default `disallowed_tools=["agent_execute"]` prevents tool-level nesting; graph compiler's cycle detection prevents handoff-level nesting.
+**[Agent-as-Tool 递归]** → 智能体 A 将智能体 B 作为工具调用，智能体 B 将智能体 A 作为工具调用。缓解措施：默认 `disallowed_tools=["agent_execute"]` 防止工具级别嵌套；图编译器的循环检测防止交接级别嵌套。
 
-**[EventBus + EventStore confusion]** → Two event systems may confuse developers. Mitigation: clear naming (EventBus for real-time coordination, EventStore for audit trail); EventBus events are not persisted by default.
+**[EventBus + EventStore 混淆]** → 两个事件系统可能使开发人员困惑。缓解措施：清晰的命名（EventBus 用于实时协调，EventStore 用于审计跟踪）；EventBus 事件默认不持久化。

@@ -1,84 +1,89 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: AgentEnvironment abstraction
-The system SHALL provide an `AgentEnvironment` ABC that represents the agent's persistent execution environment. Each environment is scoped to a single agent and contains subdirectories for sessions, files, memory, and skills.
+### 需求：AgentEnvironment 抽象
 
-#### Scenario: Environment has required subdirectories
-- **WHEN** an agent environment is created
-- **THEN** the environment contains `sessions/`, `files/`, `memory/`, and `skills/` subdirectories
+系统应提供一个 `AgentEnvironment` ABC，表示 Agent 的持久执行环境。每个环境作用于单个 Agent，包含会话、文件、内存和技能的子目录。
 
-#### Scenario: Environment is scoped to agent
-- **WHEN** an environment is accessed for agent A
-- **THEN** agent A cannot access agent B's environment files
+#### 场景：环境包含必需的子目录
+- **当** 创建 Agent 环境时
+- **则** 环境包含 `sessions/`、`files/`、`memory/` 和 `skills/` 子目录
 
-### Requirement: LocalEnvironment filesystem implementation
-The system SHALL provide a `LocalEnvironment` implementation that stores agent data on the local filesystem at `{WORKSPACE_ROOT}/{agent_id}/`.
+#### 场景：环境作用于单个 Agent
+- **当** 访问 Agent A 的环境时
+- **则** Agent A 无法访问 Agent B 的环境文件
 
-#### Scenario: File write and read
-- **WHEN** a file is written to `files/report.txt` in the environment
-- **THEN** the file can be read back with the same content
+### 需求：LocalEnvironment 文件系统实现
 
-#### Scenario: File listing
-- **WHEN** files exist in the `files/` subdirectory
-- **THEN** `list_files("files/")` returns the file list with metadata
+系统应提供一个 `LocalEnvironment` 实现，将 Agent 数据存储在本地文件系统的 `{WORKSPACE_ROOT}/{agent_id}/`。
 
-#### Scenario: File deletion
-- **WHEN** a file is deleted from the environment
-- **THEN** subsequent `exists()` returns False
+#### 场景：文件写入和读取
+- **当** 文件写入环境的 `files/report.txt` 时
+- **则** 该文件可以以相同内容被读取回来
 
-### Requirement: EnvironmentManager lifecycle
-The system SHALL provide an `EnvironmentManager` that manages environment lifecycle with lazy creation and TTL-based eviction.
+#### 场景：文件列表
+- **当** 文件存在于 `files/` 子目录中时
+- **则** `list_files("files/")` 返回文件列表及元数据
 
-#### Scenario: Lazy creation on first use
-- **WHEN** `get_environment(agent_id)` is called for an agent with no existing environment
-- **THEN** a new environment is created and returned
+#### 场景：文件删除
+- **当** 文件从环境中被删除时
+- **则** 后续的 `exists()` 返回 False
 
-#### Scenario: Cached environment reuse
-- **WHEN** `get_environment(agent_id)` is called twice for the same agent
-- **THEN** the same environment instance is returned (cached)
+### 需求：EnvironmentManager 生命周期
 
-#### Scenario: TTL eviction
-- **WHEN** an environment has been idle for longer than the configured TTL
-- **THEN** the environment is closed and removed from cache on next access
+系统应提供一个 `EnvironmentManager`，使用懒创建和基于 TTL 的驱逐来管理环境生命周期。
 
-#### Scenario: TTL reset on interaction
-- **WHEN** a file operation is performed on an environment
-- **THEN** the environment's TTL timer is reset
+#### 场景：首次使用懒创建
+- **当** 为没有现有环境的 Agent 调用 `get_environment(agent_id)` 时
+- **则** 创建并返回一个新环境
 
-#### Scenario: Close all environments
-- **WHEN** `close_all()` is called (e.g., on application shutdown)
-- **THEN** all cached environments are closed
+#### 场景：缓存环境复用
+- **当** 为同一 Agent 调用两次 `get_environment(agent_id)` 时
+- **则** 返回同一环境实例（缓存）
 
-### Requirement: REST API for file management
-The system SHALL expose REST API endpoints for managing files in an agent's environment.
+#### 场景：TTL 驱逐
+- **当** 环境空闲时间超过配置的 TTL 时
+- **则** 下次访问时环境被关闭并从缓存中移除
 
-#### Scenario: List files
-- **WHEN** a client requests `GET /api/agents/{agent_id}/environment/files`
-- **THEN** the system returns the file list in the `files/` subdirectory
+#### 场景：交互时 TTL 重置
+- **当** 对环境执行文件操作时
+- **则** 环境的 TTL 计时器被重置
 
-#### Scenario: Read file
-- **WHEN** a client requests `GET /api/agents/{agent_id}/environment/files/{path}`
-- **THEN** the system returns the file content
+#### 场景：关闭所有环境
+- **当** 调用 `close_all()`（例如应用关闭时）
+- **则** 所有缓存的环境被关闭
 
-#### Scenario: Write file
-- **WHEN** a client requests `POST /api/agents/{agent_id}/environment/files` with file content
-- **THEN** the file is written to the `files/` subdirectory
+### 需求：文件管理 REST API
 
-#### Scenario: Delete file
-- **WHEN** a client requests `DELETE /api/agents/{agent_id}/environment/files/{path}`
-- **THEN** the file is removed from the environment
+系统应暴露用于管理 Agent 环境中文件的 REST API 端点。
 
-#### Scenario: Environment stats
-- **WHEN** a client requests `GET /api/agents/{agent_id}/environment/stats`
-- **THEN** the system returns file count, total size, and creation time
+#### 场景：列出文件
+- **当** 客户端请求 `GET /api/agents/{agent_id}/environment/files` 时
+- **则** 系统返回 `files/` 子目录中的文件列表
 
-### Requirement: Session auto-association
-The system SHALL automatically associate sessions with the agent's environment. No manual environment ID management is needed.
+#### 场景：读取文件
+- **当** 客户端请求 `GET /api/agents/{agent_id}/environment/files/{path}` 时
+- **则** 系统返回文件内容
 
-#### Scenario: Session gets environment context
-- **WHEN** a session is created for an agent
-- **THEN** the agent's environment info (root path) is available in the execution context
+#### 场景：写入文件
+- **当** 客户端请求使用文件内容的 `POST /api/agents/{agent_id}/environment/files` 时
+- **则** 文件被写入 `files/` 子目录
 
-#### Scenario: Multiple sessions share environment
-- **WHEN** two sessions are created for the same agent
-- **THEN** both sessions access the same environment files
+#### 场景：删除文件
+- **当** 客户端请求 `DELETE /api/agents/{agent_id}/environment/files/{path}` 时
+- **则** 文件从环境中被移除
+
+#### 场景：环境统计
+- **当** 客户端请求 `GET /api/agents/{agent_id}/environment/stats` 时
+- **则** 系统返回文件数量、总大小和创建时间
+
+### 需求：会话自动关联
+
+系统应自动将会话与 Agent 的环境关联。无需手动管理环境 ID。
+
+#### 场景：会话获取环境上下文
+- **当** 为 Agent 创建会话时
+- **则** Agent 的环境信息（根路径）在执行上下文中可用
+
+#### 场景：多个会话共享环境
+- **当** 为同一 Agent 创建两个会话时
+- **则** 两个会话访问相同的环境文件

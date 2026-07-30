@@ -1,59 +1,59 @@
-## 1. PregelRuntime Constructor + execution_context
+## 1. PregelRuntime 构造函数 + execution_context
 
-- [x] 1.1 Add `context_engine: ContextEngine | None = None` parameter to PregelRuntime.__init__
-- [x] 1.2 Store as `self._context_engine`
-- [x] 1.3 In `_execution_context()`, inject `ctx["context_engine"] = self._context_engine` when not None
-- [x] 1.4 Verify existing tests pass with context_engine=None (backward compatible)
+- [x] 1.1 向 PregelRuntime.__init__ 添加 `context_engine: ContextEngine | None = None` 参数
+- [x] 1.2 存储为 `self._context_engine`
+- [x] 1.3 在 `_execution_context()` 中，当不为 None 时注入 `ctx["context_engine"] = self._context_engine`
+- [x] 1.4 验证使用 context_engine=None 的现有测试通过（向后兼容）
 
-## 2. Tool Result Truncation Helper
+## 2. 工具结果截断辅助函数
 
-- [x] 2.1 Create `_truncate_tool_results(messages: list[dict], tool_result_limit: int) -> list[dict]` helper function in llm_worker.py
-- [x] 2.2 Truncate tool/assistant messages with tool_results whose estimated tokens exceed limit; preserve first N tokens; append "[truncated]" indicator
-- [x] 2.3 Return a new list (non-destructive); leave original messages unchanged
-- [x] 2.4 Unit tests: oversized tool result truncated, small tool result unchanged, multiple tool results in one message, no tool results passthrough
+- [x] 2.1 在 llm_worker.py 中创建 `_truncate_tool_results(messages: list[dict], tool_result_limit: int) -> list[dict]` 辅助函数
+- [x] 2.2 截断具有超过限制的估计 token 的 tool/assistant 消息；保留前 N 个 token；附加 "[截断]" 指示符
+- [x] 2.3 返回新列表（非破坏性）；保持原始消息不变
+- [x] 2.4 单元测试：过大的工具结果被截断，小的工具结果不变，单条消息中的多个工具结果，无工具结果时透传
 
-## 3. Budget Resolution Helper
+## 3. 预算解析辅助函数
 
-- [x] 3.1 Create `_resolve_budget(node_config: dict, execution_context: dict | None) -> int` helper in llm_worker.py
-- [x] 3.2 Priority: node_config["max_tokens"] → execution_context["context_budget"] → 8000
-- [x] 3.3 Unit tests: per-node priority, runtime fallback, default fallback, all three absent
+- [x] 3.1 在 llm_worker.py 中创建 `_resolve_budget(node_config: dict, execution_context: dict | None) -> int` 辅助函数
+- [x] 3.2 优先级：node_config["max_tokens"] → execution_context["context_budget"] → 8000
+- [x] 3.3 单元测试：每节点优先级，运行时回退，默认回退，三者都缺失
 
-## 4. Context Pipeline in LLMWorker.execute()
+## 4. LLMWorker.execute() 中的上下文管道
 
-- [x] 4.1 After extracting messages from snapshot, check execution_context for "context_engine"
-- [x] 4.2 When present: resolve tool_result_limit (node_config or default 2000), call _truncate_tool_results
-- [x] 4.3 Resolve budget via _resolve_budget
-- [x] 4.4 Call context_engine.estimate_tokens(truncated_messages)
-- [x] 4.5 If over budget: call context_engine.select_messages(truncated_messages, budget)
-- [x] 4.6 If still over budget: call context_engine.compress(selected)
-- [x] 4.7 Use filtered messages for context_assemble and llm_invoke; do NOT modify snapshot or channel_updates
-- [x] 4.8 When context_engine absent: pass messages unchanged (existing behavior)
+- [x] 4.1 从快照提取消息后，检查 execution_context 中的 "context_engine"
+- [x] 4.2 当存在时：解析 tool_result_limit（node_config 或默认 2000），调用 _truncate_tool_results
+- [x] 4.3 通过 _resolve_budget 解析预算
+- [x] 4.4 调用 context_engine.estimate_tokens(truncated_messages)
+- [x] 4.5 如果超出预算：调用 context_engine.select_messages(truncated_messages, budget)
+- [x] 4.6 如果仍然超出预算：调用 context_engine.compress(selected)
+- [x] 4.7 使用过滤后的消息进行 context_assemble 和 llm_invoke；不修改 snapshot 或 channel_updates
+- [x] 4.8 当 context_engine 不存在时：通过未更改的消息（现有行为）
 
-## 5. Context Pipeline in LLMWorker.execute_stream()
+## 5. LLMWorker.execute_stream() 中的上下文管道
 
-- [x] 5.1 Apply identical pipeline as execute() (steps 4.1–4.8) in execute_stream()
-- [x] 5.2 Ensure streaming tokens correspond to filtered messages
-- [x] 5.3 WorkerResult channel_updates must contain only the new assistant message (not filtered history)
+- [x] 5.1 在 execute_stream() 中应用与 execute() 相同的管道（步骤 4.1–4.8）
+- [x] 5.2 确保流式 token 对应于过滤后的消息
+- [x] 5.3 WorkerResult channel_updates 必须只包含新的 assistant 消息（不是过滤后的历史）
 
-## 6. Service Layer Wiring
+## 6. Service 层接线
 
-- [x] 6.1 In services/workflow/execution_service.py, construct InMemoryContextEngine and pass to PregelRuntime constructor
-- [x] 6.2 In services/workflow/test_runner.py, same wiring
-- [x] 6.3 In engine/subgraph.py, pass parent runtime's context_engine to sub-runtime constructor
+- [x] 6.1 在 services/workflow/execution_service.py 中，构造 InMemoryContextEngine 并传递给 PregelRuntime 构造函数
+- [x] 6.2 在 services/workflow/test_runner.py 中，相同的接线
+- [x] 6.3 在 engine/subgraph.py 中，将父运行时的 context_engine 传递给子运行时构造函数
 
-## 7. Integration Tests
+## 7. 集成测试
 
-- [x] 7.1 Test: PregelRuntime with ContextEngine passes it to Worker via execution_context
-- [x] 7.2 Test: PregelRuntime without ContextEngine — execution_context has no "context_engine" key
-- [x] 7.3 Test: LLMWorker with ContextEngine filters messages when over budget (non-streaming)
-- [x] 7.4 Test: LLMWorker with ContextEngine filters messages when over budget (streaming)
-- [x] 7.5 Test: LLMWorker without ContextEngine passes full messages (backward compatible)
-- [x] 7.6 Test: channel messages unchanged after context pipeline (non-destructive)
-- [x] 7.7 Test: checkpoint contains full message history after context pipeline
-- [x] 7.8 Test: tool result truncation caps oversized outputs
-- [x] 7.9 Test: budget resolution priority (per-node > runtime > default)
+- [x] 7.1 测试：带 ContextEngine 的 PregelRuntime 通过 execution_context 将其传递给 Worker
+- [x] 7.2 测试：不带 ContextEngine 的 PregelRuntime——execution_context 没有 "context_engine" 键
+- [x] 7.3 测试：带 ContextEngine 的 LLMWorker 在超出预算时过滤消息（非流式）
+- [x] 7.4 测试：带 ContextEngine 的 LLMWorker 在超出预算时过滤消息（流式）
+- [x] 7.5 测试：不带 ContextEngine 的 LLMWorker 传递完整消息（向后兼容）
+- [x] 7.6 测试：上下文管道后通道消息不变（非破坏性）
+- [x] 7.7 测试：上下文管道后检查点包含完整消息历史
+- [x] 7.8 测试：工具结果截断限制过大输出
+- [x] 7.9 测试：预算解析优先级（每节点 > 运行时 > 默认）
 
-## 8. Documentation
+## 8. 文档
 
-- [x] 8.1 Update AGENTS.md ContextEngine row: "🔴 Defined only" → "🟡 LLMWorker pipeline"
-- [x] 8.2 Update docs/design/engine-design.md if it has ContextEngine integration notes
+- [x] 8.1 更新 AGENTS.md ContextEngine 行："🔴 仅定义" → "🟡 LLMWorker 管道"
+- [x] 8.2 如果关于 ContextEngine 集成有相关说明，更新 docs/design/engine-design.md

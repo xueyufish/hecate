@@ -1,32 +1,30 @@
-## Why
+## Why — 动机
 
-Context management is currently fragmented:
-- ConversationService has ContextAssembler, TokenCounter, BudgetManager (high-level)
-- EnginePort.context_assemble is pass-through (unused)
-- No reusable, testable abstraction for context operations
+上下文管理当前是碎片化的：
+- ConversationService 拥有 ContextAssembler、TokenCounter、BudgetManager（高层级）
+- EnginePort.context_assemble 是透传的（未使用）
+- 没有可复用、可测试的上下文操作抽象
 
-A ContextEngine ABC provides a clean bottom layer that ConversationService can delegate to, enabling:
-- Independent testing of context logic
-- Swappable implementations (in-memory, distributed)
-- Consistent context handling across both conversation and graph execution paths
+ContextEngine ABC 提供了一个干净的基础层，ConversationService 可以委托给它，从而实现：
+- 上下文逻辑的独立测试
+- 可替换的实现（内存、分布式）
+- 在对话和图执行路径上保持一致的内容处理
 
-## What Changes
+## What Changes — 变更内容
 
-- Add `ContextEngine` ABC in `engine/context.py` with methods: `select_messages`, `compress`, `estimate_tokens`
-- Add `InMemoryContextEngine` implementation (simple token counting, basic compression)
-- P3: Refactor ConversationService to delegate to ContextEngine
+- 在 `engine/context.py` 中添加 `ContextEngine` ABC，包含方法：`select_messages`、`compress`、`estimate_tokens`
+- 添加 `InMemoryContextEngine` 实现（简单的 token 计数、基础压缩）
+- P3：重构 ConversationService 以委托给 ContextEngine
 
-## Capabilities
+## Capabilities — 能力变更
 
-### New Capabilities
-- `context-engine`: Pluggable context management interface for message selection, compression, and token estimation
+### 新增能力
+- `context-engine`: 可插拔的上下文管理接口，用于消息选择、压缩和 token 估算
 
-### Modified Capabilities
-- None (P2 is interface reservation only)
+### 修改的能力
+- 无（P2 仅为接口预留）
 
-## Impact
+## Impact — 影响范围
 
-- **New file**: `src/hecate/engine/context.py` (ABC + InMemoryContextEngine)
-- **New test**: `tests/test_engine/test_context.py`
-- **No breaking changes**: P2 is additive; P3 refactor preserves external interfaces
-- **No new dependencies**: Uses only stdlib
+- **新文件**: `src/hecate/engine/context.py`（ABC + InMemoryContextEngine）
+- **新测试**: `tests/test_engine/test_context.py`

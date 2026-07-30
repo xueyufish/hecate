@@ -1,89 +1,89 @@
-## Context
+## Context — 背景
 
-Hecate's current per-session state lives in an ephemeral `execution_context` dict created fresh each `WorkflowExecutionService.execute()` call. When the process exits, all working state is lost — conversation buffers, compressed summaries, permission caches, and tool/task sub-contexts. Only durable storage (DB messages, CheckpointStore for graph execution, AgentEnvironment filesystem) survives.
+Hecate 当前每会话状态存在于临时 `execution_context` 字典中，每次 `WorkflowExecutionService.execute()` 调用时都会新创建。当进程退出时，所有工作状态都会丢失 — 对话缓冲区、压缩摘要、权限缓存以及工具/任务的子上下文。只有持久存储（DB 消息、用于图执行的 CheckpointStore、AgentEnvironment 文件系统）得以保留。
 
-This is a gap compared to competitor platforms:
-- **AgentScope 2.0**: `AgentState` (Pydantic) with `AgentStateStore` (InMemory/File/Redis/MySQL/OSS)
-- **Claude Code**: `SessionStore` adapter (S3/Redis/Postgres) with dual-write architecture
-- **Bedrock AgentCore**: Managed session storage (per-session filesystem, 14-day retention)
-- **Codex**: Rollout system (JSONL + SQLite index, append-only)
+这与竞争平台相比存在差距：
+- **AgentScope 2.0**：`AgentState`（Pydantic）带 `AgentStateStore`（InMemory/File/Redis/MySQL/OSS）
+- **Claude Code**：`SessionStore` 适配器（S3/Redis/Postgres）带双写架构
+- **Bedrock AgentCore**：托管会话存储（每会话文件系统，14 天保留期）
+- **Codex**：Rollout 系统（JSONL + SQLite 索引，仅追加）
 
-The `execution_context` already contains the seeds of AgentState: `session_id`, `context_engine`, `environment_root`. The gap is structure, persistence, and lifecycle management.
+`execution_context` 已经包含了 AgentState 的雏形：`session_id`、`context_engine`、`environment_root`。差距在于结构、持久化和生命周期管理。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Introduce `AgentState` as a structured Pydantic model representing per-session working state
-- Define `AgentStateStore` ABC for pluggable state persistence
-- Implement `InMemoryStateStore` for single-machine use and testing
-- Integrate state load/save lifecycle into `WorkflowExecutionService`
-- Populate `environment_root` from `EnvironmentManager` into AgentState automatically
+**目标：**
+- 引入 `AgentState` 作为结构化 Pydantic 模型，表示每会话工作状态
+- 定义 `AgentStateStore` ABC 用于可插拔的状态持久化
+- 实现 `InMemoryStateStore` 用于单机使用和测试
+- 将状态加载/保存生命周期集成到 `WorkflowExecutionService`
+- 自动将 `EnvironmentManager` 的 `environment_root` 填充到 AgentState
 
-**Non-Goals (deferred to later features):**
-- Redis/Postgres state store backends (→ 13.4a Distributed Session State Store)
-- Compressed summary implementation (→ ContextEngine enhancement)
-- REST API for state inspection (→ internal service-layer only)
-- Multi-tenant state isolation (→ 10.5 Tenant Isolation)
-- State serialization format optimization (JSON via Pydantic is sufficient for MVP)
+**非目标（推迟到后续特性）：**
+- Redis/Postgres 状态存储后端（→ 13.4a 分布式会话状态存储）
+- 压缩摘要实现（→ ContextEngine 增强）
+- 状态检查 REST API（→ 仅内部服务层）
+- 多租户状态隔离（→ 10.5 租户隔离）
+- 状态序列化格式优化（MVP 中使用 JSON 通过 Pydantic 已足够）
 
-## Decisions
+## Decisions — 决策
 
-### D1: AgentStateStore in services/ (not engine/)
+### D1：AgentStateStore 在 services/（而非 engine/）
 
-**Decision**: Place `AgentStateStore` ABC and implementations in `src/hecate/services/state/`.
+**决策**：将 `AgentStateStore` ABC 和实现放在 `src/hecate/services/state/`。
 
-**Rationale**: The engine layer cannot import from services/ (layering rule). AgentState needs to reference `AgentEnvironment` (in services/) and will be consumed by `WorkflowExecutionService` (in services/). Placing it in services/ avoids layering violations. The engine's `CheckpointStore` (graph-level) is orthogonal and stays in engine/.
+**理由**：引擎层不能从 services/ 导入（分层规则）。AgentState 需要引用 `AgentEnvironment`（在 services/ 中），并会被 `WorkflowExecutionService`（在 services/ 中）消费。将其放在 services/ 可避免分层违规。引擎的 `CheckpointStore`（图级别）是正交的，保持在 engine/ 中。
 
-**Alternative considered**: Place ABC in `engine/ports.py`. Rejected because it would require the engine to know about services-layer concepts (EnvironmentManager).
+**考虑的替代方案**：将 ABC 放在 `engine/ports.py`。拒绝，因为这将要求引擎了解服务层概念（EnvironmentManager）。
 
-### D2: AgentState as execution_context field (not replacement)
+### D2：AgentState 作为 execution_context 字段（而非替换）
 
-**Decision**: AgentState is injected into `execution_context["_agent_state"]`. Workers access it indirectly through `execution_context`.
+**决策**：AgentState 注入到 `execution_context["_agent_state"]`。Worker 通过 `execution_context` 间接访问它。
 
-**Rationale**: Minimal change to existing Worker interface. Workers already receive `execution_context` as a dict — adding a key is non-breaking. Replacing `execution_context` entirely would require changes to every Worker's `execute()` signature.
+**理由**：对现有 Worker 接口的最小更改。Worker 已接收 `execution_context` 作为字典 — 添加键不会破坏兼容性。完全替换 `execution_context` 将需要更改每个 Worker 的 `execute()` 签名。
 
-**Alternative considered**: Make AgentState the new `execution_context` type. Rejected because it changes the Worker contract and is a larger refactor for MVP.
+**考虑的替代方案**：使 AgentState 成为新的 `execution_context` 类型。拒绝，因为这改变了 Worker 契约，对于 MVP 来说改动过大。
 
-### D3: Summary field reserved, not implemented
+### D3：摘要字段预留，不实现
 
-**Decision**: AgentState includes a `summary: str` field that is always empty in MVP. ContextEngine enhancement will populate it later.
+**决策**：AgentState 包含一个 `summary: str` 字段，在 MVP 中始终为空。ContextEngine 增强将在后续填充它。
 
-**Rationale**: The field exists in the data model (so consumers can start coding against it), but no compression logic is implemented yet. This avoids coupling AgentState to ContextEngine internals prematurely.
+**理由**：该字段存在于数据模型中（以便消费者可以开始对其编写代码），但尚未实现压缩逻辑。这避免了过早将 AgentState 与 ContextEngine 内部耦合。
 
-### D4: Per-call write strategy
+### D4：每次调用写入策略
 
-**Decision**: AgentState is loaded at `execute()` entry and saved at `execute()` exit (once per call). Not saved on every message or channel write.
+**决策**：AgentState 在 `execute()` 入口处加载，在 `execute()` 退出时保存（每次调用一次）。不在每条消息或通道写入时保存。
 
-**Rationale**: Matches AgentScope's pattern. Reduces store pressure. The call is the natural atomic unit — if the process crashes mid-call, the previous state is still valid (the call will be retried).
+**理由**：与 AgentScope 的模式一致。减少存储压力。调用是自然的原子单元 — 如果进程在调用中崩溃，前一个状态仍然有效（调用将被重试）。
 
-**Alternative considered**: Save on every superstep (like LangGraph). Rejected because it adds latency and complexity for MVP.
+**考虑的替代方案**：在每个超步骤保存（如 LangGraph）。拒绝，因为它为 MVP 增加了延迟和复杂度。
 
-### D5: Pydantic BaseModel for serialization
+### D5：Pydantic BaseModel 用于序列化
 
-**Decision**: AgentState extends Pydantic `BaseModel` with `model_dump()` / `model_validate()` for serialization.
+**决策**：AgentState 继承 Pydantic `BaseModel`，使用 `model_dump()` / `model_validate()` 进行序列化。
 
-**Rationale**: Consistent with AgentScope's approach. Pydantic handles type validation, JSON serialization, and schema evolution. Already available as a project dependency.
+**理由**：与 AgentScope 的方法一致。Pydantic 处理类型验证、JSON 序列化和模式演化。已作为项目依赖可用。
 
-### D6: asyncio.Lock for concurrent access safety
+### D6：asyncio.Lock 用于并发访问安全
 
-**Decision**: InMemoryStateStore uses `asyncio.Lock` per session_id to prevent concurrent writes.
+**决策**：InMemoryStateStore 使用每个 session_id 的 `asyncio.Lock` 以防止并发写入。
 
-**Rationale**: Multiple coroutines may access the same session (e.g., streaming + background save). The lock is per-key, not global, so different sessions can be saved concurrently.
+**理由**：多个协程可能访问同一会话（例如，流式处理 + 后台保存）。锁是每个键的，而非全局的，因此不同会话可以并发保存。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-| Risk | Mitigation |
+| 风险 | 缓解措施 |
 |------|-----------|
-| InMemoryStateStore loses state on process restart | Expected for MVP. Redis/Postgres backends deferred to 13.4a. Documented limitation. |
-| AgentState size growth (large context lists) | Mitigated by future ContextEngine compression. MVP has no size limit — will add when needed. |
-| Concurrent save conflicts | asyncio.Lock prevents corruption. Not distributed-safe — acceptable for single-process MVP. |
-| execution_context dict mutation leaks state | AgentState is a Pydantic model (copy semantics). Mutations in Workers don't affect the stored snapshot until explicit save. |
+| InMemoryStateStore 在进程重启后丢失状态 | MVP 预期行为。Redis/Postgres 后端推迟到 13.4a。记录限制。 |
+| AgentState 大小增长（大型上下文列表） | 由未来的 ContextEngine 压缩缓解。MVP 没有大小限制 — 需要时添加。 |
+| 并发保存冲突 | asyncio.Lock 防止损坏。不适用于分布式 — 单进程 MVP 可接受。 |
+| execution_context 字典突变泄漏状态 | AgentState 是 Pydantic 模型（复制语义）。Worker 中的突变不会影响存储的快照，直到显式保存。 |
 
-## Migration Plan
+## Migration Plan — 迁移计划
 
-No migration needed — this is purely additive. Existing `execution_context` behavior is unchanged. AgentState is optional: if no `AgentStateStore` is provided, `WorkflowExecutionService` behaves exactly as before.
+无需迁移 — 这是纯新增功能。现有的 `execution_context` 行为不变。AgentState 是可选的：如果未提供 `AgentStateStore`，`WorkflowExecutionService` 的行为与之前完全相同。
 
-## Open Questions
+## Open Questions — 待定问题
 
-- **State size monitoring**: Should we add a warning when AgentState exceeds a threshold? (Defer to observability phase)
-- **Garbage collection of old sessions**: InMemoryStateStore grows unbounded. Add TTL eviction? (Defer to EnvironmentManager's TTL pattern)
+- **状态大小监控**：当 AgentState 超过阈值时是否应添加警告？（推迟到可观测性阶段）
+- **旧会话的垃圾回收**：InMemoryStateStore 会无限制增长。是否添加 TTL 驱逐？（推迟到 EnvironmentManager 的 TTL 模式）

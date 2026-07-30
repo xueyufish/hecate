@@ -1,56 +1,56 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: List workflow versions
-The system SHALL provide an API endpoint `GET /api/workflows/{id}/versions` that returns all versions of a workflow ordered by version number.
+### 需求：列出工作流版本
+系统须提供 API 端点 `GET /api/workflows/{id}/versions`，返回按版本号排序的所有工作流版本。
 
-#### Scenario: List versions
-- **WHEN** a user sends a GET request for a workflow's versions
-- **THEN** the system returns 200 with a list of all versions, each containing version number, graph_dsl, change_summary, and created_at
+#### 场景：列出版本
+- **当** 用户发送 GET 请求获取工作流的版本
+- **则** 系统返回 200 及所有版本的列表，每个版本包含版本号、graph_dsl、change_summary 和 created_at
 
-#### Scenario: Workflow not found
-- **WHEN** a user sends a GET request for versions of a non-existent workflow
-- **THEN** the system returns 404
+#### 场景：工作流不存在
+- **当** 用户发送 GET 请求获取不存在工作流的版本
+- **则** 系统返回 404
 
-### Requirement: Get specific version
-The system SHALL provide an API endpoint `GET /api/workflows/{id}/versions/{version}` that returns a specific version's details.
+### 需求：获取特定版本
+系统须提供 API 端点 `GET /api/workflows/{id}/versions/{version}`，返回特定版本的详情。
 
-#### Scenario: Version exists
-- **WHEN** a user sends a GET request for a specific version
-- **THEN** the system returns 200 with the version's full graph_dsl and compiled_graph
+#### 场景：版本存在
+- **当** 用户发送 GET 请求获取特定版本
+- **则** 系统返回 200 及该版本的完整 graph_dsl 和 compiled_graph
 
-#### Scenario: Version not found
-- **WHEN** a user sends a GET request for a non-existent version
-- **THEN** the system returns 404
+#### 场景：版本不存在
+- **当** 用户发送 GET 请求获取不存在的版本
+- **则** 系统返回 404
 
-### Requirement: Rollback to version
-The system SHALL provide an API endpoint `POST /api/workflows/{id}/rollback/{version}` that creates a new version with the graph_dsl from the specified version.
+### 需求：回滚到版本
+系统须提供 API 端点 `POST /api/workflows/{id}/rollback/{version}`，使用指定版本的 graph_dsl 创建新版本。
 
-#### Scenario: Successful rollback
-- **WHEN** a user sends a POST request to rollback to version 2
-- **THEN** the system creates a new version (e.g., version 5) with version 2's graph_dsl, sets it as current, returns 200
+#### 场景：成功回滚
+- **当** 用户发送 POST 请求回滚到版本 2
+- **则** 系统创建新版本（例如版本 5），使用版本 2 的 graph_dsl，将其设为当前版本，返回 200
 
-#### Scenario: Rollback to non-existent version
-- **WHEN** a user sends a POST request to rollback to a non-existent version
-- **THEN** the system returns 404
+#### 场景：回滚到不存在的版本
+- **当** 用户发送 POST 请求回滚到不存在的版本
+- **则** 系统返回 404
 
-### Requirement: Version auto-increment
-The system SHALL automatically increment version numbers when creating new versions.
+### 需求：版本自动递增
+系统须在创建新版本时自动递增版本号。
 
-#### Scenario: Sequential version numbers
-- **WHEN** a workflow has versions 1, 2, 3 and a new version is created
-- **THEN** the new version SHALL have version number 4
+#### 场景：顺序版本号
+- **当** 工作流已有版本 1, 2, 3 且创建新版本
+- **则** 新版本须具有版本号 4
 
-#### Scenario: Version number from initial creation
-- **WHEN** a workflow is created for the first time
-- **THEN** the initial version SHALL have version number 1
+#### 场景：初始创建的版本号
+- **当** 工作流首次创建
+- **则** 初始版本须具有版本号 1
 
-### Requirement: Change summary
-The system SHALL accept an optional change_summary when creating new versions.
+### 需求：变更摘要
+系统须在接受创建新版本时提供可选的 change_summary。
 
-#### Scenario: Summary provided
-- **WHEN** a user provides change_summary when updating graph_dsl
-- **THEN** the new version SHALL store the change_summary
+#### 场景：提供了摘要
+- **当** 用户在更新 graph_dsl 时提供 change_summary
+- **则** 新版本须存储 change_summary
 
-#### Scenario: Summary omitted
-- **WHEN** a user does not provide change_summary
-- **THEN** the new version SHALL have an empty change_summary
+#### 场景：未提供摘要
+- **当** 用户未提供 change_summary
+- **则** 新版本须具有空的 change_summary

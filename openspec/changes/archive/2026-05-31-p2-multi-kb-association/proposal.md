@@ -1,31 +1,31 @@
-## Why
+## Why — 动机
 
-Agents already store `knowledge_base_ids` as a JSON list in the database, the RAG pipeline already iterates over multiple KB IDs, and the agent configurator UI already provides a multi-select component. However, the system lacks **end-to-end integration**: when chatting with an agent, the frontend does not pass the agent's associated KB IDs to the chat endpoint, there is no validation that referenced KB IDs actually exist, and deleting a KB leaves stale references in agent records. This change closes these gaps to make multi-KB association a fully functional, production-ready feature.
+Agent 已经在数据库中以 JSON 列表形式存储了 `knowledge_base_ids`，RAG 流水线已经可以遍历多个 KB ID，Agent 配置器 UI 也已经提供了多选组件。然而，系统缺乏**端到端集成**：与 Agent 聊天时，前端未将 Agent 关联的 KB ID 传递给聊天端点，未验证引用的 KB ID 是否实际存在，删除 KB 会在 Agent 记录中留下过期引用。本次变更填补这些缺口，使多 KB 关联成为一个完全可用、生产就绪的功能。
 
-## What Changes
+## What Changes — 变更内容
 
-- Add KB ID validation when creating or updating agents — reject non-existent or soft-deleted KB IDs with a clear 400 error
-- Add cascade cleanup — when a knowledge base is soft-deleted, automatically remove its ID from all agents' `knowledge_base_ids` arrays
-- Auto-load agent's KB IDs in the chat flow — when the frontend chats with an agent, fetch and pass the agent's `knowledge_base_ids` to the `/v1/chat/completions` endpoint
-- Show active KB indicators in the chat UI — display which knowledge bases are being used for context during a conversation
-- Add a reverse-lookup API endpoint — `GET /api/knowledge-bases/{id}/agents` to find which agents use a specific KB
-- Improve cross-KB search result ranking — aggregate results across all KBs with global score ranking instead of per-KB top-N then merge
+- 在创建或更新 Agent 时添加 KB ID 验证 — 拒绝不存在或已软删除的 KB ID，返回清晰的 400 错误
+- 添加级联清理 — 当知识库被软删除时，自动从所有 Agent 的 `knowledge_base_ids` 数组中移除其 ID
+- 在聊天流程中自动加载 Agent 的 KB ID — 前端与 Agent 聊天时，获取并传递 Agent 的 `knowledge_base_ids` 到 `/v1/chat/completions` 端点
+- 在聊天 UI 中显示活跃的 KB 指示器 — 展示对话期间哪些知识库正在被用于上下文
+- 添加反向查找 API 端点 — `GET /api/knowledge-bases/{id}/agents` 用于查找哪些 Agent 使用了特定 KB
+- 改进跨 KB 搜索结果排序 — 跨所有 KB 聚合结果并使用全局分数排序，而非每个 KB 取 Top-N 后再合并
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `multi-kb-association`: End-to-end multi-KB support for agents — validation, cascade cleanup, auto-loading in chat, reverse lookup, and cross-KB result ranking
+### New Capabilities — 新增能力
+- `multi-kb-association`：Agent 的端到端多 KB 支持 — 验证、级联清理、聊天中自动加载、反向查找和跨 KB 结果排序
 
-### Modified Capabilities
-- `citation-display`: Requirement change — citations SHALL be generated automatically when chatting via an agent with associated KBs (not only when `kb_ids` is explicitly passed)
-- `agent-configurator`: Requirement change — agent configurator SHALL display KB validation errors and show KB status (active/deleted) in the selector
+### Modified Capabilities — 修改的能力
+- `citation-display`：需求变更 — 通过关联了 KB 的 Agent 聊天时，应自动生成引用（不仅限于显式传递 `kb_ids` 时）
+- `agent-configurator`：需求变更 — Agent 配置器应显示 KB 验证错误，并在选择器中显示 KB 状态（活跃/已删除）
 
-## Impact
+## Impact — 影响范围
 
-- **Backend models**: `AgentModel` (no schema change, `knowledge_base_ids` JSON column retained)
-- **Backend API**: `agents.py` (validation in create/update), `knowledge.py` (cascade cleanup on delete, new reverse-lookup endpoint), `chat.py` (no change — already accepts `kb_ids`)
-- **Backend services**: `conversation.py` (no change — already iterates multiple KBs), new validation helper in agents service
-- **Frontend**: Chat page (`chat/[conversationId]/page.tsx`) — load agent's KB IDs and pass to chat endpoint; display active KB badges
-- **Frontend**: Agent configurator — show KB validation errors
-- **Tests**: Agent CRUD validation tests, KB cascade cleanup tests, chat integration tests with auto-loaded KB IDs
-- **No Alembic migration needed** — the existing JSON column is sufficient for the M:N relationship
+- **后端模型**：`AgentModel`（无模式变更，保留 `knowledge_base_ids` JSON 列）
+- **后端 API**：`agents.py`（创建/更新时的验证）、`knowledge.py`（删除时的级联清理、新增反向查找端点）、`chat.py`（无需变更 — 已支持 `kb_ids`）
+- **后端服务**：`conversation.py`（无需变更 — 已支持遍历多个 KB）、Agent 服务中新增验证辅助方法
+- **前端**：聊天页面（`chat/[conversationId]/page.tsx`）— 加载 Agent 的 KB ID 并传递给聊天端点；显示活跃 KB 徽章
+- **前端**：Agent 配置器 — 显示 KB 验证错误
+- **测试**：Agent CRUD 验证测试、KB 级联清理测试、带自动加载 KB ID 的聊天集成测试
+- **无需 Alembic 迁移** — 现有的 JSON 列对于 M:N 关系已足够

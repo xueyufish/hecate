@@ -1,46 +1,46 @@
-## 1. Model Layer — Add `deleted` field
+## 1. 模型层 —— 添加 `deleted` 字段
 
-- [x] 1.1 Add `deleted: Mapped[bool]` field to `BaseModel` in `src/hecate/models/base.py` with `default=False, server_default=False`
-- [x] 1.2 Add `deleted: bool` field to all Pydantic `ReadSchema` classes that currently expose `deleted_at`
+- [x] 1.1 在 `src/hecate/models/base.py` 的 `BaseModel` 中添加 `deleted: Mapped[bool]` 字段，使用 `default=False, server_default=False`
+- [x] 1.2 在所有当前暴露 `deleted_at` 的 Pydantic `ReadSchema` 类中添加 `deleted: bool` 字段
 
-## 2. Model Layer — Replace partial indexes
+## 2. 模型层 —— 替换部分索引
 
-- [x] 2.1 Replace `postgresql_where=` index in `agent.py` with composite `Index("idx_agents_workspace", "workspace_id", "deleted")`
-- [x] 2.2 Replace `postgresql_where=` index in `workflow.py` with composite `Index("idx_workflows_workspace", "workspace_id", "deleted")`
-- [x] 2.3 Replace all 4 `postgresql_where=` indexes in `model_provider.py` with composite indexes
-- [x] 2.4 Replace `postgresql_where=` index in `tool.py` with composite `Index("idx_tools_workspace_name", "workspace_id", "name", "deleted", "deleted_at", unique=True)`
-- [x] 2.5 Replace `postgresql_where=` index in `document.py` with composite `Index("idx_documents_kb", "knowledge_base_id", "deleted")`
-- [x] 2.6 Replace `postgresql_where=` index in `conversation.py` with composite `Index("idx_conversations_agent", "agent_id", "deleted")`
-- [x] 2.7 Replace `postgresql_where=` indexes in `skill.py` with composite `Index("idx_skills_name", "workspace_id", "name", "deleted", "deleted_at", unique=True)`
+- [x] 2.1 将 `agent.py` 中的 `postgresql_where=` 索引替换为复合 `Index("idx_agents_workspace", "workspace_id", "deleted")`
+- [x] 2.2 将 `workflow.py` 中的 `postgresql_where=` 索引替换为复合 `Index("idx_workflows_workspace", "workspace_id", "deleted")`
+- [x] 2.3 将 `model_provider.py` 中的所有 4 个 `postgresql_where=` 索引替换为复合索引
+- [x] 2.4 将 `tool.py` 中的 `postgresql_where=` 索引替换为复合 `Index("idx_tools_workspace_name", "workspace_id", "name", "deleted", "deleted_at", unique=True)`
+- [x] 2.5 将 `document.py` 中的 `postgresql_where=` 索引替换为复合 `Index("idx_documents_kb", "knowledge_base_id", "deleted")`
+- [x] 2.6 将 `conversation.py` 中的 `postgresql_where=` 索引替换为复合 `Index("idx_conversations_agent", "agent_id", "deleted")`
+- [x] 2.7 将 `skill.py` 中的 `postgresql_where=` 索引替换为复合 `Index("idx_skills_name", "workspace_id", "name", "deleted", "deleted_at", unique=True)`
 
-## 3. Service Layer — Update query filters
+## 3. 服务层 —— 更新查询过滤器
 
-- [x] 3.1 Find all `deleted_at.is_(None)` / `deleted_at == None` patterns in services and replace with `~deleted`
-- [x] 3.2 Find all soft-delete operations that set `deleted_at` and update them to also set `deleted = True`
+- [x] 3.1 查找服务中所有 `deleted_at.is_(None)` / `deleted_at == None` 模式并替换为 `~deleted`
+- [x] 3.2 查找所有设置 `deleted_at` 的软删除操作，并更新为同时设置 `deleted = True`
 
-## 4. Database — Multi-dialect engine factory
+## 4. 数据库 —— 多方言引擎工厂
 
-- [x] 4.1 Refactor `src/hecate/core/database.py` — extract `create_engine_from_url()` factory function with dialect-specific pool config
-- [x] 4.2 Add SQLite pool config (StaticPool for in-memory, no pool overrides for file-based)
-- [x] 4.3 Add MySQL pool config (pool_size=20, max_overflow=10)
-- [x] 4.4 Add `DATABASE_URL` validation with clear error for unsupported dialects
+- [x] 4.1 重构 `src/hecate/core/database.py` —— 提取 `create_engine_from_url()` 工厂函数，包含方言特定的连接池配置
+- [x] 4.2 添加 SQLite 连接池配置（内存数据库使用 StaticPool，基于文件的不覆盖连接池）
+- [x] 4.3 添加 MySQL 连接池配置（pool_size=20, max_overflow=10）
+- [x] 4.4 添加 `DATABASE_URL` 验证，对不支持的方言给出明确的错误提示
 
-## 5. Dependencies
+## 5. 依赖
 
-- [x] 5.1 Add `[mysql]` optional dependency group to `pyproject.toml` with `aiomysql` package
-- [x] 5.2 Add conditional import guard for `aiomysql` in `database.py`
+- [x] 5.1 向 `pyproject.toml` 添加 `[mysql]` 可选依赖组，包含 `aiomysql` 包
+- [x] 5.2 在 `database.py` 中添加 `aiomysql` 的条件导入守卫
 
-## 6. Migration
+## 6. 迁移
 
-- [x] 6.1 Create Alembic migration that adds `deleted` boolean column (server_default=False) to all BaseModel tables
-- [x] 6.2 Add data migration step: backfill `deleted` from `deleted_at` (NULL → False, non-NULL → True)
-- [x] 6.3 Drop old `postgresql_where=` partial indexes
-- [x] 6.4 Create new composite indexes
+- [x] 6.1 创建 Alembic 迁移，向所有 BaseModel 表添加 `deleted` 布尔列（server_default=False）
+- [x] 6.2 添加数据迁移步骤：从 `deleted_at` 回填 `deleted`（NULL → False，非 NULL → True）
+- [x] 6.3 删除旧的 `postgresql_where=` 部分索引
+- [x] 6.4 创建新的复合索引
 
-## 7. Tests
+## 7. 测试
 
-- [x] 7.1 Verify all 1199 existing tests pass with SQLite (no regressions from model changes)
-- [x] 7.2 Add test for `create_engine_from_url()` with each supported dialect URL
-- [x] 7.3 Add test for unsupported dialect URL raising ValueError
-- [x] 7.4 Add test verifying composite indexes exist and partial indexes are gone
-- [x] 7.5 Verify ruff check, ruff format, mypy all pass
+- [x] 7.1 验证所有 1199 个现有测试在 SQLite 上通过（模型变更无回归）
+- [x] 7.2 为 `create_engine_from_url()` 添加测试，覆盖每种支持的方言 URL
+- [x] 7.3 添加测试验证不支持的方言 URL 会引发 ValueError
+- [x] 7.4 添加测试验证复合索引存在且部分索引已删除
+- [x] 7.5 验证 ruff check、ruff format、mypy 全部通过

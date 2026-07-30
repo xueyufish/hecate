@@ -1,103 +1,103 @@
 ## Context
 
-Hecate's cost governance stack currently has observability (Cost Dashboard 8.3 — see what was spent) and alerting (Alerting 8.6 — get notified on threshold breaches), but no enforcement layer. A workspace can consume unlimited resources with no hard cap. The existing rate limiter (`core/rate_limit.py`) provides only ephemeral per-API-key RPM limiting — it doesn't persist across restarts, doesn't track tokens or cost, and has no per-workspace scoping.
+Hecate 的成本治理栈当前涵盖可观测性（成本仪表板 8.3——查看花费了什么）和告警（告警系统 8.6——阈值突破时获得通知），但没有执行层。工作空间可以无限制地消耗资源，没有硬性上限。现有的速率限制器（`core/rate_limit.py`）仅提供临时的每 API 密钥 RPM 限制——它不会在重启后持续存在，不追踪 token 或成本，也没有每工作空间的作用域。
 
-Competitive analysis across OpenAI, LiteLLM, Coze, Dify, Anthropic, and AWS Bedrock shows that quota management is a fundamental enterprise expectation. Key patterns: OpenAI uses tier-based RPM/TPM/monthly-spend with pre-check token reservation; LiteLLM uses hierarchical org→team→user→key budgets with Redis hot-path counters; Coze uses a unified "points" currency with pre-deduction; Dify uses workspace-level quotas with separate knowledge-base rate limits.
+对 OpenAI、LiteLLM、Coze、Dify、Anthropic 和 AWS Bedrock 的竞争分析显示，配额管理是企业的基本期望。关键模式：OpenAI 使用基于层的 RPM/TPM/月度消费，带预检 token 预留；LiteLLM 使用层次化的组织→团队→用户→密钥预算，使用 Redis 热路径计数器；Coze 使用统一的"积分"货币并预先扣除；Dify 使用工作空间级配额，带独立的知识库速率限制。
 
-Hecate's existing infrastructure provides a strong foundation: AuthContext resolves workspace_id from JWT/API key; TraceModel records token usage per LLM call; CostService aggregates costs; Alerting provides the notification pipeline. This change adds the enforcement layer on top of these.
+Hecate 的现有基础设施提供了坚实的基础：AuthContext 从 JWT/API 密钥解析 workspace_id；TraceModel 记录每次 LLM 调用的 token 使用量；CostService 聚合成本；告警系统提供通知管道。此变更在这些之上添加执行层。
 
-Key constraints: No Redis in the current stack (avoid adding infrastructure dependency for an S-effort feature). PostgreSQL is the primary datastore. The existing in-memory RateLimiter must be upgraded, not broken. All enforcement must respect workspace-level isolation.
+关键约束：当前栈中无 Redis（避免为 S 级功能增加基础设施依赖）。PostgreSQL 是主数据存储。现有的内存中 RateLimiter 必须升级而非破坏。所有执行必须尊重工作空间级隔离。
 
 ## Goals / Non-Goals
 
-**Goals:**
-- Three resource types: requests (RPM + daily), tokens (daily + monthly), cost (monthly).
-- Two scope levels: workspace (budget enforcement) and API key (rate limiting).
-- Post-check enforcement: record actual token/cost usage after LLM calls, with middleware pre-check for request counts.
-- Hard reject (429) for exceeded hard limits, with configurable soft limits that trigger Alerting (8.6).
-- Three window types: rolling 60s (RPM), fixed daily (UTC midnight reset), fixed monthly (1st of month).
-- Standard response headers (`X-Quota-Limit`, `X-Quota-Remaining`, `X-Quota-Reset`) for client-side rate awareness.
-- Period auto-reset: daily and monthly usage records automatically roll over at window boundaries.
+**目标：**
+- 三种资源类型：请求（RPM + 每日）、token（每日 + 月度）、成本（月度）。
+- 两个作用域级别：工作空间（预算执行）和 API 密钥（速率限制）。
+- 后检执行：LLM 调用后记录实际 token/成本使用，中间件对请求计数进行预检。
+- 超过硬性上限时硬拒绝（429），可配置的软限制触发告警系统（8.6）。
+- 三种窗口类型：滚动 60 秒（RPM）、固定每日（UTC 午夜重置）、固定月度（每月 1 日）。
+- 标准响应头（`X-Quota-Limit`、`X-Quota-Remaining`、`X-Quota-Reset`），用于客户端速率感知。
+- 周期自动重置：每日和月度使用记录在窗口边界自动滚动。
 
-**Non-Goals:**
-- Redis-backed counters — the in-memory + database hybrid is sufficient for v1. Redis can be added later for high-scale deployments.
-- Pre-check token reservation (OpenAI pattern) — requires estimating output tokens before the call, adding complexity. v1 uses post-check (record actual usage after LLM call).
-- Storage quotas (knowledge base GB) — deferred to a future iteration. Requires scanning file storage, which is a separate enforcement point.
-- User-level quotas — only workspace and API key levels in v1. User-level adds resolution complexity (which user for API key calls?).
-- Tier-based automatic quota assignment (OpenAI tier system) — quotas are manually configured per workspace in v1.
-- Overage billing / graceful model downgrade — hard reject or soft allow only. No automatic routing to cheaper models.
+**非目标：**
+- Redis 支持的计数器——v1 版本使用内存+数据库混合模式足以。Redis 可以在后续版本中为大规模部署添加。
+- 预检 token 预留（OpenAI 模式）——需要在调用前估算输出 token，增加复杂性。v1 使用后检（LLM 调用后记录实际使用量）。
+- 存储配额（知识库 GB）——推迟到后续迭代。需要扫描文件存储，这是独立的执行点。
+- 用户级配额——v1 仅工作空间和 API 密钥级别。用户级别会增加解析复杂性（API 密钥调用对应哪个用户？）。
+- 基于层的自动配额分配（OpenAI 层系统）——v1 中配额每工作空间手动配置。
+- 超额计费/优雅模型降级——仅硬拒绝或软允许。不自动路由到更便宜的模型。
 
 ## Decisions
 
-### D1: In-memory + database hybrid over Redis
+### D1: 内存 + 数据库混合模式而非 Redis
 
-The quota system uses in-memory sliding windows for RPM (short-burst protection) and database-backed counters for daily/monthly usage (long-term budget enforcement). No Redis dependency.
+配额系统使用内存中的滑动窗口用于 RPM（短突发保护）和数据库支持的计数器用于每日/月度使用（长期预算执行）。无 Redis 依赖。
 
-**Alternatives considered:**
-- **Redis-only** (LiteLLM pattern): Atomic increments, high performance, purpose-built for rate limiting. But adds a required infrastructure dependency (Redis server), which Hecate doesn't currently use. For an S-effort feature, the dependency cost is unjustified — most Hecate deployments won't have enough traffic for Redis to matter.
-- **Database-only**: Fully persistent, no new deps. But every request hitting the database for a quota check adds latency and load on the hot path. Unacceptable for RPM checks (60 checks/min/key at 60 RPM).
+**考虑的替代方案：**
+- **仅 Redis**（LiteLLM 模式）：原子递增、高性能、专为速率限制设计。但增加了必需的基础设施依赖（Redis 服务器），Hecate 当前不使用。对于 S 级功能，依赖成本不合理——大多数 Hecate 部署不会有足以让 Redis 发挥作用的流量。
+- **仅数据库**：完全持久化，无新依赖。但每次请求都命中数据库进行配额检查，在热路径上增加了延迟和负载。对于 RPM 检查（60 次检查/分钟/密钥，在 60 RPM 时）不可接受。
 
-**Rationale:** The hybrid matches what the existing `RateLimiter` already does (in-memory for RPM) while adding persistent tracking for daily/monthly quotas. The in-memory RPM limiter is per-process, which means multi-worker deployments each get their own counter — this slightly loosens the effective RPM (N workers × configured RPM) but is acceptable for v1. The database-backed daily/monthly counters are atomically incremented after each LLM call, which is a cold path (not every HTTP request, only LLM completions).
+**理由：** 混合模式匹配现有 `RateLimiter` 已经做的事（内存中用于 RPM），同时为每日/月度配额添加持久化追踪。内存中的 RPM 限制器是每进程的，这意味着多工作节点部署各自拥有自己的计数器——这轻微降低了有效 RPM（N 个工作节点 × 配置的 RPM），但 v1 可以接受。数据库支持的每日/月度计数器在每次 LLM 调用后原子递增，这是冷路径（并非每个 HTTP 请求，仅 LLM 完成）。
 
-### D2: Post-check enforcement over pre-check token reservation
+### D2: 后检执行而非预检 token 预留
 
-Token and cost quotas are checked after the LLM call completes (post-check), not before (pre-check with estimated token reservation).
+token 和成本配额在 LLM 调用完成后检查（后检），而非之前（使用估算的 token 预留预检）。
 
-**Alternatives considered:**
-- **Pre-check with reservation** (OpenAI pattern): Reserve `estimated_input_tokens + max_output_tokens` before the call. If reservation would exceed quota, reject immediately. Prevents any overage. But requires accurate estimation of input tokens (tokenizer-dependent) and a `max_output_tokens` config that users may not set. Adds complexity and a tokenizer dependency.
-- **Hybrid pre+post**: Reserve estimate pre-call, reconcile actual post-call. Best control but most complex.
+**考虑的替代方案：**
+- **预检带预留**（OpenAI 模式）：在调用前预留 `estimated_input_tokens + max_output_tokens`。如果预留会超过配额，立即拒绝。防止任何超额。但需要准确估算输入 token（依赖分词器）和用户可能不设置的 `max_output_tokens` 配置。增加了复杂性和分词器依赖。
+- **混合预+后检**：预检估算预留，后检对账实际值。控制最好但最复杂。
 
-**Rationale:** Post-check is simpler, doesn't require a tokenizer, and the brief overage window (one extra LLM call) is acceptable with the soft-limit Alerting integration as backstop. For request-count quotas (RPM, daily requests), the middleware does pre-check (reject before processing) because the count is known upfront. The asymmetry is intentional: requests are countable upfront, tokens/cost are only known after.
+**理由：** 后检更简单，不需要分词器，短暂的超额窗口（一次额外的 LLM 调用）在软限制告警集成作为后备的情况下是可接受的。对于请求计数配额（RPM、每日请求），中间件做预检（在处理前拒绝），因为计数是事先知道的。这种不对称性是有意为之：请求可以提前计数，token/成本只有在调用后才知道。
 
-### D3: Fixed calendar windows for daily/monthly over sliding windows
+### D3: 固定日历窗口而非滑动窗口
 
-Daily quotas reset at UTC midnight, monthly quotas reset on the 1st of each month (UTC).
+每日配额在 UTC 午夜重置，月度配额在每月 1 日（UTC）重置。
 
-**Alternatives considered:**
-- **Sliding windows** (rolling 24h, rolling 30d): Smoother usage patterns, no burst-at-boundary. But expensive to compute (need to query all usage in the trailing window for every check) and harder to reason about ("how much budget do I have left this month?"). The database query cost scales with traffic.
-- **Per-workspace custom reset day**: Some billing systems let you pick a custom billing-cycle start date (e.g., the 15th of each month). Adds configuration complexity for minimal v1 benefit.
+**考虑的替代方案：**
+- **滑动窗口**（滚动 24 小时、滚动 30 天）：使用模式更平滑，无边界突发。但对于每次检查计算成本高（需要查询滑动窗口内的所有使用量），且更难理解（"我这个月还剩多少预算？"）。数据库查询成本随流量扩展。
+- **每工作空间自定义重置日**：某些计费系统允许选择自定义的计费周期开始日期（例如每月 15 日）。为 v1 的少量收益增加了配置复杂性。
 
-**Rationale:** Fixed calendar windows are the industry standard for billing (LiteLLM, OpenAI monthly caps, Coze subscriptions all use calendar resets). They're cheap to check (just filter by `period_start <= now < period_end`) and intuitive for users ("my monthly budget resets on the 1st"). The burst-at-boundary problem is mitigated by the concurrent RPM limit.
+**理由：** 固定日历窗口是计费的行业标准（LiteLLM、OpenAI 月度上限、Coze 订阅都使用日历重置）。检查成本低（只需按 `period_start <= now < period_end` 过滤），对用户直观（"我的月度预算在 1 日重置"）。边界突发问题由并发的 RPM 限制缓解。
 
-### D4: Hard reject + soft limit dual mode per quota
+### D4: 每个配额的硬拒绝 + 软限制双模式
 
-Each quota definition has both a `limit_value` (hard cap — triggers 429) and an optional `soft_limit` (warning threshold — triggers Alerting).
+每个配额定义同时具有 `limit_value`（硬性上限——触发 429）和可选的 `soft_limit`（警告阈值——触发告警系统）。
 
-**Alternatives considered:**
-- **Hard reject only**: Simple, but no early warning. Users discover they're over budget only when requests start failing.
-- **Soft allow only**: Too permissive — no way to actually cap runaway usage.
-- **Two separate quota entries**: One for hard, one for soft. More flexible but doubles the model count and management overhead.
+**考虑的替代方案：**
+- **仅硬拒绝**：简单，但没有早期警告。用户只有在请求开始失败时才发现超预算。
+- **仅软允许**：过于宽松——无法实际限制失控的使用。
+- **两个独立的配额条目**：一个用于硬限制，一个用于软限制。更灵活但模型数量翻倍，管理开销增加。
 
-**Rationale:** The dual-mode is what LiteLLM does (`max_budget` + `soft_budget`). It's the best UX: soft limit gives advance warning via Alerting (8.6 integration), hard limit provides the actual enforcement backstop. Both are on the same QuotaModel row, so no extra tables. Default: soft_limit = 80% of limit_value.
+**理由：** 双模式是 LiteLLM 的做法（`max_budget` + `soft_budget`）。这是最好的用户体验：软限制通过告警系统（8.6 集成）提供提前警告，硬限制提供实际执行后盾。两者位于同一个 QuotaModel 行上，无需额外表。默认：soft_limit = limit_value 的 80%。
 
-### D5: Workspace + API Key two-level scoping
+### D5: 工作空间 + API 密钥两级作用域
 
-Quotas are defined at two levels: workspace (budget enforcement for the whole team) and API key (per-key rate limiting). No org-level or user-level quotas in v1.
+配额在两个级别定义：工作空间（整个团队的预算执行）和 API 密钥（每密钥速率限制）。v1 中没有组织级或用户级配额。
 
-**Alternatives considered:**
-- **Five-level hierarchy** (LiteLLM pattern: org → team → user → key → end-user): Maximum flexibility, but Hecate doesn't have a team concept (only org → workspace → user), and the resolution logic for "which quota applies?" becomes complex with inheritance and overrides. Unjustified for v1 where most deployments have simple workspace-level budgeting.
-- **Workspace-only**: Simplest. But loses per-API-key RPM limiting (which the existing RateLimiter provides). API keys are used to distinguish applications or environments within a workspace — different apps may need different rate limits.
+**考虑的替代方案：**
+- **五级层次结构**（LiteLLM 模式：组织→团队→用户→密钥→最终用户）：最大灵活性，但 Hecate 没有团队概念（仅有组织→工作空间→用户），且"哪个配额适用？"的解析逻辑带继承和覆盖变得复杂。对于大多数部署使用简单的工作空间级预算的 v1 来说不合理。
+- **仅工作空间**：最简单。但失去了现有的 RateLimiter 提供的每 API 密钥 RPM 限制。API 密钥用于区分工作空间内的应用或环境——不同的应用可能需要不同的速率限制。
 
-**Rationale:** Workspace-level covers the budget use case ("this workspace gets $1000/month"). API-key-level covers the rate-limiting use case ("this key gets 100 RPM"). Together they cover the two primary scenarios. The QuotaModel.scope field (`workspace` or `api_key`) determines which dimension the quota applies to. Future iterations can add org-level and user-level if needed.
+**理由：** 工作空间级覆盖预算用例（"此工作空间每月获得 $1000"）。API 密钥级覆盖速率限制用例（"此密钥获得 100 RPM"）。两者一起覆盖两个主要场景。QuotaModel.scope 字段（`workspace` 或 `api_key`）决定配额应用于哪个维度。未来迭代可以在需要时添加组织级和用户级。
 
-### D6: Middleware for request-count, dependency for resource-intensive endpoints
+### D6: 请求计数的中间件，资源密集型端点的依赖
 
-RPM and daily-request quotas are enforced in a FastAPI middleware (applies to all requests, after auth). Token and cost quotas are enforced via a FastAPI dependency on LLM-invoking endpoints only (chat completions, agent execution).
+RPM 和每日请求配额在 FastAPI 中间件中执行（应用于所有请求，在认证之后）。token 和成本配额通过在 LLM 调用端点（聊天补全、代理执行）上的 FastAPI 依赖项执行。
 
-**Alternatives considered:**
-- **Middleware-only**: Token/cost checks in middleware would need to run before the route handler but after the LLM call — impossible, because the LLM call happens inside the handler. Middleware can only do pre-checks.
-- **Dependency-only**: Every route would need the dependency. Easy to forget on new routes. RPM limiting should be universal.
+**考虑的替代方案：**
+- **仅中间件**：token/成本检查需要在路由处理器之前但在 LLM 调用之后运行——不可能，因为 LLM 调用发生在处理器内部。中间件只能做预检查。
+- **仅依赖**：每个路由都需要依赖。新路由容易忘记。RPM 限制应该是通用的。
 
-**Rationale:** The two-layer approach uses each tool appropriately: middleware is universal (all requests get RPM-checked), dependencies are targeted (only LLM endpoints get token/cost quota checks). The middleware resolves AuthContext, checks workspace-level RPM, then passes through. The LLM endpoint dependency checks workspace-level daily/monthly token and cost quotas before processing.
+**理由：** 双层方法恰当使用每种工具：中间件是通用的（所有请求都经过 RPM 检查），依赖是有针对性的（仅 LLM 端点获得 token/成本配额检查）。中间件解析 AuthContext，检查工作空间级 RPM，然后通过。LLM 端点依赖在处理前检查工作空间级每日/每月 token 和成本配额。
 
 ## Risks / Trade-offs
 
-- **[Multi-worker RPM drift]** In-memory RPM counters are per-process. With N workers, effective RPM is N × configured RPM. → Acceptable for v1. Document the multiplier. For strict enforcement, add Redis in a future iteration. Most enterprise deployments use 1-2 workers behind a load balancer.
+- **[多工作节点 RPM 漂移]** 内存中的 RPM 计数器是每进程的。使用 N 个工作节点时，有效 RPM 为 N × 配置的 RPM。→ v1 可接受。记录此倍数。对于严格执行，在未来的迭代中添加 Redis。大多数企业部署使用负载均衡器后的 1-2 个工作节点。
 
-- **[Post-check overage window]** A workspace can exceed its monthly cost quota by one LLM call before being blocked. → Mitigated by soft_limit (80% threshold triggers Alerting). The maximum overage is bounded by the cost of a single LLM call (typically < $1). Acceptable for v1.
+- **[后检超额窗口]** 工作空间在被阻止前可能超过其月度成本配额一个 LLM 调用。→ 通过 soft_limit（80% 阈值触发告警系统）缓解。最大超额由单个 LLM 调用的成本限制（通常 < $1）。v1 可接受。
 
-- **[Database write on every LLM call]** Each LLM completion triggers a quota usage increment (UPDATE QuotaUsageModel). → Acceptable: LLM calls are inherently slow (1-30 seconds), so an additional ~1ms DB write is negligible. For extreme scale, batch the increments.
+- **[每次 LLM 调用的数据库写入]** 每次 LLM 补全触发配额使用量递增（UPDATE QuotaUsageModel）。→ 可接受：LLM 调用本身较慢（1-30 秒），因此额外 ~1ms 的数据库写入可忽略。对于极端规模，可以批量递增。
 
-- **[Quota check latency]** The middleware adds a database query to every request (checking workspace RPM quota existence). → Mitigated by caching quota definitions in memory (TTL 60s) after first load. The cache is per-process and refreshed periodically. Quota definition changes propagate within 60s.
+- **[配额检查延迟]** 中间件添加了一个数据库查询到每次请求（检查工作空间 RPM 配额是否存在）。→ 通过首次加载后在内存中缓存配额定义（TTL 60 秒）缓解。缓存是每进程的，定期刷新。配额定义更改在 60 秒内传播。
 
-- **[Period reset race]** At UTC midnight, multiple requests may race to reset the daily usage record. → Mitigated by using `INSERT ... ON CONFLICT DO UPDATE` (upsert) for period resets. The first request to detect an expired period creates a new record; concurrent requests find the new record.
+- **[周期重置竞态]** 在 UTC 午夜，多个请求可能竞相重置每日使用记录。→ 通过使用 `INSERT ... ON CONFLICT DO UPDATE`（upsert）进行周期重置缓解。第一个检测到过期周期的请求创建新记录；并发请求找到新记录。

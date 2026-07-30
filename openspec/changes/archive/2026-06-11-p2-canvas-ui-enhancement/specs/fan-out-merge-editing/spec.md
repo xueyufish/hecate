@@ -1,68 +1,68 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Fan-out and merge nodes in node palette
-The NodePalette component SHALL include fan-out and merge as draggable items, allowing users to create these nodes interactively.
+### Requirement: Fan-out and merge nodes in node palette — 节点面板中的 Fan-out 和 Merge 节点
+NodePalette 组件应将 fan-out 和 merge 作为可拖拽项包含在内，允许用户交互式创建这些节点。
 
-#### Scenario: Fan-out in node palette
-- **WHEN** the workflow editor loads
-- **THEN** the node palette SHALL include a "Fan Out" item with the fork icon and indigo color
+#### Scenario: Fan-out in node palette — 节点面板中的 Fan-out
+- **当** 工作流编辑器加载
+- **则** 节点面板应包含一个带有分支图标和靛蓝色的 "Fan Out" 项
 
-#### Scenario: Merge in node palette
-- **WHEN** the workflow editor loads
-- **THEN** the node palette SHALL include a "Merge" item with the merge icon and slate color
+#### Scenario: Merge in node palette — 节点面板中的 Merge
+- **当** 工作流编辑器加载
+- **则** 节点面板应包含一个带有合并图标和石板色的 "Merge" 项
 
-#### Scenario: Drag fan-out to canvas
-- **WHEN** the user drags the "Fan Out" item from the palette onto the canvas
-- **THEN** a new fan-out node is created at the drop location with a default branch count of 2
+#### Scenario: Drag fan-out to canvas — 拖拽 Fan-out 到画布
+- **当** 用户将 "Fan Out" 项从面板拖拽到画布上
+- **则** 在拖放位置创建一个新的 fan-out 节点，默认分支数量为 2
 
-#### Scenario: Drag merge to canvas
-- **WHEN** the user drags the "Merge" item from the palette onto the canvas
-- **THEN** a new merge node is created at the drop location
+#### Scenario: Drag merge to canvas — 拖拽 Merge 到画布
+- **当** 用户将 "Merge" 项从面板拖拽到画布上
+- **则** 在拖放位置创建一个新的 merge 节点
 
-### Requirement: Fan-out node branch configuration
-When a fan-out node is selected, the config panel SHALL display a branch count selector (2-6) and list the connected branch target nodes.
+### Requirement: Fan-out node branch configuration — Fan-out 节点分支配置
+当选中 fan-out 节点时，配置面板应显示分支数量选择器（2-6）和已连接的分支目标节点列表。
 
-#### Scenario: Configure branch count
-- **WHEN** the user changes the branch count from 2 to 3 in the fan-out config panel
-- **THEN** the fan-out node's `config.branches` SHALL be updated to accommodate 3 branch targets
+#### Scenario: Configure branch count — 配置分支数量
+- **当** 用户在 fan-out 配置面板中将分支数量从 2 改为 3
+- **则** fan-out 节点的 `config.branches` 应更新以容纳 3 个分支目标
 
-#### Scenario: Branch targets listed
-- **WHEN** the user selects a fan-out node with edges to nodes "analyst_a", "analyst_b", "analyst_c"
-- **THEN** the config panel SHALL list these target nodes and update `config.branches` to ["analyst_a", "analyst_b", "analyst_c"]
+#### Scenario: Branch targets listed — 列出分支目标
+- **当** 用户选择一个连接到 "analyst_a"、"analyst_b"、"analyst_c" 节点的 fan-out 节点
+- **则** 配置面板应列出这些目标节点，并将 `config.branches` 更新为 ["analyst_a", "analyst_b", "analyst_c"]
 
-#### Scenario: Branch targets auto-synced from edges
-- **WHEN** the user connects a new edge from the fan-out node to a target node
-- **THEN** the fan-out config panel SHALL automatically update the branch list to include the new target
+#### Scenario: Branch targets auto-synced from edges — 分支目标从边自动同步
+- **当** 用户从 fan-out 节点连接到目标节点的新边
+- **则** fan-out 配置面板应自动更新分支列表以包含新目标
 
-### Requirement: Merge node source configuration
-When a merge node is selected, the config panel SHALL display a fan-out source selector and an output channel field.
+### Requirement: Merge node source configuration — Merge 节点源配置
+当选中 merge 节点时，配置面板应显示 fan-out 源选择器和输出通道字段。
 
-#### Scenario: Configure fan-out source
-- **WHEN** the user selects a merge node and chooses "fanout" from the fan-out source dropdown
-- **THEN** the node's `config.fan_out_source` SHALL be set to "fanout"
+#### Scenario: Configure fan-out source — 配置 Fan-out 源
+- **当** 用户选择 merge 节点并从 fan-out 源下拉列表中选择 "fanout"
+- **则** 节点的 `config.fan_out_source` 应设置为 "fanout"
 
-#### Scenario: Configure output channel
-- **WHEN** the user enters "analysis_results" in the output channel field
-- **THEN** the node's `config.output_channel` SHALL be set to "analysis_results"
+#### Scenario: Configure output channel — 配置输出通道
+- **当** 用户在输出通道字段中输入 "analysis_results"
+- **则** 节点的 `config.output_channel` 应设置为 "analysis_results"
 
-#### Scenario: Fan-out source dropdown lists available fan-out nodes
-- **WHEN** the user opens the fan-out source dropdown for a merge node
-- **THEN** the dropdown SHALL list all fan-out nodes currently on the canvas
+#### Scenario: Fan-out source dropdown lists available fan-out nodes — Fan-out 源下拉列表列出可用 Fan-out 节点
+- **当** 用户打开 merge 节点的 fan-out 源下拉列表
+- **则** 下拉列表应列出当前画布上的所有 fan-out 节点
 
-### Requirement: Fan-out/merge validation warnings
-The config panel SHALL display visual warnings when fan-out or merge nodes have invalid configurations.
+### Requirement: Fan-out/merge validation warnings — Fan-out/Merge 验证警告
+当 fan-out 或 merge 节点具有无效配置时，配置面板应显示视觉警告。
 
-#### Scenario: Fan-out with no branches warning
-- **WHEN** a fan-out node has no connected branch edges
-- **THEN** the config panel SHALL display a warning "No branches connected. Connect edges to target nodes."
+#### Scenario: Fan-out with no branches warning — Fan-out 无分支警告
+- **当** fan-out 节点没有已连接的分支边
+- **则** 配置面板应显示警告"未连接任何分支。请连接边到目标节点。"
 
-#### Scenario: Merge with no fan-out source warning
-- **WHEN** a merge node has no `config.fan_out_source` set
-- **THEN** the config panel SHALL display a warning "No fan-out source linked. Select a fan-out node as source."
+#### Scenario: Merge with no fan-out source warning — Merge 无 Fan-out 源警告
+- **当** merge 节点未设置 `config.fan_out_source`
+- **则** 配置面板应显示警告"未链接任何 fan-out 源。请选择一个 fan-out 节点作为源。"
 
-### Requirement: Fan-out visual badge on canvas
-Fan-out nodes SHALL display a badge showing the number of connected branches.
+### Requirement: Fan-out visual badge on canvas — 画布上的 Fan-out 视觉徽章
+Fan-out 节点应显示一个徽章，表示已连接分支的数量。
 
-#### Scenario: Fan-out branch count badge
-- **WHEN** a fan-out node has 3 connected branch edges
-- **THEN** the node SHALL display a badge "×3" indicating 3 branches
+#### Scenario: Fan-out branch count badge — Fan-out 分支数量徽章
+- **当** fan-out 节点有 3 条已连接的分支边
+- **则** 节点应显示徽章 "×3" 表示 3 个分支

@@ -1,33 +1,33 @@
-## Why
+## Why — 为什么
 
-Hecate currently hardcodes PostgreSQL as its sole database backend. The `postgresql_where=` partial indexes in 10 model definitions and 10 migration files make the codebase incompatible with MySQL and SQLite at the DDL level. Meanwhile, the test suite already runs on SQLite (via `sqlite+aiosqlite://`) — proving the ORM models are nearly portable. Removing PostgreSQL-specific assumptions unlocks deploy-time database choice (PostgreSQL / MySQL / SQLite), which is a prerequisite for Multi-Tenant RBAC (Sprint 4) and enterprise deployment flexibility.
+Hecate 目前将 PostgreSQL 硬编码为唯一的数据库后端。10 个模型定义和 10 个迁移文件中的 `postgresql_where=` 部分索引使得代码库在 DDL 层面与 MySQL 和 SQLite 不兼容。与此同时，测试套件已经在 SQLite 上运行（通过 `sqlite+aiosqlite://`）——证明 ORM 模型几乎可以移植。移除 PostgreSQL 特定的假设可以解锁部署时的数据库选择（PostgreSQL / MySQL / SQLite），这是多租户 RBAC（Sprint 4）和企业部署灵活性的先决条件。
 
-Additionally, the current `BaseModel` conflates two distinct semantics in the `deleted_at` column: it serves as both a deletion flag (`IS NULL` = active) and an audit timestamp (when was it deleted). This should be separated into a `deleted: bool` field for state and `deleted_at: datetime` for audit.
+此外，当前的 `BaseModel` 在 `deleted_at` 列中混淆了两种不同的语义：它既作为删除标志（`IS NULL` = 活跃）又作为审计时间戳（何时被删除）。这应分离为用于状态的 `deleted: bool` 字段和用于审计的 `deleted_at: datetime`。
 
-## What Changes
+## What Changes — 变更内容
 
-- **Add `deleted: bool` field to `BaseModel`** — explicit deletion state flag, defaults to `False`. `deleted_at` remains as an audit timestamp.
-- **Replace all `postgresql_where=` partial indexes with portable composite indexes** — e.g., `Index("idx_name", "name", "deleted")` works identically on PostgreSQL, MySQL, and SQLite.
-- **Update Service layer queries** — change `WHERE deleted_at IS NULL` to `WHERE deleted = false` across all 17 services.
-- **Refactor `database.py` for multi-dialect support** — detect database dialect from `DATABASE_URL` at startup; create engine with dialect-appropriate pool settings.
-- **Add Alembic data migration** — backfill `deleted` column from existing `deleted_at` values (NULL → False, non-NULL → True).
-- **Add CI test matrix** — run pytest against both SQLite (existing) and PostgreSQL to catch dialect regressions.
+- **向 `BaseModel` 添加 `deleted: bool` 字段** — 显式的删除状态标志，默认为 `False`。`deleted_at` 保留为审计时间戳。
+- **将所有 `postgresql_where=` 部分索引替换为可移植的复合索引** — 例如 `Index("idx_name", "name", "deleted")` 在 PostgreSQL、MySQL 和 SQLite 上工作方式相同。
+- **更新服务层查询** — 将所有 17 个服务中的 `WHERE deleted_at IS NULL` 改为 `WHERE deleted = false`。
+- **重构 `database.py` 以支持多方言** — 在启动时从 `DATABASE_URL` 检测数据库方言；使用适合方言的连接池设置创建引擎。
+- **添加 Alembic 数据迁移** — 从现有 `deleted_at` 值回填 `deleted` 列（NULL → False，非 NULL → True）。
+- **添加 CI 测试矩阵** — 针对 SQLite（现有）和 PostgreSQL 运行 pytest 以捕获方言回归。
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `multi-database`: Deploy-time database backend selection (PostgreSQL, MySQL, SQLite) with automatic dialect detection and portable schema definitions
+### New Capabilities — 新能力
+- `multi-database`：部署时数据库后端选择（PostgreSQL、MySQL、SQLite），自动方言检测和可移植的 schema 定义
 
-### Modified Capabilities
-- `data-models`: `BaseModel` gains `deleted: bool` field; soft-delete semantics change from `deleted_at IS NULL` to `deleted = false`; all partial indexes replaced with composite indexes
-- `core-infrastructure`: `database.py` supports multi-dialect engine creation; `DATABASE_URL` default changes from PostgreSQL-only to dialect-agnostic; `Settings` adds database type validation
+### Modified Capabilities — 修改的能力
+- `data-models`：`BaseModel` 新增 `deleted: bool` 字段；软删除语义从 `deleted_at IS NULL` 变为 `deleted = false`；所有部分索引替换为复合索引
+- `core-infrastructure`：`database.py` 支持多方言引擎创建；`DATABASE_URL` 默认值从仅 PostgreSQL 改为方言无关；`Settings` 新增数据库类型验证
 
-## Impact
+## Impact — 影响
 
-- **Models**: All 16 `BaseModel` subclasses gain a new `deleted` column (migration required)
-- **Indexes**: 10 `postgresql_where=` indexes across 7 model files replaced with portable composite indexes
-- **Services**: 17 service files update query filters from `deleted_at IS NULL` to `deleted = false`
-- **Migrations**: New Alembic migration to add `deleted` column, backfill data, and recreate indexes
-- **Tests**: Existing SQLite tests continue to pass; new PostgreSQL integration test configuration added
-- **API**: No API-level changes — soft-delete behavior is transparent to API consumers
-- **Dependencies**: `aiomysql` added as optional dependency for MySQL support (new `[mysql]` extra in pyproject.toml)
+- **模型**：所有 16 个 `BaseModel` 子类新增 `deleted` 列（需要迁移）
+- **索引**：跨 7 个模型文件的 10 个 `postgresql_where=` 索引替换为可移植的复合索引
+- **服务**：17 个服务文件的查询过滤器从 `deleted_at IS NULL` 更新为 `deleted = false`
+- **迁移**：新的 Alembic 迁移，添加 `deleted` 列、回填数据并重新创建索引
+- **测试**：现有的 SQLite 测试继续通过；新增 PostgreSQL 集成测试配置
+- **API**：无 API 级别变更——软删除行为对 API 消费者透明
+- **依赖**：`aiomysql` 作为可选的 MySQL 支持依赖添加（`pyproject.toml` 中新增 `[mysql]` extra）

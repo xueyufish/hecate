@@ -1,68 +1,42 @@
-## Context
+## Context — 背景
 
-PregelRuntime executes graph nodes in superstep cycles. Each superstep has a set of `current_nodes` that need execution. Currently, the runtime iterates through them sequentially:
+Worker 按照它们被添加到图中的顺序执行。对于更动态的调度——例如并行运行时、带权重的 DAG 中的优先级分配——需要一个允许不同调度策略的灵活接口。
 
-```python
-for node_id in current_nodes:
-    result = await self._pool.dispatch(worker, node_id, node.config, snapshot)
-    results.append(result)
-```
+## Goals / Non-Goals — 目标 / 非目标
 
-This simple approach works but:
-- Cannot prioritize critical nodes over background tasks
-- Cannot implement fair-sharing for multi-tenant scenarios
-- Cannot reorder based on runtime conditions (e.g., cache hits)
+**目标：**
+- 定义具有 `select_next(ready: list[WorkerNode], context: dict) -> WorkerNode` 的 `SchedulerStrategy` ABC
+- 提供 `FIFOScheduler`（与当前行为匹配）和 `PriorityScheduler`
+- 使调度策略成为 PregelRuntime 的可选依赖
+- 保持引擎零依赖
 
-## Goals / Non-Goals
+**非目标：**
+- 用于离线分析的可序列化调度（P3）
+- 动态重新平衡（P3+）
 
-**Goals:**
-- Define `SchedulerStrategy` ABC with `select_next` and `set_weights` methods
-- Provide `FIFOScheduler` as default (preserves current behavior)
-- Make scheduler an optional PregelRuntime parameter
-- Keep engine zero-dependency
+## Decisions — 设计决策
 
-**Non-Goals:**
-- Parallel execution of nodes (that's WorkerPool's job)
-- Distributed scheduling across nodes
-- Dynamic priority changes during execution (P3+)
+### D1：SchedulerStrategy 在引擎内部
 
-## Decisions
+**选择**：创建 `engine/scheduler.py`，与 `engine/pregel.py` 并列。
 
-### D1: SchedulerStrategy is engine-internal, not a service port
+**理由**：调度是执行细节，不是服务边界。
 
-**Choice**: Create `engine/scheduler.py` parallel to `engine/worker.py`.
+### D2：FIFO 作为默认调度
 
-**Rationale**: Scheduling is an engine concern (how to order node execution), not a service boundary (how to call LLM/tools). It doesn't belong in EnginePort.
+**选择**：`FIFOScheduler` 通过始终选择 `ready` 列表中的第一个节点来镜像当前的顺序行为。
 
-### D2: select_next returns ordered list, not single node
+**理由**：立即兼容现有的 PregelRuntime 实现。
 
-**Choice**: `select_next(nodes: list[str], context: dict) -> list[str]`
+### D3：PriorityScheduler 使用频道状态
 
-**Alternatives considered**:
-- Return one node at a time → rejected: requires N calls for N nodes, adds overhead
-- Return generator → rejected: over-engineering for current needs
+**选择**：`PriorityScheduler` 在上下文中检查频道可用性，并偏好等待关键输入的那些就绪节点。
 
-**Rationale**: Returning an ordered list is simple and allows the runtime to process nodes in the suggested order.
+**理由**：无论可用状态如何都执行节点可以是次优的。基于权重的调度提供了更好的并行化。
 
-### D3: FIFOScheduler preserves exact current behavior
+## Risks / Trade-offs — 风险与权衡
 
-**Choice**: FIFOScheduler returns nodes in the order they were received.
-
-**Rationale**: Zero-risk default. Existing tests pass without modification.
-
-### D4: set_weights is a no-op in FIFOScheduler
-
-**Choice**: FIFOScheduler ignores weights (FIFO doesn't use priorities).
-
-**Rationale**: The method exists for future PriorityScheduler (P3) to implement.
-
-## Risks / Trade-offs
-
-| Risk | Mitigation |
-|------|-----------|
-| Adding scheduler parameter to PregelRuntime changes constructor | Default to FIFOScheduler, existing code works unchanged |
-| Scheduler adds overhead for simple graphs | FIFOScheduler is O(1) passthrough |
-
-## Open Questions
-
-None.
+| 风险 | 缓解措施 |
+|------|---------|
+| 优先级调度可能使图执行复杂化 | 提供为简单案例模拟现有行为的 FIFO 默认值 |
+| 调度器改变性能特征 | 调度器是可选的；不设置时默认使用 FIFO |

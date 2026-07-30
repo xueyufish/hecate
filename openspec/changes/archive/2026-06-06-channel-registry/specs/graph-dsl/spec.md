@@ -1,20 +1,20 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: Graph DSL parser validates against JSON Schema
-The `parse_graph()` function SHALL accept a JSON string or dict and validate it against `schemas/graph-dsl.schema.json`. The schema SHALL include `"persistent"` as an optional boolean property on channel definitions. The parser SHALL auto-migrate deprecated `"persistent_topic"` to `"topic"` with `persistent=True`.
+### Requirement: Graph DSL 解析器验证 JSON Schema
+`parse_graph()` 函数 SHALL 接受 JSON 字符串或字典，并根据 `schemas/graph-dsl.schema.json` 进行验证。schema SHALL 在 channel 定义中包含 `"persistent"` 作为可选的布尔属性。解析器 SHALL 自动将已弃用的 `"persistent_topic"` 迁移为 `"topic"` 并附带 `persistent=True`。
 
-#### Scenario: Persistent channel in JSON
-- **WHEN** `parse_graph()` encounters a channel definition with `"type": "topic", "persistent": true`
-- **THEN** it SHALL create `ChannelDef(type=ChannelType.TOPIC, persistent=True)`
+#### Scenario: JSON 中的持久化 channel
+- **WHEN** `parse_graph()` 遇到包含 `"type": "topic", "persistent": true` 的 channel 定义
+- **THEN** 它 SHALL 创建 `ChannelDef(type=ChannelType.TOPIC, persistent=True)`
 
-#### Scenario: Deprecated persistent_topic
-- **WHEN** `parse_graph()` encounters `"type": "persistent_topic"`
-- **THEN** it SHALL create `ChannelDef(type=ChannelType.TOPIC, persistent=True)` and log a deprecation warning
+#### Scenario: 已弃用的 persistent_topic
+- **WHEN** `parse_graph()` 遇到 `"type": "persistent_topic"`
+- **THEN** 它 SHALL 创建 `ChannelDef(type=ChannelType.TOPIC, persistent=True)` 并记录弃用警告
 
-#### Scenario: Custom registered type
-- **WHEN** `parse_graph()` encounters `"type": "priority_queue"` and "priority_queue" is registered in ChannelTypeRegistry
-- **THEN** it SHALL create `ChannelDef(type=ChannelType("priority_queue"))` without error
+#### Scenario: 自定义注册类型
+- **WHEN** `parse_graph()` 遇到 `"type": "priority_queue"` 且 "priority_queue" 已在 ChannelTypeRegistry 中注册
+- **THEN** 它 SHALL 创建 `ChannelDef(type=ChannelType("priority_queue"))` 且不报错
 
-#### Scenario: Unknown type
-- **WHEN** `parse_graph()` encounters `"type": "unknown"` and "unknown" is NOT in the registry
-- **THEN** it SHALL raise `GraphValidationError` with field pointing to the channel type
+#### Scenario: 未知类型
+- **WHEN** `parse_graph()` 遇到 `"type": "unknown"` 且 "unknown" 不在 registry 中
+- **THEN** 它 SHALL 引发 `GraphValidationError`，字段指向该 channel 类型

@@ -1,73 +1,73 @@
-## 1. Channel Adapter Core (channel-adapter spec)
+## 1. 通道适配器核心（channel-adapter 规范）
 
-- [x] 1.1 Create `src/hecate/channel/__init__.py` with public exports (ChannelABC, CanonicalMessage, ChannelCapabilities)
-- [x] 1.2 Create `src/hecate/channel/types.py` with CanonicalMessage frozen dataclass (id, channel_id, user_id, session_id, content, metadata, timestamp) and MessageContent dataclass (text, attachments)
-- [x] 1.3 Create `src/hecate/channel/capabilities.py` with ChannelCapabilities frozen dataclass (streaming, interactive_buttons, file_upload, markdown, rich_cards, max_message_length)
-- [x] 1.4 Create `src/hecate/channel/adapter.py` with ChannelABC abstract base class (name, description, capabilities properties; receive, respond, stream abstract methods)
+- [x] 1.1 创建 `src/hecate/channel/__init__.py`，包含公共导出（ChannelABC、CanonicalMessage、ChannelCapabilities）
+- [x] 1.2 创建 `src/hecate/channel/types.py`，包含 CanonicalMessage 冻结数据类（id、channel_id、user_id、session_id、content、metadata、timestamp）和 MessageContent 数据类（text、attachments）
+- [x] 1.3 创建 `src/hecate/channel/capabilities.py`，包含 ChannelCapabilities 冻结数据类（streaming、interactive_buttons、file_upload、markdown、rich_cards、max_message_length）
+- [x] 1.4 创建 `src/hecate/channel/adapter.py`，包含 ChannelABC 抽象基类（name、description、capabilities 属性；receive、respond、stream 抽象方法）
 
-## 2. Gateway Layer (channel-adapter spec)
+## 2. Gateway 层（channel-adapter 规范）
 
-- [x] 2.1 Create `src/hecate/gateway/__init__.py` with public exports (Gateway)
-- [x] 2.2 Create `src/hecate/gateway/session.py` with SessionRouter (session_id → channel_id/user_id mapping, create/resume logic)
-- [x] 2.3 Create `src/hecate/gateway/gateway.py` with Gateway class (accepts CanonicalMessage from channels, resolves session via SessionRouter, delegates to WorkflowExecutionService)
+- [x] 2.1 创建 `src/hecate/gateway/__init__.py`，包含公共导出（Gateway）
+- [x] 2.2 创建 `src/hecate/gateway/session.py`，包含 SessionRouter（session_id → channel_id/user_id 映射、创建/恢复逻辑）
+- [x] 2.3 创建 `src/hecate/gateway/gateway.py`，包含 Gateway 类（从通道接受 CanonicalMessage、通过 SessionRouter 解析会话、委托给 WorkflowExecutionService）
 
-## 3. Channel Plugin Registration (channel-adapter spec)
+## 3. 通道插件注册（channel-adapter 规范）
 
-- [x] 3.1 Update `src/hecate/plugin/spi/__init__.py` to export ChannelABC
-- [x] 3.2 Create `register_channels(registry)` function in `src/hecate/gateway/registration.py` that registers built-in channels (RESTChannelAdapter placeholder)
+- [x] 3.1 更新 `src/hecate/plugin/spi/__init__.py` 以导出 ChannelABC
+- [x] 3.2 在 `src/hecate/gateway/registration.py` 中创建 `register_channels(registry)` 函数，用于注册内置通道（RESTChannelAdapter 占位符）
 
-## 4. NotificationDispatcher Refactor (channel-adapter spec)
+## 4. NotificationDispatcher 重构（channel-adapter 规范）
 
-- [x] 4.1 Create `src/hecate/channel/notification.py` with NotificationChannelAdapter base class that wraps existing render functions as Channel respond() implementations
-- [x] 4.2 Refactor `src/hecate/services/notification_dispatcher.py` to use NotificationChannelAdapter instead of switch/case dispatch
+- [x] 4.1 创建 `src/hecate/channel/notification.py`，包含 NotificationChannelAdapter 基类，将现有的渲染函数包装为 Channel respond() 实现
+- [x] 4.2 重构 `src/hecate/services/notification_dispatcher.py` 以使用 NotificationChannelAdapter 替代 switch/case 分发
 
-## 5. AuthProviderABC (auth-provider spec)
+## 5. AuthProviderABC（auth-provider 规范）
 
-- [x] 5.1 Create `src/hecate/auth/__init__.py` with public exports (AuthProviderABC, JWTAuthProvider, APIKeyAuthProvider)
-- [x] 5.2 Create `src/hecate/auth/provider.py` with AuthProviderABC abstract base class (name, description properties; authenticate abstract method)
-- [x] 5.3 Create `src/hecate/auth/jwt_provider.py` with JWTAuthProvider that wraps existing `decode_access_token()` and returns AuthContext
-- [x] 5.4 Create `src/hecate/auth/api_key_provider.py` with APIKeyAuthProvider that wraps existing `_resolve_api_key()` logic and returns AuthContext
+- [x] 5.1 创建 `src/hecate/auth/__init__.py`，包含公共导出（AuthProviderABC、JWTAuthProvider、APIKeyAuthProvider）
+- [x] 5.2 创建 `src/hecate/auth/provider.py`，包含 AuthProviderABC 抽象基类（name、description 属性；authenticate 抽象方法）
+- [x] 5.3 创建 `src/hecate/auth/jwt_provider.py`，包含 JWTAuthProvider，包装现有的 `decode_access_token()` 并返回 AuthContext
+- [x] 5.4 创建 `src/hecate/auth/api_key_provider.py`，包含 APIKeyAuthProvider，包装现有的 `_resolve_api_key()` 逻辑并返回 AuthContext
 
-## 6. Auth Provider Integration (auth-provider spec)
+## 6. 认证提供者集成（auth-provider 规范）
 
-- [x] 6.1 Create `src/hecate/auth/resolver.py` with `resolve_auth_context(credentials, db)` function that iterates registered auth providers
-- [x] 6.2 Update `src/hecate/core/deps_workspace.py` to delegate `get_auth_context()` to `resolve_auth_context()` while preserving existing behavior
-- [x] 6.3 Create `register_auth_providers(registry)` function that registers JWTAuthProvider and APIKeyAuthProvider
+- [x] 6.1 创建 `src/hecate/auth/resolver.py`，包含 `resolve_auth_context(credentials, db)` 函数，遍历已注册的认证提供者
+- [x] 6.2 更新 `src/hecate/core/deps_workspace.py`，使 `get_auth_context()` 委托给 `resolve_auth_context()`，同时保留现有行为
+- [x] 6.3 创建 `register_auth_providers(registry)` 函数，注册 JWTAuthProvider 和 APIKeyAuthProvider
 
-## 7. i18n Core (i18n-spi spec)
+## 7. i18n 核心（i18n-spi 规范）
 
-- [x] 7.1 Create `src/hecate/i18n/__init__.py` with public exports (LocaleResolver, MessageCatalog, t)
-- [x] 7.2 Create `src/hecate/i18n/locale_resolver.py` with LocaleResolver (priority: explicit param → Accept-Language header → user preference → workspace default → system default "en")
-- [x] 7.3 Create `src/hecate/i18n/catalog.py` with MessageCatalog that loads from `locales/{locale}/{namespace}.json` or `.yaml`, supports nested key lookup and parameter interpolation
-- [x] 7.4 Create `src/hecate/i18n/translate.py` with `t(key, locale=None, **params)` function that uses LocaleResolver and MessageCatalog
+- [x] 7.1 创建 `src/hecate/i18n/__init__.py`，包含公共导出（LocaleResolver、MessageCatalog、t）
+- [x] 7.2 创建 `src/hecate/i18n/locale_resolver.py`，包含 LocaleResolver（优先级：显式参数 → Accept-Language 头 → 用户偏好 → 工作区默认 → 系统默认 "en"）
+- [x] 7.3 创建 `src/hecate/i18n/catalog.py`，包含 MessageCatalog，从 `locales/{locale}/{namespace}.json` 或 `.yaml` 加载，支持嵌套键查找和参数插值
+- [x] 7.4 创建 `src/hecate/i18n/translate.py`，包含 `t(key, locale=None, **params)` 函数，使用 LocaleResolver 和 MessageCatalog
 
-## 8. i18n Data Model (i18n-spi spec)
+## 8. i18n 数据模型（i18n-spi 规范）
 
-- [x] 8.1 Add `preferred_locale` (optional str) field to `src/hecate/models/user.py` UserModel
-- [x] 8.2 Add `default_locale` (optional str, default "en") field to `src/hecate/models/workspace.py` WorkspaceModel (if exists)
-- [x] 8.3 Create Alembic migration for new locale fields
+- [x] 8.1 向 `src/hecate/models/user.py` 的 UserModel 添加 `preferred_locale`（可选 str）字段
+- [x] 8.2 向 `src/hecate/models/workspace.py` 的 WorkspaceModel（如果存在）添加 `default_locale`（可选 str，默认 "en"）字段
+- [x] 8.3 为新语言字段创建 Alembic 迁移
 
-## 9. i18n Plugin Translation Registration (i18n-spi spec)
+## 9. i18n 插件翻译注册（i18n-spi 规范）
 
-- [x] 9.1 Update `src/hecate/plugin/manifest.py` to add `translations: tuple[str, ...] = ()` field to PluginManifest
-- [x] 9.2 Update `src/hecate/plugin/registry.py` to auto-load plugin translations on registration
+- [x] 9.1 更新 `src/hecate/plugin/manifest.py`，向 PluginManifest 添加 `translations: tuple[str, ...] = ()` 字段
+- [x] 9.2 更新 `src/hecate/plugin/registry.py`，在注册时自动加载插件翻译
 
-## 10. i18n Management API (i18n-spi spec)
+## 10. i18n 管理 API（i18n-spi 规范）
 
-- [x] 10.1 Create `src/hecate/api/management/i18n.py` with REST endpoints: POST /api/i18n/translations, GET /api/i18n/translations/{locale}, GET /api/i18n/locales, PUT /api/i18n/translations/{locale}/{namespace}
-- [x] 10.2 Register i18n router in `src/hecate/main.py`
+- [x] 10.1 创建 `src/hecate/api/management/i18n.py`，包含 REST 端点：POST /api/i18n/translations、GET /api/i18n/translations/{locale}、GET /api/i18n/locales、PUT /api/i18n/translations/{locale}/{namespace}
+- [x] 10.2 在 `src/hecate/main.py` 中注册 i18n 路由器
 
-## 11. Plugin SPI __init__.py Update
+## 11. Plugin SPI __init__.py 更新
 
-- [x] 11.1 Update `src/hecate/plugin/spi/__init__.py` to export all new ABCs (ChannelABC, AuthProviderABC)
+- [x] 11.1 更新 `src/hecate/plugin/spi/__init__.py` 以导出所有新的 ABC（ChannelABC、AuthProviderABC）
 
-## 12. Tests
+## 12. 测试
 
-- [x] 12.1 Create `tests/test_channel/test_adapter.py` — test ChannelABC interface, CanonicalMessage immutability, ChannelCapabilities defaults
-- [x] 12.2 Create `tests/test_channel/test_gateway.py` — test Gateway session routing, message normalization
-- [x] 12.3 Create `tests/test_auth/test_provider.py` — test AuthProviderABC interface, JWTAuthProvider, APIKeyAuthProvider
-- [x] 12.4 Create `tests/test_auth/test_resolver.py` — test provider iteration, fallback behavior
-- [x] 12.5 Create `tests/test_i18n/test_locale_resolver.py` — test locale detection priority chain
-- [x] 12.6 Create `tests/test_i18n/test_catalog.py` — test JSON/YAML loading, nested keys, parameter interpolation, fallback
-- [x] 12.7 Create `tests/test_i18n/test_translate.py` — test t() function end-to-end
-- [x] 12.8 Run full test suite: `ruff check src/hecate/ tests/ && ruff format --check src/ tests/ && mypy src/ && python -m pytest tests/ -q`
+- [x] 12.1 创建 `tests/test_channel/test_adapter.py` — 测试 ChannelABC 接口、CanonicalMessage 不可变性、ChannelCapabilities 默认值
+- [x] 12.2 创建 `tests/test_channel/test_gateway.py` — 测试 Gateway 会话路由、消息标准化
+- [x] 12.3 创建 `tests/test_auth/test_provider.py` — 测试 AuthProviderABC 接口、JWTAuthProvider、APIKeyAuthProvider
+- [x] 12.4 创建 `tests/test_auth/test_resolver.py` — 测试提供者迭代、回退行为
+- [x] 12.5 创建 `tests/test_i18n/test_locale_resolver.py` — 测试语言检测优先级链
+- [x] 12.6 创建 `tests/test_i18n/test_catalog.py` — 测试 JSON/YAML 加载、嵌套键、参数插值、回退
+- [x] 12.7 创建 `tests/test_i18n/test_translate.py` — 测试 t() 函数端到端
+- [x] 12.8 运行完整测试套件：`ruff check src/hecate/ tests/ && ruff format --check src/ tests/ && mypy src/ && python -m pytest tests/ -q`

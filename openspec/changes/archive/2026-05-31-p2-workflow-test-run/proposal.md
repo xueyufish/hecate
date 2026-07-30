@@ -1,26 +1,26 @@
-## Why
+## Why — 动机
 
-The workflow editor has a basic test run button that executes the entire workflow and shows per-node status (completed/failed). However, it lacks **input customization** (hardcoded to "test"), **output preview** (no way to see what each node produced), and **execution logs** (no debugging information). The feature catalog describes this as "单步调试、输入输出预览、执行日志" — step debugging, input/output preview, and execution logs.
+工作流编辑器有一个基本的测试运行按钮，可以执行整个工作流并显示每个节点的状态（completed/failed）。然而，它缺少**输入自定义**（硬编码为"test"）、**输出预览**（无法查看每个节点产生了什么）和**执行日志**（没有调试信息）。功能目录将此描述为"单步调试、输入输出预览、执行日志"。
 
-## What Changes
+## What Changes — 变更内容
 
-- Add **custom input form** — user can specify input data (messages, variables) before running
-- Add **node output panel** — click a node to see its input/output data after test run
-- Add **execution logs panel** — show detailed logs for each node (timing, errors, intermediate data)
-- Add **node status highlighting** — visually indicate node status on canvas (pending/running/completed/failed)
-- Add **run history sidebar** — show previous test runs with ability to compare results
+- 添加**自定义输入表单** — 用户可以在运行前指定输入数据（消息、变量）
+- 添加**节点输出面板** — 测试运行后点击节点查看其输入/输出数据
+- 添加**执行日志面板** — 显示每个节点的详细日志（时序、错误、中间数据）
+- 添加**节点状态高亮** — 在画布上直观指示节点状态（pending/running/completed/failed）
+- 添加**运行历史侧栏** — 显示之前的测试运行，支持比较结果
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `workflow-test-run`: Enhanced workflow testing with custom input, node output preview, execution logs, and run history
+### New Capabilities — 新增能力
+- `workflow-test-run`：增强的工作流测试，支持自定义输入、节点输出预览、执行日志和运行历史
 
-### Modified Capabilities
-- (none — existing spec is not formalized)
+### Modified Capabilities — 修改的能力
+- （无 — 现有规范尚未正式化）
 
-## Impact
+## Impact — 影响范围
 
-- **Backend**: Add endpoint to fetch run details with node outputs/logs
-- **Backend**: Store node outputs in WorkflowRunModel.node_results
-- **Frontend**: Workflow editor — add input form, output panel, logs panel, run history
-- **Tests**: API tests for run details endpoint
+- **Backend**：添加获取运行详情（含节点输出/日志）的端点
+- **Backend**：在 WorkflowRunModel.node_results 中存储节点输出
+- **Frontend**：工作流编辑器 — 添加输入表单、输出面板、日志面板、运行历史
+- **Tests**：运行详情端点的 API 测试

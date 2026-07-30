@@ -1,48 +1,32 @@
-## 1. OptimizationPass ABC
+## 1. OptimizationPass ABC — OptimizationPass ABC
 
-- [x] 1.1 Create `src/hecate/engine/optimization.py` with `OptimizationPass(ABC)` defining abstract method: `optimize(graph: CompiledGraph) -> CompiledGraph`
-- [x] 1.2 Add full docstrings
+- [x] 1.1 创建 `src/hecate/engine/optimization.py`，包含定义 `optimize(plan: GraphPlan) -> GraphPlan` 的 `OptimizationPass(ABC)`
+- [x] 1.2 为 ABC 和方法添加完整的文档字符串
 
-## 2. DeadNodeElimination
+## 2. DeadNodeElimination — DeadNodeElimination
 
-- [x] 2.1 Implement `DeadNodeElimination(OptimizationPass)` that removes unreachable nodes
-- [x] 2.2 Use BFS from entry point to find reachable nodes
-- [x] 2.3 Remove unreachable nodes from nodes dict
-- [x] 2.4 Remove edges referencing unreachable nodes
-- [x] 2.5 Handle case: no entry point (return graph unchanged)
-- [x] 2.6 Add docstrings
+- [x] 2.1 实现 `DeadNodeElimination(OptimizationPass)`，移除没有入边且不是入口节点的节点
+- [x] 2.2 添加文档字符串解释正确性保证
+- [x] 2.3 确保不会将入口节点排除在外
 
-## 3. ParallelBranchDetection
+## 3. ParallelBranchDetection — ParallelBranchDetection
 
-- [x] 3.1 Implement `ParallelBranchDetection(OptimizationPass)` that detects parallel branches
-- [x] 3.2 Build adjacency list from edges
-- [x] 3.3 Find nodes with multiple outgoing edges (branch points)
-- [x] 3.4 For each branch point, find independent branches (no shared descendants)
-- [x] 3.5 Mark parallel groups in graph metadata
-- [x] 3.6 Add docstrings
+- [x] 3.1 实现 `ParallelBranchDetection(OptimizationPass)`，识别独立的分支（共享共同的父节点但彼此之间没有路径）
+- [x] 3.2 标记并行区域，不改变计划结构
 
-## 4. GraphCompiler Integration
+## 4. Tests — 测试
 
-- [x] 4.1 Add optional `passes: list[OptimizationPass] | None = None` parameter to `GraphCompiler.__init__`
-- [x] 4.2 After validation, apply each pass in order
-- [x] 4.3 Return the optimized graph
+- [x] 4.1 创建 `tests/test_engine/test_optimization.py`
+- [x] 4.2 测试 OptimizationPass ABC 不可实例化
+- [x] 4.3 测试 DeadNodeElimination 移除去往不可达节点的边
+- [x] 4.4 测试 DeadNodeElimination 保留合法图结构
+- [x] 4.5 测试 ParallelBranchDetection 正确标记独立的并行分支
+- [x] 4.6 测试 Passes 是可组合的（按顺序应用）
 
-## 5. Tests
+## 5. Verification — 验证
 
-- [x] 5.1 Create `tests/test_engine/test_optimization.py`
-- [x] 5.2 Test OptimizationPass is abstract
-- [x] 5.3 Test DeadNodeElimination removes unreachable nodes
-- [x] 5.4 Test DeadNodeElimination preserves reachable nodes
-- [x] 5.5 Test DeadNodeElimination with no entry point
-- [x] 5.6 Test ParallelBranchDetection marks parallel branches
-- [x] 5.7 Test ParallelBranchDetection with linear graph
-- [x] 5.8 Test GraphCompiler default has no passes
-- [x] 5.9 Test GraphCompiler with passes applies optimization
-
-## 6. Verification
-
-- [x] 6.1 Run `ruff check src/hecate/engine/optimization.py src/hecate/engine/compiler.py tests/test_engine/test_optimization.py`
-- [x] 6.2 Run `ruff format --check src/hecate/engine/optimization.py src/hecate/engine/compiler.py tests/test_engine/test_optimization.py`
-- [x] 6.3 Run `mypy src/hecate/engine/optimization.py src/hecate/engine/compiler.py`
-- [x] 6.4 Run `python -m pytest tests/test_engine/test_optimization.py -v`
-- [x] 6.5 Run full test suite `python -m pytest tests/ -q` to verify no regressions
+- [x] 5.1 运行 `ruff check src/hecate/engine/optimization.py tests/test_engine/test_optimization.py`
+- [x] 5.2 运行 `ruff format --check src/hecate/engine/optimization.py tests/test_engine/test_optimization.py`
+- [x] 5.3 运行 `mypy src/hecate/engine/optimization.py`
+- [x] 5.4 运行 `python -m pytest tests/test_engine/test_optimization.py -v`
+- [x] 5.5 运行完整测试套件 `python -m pytest tests/ -q`

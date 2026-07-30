@@ -1,122 +1,122 @@
-## Context
+## Context — 背景
 
-Hecate's observability stack currently provides tracing (8.1), real-time monitoring (8.2), cost dashboard (8.3), and audit logs (8.7), but operators must manually check dashboards to discover problems. Competitive analysis across Dify, Coze, LangFuse, LiteLLM, Grafana/Prometheus, and Datadog shows that alerting is a fundamental expectation for enterprise platforms.
+Hecate 的观测堆栈目前提供追踪（8.1）、实时监控（8.2）、成本仪表板（8.3）和审计日志（8.7），但操作员必须手动检查仪表板才能发现问题。对 Dify、Coze、LangFuse、LiteLLM、Grafana/Prometheus 和 Datadog 的竞品分析显示，告警是企业平台的基本期望。
 
-The existing infrastructure provides a strong foundation: `TraceModel` records every span with status, latency, token usage, and model metadata; `CostService` aggregates cost from traces; `MonitoringService` demonstrates the asyncio background-task pattern with WebSocket push; `ScheduleManager` shows advisory-lock usage for multi-node safety. This change builds alerting on top of these existing components.
+现有基础设施提供了坚实的基础：`TraceModel` 记录每个 span 的状态、延迟、token 使用量和模型元数据；`CostService` 从追踪中聚合成本；`MonitoringService` 演示了带有 WebSocket 推送的 asyncio 后台任务模式；`ScheduleManager` 展示了用于多节点安全的建议锁用法。此变更在这些现有组件之上构建告警功能。
 
-Key constraints: PostgreSQL is the primary datastore (advisory locks available); no Redis or Celery; the `[scheduling]` dependency group is optional and must not be required; all code follows the models → services → api layering with zero engine-layer imports from services/api.
+关键约束：PostgreSQL 是主要数据存储（建议锁可用）；无 Redis 或 Celery；`[scheduling]` 依赖组是可选的，不能成为必需；所有代码遵循 models → services → api 分层，engine 层不从 services/api 导入。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- 8 alert types covering the full catalog description (error rate, latency p95, TTFT, token usage, daily cost, monthly cost forecast, tool failure rate, success rate).
-- Grafana-standard alert lifecycle: PENDING → FIRING → RESOLVED, with manual ACK.
-- Three-severity escalation: CRITICAL (webhook + SMS), WARNING (webhook + in-app), INFO (in-app + email).
-- Built-in message templates for Feishu (card), WeCom (markdown), DingTalk (markdown), Slack (Block Kit), and email (HTML).
-- Maintenance-window silencing to suppress notifications during planned downtime.
-- Multi-node safe evaluation via PostgreSQL advisory lock.
-- Per-workspace rule isolation with optional scope filters (agent_id, model).
+**目标：**
+- 8 种告警类型，覆盖完整目录描述（错误率、延迟 p95、TTFT、token 使用量、每日成本、月度成本预测、工具失败率、成功率）。
+- Grafana 标准告警生命周期：PENDING → FIRING → RESOLVED，带手动 ACK。
+- 三级严重性升级：CRITICAL（webhook + SMS）、WARNING（webhook + 应用内）、INFO（应用内 + 邮件）。
+- 飞书（卡片）、企业微信（markdown）、钉钉（markdown）、Slack（Block Kit）和邮件（HTML）的内置消息模板。
+- 维护窗口静默，在计划停机期间抑制通知。
+- 通过 PostgreSQL 建议锁实现多节点安全评估。
+- 每工作空间规则隔离，带可选范围过滤器（agent_id、model）。
 
-**Non-Goals:**
-- Anomaly detection (statistical baseline, z-score, EWMA deviation) — deferred to a future 8.6a feature. v1 is threshold + forecast only.
-- Expression-based rule engine (PromQL or custom DSL) — rules use fixed AlertType enum with structured parameters.
-- SMS and phone call channels — v1 provides webhook, WebSocket, and email. SMS/phone require a telephony provider integration (Twilio/Alibaba SMS) and are deferred.
-- Alert correlation or deduplication across rules — each rule evaluates independently.
-- Real-time streaming evaluation — v1 uses periodic polling (60s default). Streaming is a future optimization.
+**非目标：**
+- 异常检测（统计基线、z-score、EWMA 偏差）——推迟到未来的 8.6a 功能。v1 仅为阈值 + 预测。
+- 基于表达式的规则引擎（PromQL 或自定义 DSL）——规则使用固定的 AlertType 枚举带结构化参数。
+- SMS 和电话通道——v1 提供 webhook、WebSocket 和邮件。SMS/电话需要电信提供商集成（Twilio/阿里云 SMS）并推迟。
+- 跨规则告警关联或去重——每个规则独立评估。
+- 实时流式评估——v1 使用定期轮询（60 秒默认）。流式是未来的优化。
 
-## Decisions
+## Decisions — 决策
 
-### D1: Fixed AlertType enum over PromQL expression engine
+### D1: 固定 AlertType 枚举而非 PromQL 表达式引擎
 
-Rules use a fixed enum (`AlertType`) with structured parameters (`threshold`, `window_minutes`, `for_minutes`, `filters`) rather than a query-language expression like PromQL.
+规则使用固定枚举（`AlertType`）带结构化参数（`threshold`、`window_minutes`、`for_minutes`、`filters`），而不是像 PromQL 这样的查询语言表达式。
 
-**Alternatives considered:**
-- **PromQL engine** (Dify/Grafana pattern): Extremely flexible, but requires implementing a query parser, expression evaluator, and time-series database adapter. Unjustified complexity for an LLM platform where the set of meaningful signals is bounded and known.
-- **JSON expression tree**: A mini-DSL in JSON (e.g., `{op: "gt", left: {metric: "error_rate", window: "5m"}, right: 0.05}`). Still requires an expression evaluator and offers no real advantage over a fixed enum when the signal types are enumerable.
+**考虑的替代方案：**
+- **PromQL 引擎**（Dify/Grafana 模式）：极其灵活，但需要实现查询解析器、表达式评估器和时序数据库适配器。对于一个有意义的信号集合有限且已知的 LLM 平台来说，这是不合理的复杂性。
+- **JSON 表达式树**：JSON 格式的迷你 DSL（例如 `{op: "gt", left: {metric: "error_rate", window: "5m"}, right: 0.05}`）。仍然需要表达式评估器，并且在信号类型可枚举时相比固定枚举没有实际优势。
 
-**Rationale:** All LLM-native platforms (Coze, LiteLLM, Helicone) use fixed alert types. PromQL is the pattern for infrastructure monitoring platforms (Grafana) where metrics are open-ended. Hecate's signals are a closed set (8 types), so a fixed enum is simpler, type-safe, and API-friendly. New types are added by extending the enum and registering a new SignalProvider.
+**理由：** 所有 LLM 原生平台（Coze、LiteLLM、Helicone）都使用固定告警类型。PromQL 是基础设施监控平台（Grafana）的模式，其指标是开放式的。Hecate 的信号是一个封闭集合（8 种类型），所以固定枚举更简单、类型安全且 API 友好。新类型通过扩展枚举和注册新的 SignalProvider 来添加。
 
-### D2: Grafana-standard four-state lifecycle
+### D2: Grafana 标准四状态生命周期
 
-Alert events follow: `OK → PENDING → FIRING → RESOLVED → OK`, plus `ACKED` as a terminal state for manually acknowledged events.
+告警事件遵循：`OK → PENDING → FIRING → RESOLVED → OK`，加上 `ACKED` 作为手动确认事件的终态。
 
-**Alternatives considered:**
-- **Two-state (OK/FIRING)**: Fires immediately on threshold breach. Risks alert fatigue from transient spikes (a 10-second error burst at 3am pages on-call for no reason). Dify and LiteLLM effectively work around this by relying on Prometheus's `for` clause externally, but since we own the evaluator, we should build it in.
-- **Three-state without ACK** (OK/PENDING/FIRING): Loses the ability to track human response. Enterprise workflows need ACK to stop escalation.
+**考虑的替代方案：**
+- **两状态（OK/FIRING）**：阈值突破时立即触发。风险来自瞬时尖峰导致的告警疲劳（凌晨 3 点 10 秒的错误爆发无缘无故呼叫值班人员）。Dify 和 LiteLLM 通过外部依赖 Prometheus 的 `for` 子句来规避此问题，但由于我们自己拥有评估器，应该内置此功能。
+- **无 ACK 的三状态**（OK/PENDING/FIRING）：失去跟踪人工响应的能力。企业工作流需要 ACK 来停止升级。
 
-**Rationale:** The `for` duration (pending phase) is universally adopted by Grafana, Prometheus, Datadog, and Alertmanager. It is the single most important noise-reduction mechanism. ACK is standard in PagerDuty/Opsgenie and prevents escalation from running indefinitely.
+**理由：** `for` 持续时间（待定期）被 Grafana、Prometheus、Datadog 和 Alertmanager 普遍采用。它是最重要的降噪机制。ACK 是 PagerDuty/Opsgenie 的标准，防止升级无限运行。
 
-### D3: Dedicated asyncio evaluator with PG advisory lock
+### D3: 专用 asyncio 评估器 + PG 建议锁
 
-The alert evaluator runs as a dedicated `asyncio.Task` started in the FastAPI lifespan, not via the existing `ScheduleManager` (APScheduler).
+告警评估器作为专用的 `asyncio.Task` 在 FastAPI 生命周期中启动，而不是通过现有的 `ScheduleManager`（APScheduler）。
 
-**Alternatives considered:**
-- **Reuse ScheduleManager**: Already has advisory-lock support and cron scheduling. But it requires the `[scheduling]` optional dependency group (apscheduler + croniter). Making alerting depend on scheduling creates an unnecessary coupling — alerting should work even if scheduling isn't installed.
-- **Temporal workflow**: Hecate already uses Temporal for some paths. A periodic Temporal workflow could evaluate alerts. But Temporal is heavyweight for a simple periodic poll, and Temporal itself is in an optional dependency group.
-- **APScheduler standalone**: Would add a new dependency just for alerting when asyncio can do it natively.
+**考虑的替代方案：**
+- **复用 ScheduleManager**：已有建议锁支持和 cron 调度。但它需要 `[scheduling]` 可选依赖组（apscheduler + croniter）。使告警依赖调度会创建不必要的耦合——即使未安装调度，告警也应工作。
+- **Temporal 工作流**：Hecate 已经对一些路径使用 Temporal。周期性的 Temporal 工作流可以评估告警。但 Temporal 对于简单的定期轮询来说过于重量级，而且 Temporal 本身在可选依赖组中。
+- **APScheduler 独立**：当 asyncio 可以原生完成时，这为告警添加了新的依赖。
 
-**Rationale:** The `MonitoringService._push_loop()` already establishes the pattern of an asyncio background task in the application lifespan. The evaluator follows the same pattern. The PG advisory lock (`pg_try_advisory_lock`) ensures only one node evaluates in a multi-worker deployment — approximately 15 lines of SQL. Default interval is 60 seconds, configurable via `ALERT_EVAL_INTERVAL`.
+**理由：** `MonitoringService._push_loop()` 已经确立了在应用程序生命周期中使用 asyncio 后台任务的模式。评估器遵循相同的模式。PG 建议锁（`pg_try_advisory_lock`）确保在多工作节点部署中只有一个节点评估——大约 15 行 SQL。默认间隔为 60 秒，可通过 `ALERT_EVAL_INTERVAL` 配置。
 
-### D4: TraceModel as the single signal source
+### D4: TraceModel 作为单一信号源
 
-All 8 signal types query `TraceModel` (and `CostService` for cost signals) rather than the in-memory `MetricsCollector`.
+所有 8 种信号类型查询 `TraceModel`（以及成本信号的 `CostService`），而不是内存中的 `MetricsCollector`。
 
-**Alternatives considered:**
-- **MetricsCollector (in-memory)**: Fast, but ephemeral — data is lost on restart. Cannot evaluate rules over historical windows. Not multi-process safe (each worker has its own collector). Unsuitable for alerting where rules span 5-30 minute windows.
-- **Dual-source hybrid**: Use MetricsCollector for real-time alerts (sub-minute) and TraceModel for windowed alerts. Adds complexity with no clear v1 benefit — 60-second evaluation cadence is sufficient.
+**考虑的替代方案：**
+- **MetricsCollector（内存中）**：快速，但短暂——重启时数据丢失。无法在历史窗口上评估规则。不是多进程安全的（每个工作节点有自己的收集器）。不适合规则跨越 5-30 分钟窗口的告警。
+- **双源混合**：对于次分钟级告警使用 MetricsCollector，对于窗口化告警使用 TraceModel。增加了复杂性而没有明确的 v1 收益——60 秒的评估节奏就足够了。
 
-**Rationale:** TraceModel is durable, indexed, multi-process safe, and already powers CostService. Every signal we need is derivable: error rate (`COUNT(status=error)/COUNT(*)`), latency p95 (percentile of `end_time - start_time`), TTFT (`AVG(metadata->ttft_ms)`), token usage (`SUM(usage->total_tokens)`), tool failure rate (`COUNT(status=error AND type=TOOL)/COUNT(type=TOOL)`). Using a single source keeps the SignalProvider registry uniform.
+**理由：** TraceModel 是持久化的、有索引的、多进程安全的，并且已经驱动了 CostService。每个我们需要的信号都是可推导的：错误率（`COUNT(status=error)/COUNT(*)`）、延迟 p95（`end_time - start_time` 的百分位数）、TTFT（`AVG(metadata->ttft_ms)`）、token 使用量（`SUM(usage->total_tokens)`）、工具失败率（`COUNT(status=error AND type=TOOL)/COUNT(type=TOOL)`）。使用单一源使 SignalProvider 注册表保持统一。
 
-### D5: Weighted moving average for budget forecast
+### D5: 预算预测的加权移动平均
 
-The `cost_monthly_forecast` alert type uses an exponentially-weighted moving average (EWMA) of daily costs, extrapolated to month-end, rather than simple linear projection.
+`cost_monthly_forecast` 告警类型使用每日成本的指数加权移动平均（EWMA）外推到月底，而不是简单的线性投影。
 
-**Alternatives considered:**
-- **Simple linear projection** (LiteLLM pattern: `daily_avg = total_spend / days_elapsed; projected = daily_avg * total_days`): Ignores trend changes. If spending accelerates mid-month, the projection lags. If spending drops, it overestimates.
-- **Seasonal decomposition** (Datadog anomaly detection): Decomposes into trend + seasonality + residual. Far too complex for v1 and requires weeks of baseline data that a freshly deployed instance won't have.
+**考虑的替代方案：**
+- **简单线性投影**（LiteLLM 模式：`daily_avg = total_spend / days_elapsed; projected = daily_avg * total_days`）：忽略趋势变化。如果支出在月中加速，投影滞后。如果支出下降，则高估。
+- **季节性分解**（Datadog 异常检测）：分解为趋势 + 季节性 + 残差。对于 v1 来说太复杂，需要新部署的实例尚未具备的数周基线数据。
 
-**Rationale:** EWMA weights recent days more heavily (exponential decay), so it captures trend changes (acceleration/deceleration) without requiring seasonal baseline data. The formula: `recent_avg = sum(cost[i] * 0.5^(7-i)) / sum(0.5^(7-i))` for the last 7 days, then `projected_monthly = recent_avg * days_in_month`. This is the standard approach in budget-management tools (AWS Budgets, CloudHealth) and is simple to implement and reason about.
+**理由：** EWMA 对最近日期加权更重（指数衰减），因此它能捕捉趋势变化（加速/减速），而不需要季节性基线数据。公式：过去 7 天的 `recent_avg = sum(cost[i] * 0.5^(7-i)) / sum(0.5^(7-i))`，然后 `projected_monthly = recent_avg * days_in_month`。这是预算管理工具（AWS Budgets、CloudHealth）的标准方法，且易于实现和理解。
 
-### D6: Per-platform built-in message templates
+### D6: 每个平台的内置消息模板
 
-Each IM channel type (Feishu, WeCom, DingTalk, Slack) has a built-in message template that formats alert events into the platform's native message format, rather than requiring users to craft raw webhook payloads.
+每种 IM 通道类型（飞书、企业微信、钉钉、Slack）都有内置的消息模板，将告警事件格式化为平台的原生消息格式，而不是要求用户制作原始 webhook 负载。
 
-**Alternatives considered:**
-- **Generic JSON only**: User configures a Jinja2 template or raw payload. Maximum flexibility but terrible UX — every user reinvents the same Feishu card JSON. Not viable for an enterprise product.
-- **Single unified template**: One message format sent to all channels. Loses platform-specific features (Feishu interactive cards, Slack Block Kit buttons for ACK).
+**考虑的替代方案：**
+- **仅通用 JSON**：用户配置 Jinja2 模板或原始负载。最大灵活性但用户体验极差——每个用户重新发明相同的飞书卡片 JSON。对于企业产品不可行。
+- **单一统一模板**：一种消息格式发送到所有通道。失去平台特定功能（飞书交互式卡片、Slack Block Kit ACK 按钮）。
 
-**Rationale:** Each Chinese IM platform has a distinct payload format (Feishu uses `card` JSON with interactive elements; WeCom uses `markdown` with limited formatting; DingTalk uses `markdown` with at-sign mentions; Slack uses `blocks` array with Block Kit). Pre-built templates mean users just paste a webhook URL and get a properly formatted alert with action buttons. The templates are defined as Python functions that take an `AlertEventModel` and return the platform-specific JSON payload.
+**理由：** 每个中国 IM 平台都有不同的负载格式（飞书使用带交互元素的 `card` JSON；企业微信使用格式有限的 `markdown`；钉钉使用带 @ 提醒的 `markdown`；Slack 使用带有 Block Kit 的 `blocks` 数组）。预构建模板意味着用户只需粘贴 webhook URL 即可获得带操作按钮的格式正确的告警。模板被定义为 Python 函数，接受 `AlertEventModel` 并返回平台特定的 JSON 负载。
 
-### D7: Escalation policies as reusable entities
+### D7: 升级策略作为可重用实体
 
-`EscalationPolicyModel` is a separate table that rules reference via `escalation_policy_id`, rather than embedding escalation steps directly in `AlertRuleModel`.
+`EscalationPolicyModel` 是一个单独的表，规则通过 `escalation_policy_id` 引用它，而不是将升级步骤直接嵌入 `AlertRuleModel`。
 
-**Alternatives considered:**
-- **Embed in rule**: Simpler schema (one fewer table), but escalation logic is typically shared across many rules. A production deployment might have 50 rules but only 2-3 escalation policies (e.g., "standard" and "critical-only"). Duplicating steps across 50 rules is error-prone.
-- **Global config**: A single YAML/config-based escalation policy. Not multi-tenant friendly — different workspaces may have different on-call rotations.
+**考虑的替代方案：**
+- **嵌入规则中**：更简单的模式（少一个表），但升级逻辑通常在多个规则之间共享。一个生产部署可能有 50 条规则但只有 2-3 个升级策略（例如"标准"和"仅严重"）。在 50 条规则中重复步骤容易出错。
+- **全局配置**：单个基于 YAML/配置的升级策略。不适用于多租户——不同的工作空间可能有不同的值班轮换。
 
-**Rationale:** Escalation policies are inherently reusable ( PagerDuty, Opsgenie all model them as first-class entities). A default policy is seeded via migration (step 0: webhook + WebSocket, step 1 after 15min: email, repeat every 60min). Users can create custom policies per workspace.
+**理由：** 升级策略本质上是可重用的（PagerDuty、Opsgenie 都将它们作为一等实体建模）。通过迁移创建默认策略（步骤 0：webhook + WebSocket，15 分钟后步骤 1：邮件，每 60 分钟重复）。用户可以为每个工作空间创建自定义策略。
 
-### D8: Silence windows as time-bounded matchers
+### D8: 静默窗口作为时间绑定的匹配器
 
-`AlertSilenceModel` suppresses notifications for matched rules during a `[start_at, end_at]` window, with matchers on `rule_ids` and/or `severity`.
+`AlertSilenceModel` 在 `[start_at, end_at]` 窗口内抑制匹配规则的通知，匹配器基于 `rule_ids` 和/或 `severity`。
 
-**Alternatives considered:**
-- **Disable rule**: Temporarily setting `rule.enabled = false` loses the evaluation history and doesn't auto-resume. Also requires manual re-enablement.
-- **Per-channel mute**: Mute at the notification channel level. Too coarse — a channel might serve multiple rules where only some should be silenced.
+**考虑的替代方案：**
+- **禁用规则**：临时设置 `rule.enabled = false` 会丢失评估历史且不会自动恢复。还需要手动重新启用。
+- **按通道静音**：在通知通道级别静音。过于粗糙——一个通道可能服务多个规则，其中只有一些应该被静音。
 
-**Rationale:** This matches Grafana Alertmanager's silencing model. Silence windows are first-class entities with audit trail (who silenced, why, when). The evaluator checks active silences before dispatching notifications. Silences auto-expire at `end_at`, so maintenance windows are hands-off.
+**理由：** 这与 Grafana Alertmanager 的静默模型匹配。静默窗口是具有审计跟踪（谁静默的、为什么、何时）的一等实体。评估器在发送通知前检查活跃静默。静默在 `end_at` 自动过期，因此维护窗口无需手动操作。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Evaluation latency]** 60-second polling means alerts fire up to 60 seconds after a threshold breach. → Acceptable for v1. Streaming evaluation (webhook on trace completion) can be added later for sub-minute alerts. The `for` duration already adds minutes of delay, so the poll interval is not the bottleneck.
+- **[评估延迟]** 60 秒轮询意味着告警在阈值突破后最多延迟 60 秒触发。→ v1 可接受。流式评估（在追踪完成时的 webhook）以后可以添加用于次分钟级告警。`for` 持续时间已经增加了数分钟的延迟，因此轮询间隔不是瓶颈。
 
-- **[Database load]** Each evaluation cycle queries TraceModel for every enabled rule. With many rules and large trace volumes, this could be expensive. → Mitigation: (1) rules are window-bounded (5-30 min), so queries hit recent data with time indexes; (2) SignalProvider implementations use `COUNT`/`SUM` aggregations, not row-level scans; (3) a max rule count guard can be added if needed.
+- **[数据库负载]** 每个评估周期为每条启用的规则查询 TraceModel。如果规则多且追踪量大，这可能很昂贵。→ 缓解：(1) 规则是窗口绑定的（5-30 分钟），所以查询命中具有时间索引的近期数据；(2) SignalProvider 实现使用 `COUNT`/`SUM` 聚合，不是行级扫描；(3) 如果需要可以添加最大规则数守卫。
 
-- **[Single evaluator node]** Advisory lock means only one node evaluates. If that node is down, alerts are missed. → Mitigation: the lock auto-releases on connection close (session-level lock), so a healthy node picks up within one evaluation cycle. For HA, a future enhancement can use a leader-election mechanism.
+- **[单评估器节点]** 建议锁意味着只有一个节点评估。如果该节点宕机，告警将被错过。→ 缓解：锁在连接关闭时自动释放（会话级锁），因此健康的节点在一个评估周期内接管。对于 HA，未来的增强可以使用领导者选举机制。
 
-- **[TTFT accuracy]** TTFT is measured in LLMWorker by timestamping the first chunk arrival. If the LLM provider buffers differently, TTFT may not reflect true first-token time. → Mitigation: document the measurement semantics clearly. The metric is still useful for relative comparison (before/after optimization).
+- **[TTFT 准确性]** TTFT 在 LLMWorker 中通过为第一个数据块到达打时间戳来测量。如果 LLM 提供者缓冲方式不同，TTFT 可能不反映真实的首 token 时间。→ 缓解：清晰地记录测量语义。该指标对于相对比较（优化前后）仍然有用。
 
-- **[Email dependency]** Adding `aiosmtplib` introduces an optional dependency. → Mitigation: place in `[observability]` group. Email channel gracefully degrades if SMTP is not configured (logs a warning, other channels still fire).
+- **[邮件依赖]** 添加 `aiosmtplib` 引入了可选依赖。→ 缓解：放在 `[observability]` 组中。如果未配置 SMTP，邮件通道优雅降级（记录警告，其他通道仍然触发）。
 
-- **[Webhook delivery reliability]** HTTP POST to external webhooks can fail (timeout, 5xx). → Mitigation: 3 retries with exponential backoff. Failed deliveries are logged but do not block the evaluation cycle. A future enhancement can add a dead-letter table.
+- **[Webhook 交付可靠性]** 对外部 webhook 的 HTTP POST 可能失败（超时、5xx）。→ 缓解：3 次重试带指数退避。失败的交付被记录但不阻塞评估周期。未来的增强可以添加死信表。

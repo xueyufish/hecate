@@ -1,106 +1,92 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: SandboxConfig supports volume mounts
+### 需求：SandboxConfig 支持卷挂载
 
-The `SandboxConfig` dataclass SHALL include a `volumes` field of type `dict[str, str]` where keys are host paths or Docker volume names and values are container mount paths. The field SHALL default to an empty dict, preserving backward compatibility.
+`SandboxConfig` 数据类应包含一个 `volumes` 字段，类型为 `dict[str, str]`，其中键是主机路径或 Docker 卷名，值是容器挂载路径。该字段应默认为空字典，保持向后兼容。
 
-#### Scenario: SandboxConfig with no volumes
+#### 场景：不带卷的 SandboxConfig
+- **当** 构造 `SandboxConfig()` 而未指定 `volumes` 时
+- **则** `volumes` 应为空字典 `{}`
+- **且** 沙箱容器应不带 `--volume` 参数创建
 
-- **WHEN** `SandboxConfig()` is constructed without specifying `volumes`
-- **THEN** `volumes` SHALL be an empty dict `{}`
-- **AND** the sandbox container SHALL be created with no `--volume` arguments
+#### 场景：带环境卷的 SandboxConfig
+- **当** 构造 `SandboxConfig(volumes={"agent-abc123": "/mnt/env"})` 时
+- **则** `volumes` 应包含 `{"agent-abc123": "/mnt/env"}`
+- **且** 沙箱容器应使用 `--volume agent-abc123:/mnt/env` 创建
 
-#### Scenario: SandboxConfig with environment volume
+### 需求：SandboxExecutor 在配置时挂载卷
 
-- **WHEN** `SandboxConfig(volumes={"agent-abc123": "/mnt/env"})` is constructed
-- **THEN** `volumes` SHALL contain `{"agent-abc123": "/mnt/env"}`
-- **AND** the sandbox container SHALL be created with `--volume agent-abc123:/mnt/env`
+`SandboxExecutor._create_container()` 应为 `SandboxConfig.volumes` 中的每个条目追加 `--volume {host}:{container}` 参数到 `docker run` 命令。
 
-### Requirement: SandboxExecutor mounts volumes when configured
+#### 场景：单个卷挂载
+- **当** `SandboxConfig(volumes={"/workspace/agent-1": "/mnt/env"})` 传递给 `SandboxExecutor`
+- **且** 调用 `execute("run_code", {"code": "print('hi')"})`
+- **则** `docker run` 命令应包含 `--volume /workspace/agent-1:/mnt/env`
+- **且** 容器应在 `/mnt/env` 下可以访问 Agent 的文件
 
-`SandboxExecutor._create_container()` SHALL append `--volume {host}:{container}` arguments to the `docker run` command for each entry in `SandboxConfig.volumes`.
+#### 场景：多个卷挂载
+- **当** 传递 `SandboxConfig(volumes={"/data": "/mnt/data", "/config": "/mnt/config"})` 时
+- **则** `docker run` 命令应包含 `--volume /data:/mnt/data` 和 `--volume /config:/mnt/config`
 
-#### Scenario: Single volume mount
+#### 场景：空 volume 不产生挂载参数
+- **当** 传递 `SandboxConfig(volumes={})` 时
+- **则** `docker run` 命令不应包含任何 `--volume` 参数
 
-- **WHEN** `SandboxConfig(volumes={"/workspace/agent-1": "/mnt/env"})` is passed to `SandboxExecutor`
-- **AND** `execute("run_code", {"code": "print('hi')"})` is called
-- **THEN** the `docker run` command SHALL include `--volume /workspace/agent-1:/mnt/env`
-- **AND** the container SHALL have access to the agent's files at `/mnt/env`
+### 需求：环境桥接从 AgentEnvironment 解析卷挂载
 
-#### Scenario: Multiple volume mounts
+一个 `resolve_environment_volumes()` 函数应接受一个 `AgentEnvironment`（或 None）并返回 `dict[str, str]` 映射用于 SandboxConfig 卷。该函数应不同地处理 DockerEnvironment 和 LocalEnvironment。
 
-- **WHEN** `SandboxConfig(volumes={"/data": "/mnt/data", "/config": "/mnt/config"})` is passed
-- **THEN** the `docker run` command SHALL include both `--volume /data:/mnt/data` and `--volume /config:/mnt/config`
+#### 场景：DockerEnvironment 解析为命名卷
+- **当** 使用 `DockerEnvironment(agent_id="agent-abc")` 调用 `resolve_environment_volumes()` 时
+- **则** 返回值应为 `{"agent-abc": "/mnt/env"}`
+- **且** 键应为环境容器使用的 Docker 卷名
 
-#### Scenario: Empty volumes produces no mount args
+#### 场景：LocalEnvironment 解析为主机 bind mount
+- **当** 使用 `LocalEnvironment(root="/workspace/agent-1")` 调用 `resolve_environment_volumes()` 时
+- **则** 返回值应为 `{"/workspace/agent-1": "/mnt/env"}`
+- **且** 键应为绝对主机路径
 
-- **WHEN** `SandboxConfig(volumes={})` is passed
-- **THEN** the `docker run` command SHALL NOT contain any `--volume` arguments
+#### 场景：无环境返回空映射
+- **当** 调用 `resolve_environment_volumes(None)` 时
+- **则** 返回值应为 `{}`
 
-### Requirement: Environment bridge resolves volume mounts from AgentEnvironment
+### 需求：沙箱挂载模式可配置
 
-A `resolve_environment_volumes()` function SHALL accept an `AgentEnvironment` (or None) and return a `dict[str, str]` mapping for SandboxConfig volumes. The function SHALL handle DockerEnvironment and LocalEnvironment differently.
+`SANDBOX_MOUNT_MODE` 配置设置应控制 Docker 挂载权限后缀。有效值为 `"rw"`（读写，默认）和 `"ro"`（只读）。
 
-#### Scenario: DockerEnvironment resolves to named volume
+#### 场景：默认挂载模式为 rw
+- **当** 未设置 `SANDBOX_MOUNT_MODE` 时
+- **则** 卷挂载应包含 `:rw` 后缀（例如 `--volume agent-x:/mnt/env:rw`）
 
-- **WHEN** `resolve_environment_volumes()` is called with a `DockerEnvironment(agent_id="agent-abc")`
-- **THEN** the return value SHALL be `{"agent-abc": "/mnt/env"}`
-- **AND` the key SHALL be the Docker volume name used by the environment container
+#### 场景：挂载模式 ro
+- **当** 设置 `SANDBOX_MOUNT_MODE=ro` 时
+- **则** 卷挂载应包含 `:ro` 后缀（例如 `--volume agent-x:/mnt/env:ro`）
 
-#### Scenario: LocalEnvironment resolves to host bind mount
+### 需求：SandboxPool 传播卷配置
 
-- **WHEN** `resolve_environment_volumes()` is called with a `LocalEnvironment(root="/workspace/agent-1")`
-- **THEN** the return value SHALL be `{"/workspace/agent-1": "/mnt/env"}`
-- **AND` the key SHALL be the absolute host path
+`SandboxPool` 应在通过池创建新容器时传播执行器的 `SandboxConfig.volumes`。
 
-#### Scenario: No environment returns empty mapping
+#### 场景：池使用执行器配置的卷
+- **当** 构造 `SandboxPool(executor=SandboxExecutor(config=SandboxConfig(volumes={"/data": "/mnt/env"})))` 时
+- **且** 池创建新容器
+- **则** 容器应在 `/mnt/env` 下挂载 `/data`
 
-- **WHEN** `resolve_environment_volumes(None)` is called
-- **THEN** the return value SHALL be `{}`
+### 需求：BuiltinTools 将环境挂载传递给 SandboxExecutor
 
-### Requirement: Sandbox mount mode is configurable
+`BuiltinTools._execute_code()` 应在 AgentEnvironment 可用时解析 Agent 的环境卷挂载并将其传递给 SandboxExecutor。
 
-A `SANDBOX_MOUNT_MODE` config setting SHALL control the Docker mount permission suffix. Valid values are `"rw"` (read-write, default) and `"ro"` (read-only).
+#### 场景：execute_code 时环境可用
+- **当** 调用 `_execute_code()` 且 `AgentEnvironment` 可用时
+- **则** 应调用 `resolve_environment_volumes(env)` 获取卷挂载
+- **且** 将 `SandboxConfig(volumes=volume_mounts)` 传递给 SandboxExecutor
+- **且** 沙箱容器应在 `/mnt/env` 下挂载环境
 
-#### Scenario: Default mount mode is rw
+#### 场景：execute_code 时无环境
+- **当** 调用 `_execute_code()` 且没有 `AgentEnvironment` 可用时
+- **则** 应将 `SandboxConfig(volumes={})` 传递给 SandboxExecutor
+- **且** 沙箱容器应没有卷挂载（向后兼容）
 
-- **WHEN** `SANDBOX_MOUNT_MODE` is not set
-- **THEN** volume mounts SHALL include the `:rw` suffix (e.g., `--volume agent-x:/mnt/env:rw`)
-
-#### Scenario: Mount mode ro
-
-- **WHEN** `SANDBOX_MOUNT_MODE=ro` is set
-- **THEN** volume mounts SHALL include the `:ro` suffix (e.g., `--volume agent-x:/mnt/env:ro`)
-
-### Requirement: SandboxPool propagates volume config
-
-`SandboxPool` SHALL propagate the executor's `SandboxConfig.volumes` when creating new containers via the pool.
-
-#### Scenario: Pool uses executor config volumes
-
-- **WHEN** `SandboxPool(executor=SandboxExecutor(config=SandboxConfig(volumes={"/data": "/mnt/env"})))` is constructed
-- **AND` the pool creates a new container
-- **THEN** the container SHALL have `/data` mounted at `/mnt/env`
-
-### Requirement: BuiltinTools passes environment mount to SandboxExecutor
-
-`BuiltinTools._execute_code()` SHALL resolve the agent's environment volume mounts and pass them to SandboxExecutor when an AgentEnvironment is available.
-
-#### Scenario: execute_code with environment available
-
-- **WHEN** `_execute_code()` is called and an `AgentEnvironment` is available
-- **THEN** it SHALL call `resolve_environment_volumes(env)` to get volume mounts
-- **AND` pass `SandboxConfig(volumes=volume_mounts)` to SandboxExecutor
-- **AND` the sandbox container SHALL have the environment mounted at `/mnt/env`
-
-#### Scenario: execute_code without environment
-
-- **WHEN** `_execute_code()` is called and no `AgentEnvironment` is available
-- **THEN` it SHALL pass `SandboxConfig(volumes={})` to SandboxExecutor
-- **AND` the sandbox container SHALL have no volume mounts (backward compatible)
-
-#### Scenario: Agent reads sandbox output via environment
-
-- **WHEN** sandbox writes `output.txt` to `/mnt/env/files/output.txt`
-- **AND` the sandbox container finishes
-- **THEN` the agent SHALL be able to read the file via `read_file("files/output.txt")` on its environment
+#### 场景：Agent 通过环境读取沙箱输出
+- **当** 沙箱将 `output.txt` 写入 `/mnt/env/files/output.txt`
+- **且** 沙箱容器完成时
+- **则** Agent 应能够通过其环境上的 `read_file("files/output.txt")` 读取该文件
