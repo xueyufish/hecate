@@ -1,23 +1,23 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Validate tool output against schema
-The system SHALL validate tool execution results against a JSON Schema.
+### 需求：根据 Schema 校验工具输出
+系统须根据 JSON Schema 校验工具执行结果。
 
-#### Scenario: Valid output
-- **WHEN** a tool returns output matching its schema
-- **THEN** the system accepts the result
+#### 场景：有效输出
+- **当** 工具返回匹配其 schema 的输出
+- **则** 系统接受结果
 
-#### Scenario: Invalid output
-- **WHEN** a tool returns output not matching its schema
-- **THEN** the system logs the validation error and returns error result
+#### 场景：无效输出
+- **当** 工具返回不匹配其 schema 的输出
+- **则** 系统记录校验错误并返回错误结果
 
-### Requirement: Custom validation rules
-The system SHALL support custom validation rules beyond JSON Schema.
+### 需求：自定义校验规则
+系统须支持超越 JSON Schema 的自定义校验规则。
 
-#### Scenario: Custom rule passes
-- **WHEN** a custom validation rule is defined and the output passes
-- **THEN** the system accepts the result
+#### 场景：自定义规则通过
+- **当** 定义了自定义校验规则且输出通过
+- **则** 系统接受结果
 
-#### Scenario: Custom rule fails
-- **WHEN** a custom validation rule is defined and the output fails
-- **THEN** the system returns error with rule details
+#### 场景：自定义规则失败
+- **当** 定义了自定义校验规则且输出未通过
+- **则** 系统返回包含规则详情的错误

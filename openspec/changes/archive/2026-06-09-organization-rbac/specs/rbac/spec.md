@@ -1,83 +1,83 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Workspace membership model
-The system SHALL maintain a `WorkspaceMemberModel` linking users to workspaces with a role. Each user-workspace pair SHALL be unique. The role SHALL be one of: `admin`, `editor`, `viewer`.
+### 需求：工作区成员模型
+系统应维护一个 `WorkspaceMemberModel`，将用户链接到工作区并赋予角色。每个用户-工作区对应是唯一的。角色应为以下之一：`admin`、`editor`、`viewer`。
 
-#### Scenario: User added to workspace
-- **WHEN** a workspace admin sends POST `/api/orgs/{org_id}/workspaces/{ws_id}/members` with `{user_id: "...", role: "editor"}`
-- **THEN** the system creates a WorkspaceMemberModel entry and returns `201`
+#### 场景：用户被添加到工作区
+- **当** 工作区管理员发送 POST `/api/orgs/{org_id}/workspaces/{ws_id}/members`，包含 `{user_id: "...", role: "editor"}`
+- **则** 系统创建 WorkspaceMemberModel 条目并返回 `201`
 
-#### Scenario: Duplicate membership rejected
-- **WHEN** a workspace admin tries to add a user who is already a member of the workspace
-- **THEN** the system returns `409 Conflict`
+#### 场景：重复成员被拒绝
+- **当** 工作区管理员尝试添加已是工作区成员的用户
+- **则** 系统返回 `409 Conflict`
 
-#### Scenario: Remove member from workspace
-- **WHEN** a workspace admin sends DELETE `/api/orgs/{org_id}/workspaces/{ws_id}/members/{user_id}`
-- **THEN** the system removes the membership entry and returns `204`
+#### 场景：从工作区移除成员
+- **当** 工作区管理员发送 DELETE `/api/orgs/{org_id}/workspaces/{ws_id}/members/{user_id}`
+- **则** 系统移除成员条目并返回 `204`
 
-### Requirement: Role-based permission enforcement
-The system SHALL enforce workspace-level permissions based on the user's role. Permission checks SHALL be implemented as FastAPI dependency functions that can be applied to any endpoint.
+### 需求：基于角色的权限强制
+系统应根据用户角色强制实施工作区级权限。权限检查应作为 FastAPI 依赖函数实现，可应用于任何端点。
 
-#### Scenario: Admin manages workspace settings
-- **WHEN** a user with `admin` role sends PATCH `/api/orgs/{org_id}/workspaces/{ws_id}` with settings update
-- **THEN** the system applies the update and returns `200`
+#### 场景：管理员管理工作区设置
+- **当** 具有 `admin` 角色的用户发送 PATCH `/api/orgs/{org_id}/workspaces/{ws_id}` 进行设置更新
+- **则** 系统应用更新并返回 `200`
 
-#### Scenario: Editor cannot manage members
-- **WHEN** a user with `editor` role sends POST `/api/orgs/{org_id}/workspaces/{ws_id}/members`
-- **THEN** the system returns `403 Forbidden`
+#### 场景：编辑器不能管理成员
+- **当** 具有 `editor` 角色的用户发送 POST `/api/orgs/{org_id}/workspaces/{ws_id}/members`
+- **则** 系统返回 `403 Forbidden`
 
-#### Scenario: Viewer cannot create resources
-- **WHEN** a user with `viewer` role sends POST `/api/agents` with a new agent definition
-- **THEN** the system returns `403 Forbidden`
+#### 场景：查看者不能创建资源
+- **当** 具有 `viewer` 角色的用户发送 POST `/api/agents` 定义新代理
+- **则** 系统返回 `403 Forbidden`
 
-#### Scenario: Viewer can read resources
-- **WHEN** a user with `viewer` role sends GET `/api/agents`
-- **THEN** the system returns the list of agents in the authenticated workspace
+#### 场景：查看者可以读取资源
+- **当** 具有 `viewer` 角色的用户发送 GET `/api/agents`
+- **则** 系统返回认证工作区中的代理列表
 
-#### Scenario: Editor can create and edit resources
-- **WHEN** a user with `editor` role sends POST `/api/agents` or PATCH `/api/agents/{id}`
-- **THEN** the system creates or updates the agent in the authenticated workspace
+#### 场景：编辑器可以创建和编辑资源
+- **当** 具有 `editor` 角色的用户发送 POST `/api/agents` 或 PATCH `/api/agents/{id}`
+- **则** 系统在认证工作区中创建或更新代理
 
-### Requirement: Permission dependency functions
-The system SHALL provide the following FastAPI dependency functions for use in API endpoints: `require_workspace_admin()`, `require_workspace_editor()`, `require_workspace_viewer()`. These dependencies SHALL resolve the authenticated user's role in the current workspace and raise `403 Forbidden` if the role is insufficient.
+### 需求：权限依赖函数
+系统应提供以下 FastAPI 依赖函数，用于 API 端点：`require_workspace_admin()`、`require_workspace_editor()`、`require_workspace_viewer()`。这些依赖应解析认证用户在当前工作区中的角色，并在角色不足时抛出 `403 Forbidden`。
 
-#### Scenario: require_workspace_admin dependency
-- **WHEN** an endpoint uses `Depends(require_workspace_admin)` and the authenticated user has `viewer` role
-- **THEN** the dependency raises `403 Forbidden` before the endpoint logic executes
+#### 场景：require_workspace_admin 依赖
+- **当** 端点使用 `Depends(require_workspace_admin)` 且认证用户具有 `viewer` 角色
+- **则** 依赖在端点逻辑执行前抛出 `403 Forbidden`
 
-#### Scenario: require_workspace_editor dependency allows admin
-- **WHEN** an endpoint uses `Depends(require_workspace_editor)` and the authenticated user has `admin` role
-- **THEN** the dependency passes — admin implicitly satisfies editor-level requirements
+#### 场景：require_workspace_editor 依赖允许 admin
+- **当** 端点使用 `Depends(require_workspace_editor)` 且认证用户具有 `admin` 角色
+- **则** 依赖通过——admin 隐式满足 editor 级别要求
 
-#### Scenario: require_workspace_viewer dependency allows all roles
-- **WHEN** an endpoint uses `Depends(require_workspace_viewer)` and the authenticated user has any role (admin/editor/viewer)
-- **THEN** the dependency passes
+#### 场景：require_workspace_viewer 依赖允许所有角色
+- **当** 端点使用 `Depends(require_workspace_viewer)` 且认证用户具有任意角色（admin/editor/viewer）
+- **则** 依赖通过
 
-### Requirement: Role assignment and modification
-A workspace admin SHALL be able to change the role of existing members. The admin role cannot be removed from the last admin in a workspace — there must always be at least one admin.
+### 需求：角色分配与修改
+工作区管理员应能更改现有成员的角色。不能从工作区中移除最后一个管理员的 admin 角色——必须始终至少有一个管理员。
 
-#### Scenario: Change member role
-- **WHEN** a workspace admin sends PATCH `/api/orgs/{org_id}/workspaces/{ws_id}/members/{user_id}` with `{role: "viewer"}`
-- **THEN** the system updates the member's role from editor to viewer
+#### 场景：更改成员角色
+- **当** 工作区管理员发送 PATCH `/api/orgs/{org_id}/workspaces/{ws_id}/members/{user_id}`，包含 `{role: "viewer"}`
+- **则** 系统将成员角色从 editor 更新为 viewer
 
-#### Scenario: Cannot remove last admin
-- **WHEN** a workspace admin attempts to change their own role to `editor` and they are the only admin in the workspace
-- **THEN** the system returns `409 Conflict` with message "Workspace must have at least one admin"
+#### 场景：不能移除最后一个管理员
+- **当** 工作区管理员尝试将自己的角色更改为 `editor`，且其是工作区中唯一的管理员
+- **则** 系统返回 `409 Conflict`，提示"工作区必须至少有一个管理员"
 
-### Requirement: Workspace creator is admin
-When a workspace is created, the creator SHALL automatically be added as a workspace member with `admin` role. This membership is mandatory and cannot be removed while the workspace exists.
+### 需求：工作区创建者是管理员
+创建工作区时，创建者应自动被添加为具有 `admin` 角色的工作区成员。此成员资格是强制性的，在工作区存在期间不能移除。
 
-#### Scenario: Creator gets admin role
-- **WHEN** an org owner creates a new workspace
-- **THEN** the system creates a WorkspaceMemberModel entry for the creator with `role: "admin"`
+#### 场景：创建者获得管理员角色
+- **当** 组织所有者创建新工作区
+- **则** 系统为创建者创建 WorkspaceMemberModel 条目，`role: "admin"`
 
-### Requirement: System-scope API key bypasses workspace RBAC
-A system-scope API key SHALL bypass workspace-level RBAC checks. It can access any resource in any workspace without membership requirements.
+### 需求：系统级 API 密钥绕过工作区 RBAC
+系统级 API 密钥应绕过工作区级 RBAC 检查。无需成员资格即可访问任意工作区中的任意资源。
 
-#### Scenario: System key accesses any workspace
-- **WHEN** a request authenticates with a system-scope API key
-- **THEN** RBAC dependencies pass regardless of workspace membership or role
+#### 场景：系统密钥访问任意工作区
+- **当** 请求使用系统级 API 密钥进行认证
+- **则** RBAC 依赖通过，无论工作区成员资格或角色如何
 
-#### Scenario: Workspace key respects RBAC
-- **WHEN** a request authenticates with a workspace-scope API key
-- **THEN** the key is treated as having `admin` role within its bound workspace, and `403 Forbidden` for any other workspace
+#### 场景：工作区密钥遵循 RBAC
+- **当** 请求使用工作区级 API 密钥进行认证
+- **则** 该密钥在其绑定的工作区内被视为具有 `admin` 角色，对于其他任何工作区返回 `403 Forbidden`

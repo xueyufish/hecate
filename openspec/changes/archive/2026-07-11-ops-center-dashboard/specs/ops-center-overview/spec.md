@@ -1,100 +1,100 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Unified overview aggregation endpoint
-The system SHALL expose `GET /api/ops-center/overview` that aggregates metrics from all three Ops Center subsystems (Agent Health, Tool Analytics, Conversation Analytics) into a single response. The endpoint SHALL call the three existing services in parallel via `asyncio.gather(return_exceptions=True)`. Supports `start_date` and `end_date` query parameters.
+### Requirement: Unified overview aggregation endpoint — 需求：统一概览聚合端点
+系统应暴露 `GET /api/ops-center/overview`，聚合来自所有三个 Ops Center 子系统（Agent Health、Tool Analytics、Conversation Analytics）的指标为单个响应。端点应通过 `asyncio.gather(return_exceptions=True)` 并行调用三个现有服务。支持 `start_date` 和 `end_date` 查询参数。
 
-#### Scenario: All three sources available
-- **WHEN** a client requests `GET /api/ops-center/overview?start_date=...&end_date=...`
-- **THEN** the system returns `{agent_health: {...}, tool_analytics: {...}, conversation_analytics: {...}, errors: []}` with data from all three subsystems
+#### Scenario: All three sources available — 场景：所有三个源都可用
+- **WHEN** 客户端请求 `GET /api/ops-center/overview?start_date=...&end_date=...`
+- **THEN** 系统返回 `{agent_health: {...}, tool_analytics: {...}, conversation_analytics: {...}, errors: []}`，包含所有三个子系统的数据
 
-#### Scenario: One source fails
-- **WHEN** the ToolAnalyticsService raises an exception during aggregation
-- **THEN** the system returns `{agent_health: {...}, tool_analytics: null, conversation_analytics: {...}, errors: ["tool_analytics: <error message>"]}` with HTTP 200 (not 500)
+#### Scenario: One source fails — 场景：一个源失败
+- **WHEN** ToolAnalyticsService 在聚合期间抛出异常
+- **THEN** 系统返回 `{agent_health: {...}, tool_analytics: null, conversation_analytics: {...}, errors: ["tool_analytics: <error message>"]}`，HTTP 200（不是 500）
 
-#### Scenario: All sources fail
-- **WHEN** all three services raise exceptions
-- **THEN** the system returns `{agent_health: null, tool_analytics: null, conversation_analytics: null, errors: [...]}` with HTTP 200
+#### Scenario: All sources fail — 场景：所有源失败
+- **WHEN** 所有三个服务抛出异常
+- **THEN** 系统返回 `{agent_health: null, tool_analytics: null, conversation_analytics: null, errors: [...]}`，HTTP 200
 
-### Requirement: Agent Health summary card
-The overview SHALL include an agent health summary with: total agents, healthy count, warning count, critical count, fleet error rate, and fleet P95 latency. This data comes from `AgentHealthService.get_fleet_overview()`.
+### Requirement: Agent Health summary card — 需求：Agent 健康摘要卡片
+概览应包括 agent 健康摘要：总 agent 数、healthy 计数、warning 计数、critical 计数、集群错误率和集群 P95 延迟。此数据来自 `AgentHealthService.get_fleet_overview()`。
 
-#### Scenario: Agent health summary displayed
-- **WHEN** the overview endpoint returns agent_health data
-- **THEN** the frontend displays a card showing total agents, health distribution (healthy/warning/critical counts with color-coded badges), fleet error rate, and fleet P95 latency
+#### Scenario: Agent health summary displayed — 场景：显示 Agent 健康摘要
+- **WHEN** 概览端点返回 agent_health 数据
+- **THEN** 前端显示卡片，展示总 agent 数、健康分布（healthy/warning/critical 计数及颜色编码徽章）、集群错误率和集群 P95 延迟
 
-#### Scenario: Agent health data unavailable
-- **WHEN** agent_health is null in the overview response
-- **THEN** the frontend displays "Agent health data unavailable" with a retry indicator
+#### Scenario: Agent health data unavailable — 场景：Agent 健康数据不可用
+- **WHEN** 概览响应中 agent_health 为 null
+- **THEN** 前端显示 "Agent health data unavailable" 及重试指示器
 
-### Requirement: Tool Analytics summary card
-The overview SHALL include a tool analytics summary with: total executions, success rate, P95 latency, error count, and unique tools. This data comes from `ToolAnalyticsService.get_overview()`.
+### Requirement: Tool Analytics summary card — 需求：工具分析摘要卡片
+概览应包括工具分析摘要：总执行次数、成功率、P95 延迟、错误计数和唯一工具数。此数据来自 `ToolAnalyticsService.get_overview()`。
 
-#### Scenario: Tool analytics summary displayed
-- **WHEN** the overview endpoint returns tool_analytics data
-- **THEN** the frontend displays a card showing total executions, success rate percentage, P95 latency, and error count
+#### Scenario: Tool analytics summary displayed — 场景：显示工具分析摘要
+- **WHEN** 概览端点返回 tool_analytics 数据
+- **THEN** 前端显示卡片，展示总执行次数、成功率百分比、P95 延迟和错误计数
 
-#### Scenario: Tool analytics data unavailable
-- **WHEN** tool_analytics is null in the overview response
-- **THEN** the frontend displays "Tool analytics data unavailable" with a retry indicator
+#### Scenario: Tool analytics data unavailable — 场景：工具分析数据不可用
+- **WHEN** 概览响应中 tool_analytics 为 null
+- **THEN** 前端显示 "Tool analytics data unavailable" 及重试指示器
 
-### Requirement: Conversation Quality summary card
-The overview SHALL include a conversation quality summary with: total conversations, scored conversations, average quality score, and feedback ratio (positive / total). This data comes from `ConversationAnalyticsService.get_overview()`.
+### Requirement: Conversation Quality summary card — 需求：对话质量摘要卡片
+概览应包括对话质量摘要：总会话数、已评分会话数、平均质量评分和反馈比率（positive / total）。此数据来自 `ConversationAnalyticsService.get_overview()`。
 
-#### Scenario: Conversation quality summary displayed
-- **WHEN** the overview endpoint returns conversation_analytics data
-- **THEN** the frontend displays a card showing total conversations, scored conversations, average quality score, and feedback ratio percentage
+#### Scenario: Conversation quality summary displayed — 场景：显示对话质量摘要
+- **WHEN** 概览端点返回 conversation_analytics 数据
+- **THEN** 前端显示卡片，展示总会话数、已评分会话数、平均质量评分和反馈比率百分比
 
-#### Scenario: Conversation data unavailable
-- **WHEN** conversation_analytics is null in the overview response
-- **THEN** the frontend displays "Conversation data unavailable" with a retry indicator
+#### Scenario: Conversation data unavailable — 场景：对话数据不可用
+- **WHEN** 概览响应中 conversation_analytics 为 null
+- **THEN** 前端显示 "Conversation data unavailable" 及重试指示器
 
-### Requirement: Recent Activity Feed
-The overview SHALL include a Recent Activity Feed that surfaces notable events across all three subsystems: critical/warning agents, recent tool errors, and low-quality conversations. The feed SHALL be time-sorted (most recent first) with a maximum of 20 items. Each item SHALL have: timestamp, source (agent_health/tool_analytics/conversation_analytics), severity (critical/warning/info), title, and a link to the relevant sub-dashboard.
+### Requirement: Recent Activity Feed — 需求：最近活动源
+概览应包括一个最近活动源，展示跨所有三个子系统的值得关注的事件：critical/warning agent、最近的工具错误和低质量对话。该源应按时间排序（最新的在前），最多 20 个项目。每个项目应有：时间戳、源（agent_health/tool_analytics/conversation_analytics）、严重性（critical/warning/info）、标题和指向相关子仪表板的链接。
 
-#### Scenario: Activity feed with mixed events
-- **WHEN** the overview page loads
-- **THEN** the feed displays recent events sorted by timestamp: critical agents, tool error spikes, low-quality conversations — each with a severity badge and link to detail
+#### Scenario: Activity feed with mixed events — 场景：混合事件的活动源
+- **WHEN** 概览页面加载
+- **THEN** 源显示按时间戳排序的最近事件：关键 agent、工具错误峰值、低质量对话 — 每个都有严重性徽章和详细链接
 
-#### Scenario: No recent anomalies
-- **WHEN** all subsystems are healthy (no critical agents, no tool errors, no low-quality conversations)
-- **THEN** the feed displays "All systems operational" message
+#### Scenario: No recent anomalies — 场景：无最近异常
+- **WHEN** 所有子系统都健康（无关键 agent、无工具错误、无低质量对话）
+- **THEN** 源显示 "All systems operational" 消息
 
-#### Scenario: Activity feed limited to 20 items
-- **WHEN** more than 20 notable events exist
-- **THEN** the feed shows only the 20 most recent items
+#### Scenario: Activity feed limited to 20 items — 场景：活动源限制为 20 个项目
+- **WHEN** 存在超过 20 个值得关注的事件
+- **THEN** 源仅显示最近的 20 个项目
 
-### Requirement: Quick links to sub-dashboards
-The overview page SHALL display quick-link buttons to the three sub-dashboards: Agent Health (`/ops-center/agents`), Tool Analytics (`/ops-center/tools`), Conversations (`/ops-center/conversations`). Each link SHALL open the respective sub-dashboard.
+### Requirement: Quick links to sub-dashboards — 需求：指向子仪表板的快速链接
+概览页面应显示指向三个子仪表板的快速链接按钮：Agent Health（`/ops-center/agents`）、Tool Analytics（`/ops-center/tools`）、Conversations（`/ops-center/conversations`）。每个链接应打开相应的子仪表板。
 
-#### Scenario: Quick links displayed
-- **WHEN** the overview page is rendered
-- **THEN** three link cards are displayed: "View Agent Health", "View Tool Analytics", "View Conversations"
+#### Scenario: Quick links displayed — 场景：显示快速链接
+- **WHEN** 概览页面渲染
+- **THEN** 显示三个链接卡片："View Agent Health"、"View Tool Analytics"、"View Conversations"
 
-### Requirement: Time range selector
-The overview page SHALL include a time range selector (Last 24h / 7d / 30d) that re-fetches the overview data with updated `start_date` and `end_date` parameters.
+### Requirement: Time range selector — 需求：时间范围选择器
+概览页面应包含一个时间范围选择器（Last 24h / 7d / 30d），使用更新的 `start_date` 和 `end_date` 参数重新获取概览数据。
 
-#### Scenario: Default time range
-- **WHEN** the user navigates to the overview page
-- **THEN** the default time range is "Last 7 days" and the overview data reflects that range
+#### Scenario: Default time range — 场景：默认时间范围
+- **WHEN** 用户导航到概览页面
+- **THEN** 默认时间范围为 "Last 7 days"，概览数据反映该范围
 
-#### Scenario: Change time range
-- **WHEN** the user selects "Last 24h"
-- **THEN** the page re-fetches `GET /api/ops-center/overview` with start_date = now - 24h and end_date = now
+#### Scenario: Change time range — 场景：更改时间范围
+- **WHEN** 用户选择 "Last 24h"
+- **THEN** 页面使用 start_date = now - 24h 和 end_date = now 重新获取 `GET /api/ops-center/overview`
 
-### Requirement: Sidebar overview link
-The sidebar SHALL have an "Ops Center" link pointing to `/ops-center` (the new overview page). The existing sub-dashboard links (Agent Health, Tool Analytics, Conversations) SHALL remain as sibling links.
+### Requirement: Sidebar overview link — 需求：侧边栏概览链接
+侧边栏应有一个指向 `/ops-center`（新的概览页面）的 "Ops Center" 链接。现有的子仪表板链接（Agent Health、Tool Analytics、Conversations）应保持为同级链接。
 
-#### Scenario: Ops Center link points to overview
-- **WHEN** the user clicks "Ops Center" in the sidebar
-- **THEN** the browser navigates to `/ops-center` (the unified overview page)
+#### Scenario: Ops Center link points to overview — 场景：Ops Center 链接指向概览
+- **WHEN** 用户点击侧边栏中的 "Ops Center"
+- **THEN** 浏览器导航到 `/ops-center`（统一概览页面）
 
-#### Scenario: Sub-dashboard links remain accessible
-- **WHEN** the sidebar is rendered
-- **THEN** "Agent Health" (`/ops-center/agents`), "Tool Analytics" (`/ops-center/tools`), and "Conversations" (`/ops-center/conversations`) links are visible as siblings to "Ops Center"
+#### Scenario: Sub-dashboard links remain accessible — 场景：子仪表板链接保持可访问
+- **WHEN** 侧边栏渲染
+- **THEN** "Agent Health"（`/ops-center/agents`）、"Tool Analytics"（`/ops-center/tools`）和 "Conversations"（`/ops-center/conversations`）链接作为 "Ops Center" 的同级链接可见
 
-### Requirement: Empty state handling
-The overview page SHALL display an appropriate empty state when no Ops Center data exists for the selected time range.
+### Requirement: Empty state handling — 需求：空状态处理
+概览页面应在所选时间范围内没有 Ops Center 数据时显示适当的空状态。
 
-#### Scenario: No data in time range
-- **WHEN** the selected time range has no data from any subsystem
-- **THEN** the page displays "No Ops Center data available for this period" with guidance to start using agents to generate data
+#### Scenario: No data in time range — 场景：时间范围内无数据
+- **WHEN** 所选时间范围没有任何子系统的数据
+- **THEN** 页面显示 "No Ops Center data available for this period" 及开始使用 agent 生成数据的指导

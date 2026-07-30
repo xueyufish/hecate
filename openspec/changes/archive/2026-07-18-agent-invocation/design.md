@@ -1,80 +1,76 @@
-## Context
+## Context — 背景
 
-Hecate's agent execution has two paths today:
+Hecate 的 Agent 执行目前有两条路径：
 
-1. **AgentWorker** (engine layer) — handles AGENT-type nodes in the Pregel runtime. Supports two strategies: nested graph execution via WorkflowExecutionService (primary), and port-based execution via `EnginePort.agent_execute()` (fallback).
+1. **AgentWorker**（引擎层）— 处理 Pregel 运行时中的 AGENT 类型节点。支持两种策略：通过 WorkflowExecutionService 的嵌套图执行（主要），以及通过 `EnginePort.agent_execute()` 的基于端口执行（回退）。
 
-2. **AgentExecutionPort** (services layer) — concrete EnginePort adapter for agent execution. Currently a thin shell: loads AgentModel from DB, injects persona + skills as system prompt, calls `llm_service.chat(tools=None)`.
+2. **AgentExecutionPort**（服务层）— Agent 执行的具体 EnginePort 适配器。目前是一个薄壳：从数据库加载 AgentModel，将角色 + 技能作为系统提示注入，调用 `llm_service.chat(tools=None)`。
 
-The gap: `AgentExecutionPort` bypasses the full LLM pipeline that `LLMWorker` provides (tool loading, knowledge retrieval, guard hooks, context assembly, token budget management). Agents invoked via `agent_execute` get degraded behavior.
+差距：`AgentExecutionPort` 绕过了 `LLMWorker` 提供的完整 LLM 流水线（工具加载、知识检索、守卫钩子、上下文组装、令牌预算管理）。通过 `agent_execute` 调用的 Agent 获得降级的行为。
 
-Additionally, the Agent-as-Tool capability (`AgentDefinition` + `AgentTool` in `engine/agent_tool.py`) is fully built but lacks a DSL-level `invocation_mode` switch to activate it from graph definitions.
+此外，Agent-as-Tool 能力（`engine/agent_tool.py` 中的 `AgentDefinition` + `AgentTool`）已完全构建，但缺少 DSL 级别的 `invocation_mode` 开关来从图定义中激活它。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Bring AgentExecutionPort to parity with LLMWorker's pipeline (tools, KB, hooks, context assembly)
-- Add `invocation_mode` field to AGENT node DSL schema for Agent-as-Tool activation
-- Wire `invocation_mode` in AgentWorker to route between nested graph execution and Agent-as-Tool
-- Ensure `AgentDefinition.resolve_tools()` filtering works end-to-end in agent_execute
-- Add unit tests for AgentExecutionPort
+**目标：**
+- 使 AgentExecutionPort 与 LLMWorker 的流水线（工具、知识库、钩子、上下文组装）达到同等水平
+- 为 AGENT 节点 DSL 模式添加 `invocation_mode` 字段，用于 Agent-as-Tool 激活
+- 在 AgentWorker 中接入 `invocation_mode`，在嵌套图执行和 Agent-as-Tool 之间路由
+- 确保 `AgentDefinition.resolve_tools()` 过滤在 agent_execute 中端到端工作
+- 为 AgentExecutionPort 添加单元测试
 
-**Non-Goals:**
-- Streaming support for agent_execute (spec returns dict, not AsyncGenerator — deferred to P3)
-- A2A remote agent execution (already exists in AgentTool.execute_remote — not in scope)
-- Agent Handoff changes (already fully implemented in handoff.py)
-- Changes to WorkflowExecutionService's nested graph execution path
+**非目标：**
+- agent_execute 的流式支持（spec 返回 dict，而非 AsyncGenerator — 推迟到 P3）
+- A2A 远程 Agent 执行（已在 AgentTool.execute_remote 中存在 — 不在范围内）
+- Agent Handoff 变更（已在 handoff.py 中完全实现）
+- WorkflowExecutionService 嵌套图执行路径的更改
 
-## Decisions
+## Decisions — 决策
 
-### Decision 1: Upgrade AgentExecutionPort in-place vs. new class
+### 决策 1：原地升级 AgentExecutionPort vs. 新建类
 
-**Choice**: Upgrade `AgentExecutionPort.agent_execute()` in-place.
+**选择**：原地升级 `AgentExecutionPort.agent_execute()`。
 
-**Rationale**: The class already exists, is wired into `_ProductionEnginePort`, and has the right method signature. Creating a new class would require changing the adapter factory and all callers. In-place upgrade is lower risk.
+**理由**：该类已存在，已接入 `_ProductionEnginePort`，并具有正确的方法签名。创建新类需要更改适配器工厂和所有调用者。原地升级风险较低。
 
-**Alternatives considered**:
-- New `FullPipelineAgentExecutionPort` — rejected: unnecessary indirection, same DB session and LLM service dependencies.
-- Delegate to LLMWorker internally — rejected: LLMWorker expects a WorkerResult, not a dict. The return type contract differs.
+**考虑的替代方案**：
+- 新的 `FullPipelineAgentExecutionPort` — 拒绝：不必要的间接层，相同的 DB 会话和 LLM 服务依赖。
+- 内部委托给 LLMWorker — 拒绝：LLMWorker 期望 `WorkerResult`，而非 dict。返回类型契约不同。
 
-### Decision 2: How to access guard hooks and context engine
+### 决策 2：如何访问守卫钩子和上下文引擎
 
-**Choice**: Accept optional `pre_hook`, `post_hook`, and `context_engine` parameters in `AgentExecutionPort.__init__()`, defaulting to NoOp variants.
+**选择**：在 `AgentExecutionPort.__init__()` 中接受可选的 `pre_hook`、`post_hook` 和 `context_engine` 参数，默认为 NoOp 变体。
 
-**Rationale**: Follows the same pattern as `LLMWorker.__init__()` which accepts `pre_llm_hook` and `post_llm_hook`. The `_ProductionEnginePort` factory will wire the actual hooks. Defaulting to NoOp maintains backward compatibility.
+**理由**：遵循 `LLMWorker.__init__()` 接受的相同模式，后者接受 `pre_llm_hook` 和 `post_llm_hook`。`_ProductionEnginePort` 工厂将接入实际的钩子。默认为 NoOp 保持向后兼容。
 
-**Alternatives considered**:
-- Pass hooks via `execution_context` dict — rejected: fragile, type-unsafe, couples engine runtime to service layer.
-- Global singleton hooks — rejected: violates DI principles, makes testing harder.
+**考虑的替代方案**：
+- 通过 `execution_context` 字典传递钩子 — 拒绝：脆弱、类型不安全、将引擎运行时耦合到服务层。
+- 全局单例钩子 — 拒绝：违反 DI 原则，使测试更困难。
 
-### Decision 3: invocation_mode default value
+### 决策 3：invocation_mode 默认值
 
-**Choice**: Default `invocation_mode` to `"graph"` (existing behavior).
+**选择**：默认 `invocation_mode` 为 `"graph"`（现有行为）。
 
-**Rationale**: All existing AGENT nodes use nested graph execution. Changing the default would break existing graphs. `"tool"` mode is opt-in.
+**理由**：所有现有的 AGENT 节点都使用嵌套图执行。更改默认值会破坏现有图。`"tool"` 模式是可选加入的。
 
-### Decision 4: Where to load agent tools in agent_execute
+### 决策 4：在 agent_execute 中加载 Agent 工具的位置
 
-**Choice**: Load tools from `AgentModel.tool_ids` (or equivalent) within `agent_execute()`, then apply `AgentDefinition.resolve_tools()` filtering if an AgentDefinition is provided.
+**选择**：在 `agent_execute()` 中从 `AgentModel.tool_ids`（或等效）加载工具，然后如果提供了 AgentDefinition，则应用 `AgentDefinition.resolve_tools()` 过滤。
 
-**Rationale**: The agent's configured tools are the base set. AgentDefinition's whitelist/blacklist narrows them for specific invocations. This matches the existing `AgentTool.resolve_tools()` design.
+**理由**：Agent 配置的工具是基础集。AgentDefinition 的白名单/黑名单为特定调用缩小工具范围。这与现有的 `AgentTool.resolve_tools()` 设计一致。
 
-### Decision 5: Knowledge base integration scope
+### 决策 5：知识库集成范围
 
-**Choice**: Call `EnginePort.knowledge_query()` within agent_execute when the agent has knowledge bases configured, and inject results as context messages.
+**选择**：当 Agent 配置了知识库时，在 agent_execute 中调用 `EnginePort.knowledge_query()`，并将结果作为上下文消息注入。
 
-**Rationale**: This brings agent_execute to parity with what CONVERSATION nodes can do. The knowledge_query method already exists on EnginePort and is implemented in AgentExecutionPort.
+**理由**：这使 agent_execute 与 CONVERSATION 节点所能做到的达到同等水平。knowledge_query 方法已存在于 EnginePort 上，并在 AgentExecutionPort 中实现。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-**[Risk] Increased latency** — Adding tools, KB queries, and hooks adds latency to agent_execute calls.
-→ Mitigation: KB queries run in parallel (already implemented). Hook execution is fast (in-memory checks). Tool loading is a single DB query.
+**[风险] 延迟增加** — 添加工具、知识库查询和钩子增加了 agent_execute 调用的延迟。→ 缓解：知识库查询并行运行（已实现）。钩子执行速度快（内存检查）。工具加载是单次数据库查询。
 
-**[Risk] Circular dependency** — AgentExecutionPort needs to call EnginePort methods (knowledge_query, context_assemble) but is itself an EnginePort implementation.
-→ Mitigation: AgentExecutionPort calls its own methods (self.knowledge_query, self.context_assemble). No circular import — it's the same object.
+**[风险] 循环依赖** — AgentExecutionPort 需要调用 EnginePort 方法（knowledge_query、context_assemble），但其本身是 EnginePort 实现。→ 缓解：AgentExecutionPort 调用自己的方法（self.knowledge_query、self.context_assemble）。无循环导入 — 是同一对象。
 
-**[Risk] Breaking existing agent_execute callers** — Upgrading the pipeline could change response format.
-→ Mitigation: Response dict keys (response, usage, model) are unchanged. Additional keys are additive. No breaking change.
+**[风险] 破坏现有的 agent_execute 调用者** — 升级流水线可能会改变响应格式。→ 缓解：响应字典键（response、usage、model）不变。额外的键是新增的。无破坏性变更。
 
-**[Trade-off] No streaming** — AgentExecute returns a dict, not a stream. Parent agents can't get token-by-token output from sub-agents.
-→ Acceptable: Spec defines dict return. Streaming is a separate concern (P3).
+**[权衡] 无流式** — AgentExecute 返回 dict，而非流。父 Agent 无法从子 Agent 获取逐令牌输出。→ 可接受：Spec 定义 dict 返回。流式是独立问题（P3）。

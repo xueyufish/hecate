@@ -1,120 +1,120 @@
-## Context
+## Context — 背景
 
-Hecate has three independent security audit sources that evolved at different times:
+Hecate 有三个独立的安全审计来源，它们在不同时期演变而来：
 
-1. **AuditLog** (P2, `services/audit/`) — API-level audit via `AuditMiddleware`. Every HTTP request captured. Partitioned PostgreSQL table. Has a `PolicyEngine` that detects anomalies (bulk delete, off-hours, unusual IP) but only `log.warning()` — violations are lost.
+1. **AuditLog**（P2，`services/audit/`）— 通过 `AuditMiddleware` 进行的 API 级审计。捕获每个 HTTP 请求。分区 PostgreSQL 表。具有检测异常（批量删除、非工作时间、异常 IP）的 `PolicyEngine`，但仅 `log.warning()` — 违规信息丢失。
 
-2. **SecurityAudit** (9.14, `models/security_audit.py` + `engine/audit_sink.py` + `services/security/audit_service.py`) — Tool policy decision audit. Every `ToolPolicyPipeline` and `ToolAccessPolicy` evaluation emits a structured event. Async batch writer. Just merged, no external consumers.
+2. **SecurityAudit**（9.14，`models/security_audit.py` + `engine/audit_sink.py` + `services/security/audit_service.py`）— 工具策略决策审计。每次 `ToolPolicyPipeline` 和 `ToolAccessPolicy` 评估都会发出结构化事件。异步批量写入器。刚刚合并，没有外部消费者。
 
-3. **TraceModel** (OTel bridge) — operational spans, not directly security-relevant but provides latency and tool execution telemetry.
+3. **TraceModel**（OTel 桥接）— 操作跨度，不直接与安全相关，但提供延迟和工具执行遥测。
 
-None of these can export to external SIEM systems (Splunk, Datadog, Elastic, QRadar). Enterprise SOC teams have no visibility into Hecate security events. The naming is also confusing — "SecurityAudit" vs "AuditLog" are indistinguishable by name, and "Policy" is overloaded (ToolPolicyPipeline, ToolAccessPolicy, PolicyEngine = three different meanings).
+这些都无法导出到外部 SIEM 系统（Splunk、Datadog、Elastic、QRadar）。企业 SOC 团队对 Hecate 安全事件没有可见性。命名也令人困惑 — "SecurityAudit" 与 "AuditLog" 在名称上无法区分，"Policy" 被过度使用（ToolPolicyPipeline、ToolAccessPolicy、PolicyEngine 分别表示三种不同的含义）。
 
-**Industry naming patterns:**
-- AWS: CloudTrail (activity) / GuardDuty Finding (anomaly) / Security Hub (aggregation)
-- OCSF: Activity (class 4001) / Authorization (class 2201) / Security Finding (class 2001)
-- Kubernetes: Audit Log / Admission Decision / Policy Violation
+**行业命名模式：**
+- AWS：CloudTrail（活动）/ GuardDuty Finding（异常）/ Security Hub（聚合）
+- OCSF：Activity（class 4001）/ Authorization（class 2201）/ Security Finding（class 2001）
+- Kubernetes：Audit Log / Admission Decision / Policy Violation
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Rename SecurityAudit → ToolDecision and PolicyEngine → FindingEngine to eliminate confusion
-- Persist PolicyEngine findings (currently lost via `log.warning()`)
-- Build a unified SIEM export pipeline with Webhook + Syslog + OCSF support
-- Configurable event filtering (by type and severity threshold)
-- Backward-compatible defaults (SIEM export disabled by default, no breaking runtime behavior)
+**目标：**
+- 将 SecurityAudit 重命名为 ToolDecision，PolicyEngine 重命名为 FindingEngine，消除混淆
+- 持久化 PolicyEngine 发现结果（目前通过 `log.warning()` 丢失）
+- 构建统一的 SIEM 导出管道，支持 Webhook + Syslog + OCSF
+- 可配置的事件过滤（按类型和严重级别阈值）
+- 向后兼容的默认值（SIEM 导出默认禁用，无破坏性运行时行为）
 
-**Non-Goals:**
-- Real-time blocking based on SIEM feedback (SIEM is observation-only)
-- Kafka/ message queue export (defer to P1 — webhook + syslog covers 90% of deployments)
-- OTel Logs OTLP export (defer to P2 — requires OTel collector setup)
-- Custom SIEM correlation rules inside Hecate (external SIEM does correlation)
-- Merging AuditLog and ToolDecision into a single table (different schemas, different query patterns)
+**非目标：**
+- 基于 SIEM 反馈的实时阻断（SIEM 仅用于观察）
+- Kafka/消息队列导出（推迟到 P1 — webhook + syslog 覆盖 90% 的部署）
+- OTel Logs OTLP 导出（推迟到 P2 — 需要 OTel collector 设置）
+- Hecate 内部的自定义 SIEM 关联规则（外部 SIEM 进行关联）
+- 将 AuditLog 和 ToolDecision 合并为单个表（模式不同，查询模式不同）
 
-## Decisions
+## Decisions — 决策
 
-### D1: Naming — three layers aligned with industry standards
+### D1：命名 — 三层对齐行业标准
 
-| Layer | Old Name | New Name | Industry Analog |
+| 层 | 旧名称 | 新名称 | 行业类比 |
 |-------|----------|----------|-----------------|
-| API operations | AuditLog | AuditLog (unchanged) | AWS CloudTrail, OCSF Activity |
-| Tool decisions | SecurityAudit | **ToolDecision** | OCSF Authorization, K8s Admission Decision |
-| Anomaly detection | PolicyEngine + PolicyViolation | **FindingEngine + SecurityFinding** | AWS GuardDuty Finding, OCSF Finding |
-| Export | (none) | **SIEM Export Pipeline** | AWS Security Hub |
+| API 操作 | AuditLog | AuditLog（不变） | AWS CloudTrail、OCSF Activity |
+| 工具决策 | SecurityAudit | **ToolDecision** | OCSF Authorization、K8s Admission Decision |
+| 异常检测 | PolicyEngine + PolicyViolation | **FindingEngine + SecurityFinding** | AWS GuardDuty Finding、OCSF Finding |
+| 导出 | （无） | **SIEM Export Pipeline** | AWS Security Hub |
 
-**Rationale:** "SecurityAudit" was misleading — it only captures tool policy decisions, not general security. "ToolDecision" is precise. "PolicyEngine" was overloaded with ToolPolicyPipeline/ToolAccessPolicy. "FindingEngine" aligns with GuardDuty Finding, Defender Alert, OCSF Finding class.
+**理由：** "SecurityAudit" 具有误导性 — 它仅捕获工具策略决策，而非通用安全事件。"ToolDecision" 更精确。"PolicyEngine" 与 ToolPolicyPipeline/ToolAccessPolicy 过度重叠。"FindingEngine" 与 GuardDuty Finding、Defender Alert、OCSF Finding class 对齐。
 
-**Alternative considered:** Keep names, document the difference. Rejected — documentation cannot fix naming confusion that appears in code, API paths, config keys, and database tables.
+**考虑的替代方案：** 保留名称，记录差异。拒绝 — 文档无法修复出现在代码、API 路径、配置键和数据库表中的命名混淆。
 
-### D2: Unified SecurityEvent — normalize at export layer, not storage layer
-
-```
-AuditLog (PG table) ──┐
-ToolDecision (PG table) ──→ SecurityEventCollector ──→ SIEMExporter(s)
-SecurityFinding (PG table) ──┘    (normalize + filter)
-```
-
-Each source keeps its own table and schema. The collector reads from all three and normalizes into a `SecurityEvent` dataclass for export only.
-
-**Rationale:** Different sources have different fields (API log has HTTP method/path; tool decision has layer_results/policy_version; finding has severity/metadata). Forcing them into one table loses type-specific query capability or requires a wide sparse table.
-
-**Alternative considered:** Single `security_events` table with `event_type` discriminator. Rejected — AuditLog is already partitioned and in production; migration risk outweighs the benefit.
-
-### D3: Push architecture with async batching
+### D2：统一 SecurityEvent — 在导出层而非存储层归一化
 
 ```
-Source event ──→ SecurityEventCollector.emit() (non-blocking, in-memory buffer)
-                        │
-                        ▼ (every batch_size or flush_interval)
-                SIEMExporter.export(events: list[SecurityEvent])
+AuditLog（PG 表）──┐
+ToolDecision（PG 表）──→ SecurityEventCollector ──→ SIEMExporter(s)
+SecurityFinding（PG 表）──┘    （归一化 + 过滤）
 ```
 
-The collector buffers events and flushes in batches — same pattern as the existing `SecurityAuditService` async batch writer. Each exporter receives the batch and sends it to its target (webhook HTTP POST, syslog TCP stream, etc.).
+每个源保留自己的表和模式。收集器从所有三个源读取并归一化为 `SecurityEvent` 数据类，仅用于导出。
 
-**Rationale:** Non-blocking emission prevents SIEM export from affecting request latency. Batching amortizes network I/O. Same proven pattern as the audit batch writer.
+**理由：** 不同的源具有不同的字段（API 日志有 HTTP 方法/路径；工具决策有 layer_results/policy_version；发现结果有 severity/metadata）。强制将它们放入一个表会失去类型特定的查询能力，或需要宽稀疏表。
 
-**Alternative considered:** Real-time per-event streaming. Rejected — high network overhead for high-volume deployments, and SIEM systems prefer batch ingestion.
+**考虑的替代方案：** 带 `event_type` 鉴别器的单个 `security_events` 表。拒绝 — AuditLog 已分区且在生成中；迁移风险大于收益。
 
-### D4: Three exporters in P0
+### D3：推送架构带异步批处理
 
-| Exporter | Target | Protocol | Use Case |
+```
+源事件 ──→ SecurityEventCollector.emit()（非阻塞，内存缓冲区）
+                │
+                ▼（每 batch_size 或 flush_interval）
+        SIEMExporter.export(events: list[SecurityEvent])
+```
+
+收集器缓冲事件并分批刷新 — 与现有 `SecurityAuditService` 异步批量写入器相同的模式。每个导出器接收批次并发送到其目标（webhook HTTP POST、syslog TCP 流等）。
+
+**理由：** 非阻塞发射防止 SIEM 导出影响请求延迟。批处理分摊网络 I/O。与审计批量写入器相同的经过验证的模式。
+
+**考虑的替代方案：** 实时每个事件流式传输。拒绝 — 高流量部署的网络开销高，且 SIEM 系统偏好批量摄入。
+
+### D4：P0 中的三个导出器
+
+| 导出器 | 目标 | 协议 | 用例 |
 |----------|--------|----------|----------|
-| **WebhookSIEMExporter** | Splunk HEC, Datadog, Elastic, generic | HTTPS POST with JSON body | Cloud SIEM, most common |
-| **SyslogSIEMExporter** | QRadar, ArcSight, rsylog | RFC 5424 over TCP/UDP + TLS | On-premise enterprise |
-| **OCSFFormatter** | AWS CloudWatch, IBM, next-gen | JSON with OCSF v1.5 schema | Standards-compliant export |
+| **WebhookSIEMExporter** | Splunk HEC、Datadog、Elastic、通用 | HTTPS POST 带 JSON 体 | 云 SIEM，最常见 |
+| **SyslogSIEMExporter** | QRadar、ArcSight、rsyslog | RFC 5424 通过 TCP/UDP + TLS | 本地部署企业 |
+| **OCSFFormatter** | AWS CloudWatch、IBM、下一代 | 带 OCSF v1.5 模式的 JSON | 标准合规导出 |
 
-OCSFFormatter is a formatter, not a transport — it wraps another exporter (typically webhook) to produce OCSF-compliant JSON.
+OCSFFormatter 是一个格式化器，而不是传输器 — 它包装另一个导出器（通常是 webhook）以生成符合 OCSF 的 JSON。
 
-**Rationale:** Webhook covers cloud SIEMs (90% of modern deployments). Syslog is essential for on-premise enterprise. OCSF mapping is low-effort (it's just JSON schema) and future-proofs for industry standardization.
+**理由：** Webhook 覆盖云 SIEM（90% 的现代部署）。Syslog 对本地部署企业至关重要。OCSF 映射工作量小（只是 JSON 模式）且为行业标准化提供了未来保障。
 
-**Alternative considered:** Start with webhook only. Rejected — user explicitly requested all three in scope.
+**考虑的替代方案：** 仅从 webhook 开始。拒绝 — 用户明确要求全部三个在范围内。
 
-### D5: Configurable filtering — event types + severity threshold
+### D5：可配置的过滤 — 事件类型 + 严重级别阈值
 
 ```python
-SIEM_FILTER_EVENT_TYPES = "api,tool_policy,anomaly"  # comma-separated, default: all
-SIEM_MIN_SEVERITY = "info"  # info | low | medium | high | critical, default: info (all)
+SIEM_FILTER_EVENT_TYPES = "api,tool_policy,anomaly"  # 逗号分隔，默认：全部
+SIEM_MIN_SEVERITY = "info"  # info | low | medium | high | critical，默认：info（全部）
 ```
 
-**Severity mapping (built-in defaults):**
+**严重级别映射（内置默认值）：**
 
-| Event Type | Default Severity |
+| 事件类型 | 默认严重级别 |
 |------------|-----------------|
-| API success (2xx) | INFO |
-| API client error (4xx) | LOW |
-| API server error (5xx) | MEDIUM |
+| API 成功（2xx） | INFO |
+| API 客户端错误（4xx） | LOW |
+| API 服务端错误（5xx） | MEDIUM |
 | ToolDecision ALLOW | INFO |
 | ToolDecision SANDBOX | MEDIUM |
 | ToolDecision DENY | HIGH |
 | ToolDecision APPROVAL_REQUIRED | MEDIUM |
-| SecurityFinding (low) | LOW |
-| SecurityFinding (medium) | MEDIUM |
-| SecurityFinding (high) | HIGH |
-| SecurityFinding (critical) | CRITICAL |
+| SecurityFinding（低） | LOW |
+| SecurityFinding（中） | MEDIUM |
+| SecurityFinding（高） | HIGH |
+| SecurityFinding（严重） | CRITICAL |
 
-**Rationale:** Not every successful API GET needs to go to SIEM. Configurable filtering reduces noise and SIEM ingestion costs.
+**理由：** 并非每个成功的 API GET 都需要进入 SIEM。可配置的过滤减少噪音和 SIEM 摄入成本。
 
-### D6: SecurityFinding persistence — new table, not reuse AuditLog
+### D6：SecurityFinding 持久化 — 新表，不复用 AuditLog
 
 ```sql
 CREATE TABLE security_findings (
@@ -122,43 +122,43 @@ CREATE TABLE security_findings (
     org_id UUID NOT NULL,
     workspace_id UUID,
     user_id UUID,
-    rule_name VARCHAR(100) NOT NULL,    -- e.g., "bulk_delete_rule"
+    rule_name VARCHAR(100) NOT NULL,    -- 例如 "bulk_delete_rule"
     severity VARCHAR(20) NOT NULL,      -- low | medium | high | critical
     message TEXT NOT NULL,
-    source_event JSON,                  -- the triggering AuditEvent
+    source_event JSON,                  -- 触发的 AuditEvent
     metadata JSON DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL
 );
 ```
 
-**Rationale:** Findings have different fields from AuditLog (rule_name, severity, source_event). Reusing AuditLog would require nullable columns or a wide table. Separate table allows dedicated query API and retention policy.
+**理由：** 发现结果具有与 AuditLog 不同的字段（rule_name、severity、source_event）。复用 AuditLog 需要可空列或宽表。单独的表允许专用查询 API 和保留策略。
 
-**Alternative considered:** Store findings as AuditLog entries with `action="security.finding"`. Rejected — loses severity indexing and rule_name filtering.
+**考虑的替代方案：** 将发现结果存储为带有 `action="security.finding"` 的 AuditLog 条目。拒绝 — 失去严重级别索引和 rule_name 过滤。
 
-### D7: Migration — rename table via Alembic
+### D7：迁移 — 通过 Alembic 重命名表
 
-Two migrations:
-1. Rename `security_audit_events` → `tool_decisions` (Alembic `rename_table`)
-2. Create `security_findings` table
+两个迁移：
+1. 将 `security_audit_events` 重命名为 `tool_decisions`（Alembic `rename_table`）
+2. 创建 `security_findings` 表
 
-No data migration needed — column names stay the same (only table name changes). Config key renames are in `.env.example` with backward-compatible aliases (if `AGENT_ENV_AUDIT_ENABLED` is set, fall back to it when `AGENT_ENV_DECISION_ENABLED` is not set).
+无需数据迁移 — 列名保持相同（仅表名更改）。配置文件键重命名在 `.env.example` 中带有向后兼容的别名（如果设置了 `AGENT_ENV_AUDIT_ENABLED` 而 `AGENT_ENV_DECISION_ENABLED` 未设置，则回退使用它）。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Naming refactor breaks 9.14 code]** → 9.14 merged days ago, no external consumers, no published API docs referencing old names. Migration is code-internal only.
-- **[Syslog reliability]** → UDP is lossy; TCP adds backpressure. Mitigation: TCP default, configurable retry, buffer overflow drops oldest with WARNING log.
-- **[Webhook endpoint down]** → Network failure to SIEM should not affect Hecate. Mitigation: exporter catches all exceptions, logs error, continues. Failed batches are dropped (not retried) to prevent unbounded memory growth. Retry/queue is a P1 enhancement.
-- **[OCSF schema correctness]** → OCSF v1.5 is complex; our mapping may miss required fields. Mitigation: map core fields only (timestamp, severity, actor, action, resource), put platform-specific data in `metadata` extension. Validate against OCSF JSON schema in tests.
-- **[Config rename confusion]** → Users with `AGENT_ENV_AUDIT_ENABLED=true` in `.env` may not notice the rename. Mitigation: backward-compatible alias in config loader.
+- **[命名重构破坏 9.14 代码]** → 9.14 几天前才合并，没有外部消费者，没有引用旧名称的已发布 API 文档。迁移仅限代码内部。
+- **[Syslog 可靠性]** → UDP 有损；TCP 增加背压。缓解：TCP 默认，可配置重试，缓冲区溢出时丢弃最旧条目并记录 WARNING。
+- **[Webhook 端点宕机]** → 网络故障到 SIEM 不应影响 Hecate。缓解：导出器捕获所有异常，记录错误，继续运行。失败的批次被丢弃（不重试）以防止无界内存增长。重试/队列是 P1 增强。
+- **[OCSF 模式正确性]** → OCSF v1.5 复杂；我们的映射可能遗漏必需字段。缓解：仅映射核心字段（timestamp、severity、actor、action、resource），将平台特定数据放在 `metadata` 扩展中。在测试中根据 OCSF JSON 模式验证。
+- **[配置重命名混淆]** → 在 `.env` 中有 `AGENT_ENV_AUDIT_ENABLED=true` 的用户可能未注意到重命名。缓解：配置加载器中的向后兼容别名。
 
-## Migration Plan
+## Migration Plan — 迁移计划
 
-1. **Phase 1 — Rename (no behavior change):** Rename all SecurityAudit → ToolDecision in code. Rename table via Alembic. Add config aliases. All existing tests pass with updated names.
-2. **Phase 2 — Finding persistence:** Add SecurityFindingModel + FindingEngine persistence. FindingEngine now writes to DB instead of `log.warning()`.
-3. **Phase 3 — SIEM Pipeline:** Add SecurityEvent + Collector + Exporters. Disabled by default. No impact on existing behavior.
+1. **阶段 1 — 重命名（无行为变更）：** 在代码中将所有 SecurityAudit 重命名为 ToolDecision。通过 Alembic 重命名表。添加配置别名。所有现有测试使用更新后的名称通过。
+2. **阶段 2 — 发现结果持久化：** 添加 SecurityFindingModel + FindingEngine 持久化。FindingEngine 现在写入数据库而非 `log.warning()`。
+3. **阶段 3 — SIEM 管道：** 添加 SecurityEvent + Collector + Exporters。默认禁用。对现有行为无影响。
 
-**Rollback:** Revert the branch. The Alembic migration can be downgraded (`alembic downgrade -1`). Config aliases ensure old `.env` files still work.
+**回滚：** 撤销分支。Alembic 迁移可以降级（`alembic downgrade -1`）。配置别名确保旧的 `.env` 文件仍然有效。
 
-## Open Questions
+## Open Questions — 开放问题
 
-None remaining — all design decisions confirmed during explore phase.
+无 — 所有设计决策在探索阶段已确认。

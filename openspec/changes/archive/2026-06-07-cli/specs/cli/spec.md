@@ -1,262 +1,262 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: CLI entry point and command structure
-The system SHALL provide a `hecate` CLI command registered as a `console_scripts` entry point in pyproject.toml, using `typer` framework with nested subcommand groups mapping to API resource domains.
+### Requirement: CLI 入口点和命令结构 — CLI 入口点和命令结构
+系统 SHALL 提供一个 `hecate` CLI 命令，注册为 pyproject.toml 中的 `console_scripts` 入口点，使用 `typer` 框架，嵌套子命令组映射到 API 资源域。
 
-#### Scenario: CLI help shows all resource groups
-- **WHEN** `hecate --help` is executed
-- **THEN** the output SHALL list subcommand groups: agent, session, chat, kb, tool, skill, workflow, prompt, memory, template, conversation, model, config, auth
+#### Scenario: CLI 帮助显示所有资源组
+- **WHEN** 执行 `hecate --help`
+- **THEN** 输出 SHALL 列出子命令组：agent、session、chat、kb、tool、skill、workflow、prompt、memory、template、conversation、model、config、auth
 
-#### Scenario: Resource group help shows actions
-- **WHEN** `hecate agent --help` is executed
-- **THEN** the output SHALL list actions: list, create, get, update, delete
+#### Scenario: 资源组帮助显示操作
+- **WHEN** 执行 `hecate agent --help`
+- **THEN** 输出 SHALL 列出操作：list、create、get、update、delete
 
-#### Scenario: Unknown command returns error
-- **WHEN** `hecate nonexistent --help` is executed
-- **THEN** the CLI SHALL exit with non-zero code and display error message
+#### Scenario: 未知命令返回错误
+- **WHEN** 执行 `hecate nonexistent --help`
+- **THEN** CLI SHALL 以非零代码退出并显示错误消息
 
-### Requirement: Configuration management via TOML profiles
-The system SHALL read and write CLI configuration from `~/.hecate/config.toml`, supporting named profiles with `base_url`, `api_key`, and `output` settings. The `default` profile SHALL be used when no `--profile` flag is provided.
+### Requirement: 通过 TOML 配置文件的配置管理
+系统 SHALL 从 `~/.hecate/config.toml` 读写 CLI 配置，支持带 `base_url`、`api_key` 和 `output` 设置的命名配置文件。当未提供 `--profile` 标志时，SHALL 使用 `default` 配置文件。
 
-#### Scenario: Default configuration
-- **WHEN** `~/.hecate/config.toml` does not exist and no env vars are set
-- **THEN** the CLI SHALL use `base_url=http://localhost:8000` and prompt for `api_key` on first authenticated command
+#### Scenario: 默认配置
+- **WHEN** `~/.hecate/config.toml` 不存在且未设置环境变量
+- **THEN** CLI SHALL 使用 `base_url=http://localhost:8000` 并在第一个需要认证的命令时提示输入 `api_key`
 
-#### Scenario: Set configuration value
-- **WHEN** `hecate config set api_key hec-xxxxx` is executed
-- **THEN** the CLI SHALL write the value to the active profile in `~/.hecate/config.toml`
+#### Scenario: 设置配置值
+- **WHEN** 执行 `hecate config set api_key hec-xxxxx`
+- **THEN** CLI SHALL 将值写入 `~/.hecate/config.toml` 的活动配置文件
 
-#### Scenario: Use named profile
-- **WHEN** `hecate --profile staging agent list` is executed
-- **THEN** the CLI SHALL read the `staging` profile's `base_url` and `api_key` from config
+#### Scenario: 使用命名配置文件
+- **WHEN** 执行 `hecate --profile staging agent list`
+- **THEN** CLI SHALL 从配置中读取 `staging` 配置文件的 `base_url` 和 `api_key`
 
-#### Scenario: Show current configuration
-- **WHEN** `hecate config show` is executed
-- **THEN** the CLI SHALL display the active profile's settings with `api_key` masked
+#### Scenario: 显示当前配置
+- **WHEN** 执行 `hecate config show`
+- **THEN** CLI SHALL 显示活动配置文件的设置，`api_key` 被屏蔽
 
-### Requirement: Dual authentication — API Key and JWT
-The CLI SHALL support authentication via direct API key storage and JWT login with automatic token refresh.
+### Requirement: 双重认证 — API Key 和 JWT
+CLI SHALL 支持通过直接 API 密钥存储和 JWT 登录（带自动 token 刷新）进行认证。
 
-#### Scenario: Authenticate with stored API key
-- **WHEN** a command is executed and the active profile has `api_key` set
-- **THEN** the CLI SHALL send `Authorization: Bearer <api_key>` header with all API requests
+#### Scenario: 使用存储的 API Key 认证
+- **WHEN** 执行命令且活动配置文件已设置 `api_key`
+- **THEN** CLI SHALL 在每次 API 请求中发送 `Authorization: Bearer <api_key>` 标头
 
-#### Scenario: Login with JWT
-- **WHEN** `hecate auth login --email user@example.com` is executed with correct credentials
-- **THEN** the CLI SHALL call `POST /api/auth/login`, store the access token and refresh token in the profile, and use the access token for subsequent requests
+#### Scenario: 使用 JWT 登录
+- **WHEN** 使用正确凭据执行 `hecate auth login --email user@example.com`
+- **THEN** CLI SHALL 调用 `POST /api/auth/login`，将 access token 和 refresh token 存储在配置文件中，并为后续请求使用 access token
 
-#### Scenario: JWT auto-refresh on expiry
-- **WHEN** an API request returns 401 and the profile has a refresh token
-- **THEN** the CLI SHALL call `POST /api/auth/refresh` with the refresh token, update the stored access token, and retry the original request
+#### Scenario: JWT 过期时自动刷新
+- **WHEN** API 请求返回 401 且配置文件中存在 refresh token
+- **THEN** CLI SHALL 使用 refresh token 调用 `POST /api/auth/refresh`，更新存储的 access token，并重试原始请求
 
-#### Scenario: Whoami shows current user
-- **WHEN** `hecate auth whoami` is executed
-- **THEN** the CLI SHALL call `GET /api/auth/me` and display the current user's email and ID
+#### Scenario: Whoami 显示当前用户
+- **WHEN** 执行 `hecate auth whoami`
+- **THEN** CLI SHALL 调用 `GET /api/auth/me` 并显示当前用户的电子邮件和 ID
 
-### Requirement: Output formatting — table and JSON
-The CLI SHALL display output in rich tables by default and support a `--json` flag for machine-readable JSON output.
+### Requirement: 输出格式 — 表格和 JSON
+CLI SHALL 默认以 rich 表格显示输出，并支持 `--json` 标志用于机器可读的 JSON 输出。
 
-#### Scenario: Default table output
-- **WHEN** `hecate agent list` is executed without `--json`
-- **THEN** the CLI SHALL render a rich table with columns for id, name, mode, and model_config
+#### Scenario: 默认表格输出
+- **WHEN** 不带 `--json` 执行 `hecate agent list`
+- **THEN** CLI SHALL 渲染包含 id、name、mode 和 model_config 列的 rich 表格
 
-#### Scenario: JSON output
-- **WHEN** `hecate agent list --json` is executed
-- **THEN** the CLI SHALL print the raw JSON response to stdout for piping to jq or other tools
+#### Scenario: JSON 输出
+- **WHEN** 执行 `hecate agent list --json`
+- **THEN** CLI SHALL 将原始 JSON 响应打印到 stdout，用于通过 jq 或其他工具的管道处理
 
-### Requirement: HTTP client wrapper
-The CLI SHALL use `httpx` synchronous client for all API communication, with configurable timeout and automatic error handling.
+### Requirement: HTTP 客户端包装器
+CLI SHALL 对所有 API 通信使用 `httpx` 同步客户端，具有可配置的超时和自动错误处理。
 
-#### Scenario: Successful API call
-- **WHEN** a CLI command makes a GET request to `/api/agents`
-- **THEN** the client SHALL return the parsed JSON response
+#### Scenario: 成功的 API 调用
+- **WHEN** CLI 命令向 `/api/agents` 发出 GET 请求
+- **THEN** 客户端 SHALL 返回解析后的 JSON 响应
 
-#### Scenario: API error with user-friendly message
-- **WHEN** the API returns a 4xx or 5xx error
-- **THEN** the CLI SHALL display the error code and message from the API response and exit with non-zero code
+#### Scenario: 带用户友好消息的 API 错误
+- **WHEN** API 返回 4xx 或 5xx 错误
+- **THEN** CLI SHALL 显示来自 API 响应的错误代码和消息，并以非零代码退出
 
-#### Scenario: Connection refused
-- **WHEN** the API server is not reachable
-- **THEN** the CLI SHALL display "Error: Cannot connect to Hecate server at <base_url>" and exit with code 1
+#### Scenario: 连接被拒绝
+- **WHEN** API 服务器不可达
+- **THEN** CLI SHALL 显示 "Error: Cannot connect to Hecate server at <base_url>" 并以代码 1 退出
 
-### Requirement: Agent CRUD commands
-The CLI SHALL provide `hecate agent` subcommands for agent lifecycle management.
+### Requirement: Agent CRUD 命令
+CLI SHALL 为 agent 生命周期管理提供 `hecate agent` 子命令。
 
-#### Scenario: List agents
-- **WHEN** `hecate agent list` is executed
-- **THEN** the CLI SHALL call `GET /api/agents` and display agents in a table
+#### Scenario: 列出 agents
+- **WHEN** 执行 `hecate agent list`
+- **THEN** CLI SHALL 调用 `GET /api/agents` 并在表格中显示 agents
 
-#### Scenario: Create agent
-- **WHEN** `hecate agent create --name "Test" --model gpt-4o --mode chat` is executed
-- **THEN** the CLI SHALL call `POST /api/agents` with the provided parameters and display the created agent
+#### Scenario: 创建 agent
+- **WHEN** 执行 `hecate agent create --name "Test" --model gpt-4o --mode chat`
+- **THEN** CLI SHALL 使用提供的参数调用 `POST /api/agents` 并显示创建的 agent
 
-#### Scenario: Get agent
-- **WHEN** `hecate agent get <agent_id>` is executed
-- **THEN** the CLI SHALL call `GET /api/agents/{id}` and display the agent details
+#### Scenario: 获取 agent
+- **WHEN** 执行 `hecate agent get <agent_id>`
+- **THEN** CLI SHALL 调用 `GET /api/agents/{id}` 并显示 agent 详情
 
-#### Scenario: Update agent
-- **WHEN** `hecate agent update <agent_id> --name "New Name"` is executed
-- **THEN** the CLI SHALL call `PUT /api/agents/{id}` with the updated fields
+#### Scenario: 更新 agent
+- **WHEN** 执行 `hecate agent update <agent_id> --name "New Name"`
+- **THEN** CLI SHALL 使用更新的字段调用 `PUT /api/agents/{id}`
 
-#### Scenario: Delete agent
-- **WHEN** `hecate agent delete <agent_id>` is executed
-- **THEN** the CLI SHALL prompt for confirmation and call `DELETE /api/agents/{id}`
+#### Scenario: 删除 agent
+- **WHEN** 执行 `hecate agent delete <agent_id>`
+- **THEN** CLI SHALL 提示确认并调用 `DELETE /api/agents/{id}`
 
-### Requirement: Session management commands
-The CLI SHALL provide `hecate session` subcommands for session lifecycle.
+### Requirement: Session 管理命令
+CLI SHALL 为 session 生命周期提供 `hecate session` 子命令。
 
-#### Scenario: Create session
-- **WHEN** `hecate session create --agent-id <id>` is executed
-- **THEN** the CLI SHALL call `POST /api/sessions` and return the session ID
+#### Scenario: 创建 session
+- **WHEN** 执行 `hecate session create --agent-id <id>`
+- **THEN** CLI SHALL 调用 `POST /api/sessions` 并返回 session ID
 
-#### Scenario: List sessions
-- **WHEN** `hecate session list` is executed
-- **THEN** the CLI SHALL call `GET /api/sessions` and display sessions in a table
+#### Scenario: 列出 sessions
+- **WHEN** 执行 `hecate session list`
+- **THEN** CLI SHALL 调用 `GET /api/sessions` 并在表格中显示 sessions
 
-#### Scenario: Resume interrupted session
-- **WHEN** `hecate session resume <session_id> --message "approved"` is executed
-- **THEN** the CLI SHALL call `POST /api/sessions/{id}/resume` with the resume value
+#### Scenario: 恢复中断的 session
+- **WHEN** 执行 `hecate session resume <session_id> --message "approved"`
+- **THEN** CLI SHALL 使用 resume 值调用 `POST /api/sessions/{id}/resume`
 
-### Requirement: Chat commands with streaming
-The CLI SHALL provide `hecate chat send` for one-shot messages and `hecate chat interactive` for interactive REPL sessions with SSE streaming.
+### Requirement: 带流式的聊天命令
+CLI SHALL 提供 `hecate chat send` 用于一次性消息和 `hecate chat interactive` 用于带 SSE 流式的交互式 REPL 会话。
 
-#### Scenario: One-shot chat message
-- **WHEN** `hecate chat send <agent_id> "Hello"` is executed
-- **THEN** the CLI SHALL call `POST /v1/chat/completions` with the message and display the assistant's response
+#### Scenario: 一次性聊天消息
+- **WHEN** 执行 `hecate chat send <agent_id> "Hello"`
+- **THEN** CLI SHALL 使用消息调用 `POST /v1/chat/completions` 并显示助手的响应
 
-#### Scenario: Interactive chat with streaming
-- **WHEN** `hecate chat interactive <agent_id>` is executed
-- **THEN** the CLI SHALL open an interactive REPL that sends messages to the agent with `stream=true`, displaying response tokens incrementally as they arrive
+#### Scenario: 带流式的交互式聊天
+- **WHEN** 执行 `hecate chat interactive <agent_id>`
+- **THEN** CLI SHALL 打开一个交互式 REPL，使用 `stream=true` 向 agent 发送消息，增量显示到达的响应 token
 
-#### Scenario: Interactive chat slash commands
-- **WHEN** the user types `/clear`, `/exit`, or `/history` in interactive mode
-- **THEN** the CLI SHALL handle the slash command accordingly (clear context, exit, show conversation history)
+#### Scenario: 交互式聊天斜杠命令
+- **WHEN** 用户在交互模式下输入 `/clear`、`/exit` 或 `/history`
+- **THEN** CLI SHALL 相应地处理斜杠命令（清除上下文、退出、显示会话历史）
 
-#### Scenario: Streaming SSE parsing
-- **WHEN** the API returns SSE events during streaming
-- **THEN** the CLI SHALL parse `data: {...}` lines, extract `choices[0].delta.content`, and print each token without newline
+#### Scenario: 流式 SSE 解析
+- **WHEN** API 在流式期间返回 SSE 事件
+- **THEN** CLI SHALL 解析 `data: {...}` 行，提取 `choices[0].delta.content`，并打印每个 token 而不换行
 
-### Requirement: Knowledge base commands
-The CLI SHALL provide `hecate kb` subcommands for knowledge base and document management.
+### Requirement: 知识库命令
+CLI SHALL 为知识库和文档管理提供 `hecate kb` 子命令。
 
-#### Scenario: List knowledge bases
-- **WHEN** `hecate kb list` is executed
-- **THEN** the CLI SHALL call `GET /api/knowledge-bases` and display KBs in a table
+#### Scenario: 列出知识库
+- **WHEN** 执行 `hecate kb list`
+- **THEN** CLI SHALL 调用 `GET /api/knowledge-bases` 并在表格中显示知识库
 
-#### Scenario: Create knowledge base
-- **WHEN** `hecate kb create --name "My KB" --description "Test"` is executed
-- **THEN** the CLI SHALL call `POST /api/knowledge-bases` and return the created KB
+#### Scenario: 创建知识库
+- **WHEN** 执行 `hecate kb create --name "My KB" --description "Test"`
+- **THEN** CLI SHALL 调用 `POST /api/knowledge-bases` 并返回创建的知识库
 
-#### Scenario: Upload document to knowledge base
-- **WHEN** `hecate kb upload <kb_id> document.pdf` is executed
-- **THEN** the CLI SHALL call `POST /api/knowledge-bases/{id}/documents` with multipart file upload
+#### Scenario: 向知识库上传文档
+- **WHEN** 执行 `hecate kb upload <kb_id> document.pdf`
+- **THEN** CLI SHALL 使用 multipart 文件上传调用 `POST /api/knowledge-bases/{id}/documents`
 
-#### Scenario: List documents in knowledge base
-- **WHEN** `hecate kb documents <kb_id>` is executed
-- **THEN** the CLI SHALL call `GET /api/knowledge-bases/{id}/documents` and display documents with parsing status
+#### Scenario: 列出知识库中的文档
+- **WHEN** 执行 `hecate kb documents <kb_id>`
+- **THEN** CLI SHALL 调用 `GET /api/knowledge-bases/{id}/documents` 并显示带解析状态的文档
 
-### Requirement: Tool commands
-The CLI SHALL provide `hecate tool` subcommands for tool listing.
+### Requirement: Tool 命令
+CLI SHALL 为工具列出提供 `hecate tool` 子命令。
 
-#### Scenario: List tools
-- **WHEN** `hecate tool list` is executed
-- **THEN** the CLI SHALL call `GET /api/tools` and display tools in a table
+#### Scenario: 列出工具
+- **WHEN** 执行 `hecate tool list`
+- **THEN** CLI SHALL 调用 `GET /api/tools` 并在表格中显示工具
 
-#### Scenario: List tools filtered by source
-- **WHEN** `hecate tool list --source builtin` is executed
-- **THEN** the CLI SHALL call `GET /api/tools?source=builtin` and display only builtin tools
+#### Scenario: 按源过滤列出工具
+- **WHEN** 执行 `hecate tool list --source builtin`
+- **THEN** CLI SHALL 调用 `GET /api/tools?source=builtin` 并仅显示内置工具
 
-### Requirement: Skill CRUD commands
-The CLI SHALL provide `hecate skill` subcommands for skill management.
+### Requirement: Skill CRUD 命令
+CLI SHALL 为技能管理提供 `hecate skill` 子命令。
 
-#### Scenario: List skills
-- **WHEN** `hecate skill list` is executed
-- **THEN** the CLI SHALL call `GET /api/skills` and display skills in a table
+#### Scenario: 列出技能
+- **WHEN** 执行 `hecate skill list`
+- **THEN** CLI SHALL 调用 `GET /api/skills` 并在表格中显示技能
 
-#### Scenario: Import skill from SKILL.md
-- **WHEN** `hecate skill import skill.md` is executed
-- **THEN** the CLI SHALL call `POST /api/skills/import` with the file upload
+#### Scenario: 从 SKILL.md 导入技能
+- **WHEN** 执行 `hecate skill import skill.md`
+- **THEN** CLI SHALL 使用文件上传调用 `POST /api/skills/import`
 
-### Requirement: Workflow commands
-The CLI SHALL provide `hecate workflow` subcommands for workflow CRUD, versioning, validation, and test runs.
+### Requirement: Workflow 命令
+CLI SHALL 为工作流 CRUD、版本管理、验证和测试运行提供 `hecate workflow` 子命令。
 
-#### Scenario: List workflows
-- **WHEN** `hecate workflow list` is executed
-- **THEN** the CLI SHALL call `GET /api/workflows` and display workflows in a table
+#### Scenario: 列出工作流
+- **WHEN** 执行 `hecate workflow list`
+- **THEN** CLI SHALL 调用 `GET /api/workflows` 并在表格中显示工作流
 
-#### Scenario: Validate workflow
-- **WHEN** `hecate workflow validate <workflow_id>` is executed
-- **THEN** the CLI SHALL call `POST /api/workflows/{id}/validate` and display validation results
+#### Scenario: 验证工作流
+- **WHEN** 执行 `hecate workflow validate <workflow_id>`
+- **THEN** CLI SHALL 调用 `POST /api/workflows/{id}/validate` 并显示验证结果
 
-#### Scenario: Test run workflow
-- **WHEN** `hecate workflow test-run <workflow_id>` is executed
-- **THEN** the CLI SHALL call `POST /api/workflows/{id}/test-run` and display the execution result
+#### Scenario: 测试运行工作流
+- **WHEN** 执行 `hecate workflow test-run <workflow_id>`
+- **THEN** CLI SHALL 调用 `POST /api/workflows/{id}/test-run` 并显示执行结果
 
-### Requirement: Prompt commands
-The CLI SHALL provide `hecate prompt` subcommands for prompt CRUD and version management.
+### Requirement: Prompt 命令
+CLI SHALL 为 prompt CRUD 和版本管理提供 `hecate prompt` 子命令。
 
-#### Scenario: List prompts
-- **WHEN** `hecate prompt list` is executed
-- **THEN** the CLI SHALL call `GET /api/prompts` and display prompts in a table
+#### Scenario: 列出 prompts
+- **WHEN** 执行 `hecate prompt list`
+- **THEN** CLI SHALL 调用 `GET /api/prompts` 并在表格中显示 prompts
 
-#### Scenario: Get prompt by label
-- **WHEN** `hecate prompt by-label production` is executed
-- **THEN** the CLI SHALL call `GET /api/prompts/by-label/production` and display the prompt content
+#### Scenario: 按标签获取 prompt
+- **WHEN** 执行 `hecate prompt by-label production`
+- **THEN** CLI SHALL 调用 `GET /api/prompts/by-label/production` 并显示 prompt 内容
 
-### Requirement: Memory commands
-The CLI SHALL provide `hecate memory` subcommands for memory blocks and user memories.
+### Requirement: Memory 命令
+CLI SHALL 为记忆块和用户记忆提供 `hecate memory` 子命令。
 
-#### Scenario: List agent memory blocks
-- **WHEN** `hecate memory blocks <agent_id>` is executed
-- **THEN** the CLI SHALL call `GET /api/agents/{id}/memory-blocks` and display blocks in a table
+#### Scenario: 列出 agent 记忆块
+- **WHEN** 执行 `hecate memory blocks <agent_id>`
+- **THEN** CLI SHALL 调用 `GET /api/agents/{id}/memory-blocks` 并在表格中显示块
 
-#### Scenario: Search user memories
-- **WHEN** `hecate memory search <query>` is executed
-- **THEN** the CLI SHALL call `GET /api/memory?q=<query>` and display matching memories
+#### Scenario: 搜索用户记忆
+- **WHEN** 执行 `hecate memory search <query>`
+- **THEN** CLI SHALL 调用 `GET /api/memory?q=<query>` 并显示匹配的记忆
 
-### Requirement: Template commands
-The CLI SHALL provide `hecate template` subcommands for agent and orchestration templates.
+### Requirement: Template 命令
+CLI SHALL 为 agent 和编排模板提供 `hecate template` 子命令。
 
-#### Scenario: List agent templates
-- **WHEN** `hecate template agents` is executed
-- **THEN** the CLI SHALL call `GET /api/agent-templates` and display available templates
+#### Scenario: 列出 agent 模板
+- **WHEN** 执行 `hecate template agents`
+- **THEN** CLI SHALL 调用 `GET /api/agent-templates` 并显示可用模板
 
-#### Scenario: Instantiate agent template
-- **WHEN** `hecate template agents instantiate <template_id> --name "My Agent"` is executed
-- **THEN** the CLI SHALL call `POST /api/agent-templates/{id}/instantiate` and return the created agent
+#### Scenario: 实例化 agent 模板
+- **WHEN** 执行 `hecate template agents instantiate <template_id> --name "My Agent"`
+- **THEN** CLI SHALL 调用 `POST /api/agent-templates/{id}/instantiate` 并返回创建的 agent
 
-### Requirement: Conversation commands
-The CLI SHALL provide `hecate conversation` subcommands for conversation management.
+### Requirement: Conversation 命令
+CLI SHALL 为会话管理提供 `hecate conversation` 子命令。
 
-#### Scenario: List conversations
-- **WHEN** `hecate conversation list` is executed
-- **THEN** the CLI SHALL call `GET /api/conversations` and display conversations in a table
+#### Scenario: 列出会话
+- **WHEN** 执行 `hecate conversation list`
+- **THEN** CLI SHALL 调用 `GET /api/conversations` 并在表格中显示会话
 
-#### Scenario: Get conversation with messages
-- **WHEN** `hecate conversation get <conversation_id>` is executed
-- **THEN** the CLI SHALL call `GET /api/conversations/{id}` and display the conversation with all messages
+#### Scenario: 获取带消息的会话
+- **WHEN** 执行 `hecate conversation get <conversation_id>`
+- **THEN** CLI SHALL 调用 `GET /api/conversations/{id}` 并显示包含所有消息的会话
 
-### Requirement: Model provider commands
-The CLI SHALL provide `hecate model` subcommands for model listing and provider management.
+### Requirement: Model provider 命令
+CLI SHALL 为模型列出和提供者管理提供 `hecate model` 子命令。
 
-#### Scenario: List available models
-- **WHEN** `hecate model list` is executed
-- **THEN** the CLI SHALL call `GET /v1/models` and display models in a table
+#### Scenario: 列出可用模型
+- **WHEN** 执行 `hecate model list`
+- **THEN** CLI SHALL 调用 `GET /v1/models` 并在表格中显示模型
 
-#### Scenario: Test model provider connectivity
-- **WHEN** `hecate model providers test <provider_id>` is executed
-- **THEN** the CLI SHALL call `POST /api/model-providers/{id}/test` and display the test result
+#### Scenario: 测试模型提供者连接
+- **WHEN** 执行 `hecate model providers test <provider_id>`
+- **THEN** CLI SHALL 调用 `POST /api/model-providers/{id}/test` 并显示测试结果
 
-### Requirement: Pagination support
-The CLI SHALL support `--page` and `--page-size` flags for all list commands, defaulting to page=1 and page_size=20.
+### Requirement: 分页支持
+CLI SHALL 为所有列表命令支持 `--page` 和 `--page-size` 标志，默认为 page=1 和 page_size=20。
 
-#### Scenario: Custom pagination
-- **WHEN** `hecate agent list --page 2 --page-size 10` is executed
-- **THEN** the CLI SHALL call `GET /api/agents?page=2&page_size=10` and display the results
+#### Scenario: 自定义分页
+- **WHEN** 执行 `hecate agent list --page 2 --page-size 10`
+- **THEN** CLI SHALL 调用 `GET /api/agents?page=2&page_size=10` 并显示结果
 
-### Requirement: CLI dependencies
-The CLI SHALL add `typer>=0.15.0` and `rich>=13.0.0` to the main dependencies in pyproject.toml, and register a `hecate` console_scripts entry point pointing to `hecate.cli.main:app`.
+### Requirement: CLI 依赖
+CLI SHALL 将 `typer>=0.15.0` 和 `rich>=13.0.0` 添加到 pyproject.toml 的主要依赖中，并注册指向 `hecate.cli.main:app` 的 `hecate` console_scripts 入口点。
 
-#### Scenario: Install and run CLI
-- **WHEN** `uv pip install -e .` is executed
-- **THEN** the `hecate` command SHALL be available in the shell
+#### Scenario: 安装并运行 CLI
+- **WHEN** 执行 `uv pip install -e .`
+- **THEN** `hecate` 命令 SHALL 在 shell 中可用

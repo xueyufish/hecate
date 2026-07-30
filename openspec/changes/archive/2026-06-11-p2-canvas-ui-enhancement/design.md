@@ -1,85 +1,85 @@
-## Context
+## Context — 背景
 
-The workflow canvas editor (`web/src/components/workflow/`) is a React Flow-based visual graph editor. It currently supports:
+工作流画布编辑器（`web/src/components/workflow/`）是一个基于 React Flow 的可视化图谱编辑器。当前支持：
 
-- **6 node types** rendered via `nodeTypeComponents` in `node-types.tsx`: conversation, condition, tool-call, agent, knowledge-retrieval, variable-set. Fan-out and merge exist as components but are excluded from the node palette.
-- **Edge types**: Only handoff has custom rendering (dashed purple). All other edges use React Flow's default Bezier.
-- **Config panel** (`config-panel.tsx`): Renders per-node-type forms. Agent nodes only expose `agent_ref` as a text input.
-- **Template picker** (`template-picker.tsx`): Loads templates from `/api/orchestration-templates`, populates canvas as read-only one-shot.
-- **Node palette** (`node-palette.tsx`): 6 draggable items. No fan-out or merge.
-- **DSL bridge**: `dsl-bridge.ts` converts between Graph DSL JSON and React Flow node/edge arrays. Currently one-directional (DSL → canvas).
+- **6 种节点类型**，通过 `node-types.tsx` 中的 `nodeTypeComponents` 渲染：conversation、condition、tool-call、agent、knowledge-retrieval、variable-set。Fan-out 和 merge 虽作为组件存在，但被排除在节点面板之外。
+- **边类型**：仅 handoff 具有自定义渲染（紫色虚线）。所有其他边使用 React Flow 的默认 Bezier 曲线。
+- **配置面板**（`config-panel.tsx`）：渲染每种节点类型的表单。Agent 节点仅暴露 `agent_ref` 文本输入框。
+- **模板选择器**（`template-picker.tsx`）：从 `/api/orchestration-templates` 加载模板，以只读一次性方式填充画布。
+- **节点面板**（`node-palette.tsx`）：6 个可拖拽项。不包含 fan-out 或 merge。
+- **DSL 桥接**：`dsl-bridge.ts` 在 Graph DSL JSON 与 React Flow 节点/边数组之间转换。当前为单向（DSL → canvas）。
 
-The backend Graph DSL schema (`schemas/graph-dsl.schema.json`) already supports: agent `invocation_mode` (direct/tool), `channels` (readable/writable), fan-out `branches`, merge `fan_out_source`/`output_channel`, edge `type: "handoff"`, and conditional edge targets (dict mapping). No backend changes needed — this is purely a frontend enhancement.
+后端 Graph DSL 模式（`schemas/graph-dsl.schema.json`）已支持：agent `invocation_mode`（direct/tool）、`channels`（readable/writable）、fan-out `branches`、merge `fan_out_source`/`output_channel`、边 `type: "handoff"` 以及条件边目标（字典映射）。无需后端改动 — 这纯粹是前端增强。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Enable rich agent node configuration matching the full Graph DSL schema capabilities
-- Allow template customization after loading — edit, modify, save as new workflow
-- Provide visual edge type differentiation for 4 distinct edge types
-- Enable interactive fan-out/merge node creation and configuration
-- All changes are frontend-only with no backend API modifications
+**目标：**
+- 提供与完整 Graph DSL 模式能力匹配的丰富 agent 节点配置
+- 允许模板加载后进行自定义 — 编辑、修改、另存为新工作流
+- 为 4 种不同的边类型提供可视化区分
+- 支持交互式 fan-out/merge 节点创建和配置
+- 所有更改仅限前端，无需后端 API 修改
 
-**Non-Goals:**
-- Backend Graph DSL schema changes (already supports all needed fields)
-- Real-time collaboration / multi-user editing
-- Undo/redo system (can be added later)
-- Workflow version history (covered by existing `workflow-version-publish` spec)
-- Canvas auto-layout algorithms (manual positioning only)
-- Execution visualization during test runs (already in `multi-agent-canvas` spec)
+**非目标：**
+- 后端 Graph DSL 模式变更（已支持所有必要字段）
+- 实时协作 / 多用户编辑
+- 撤销/重做系统（可后续添加）
+- 工作流版本历史（由现有 `workflow-version-publish` 规范覆盖）
+- 画布自动布局算法（仅手动定位）
+- 测试运行期间的执行可视化（已在 `multi-agent-canvas` 规范中）
 
-## Decisions
+## Decisions — 决策
 
-### D1: Config panel uses field-per-section layout with API-backed selectors
+### D1：配置面板采用按字段分区的布局与 API 驱动的选择器
 
-**Decision**: Replace the agent node's single `agent_ref` text input with a structured form containing: (1) Agent selector (dropdown fetching from `/api/agents`), (2) Role description (textarea for `system_prompt`), (3) Invocation mode (radio: direct/tool), (4) Channel selector (dual-list multi-select from graph's `state` keys), (5) Model override (text input).
+**决策**：将 agent 节点单一的 `agent_ref` 文本输入替换为结构化表单，包含：（1）Agent 选择器（从 `/api/agents` 获取的下拉列表）、（2）角色描述（`system_prompt` 文本域）、（3）调用模式（单选：direct/tool）、（4）通道选择器（基于图谱 `state` 键的双列多选）、（5）模型覆盖（文本输入）。
 
-**Rationale**: The Graph DSL already supports all these fields in `node.config`. The config panel just needs to expose them. Using API-backed selectors ensures the user picks valid agent IDs and channel names rather than typing freeform.
+**理由**：Graph DSL 已在 `node.config` 中支持所有这些字段。配置面板只需将其暴露即可。使用 API 驱动的选择器可确保用户选择有效的 agent ID 和通道名称，而非自由输入。
 
-**Alternative considered**: Keep freeform text inputs and validate on save — rejected because dropdowns prevent errors and match the UX of Coze/AgentArts.
+**备选方案**：保留自由文本输入并在保存时验证 — 已拒绝，因为下拉列表可防止错误且与 Coze/AgentArts 的 UX 一致。
 
-### D2: Template customization via edit mode flag, not clone-and-edit
+### D2：通过编辑模式标志实现模板自定义，而非克隆后编辑
 
-**Decision**: After loading a template, set an `isCustomizing` flag in canvas state. This flag enables all canvas editing (add/remove nodes, edit configs, adjust connections). The "Save" action calls the workflow create API with the modified graph. Original template is never modified.
+**决策**：加载模板后，在画布状态中设置 `isCustomizing` 标志。该标志启用所有画布编辑（添加/删除节点、编辑配置、调整连接）。"保存"操作使用修改后的图谱调用工作流创建 API。原始模板永不修改。
 
-**Rationale**: Templates are read-only assets. Customization creates a new workflow derived from the template. This matches the "Save As" mental model users expect.
+**理由**：模板是只读资产。自定义操作会创建从模板派生出的新工作流。这符合用户期望的"另存为"心智模型。
 
-**Alternative considered**: Clone template JSON then edit the clone — equivalent behavior, but the flag approach is simpler to implement since the canvas is already in edit mode by default; we just need to prevent accidental template overwrite.
+**备选方案**：克隆模板 JSON 然后编辑克隆 — 行为等效，但标志方法实现更简单，因为画布默认已在编辑模式；我们只需防止意外覆盖模板。
 
-### D3: Edge type selector as connection-line popover
+### D3：边类型选择器作为连接线弹出层
 
-**Decision**: When the user drags a connection from a source handle, show a small popover near the mouse with edge type options: Default, Handoff, Conditional. The selection determines the edge's `data.edgeType` and visual style. Fan-out edges are auto-created when connecting to a fan-out node (no manual selection needed).
+**决策**：当用户从源手柄拖动连接时，在鼠标附近显示一个小型弹出层，包含边类型选项：Default、Handoff、Conditional。选择决定边的 `data.edgeType` 和视觉样式。Fan-out 边在连接到 fan-out 节点时自动创建（无需手动选择）。
 
-**Rationale**: React Flow's `onConnect` event fires after the connection is made. We intercept it to show the type selector before finalizing. This matches the UX pattern of FigJam/Miro connection type selection.
+**理由**：React Flow 的 `onConnect` 事件在连接建立后触发。我们在最终确定前拦截它以显示类型选择器。这与 FigJam/Miro 连接类型选择的 UX 模式一致。
 
-**Alternative considered**: Pre-select edge type in a toolbar — rejected because it requires mode-switching which is less intuitive than contextual selection.
+**备选方案**：在工具栏中预选边类型 — 已拒绝，因为需要模式切换，不如上下文选择直观。
 
-### D4: Fan-out and merge added to node palette with structured config
+### D4：Fan-out 和 merge 添加到节点面板并支持结构化配置
 
-**Decision**: Add fan-out and merge to the node palette. On drop, fan-out nodes prompt for branch count (2-6). Branch targets are configured by connecting edges from the fan-out node. Merge nodes require linking to a fan-out source and specifying an output channel.
+**决策**：将 fan-out 和 merge 添加到节点面板。拖放时，fan-out 节点提示输入分支数量（2-6）。通过从 fan-out 节点连接边来配置分支目标。Merge 节点需要链接到 fan-out 源并指定输出通道。
 
-**Rationale**: The current `fan-out-merge-visual` spec excludes these from the palette because they "can only appear when loaded from an existing DSL." This change reverses that decision — interactive creation is needed for real workflow design.
+**理由**：当前的 `fan-out-merge-visual` 规范将它们排除在面板之外，因为它们"只能在从现有 DSL 加载时出现"。此变更推翻了该决定 — 实际工作流设计需要交互式创建。
 
-**Alternative considered**: Auto-insert fan-out/merge pairs when the user drags a parallel pattern — too magical, hard to predict intent. Simple node-by-node creation is more predictable.
+**备选方案**：当用户拖入并行模式时自动插入 fan-out/merge 对 — 过于魔法，难以预测意图。逐个节点创建更可预测。
 
-### D5: Channel selector reads from graph state declaration
+### D5：通道选择器从图谱状态声明中读取
 
-**Decision**: The channel multi-select in agent node config reads available channels from the graph's `state` declaration (the top-level `state` object in Graph DSL). Users can select which channels an agent reads from and writes to.
+**决策**：Agent 节点配置中的通道多选从图谱的 `state` 声明（Graph DSL 中的顶层 `state` 对象）读取可用通道。用户可以选择 agent 读取和写入的通道。
 
-**Rationale**: Channels are defined at the graph level, not per-node. The selector must show all declared channels and let the user pick a subset for each agent's readable/writable lists. This matches the DSL schema where `channels.readable` and `channels.writable` reference top-level state keys.
+**理由**：通道在图谱级别定义，而非每个节点。选择器必须显示所有声明的通道，并让用户为每个 agent 的 readable/writable 列表选择子集。这与 `channels.readable` 和 `channels.writable` 引用顶层 state 键的 DSL 模式一致。
 
-### D6: Round-trip DSL bridge for template customization
+### D6：用于模板自定义的双向 DSL 桥接
 
-**Decision**: Enhance `dsl-bridge.ts` with a `reactFlowToDsl()` function that converts canvas nodes/edges back to Graph DSL JSON. This enables saving customized workflows.
+**决策**：增强 `dsl-bridge.ts`，添加 `reactFlowToDsl()` 函数，将画布节点/边转换回 Graph DSL JSON。这使保存自定义工作流成为可能。
 
-**Rationale**: Currently only `dslToReactFlow()` exists (one-directional). Template customization requires converting the edited canvas state back to DSL for saving. The function must handle: node type mapping, config extraction, edge type reconstruction, and state channel discovery from node configs.
+**理由**：当前仅存在 `dslToReactFlow()`（单向）。模板自定义需要将编辑后的画布状态转换回 DSL 以便保存。该函数必须处理：节点类型映射、配置提取、边类型重建以及从节点配置中发现状态通道。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-**[Edge type selector UX complexity]** → The popover-on-connect pattern may feel unfamiliar. Mitigation: Keep the popover minimal (3 options with icons), default to "Default" type, and ensure the existing handoff handle behavior continues to work.
+**[边类型选择器 UX 复杂度]** → 连接时弹出层模式可能让人感觉陌生。缓解措施：保持弹出层简洁（3 个选项带图标），默认选择 "Default" 类型，并确保现有 handoff 手柄行为继续工作。
 
-**[Channel selector depends on graph state]** → If no channels are declared (new empty graph), the selector shows nothing. Mitigation: Show a hint "Add channels in graph settings" and allow freeform channel name entry as fallback.
+**[通道选择器依赖图谱状态]** → 如果未声明任何通道（新的空图谱），选择器显示为空。缓解措施：显示提示"在图谱设置中添加通道"，并允许自由输入通道名称作为后备方案。
 
-**[Fan-out/merge config validation]** → Invalid fan-out/merge configurations (e.g., merge without fan-out source) will fail at compile time, not edit time. Mitigation: Add visual warnings in the config panel when fan-out has no branches or merge has no source link.
+**[Fan-out/merge 配置验证]** → 无效的 fan-out/merge 配置（例如 merge 没有 fan-out 源）将在编译时而非编辑时失败。缓解措施：当 fan-out 没有分支或 merge 没有源链接时，在配置面板中添加视觉警告。
 
-**[Template customization state management]** → Adding `isCustomizing` flag and edit tracking to canvas state. Mitigation: Use the existing Zustand store pattern — add a `customizingFrom` field to track template origin.
+**[模板自定义状态管理]** → 向画布状态添加 `isCustomizing` 标志和编辑跟踪。缓解措施：使用现有的 Zustand 存储模式 — 添加 `customizingFrom` 字段来跟踪模板来源。

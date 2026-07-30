@@ -1,64 +1,64 @@
-## Context
+## Context — 背景
 
-The workflow canvas editor (`workflows/[id]/page.tsx`) has a three-column layout: left palette (200px), center canvas, right panel (280px). The right panel currently shows test-run input form and node execution results, but **no node configuration editing**.
+工作流画布编辑器（`workflows/[id]/page.tsx`）具有三列布局：左侧调色板（200px）、中央画布、右侧面板（280px）。右侧面板当前显示测试运���输入表单和节点执行结果，但**没有节点配置编辑**。
 
-A fully-built `ConfigPanel` component exists (`components/workflow/config-panel.tsx`, 217 lines) with forms for all 6 node types (conversation, condition, tool-call, agent, knowledge-retrieval, variable-set). It accepts `{ node, onUpdate, onClose }` props but is never imported or rendered.
+一个完全构建好的 `ConfigPanel` 组件存在（`components/workflow/config-panel.tsx`，217 行），包含所有 6 种节点类型的表单（conversation、condition、tool-call、agent、knowledge-retrieval、variable-set）。它接受 `{ node, onUpdate, onClose }` props，但从未被导入或渲染。
 
-The backend DSL schema defines 8 node types. The frontend only handles 6 — fan-out and merge have no type definitions, visual components, or config forms.
+后端 DSL 模式定义了 8 种节点类型。前端仅处理 6 种——扇出和合并没有类型定义、视觉组件或配置表单。
 
-Node positions are calculated with a fixed grid formula on every DSL load, so any manual layout adjustments are lost on refresh.
+节点位置在每次 DSL 加载时使用固定网格公式计算，因此任何手动布局调整都会在刷新时丢失。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Users can click a node on the canvas to open its configuration in the right-side panel
-- ConfigPanel edits propagate to the canvas and trigger auto-save
-- Node layout positions persist across page reloads (localStorage, keyed by workflowId)
-- Fan-out and merge nodes render visually when present in a loaded DSL (no creation/editing)
+**目标：**
+- 用户可以点击画布上的节点以在右侧面板中打开其配置
+- ConfigPanel 编辑传播到画布并触发自动保存
+- 节点布局位置跨页面重新加载持久化（localStorage，以 workflowId 为键）
+- 当加载的 DSL 中存在扇出和合并节点时，它们能视觉渲染（无创建/编辑）
 
-**Non-Goals:**
-- Fan-out/merge node creation in the palette or configuration forms (deferred to P3)
-- Test-run result display in the right panel (stays in bottom panel)
-- DSL schema changes (backend unchanged)
-- i18n or accessibility improvements
+**非目标：**
+- 在调色板或配置表单中创建扇出/合并节点（推迟到 P3）
+- 在右侧面板中显示测试运行结果（保持在底部面板）
+- DSL 模式变更（后端不变）
+- i18n 或可访问性改进
 
-## Decisions
+## Decisions — 设计决策
 
-### Decision 1: Right-side panel shows ConfigPanel when node is selected
+### 决策 1：选中节点时右侧面板显示 ConfigPanel
 
-**Choice**: Dynamic right panel — ConfigPanel when node selected, placeholder when nothing selected.
+**选择**：动态右侧面板——选中节点时显示 ConfigPanel，未选中时显示占位文本。
 
-**Alternatives considered**:
-- AgentArts-style inline node expansion (no side panel): Rejected because Hecate nodes have rich config (model, prompt, channels) that needs more space than inline expansion provides
-- Floating/drawer overlay: Rejected because it adds complexity without clear benefit over a dedicated panel
+**考虑的替代方案**：
+- AgentArts 风格的内联节点展开（无侧面板）：被否决，因为 Hecate 节点具有丰富的配置（model、prompt、channels），需要比内联展开更多空间
+- 浮动/抽屉覆盖层：被否决，因为它增加复杂性，没有比专用面板更明确的好处
 
-**Rationale**: The right panel already exists at 280px. Widening to 300px (matching ConfigPanel's existing `w-[300px]`) gives a natural home for node editing without new UI patterns.
+**理由**：右侧面板已存在为 280px。加宽到 300px（匹配 ConfigPanel 现有的 `w-[300px]`）为节点编辑提供了自然的承载位置，无需新的 UI 模式。
 
-### Decision 2: Test-run results stay in the bottom panel
+### 决策 2：测试运行结果保持在底部面板
 
-**Choice**: Right panel is exclusively for node editing. Test-run input form and results remain at the bottom.
+**选择**：右侧面板专用于节点编辑。测试运行输入表单和结果保持在底部。
 
-**Rationale**: Editing and test-run viewing are mutually exclusive workflows. Separating them keeps the right panel logic simple (two states: node selected / nothing selected) and avoids mode confusion.
+**理由**：编辑和测试运行查看是互斥的工作流。将它们分开保持右侧面板逻辑简单（两种状态：节点选中/未选中）并避免模式混淆。
 
-### Decision 3: Layout persistence uses localStorage, not DSL
+### 决策 3：布局持久化使用 localStorage，不使用 DSL
 
-**Choice**: Store ReactFlow node positions in `localStorage` keyed by `hecate-layout-${workflowId}`. DSL remains purely semantic (no position fields).
+**选择**：将 ReactFlow 节点位置存储在 `localStorage` 中，以 `hecate-layout-${workflowId}` 为键。DSL 保持纯语义（无位置字段）。
 
-**Alternatives considered**:
-- Add `position` to DSL schema: Rejected because it pollutes the semantic model with view-layer data
-- Backend API field: Rejected because layout is a frontend concern; avoids API changes
-- Auto-layout with dagre/elkjs: Considered for fallback only; user manual adjustments should persist
+**考虑的替代方案**：
+- 向 DSL 模式添加 `position`：被否决，因为它用视图层数据污染了语义模型
+- 后端 API 字段：被否决，因为布局是前端关注点；避免 API 变更
+- 使用 dagre/elkjs 的自动布局：仅作为回退方案考虑；用户手动调整应持久化
 
-**Rationale**: Clean separation of concerns. The DSL describes what the workflow does; localStorage describes how it looks. No backend changes needed.
+**理由**：清晰的关注点分离。DSL 描述工作流的功能；localStorage 描述其外观。无需后端变更。
 
-### Decision 4: Fan-out/merge as visual-only node types
+### 决策 4：扇出/合并作为仅视觉节点类型
 
-**Choice**: Add type enum values, visual components, and DSL bridge labels. No palette entry, no ConfigPanel form.
+**选择**：添加类型枚举值、视觉组件和 DSL 桥接标签。无调色板入口，无 ConfigPanel 表单。
 
-**Rationale**: If a workflow DSL contains fan-out/merge nodes (e.g., created via API), the frontend should render them instead of silently dropping them. Full creation/editing UI requires interaction design for branch wiring that should not be rushed.
+**理由**：如果工作流 DSL 包含扇出/合并节点（例如，通过 API 创建），前端应渲染它们而不是静默丢弃。完整的创建/编辑 UI 需要分支连接的交互相应设计，不应仓促完成。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险与权衡
 
-- **localStorage size limits**: Workflow layouts are small (<10KB per workflow), so hitting the ~5MB limit would require thousands of workflows. → Acceptable for now; can migrate to IndexedDB or backend API in P3 if needed.
-- **Fan-out/merge visual-only gap**: Users cannot create these nodes from the UI, only via API. → Documented as P3 TODO in feature-catalog.md.
-- **ConfigPanel width increase (280→300px)**: Slightly reduces canvas space. → Minimal impact; 20px difference is barely noticeable.
+- **localStorage 大小限制**：工作流布局很小（每个工作流 <10KB），达到约 5MB 限制需要数千个工作流。→ 目前可接受；如果需要，可在 P3 迁移到 IndexedDB 或后端 API。
+- **扇出/合并仅视觉的差距**：用户无法从 UI 创建这些节点，只能通过 API。→ 在 feature-catalog.md 中记录为 P3 TODO。
+- **ConfigPanel 宽度增加（280→300px）**：略微减少画布空间。→ 影响最小；20px 差异几乎不可察觉。

@@ -1,67 +1,67 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Extract facts from conversation
-The system SHALL extract persistent facts from conversations using LLM tool calling.
+### 需求：从对话中提取事实
+系统须使用 LLM 工具调用从对话中提取持久事实。
 
-#### Scenario: Extract user preference
-- **WHEN** a user says "I prefer Python over JavaScript"
-- **THEN** the system SHALL create a memory record with content "User prefers Python over JavaScript", type "semantic"
+#### 场景：提取用户偏好
+- **当** 用户说"我更喜欢 Python 而不是 JavaScript"
+- **则** 系统须创建一条内容为"用户更喜欢 Python 而不是 JavaScript"、类型为"semantic"的记忆记录
 
-#### Scenario: Extract procedural knowledge
-- **WHEN** a user describes a workflow "First check the logs, then restart the service"
-- **THEN** the system SHALL create a memory record with type "procedural"
+#### 场景：提取程序性知识
+- **当** 用户描述一个工作流"先检查日志，然后重启服务"
+- **则** 系统须创建一条类型为"procedural"的记忆记录
 
-### Requirement: Store memory with embedding
-The system SHALL store extracted memories with vector embeddings for semantic retrieval.
+### 需求：带 embedding 存储记忆
+系统须将提取的记忆与向量 embedding 一起存储，以便语义检索。
 
-#### Scenario: Memory stored with embedding
-- **WHEN** a memory is created
-- **THEN** the system SHALL generate an embedding vector and store it with the memory
+#### 场景：记忆与 embedding 一起存储
+- **当** 创建记忆时
+- **则** 系统须生成 embedding 向量并与记忆一起存储
 
-### Requirement: Retrieve relevant memories
-The system SHALL retrieve relevant memories based on semantic similarity to the current query.
+### 需求：检索相关记忆
+系统须基于与当前查询的语义相似度检索相关记忆。
 
-#### Scenario: Semantic search
-- **WHEN** a user asks "What's my preferred language?"
-- **THEN** the system SHALL retrieve memories about language preferences using vector similarity
+#### 场景：语义搜索
+- **当** 用户问"我偏好的语言是什么？"
+- **则** 系统须使用向量相似度检索有关语言偏好的记忆
 
-#### Scenario: Scope filtering
-- **WHEN** retrieving memories
-- **THEN** the system SHALL filter by scope (user_id, agent_id, session_id as configured)
+#### 场景：作用域过滤
+- **当** 检索记忆时
+- **则** 系统须按作用域（按配置的 user_id, agent_id, session_id）过滤
 
-### Requirement: Memory importance scoring
-The system SHALL assign importance scores to memories based on content and access patterns.
+### 需求：记忆重要性评分
+系统须根据内容和访问模式为记忆分配重要性评分。
 
-#### Scenario: Initial importance
-- **WHEN** a memory is first created
-- **THEN** the system SHALL assign an initial importance score based on content analysis
+#### 场景：初始重要性
+- **当** 首次创建记忆时
+- **则** 系统须基于内容分析分配初始重要性评分
 
-#### Scenario: Importance boost on access
-- **WHEN** a memory is retrieved and used
-- **THEN** the system SHALL increment its access_count and adjust importance
+#### 场景：访问时重要性提升
+- **当** 记忆被检索和使用时
+- **则** 系统须增加其 access_count 并调整重要性
 
-### Requirement: Memory CRUD API
-The system SHALL provide CRUD endpoints for memories.
+### 需求：记忆 CRUD API
+系统须提供记忆的 CRUD 端点。
 
-#### Scenario: Create memory
-- **WHEN** a user sends POST /api/memory with content and scope
-- **THEN** the system creates a memory with embedding and returns 201
+#### 场景：创建记忆
+- **当** 用户向 POST /api/memory 发送内容和作用域
+- **则** 系统创建带 embedding 的记忆并返回 201
 
-#### Scenario: List memories
-- **WHEN** a user sends GET /api/memory with scope filters
-- **THEN** the system returns matching memories ordered by importance
+#### 场景：列出记忆
+- **当** 用户向 GET /api/memory 发送作用域过滤器
+- **则** 系统返回按重要性排序的匹配记忆
 
-#### Scenario: Delete memory
-- **WHEN** a user sends DELETE /api/memory/{id}
-- **THEN** the system deletes the memory and returns 204
+#### 场景：删除记忆
+- **当** 用户向 DELETE /api/memory/{id} 发送请求
+- **则** 系统删除记忆并返回 204
 
-### Requirement: Memory injection into context
-The system SHALL inject relevant memories into the context before LLM calls.
+### 需求：将记忆注入上下文
+系统须在 LLM 调用前将相关记忆注入上下文。
 
-#### Scenario: Memories added to context
-- **WHEN** context is assembled for a conversation
-- **THEN** the system SHALL retrieve top-K relevant memories and add them as a system message
+#### 场景：记忆添加到上下文
+- **当** 为对话组装上下文时
+- **则** 系统须检索 top-K 相关记忆并将其作为 system 消息添加
 
-#### Scenario: Token budget respected
-- **WHEN** injecting memories
-- **THEN** the system SHALL not exceed the allocated token budget for memories
+#### 场景：遵守 token 预算
+- **当** 注入记忆时
+- **则** 系统须不超过分配给记忆的 token 预算

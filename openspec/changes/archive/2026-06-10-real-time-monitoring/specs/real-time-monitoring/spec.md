@@ -1,118 +1,118 @@
-## Purpose
-Define the real-time monitoring capability for Hecate — WebSocket-based metric streaming, time-windowed aggregation with dual-mode storage (InMemory + TimescaleDB), and REST metric query API.
+## Purpose — 目的
+定义 Hecate 的实时监控能力——基于 WebSocket 的指标流式传输、带双模式存储（InMemory + TimescaleDB）的时间窗口聚合，以及 REST 指标查询 API。
 
-## Requirements
+## Requirements — 需求
 
-### Requirement: MetricsStore ABC defines the metric persistence interface
-The engine SHALL define a `MetricsStore` ABC with abstract methods for recording and querying time-windowed metrics. Two implementations SHALL be provided: `InMemoryMetricsStore` (default, zero external deps) and `TimescaleMetricsStore` (optional, requires TimescaleDB extension).
+### 需求：MetricsStore ABC 定义指标持久化接口
+引擎应定义一个 `MetricsStore` ABC，带有用于记录和查询时间窗口指标的抽象方法。应提供两个实现：`InMemoryMetricsStore`（默认，零外部依赖）和 `TimescaleMetricsStore`（可选，需要 TimescaleDB 扩展）
 
-#### Scenario: Record a counter metric
-- **WHEN** `record_counter(name="requests_total", value=1, tags={"agent_id": "abc"})` is called
-- **THEN** the counter SHALL be incremented by the given value for the specified time bucket
+#### 场景：记录计数器指标
+- **当** 调用 `record_counter(name="requests_total", value=1, tags={"agent_id": "abc"})`
+- **则** 计数器应在指定的时间桶中按给定值递增
 
-#### Scenario: Record a histogram metric for latency
-- **WHEN** `record_histogram(name="request_latency_ms", value=150.3, tags={"endpoint": "/v1/chat"})` is called
-- **THEN** the value SHALL be appended to the histogram for the current time bucket
+#### 场景：记录延迟的直方图指标
+- **当** 调用 `record_histogram(name="request_latency_ms", value=150.3, tags={"endpoint": "/v1/chat"})`
+- **则** 该值应追加到当前时间桶的直方图中
 
-#### Scenario: Record a gauge metric
-- **WHEN** `record_gauge(name="active_sessions", value=42, tags={})` is called
-- **THEN** the gauge SHALL be set to the given value, replacing any previous value
+#### 场景：记录计量器指标
+- **当** 调用 `record_gauge(name="active_sessions", value=42, tags={})`
+- **则** 计量器应设为给定值，替换任何先前的值
 
-#### Scenario: Query metrics for a time window
-- **WHEN** `query_metrics(name="requests_total", window="5m", aggregation="sum")` is called
-- **THEN** it SHALL return the aggregated metric value for the last 5 minutes
+#### 场景：查询时间窗口的指标
+- **当** 调用 `query_metrics(name="requests_total", window="5m", aggregation="sum")`
+- **则** 应返回最近 5 分钟的聚合指标值
 
-#### Scenario: Query percentile latency
-- **WHEN** `query_metrics(name="request_latency_ms", window="5m", aggregation="p95")` is called
-- **THEN** it SHALL return the 95th percentile latency value for the last 5 minutes
+#### 场景：查询百分位延迟
+- **当** 调用 `query_metrics(name="request_latency_ms", window="5m", aggregation="p95")`
+- **则** 应返回最近 5 分钟的 95 百分位延迟值
 
-#### Scenario: Get a full snapshot of all metrics
-- **WHEN** `get_snapshot(windows=["1m", "5m", "15m"])` is called
-- **THEN** it SHALL return a `MetricsSnapshot` containing all counters, gauges, and histogram aggregations for each requested window
+#### 场景：获取所有指标的完整快照
+- **当** 调用 `get_snapshot(windows=["1m", "5m", "15m"])`
+- **则** 应返回包含每个请求窗口的所有计数器、计量器和直方图聚合的 `MetricsSnapshot`
 
-### Requirement: InMemoryMetricsStore provides zero-dependency default
-The `InMemoryMetricsStore` SHALL use ring buffers organized by time window (1m, 5m, 15m, 1h). Each metric event appends to all applicable windows. Expired data SHALL be garbage-collected on each snapshot query.
+### 需求：InMemoryMetricsStore 提供零依赖默认实现
+`InMemoryMetricsStore` 应使用按时间窗口（1m、5m、15m、1h）组织的环形缓冲区。每个指标事件追加到所有适用的窗口。过期数据应在每次快照查询时进行垃圾回收
 
-#### Scenario: Metrics accumulate in time windows
-- **WHEN** 100 counter increments are recorded over 2 minutes
-- **THEN** the 1m window SHALL contain only events from the last 60 seconds, while the 5m window SHALL contain all 100 events
+#### 场景：指标在时间窗口中累积
+- **当** 2 分钟内记录了 100 次计数器递增
+- **则** 1m 窗口仅包含过去 60 秒内的事件，而 5m 窗口包含所有 100 个事件
 
-#### Scenario: Expired data is garbage-collected
-- **WHEN** a snapshot is requested and a 1m ring buffer has entries older than 60 seconds
-- **THEN** those entries SHALL be removed during the snapshot computation
+#### 场景：过期数据被垃圾回收
+- **当** 请求快照时，1m 环形缓冲区有超过 60 秒的条目
+- **则** 这些条目应在快照计算期间被移除
 
-#### Scenario: Memory cap enforcement
-- **WHEN** the number of entries in any single ring buffer exceeds `MAX_METRICS_BUFFER_SIZE` (default 100,000)
-- **THEN** the oldest entries SHALL be evicted to stay within the cap
+#### 场景：内存上限强制
+- **当** 任何单个环形缓冲区中的条目数超过 `MAX_METRICS_BUFFER_SIZE`（默认 100,000）
+- **则** 最旧的条目应被逐出以保持在上限内
 
-### Requirement: TimescaleMetricsStore uses PostgreSQL time_bucket for aggregation
-The `TimescaleMetricsStore` SHALL persist metrics to a `metrics` table (or hypertable) and use TimescaleDB's `time_bucket()` function for server-side aggregation. When TimescaleDB is not installed, it SHALL fall back to standard PostgreSQL date_trunc aggregation.
+### 需求：TimescaleMetricsStore 使用 PostgreSQL time_bucket 进行聚合
+`TimescaleMetricsStore` 应将指标持久化到 `metrics` 表（或超表），并使用 TimescaleDB 的 `time_bucket()` 函数进行服务器端聚合。当 TimescaleDB 未安装时，应回退到标准 PostgreSQL date_trunc 聚合
 
-#### Scenario: Persist a metric to the database
-- **WHEN** `record_counter(name="requests_total", value=1, tags={"agent_id": "abc"})` is called
-- **THEN** a row SHALL be inserted into the metrics table with timestamp, name, value, and tags
+#### 场景：将指标持久化到数据库
+- **当** 调用 `record_counter(name="requests_total", value=1, tags={"agent_id": "abc"})`
+- **则** 应插入一行到 metrics 表，包含时间戳、名称、值和标签
 
-#### Scenario: Query with time_bucket aggregation
-- **WHEN** `query_metrics(name="requests_total", window="5m", aggregation="sum")` is called and TimescaleDB is available
-- **THEN** it SHALL use `time_bucket('5 minutes', timestamp)` for grouping
+#### 场景：使用 time_bucket 聚合查询
+- **当** 调用 `query_metrics(name="requests_total", window="5m", aggregation="sum")` 且 TimescaleDB 可用
+- **则** 应使用 `time_bucket('5 minutes', timestamp)` 进行分组
 
-#### Scenario: Fallback without TimescaleDB
-- **WHEN** TimescaleDB extension is not installed
-- **THEN** the store SHALL use `date_trunc('minute', timestamp)` as a fallback with equivalent results
+#### 场景：无 TimescaleDB 时的回退
+- **当** TimescaleDB 扩展未安装
+- **则** 存储应使用 `date_trunc('minute', timestamp)` 作为回退，结果等效
 
-### Requirement: WebSocket endpoint pushes metric snapshots
-The system SHALL expose a WebSocket endpoint at `/ws/monitoring` that accepts connections from dashboard clients and pushes a `MetricsSnapshot` JSON every 5 seconds (configurable via `METRICS_PUSH_INTERVAL`).
+### 需求：WebSocket 端点推送指标快照
+系统应暴露一个 WebSocket 端点 `/ws/monitoring`，接受来自仪表板客户端的连接，每 5 秒推送一次 `MetricsSnapshot` JSON（可通过 `METRICS_PUSH_INTERVAL` 配置）
 
-#### Scenario: Client connects and receives snapshots
-- **WHEN** a WebSocket client connects to `/ws/monitoring`
-- **THEN** it SHALL receive a JSON snapshot every `METRICS_PUSH_INTERVAL` seconds containing all metric windows
+#### 场景：客户端连接并接收快照
+- **当** WebSocket 客户端连接到 `/ws/monitoring`
+- **则** 应每 `METRICS_PUSH_INTERVAL` 秒接收包含所有指标窗口的 JSON 快照
 
-#### Scenario: Client subscribes to specific metrics
-- **WHEN** a connected client sends `{"action": "subscribe", "metrics": ["error_rate", "p95_latency"]}`
-- **THEN** subsequent snapshots SHALL include only the requested metrics
+#### 场景：客户端订阅特定指标
+- **当** 已连接客户端发送 `{"action": "subscribe", "metrics": ["error_rate", "p95_latency"]}`
+- **则** 后续快照应仅包含请求的指标
 
-#### Scenario: Client sends ping
-- **WHEN** a connected client sends `{"action": "ping"}`
-- **THEN** the server SHALL respond with `{"type": "pong"}`
+#### 场景：客户端发送 ping
+- **当** 已连接客户端发送 `{"action": "ping"}`
+- **则** 服务器应以 `{"type": "pong"}` 响应
 
-#### Scenario: Server shutdown notification
-- **WHEN** the application is shutting down
-- **THEN** the server SHALL send `{"type": "shutdown"}` to all connected clients before closing connections
+#### 场景：服务器关闭通知
+- **当** 应用正在关闭
+- **则** 服务器应在关闭连接前向所有已连接客户端发送 `{"type": "shutdown"}`
 
-#### Scenario: Stale connection cleanup
-- **WHEN** a WebSocket client disconnects without close frame
-- **THEN** the connection SHALL be removed from the active set on the next failed send attempt
+#### 场景：过期连接清理
+- **当** WebSocket 客户端未发送关闭帧即断开连接
+- **则** 连接应在下次发送尝试失败时从活动集中移除
 
-### Requirement: REST API for on-demand metric queries
-The system SHALL expose `GET /api/monitoring/metrics` endpoint accepting query parameters for metric name, time window, aggregation function, and tag filters.
+### 需求：按需指标查询的 REST API
+系统应暴露 `GET /api/monitoring/metrics` 端点，接受指标名称、时间窗口、聚合函数和标签过滤器的查询参数
 
-#### Scenario: Query a specific metric
-- **WHEN** `GET /api/monitoring/metrics?name=requests_total&window=5m&aggregation=sum` is called
-- **THEN** it SHALL return the aggregated metric value for the last 5 minutes
+#### 场景：查询特定指标
+- **当** 调用 `GET /api/monitoring/metrics?name=requests_total&window=5m&aggregation=sum`
+- **则** 应返回最近 5 分钟的聚合指标值
 
-#### Scenario: Query with tag filters
-- **WHEN** `GET /api/monitoring/metrics?name=requests_total&window=15m&aggregation=sum&agent_id=abc` is called
-- **THEN** it SHALL return the sum filtered to the specified agent_id tag
+#### 场景：使用标签过滤器查询
+- **当** 调用 `GET /api/monitoring/metrics?name=requests_total&window=15m&aggregation=sum&agent_id=abc`
+- **则** 应返回按指定 agent_id 标签过滤的总和
 
-#### Scenario: Query multiple metrics at once
-- **WHEN** `GET /api/monitoring/metrics?names=requests_total,error_count&window=5m` is called
-- **THEN** it SHALL return both metrics in a single response
+#### 场景：同时查询多个指标
+- **当** 调用 `GET /api/monitoring/metrics?names=requests_total,error_count&window=5m`
+- **则** 应在单个响应中返回两个指标
 
-#### Scenario: List available metrics
-- **WHEN** `GET /api/monitoring/metrics` is called without `name` or `names` parameter
-- **THEN** it SHALL return a list of all available metric names with their current values across all windows
+#### 场景：列出可用指标
+- **当** 在无 `name` 或 `names` 参数的情况下调用 `GET /api/monitoring/metrics`
+- **则** 应返回所有可用指标名称列表及其跨所有窗口的当前值
 
-### Requirement: MonitoringService orchestrates metric collection and push
-A `MonitoringService` SHALL manage the MetricsStore, the WebSocket ConnectionManager, and the background push task. It SHALL be initialized during application lifespan startup and stopped gracefully on shutdown.
+### 需求：MonitoringService 编排指标收集和推送
+`MonitoringService` 应管理 MetricsStore、WebSocket ConnectionManager 和后台推送任务。应在应用生命周期启动期间初始化，并在关闭时优雅停止
 
-#### Scenario: Service starts with application
-- **WHEN** the FastAPI application starts
-- **THEN** `MonitoringService` SHALL initialize the configured MetricsStore and start the background push task
+#### 场景：服务随应用启动
+- **当** FastAPI 应用启动时
+- **则** `MonitoringService` 应初始化配置的 MetricsStore 并启动后台推送任务
 
-#### Scenario: Service stops gracefully
-- **WHEN** the FastAPI application shuts down
-- **THEN** the push task SHALL be cancelled, a shutdown message SHALL be sent to all WebSocket clients, and all connections SHALL be closed
+#### 场景：服务优雅停止
+- **当** FastAPI 应用关闭时
+- **则** 推送任务应被取消，应向所有 WebSocket 客户端发送关闭消息，所有连接应被关闭
 
-#### Scenario: Push task broadcasts snapshots
-- **WHEN** the push task timer fires (every `METRICS_PUSH_INTERVAL` seconds)
-- **THEN** it SHALL call `MetricsStore.get_snapshot()`, serialize to JSON, and broadcast to all connected WebSocket clients
+#### 场景：推送任务广播快照
+- **当** 推送任务计时器触发（每 `METRICS_PUSH_INTERVAL` 秒）
+- **则** 应调用 `MetricsStore.get_snapshot()`，序列化为 JSON，并广播到所有已连接的 WebSocket 客户端

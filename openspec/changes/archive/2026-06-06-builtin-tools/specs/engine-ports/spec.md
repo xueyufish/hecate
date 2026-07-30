@@ -1,13 +1,13 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: Tool execution
-- **WHEN** `tool_execute(name, args, context)` is called
-- **THEN** it SHALL route the call through ToolRegistry, which resolves the tool by name and source type, executes it via the appropriate executor, and returns the tool's result
+### Requirement: 工具执行 — Tool execution
+- **当** 调用 `tool_execute(name, args, context)`
+- **则** 它应通过 ToolRegistry 路由调用，由 ToolRegistry 按名称和源类型解析工具，通过相应的执行器执行它，并返回工具的结果
 
-#### Scenario: Tool execution via registry
-- **WHEN** `tool_execute("web_search", {"query": "test"}, context)` is called
-- **THEN** the adapter SHALL delegate to `ToolRegistry.execute("web_search", {"query": "test"}, context)` and return the registry's result
+#### Scenario: 通过注册表的工具执行 — Tool execution via registry
+- **当** 调用 `tool_execute("web_search", {"query": "test"}, context)`
+- **则** 适配器应委派给 `ToolRegistry.execute("web_search", {"query": "test"}, context)` 并返回注册表的结果
 
-#### Scenario: Tool not found
-- **WHEN** `tool_execute("nonexistent", args, context)` is called and the tool does not exist
-- **THEN** it SHALL raise `ValueError` with message indicating the tool was not found
+#### Scenario: 未找到工具 — Tool not found
+- **当** 调用 `tool_execute("nonexistent", args, context)` 且工具不存在
+- **则** 它应抛出 `ValueError`，消息指示未找到该工具

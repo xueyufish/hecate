@@ -1,65 +1,65 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Event dataclass captures granular execution state
-The engine SHALL define an immutable `Event` dataclass in `engine/eventstore.py` with fields: `id` (UUID, auto-generated), `session_id` (UUID), `superstep` (int), `event_type` (EventType enum), `node_id` (str | None), `timestamp` (datetime, auto-generated), `payload` (dict).
+### Requirement：Event 数据类捕获细粒度执行状态 — Event 数据类捕获细粒度执行状态
+引擎 SHALL 在 `engine/eventstore.py` 中定义一个不可变的 `Event` 数据类，包含字段：`id`（UUID，自动生成）、`session_id`（UUID）、`superstep`（int）、`event_type`（EventType 枚举）、`node_id`（str | None）、`timestamp`（datetime，自动生成）、`payload`（dict）。
 
-#### Scenario: Create a node execution event
-- **WHEN** an Event is created with `session_id`, `superstep=3`, `event_type=NodeType.NODE_START`, `node_id="agent_1"`
-- **THEN** it SHALL have auto-generated `id` (UUID), `timestamp` (UTC now), and default `payload={}`
+#### Scenario：创建节点执行事件
+- **WHEN** 使用 `session_id`、`superstep=3`、`event_type=NodeType.NODE_START`、`node_id="agent_1"` 创建一个 Event
+- **THEN** 它 SHALL 具有自动生成的 `id`（UUID）、`timestamp`（UTC 当前时间）和默认值 `payload={}`
 
-#### Scenario: Event immutability
-- **WHEN** an Event instance exists
-- **THEN** attempting to set any field SHALL raise `FrozenInstanceError`
+#### Scenario：事件不可变性
+- **WHEN** 一个 Event 实例存在
+- **THEN** 尝试设置任何字段 SHALL 引发 `FrozenInstanceError`
 
-### Requirement: EventType enum defines standard event categories
-The engine SHALL define a string enum `EventType` with values: `NODE_START`, `NODE_END`, `TOOL_CALL`, `TOOL_RESULT`, `CHANNEL_WRITE`, `LLM_REQUEST`, `LLM_RESPONSE`, `INTERRUPT`, `RESUME`, `ERROR`, `CUSTOM`.
+### Requirement: EventType 枚举定义标准事件类别 — EventType 枚举定义标准事件类别
+引擎 SHALL 定义一个字符串枚举 `EventType`，值为：`NODE_START`、`NODE_END`、`TOOL_CALL`、`TOOL_RESULT`、`CHANNEL_WRITE`、`LLM_REQUEST`、`LLM_RESPONSE`、`INTERRUPT`、`RESUME`、`ERROR`、`CUSTOM`。
 
-#### Scenario: Use standard event type
-- **WHEN** `EventType.TOOL_CALL` is referenced
-- **THEN** it SHALL equal the string `"TOOL_CALL"`
+#### Scenario：使用标准事件类型
+- **WHEN** 引用 `EventType.TOOL_CALL`
+- **THEN** 它 SHALL 等于字符串 `"TOOL_CALL"`
 
-#### Scenario: Custom event type
-- **WHEN** an event is created with `event_type=EventType.CUSTOM` and `payload={"custom_type": "my_event"}`
-- **THEN** the event SHALL be valid and storeable
+#### Scenario：自定义事件类型
+- **WHEN** 使用 `event_type=EventType.CUSTOM` 和 `payload={"custom_type": "my_event"}` 创建一个事件
+- **THEN** 该事件 SHALL 有效且可存储
 
-### Requirement: EventStore ABC defines append-only event persistence
-The engine SHALL define an `EventStore` ABC with abstract methods: `append`, `get_events`, `replay`, `get_version`.
+### Requirement：EventStore ABC 定义仅追加的事件持久化 — EventStore ABC 定义仅追加的事件持久化
+引擎 SHALL 定义一个 `EventStore` ABC，包含抽象方法：`append`、`get_events`、`replay`、`get_version`。
 
-#### Scenario: Append an event
-- **WHEN** `append(event)` is called with a valid Event
-- **THEN** it SHALL persist the event and return its UUID
+#### Scenario：追加事件
+- **WHEN** 使用有效 Event 调用 `append(event)`
+- **THEN** 它 SHALL 持久化该事件并返回其 UUID
 
-#### Scenario: Query events for a session
-- **WHEN** `get_events(session_id, from_version=5)` is called
-- **THEN** it SHALL return all events for the session with version >= 5, ordered by version ascending
+#### Scenario：按会话查询事件
+- **WHEN** 使用 `session_id` 和 `from_version=0` 调用 `get_events(session_id, from_version=0)`
+- **THEN** 它 SHALL 返回该会话的所有事件
 
-#### Scenario: Replay events as stream
-- **WHEN** `replay(session_id, from_version=0)` is called
-- **THEN** it SHALL return an `AsyncGenerator[Event, None]` yielding events in order
+#### Scenario：增量查询事件
+- **WHEN** 使用 `from_version=5` 调用 `get_events(session_id, from_version=5)`
+- **THEN** 它 SHALL 仅返回版本号 > 5 的事件
 
-#### Scenario: Get current version
-- **WHEN** `get_version(session_id)` is called
-- **THEN** it SHALL return the highest version number for the session, or 0 if no events exist
+#### Scenario：重放事件
+- **WHEN** 使用 `session_id` 和 `from_version=0` 调用 `replay(session_id, from_version=0)`
+- **THEN** 它 SHALL 通过 AsyncGenerator 产出事件
 
-### Requirement: InMemoryEventStore provides test implementation
-An `InMemoryEventStore` SHALL implement EventStore using an in-memory dict mapping session_id to a list of events, suitable for unit tests.
+#### Scenario：获取版本号
+- **WHEN** 为已有 3 个事件的会话调用 `get_version(session_id)`
+- **THEN** 它 SHALL 返回 `3`
 
-#### Scenario: Append and retrieve
-- **WHEN** 3 events are appended for session A, then `get_events(session_a)` is called
-- **THEN** it SHALL return exactly 3 events in append order
+#### Scenario：无事件的会话版本号
+- **WHEN** 为没有事件的会话调用 `get_version(session_id)`
+- **THEN** 它 SHALL 返回 `0`
 
-#### Scenario: Version tracking
-- **WHEN** 5 events are appended for a session
-- **THEN** `get_version(session_id)` SHALL return 5
+### Requirement：InMemoryEventStore 提供测试实现 — InMemoryEventStore 提供测试实现
+一个 `InMemoryEventStore` SHALL 使用内存中的字典实现 EventStore，适用于测试。
 
-#### Scenario: Replay from version
-- **WHEN** 10 events exist and `replay(session_id, from_version=7)` is called
-- **THEN** it SHALL yield events with version 7, 8, 9, 10
+#### Scenario：顺序版本号分配
+- **WHEN** 为同一会话追加 3 个事件
+- **THEN** 事件 SHALL 获得版本号 1、2、3（按顺序）
 
-#### Scenario: Empty session
-- **WHEN** `get_events(session_id)` is called for a session with no events
-- **THEN** it SHALL return an empty list
+#### Scenario：空会话
+- **WHEN** 为没有事件的会话调用 `get_events(session_id)`
+- **THEN** 它 SHALL 返回空列表
 
-#### Scenario: Multiple sessions isolated
-- **WHEN** events are appended for session A and session B
-- **THEN** `get_events(session_a)` SHALL NOT include events from session B
+#### Scenario：重放空会话
+- **WHEN** 为没有事件的会话调用 `replay(session_id)`
+- **THEN** 生成器 SHALL 不产出任何事件

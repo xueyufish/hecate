@@ -1,79 +1,79 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: ToolResultSecurityHook implements PostToolHook
-The `ToolResultSecurityHook` SHALL implement the `PostToolHook` ABC, detecting and masking PII in tool execution results before they are stored in channels or returned to the LLM.
+### 需求：ToolResultSecurityHook 实现 PostToolHook
+`ToolResultSecurityHook` 应实现 `PostToolHook` ABC，在工具执行结果存储到通道或返回到 LLM 之前检测和掩码 PII
 
-#### Scenario: Clean tool result passes through
-- **WHEN** `on_post_tool_call(name, result, context)` is called with a result containing no PII
-- **THEN** it SHALL return `GuardrailResult(action=GuardrailAction.ALLOW)`
+#### 场景：干净工具结果通过
+- **当** 使用不含 PII 的结果调用 `on_post_tool_call(name, result, context)`
+- **则** 应返回 `GuardrailResult(action=GuardrailAction.ALLOW)`
 
-#### Scenario: PII detected in tool result
-- **WHEN** the tool result string contains PII patterns and `data_security.mask_tool_results` is True
-- **THEN** it SHALL anonymize PII in the result and return `GuardrailResult(action=GuardrailAction.SANITIZE, modified_data={"result": <masked_result>})`
+#### 场景：工具结果中检测到 PII
+- **当** 工具结果字符串包含 PII 模式且 `data_security.mask_tool_results` 为 True
+- **则** 应在结果中匿名化 PII 并返回 `GuardrailResult(action=GuardrailAction.SANITIZE, modified_data={"result": <masked_result>})`
 
-#### Scenario: Tool result masking disabled
-- **WHEN** `data_security.mask_tool_results` is False
-- **THEN** tool results SHALL pass through without PII masking
+#### 场景：工具结果掩码已禁用
+- **当** `data_security.mask_tool_results` 为 False
+- **则** 工具结果应原样通过而不进行 PII 掩码
 
-#### Scenario: Security disabled for agent
-- **WHEN** `data_security` is not configured or `guardrail_config` is None
-- **THEN** it SHALL return `GuardrailResult(action=GuardrailAction.ALLOW)` without scanning
+#### 场景：代理安全已禁用
+- **当** 未配置 `data_security` 或 `guardrail_config` 为 None
+- **则** 应返回 `GuardrailResult(action=GuardrailAction.ALLOW)` 而不扫描
 
-### Requirement: PII storage mode configuration
-The system SHALL support two PII storage modes controlled by `guardrail_config.data_security.pii_storage_mode`.
+### 需求：PII 存储模式配置
+系统应支持两种由 `guardrail_config.data_security.pii_storage_mode` 控制的 PII 存储模式
 
-#### Scenario: mask_only mode (default)
-- **WHEN** `pii_storage_mode` is `"mask_only"` or not specified
-- **THEN** PII SHALL be replaced with irreversible placeholders before database storage
-- **THEN** no original PII values SHALL be persisted
+#### 场景：mask_only 模式（默认）
+- **当** `pii_storage_mode` 为 `"mask_only"` 或未指定
+- **则** PII 应在数据库存储前替换为不可逆占位符
+- **则** 不应持久化任何原始 PII 值
 
-#### Scenario: mask_and_encrypt mode
-- **WHEN** `pii_storage_mode` is `"mask_and_encrypt"`
-- **THEN** original PII values SHALL be encrypted with Fernet and stored in a `PIIMappingModel` table
-- **THEN** each mapping SHALL be keyed by (session_id, placeholder)
-- **THEN** encrypted values SHALL be recoverable by authorized components using the Fernet key
+#### 场景：mask_and_encrypt 模式
+- **当** `pii_storage_mode` 为 `"mask_and_encrypt"`
+- **则** 原始 PII 值应使用 Fernet 加密并存储在 `PIIMappingModel` 表中
+- **则** 每个映射应以 (session_id, placeholder) 为键
+- **则** 加密值应由授权组件使用 Fernet 密钥恢复
 
-#### Scenario: Fernet key not configured
-- **WHEN** `pii_storage_mode` is `"mask_and_encrypt"` and `FERNET_KEY` is not set
-- **THEN** the system SHALL raise a `ConfigurationError` at hook construction time
+#### 场景：Fernet 密钥未配置
+- **当** `pii_storage_mode` 为 `"mask_and_encrypt"` 且未设置 `FERNET_KEY`
+- **则** 系统应在钩子构造时抛出 `ConfigurationError`
 
-### Requirement: PIIMappingModel for encrypted mappings
-The system SHALL define a `PIIMappingModel` ORM model for storing Fernet-encrypted PII mappings in `mask_and_encrypt` mode.
+### 需求：用于加密映射的 PIIMappingModel
+系统应定义 `PIIMappingModel` ORM 模型，用于在 `mask_and_encrypt` 模式下存储 Fernet 加密的 PII 映射
 
-#### Scenario: Model fields
-- **WHEN** `PIIMappingModel` is defined
-- **THEN** it SHALL have fields: `id` (UUID PK), `session_id` (UUID, FK to sessions), `placeholder` (str, e.g., "[EMAIL_1]"), `encrypted_value` (bytes, Fernet-encrypted), `pii_type` (str, e.g., "email"), `created_at` (datetime)
+#### 场景：模型字段
+- **当** 定义 `PIIMappingModel`
+- **则** 应包含字段：`id`（UUID PK）、`session_id`（UUID，指向 sessions 的 FK）、`placeholder`（str，例如 "[EMAIL_1]"）、`encrypted_value`（bytes，Fernet 加密）、`pii_type`（str，例如 "email"）、`created_at`（datetime）
 
-#### Scenario: Unique constraint
-- **WHEN** a mapping is saved
-- **THEN** the combination of (session_id, placeholder) SHALL be unique
+#### 场景：唯一约束
+- **当** 保存映射
+- **则** (session_id, placeholder) 的组合应是唯一的
 
-### Requirement: PII audit event logging
-The system SHALL log PII detection events to the EventStore when `data_security.audit_pii_events` is True.
+### 需求：PII 审计事件记录
+当 `data_security.audit_pii_events` 为 True 时，系统应将 PII 检测事件记录到 EventStore
 
-#### Scenario: PII detected and logged
-- **WHEN** PII is detected in any data flow (input, output, tool result) and audit is enabled
-- **THEN** an Event SHALL be appended to EventStore with type `PII_DETECTED`, containing pii_type and placeholder count, but NOT the original PII value
+#### 场景：检测到 PII 并记录
+- **当** 在任何数据流（输入、输出、工具结果）中检测到 PII 且审计已启用
+- **则** 应将事件追加到 EventStore，类型为 `PII_DETECTED`，包含 pii_type 和占位符计数，但不包含原始 PII 值
 
-#### Scenario: Audit disabled
-- **WHEN** `audit_pii_events` is False
-- **THEN** no PII detection events SHALL be logged to EventStore
+#### 场景：审计已禁用
+- **当** `audit_pii_events` 为 False
+- **则** 不应向 EventStore 记录 PII 检测事件
 
-### Requirement: AgentModel guardrail_config column
-The `AgentModel` SHALL have a `guardrail_config` JSONB column for per-agent security configuration.
+### 需求：AgentModel guardrail_config 列
+`AgentModel` 应具有 `guardrail_config` JSONB 列，用于按代理安全配置
 
-#### Scenario: Column added to AgentModel
-- **WHEN** the migration runs
-- **THEN** the `agents` table SHALL have a nullable `guardrail_config` JSONB column with default `NULL`
+#### 场景：列添加到 AgentModel
+- **当** 运行迁移
+- **则** `agents` 表应具有可空 `guardrail_config` JSONB 列，默认 `NULL`
 
-#### Scenario: Agent created with guardrail config
-- **WHEN** an agent is created with `guardrail_config` in the request body
-- **THEN** the config SHALL be stored in the JSONB column
+#### 场景：使用防护栏配置创建代理
+- **当** 在请求体中带有 `guardrail_config` 创建代理
+- **则** 配置应存储在 JSONB 列中
 
-#### Scenario: Agent created without guardrail config
-- **WHEN** an agent is created without `guardrail_config`
-- **THEN** the column SHALL be `NULL`, meaning security hooks are disabled for this agent
+#### 场景：无防护栏配置创建代理
+- **当** 无 `guardrail_config` 创建代理
+- **则** 列应为 `NULL`，表示此代理的安全钩子已禁用
 
-#### Scenario: Guardrail config updated
-- **WHEN** an agent is updated with a new `guardrail_config`
-- **THEN** the stored config SHALL be replaced atomically
+#### 场景：防护栏配置已更新
+- **当** 使用新的 `guardrail_config` 更新代理
+- **则** 存储的配置应以原子方式替换

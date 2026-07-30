@@ -1,43 +1,43 @@
-## Context
+## Context — 背景
 
-Feature 9.4 (Execution Security) established three-layer tool access control: rule engine (tool-name glob) → risk-level fallback → sandbox routing. The rule engine matches tool names only (`fnmatch(tool_name, rule.pattern)`) — it cannot distinguish between different argument values for the same tool.
+功能 9.4（执行安全）建立了三层工具访问控制：规则引擎（工具名称 glob）→ 风险级别回退 → 沙箱路由。规则引擎仅匹配工具名称（`fnmatch(tool_name, rule.pattern)`）——它无法区分同一工具的不同参数值。
 
-A 10-platform survey was conducted to inform the design:
+进行了一项 10 平台研究以指导设计：
 
-| Platform | Argument Inspection | Technique |
+| 平台 | 参数检查 | 技术 |
 |----------|-------------------|-----------|
-| Claude Code | ✅ | Glob on command strings, compound command parsing (`Bash(rm *)`) |
-| HermesAgent | ✅ | Regex dangerous patterns + LLM-assisted approval |
-| AgentScope 2.0 | ✅ | Tree-sitter AST + prefix patterns + 7-layer analysis |
-| AgentArts | ❌ | Sandbox isolation only, no argument inspection |
-| openJiuwen | ❌ | Kernel-level (Landlock + seccomp) |
-| Salesforce/Dify/IBM/Google | ❌ | Tool-name level only |
+| Claude Code | ✅ | 命令字符串上的 Glob，复合命令解析（`Bash(rm *)`） |
+| HermesAgent | ✅ | 正则危险模式 + LLM 辅助批准 |
+| AgentScope 2.0 | ✅ | Tree-sitter AST + 前缀模式 + 7 层分析 |
+| AgentArts | ❌ | 仅沙箱隔离，无参数检查 |
+| openJiuwen | ❌ | 内核级（Landlock + seccomp） |
+| Salesforce/Dify/IBM/Google | ❌ | 仅工具名称级别 |
 
-**Current state**: `ToolAccessPolicy.evaluate()` receives `tool_meta` (risk_level, approval_required, sandbox_enabled), `rules` (list of `ToolRule`), and `context` (tool_name). The `ToolWorker._check_access()` method already receives parsed `arguments` dict but does not forward it to the policy evaluator.
+**当前状态**：`ToolAccessPolicy.evaluate()` 接收 `tool_meta`（risk_level、approval_required、sandbox_enabled）、`rules`（`ToolRule` 列表）和 `context`（tool_name）。`ToolWorker._check_access()` 方法已经接收了解析后的 `arguments` 字典，但并未将其转发给策略评估器。
 
-**Constraint**: Engine layer maintains zero external dependencies (stdlib only). All runtime context (workspace_root, session info) must be passed via context dict.
+**约束**：引擎层保持零外部依赖（仅标准库）。所有运行时上下文（workspace_root、会话信息）必须通过 context 字典传递。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Extend `ToolRule` with optional `arg_conditions` for glob-based argument value matching
-- Extend `ToolAccessPolicy.evaluate()` to match argument conditions after tool-name match
-- Add built-in dangerous pattern detection that cannot be overridden by user rules
-- Add workspace boundary enforcement for file-path arguments
-- Maintain full backward compatibility with existing name-only rules
+**目标：**
+- 扩展 `ToolRule` 以包含可选的 `arg_conditions` 用于基于 glob 的参数值匹配
+- 扩展 `ToolAccessPolicy.evaluate()` 以在工具名称匹配后匹配参数条件
+- 添加内置危险模式检测，不能被用户规则覆盖
+- 为文件路径参数添加工作空间边界执行
+- 保持与现有仅名称规则的完全向后兼容
 
-**Non-Goals:**
-- Compound command parsing (`&&`, `||`, `;`) — deferred to future enhancement (Claude Code does this, but adds complexity)
-- Regex-based argument matching — glob patterns cover 80% of use cases (per survey)
-- LLM-assisted approval classification (HermesAgent smart approval) — future enhancement
-- Tree-sitter AST command analysis (AgentScope approach) — over-engineering for MVP
-- Kernel-level isolation (Landlock/seccomp) — orthogonal to argument inspection, already handled by Docker sandbox executor (9.4c)
+**非目标：**
+- 复合命令解析（`&&`、`||`、`;`）——推迟到未来增强（Claude Code 做了这个，但增加了复杂性）
+- 基于正则表达式的参数匹配——glob 模式覆盖 80% 的用例（根据调查）
+- LLM 辅助批准分类（HermesAgent 智能批准）——未来增强
+- Tree-sitter AST 命令分析（AgentScope 方法）——对于 MVP 来说过度设计
+- 内核级隔离（Landlock/seccomp）——与参数检查正交，已由 Docker 沙箱执行器处理（9.4c）
 
-## Decisions
+## Decisions — 决策
 
-### D31: Glob pattern matching for argument conditions
+### D31: 参数条件的 Glob 模式匹配
 
-Use `fnmatch` glob patterns for argument value matching, consistent with existing tool-name matching.
+使用 `fnmatch` glob 模式进行参数值匹配，与现有的工具名称匹配一致。
 
 ```python
 ToolRule(DENY, "write_file", arg_conditions={"path": "*.env"})
@@ -45,91 +45,91 @@ ToolRule(ASK,   "execute_code", arg_conditions={"code": "*os.system*"})
 ToolRule(ALLOW, "read_file", arg_conditions={"path": "src/*"})
 ```
 
-**Rationale**: Claude Code uses glob (`Bash(rm *)`), AgentScope uses prefix patterns (`npm run:*`). Both are glob-like. Glob is already in our codebase (`fnmatch`), requires zero new dependencies, and is well-understood by users. Regex (HermesAgent) was rejected for higher learning cost and debugging difficulty.
+**理由**：Claude Code 使用 glob（`Bash(rm *)`），AgentScope 使用前缀模式（`npm run:*`）。两者都类似 glob。Glob 已经存在于我们的代码库中（`fnmatch`），需要零新依赖，并且用户容易理解。Regex（HermesAgent）因学习成本更高和调试困难被拒绝。
 
-**Alternatives rejected**:
-- Regex matching — higher complexity, users struggle with regex patterns
-- Tree-sitter AST parsing — requires external dependency (tree-sitter), over-engineering for MVP
-- Prefix-only matching (`npm run:*`) — subset of glob, no advantage
+**被拒绝的替代方案**：
+- 正则匹配——更高的复杂性，用户难以掌握正则模式
+- Tree-sitter AST 解析——需要外部依赖（tree-sitter），对于 MVP 过度设计
+- 仅前缀匹配（`npm run:*`）——glob 的子集，没有优势
 
-### D32: Built-in dangerous patterns as DENY baseline
+### D32: 作为 DENY 基线的内置危险模式
 
-Define `DANGEROUS_PATTERNS` constant in `engine/tool_access.py` — a list of `(tool_name_glob, arg_key, arg_glob, description)` tuples. These patterns are checked BEFORE user-defined rules and cannot be overridden by `ALLOW` rules.
+在 `engine/tool_access.py` 中定义 `DANGEROUS_PATTERNS` 常量——一个 `(tool_name_glob, arg_key, arg_glob, description)` 元组列表。这些模式在用户定义规则之前检查，且不能被 `ALLOW` 规则覆盖。
 
 ```python
 DANGEROUS_PATTERNS: list[DangerousPattern] = [
-    # Shell commands
-    DangerousPattern("bash", "command", "rm -rf /",       "recursive root delete"),
-    DangerousPattern("bash", "command", "mkfs*",           "filesystem format"),
-    DangerousPattern("bash", "command", "dd if=*of=/dev/", "disk overwrite"),
-    DangerousPattern("bash", "command", "*curl*|*sh",      "remote code execution"),
-    DangerousPattern("bash", "command", ":*()*{*}*",        "fork bomb"),
-    # Code execution
-    DangerousPattern("execute_code", "code", "*os.system*",   "OS system call"),
-    DangerousPattern("execute_code", "code", "*subprocess*",   "subprocess invocation"),
-    DangerousPattern("execute_code", "code", "*eval(*",         "eval execution"),
-    DangerousPattern("execute_code", "code", "*exec(*",         "exec execution"),
-    # Sensitive files
-    DangerousPattern("write_file", "path", "*/.ssh/*",      "SSH key write"),
-    DangerousPattern("write_file", "path", "*/.env*",       "env file write"),
-    DangerousPattern("write_file", "path", "*/.bashrc",     "shell config write"),
-    DangerousPattern("write_file", "path", "/etc/*",        "system config write"),
-    DangerousPattern("read_file",  "path", "/etc/passwd",   "password file read"),
-    DangerousPattern("read_file",  "path", "*/.ssh/id_*",   "SSH key read"),
-    # SQL dangerous operations
-    DangerousPattern("*", "code",  "*DROP TABLE*",          "SQL table drop"),
-    DangerousPattern("*", "code",  "*DELETE FROM*",         "SQL delete without WHERE"),
+    # Shell 命令
+    DangerousPattern("bash", "command", "rm -rf /",       "递归根目录删除"),
+    DangerousPattern("bash", "command", "mkfs*",           "文件系统格式化"),
+    DangerousPattern("bash", "command", "dd if=*of=/dev/", "磁盘覆写"),
+    DangerousPattern("bash", "command", "*curl*|*sh",      "远程代码执行"),
+    DangerousPattern("bash", "command", ":*()*{*}*",        "fork 炸弹"),
+    # 代码执行
+    DangerousPattern("execute_code", "code", "*os.system*",   "OS 系统调用"),
+    DangerousPattern("execute_code", "code", "*subprocess*",   "子进程调用"),
+    DangerousPattern("execute_code", "code", "*eval(*",         "eval 执行"),
+    DangerousPattern("execute_code", "code", "*exec(*",         "exec 执行"),
+    # 敏感文件
+    DangerousPattern("write_file", "path", "*/.ssh/*",      "SSH 密钥写入"),
+    DangerousPattern("write_file", "path", "*/.env*",       "环境变量文件写入"),
+    DangerousPattern("write_file", "path", "*/.bashrc",     "Shell 配置写入"),
+    DangerousPattern("write_file", "path", "/etc/*",        "系统配置写入"),
+    DangerousPattern("read_file",  "path", "/etc/passwd",   "密码文件读取"),
+    DangerousPattern("read_file",  "path", "*/.ssh/id_*",   "SSH 密钥读取"),
+    # SQL 危险操作
+    DangerousPattern("*", "code",  "*DROP TABLE*",          "SQL 表删除"),
+    DangerousPattern("*", "code",  "*DELETE FROM*",         "无 WHERE 的 SQL 删除"),
 ]
 ```
 
-**Rationale**: HermesAgent's `DANGEROUS_PATTERNS` provides an effective security baseline. AgentScope's 7-layer analysis confirmed the same categories. These patterns give out-of-the-box security without requiring users to configure every rule manually. The patterns are checked first (before user rules) and result in `DENY` — they cannot be overridden.
+**理由**：HermesAgent 的 `DANGEROUS_PATTERNS` 提供了有效的安全基线。AgentScope 的 7 层分析确认了相同的类别。这些模式提供了开箱即用的安全性，无需用户手动配置每条规则。模式首先检查（在用户规则之前），结果为 `DENY`——它们不能被覆盖。
 
-**Alternatives rejected**:
-- Configurable dangerous patterns (stored in DB) — adds complexity, these patterns rarely change
-- ASK instead of DENY for dangerous patterns — DENY is safer; users can add explicit ALLOW rules with `arg_conditions` for safe variants (e.g., `rm -rf node_modules/`)
+**被拒绝的替代方案**：
+- 可配置的危险模式（存储在数据库中）——增加了复杂性，这些模式很少改变
+- 危险模式使用 ASK 而不是 DENY——DENY 更安全；用户可以为安全变体添加带有 `arg_conditions` 的显式 ALLOW 规则（例如 `rm -rf node_modules/`）
 
-### D33: Workspace boundary as policy layer (not model field)
+### D33: 作为策略层的工作空间边界（不是模型字段）
 
-Add `WorkspaceBoundaryPolicy` as a helper class in `engine/tool_access.py` that checks if file-path arguments resolve within `workspace_root`. The `workspace_root` is passed via `context` dict (from services layer).
+添加 `WorkspaceBoundaryPolicy` 作为 `engine/tool_access.py` 中的辅助类，检查文件路径参数是否解析在 `workspace_root` 内。`workspace_root` 通过 `context` 字典传递（来自服务层）。
 
 ```python
 class WorkspaceBoundaryPolicy:
     def check(self, tool_name: str, arguments: dict, workspace_root: str) -> AccessDecision | None:
-        """Check if tool operates on files within workspace boundary.
+        """检查工具是否在工作空间边界内的文件上操作。
 
-        Returns EXECUTE if path is inside workspace, REQUIRE_APPROVAL if outside,
-        None if tool has no path argument.
+        如果路径在工作空间内返回 EXECUTE，如果在外部返回 REQUIRE_APPROVAL，
+        如果工具没有路径参数返回 None。
         """
 ```
 
-Evaluation happens between user rules and risk-level fallback:
+评估发生在用户规则和风险级别回退之间：
 
 ```
-Layer 1: Dangerous patterns (DENY — cannot override)
-Layer 2: User rules (DENY → ASK → ALLOW with arg_conditions)
-Layer 3: Workspace boundary (inside → ALLOW, outside → ASK)
-Layer 4: Risk level fallback
-Layer 5: Sandbox routing
+第 1 层：危险模式（DENY——不能覆盖）
+第 2 层：用户规则（带 arg_conditions 的 DENY → ASK → ALLOW）
+第 3 层：工作空间边界（内部 → ALLOW，外部 → ASK）
+第 4 层：风险级别回退
+第 5 层：沙箱路由
 ```
 
-**Rationale**: Workspace boundary is conceptually between explicit rules (user knows best) and risk-level defaults (system fallback). If a user explicitly configures a rule, it takes precedence. If no rule matches, workspace boundary provides a sensible default: inside = trusted, outside = untrusted.
+**理由**：工作空间边界在概念上位于显式规则（用户最了解）和风险级别默认值（系统回退）之间。如果用户显式配置了规则，它优先。如果没有规则匹配，工作空间边界提供合理的默认值：内部 = 受信任，外部 = 不受信任。
 
-**Alternatives rejected**:
-- Auto-generate ALLOW/ASK rules from workspace boundary — less transparent, harder to debug
-- Put workspace boundary in services layer — breaks engine's zero-dependency constraint
-- Check workspace boundary before user rules — user should be able to override workspace defaults
+**被拒绝的替代方案**：
+- 从工作空间边界自动生成 ALLOW/ASK 规则——不够透明，难以调试
+- 将工作空间边界放在服务层——破坏了引擎的零依赖约束
+- 在用户规则之前检查工作空间边界——用户应该能够覆盖工作空间默认值
 
-### D34: arg_conditions in ToolPolicyModel (JSON column)
+### D34: ToolPolicyModel 中的 arg_conditions（JSON 列）
 
-Add `arg_conditions` JSON column to `ToolPolicyModel` for persisted argument-level rules.
+向 `ToolPolicyModel` 添加 `arg_conditions` JSON 列，用于持久化的参数级规则。
 
 ```python
 class ToolPolicyModel(BaseModel):
-    # ... existing fields ...
+    # ... 现有字段 ...
     arg_conditions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 ```
 
-Example row:
+示例行：
 ```json
 {
   "workspace_id": "...",
@@ -140,38 +140,38 @@ Example row:
 }
 ```
 
-**Rationale**: Consistent with existing `ToolPolicyModel` storage pattern. JSON column is flexible enough for any argument key-value combinations. SQLAlchemy JSON column type works across PostgreSQL, MySQL, and SQLite.
+**理由**：与现有的 `ToolPolicyModel` 存储模式一致。JSON 列足够灵活，可以处理任何参数键-值组合。SQLAlchemy JSON 列类型适用于 PostgreSQL、MySQL 和 SQLite。
 
-**Alternatives rejected**:
-- Separate `ToolArgPolicyModel` table — premature normalization, adds join complexity
-- Store as semicolon-separated string — fragile, no type safety
-- Don't persist (runtime only) — users lose ability to configure persistent argument-level rules
+**被拒绝的替代方案**：
+- 单独的 `ToolArgPolicyModel` 表——过早规范化，增加了连接复杂性
+- 存储为分号分隔的字符串——脆弱，无类型安全
+- 不持久化（仅运行时）——用户无法配置持久的参数级规则
 
-### D35: Evaluation order — dangerous patterns first, arg_conditions after name match
+### D35: 评估顺序——危险模式优先，arg_conditions 在名称匹配后
 
-The extended evaluation flow:
+扩展的评估流程：
 
 ```
-1. DANGEROUS_PATTERNS check (DENY — bypass-immune, cannot be overridden)
-2. User rule matching (DENY → ASK → ALLOW)
-   For each tier, sorted by priority:
-     a. Check tool name with fnmatch
-     b. If name matches AND rule has arg_conditions:
-        Check each arg_condition with fnmatch(arg_value, pattern)
-        Only match if ALL conditions match
-     c. If name matches AND rule has NO arg_conditions:
-        Match immediately (name-only match — backward compatible)
-3. Workspace boundary check (if no rule matched and tool has path arg)
-4. Risk level fallback
-5. Sandbox routing
+1. DANGEROUS_PATTERNS 检查（DENY——绕过免疫，不能被覆盖）
+2. 用户规则匹配（DENY → ASK → ALLOW）
+   对于每个层级，按优先级排序：
+     a. 使用 fnmatch 检查工具名称
+     b. 如果名称匹配且规则有 arg_conditions：
+        使用 fnmatch(arg_value, pattern) 检查每个 arg_condition
+        仅当 ALL 条件匹配时才匹配
+     c. 如果名称匹配且规则没有 arg_conditions：
+        立即匹配（仅名称匹配——向后兼容）
+3. 工作空间边界检查（如果没有规则匹配且工具有路径参数）
+4. 风险级别回退
+5. 沙箱路由
 ```
 
-**Rationale**: Dangerous patterns must be checked first to ensure they cannot be bypassed. Within user rules, name-only rules are "broader" and arg_conditions rules are "more specific" — priority field controls ordering within each tier. Backward compatibility is maintained: existing rules without arg_conditions work exactly as before.
+**理由**：危险模式必须首先检查以确保它们不能被绕过。在用户规则中，仅名称规则是"更广泛的"，而 arg_conditions 规则是"更具体的"——priority 字段控制每个层级内的排序。向后兼容性得以保持：没有 arg_conditions 的现有规则与之前完全相同地工作。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Glob limitation]** Glob cannot express complex patterns like "DELETE FROM without WHERE clause" → Mitigation: Use `*DELETE FROM*` as dangerous pattern (over-matches but safer), users can add ALLOW rules for safe variants
-- **[No compound command parsing]** `bash(safe-cmd *)` won't protect against `safe-cmd && dangerous-cmd` → Mitigation: Document as known limitation; future enhancement to parse `&&`, `||`, `;` (Claude Code approach)
-- **[Dangerous pattern false positives]** `*subprocess*` in code blocks legitimate use of subprocess module → Mitigation: Users can add `ALLOW` rules for specific safe patterns; dangerous patterns use DENY which is fail-safe
-- **[Workspace root availability]** If `context["workspace_root"]` is not set, workspace boundary check is skipped → Mitigation: Services layer must provide workspace_root; documented as requirement
-- **[Performance]** Each tool call now checks dangerous patterns + user rules + workspace boundary → Mitigation: Pattern lists are small (< 20 entries), fnmatch is fast; measured < 0.1ms per evaluation
+- **[Glob 限制]** Glob 无法表达像"没有 WHERE 子句的 DELETE FROM"这样的复杂模式 → 缓解：使用 `*DELETE FROM*` 作为危险模式（过度匹配但更安全），用户可以为安全变体添加 ALLOW 规则
+- **[没有复合命令解析]** `bash(safe-cmd *)` 不能防御 `safe-cmd && dangerous-cmd` → 缓解：记录为已知限制；未来增强以解析 `&&`、`||`、`;`（Claude Code 方法）
+- **[危险模式误报]** 代码块中的 `*subprocess*` 会误伤 subprocess 模块的合法使用 → 缓解：用户可以为特定的安全模式添加 `ALLOW` 规则；危险模式使用 DENY 是故障安全的
+- **[工作空间根目录可用性]** 如果 `context["workspace_root"]` 未设置，跳过工作空间边界检查 → 缓解：服务层必须提供 workspace_root；记录为需求
+- **[性能]** 每次工具调用现在检查危险模式 + 用户规则 + 工作空间边界 → 缓解：模式列表很小（< 20 条），fnmatch 很快；每次评估测量 < 0.1ms

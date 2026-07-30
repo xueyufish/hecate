@@ -1,53 +1,34 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Hybrid search combines dense and sparse retrieval
-The system SHALL perform hybrid search by executing both dense (semantic) and sparse (keyword) retrieval, then fusing the results using Qdrant's native QueryRequest fusion API.
+### 需求：混合搜索模式
+系统须支持 `search_mode: str` 查询参数，值为 `"vector"`、`"keyword"` 或 `"hybrid"`。当模式为 `"hybrid"` 时，系统须将向量和关键词搜索结果通过 RRF 融合。
 
-#### Scenario: Hybrid search with default weights
-- **WHEN** `HybridSearcher.search(collection_name, query, limit)` is called
-- **THEN** the system SHALL execute a Qdrant QueryRequest with both dense and sparse prefetch, fusion=RRF, and return results ordered by fused score
+#### 场景：混合搜索（默认）
+- **当** search_mode="hybrid" 且查询为 "annual leave policy"
+- **则** 系统同时执行向量和关键词搜索，使用 RRF 融合结果，返回组合的 top-K 结果
 
-#### Scenario: Hybrid search with custom weights
-- **WHEN** `HybridSearcher.search()` is called with custom `dense_weight` and `sparse_weight`
-- **THEN** the fusion SHALL apply the specified weights to influence the final ranking
+#### 场景：纯向量搜索
+- **当** search_mode="vector"
+- **则** 系统仅执行余弦距离向量搜索，无关键词组件
 
-#### Scenario: Fallback when sparse vectors unavailable
-- **WHEN** the target collection has no sparse vector configuration
-- **THEN** the system SHALL fall back to dense-only search and log a warning
+#### 场景：纯关键词搜索
+- **当** search_mode="keyword"
+- **则** 系统仅执行 BM25 关键词搜索，无向量组件
 
-### Requirement: Knowledge base service exposes hybrid search
-The `KnowledgeBaseService.search()` method SHALL accept a `mode` parameter to control retrieval strategy: "hybrid" (default), "dense" (vector only), "sparse" (keyword only).
+### 需求：RRF 融合
+系统须使用倒数秩融合（RRF）结合向量和关键词搜索的结果。RRF 常量 k 须可配置。
 
-#### Scenario: Search with hybrid mode
-- **WHEN** `KnowledgeBaseService.search(collection_name, query, limit, mode="hybrid")` is called
-- **THEN** it SHALL delegate to `HybridSearcher.search()` which uses both dense and sparse retrieval
+#### 场景：均等排名结果
+- **当** 文档 A 在向量搜索中排第 1，在关键词搜索中排第 2（k=60）
+- **则** 最终得分为 `1/(60+1) + 1/(60+2) = 0.01639 + 0.01613 = 0.03252`
 
-#### Scenario: Search with dense-only mode
-- **WHEN** `KnowledgeBaseService.search(collection_name, query, limit, mode="dense")` is called
-- **THEN** it SHALL perform dense vector search only, ignoring sparse vectors
+#### 场景：单一来源结果
+- **当** 文档在向量搜索中排第 1，但不在关键词搜索中（k=60）
+- **则** 最终得分为 `1/(60+1) + 0 = 0.01639`
 
-#### Scenario: Search with sparse-only mode
-- **WHEN** `KnowledgeBaseService.search(collection_name, query, limit, mode="sparse")` is called
-- **THEN** it SHALL perform sparse vector search only (keyword/BM25 style)
+### 需求：知识库级别的搜索模式配置
+系统须支持在知识库元数据中设置默认 search_mode。当未提供查询参数时，使用知识库的默认 search_mode。
 
-### Requirement: EnginePort knowledge_query wired to RAG services
-The `AgentExecutionPort.knowledge_query()` SHALL delegate to `KnowledgeBaseService.search()`, enabling the execution engine to retrieve knowledge during agent execution.
-
-#### Scenario: Engine queries knowledge base
-- **WHEN** the execution engine calls `knowledge_query(query, kb_ids)` on the port
-- **THEN** it SHALL look up the Qdrant collection names for the given `kb_ids` and call `KnowledgeBaseService.search()` for each, aggregating results
-
-#### Scenario: Knowledge base not found
-- **WHEN** `knowledge_query` is called with a `kb_id` that doesn't exist
-- **THEN** it SHALL return an empty list and log a warning (not raise)
-
-### Requirement: Document ingestion stores sparse vectors
-The `KnowledgeBaseService.ingest_document()` pipeline SHALL generate and store both dense and sparse vectors for each document chunk.
-
-#### Scenario: Ingest with hybrid indexing
-- **WHEN** `KnowledgeBaseService.ingest_document(file_path, collection_name)` is called
-- **THEN** the pipeline SHALL generate sparse embeddings via `EmbeddingService.encode()` and pass both dense and sparse vectors to `QdrantIndexer.upsert_vectors()`
-
-#### Scenario: Ingest with dense-only (fallback)
-- **WHEN** sparse embedding generation fails (model not available)
-- **THEN** the pipeline SHALL fall back to dense-only indexing and log a warning
+#### 场景：知识库级别的默认搜索模式
+- **当** 知识库配置为 search_mode="keyword"（在知识库元数据中设置）
+- **则** `GET /api/knowledge-bases/{id}/query?q=...` 使用 search_mode="keyword"，除非查询参数另有指定

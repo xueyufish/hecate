@@ -1,63 +1,63 @@
-## Context
+## Context — 背景
 
-The chat endpoint `POST /v1/chat/completions` processes messages asynchronously. When a user sends multiple messages rapidly to the same conversation, they are processed concurrently. This causes:
+聊天端点 `POST /v1/chat/completions` 异步处理消息。当用户向同一对话快速发送多条消息时，它们会被并发处理。这会导致：
 
-1. **Out-of-order processing**: Message B might complete before Message A
-2. **Memory corruption**: Concurrent writes to L1 memory blocks or L3 user memory
-3. **Context inconsistency**: L2 compression might race with new message processing
-4. **Wasted resources**: Multiple LLM calls for the same session simultaneously
+1. **乱序处理**：消息 B 可能在消息 A 之前完成
+2. **内存损坏**：对 L1 内存块或 L3 用户内存的并发写入
+3. **上下文不一致**：L2 压缩可能和新消息处理发生竞态
+4. **资源浪费**：同一会话同时进行多次 LLM 调用
 
-The existing rate limiter (`RateLimiter`) is per-API-key, not per-session. It doesn't solve the sequential processing problem.
+现有的限流器（`RateLimiter`）是按 API 密钥而非按会话的。它不能解决顺序处理问题。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Ensure sequential processing within a single conversation/session
-- Queue new messages automatically when a session is busy
-- Provide queue status feedback to the client
-- Timeout queued messages after 5 minutes
-- Minimal latency impact when no contention (no queuing overhead)
+**目标：**
+- 确保单个对话/会话内的顺序处理
+- 当会话忙时自动排队新消息
+- 向客户端提供队列状态反馈
+- 5 分钟后超时排队消息
+- 无争用时最小化延迟影响（无排队开销）
 
-**Non-Goals:**
-- Distributed queue (Redis/Celery) — single-server deployment only
-- Cross-session queuing — each session is independent
-- Priority queuing — strict FIFO only
-- Persistent queue — in-memory, lost on restart
+**非目标：**
+- 分布式队列（Redis/Celery）— 仅单服务器部署
+- 跨会话排队 — 每个会话独立
+- 优先级排队 — 仅严格 FIFO
+- 持久化队列 — 内存中，重启后丢失
 
-## Decisions
+## Decisions — 决策
 
-### D1: asyncio.Lock per session (not external queue)
+### D1：每会话使用 asyncio.Lock（而非外部队列）
 
-**Decision**: Use `asyncio.Lock` keyed by session_id. When a message arrives for a busy session, await the lock with a timeout.
+**决策**：使用以 session_id 为键的 `asyncio.Lock`。当消息到达繁忙会话时，等待锁直至超时。
 
-**Rationale**: Simple, no external dependencies, works for single-server deployment. The asyncio event loop handles fairness.
+**理由**：简单，无外部依赖，适用于单服务器部署。asyncio 事件循环处理公平性。
 
-**Alternatives considered**:
-- Redis queue — overkill for per-session ordering, adds dependency
-- Database-backed queue — too much latency for chat messages
-- Temporal workflow — planned for P3, not needed for simple ordering
+**考虑过的替代方案**：
+- Redis 队列 — 对于每会话排序过度设计，增加依赖
+- 数据库支持的队列 — 对聊天消息延迟太大
+- Temporal 工作流 — 计划用于 P3，简单排序不需要
 
-### D2: Lock manager as singleton service
+### D2：锁管理器作为单例服务
 
-**Decision**: Create `SessionLockManager` as a singleton that manages `asyncio.Lock` instances per session_id. Locks are created on first use and cached.
+**决策**：创建 `SessionLockManager` 作为单例，管理每个 session_id 的 `asyncio.Lock` 实例。锁在首次使用时创建并缓存。
 
-**Rationale**: Centralized lock management, easy to test, clean separation of concerns.
+**理由**：集中的锁管理，易于测试，清晰的关注点分离。
 
-### D3: Queue status via response headers
+### D3：通过响应头返回队列状态
 
-**Decision**: Return `X-Queue-Position` header (0 = processing, 1+ = queued position) and `X-Queue-Wait-Ms` header (time spent waiting).
+**决策**：返回 `X-Queue-Position` 头（0 = 处理中，1+ = 队列位置）和 `X-Queue-Wait-Ms` 头（等待时间）。
 
-**Rationale**: Non-breaking addition to existing API. Clients can poll or show status without changing the response body.
+**理由**：对现有 API 的非破坏性扩展。客户端可以轮询或显示状态，无需更改响应体。
 
-### D4: 5-minute timeout for queued messages
+### D4：排队消息 5 分钟超时
 
-**Decision**: If a message waits more than 5 minutes in queue, return 408 Request Timeout.
+**决策**：如果消息在队列中等待超过 5 分钟，返回 408 Request Timeout。
 
-**Rationale**: Prevents infinite waits if a processing message hangs. 5 minutes is generous for LLM responses.
+**理由**：防止消息处理挂起导致的无限等待。5 分钟对于 LLM 响应已经足够宽裕。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[In-memory only]** → Queue state lost on server restart. Acceptable for chat messages (user can resend).
-- **[Single-server only]** → asyncio.Lock doesn't work across processes. If scaling to multiple workers, need Redis-based lock.
-- **[Lock contention]** → If one message takes 5 minutes, others wait. Mitigation: timeout prevents infinite waits.
-- **[Deadlock risk]** → If lock is not released on error. Mitigation: use `async with lock:` pattern for automatic cleanup.
+- **[仅内存]** — 服务器重启后队列状态丢失。对聊天消息可接受（用户可以重发）。
+- **[仅单服务器]** — asyncio.Lock 不能跨进程工作。如果扩展到多个 worker，需要基于 Redis 的锁。
+- **[锁争用]** — 如果一条消息耗时 5 分钟，其他消息将等待。缓解措施：超时防止无限等待。
+- **[死锁风险]** — 如果锁在出错时未释放。缓解措施：使用 `async with lock:` 模式自动清理。

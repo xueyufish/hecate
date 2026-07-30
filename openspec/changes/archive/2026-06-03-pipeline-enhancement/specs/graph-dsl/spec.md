@@ -1,47 +1,47 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: Compiler validates entry point, edges, and handoff cycles
-The `GraphCompiler.compile()` SHALL perform four validation stages before producing a `CompiledGraph`: entry point, edges, handoff cycles, and fan-out/merge structural constraints.
+### Requirement: 编译器验证入口点、边和交接循环 — 编译器验证入口点、边和交接循环
+`GraphCompiler.compile()` SHALL 在生成 `CompiledGraph` 之前执行四个验证阶段：入口点、边、交接循环以及扇出/合并结构约束。
 
-#### Scenario: Entry point not found
-- **WHEN** the declared entry point references a non-existent node
-- **THEN** it SHALL raise `GraphValidationError` with field="entry"
+#### Scenario: 未找到入口点
+- **WHEN** 声明的入口点引用了一个不存在的节点
+- **THEN** 它 SHALL 引发 `GraphValidationError`，field="entry"
 
-#### Scenario: Edge target references non-existent node
-- **WHEN** an edge target is neither a declared node ID nor a sentinel (`__start__`, `__end__`)
-- **THEN** it SHALL raise `GraphValidationError` with field indicating the edge path
+#### Scenario: 边目标引用不存在的节点
+- **WHEN** 边目标既不是声明的节点 ID 也不是哨兵（`__start__`、`__end__`）
+- **THEN** 它 SHALL 引发 `GraphValidationError`，字段指示边路径
 
-#### Scenario: Unreachable nodes logged as warning
-- **WHEN** nodes exist that are not reachable from the entry point via BFS
-- **THEN** the compiler SHALL log a WARNING with the unreachable node IDs but SHALL NOT raise an error
+#### Scenario: 不可达节点记录为警告
+- **WHEN** 存在从入口点通过 BFS 不可达的节点
+- **THEN** 编译器 SHALL 记录包含不可达节点 ID 的 WARNING，但 SHALL NOT 引发错误
 
-#### Scenario: Handoff between non-agent nodes
-- **WHEN** a handoff edge source or target is not an AGENT-type node
-- **THEN** it SHALL raise `GraphValidationError`
+#### Scenario: 非代理节点之间的交接
+- **WHEN** 交接边的源或目标不是 AGENT 类型的节点
+- **THEN** 它 SHALL 引发 `GraphValidationError`
 
-#### Scenario: Fan-out without merge
-- **WHEN** a graph contains a FAN_OUT node but no MERGE node is reachable from any of its branches
-- **THEN** it SHALL raise `GraphValidationError` with message "FAN_OUT node '{id}' has no reachable MERGE node"
+#### Scenario: 有扇出无合并
+- **WHEN** 图包含 FAN_OUT 节点但从其任何分支都无法到达 MERGE 节点
+- **THEN** 它 SHALL 引发 `GraphValidationError`，消息为 "FAN_OUT node '{id}' has no reachable MERGE node"
 
-#### Scenario: Merge without fan-out
-- **WHEN** a graph contains a MERGE node but no FAN_OUT node is upstream
-- **THEN** it SHALL raise `GraphValidationError` with message "MERGE node '{id}' has no upstream FAN_OUT node"
+#### Scenario: 有合并无扇出
+- **WHEN** 图包含 MERGE 节点但上游没有 FAN_OUT 节点
+- **THEN** 它 SHALL 引发 `GraphValidationError`，消息为 "MERGE node '{id}' has no upstream FAN_OUT node"
 
-#### Scenario: Fan-out branches must match merge
-- **WHEN** a FAN_OUT node has 3 branches but the downstream MERGE node's config lists a different fan_out_source
-- **THEN** it SHALL raise `GraphValidationError`
+#### Scenario: 扇出分支必须匹配合并
+- **WHEN** FAN_OUT 节点有 3 个分支但下游 MERGE 节点的配置列出了不同的 fan_out_source
+- **THEN** 它 SHALL 引发 `GraphValidationError`
 
-### Requirement: Graph DSL parser validates against JSON Schema
-The `parse_graph()` function SHALL accept a JSON string or dict and validate it against `schemas/graph-dsl.schema.json`. The schema SHALL include "fan-out" and "merge" as valid node type enum values.
+### Requirement: Graph DSL 解析器根据 JSON Schema 验证 — Graph DSL 解析器根据 JSON Schema 验证
+`parse_graph()` 函数 SHALL 接受 JSON 字符串或字典，并根据 `schemas/graph-dsl.schema.json` 进行验证。schema SHALL 包括 "fan-out" 和 "merge" 作为有效的节点类型枚举值。
 
-#### Scenario: Valid JSON graph
-- **WHEN** `parse_graph('{"version":"1.0","nodes":{...},"edges":[...]}')` is called with valid input
-- **THEN** it SHALL return a `GraphConfig` with typed `ChannelDef`, `NodeConfig`, and `Edge` objects
+#### Scenario: 有效的 JSON 图
+- **WHEN** 使用有效输入调用 `parse_graph('{"version":"1.0","nodes":{...},"edges":[...]}')`
+- **THEN** 它 SHALL 返回一个包含类型化 `ChannelDef`、`NodeConfig` 和 `Edge` 对象的 `GraphConfig`
 
-#### Scenario: Fan-out node in JSON
-- **WHEN** `parse_graph(...)` encounters a node with `"type": "fan-out"`
-- **THEN** it SHALL create a `NodeConfig` with `NodeType.FAN_OUT`
+#### Scenario: JSON 中的扇出节点
+- **WHEN** `parse_graph(...)` 遇到一个类型为 `"type": "fan-out"` 的节点
+- **THEN** 它 SHALL 创建一个 `NodeType.FAN_OUT` 的 `NodeConfig`
 
-#### Scenario: Merge node in JSON
-- **WHEN** `parse_graph(...)` encounters a node with `"type": "merge"`
-- **THEN** it SHALL create a `NodeConfig` with `NodeType.MERGE`
+#### Scenario: JSON 中的合并节点
+- **WHEN** `parse_graph(...)` 遇到一个类型为 `"type": "merge"` 的节点
+- **THEN** 它 SHALL 创建一个 `NodeType.MERGE` 的 `NodeConfig`

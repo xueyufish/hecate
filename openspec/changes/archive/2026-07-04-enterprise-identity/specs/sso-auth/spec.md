@@ -1,107 +1,107 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: OIDCAuthProvider implements AuthProviderABC
-The system SHALL define `OIDCAuthProvider(AuthProviderABC)` in `auth/oidc_provider.py` that authenticates users via OpenID Connect authorization code flow using Authlib's Starlette client.
+### Requirement: OIDCAuthProvider 实现 AuthProviderABC — OIDCAuthProvider implements AuthProviderABC
+系统应在 `auth/oidc_provider.py` 中定义 `OIDCAuthProvider(AuthProviderABC)`，通过 OpenID Connect 授权码流程使用 Authlib 的 Starlette 客户端认证用户。
 
-#### Scenario: OIDC provider initialization
-- **WHEN** an OIDCAuthProvider is created with `client_id`, `client_secret`, `discovery_url`, and `scope` configuration
-- **THEN** the provider SHALL register an Authlib `OidcClient` that fetches IdP metadata from the discovery URL on first use
+#### Scenario: OIDC 提供者初始化 — OIDC provider initialization
+- **WHEN** 使用 `client_id`、`client_secret`、`discovery_url` 和 `scope` 配置创建 OIDCAuthProvider
+- **THEN** 提供者应注册一个 Authlib `OidcClient`，在首次使用时从发现 URL 获取 IdP 元数据
 
-#### Scenario: Initiate OIDC login
-- **WHEN** a user navigates to `/auth/sso/oidc/login`
-- **THEN** the system SHALL redirect to the IdP authorization endpoint with PKCE challenge and state parameter
-- **AND** the redirect URL SHALL include `client_id`, `redirect_uri`, `scope=openid profile email`, and `response_type=code`
+#### Scenario: 发起 OIDC 登录 — Initiate OIDC login
+- **WHEN** 用户导航到 `/auth/sso/oidc/login`
+- **THEN** 系统应重定向到 IdP 授权端点，带 PKCE 质询和 state 参数
+- **AND** 重定向 URL 应包含 `client_id`、`redirect_uri`、`scope=openid profile email` 和 `response_type=code`
 
-#### Scenario: OIDC callback with valid authorization code
-- **WHEN** the IdP redirects back to `/auth/sso/oidc/callback` with a valid `code` and matching `state`
-- **THEN** the system SHALL exchange the code for an access token and ID token
-- **AND** SHALL fetch userinfo from the IdP userinfo endpoint
-- **AND** SHALL map the `sub` claim to `UserModel.sso_id` for user resolution
+#### Scenario: 使用有效授权码的 OIDC 回调 — OIDC callback with valid authorization code
+- **WHEN** IdP 回调到 `/auth/sso/oidc/callback`，带有有效的 `code` 和匹配的 `state`
+- **THEN** 系统应将 code 交换为访问令牌和 ID 令牌
+- **AND** 应从 IdP 的 userinfo 端点获取用户信息
+- **AND** 应将 `sub` 声明映射到 `UserModel.sso_id` 用于用户解析
 
-#### Scenario: JIT provisioning on first OIDC login
-- **WHEN** the OIDC userinfo `sub` claim does not match any existing `UserModel.sso_id`
-- **THEN** the system SHALL create a new UserModel with `sso_id=sub`, `email=userinfo.email`, `display_name=userinfo.name`, `auth_method="sso"`, `active=True`, and a random `hashed_password`
-- **AND** SHALL issue a JWT token for the newly created user
+#### Scenario: 首次 OIDC 登录时的 JIT 配置 — JIT provisioning on first OIDC login
+- **WHEN** OIDC userinfo 的 `sub` 声明不匹配任何现有的 `UserModel.sso_id`
+- **THEN** 系统应创建新的 UserModel，`sso_id=sub`、`email=userinfo.email`、`display_name=userinfo.name`、`auth_method="sso"`、`active=True` 和随机 `hashed_password`
+- **AND** 应为新创建的用户签发 JWT 令牌
 
-#### Scenario: OIDC callback with invalid state
-- **WHEN** the callback request has a `state` parameter that does not match the value stored in the session
-- **THEN** the system SHALL return HTTP 400 with error "Invalid state parameter"
+#### Scenario: state 无效的 OIDC 回调 — OIDC callback with invalid state
+- **WHEN** 回调请求的 `state` 参数与会话中存储的值不匹配
+- **THEN** 系统应返回 HTTP 400，错误为 "Invalid state parameter"
 
-#### Scenario: OIDC callback with expired or invalid code
-- **WHEN** the IdP returns an error or the code exchange fails
-- **THEN** the system SHALL return HTTP 401 with error "OIDC authentication failed"
+#### Scenario: code 过期或无效的 OIDC 回调 — OIDC callback with expired or invalid code
+- **WHEN** IdP 返回错误或 code 交换失败
+- **THEN** 系统应返回 HTTP 401，错误为 "OIDC authentication failed"
 
-### Requirement: SAMLAuthProvider implements AuthProviderABC
-The system SHALL define `SAMLAuthProvider(AuthProviderABC)` in `auth/saml_provider.py` that authenticates users via SAML 2.0 SP-initiated SSO using python3-saml.
+### Requirement: SAMLAuthProvider 实现 AuthProviderABC — SAMLAuthProvider implements AuthProviderABC
+系统应在 `auth/saml_provider.py` 中定义 `SAMLAuthProvider(AuthProviderABC)`，使用 python3-saml 通过 SAML 2.0 SP 发起的 SSO 认证用户。
 
-#### Scenario: SAML provider initialization
-- **WHEN** a SAMLAuthProvider is created with `sp_entity_id`, `sp_acs_url`, `idp_entity_id`, `idp_sso_url`, and `idp_x509_cert` configuration
-- **THEN** the provider SHALL initialize a OneLogin_Saml2_Auth instance with SP and IdP metadata
+#### Scenario: SAML 提供者初始化 — SAML provider initialization
+- **WHEN** 使用 `sp_entity_id`、`sp_acs_url`、`idp_entity_id`、`idp_sso_url` 和 `idp_x509_cert` 配置创建 SAMLAuthProvider
+- **THEN** 提供者应使用 SP 和 IdP 元数据初始化一个 OneLogin_Saml2_Auth 实例
 
-#### Scenario: Initiate SAML login
-- **WHEN** a user navigates to `/auth/sso/saml/login`
-- **THEN** the system SHALL generate a SAML AuthnRequest and redirect to the IdP SSO URL
+#### Scenario: 发起 SAML 登录 — Initiate SAML login
+- **WHEN** 用户导航到 `/auth/sso/saml/login`
+- **THEN** 系统应生成 SAML AuthnRequest 并重定向到 IdP SSO URL
 
-#### Scenario: SAML ACS with valid assertion
-- **WHEN** the IdP POSTs a SAML response to `/auth/sso/saml/acs` with a valid signed assertion
-- **THEN** the system SHALL validate the XML signature, check the assertion conditions (NotBefore, NotOnOrAfter)
-- **AND** SHALL extract the `NameID` as the user identifier and map it to `UserModel.sso_id`
+#### Scenario: 使用有效断言的 SAML ACS — SAML ACS with valid assertion
+- **WHEN** IdP 将 SAML 响应 POST 到 `/auth/sso/saml/acs`，带有有效的签名断言
+- **THEN** 系统应验证 XML 签名，检查断言条件（NotBefore、NotOnOrAfter）
+- **AND** 应提取 `NameID` 作为用户标识符，并映射到 `UserModel.sso_id`
 
-#### Scenario: JIT provisioning on first SAML login
-- **WHEN** the SAML NameID does not match any existing `UserModel.sso_id`
-- **THEN** the system SHALL create a new UserModel with `sso_id=NameID`, email from the SAML attribute statement, and `active=True`
+#### Scenario: 首次 SAML 登录时的 JIT 配置 — JIT provisioning on first SAML login
+- **WHEN** SAML NameID 不匹配任何现有的 `UserModel.sso_id`
+- **THEN** 系统应创建新的 UserModel，`sso_id=NameID`、来自 SAML 属性语句的 email、`active=True`
 
-#### Scenario: SAML ACS with invalid signature
-- **WHEN** the SAML response has an invalid or missing signature
-- **THEN** the system SHALL return HTTP 401 with error "SAML signature validation failed"
+#### Scenario: 签名无效的 SAML ACS — SAML ACS with invalid signature
+- **WHEN** SAML 响应具有无效或缺失的签名
+- **THEN** 系统应返回 HTTP 401，错误为 "SAML signature validation failed"
 
-### Requirement: LDAPAuthProvider implements AuthProviderABC
-The system SHALL define `LDAPAuthProvider(AuthProviderABC)` in `auth/ldap_provider.py` that authenticates users via LDAP bind using ldap3 with asyncio transport.
+### Requirement: LDAPAuthProvider 实现 AuthProviderABC — LDAPAuthProvider implements AuthProviderABC
+系统应在 `auth/ldap_provider.py` 中定义 `LDAPAuthProvider(AuthProviderABC)`，使用 ldap3 通过 asyncio 传输的 LDAP 绑定认证用户。
 
-#### Scenario: LDAP provider initialization
-- **WHEN** an LDAPAuthProvider is created with `server_url`, `base_dn`, `bind_dn`, `bind_password`, `search_filter`, and `use_ssl` configuration
-- **THEN** the provider SHALL initialize an ldap3 connection pool with the configured server
+#### Scenario: LDAP 提供者初始化 — LDAP provider initialization
+- **WHEN** 使用 `server_url`、`base_dn`、`bind_dn`、`bind_password`、`search_filter` 和 `use_ssl` 配置创建 LDAPAuthProvider
+- **THEN** 提供者应使用配置的服务器初始化 ldap3 连接池
 
-#### Scenario: LDAP authentication with valid credentials
-- **WHEN** `authenticate(token, db)` is called where token is a base64-encoded `username:password` string
-- **THEN** the system SHALL bind to the LDAP server with the user's DN (resolved via search filter)
-- **AND** if bind succeeds, SHALL query UserModel by `sso_id=username` or create via JIT
-- **AND** SHALL return an AuthContext with `auth_method="ldap"`
+#### Scenario: 使用有效凭据的 LDAP 认证 — LDAP authentication with valid credentials
+- **WHEN** 调用 `authenticate(token, db)`，其中 token 是 base64 编码的 `username:password` 字符串
+- **THEN** 系统应使用用户的 DN（通过搜索过滤器解析）绑定到 LDAP 服务器
+- **AND** 如果绑定成功，应通过 `sso_id=username` 查询 UserModel 或通过 JIT 创建
+- **AND** 应返回 `auth_method="ldap"` 的 AuthContext
 
-#### Scenario: LDAP authentication with invalid credentials
-- **WHEN** the LDAP bind fails with `INVALID_CREDENTIALS`
-- **THEN** the system SHALL return `None` (auth provider chain continues to next provider)
+#### Scenario: 凭据无效的 LDAP 认证 — LDAP authentication with invalid credentials
+- **WHEN** LDAP 绑定失败，返回 `INVALID_CREDENTIALS`
+- **THEN** 系统应返回 `None`（认证提供者链继续到下一个提供者）
 
-#### Scenario: LDAP server unreachable
-- **WHEN** the LDAP server is unreachable or times out
-- **THEN** the system SHALL log an error and return `None` (does not block the auth chain)
+#### Scenario: LDAP 服务器不可达 — LDAP server unreachable
+- **WHEN** LDAP 服务器不可达或超时
+- **THEN** 系统应记录错误并返回 `None`（不阻塞认证链）
 
-### Requirement: SSO auth context method
-The system SHALL extend AuthContext to support `"sso"` and `"ldap"` as valid `auth_method` values in addition to the existing `"jwt"` and `"api_key"`.
+### Requirement: SSO 认证上下文方法 — SSO auth context method
+系统应扩展 AuthContext，支持 `"sso"` 和 `"ldap"` 作为有效的 `auth_method` 值，除了现有的 `"jwt"` 和 `"api_key"`。
 
-#### Scenario: AuthContext from SSO authentication
-- **WHEN** a user authenticates successfully via OIDC or SAML
-- **THEN** the AuthContext SHALL have `auth_method="sso"`, `user_id`, `org_id`, `workspace_id`, and `role` resolved from the user's workspace membership
+#### Scenario: 来自 SSO 认证的 AuthContext — AuthContext from SSO authentication
+- **WHEN** 用户通过 OIDC 或 SAML 成功认证
+- **THEN** AuthContext 应具有 `auth_method="sso"`、从用户的工作区成员关系解析的 `user_id`、`org_id`、`workspace_id` 和 `role`
 
-#### Scenario: AuthContext from LDAP authentication
-- **WHEN** a user authenticates successfully via LDAP
-- **THEN** the AuthContext SHALL have `auth_method="ldap"` with the same fields as SSO
+#### Scenario: 来自 LDAP 认证的 AuthContext — AuthContext from LDAP authentication
+- **WHEN** 用户通过 LDAP 成功认证
+- **THEN** AuthContext 应具有 `auth_method="ldap"`，字段与 SSO 相同
 
-### Requirement: SSO configuration in Settings
-The system SHALL add SSO provider configuration to the Settings class with fields for OIDC, SAML, and LDAP providers.
+### Requirement: Settings 中的 SSO 配置 — SSO configuration in Settings
+系统应向 Settings 类添加 SSO 提供者配置，包含 OIDC、SAML 和 LDAP 提供者的字段。
 
-#### Scenario: OIDC configuration
-- **WHEN** Settings includes `SSO_OIDC_CLIENT_ID`, `SSO_OIDC_CLIENT_SECRET`, `SSO_OIDC_DISCOVERY_URL`
-- **THEN** the OIDCAuthProvider SHALL be registered in the auth resolver
+#### Scenario: OIDC 配置 — OIDC configuration
+- **WHEN** Settings 包含 `SSO_OIDC_CLIENT_ID`、`SSO_OIDC_CLIENT_SECRET`、`SSO_OIDC_DISCOVERY_URL`
+- **THEN** OIDCAuthProvider 应在认证解析器中注册
 
-#### Scenario: SAML configuration
-- **WHEN** Settings includes `SSO_SAML_SP_ENTITY_ID`, `SSO_SAML_IDP_ENTITY_ID`, `SSO_SAML_IDP_SSO_URL`, `SSO_SAML_IDP_X509_CERT`
-- **THEN** the SAMLAuthProvider SHALL be registered in the auth resolver
+#### Scenario: SAML 配置 — SAML configuration
+- **WHEN** Settings 包含 `SSO_SAML_SP_ENTITY_ID`、`SSO_SAML_IDP_ENTITY_ID`、`SSO_SAML_IDP_SSO_URL`、`SSO_SAML_IDP_X509_CERT`
+- **THEN** SAMLAuthProvider 应在认证解析器中注册
 
-#### Scenario: LDAP configuration
-- **WHEN** Settings includes `SSO_LDAP_SERVER_URL`, `SSO_LDAP_BASE_DN`, `SSO_LDAP_BIND_DN`, `SSO_LDAP_BIND_PASSWORD`
-- **THEN** the LDAPAuthProvider SHALL be registered in the auth resolver
+#### Scenario: LDAP 配置 — LDAP configuration
+- **WHEN** Settings 包含 `SSO_LDAP_SERVER_URL`、`SSO_LDAP_BASE_DN`、`SSO_LDAP_BIND_DN`、`SSO_LDAP_BIND_PASSWORD`
+- **THEN** LDAPAuthProvider 应在认证解析器中注册
 
-#### Scenario: No SSO configured
-- **WHEN** no SSO settings are provided
-- **THEN** no SSO providers SHALL be registered and existing JWT/APIKey auth continues to work
+#### Scenario: 未配置 SSO — No SSO configured
+- **WHEN** 未提供 SSO 设置
+- **THEN** 不应注册 SSO 提供者，现有的 JWT/APIKey 认证继续工作

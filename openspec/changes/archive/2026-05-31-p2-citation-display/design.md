@@ -1,88 +1,83 @@
-## Context
+## Context — 背景
 
-Hecate's RAG pipeline retrieves scored document chunks via `HybridSearcher`, but citations are lost before reaching the API response. The `/v1/chat/completions` endpoint goes directly to `llm_service` without any knowledge retrieval. The `ConversationService` has a `ContextAssembler` that accepts a `knowledge` parameter but never passes it. Meanwhile, `MessageModel` already has a `metadata_` JSONB column suitable for storing citation arrays.
+Hecate 的 RAG 能力通过 `EnginePort.knowledge_query()` 提供。工具调用通过 `EnginePort.tool_execute()` 提供。当前流程：
+1. 用户发送消息
+2. LLM 确定是否需要知识库查询或工具调用
+3. 执行知识库/工具调用，结果作为文本注入到 LLM 上下文中
+4. LLM 生成回复，回复中不引用来源（来源"消失在" LLM 的上下文中）
 
-The industry has converged on OpenAI's `annotations` pattern — an array of structured citation objects on the assistant message — which is what we'll adopt.
+我们需要保留来源元数据，将其从 LLM 上下文传递到 UI，使用户可以看到每个 claim 的来源。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- When an agent has associated knowledge bases, retrieve relevant chunks and format them as numbered references in the LLM prompt
-- Return structured citations (annotations) in both REST and SSE streaming responses
-- Persist citations in message metadata for conversation history retrieval
-- Provide a `GET /api/messages/{id}/citations` endpoint for citation lookup
-- Maintain OpenAI API compatibility (annotations are an additive, non-breaking extension)
+**目标:**
+- G1: 引用数据类型——`Citation` schema，包含 source_type（knowledge_base, tool_call, message）、source_id、excerpt、relevance_score、verified
+- G2: 引用提取——从工具调用和知识库查询中构建 `Citation` 对象
+- G3: 消息引用——`MessageResponse` 包含可选的 `citations: list[Citation]`
+- G4: 引用 UI——消息气泡中的内联引用组件，可折叠的源引用，支持知识库和工具调用来源
+- G5: 会话模式引用——在工作流测试运行器调试输出中显示引用
 
-**Non-Goals:**
-- Inline citation marker insertion by the LLM (we format the prompt with numbered references, but the LLM may or may not use `[1]` notation — we don't force it)
-- Web search citation (only KB/RAG citations for now; the `annotations` field is extensible for future web citation types)
-- Citation deduplication across multiple KBs (acceptable for P2)
-- Frontend citation panel rendering (backend-only; frontend will be a separate change)
+**非目标:**
+- 带引用 claim 级别的精确归因——LLM 输出的 token 级引用（Groundedness）——P3
+- 自动引用验证/事实核查——P4
+- 引用样式格式化（APA/MLA）——P4
+- 每个消息的引用存储——引用在运行时构建，未持久化到 DB
 
-## Decisions
+## Decisions — 决策
 
-### D1: Follow OpenAI's `annotations` pattern
+### D1: 引用作为运行时构建，非持久化
 
-OpenAI returns `annotations` as an array on `ChatCompletionMessage`. Each annotation has a `type` (e.g., `url_citation`) and typed payload. We adopt this pattern with our own `kb_citation` type:
+**决策**: `Citation` 对象在运行时构建，作为消息响应的一部分返回。它们不存储在数据库中的单独 `citations` 表中。
 
-```json
-{
-  "type": "kb_citation",
-  "kb_citation": {
-    "position": 1,
-    "kb_id": "uuid",
-    "kb_name": "My Knowledge Base",
-    "document_name": "report.pdf",
-    "chunk_id": "abc123",
-    "score": 0.92,
-    "content_snippet": "First 150 chars of chunk..."
-  }
-}
+**理由**: 引用是消息上下文的函数——展示时有用，但不需要为历史目的持久化。持久化引用需要新的 DB 迁移和存储逻辑，增加了实现成本而无显著的 UX 收益。用户查看历史消息时，引用基于当时可用的内容构建。
+
+**考虑的替代方案**: 与消息关联的持久化引用——由于不必要的存储复杂性而被拒绝。
+
+### D2: 引用提取发生在服务层
+
+**决策**: 服务层（`ConversationService`）在 LLM 调用和工具执行完成后提取引用。引擎层不知晓引用——它只返回原始结果。服务层检查结果，提取来源元数据，构建 `Citation` 对象，并将其附加到响应中。
+
+**理由**: 保持引擎独立。引用提取是特定于 LLM 提供商/知识库的业务逻辑，不属于端口抽象。
+
+**流程**:
+```
+LLM 调用 → 工具调用 → 工具执行 → 结果
+                                  ↓
+                            提取引用 ← 原始工具调用/知识库结果
+                                  ↓
+                            消息响应包含引用
 ```
 
-**Rationale**: Industry standard, non-breaking (unknown fields are ignored by OpenAI clients), extensible for future citation types.
+### D3: 知识库引用来自向量搜索元数据
 
-### D2: Inject knowledge at ConversationService level, not chat.py
+**决策**: 知识库引用从 `knowledge_query()` 返回的向量搜索结果中提取。每个结果包含 `source_id`、`excerpt`、`relevance_score`、`document_title`。
 
-The `/v1/chat/completions` endpoint currently bypasses `ConversationService` entirely. Instead of modifying the raw endpoint, we add an optional `kb_ids` parameter to `ConversationService.chat()` and handle knowledge retrieval there.
+**理由**: 向量搜索已返回每个匹配段落的元数据。这是引用信息的主要来源——无需额外的检索。
 
-**Rationale**: Keeps `/v1/chat/completions` as a thin passthrough. The conversation service is the right place for orchestration logic. The endpoint just needs to accept and forward `kb_ids`.
+### D4: 工具调用引用来自工具结果模式
 
-### D3: Numbered reference prompt format
+**决策**: 当工具结果的 JSON 包含 `source`、`reference`、`url` 或 `document_id` 字段时，识别工具调用引用。通用工具结果无引用。
 
-When knowledge chunks are retrieved, they are formatted as:
+**理由**: 结构化工具结果已包含足以构建引用的字段。我们推广一种约定：工具返回具有标准引用键的 JSON。
 
+### D5: 引用 UI 使用可折叠展开
+
+**决策**: 引用在消息气泡内渲染为内联"源标签"（[1]、[2] 等）。点击标签展开显示摘录卡片，包含来源名称、摘录文本和相关性分值。
+
+**理由**: 内联标签最小化视觉干扰。用户仅在感兴趣时展开查看引用细节。
+
+**UI 状态**:
 ```
-The following reference documents are available:
-[1] "chunk text from document A..." (Source: report.pdf)
-[2] "chunk text from document B..." (Source: manual.docx)
-...
-```
-
-This is appended to the system message (or injected as a separate system message). The LLM naturally uses `[1]`, `[2]` notation when citing sources.
-
-**Rationale**: Simple, effective, works with all LLM providers. No special prompting required.
-
-### D4: SSE citation delivery via dedicated event
-
-In streaming mode, citations are emitted as a separate SSE event after all content chunks but before `[DONE]`:
-
-```
-data: {"type": "citations", "citations": [...]}
-data: [DONE]
+用户消息: "公司政策有哪些？"
+Agent 响应: "根据我们的政策，年假为 20 天。[1][2]"
+                          ┌─────────────────────┐
+[1] 点击展开 →            │ 📄 员工手册.pdf      │
+                          │ ...年假 20 天...      │
+                          │ 相关性: 0.92         │
+                          └─────────────────────┘
 ```
 
-**Rationale**: Citations are only available after the full response is generated (we know which chunks were retrieved, not which the LLM actually used). Sending them before `[DONE]` lets the frontend render the citation panel immediately.
+## Risks / Trade-offs — 风险与权衡
 
-### D5: No new database table — use metadata_ column
-
-Citations are stored as a JSON array in `MessageModel.metadata_["citations"]`. No new table, no migration.
-
-**Rationale**: `metadata_` is already a JSONB column. Citation data is read-heavy, write-once per message. No need for relational queries on individual citation fields.
-
-## Risks / Trade-offs
-
-- **Prompt token overhead**: Injecting 5-10 chunks into the system message adds ~500-2000 tokens. Mitigated by limiting chunk count (default 5) and truncating chunk text to 500 chars.
-- **LLM may ignore references**: The LLM might not use `[1]` notation consistently. Citations are still returned as metadata regardless — the frontend can show "Sources used" without inline markers.
-- **Streaming citation timing**: Citations are sent after content completes. If the SSE connection drops before `[DONE]`, citations are lost. Mitigated by the REST endpoint for citation retrieval (`GET /api/messages/{id}/citations`).
-- **OpenAI client compatibility**: The `annotations` field is not recognized by older OpenAI SDK versions. This is non-breaking (unknown fields are silently ignored by most clients).
+- **[风险] 引用未连接**: LLM 输出中的引用编号与提取的引用可能错位。→ 缓解措施：引用由 LLM 输出中的编号标记（[1]、[2]）触发，但真实来源来自执行的工具/知识库调用。LLM 可能引用未提供的内容——这在 P3 之前是已知的限制。
+- **[权衡] 运行时引用而非持久化引用**: 查看历史消息时缺少引用再次可用的保证。→ 接受的权衡。如果引用偏移成为问题，可添加持久化。

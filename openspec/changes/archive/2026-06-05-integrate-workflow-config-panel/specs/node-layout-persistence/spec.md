@@ -1,30 +1,30 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Node positions persist to localStorage
-When nodes are moved or the workflow is saved, the system SHALL persist each node's x/y position to localStorage, keyed by `hecate-layout-{workflowId}`.
+### Requirement: 节点位置持久化到 localStorage — 节点位置持久化到 localStorage
+当节点被移动或工作流被保存时，系统 SHALL 将每个节点的 x/y 位置持久化到 localStorage，以 `hecate-layout-{workflowId}` 为键。
 
-#### Scenario: Save layout after node drag
-- **WHEN** user drags a node to a new position on the canvas
-- **THEN** the node positions are saved to localStorage under `hecate-layout-{workflowId}` after the existing 2-second auto-save debounce
+#### Scenario: 节点拖拽后保存布局
+- **WHEN** 用户将节点拖拽到画布上的新位置
+- **THEN** 在现有的 2 秒自动保存去抖后，节点位置保存到 localStorage 的 `hecate-layout-{workflowId}` 下
 
-#### Scenario: Restore layout on page load
-- **WHEN** user opens a workflow that has a saved layout in localStorage
-- **THEN** nodes are rendered at their saved positions instead of the default grid layout
+#### Scenario: 页面加载时恢复布局
+- **WHEN** 用户打开一个在 localStorage 中有保存布局的工作流
+- **THEN** 节点在其保存的位置渲染，而不是默认网格布局
 
-### Requirement: Fallback to grid layout when no saved positions exist
-When loading a workflow with no localStorage layout data, the system SHALL use the existing grid-based layout formula.
+### Requirement: 无保存位置时回退到网格布局 — 无保存位置时回退到网格布局
+当加载没有 localStorage 布局数据的工作流时，系统 SHALL 使用现有的基于网格的布局公式。
 
-#### Scenario: First time opening a workflow
-- **WHEN** user opens a workflow that has never been edited on this device
-- **THEN** nodes are positioned using the default grid layout (250px horizontal spacing, 150px vertical spacing)
+#### Scenario: 首次打开工作流
+- **WHEN** 用户打开一个在此设备上从未编辑过的工作流
+- **THEN** 节点使用默认网格布局定位（250px 水平间距，150px 垂直间距）
 
-#### Scenario: Clear localStorage manually
-- **WHEN** user clears browser localStorage
-- **THEN** on next page load, nodes fall back to the default grid layout
+#### Scenario: 手动清除 localStorage
+- **WHEN** 用户清除浏览器 localStorage
+- **THEN** 下次页面加载时，节点回退到默认网格布局
 
-### Requirement: Layout data is independent of DSL
-The layout storage SHALL be completely independent of the Graph DSL. The DSL SHALL NOT contain position fields. Layout and DSL are loaded separately and merged at render time.
+### Requirement: 布局数据独立于 DSL — 布局数据独立于 DSL
+布局存储 SHALL 完全独立于 Graph DSL。DSL SHALL NOT 包含位置字段。布局和 DSL 分别加载并在渲染时合并。
 
-#### Scenario: DSL contains no position data
-- **WHEN** the backend returns a Graph DSL via GET /api/workflows/{id}
-- **THEN** the response contains no x/y position fields for nodes
+#### Scenario: DSL 不包含位置数据
+- **WHEN** 后端通过 GET /api/workflows/{id} 返回 Graph DSL
+- **THEN** 响应中不包含节点的 x/y 位置字段

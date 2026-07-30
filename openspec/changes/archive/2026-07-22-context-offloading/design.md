@@ -1,163 +1,163 @@
-## Context
+## Context — 背景
 
-Hecate's LLMWorker (engine layer) applies a 4-step context pipeline before each LLM invocation:
-1. Tool result truncation (cap each tool result to ~2000 tokens)
-2. Token estimation against budget
-3. Message selection (`ContextEngine.select_messages`) — keep most recent within budget
-4. Compression (`ContextEngine.compress`) — drop oldest as last resort
+Hecate 的 LLMWorker（引擎层）在每次 LLM 调用之前应用一个 4 步上下文管道：
+1. 工具结果截断（将每个工具结果限制在约 2000 tokens）
+2. 按预算估算 tokens
+3. 消息选择（`ContextEngine.select_messages`）— 在预算内保留最新的消息
+4. 压缩（`ContextEngine.compress`）— 最后手段，丢弃最旧的消息
 
-When step 4 fires, messages are permanently discarded from the LLM's view. The channel retains the originals (non-destructive pipeline), but the LLM has no mechanism to retrieve them — there is no tool, no memory hook, and no file pointer. This contrasts with:
+当第 4 步触发时，消息会从 LLM 的视图中永久丢弃。通道保留原始消息（非破坏性管道），但 LLM 没有机制来检索它们 — 没有工具、没有记忆钩子、没有文件指针。这与以下平台形成对比：
 
-- **AgentScope** — `Offloader` protocol writes oversized context to files and returns a reference
-- **Claude Code** — file-based compaction cascade with `read_file` recovery
-- **Amazon Bedrock AgentCore** — session state persisted to `/mnt/workspace`, retrievable on resume
-- **Letta/MemGPT** — agent self-manages memory via `memory_store`/`memory_search` function tools
+- **AgentScope** — `Offloader` 协议将过大的上下文写入文件并返回引用
+- **Claude Code** — 基于文件的压缩级联，通过 `read_file` 恢复
+- **Amazon Bedrock AgentCore** — 会话状态持久化到 `/mnt/workspace`，可在恢复时检索
+- **Letta/MemGPT** — Agent 通过 `memory_store`/`memory_search` 函数工具自行管理记忆
 
-Hecate now has `AgentEnvironment` (1.3.15) with `write_file`/`read_file` and per-agent persistent storage under `memory/`. This makes file-based offloading viable without new infrastructure.
+Hecate 现在拥有 `AgentEnvironment`（1.3.15），提供 `write_file`/`read_file` 和每个 Agent 在 `memory/` 下的持久存储。这使得基于文件的卸载成为可能，无需新的基础设施。
 
-**Current state of the pipeline** (`llm_worker.py` L146-182):
+**管道的当前状态**（`llm_worker.py` L146-182）：
 ```
 messages → _truncate_tool_results → estimate_tokens → select_messages → compress → LLM
 ```
 
-`compress` calls `InMemoryContextEngine.compress()` which does `messages[-max_messages:]` — pure truncation.
+`compress` 调用 `InMemoryContextEngine.compress()`，它执行 `messages[-max_messages:]` — 纯粹的截断。
 
-**Constraints:**
-- Must not break existing ContextEngine ABC (used by other pipelines)
-- Must not break ConversationService path (uses CompressionPipeline, not LLMWorker)
-- Must work with both LocalEnvironment and DockerEnvironment
-- Engine layer has zero external deps — offloader must live in services/ and be passed in via execution_context
+**约束条件：**
+- 不得破坏现有的 ContextEngine ABC（被其他管道使用）
+- 不得破坏 ConversationService 路径（使用 CompressionPipeline，而非 LLMWorker）
+- 必须同时适用于 LocalEnvironment 和 DockerEnvironment
+- 引擎层零外部依赖 — 卸载器必须位于 services/ 中，并通过 execution_context 传入
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Preserve overflow context in persistent storage instead of discarding it
-- Let the agent retrieve offloaded content on demand via the existing `read_file` tool
-- Integrate cleanly with the existing LLMWorker pipeline as a new step before compression
-- Remain fully backward compatible — no environment means no offload, fallback to compress
-- Keep the offload decision local to LLMWorker (no PregelRuntime orchestration changes beyond context injection)
-- Configurable threshold and global enable/disable
+**目标：**
+- 将溢出的上下文保存在持久存储中，而不是丢弃它
+- 允许 Agent 通过现有的 `read_file` 工具按需检索卸载的内容
+- 与现有的 LLMWorker 管道干净集成，作为压缩之前的新步骤
+- 保持完全向后兼容 — 无环境就不卸载，回退到压缩
+- 将卸载决策限定在 LLMWorker 内部（PregelRuntime 无需变更，除上下文注入外）
+- 可配置阈值和全局启用/禁用
 
-**Non-Goals:**
-- Semantic search over offloaded messages (future: integrate with L4 Knowledge Memory)
-- Automatic re-injection of offloaded content (agent must explicitly `read_file`)
-- Modifying the ConversationService path (separate code path, already has CompressionPipeline)
-- Changing the ContextEngine ABC (no new abstract methods)
-- Summarizing offloaded content via LLM (keep it lossless; summaries are a future enhancement)
-- Cross-session offload sharing (each session gets its own offload directory)
+**非目标：**
+- 对卸载的消息进行语义搜索（未来：与 L4 知识记忆集成）
+- 自动重新注入已卸载的内容（Agent 必须显式调用 `read_file`）
+- 修改 ConversationService 路径（独立的代码路径，已有 CompressionPipeline）
+- 更改 ContextEngine ABC（不添加新的抽象方法）
+- 通过 LLM 总结已卸载的内容（保持无损；摘要是未来的增强功能）
+- 跨会话共享卸载内容（每个会话有自己的卸载目录）
 
-## Decisions
+## Decisions — 决策
 
-### Decision 1: Offloader lives in `services/context/`, not `engine/`
+### 决策 1：卸载器位于 services/context/，而非 engine/
 
-**Choice:** Create `src/hecate/services/context/offloader.py`. LLMWorker receives it via `execution_context["environment"]` (the AgentEnvironment) and constructs the offloader inline, OR receives a pre-built offloader via `execution_context["context_offloader"]`.
+**选择：** 创建 `src/hecate/services/context/offloader.py`。LLMWorker 通过 `execution_context["environment"]`（AgentEnvironment）接收它，并内联构造卸载器，或者通过 `execution_context["context_offloader"]` 接收预构建的卸载器。
 
-**Rationale:** Engine layer has zero external deps (AGENTS.md: "engine/ → Zero external deps"). `AgentEnvironment` is defined in `services/environment/environment.py`. Putting the offloader in engine/ would require importing from services/, a layering violation.
+**理由：** 引擎层零外部依赖（AGENTS.md："engine/ → Zero external deps"）。`AgentEnvironment` 定义在 `services/environment/environment.py` 中。将卸载器放在 engine/ 中需要从 services/ 导入，违反分层原则。
 
-**Alternatives considered:**
-- *Put offloader in engine/*: Rejected — layering violation, engine can't import services.
-- *Define an Offloader ABC in engine/ports.py*: Overkill for one class; adds extension point we don't need yet.
+**考虑的替代方案：**
+- *将卸载器放在 engine/*：拒绝 — 分层违规，引擎无法导入 services。
+- *在 engine/ports.py 中定义 Offloader ABC*：一个类这样做过度设计了；增加了当前不需要的扩展点。
 
-**Final approach:** LLMWorker consumes `execution_context["environment"]` (an `AgentEnvironment` or None) and calls a helper function from `services/context/offloader.py`. Since `engine/workers/llm_worker.py` already imports from `hecate.engine.context`, but we need services-layer access, the offloader is injected via execution_context as a callable/instance OR we pass the environment and let LLMWorker call a small helper. The cleanest: **pass the environment via execution_context; offloader logic is a pure function in services/ that LLMWorker calls only when environment is present.**
+**最终方案：** LLMWorker 消费 `execution_context["environment"]`（一个 `AgentEnvironment` 或 None），并调用 `services/context/offloader.py` 中的辅助函数。由于 `engine/workers/llm_worker.py` 已经导入了 `hecate.engine.context`，但我们需要 services 层访问权限，卸载器通过 execution_context 作为可调用对象/实例注入，或者我们传递环境并让 LLMWorker 调用一个小辅助函数。最干净的方式：**通过 execution_context 传递环境；卸载器逻辑是 services/ 中的纯函数，LLMWorker 仅在 environment 存在时调用。**
 
-Wait — engine can't import from services. So the offloader must be **passed in** via execution_context, not imported. Decision: `execution_context["context_offloader"]` holds a `ContextOffloader` instance (constructed by whoever wires PregelRuntime — typically the services layer). LLMWorker calls `offloader.offload(messages)` if present. No engine→services import needed.
+等等 — 引擎无法从 services 导入。所以卸载器必须通过 execution_context **传入**，而不是导入。决策：`execution_context["context_offloader"]` 持有一个 `ContextOffloader` 实例（由任何编排 PregelRuntime 的东西构建 — 通常是 services 层）。LLMWorker 在存在时调用 `offloader.offload(messages)`。不需要 engine→services 的导入。
 
-### Decision 2: Offload triggers BEFORE compression, AFTER selection
+### 决策 2：卸载在压缩之前、选择之后触发
 
-**Choice:** Pipeline becomes 5 steps:
+**选择：** 管道变为 5 步：
 ```
 truncation → estimation → selection → offload → compress (last resort)
 ```
 
-**Rationale:**
-- After selection, we know exactly which messages are being dropped (the ones not selected).
-- Offload those specific messages to file, replace with a reference stub.
-- Recompute tokens on the [stub + selected] list. If still over budget, THEN compress.
-- This means compression (true deletion) only happens when even the stub doesn't fit — extremely rare.
+**理由：**
+- 在 selection 之后，我们确切知道哪些消息正在被丢弃（未选中的消息）。
+- 将这些特定消息卸载到文件，替换为引用桩。
+- 在 [stub + selected] 列表上重新计算 tokens。如果仍然超出预算，则进行压缩。
+- 这意味着压缩（真正的删除）只会在即使 stub 也放不下时发生 — 极为罕见。
 
-**Alternative considered:** Offload BEFORE selection (offload everything, then select from what remains). Rejected — we'd offload messages that would have been selected anyway, wasting storage and losing context that could have stayed in-line.
+**考虑的替代方案：** 在选择之前卸载（先卸载所有内容，然后从剩余部分中选择）。拒绝 — 我们会卸载本应被选中的消息，浪费存储空间并丢失本可以保持在行内的上下文。
 
-### Decision 3: Offloaded messages stored as JSON, not Markdown
+### 决策 3：卸载的消息存储为 JSON，而非 Markdown
 
-**Choice:** Serialize the dropped messages as JSON to `memory/sessions/{session_id}/offloaded_{timestamp}.json`.
+**选择：** 将丢弃的消息序列化为 JSON 保存到 `memory/sessions/{session_id}/offloaded_{timestamp}.json`。
 
-**Rationale:**
-- JSON preserves message structure (role, content, tool_calls, tool_call_id).
-- Markdown would lose tool_calls structure and require a parser to restore.
-- The agent's `read_file` returns bytes; JSON is easy to interpret on retrieval.
-- Reference stub in the live context is Markdown-formatted for LLM readability.
+**理由：**
+- JSON 保留消息结构（role、content、tool_calls、tool_call_id）。
+- Markdown 会丢失 tool_calls 结构，需要解析器才能恢复。
+- Agent 的 `read_file` 返回字节；JSON 在检索时易于解释。
+- 活动上下文中的引用桩格式化为 Markdown，便于 LLM 阅读。
 
-**Alternatives considered:**
-- *Markdown*: Lossy for tool messages. Rejected.
-- *MessagePack*: Adds a dependency. JSON is universal and debuggable.
-- *One file per message*: Too many files; hard to retrieve as a batch.
+**考虑的替代方案：**
+- *Markdown*：对 tool 消息有损。拒绝。
+- *MessagePack*：增加依赖。JSON 通用且可调试。
+- *每个消息一个文件*：文件太多；难以批量检索。
 
-### Decision 4: Reference stub format
+### 决策 4：引用桩格式
 
-**Choice:** Replace the offloaded block with a single system-role message:
+**选择：** 将卸载的块替换为单个 system 角色的消息：
 ```
 [Earlier conversation (messages 1-{N}) offloaded to {path}.
  Topics: {auto_summary}.
  Use read_file("{path}") to retrieve the full content.]
 ```
 
-Where `{auto_summary}` is a cheap heuristic summary (first 200 chars of each user message, truncated to 500 chars total) — NOT an LLM summary, to keep offload latency near zero.
+其中 `{auto_summary}` 是廉价的启发式摘要（每条用户消息的前 200 个字符，总计截断到 500 个字符）— 不是 LLM 摘要，以保持卸载延迟接近零。
 
-**Rationale:**
-- System role avoids polluting user/assistant turns.
-- Topic hint helps the LLM decide whether retrieval is needed.
-- Explicit `read_file` instruction tells the LLM how to recover.
-- Heuristic summary avoids an extra LLM call (latency + cost).
+**理由：**
+- System 角色避免污染 user/assistant 轮次。
+- 主题提示帮助 LLM 决定是否需要检索。
+- 显式的 `read_file` 指令告诉 LLM 如何恢复。
+- 启发式摘要避免了额外的 LLM 调用（延迟 + 成本）。
 
-**Alternative considered:** No summary, just a pointer. Rejected — LLM has no signal to decide whether retrieval is worth it.
+**考虑的替代方案：** 无摘要，仅一个指针。拒绝 — LLM 没有信号来判断检索是否值得。
 
-### Decision 5: One offload file per pipeline invocation, not accumulated
+### 决策 5：每次管道调用生成一个卸载文件，不累积
 
-**Choice:** Each time the pipeline runs and triggers offload, write a new timestamped file. Do not merge with previous offloads.
+**选择：** 每次管道运行并触发卸载时，写入一个新的带时间戳的文件。不与之前的卸载内容合并。
 
-**Rationale:**
-- Simpler implementation — no read-modify-write of existing offload files.
-- Avoids race conditions across concurrent supersteps.
-- Each offload is a snapshot of what was dropped at that moment.
-- Downside: multiple files accumulate over a long session. Acceptable — agent can read any of them, and a future cleanup task (Session GC agent 13.9b) can prune old offloads.
+**理由：**
+- 实现更简单 — 无需对现有卸载文件进行读-改-写操作。
+- 避免跨并发超步的竞态条件。
+- 每次卸载是当时被丢弃内容的快照。
+- 缺点：多个文件在长时间会话中累积。可接受 — Agent 可以读取其中任何一个，未来的清理任务（Session GC agent 13.9b）可以清理旧的卸载文件。
 
-**Alternative considered:** Single rolling file, append new offloads. Rejected — concurrent superstep writes would corrupt it.
+**考虑的替代方案：** 单个滚动文件，追加新的卸载内容。拒绝 — 并发超步写入会损坏它。
 
-### Decision 6: Config settings
+### 决策 6：配置设置
 
-**Choice:**
-- `CONTEXT_OFFLOAD_ENABLED: bool = True` — global switch
-- `CONTEXT_OFFLOAD_THRESHOLD_TOKENS: int = 6000` — only offload if overflow ≥ this threshold
+**选择：**
+- `CONTEXT_OFFLOAD_ENABLED: bool = True` — 全局开关
+- `CONTEXT_OFFLOAD_THRESHOLD_TOKENS: int = 6000` — 仅当溢出 ≥ 此阈值时才卸载
 
-**Rationale:**
-- Threshold prevents offloading trivially small overflows (e.g., 50 tokens over budget → not worth a file write).
-- 6000 default ≈ 1500 lines of text — meaningful chunk worth preserving.
-- Global switch lets operators disable offload in storage-constrained environments.
+**理由：**
+- 阈值防止为微小溢出（例如，超出预算 50 tokens → 不值得一次文件写入）进行卸载。
+- 6000 默认值 ≈ 1500 行文本 — 值得保存的有意义的块。
+- 全局开关让运维人员在存储受限的环境中禁用卸载。
 
-### Decision 7: Backward compatibility via execution_context optionality
+### 决策 7：通过 execution_context 可选性实现向后兼容
 
-**Choice:** If `execution_context` lacks `"context_offloader"` or if the offloader has no `AgentEnvironment`, the pipeline skips offload and proceeds to compression exactly as today.
+**选择：** 如果 `execution_context` 缺少 `"context_offloader"` 或卸载器没有 `AgentEnvironment`，管道跳过卸载并完全按当前方式继续压缩。
 
-**Rationale:** Zero regression risk. Existing tests, deployments without environments, and the ConversationService path are untouched.
+**理由：** 零回归风险。现有的测试、没有环境的部署以及 ConversationService 路径不受影响。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Storage growth]** Each long session accumulates offload files under `memory/sessions/{session_id}/`. → Mitigation: Session GC agent (13.9b) already scans for orphaned data; offload files naturally fall under its scope. Configurable threshold limits frequency.
-- **[LLM may not retrieve]** The agent might ignore the offload stub and proceed without the early context, degrading quality. → Mitigation: the topic hint in the stub gives the LLM a signal. Future enhancement: inject a stronger system prompt nudge.
-- **[Offload latency]** Writing a JSON file to the environment on every over-budget pipeline invocation adds I/O. → Mitigation: offload only fires when selection drops messages AND overflow ≥ threshold. For LocalEnvironment, file write is sub-millisecond. For DockerEnvironment, tar-based write is slower but only triggers on genuinely long conversations.
-- **[No semantic search]** Agent must know the topic to decide whether to retrieve. No vector search over offloaded content. → Accepted trade-off for this change. Future: feed offloaded JSON into L4 Knowledge Memory for semantic retrieval.
-- **[Stub tokens still count]** The reference stub consumes some of the budget (~100 tokens). If budget is extremely tight, stub + selected messages might still exceed budget, forcing compression anyway. → Mitigation: stub is capped at 500 chars; compression as last resort is retained.
-- **[execution_context contract change]** Adding `"context_offloader"` key is additive. Existing consumers of execution_context are unaffected. → Mitigation: documented in spec; key is optional.
+- **[存储增长]** 每个长会话在 `memory/sessions/{session_id}/` 下累积卸载文件。→ 缓解：Session GC agent（13.9b）已经扫描孤立数据；卸载文件自然地属于其范围。可配置阈值限制频率。
+- **[LLM 可能不检索]** Agent 可能忽略卸载桩并继续，没有早期上下文，降低质量。→ 缓解：桩中的主题提示给 LLM 提供信号。未来的增强：注入更强的系统提示提醒。
+- **[卸载延迟]** 在每次超出预算的管道调用时向环境写入 JSON 文件会增加 I/O。→ 缓解：卸载仅在选择丢弃消息且溢出 ≥ 阈值时触发。对于 LocalEnvironment，文件写入是亚毫秒级的。对于 DockerEnvironment，基于 tar 的写入较慢，但仅在真正长时间对话时触发。
+- **[无语义搜索]** Agent 必须知道主题才能决定是否检索。没有对卸载内容的向量搜索。→ 此变更接受此权衡。未来：将卸载的 JSON 输入 L4 知识记忆进行语义检索。
+- **[桩仍占用 tokens]** 引用桩消耗部分预算（约 100 tokens）。如果预算非常紧张，桩 + 选中的消息可能仍然超出预算，强制进行压缩。→ 缓解：桩限制在 500 字符；作为最后手段的压缩被保留。
+- **[execution_context 契约变更]** 添加 `"context_offloader"` 键是增量的。现有的 execution_context 消费者不受影响。→ 缓解：在 spec 中记录；键是可选的。
 
-## Migration Plan
+## Migration Plan — 迁移计划
 
-No migration required. This is purely additive:
-1. Deploy new code with `CONTEXT_OFFLOAD_ENABLED=true` (default).
-2. Wire PregelRuntime construction to inject a `ContextOffloader` when an `AgentEnvironment` is available.
-3. Existing deployments without environments automatically fall back to the compression-only path.
+无需迁移。这纯粹是增量添加：
+1. 部署新代码，`CONTEXT_OFFLOAD_ENABLED=true`（默认）。
+2. 在 PregelRuntime 构建时，当 `AgentEnvironment` 可用时注入 `ContextOffloader`。
+3. 没有环境的现有部署自动回退到仅压缩路径。
 
-**Rollback:** Set `CONTEXT_OFFLOAD_ENABLED=false`. Pipeline skips offload step entirely.
+**回滚：** 设置 `CONTEXT_OFFLOAD_ENABLED=false`。管道完全跳过卸载步骤。
 
-## Open Questions
+## Open Questions — 开放问题
 
-None — all design decisions are resolved. Open questions during implementation will be captured in tasks.md.
+无 — 所有设计决策已解决。实现过程中的开放问题将在 tasks.md 中记录。

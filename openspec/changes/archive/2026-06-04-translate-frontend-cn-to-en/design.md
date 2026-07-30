@@ -1,75 +1,75 @@
-## Context
+## Context — 背景
 
-Hecate frontend (`web/src/`) has 236 Chinese string literals across 26 files. Documentation was recently translated to English (CN→EN). The codebase needs the same treatment before going public. All changes are UI text only — no behavior changes.
+Hecate 前端（`web/src/`）在 26 个文件中有 236 个中文字符串字面量。文档最近已翻译成英语（CN→EN）。代码库在公开前需要同样的处理。所有变更仅为 UI 文本——无行为变更。
 
-Current state: Chinese strings exist in UI components (labels, placeholders, buttons), alert messages, status indicators, node type names, and test assertions.
+当前状态：UI 组件（标签、占位符、按钮）、提示消息、状态指示器、节点类型名称和测试断言中存在中文字符串。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Translate all Chinese UI text to English
-- Maintain consistency across all files (same English term for same Chinese term)
-- Fix the "handoff" edge label inconsistency (`"移交"` → `"Handoff"`)
-- Fix the `config-panel.tsx` typo (`"knowledge-rerieval"` → `"knowledge-retrieval"`)
-- Update test assertions to match translated strings
+**目标：**
+- 将所有中文 UI 文本翻译成英语
+- 跨所有文件保持一致性（同一个中文术语对应同一个英文术语）
+- 修复"handoff"边标签不一致问题（`"移交"` → `"Handoff"`）
+- 修复 `config-panel.tsx` 中的拼写错误（`"knowledge-rerieval"` → `"knowledge-retrieval"`）
+- 更新测试断言以匹配翻译后的字符串
 
-**Non-Goals:**
-- Introducing i18n framework (deferred to P3/P4)
-- Changing any functionality
-- Translating documentation (already done)
-- Translating comments or variable names (they're already English)
+**非目标：**
+- 引入 i18n 框架（推迟到 P3/P4）
+- 更改任何功能
+- 翻译文档（已完成）
+- 翻译注释或变量名（它们已经是英语）
 
-## Decisions
+## Decisions — 设计决策
 
-### D1: Direct string replacement, not i18n framework
+### D1：直接字符串替换，不使用 i18n 框架
 
-**Choice**: Replace Chinese strings directly with English equivalents in the source code.
+**选择**：直接在源代码中用英文对应词替换中文字符串。
 
-**Alternatives considered**: Introduce `next-intl` or `react-i18next` with translation keys.
+**考虑的替代方案**：引入 `next-intl` 或 `react-i18next` 以及翻译键。
 
-**Rationale**: i18n is a P3/P4 concern per project decision. Direct replacement is simpler, has zero risk of breaking functionality, and achieves the immediate goal (English-only codebase for public repo).
+**理由**：i18n 按照项目决策是 P3/P4 关注点。直接替换更简单，没有破坏功能的风险，并且实现了即时目标（公开仓库的纯英文代码库）。
 
-### D2: Consistent terminology mapping
+### D2：一致的术语映射
 
-**Choice**: Use a fixed mapping of Chinese → English terms across all files:
+**选择**：跨所有文件使用固定的中文 → 英文术语映射。
 
-| Chinese | English | Used In |
+| 中文 | 英文 | 使用位置 |
 |---------|---------|---------|
-| 对话 | Conversation | nodes, UI labels |
-| 条件 | Condition | nodes, UI labels |
-| 工具调用 | Tool Call | nodes, UI labels |
-| 知识检索 | Knowledge Retrieval | nodes, UI labels |
-| 变量设置 | Variable Set | nodes, UI labels |
-| 移交 | Handoff | edge labels, logic checks |
-| 开始 | Start | start node |
-| 结束 | End | end node |
-| 工具模式 | Tool Mode | agent node |
-| 保存 | Save | toolbar button |
-| 验证 | Validate | toolbar button |
-| 测试运行 | Test Run | toolbar button |
-| 编排模板 | Templates | toolbar button |
-| 输入 | Input | toolbar button |
-| 历史 | History | toolbar button |
+| 对话 | Conversation | 节点、UI 标签 |
+| 条件 | Condition | 节点、UI 标签 |
+| 工具调用 | Tool Call | 节点、UI 标签 |
+| 知识检索 | Knowledge Retrieval | 节点、UI 标签 |
+| 变量设置 | Variable Set | 节点、UI 标签 |
+| 移交 | Handoff | 边标签、逻辑检查 |
+| 开始 | Start | 起始节点 |
+| 结束 | End | 结束节点 |
+| 工具模式 | Tool Mode | 代理节点 |
+| 保存 | Save | 工具栏按钮 |
+| 验证 | Validate | 工具栏按钮 |
+| 测试运行 | Test Run | 工具栏按钮 |
+| 编排模板 | Templates | 工具栏按钮 |
+| 输入 | Input | 工具栏按钮 |
+| 历史 | History | 工具栏按钮 |
 
-### D3: Translation execution order
+### D3：翻译执行顺序
 
-**Choice**: Translate in two batches:
+**选择**：分两批翻译：
 
-1. **Workflow canvas files** (core, ~120 occurrences): `workflow/*`, `dsl-bridge.ts`, `workflows/*`
-2. **Other pages** (~116 occurrences): agents, knowledge, models, login, sidebar
+1. **工作流画布文件**（核心，约 120 处）：`workflow/*`、`dsl-bridge.ts`、`workflows/*`
+2. **其他页面**（约 116 处）：代理、知识、模型、登录、侧边栏
 
-**Rationale**: Workflow canvas is the most complex (edge labels used in logic), needs careful attention first.
+**理由**：工作流画布最复杂（边标签用于逻辑），需要首先仔细处理。
 
-### D4: Edge label logic fix
+### D4：边标签逻辑修复
 
-**Choice**: When translating `"移交"` to `"Handoff"`, update all equality checks in `canvas-area.tsx` and `dsl-bridge.ts` simultaneously.
+**选择**：将 `"移交"` 翻译为 `"Handoff"` 时，同时更新 `canvas-area.tsx` 和 `dsl-bridge.ts` 中的所有相等性检查。
 
-**Risk**: Missed reference → broken handoff edge rendering.
-**Mitigation**: Search for all occurrences of `"移交"` before and after translation.
+**风险**：遗漏引用 → 破坏 handoff 边渲染。
+**缓解措施**：在翻译前后搜索所有 `"移交"` 的引用。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险与权衡
 
-- **[Missed translation]** → Search for Chinese characters after each batch to verify completeness
-- **[Test failure]** → Run `npm test` in `web/` after each batch to catch assertion mismatches
-- **[Logic break from edge label change]** → Verify `"Handoff"` is used consistently in all equality checks
-- **[Inconsistent terminology]** → Use the fixed mapping table (D2) for all translations
+- **[遗漏翻译]** → 每批翻译后搜索中文字符以验证完整性
+- **[测试失败]** → 每批翻译后在 `web/` 中运行 `npm test` 以捕获断言不匹配
+- **[边标签更改导致的逻辑破坏]** → 验证 `"Handoff"` 在所有相等性检查中一致使用
+- **[不一致的术语]** → 对所有翻译使用固定映射表（D2）

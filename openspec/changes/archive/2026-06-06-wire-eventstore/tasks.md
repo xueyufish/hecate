@@ -1,49 +1,49 @@
-## 1. PregelRuntime EventStore Integration
+## 1. PregelRuntime EventStore 集成
 
-- [x] 1.1 Add imports for `EventStore`, `EventType`, `Event` from `hecate.engine.eventstore` in `src/hecate/engine/pregel.py`
-- [x] 1.2 Add `event_store: EventStore | None = None` parameter to `PregelRuntime.__init__()` — store as `self._event_store = event_store`
-- [x] 1.3 Add private `_emit()` helper method to PregelRuntime that checks `if self._event_store` before appending
-- [x] 1.4 Record RESUME event after `_restore_from_checkpoint()` when resume_value is provided
-- [x] 1.5 Record CUSTOM SESSION_START event after initial_input write when starting fresh
-- [x] 1.6 Record NODE_START event before dispatching each node
-- [x] 1.7 Record NODE_END event after worker returns result
-- [x] 1.8 Record ERROR event before raising worker error
-- [x] 1.9 Record INTERRUPT event when interrupt detected
-- [x] 1.10 Record CHANNEL_WRITE event after `_apply_writes()`
-- [x] 1.11 Record CUSTOM SUPERSTEP_END event after checkpoint save
+- [x] 1.1 在 `src/hecate/engine/pregel.py` 中添加从 `hecate.engine.eventstore` 导入 `EventStore`、`EventType`、`Event`
+- [x] 1.2 在 `PregelRuntime.__init__()` 中添加 `event_store: EventStore | None = None` 参数 — 存储为 `self._event_store = event_store`
+- [x] 1.3 添加私有 `_emit()` 辅助方法到 PregelRuntime，在追加前检查 `if self._event_store`
+- [x] 1.4 在提供 resume_value 时，在 `_restore_from_checkpoint()` 后记录 RESUME 事件
+- [x] 1.5 在全新开始时，在 initial_input 写入后记录 CUSTOM SESSION_START 事件
+- [x] 1.6 在分发每个节点前记录 NODE_START 事件
+- [x] 1.7 在 worker 返回结果后记录 NODE_END 事件
+- [x] 1.8 在抛出 worker 错误前记录 ERROR 事件
+- [x] 1.9 在检测到中断时记录 INTERRUPT 事件
+- [x] 1.10 在 `_apply_writes()` 后记录 CHANNEL_WRITE 事件
+- [x] 1.11 在 checkpoint 保存后记录 CUSTOM SUPERSTEP_END 事件
 
-## 2. Worker ABC Changes
+## 2. Worker ABC 变更
 
-- [x] 2.1 Add `event_store: EventStore | None = None` parameter to `Worker.__init__()` in `src/hecate/engine/worker.py`
-- [x] 2.2 Add `execution_context: dict | None = None` parameter to `Worker.execute()` abstract method
-- [x] 2.3 Add `execution_context: dict | None = None` parameter to `WorkerPool.dispatch()` in `src/hecate/engine/worker.py`
-- [x] 2.4 Update `DirectWorkerPool.dispatch()` to pass execution_context to worker.execute()
-- [x] 2.5 Update PregelRuntime to pass execution_context with session_id, superstep, event_store when dispatching workers
+- [x] 2.1 在 `src/hecate/engine/worker.py` 的 `Worker.__init__()` 中添加 `event_store: EventStore | None = None` 参数
+- [x] 2.2 在 Worker.execute() 抽象方法中添加 `execution_context: dict | None = None` 参数
+- [x] 2.3 在 `src/hecate/engine/worker.py` 的 `WorkerPool.dispatch()` 中添加 `execution_context: dict | None = None` 参数
+- [x] 2.4 更新 `DirectWorkerPool.dispatch()` 将 execution_context 传递给 worker.execute()
+- [x] 2.5 更新 PregelRuntime，在分发 worker 时传递包含 session_id、superstep、event_store 的 execution_context
 
-## 3. Production Worker Updates
+## 3. 生产 Worker 更新
 
-- [x] 3.1 Update `LLMWorker.__init__()` to accept and store `event_store` parameter
-- [x] 3.2 Update `LLMWorker.execute()` to accept `execution_context` and record LLM_REQUEST/LLM_RESPONSE events
-- [x] 3.3 Update `ToolWorker.__init__()` to accept and store `event_store` parameter
-- [x] 3.4 Update `ToolWorker.execute()` to accept `execution_context` and record TOOL_CALL/TOOL_RESULT events
-- [x] 3.5 Update `AgentWorker.__init__()` to accept `event_store` parameter
-- [x] 3.6 Update `ConditionWorker`, `KnowledgeWorker`, `VariableSetWorker`, `SuggestionWorker` constructors to accept `event_store`
+- [x] 3.1 更新 `LLMWorker.__init__()` 接受并存储 `event_store` 参数
+- [x] 3.2 更新 `LLMWorker.execute()` 接受 `execution_context` 并记录 LLM_REQUEST/LLM_RESPONSE 事件
+- [x] 3.3 更新 `ToolWorker.__init__()` 接受并存储 `event_store` 参数
+- [x] 3.4 更新 `ToolWorker.execute()` 接受 `execution_context` 并记录 TOOL_CALL/TOOL_RESULT 事件
+- [x] 3.5 更新 `AgentWorker.__init__()` 接受 `event_store` 参数
+- [x] 3.6 更新 `ConditionWorker`、`KnowledgeWorker`、`VariableSetWorker`、`SuggestionWorker` 构造函数接受 `event_store`
 
-## 4. Test Stub Updates
+## 4. 测试桩更新
 
-- [x] 4.1 Update all 17 test Worker classes in `tests/test_engine/` to accept `event_store` parameter in constructor
+- [x] 4.1 更新 `tests/test_engine/` 中所有 17 个测试 Worker 类，在构造函数中接受 `event_store` 参数
 
-## 5. Tests
+## 5. 测试
 
-- [x] 5.1 Add test `test_pregel_records_lifecycle_events` in `tests/test_engine/test_pregel.py` — verify NODE_START, NODE_END, CHANNEL_WRITE, SUPERSTEP_END events recorded
-- [x] 5.2 Add test `test_pregel_records_resume_event` — verify RESUME event on resume_value
-- [x] 5.3 Add test `test_pregel_records_interrupt_event` — verify INTERRUPT event when worker returns interrupt command
-- [x] 5.4 Add test `test_pregel_records_error_event` — verify ERROR event when worker returns error
-- [x] 5.5 Add test `test_pregel_no_recording_without_event_store` — verify no events recorded when event_store is None
+- [x] 5.1 在 `tests/test_engine/test_pregel.py` 中添加测试 `test_pregel_records_lifecycle_events` — 验证记录了 NODE_START、NODE_END、CHANNEL_WRITE、SUPERSTEP_END 事件
+- [x] 5.2 添加测试 `test_pregel_records_resume_event` — 验证 resume_value 时的 RESUME 事件
+- [x] 5.3 添加测试 `test_pregel_records_interrupt_event` — 验证 worker 返回中断命令时的 INTERRUPT 事件
+- [x] 5.4 添加测试 `test_pregel_records_error_event` — 验证 worker 返回错误时的 ERROR 事件
+- [x] 5.5 添加测试 `test_pregel_no_recording_without_event_store` — 验证 event_store 为 None 时没有记录事件
 
-## 6. Verification
+## 6. 验证
 
-- [x] 6.1 Run `ruff check src/hecate/ tests/`
-- [x] 6.2 Run `ruff format --check src/ tests/`
-- [x] 6.3 Run `mypy src/`
-- [x] 6.4 Run `python -m pytest tests/ -q` — no regressions
+- [x] 6.1 运行 `ruff check src/hecate/ tests/`
+- [x] 6.2 运行 `ruff format --check src/ tests/`
+- [x] 6.3 运行 `mypy src/`
+- [x] 6.4 运行 `python -m pytest tests/ -q` — 无回归

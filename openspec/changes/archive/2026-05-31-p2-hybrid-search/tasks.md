@@ -1,43 +1,33 @@
-## 1. Sparse Vector Generation (EmbeddingService)
+## 1. 引擎层 — 端口变更
 
-- [x] 1.1 Update `embedding.py` — `encode()` uses BGE-M3's `encode()` method with `return_dense=True, return_sparse=True`, converts sparse output to `dict[int, float]`
-- [x] 1.2 Update `encode_query()` — calls `encode([query])` and returns `EmbeddingResult` containing both dense and sparse
-- [x] 1.3 Update `_mock_embedding()` — generate deterministic mock sparse vectors (token_id → weight mapping based on text hash)
+- [x] 1.1 更新 `EnginePort.knowledge_query()` 签名——添加 `search_mode: str = "hybrid"` 和 `search_config: dict | None = None` 参数
+- [x] 1.2 更新 `InMemoryKnowledgeBaseAdapter`（端口适配器/测试存根）以处理 search_mode 参数
 
-## 2. Qdrant Sparse Vector Support (QdrantIndexer)
+## 2. 服务层 — 关键词搜索引擎
 
-- [x] 2.1 Update `create_collection()` — add `sparse_vectors_config={"sparse": SparseVectorParams(index=models.SparseIndexParams())}` parameter
-- [x] 2.2 Update `upsert_vectors()` — add optional parameter `sparse_vectors: list[dict[int, float]] | None = None`, pass both dense and sparse vectors when constructing PointStruct
-- [x] 2.3 Add `search_sparse()` method — use Qdrant's `query_points()` for sparse vector search
-- [x] 2.4 Add collection config detection method `has_sparse_vectors(collection_name)` — check if collection has sparse vectors configured
+- [x] 2.1 创建 `src/hecate/services/rag/keyword_engine.py`——`KeywordSearchEngine` 抽象基类，方法：`index_documents(knowledge_base_id, documents)`, `search(knowledge_base_id, query, top_k) -> list[dict]`, `remove_document(knowledge_base_id, doc_id)`
+- [x] 2.2 实现 `RankBM25Engine`——使用 `rank_bm25` 包的纯 Python BM25，在 `index_documents()` 时构建内存索引，`search()` 时使用 `BM25Okapi`
+- [x] 2.3 在 `src/hecate/services/rag/keyword_engine.py` 中实现 `TantivyKeywordEngine`——使用 `tantivy` 包的生产 BM25（`try/except ImportError` 降级），为每个知识库创建独立索引
+- [x] 2.4 创建 `src/hecate/services/rag/hybrid_search.py`——`RRFFusionStrategy` 类，方法 `fuse(vector_results, keyword_results, top_k, rrf_k=60) -> list[dict]`，使用倒数秩融合合并及重新排序结果
+- [x] 2.5 创建 `src/hecate/services/rag/hybrid_search.py` 中的 `HybridSearchService`——协调对 `KnowledgeBaseService`（向量）和 `KeywordSearchEngine`（关键词）的并行调用，应用 RRF 融合
 
-## 3. Hybrid Retrieval Implementation (HybridSearcher)
+## 3. API 层 — 查询集成
 
-- [x] 3.1 Rewrite `search()` method — implement true hybrid retrieval using Qdrant `QueryRequest` with `prefetch` + `fusion=Models.Fusion.RRF`
-- [x] 3.2 Add `mode` parameter support — `"hybrid"` (default) / `"dense"` / `"sparse"` three modes
-- [x] 3.3 Implement fallback logic — when collection has no sparse vector config, auto-degrade to dense-only and log warning
-- [x] 3.4 Update `HybridSearchResult` — add `sparse_score` field to record sparse retrieval score
+- [x] 3.1 更新 `GET /api/knowledge-bases/{id}/query`——添加可选的 `search_mode` 查询参数（vector|keyword|hybrid），默认从配置读取
+- [x] 3.2 更新 `src/hecate/api/knowledge_bases.py` 中的 `KnowledgeController`——将 search_mode 转发到 `KnowledgeService`，后者随后调用 `HybridSearchService`
 
-## 4. Knowledge Base Service Update (KnowledgeBaseService)
+## 4. 配置
 
-- [x] 4.1 Update `ingest_document()` — call `embedding_service.encode()` in the pipeline to get sparse vectors, pass to `qdrant_indexer.upsert_vectors()`
-- [x] 4.2 Update `search()` — add `mode: str = "hybrid"` parameter, pass mode to `hybrid_searcher.search()`
-- [x] 4.3 Add `reindex_with_sparse(collection_name)` method — reindex existing collections, generate and store sparse vectors for existing documents
+- [x] 4.1 向核心配置添加 `SearchSettings` 类（在 `src/hecate/core/config.py`）——字段：`default_search_mode: str = "hybrid"`, `rrf_k: int = 60`, `rrf_top_k: int = 10`, `keyword_engine: str = "rank_bm25"`
+- [x] 4.2 在 `pyproject.toml` 的 `[project.optional-dependencies]` 下的 `[rag]` 组中添加 `tantivy` 可选依赖
 
-## 5. EnginePort Integration
+## 5. 测试
 
-- [x] 5.1 Update `AgentExecutionPort.knowledge_query()` — inject `KnowledgeBaseService`, look up Qdrant collection names for kb_ids, call `search()` to return results
-- [x] 5.2 Add `kb_id → collection_name` mapping logic — query `KnowledgeBaseModel` to get the `qdrant_collection` field
+- [x] 5.1 创建 `tests/test_services/test_rag/test_keyword_engine.py`——测试 RankBM25Engine 的索引和搜索（有效查询、空结果、多知识库隔离）
+- [x] 5.2 创建 `tests/test_services/test_rag/test_hybrid_search.py`——测试 RRF 融合（均等排名、向量主导、关键词主导、top-K 限制、边界情况）
+- [x] 5.3 更新 `tests/test_api/test_knowledge_bases.py`——测试 `search_mode` 查询参数（向量、关键词、混合、无效模式）
+- [x] 5.4 更新 `tests/test_services/test_rag/test_knowledge_service.py`——测试 search_mode 传播到下层引擎
 
-## 6. Model & Configuration
+## 6. 文档
 
-- [x] 6.1 Update `KnowledgeBaseModel` — add `search_mode` field (default `"hybrid"`) and `sparse_weight` field (default `0.3`)
-- [x] 6.2 Generate and execute Alembic migration script
-
-## 7. Tests
-
-- [x] 7.1 Write `test_embedding_sparse.py` — test sparse vector generation (encode/encode_query/mock)
-- [x] 7.2 Write `test_hybrid_search.py` — test hybrid search (hybrid/dense/sparse modes, fallback)
-- [x] 7.3 Write `test_knowledge_service.py` — test ingest with sparse vectors, search multi-mode
-- [x] 7.4 Write `test_engine_port_knowledge.py` — test EnginePort.knowledge_query real invocation
-- [x] 7.5 Full validation: `ruff check src/` + `mypy src/` + `pytest tests/ -q`
+- [x] 6.1 更新 `docs/features/feature-catalog.md`——将 2.3 和 7.2 标记为已实现

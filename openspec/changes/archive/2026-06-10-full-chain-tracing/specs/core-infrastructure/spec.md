@@ -1,20 +1,20 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: FastAPI application entry point
-The `main.py` module SHALL initialize the FastAPI application with CORS middleware, unified error handling, lifespan events, health check endpoint, route registration, and OpenTelemetry instrumentation for automatic request tracing.
+### 需求：FastAPI 应用入口点
+`main.py` 模块应使用 CORS 中间件、统一错误处理、生命周期事件、健康检查端点、路由注册和用于自动请求追踪的 OpenTelemetry 插装来初始化 FastAPI 应用
 
-#### Scenario: OTel instrumentation enabled on startup
-- **WHEN** the FastAPI application starts
-- **THEN** `FastAPIInstrumentor` SHALL be configured to auto-create OTel spans for every HTTP request, with `opentelemetry-api` and `opentelemetry-sdk` as the tracing backend
+#### 场景：启动时启用 OTel 插装
+- **当** FastAPI 应用启动时
+- **则** 应配置 `FastAPIInstrumentor` 为每个 HTTP 请求自动创建 OTel span，使用 `opentelemetry-api` 和 `opentelemetry-sdk` 作为追踪后端
 
-#### Scenario: OTel span contains business attributes
-- **WHEN** a request is processed that has `agent_id` and `session_id` in request state
-- **THEN** the root OTel span SHALL include `agent_id` and `session_id` as attributes
+#### 场景：OTel span 包含业务属性
+- **当** 处理请求且请求状态中有 `agent_id` 和 `session_id`
+- **则** 根 OTel span 应包含 `agent_id` 和 `session_id` 作为属性
 
-#### Scenario: Tracing disabled via configuration
-- **WHEN** `TRACING_ENABLED=false` environment variable is set
-- **THEN** OTel instrumentation SHALL NOT be configured and no spans SHALL be created
+#### 场景：通过配置禁用追踪
+- **当** 设置了环境变量 `TRACING_ENABLED=false`
+- **则** 不应配置 OTel 插装且不应创建 span
 
-#### Scenario: Health check endpoint
-- **WHEN** `GET /health` is called
-- **THEN** it SHALL return `{"status": "ok"}`
+#### 场景：健康检查端点
+- **当** 调用 `GET /health`
+- **则** 应返回 `{"status": "ok"}`

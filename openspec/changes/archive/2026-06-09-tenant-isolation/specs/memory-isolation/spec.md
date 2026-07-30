@@ -1,52 +1,52 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### REQ-1: Workspace Isolation on Memory Models
-All memory models (L1 `MemoryBlockModel`, L3 `MemoryModel`, L4 `KnowledgeMemoryModel`) SHALL have a `workspace_id` UUID column as a first-class field. All service-layer queries SHALL filter by `workspace_id` to enforce tenant isolation.
+### REQ-1：内存模型的工作区隔离
+所有内存模型（L1 `MemoryBlockModel`、L3 `MemoryModel`、L4 `KnowledgeMemoryModel`）应具有 `workspace_id` UUID 列作为一级字段。所有服务层查询应通过 `workspace_id` 进行过滤以强制执行租户隔离。
 
-#### Scenario: Query L1 memory blocks with workspace filter
-- **WHEN** `WorkingMemoryService.list_blocks(agent_id, workspace_id=ws_id)` is called
-- **THEN** Only return blocks where `workspace_id == ws_id` AND `agent_id == agent_id`
+#### 场景：使用工作区过滤器查询 L1 内存块
+- **当** 调用 `WorkingMemoryService.list_blocks(agent_id, workspace_id=ws_id)`
+- **则** 仅返回 `workspace_id == ws_id` 且 `agent_id == agent_id` 的块
 
-#### Scenario: Query L3 user memories with workspace filter
-- **WHEN** `UserMemoryService.retrieve_memories(query, scope, workspace_id=ws_id)` is called
-- **THEN** Only return memories where `workspace_id == ws_id`, in addition to any scope filters
+#### 场景：使用工作区过滤器查询 L3 用户内存
+- **当** 调用 `UserMemoryService.retrieve_memories(query, scope, workspace_id=ws_id)`
+- **则** 仅返回 `workspace_id == ws_id` 的内存，此外还有任何作用域过滤器
 
-#### Scenario: Query L4 knowledge with workspace filter
-- **WHEN** `KnowledgeMemoryService.search(query, agent_id, workspace_id=ws_id)` is called
-- **THEN** Qdrant search payload filter SHALL include `workspace_id == ws_id` as a mandatory filter condition
+#### 场景：使用工作区过滤器查询 L4 知识
+- **当** 调用 `KnowledgeMemoryService.search(query, agent_id, workspace_id=ws_id)`
+- **则** Qdrant 搜索负载过滤器应包括 `workspace_id == ws_id` 作为强制过滤条件
 
-#### Scenario: Create memory block with workspace
-- **WHEN** A new `MemoryBlockModel` is created
-- **THEN** `workspace_id` is set from the agent's workspace (validated against auth context)
+#### 场景：创建工作区限定的内存块
+- **当** 创建新的 `MemoryBlockModel`
+- **则** `workspace_id` 从代理的工作区设置（根据认证上下文验证）
 
-#### Scenario: Create user memory with workspace
-- **WHEN** A new `MemoryModel` is created
-- **THEN** `workspace_id` is set from the request auth context
+#### 场景：创建工作区限定的用户内存
+- **当** 创建新的 `MemoryModel`
+- **则** `workspace_id` 从请求认证上下文设置
 
-#### Scenario: Vector store payload includes workspace_id
-- **WHEN** a memory vector is stored in Qdrant for L4 knowledge memory
-- **THEN** the point payload SHALL include `workspace_id` matching the memory's workspace, and search queries SHALL filter by it
+#### 场景：向量存储负载包含 workspace_id
+- **当** L4 知识内存的向量存储在 Qdrant 中
+- **则** 点负载应包括与内存工作区匹配的 `workspace_id`，且搜索查询应通过它进行过滤
 
-### REQ-3: API Workspace Context
-All memory API endpoints SHALL accept workspace context from the authentication middleware. The `workspace_id` SHALL be validated against the authenticated user's permitted workspaces.
+### REQ-3：API 工作区上下文
+所有内存 API 端点应从认证中间件接受工作区上下文。`workspace_id` 应根据认证用户被允许的工作区进行验证。
 
-#### Scenario: Memory block endpoints workspace enforcement
-- **WHEN** `POST /api/agents/{agent_id}/memory-blocks` is called
-- **THEN** The agent's `workspace_id` is used as the workspace context, and the created block inherits it
+#### 场景：内存块端点工作区强制
+- **当** 调用 `POST /api/agents/{agent_id}/memory-blocks`
+- **则** 使用代理的 `workspace_id` 作为工作区上下文，创建的块继承该值
 
-#### Scenario: User memory endpoints workspace enforcement
-- **WHEN** `GET /api/users/{user_id}/memories` is called
-- **THEN** Only memories within the authenticated workspace are returned
+#### 场景：用户内存端点工作区强制
+- **当** 调用 `GET /api/users/{user_id}/memories`
+- **则** 仅返回认证工作区内的内存
 
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Vector store workspace payload on all insertions
-All vector store adapters (Qdrant, Chroma) SHALL include `workspace_id` in the payload metadata when inserting points for memory or knowledge base chunks.
+### 需求：所有插入的向量存储工作区负载
+所有向量存储适配器（Qdrant、Chroma）在插入内存或知识库块的点时，应在负载元数据中包含 `workspace_id`
 
-#### Scenario: Qdrant upsert includes workspace_id
-- **WHEN** a vector point is upserted into Qdrant
-- **THEN** the payload SHALL contain a `workspace_id` field with the workspace UUID
+#### 场景：Qdrant upsert 包含 workspace_id
+- **当** 向量点被 upsert 到 Qdrant
+- **则** 负载应包含带有工作区 UUID 的 `workspace_id` 字段
 
-#### Scenario: Chroma upsert includes workspace_id
-- **WHEN** a vector point is added to Chroma
-- **THEN** the metadata SHALL contain a `workspace_id` field with the workspace UUID
+#### 场景：Chroma upsert 包含 workspace_id
+- **当** 向量点被添加到 Chroma
+- **则** 元数据应包含带有工作区 UUID 的 `workspace_id` 字段

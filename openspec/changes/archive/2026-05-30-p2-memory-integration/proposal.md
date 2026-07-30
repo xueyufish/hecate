@@ -1,31 +1,31 @@
-## Why
+## Why — 动机
 
-Agent conversations have no memory — every turn is a stateless call, unable to remember user preferences across sessions or automatically compress history in long conversations. The `services/memory/` directory already has complete three-layer memory service code (L1 working memory, L2 conversation compression, L3 user memory), and `ContextAssembler` already has `memory_blocks` and `user_memories` injection interfaces, but `ConversationService` never calls them. Need to wire the existing memory services into the conversation flow so Agents have full memory capabilities.
+Agent 对话没有记忆——每次轮转都是无状态调用，无法跨会话记住用户偏好，也无法在长对话中自动压缩历史。`services/memory/` 目录已有完整的三层记忆服务代码（L1 工作记忆、L2 对话压缩、L3 用户记忆），`ContextAssembler` 已有 `memory_blocks` 和 `user_memories` 注入接口，但 `ConversationService` 从未调用它们。需要将现有记忆服务接入对话流程，使 Agent 拥有完整的记忆能力。
 
-## What Changes
+## What Changes — 变更内容
 
-- Wire `CompressionPipeline` (L2) into `ConversationService` for automatic compression in long conversations
-- Wire `WorkingMemoryService` (L1) into `ContextAssembler` so Agents can read/write named memory blocks every turn
-- Wire `UserMemoryService` (L3) into the conversation flow for cross-session user fact persistence
-- Automatically extract user memories (preferences, facts, key info) at conversation end
-- Add memory management API (CRUD memory blocks, view user memories, manually trigger compression)
-- Add frontend memory panel (view/edit working memory, user memory list)
+- 将 `CompressionPipeline`（L2）接入 `ConversationService`，实现长对话自动压缩
+- 将 `WorkingMemoryService`（L1）接入 `ContextAssembler`，使 Agent 每轮可读写命名记忆块
+- 将 `UserMemoryService`（L3）接入对话流程，实现跨会话用户事实持久化
+- 在对话结束时自动提取用户记忆（偏好、事实、关键信息）
+- 添加记忆管理 API（CRUD 记忆块、查看用户记忆、手动触发压缩）
+- 添加前端记忆面板（查看/编辑工作记忆、用户记忆列表）
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
+### New Capabilities — 新增能力
 
-- `session-memory`: In-session memory integration — L1 working memory injection into context + L2 automatic conversation compression + L3 user memory extraction and retrieval
-- `memory-api`: Memory management REST API — CRUD working memory blocks, view/search user memories, compression status query
+- `session-memory`: 会话内记忆集成——L1 工作记忆注入上下文 + L2 自动对话压缩 + L3 用户记忆提取和检索
+- `memory-api`: 记忆管理 REST API——CRUD 工作记忆块、查看/搜索用户记忆、压缩状态查询
 
-### Modified Capabilities
+### Modified Capabilities — 修改的能力
 
-- (No existing specs need modification)
+- （无现有 spec 需要修改）
 
-## Impact
+## Impact — 影响
 
-- **Service layer**: `ConversationService` adds memory invocation logic (compression, extraction, injection)
-- **Context layer**: `ContextAssembler`'s `memory_blocks` / `user_memories` parameters will actually be populated
-- **API layer**: `api/management/memory.py` already has a skeleton, needs endpoint expansion
-- **Data layer**: `MemoryBlockModel`, `MemoryModel` already exist, need Alembic migration confirmation
-- **Dependencies**: No new external dependencies, all based on existing code
+- **服务层**: `ConversationService` 增加记忆调用逻辑（压缩、提取、注入）
+- **上下文层**: `ContextAssembler` 的 `memory_blocks` / `user_memories` 参数将真正被填充
+- **API 层**: `api/management/memory.py` 已有骨架，需要扩展端点
+- **数据层**: `MemoryBlockModel`, `MemoryModel` 已存在，需要确认 Alembic 迁移
+- **依赖**: 无新增外部依赖，全部基于现有代码

@@ -1,34 +1,34 @@
-## Why
+## Why — 为什么
 
-Hecate's engine layer uses generic Python exceptions (ValueError, KeyError, RuntimeError) with no way to distinguish error source at the exception level. The existing `ErrorClassifier` in `services/validation/retry_policy.py` classifies errors by string keyword matching — fragile and indirect. API layer error handling relies on ad-hoc if-else string inspection rather than structured exception types.
+Hecate 的 engine 层使用泛型 Python 异常（ValueError、KeyError、RuntimeError），无法在异常级别区分错误来源。现有的 `ErrorClassifier` 位于 `services/validation/retry_policy.py` 中，通过字符串关键字匹配来分类错误——脆弱且间接。API 层的错误处理依赖于临时的 if-else 字符串检查，而非结构化的异常类型。
 
-Research across 10 platforms (OpenAI SDK, LiteLLM, LangChain, LangGraph, Google ADK, IBM watsonx, Salesforce, Huawei, AutoGen, CrewAI) shows that **no platform wraps provider exceptions into their own LLMError/ToolError tree**. All let provider SDK exceptions pass through. The industry consensus is: define your own domain-specific errors only (engine, channel, security), use an error category enum for classification, and upgrade the classifier to use isinstance checks.
+对 10 个平台（OpenAI SDK、LiteLLM、LangChain、LangGraph、Google ADK、IBM watsonx、Salesforce、Huawei、AutoGen、CrewAI）的研究表明，**没有平台将提供商异常包装到自己的 LLMError/ToolError 树中**。所有平台都让提供商的 SDK 异常直接通过。行业共识是：只定义你自己的领域特定错误（engine、channel、security），使用错误类别枚举进行分类，并升级分类器以使用 isinstance 检查。
 
-## What Changes
+## What Changes — 变更内容
 
-- Define `HecateError(Exception)` as the base exception for all Hecate-specific errors in a new `engine/errors.py`
-- Define three Hecate-specific exception categories: `EngineError`, `ChannelError`, `SecurityError` with subtypes
-- Change `GraphValidationError` inheritance from `Exception` to `EngineError` (backward compatible — EngineError inherits from HecateError inherits from Exception)
-- Define `ErrorCategory` StrEnum with semantic categories (LLM_RATE_LIMIT, LLM_AUTH, LLM_TIMEOUT, TOOL_TIMEOUT, ENGINE, SECURITY, etc.)
-- Upgrade `ErrorClassifier` to support isinstance-based type matching with provider SDK exceptions (openai.RateLimitError, etc.) while preserving string-based fallback
-- Update PregelRuntime's `MaxSupersteps` error from generic `RuntimeError` to `MaxSuperstepsError(EngineError)`
+- 在新的 `engine/errors.py` 中定义 `HecateError(Exception)` 作为所有 Hecate 特定错误的基础异常
+- 定义三个 Hecate 特定的异常类别：`EngineError`、`ChannelError`、`SecurityError` 及其子类型
+- 将 `GraphValidationError` 的继承从 `Exception` 改为 `EngineError`（向后兼容——EngineError 继承自 HecateError 继承自 Exception）
+- 定义 `ErrorCategory` StrEnum，包含语义类别（LLM_RATE_LIMIT, LLM_AUTH, LLM_TIMEOUT, TOOL_TIMEOUT, ENGINE, SECURITY 等）
+- 升级 `ErrorClassifier` 以支持基于 isinstance 的类型匹配，支持提供商 SDK 异常（openai.RateLimitError 等），同时保留基于字符串的回退
+- 将 PregelRuntime 的 `MaxSupersteps` 错误从通用的 `RuntimeError` 更新为 `MaxSuperstepsError(EngineError)`
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
+### 新增能力
 
-- `exception-hierarchy`: HecateError base class with EngineError/ChannelError/SecurityError subtypes, ErrorCategory enum, and upgraded ErrorClassifier
+- `exception-hierarchy`：HecateError 基类，包含 EngineError/ChannelError/SecurityError 子类型、ErrorCategory 枚举和升级后的 ErrorClassifier
 
-### Modified Capabilities
+### 修改的能力
 
-(none — existing specs for guardrail-hook, engine-types, channel-registry remain unchanged; error classification is additive)
+（无——现有的 guardrail-hook、engine-types、channel-registry 规范保持不变；错误分类是新增的）
 
-## Impact
+## Impact — 影响
 
-- **New file**: `src/hecate/engine/errors.py` — exception hierarchy + ErrorCategory enum
-- **Modified**: `src/hecate/services/validation/retry_policy.py` — ErrorClassifier upgraded with isinstance support
-- **Modified**: `src/hecate/engine/graph_dsl.py` — GraphValidationError inherits EngineError
-- **Modified**: `src/hecate/engine/pregel.py` — MaxSuperstepsError replaces RuntimeError
-- **Modified**: `src/hecate/engine/channel.py` — ChannelNotFoundError replaces bare KeyError
-- **Tests**: New tests for exception hierarchy, ErrorCategory classification, ErrorClassifier isinstance matching
-- **No breaking changes**: All existing except blocks continue to work (HecateError inherits Exception)
+- **新文件**：`src/hecate/engine/errors.py`——异常层级 + ErrorCategory 枚举
+- **修改**：`src/hecate/services/validation/retry_policy.py`——ErrorClassifier 升级，支持 isinstance
+- **修改**：`src/hecate/engine/graph_dsl.py`——GraphValidationError 继承 EngineError
+- **修改**：`src/hecate/engine/pregel.py`——MaxSuperstepsError 替换 RuntimeError
+- **修改**：`src/hecate/engine/channel.py`——ChannelNotFoundError 替换裸 KeyError
+- **测试**：异常层级、ErrorCategory 分类、ErrorClassifier isinstance 匹配的新测试
+- **无破坏性变更**：所有现有的 except 块继续工作（HecateError 继承自 Exception）

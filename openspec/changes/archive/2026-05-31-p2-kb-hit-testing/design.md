@@ -1,63 +1,63 @@
-## Context
+## Context — 背景
 
-Hecate's RAG pipeline is complete with hybrid search (3.2.2 + 3.2.3). The service layer has:
+Hecate 的 RAG 流水线已通过混合搜索（3.2.2 + 3.2.3）完成。服务层拥有：
 
-- **`KnowledgeBaseService.search()`** — accepts collection_name, query, limit, mode; returns `list[HybridSearchResult]`
-- **`HybridSearchResult`** — `id`, `score`, `content`, `metadata`, `sparse_score`
-- **`HybridSearcher`** — supports `"hybrid"`, `"dense"`, `"sparse"` modes via Qdrant native fusion
-- **`KnowledgeBaseModel`** — has `qdrant_collection` (maps kb_id → collection name), `search_mode`, `sparse_weight`
-- **KB API** (`api/management/knowledge.py`) — CRUD + document upload, but **no search endpoint**
+- **`KnowledgeBaseService.search()`** — 接受 collection_name、query、limit、mode；返回 `list[HybridSearchResult]`
+- **`HybridSearchResult`** — `id`、`score`、`content`、`metadata`、`sparse_score`
+- **`HybridSearcher`** — 通过 Qdrant 原生融合支持 `"hybrid"`、`"dense"`、`"sparse"` 模式
+- **`KnowledgeBaseModel`** — 拥有 `qdrant_collection`（映射 kb_id → 集合名称）、`search_mode`、`sparse_weight`
+- **KB API**（`api/management/knowledge.py`）— 支持 CRUD + 文档上传，但**无搜索端点**
 
-Chunks are stored in Qdrant (not PostgreSQL). Each point has a vector, optional sparse vector, and payload with `content`, `metadata` (including source document info). The QdrantIndexer has `search()`, `search_sparse()`, `search_hybrid()` methods.
+分块存储在 Qdrant 中（而非 PostgreSQL）。每个点都有一个向量、可选的稀疏向量以及包含 `content`、`metadata`（包括来源文档信息）的载荷。`QdrantIndexer` 提供 `search()`、`search_sparse()`、`search_hybrid()` 方法。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Expose a search endpoint for KB hit testing: users send a query, get scored results with content snippets
-- Provide chunk browsing: paginated list of stored chunks so users can verify ingestion quality
-- Mode comparison: run same query across dense/sparse/hybrid and return side-by-side results
-- Return actionable detail: score, content snippet, source document, dense/sparse score breakdown
+**目标：**
+- 暴露 KB 命中测试的搜索端点：用户发送查询，获得带内容片段的评分结果
+- 提供分块浏览：已存储分块的分页列表，以便用户验证数据摄入质量
+- 模式比较：在 dense/sparse/hybrid 上运行同一查询并返回并列结果
+- 返回可操作细节：分数、内容片段、来源文档、dense/sparse 分数分解
 
-**Non-Goals:**
-- No new ORM models — chunks live in Qdrant, not PostgreSQL
-- No chunk editing or deletion UI — that's KB management, not hit testing
-- No automatic quality scoring or recommendations — users interpret results themselves
-- No re-ranking or cross-encoder — that's P4 (3.2.5)
+**非目标：**
+- 不新增 ORM 模型 — 分块存在 Qdrant 中，不在 PostgreSQL 中
+- 不提供分块编辑或删除 UI — 属于 KB 管理范畴，非命中测试
+- 不提供自动质量评分或建议 — 用户自行解读结果
+- 不提供重排序或交叉编码器 — 属于 P4（3.2.5）
 
-## Decisions
+## Decisions — 决策
 
-### D1: Search endpoint as POST (not GET)
+### D1：搜索端点为 POST（而非 GET）
 
-**Decision**: `POST /api/knowledge-bases/{id}/search` with JSON body `{query, mode, limit}`.
+**决策**：`POST /api/knowledge-bases/{id}/search`，使用 JSON 体 `{query, mode, limit}`。
 
-**Rationale**: Search queries can be long (full sentences, multi-line). POST body is more natural than URL-encoded GET params. Consistent with the `POST /api/workflows/{id}/test-run` pattern in the codebase.
+**理由**：搜索查询可能很长（完整句子、多行）。POST body 比 URL 编码的 GET 参数更自然。与代码库中 `POST /api/workflows/{id}/test-run` 的模式一致。
 
-**Alternative considered**: `GET /api/knowledge-bases/{id}/search?q=...&mode=...` — rejected because queries often exceed URL length limits and contain special characters.
+**考虑过的替代方案**：`GET /api/knowledge-bases/{id}/search?q=...&mode=...` — 因查询常常超出 URL 长度限制且含特殊字符而被拒绝。
 
-### D2: Chunk listing via Qdrant scroll, not PostgreSQL
+### D2：通过 Qdrant scroll（而非 PostgreSQL）列出分块
 
-**Decision**: `GET /api/knowledge-bases/{id}/chunks` uses Qdrant's `scroll()` API to paginate through stored points. No chunk data in PostgreSQL.
+**决策**：`GET /api/knowledge-bases/{id}/chunks` 使用 Qdrant 的 `scroll()` API 对存储的点进行分页。分块数据不存入 PostgreSQL。
 
-**Rationale**: Chunks are stored exclusively in Qdrant payloads. Adding a PostgreSQL mirror would be redundant and introduce sync issues. Qdrant's `scroll()` supports cursor-based pagination natively.
+**理由**：分块仅存储在 Qdrant 载荷中。添加 PostgreSQL 镜像会冗余并引入同步问题。Qdrant 的 `scroll()` 原生支持游标分页。
 
-**Alternative considered**: Store chunk content in a `DocumentChunkModel` — rejected because it duplicates Qdrant data and requires sync logic.
+**考虑过的替代方案**：将分块内容存储在 `DocumentChunkModel` 中 — 因会重复 Qdrant 数据并需要同步逻辑而被拒绝。
 
-### D3: Mode comparison as a separate endpoint
+### D3：模式比较作为独立端点
 
-**Decision**: `POST /api/knowledge-bases/{id}/compare` runs the query in all 3 modes (dense, sparse, hybrid) and returns a structured response with results per mode.
+**决策**：`POST /api/knowledge-bases/{id}/compare` 在所有 3 种模式（dense、sparse、hybrid）下运行查询，并返回包含每种模式结果的结构化响应。
 
-**Rationale**: Comparison is a distinct use case from single-mode search. Users want to see how different modes rank the same query. A separate endpoint keeps the search endpoint simple and the comparison endpoint focused.
+**理由**：比较是与单模式搜索不同的用例。用户希望看到不同模式如何对同一查询排序。独立端点保持搜索端点简单、比较端点专注。
 
-**Alternative considered**: Add `compare=true` flag to the search endpoint — rejected because the response shape differs significantly (3 result sets vs 1).
+**考虑过的替代方案**：向搜索端点添加 `compare=true` 标志 — 因响应结构差异显著（3 组结果 vs 1 组）而被拒绝。
 
-### D4: Score breakdown via HybridSearchResult extension
+### D4：通过 `HybridSearchResult` 扩展实现分数分解
 
-**Decision**: Extend `HybridSearchResult` with optional `dense_score` and `sparse_weight` fields (not just `sparse_score`). When hybrid mode is used, both individual scores are populated so users can see each mode's contribution.
+**决策**：扩展 `HybridSearchResult`，添加可选的 `dense_score` 和 `sparse_weight` 字段（不仅是 `sparse_score`）。使用 hybrid 模式时，两个单独分数都会被填充，以便用户了解每种模式的贡献。
 
-**Rationale**: The current `sparse_score` field only shows the sparse contribution. For hit testing transparency, users need to see both dense and sparse scores independently, plus the final fused score.
+**理由**：目前的 `sparse_score` 字段仅显示稀疏贡献。为实现命中测试透明，用户需要独立查看 dense 和 sparse 分数，以及最终融合分数。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Qdrant scroll performance]** — Scrolling through large collections (100k+ chunks) may be slow. → Mitigation: enforce page_size limits (max 50), use cursor-based pagination.
-- **[Search latency for comparison]** — Compare endpoint runs 3 searches sequentially. → Mitigation: run in parallel with `asyncio.gather()`, each with a reduced limit (default 5).
-- **[No chunk count in PostgreSQL]** — Users can't see total chunk count without querying Qdrant. → Mitigation: use Qdrant's `count()` API to get collection size.
+- **[Qdrant scroll 性能]** — 滚动大型集合（10 万+ 分块）可能较慢。→ 缓解措施：限制 page_size（最大 50），使用游标分页。
+- **[比较功能的搜索延迟]** — Compare 端点顺序执行 3 次搜索。→ 缓解措施：使用 `asyncio.gather()` 并行运行，每次限制较小的 limit（默认 5）。
+- **[PostgreSQL 中无分块计数]** — 不查询 Qdrant 就无法查看总分块数。→ 缓解措施：使用 Qdrant 的 `count()` API 获取集合大小。

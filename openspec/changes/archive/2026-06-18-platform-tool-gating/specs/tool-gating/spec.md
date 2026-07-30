@@ -1,135 +1,135 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: ToolModel supports available_when field
+### Requirement: ToolModel supports available_when field — ToolModel 支持 available_when 字段
 
-`ToolModel` SHALL accept an optional `available_when: str | None` field. When `None` (default), the tool SHALL be always available. When a non-empty string, the string SHALL be a Python expression evaluated against runtime context to determine tool visibility.
+`ToolModel` SHALL 接受一个可选的 `available_when: str | None` 字段。当为 `None`（默认）时，工具 SHALL 始终可用。当为非空字符串时，该字符串 SHALL 是一个针对运行时上下文评估的 Python 表达式，用于确定工具可见性。
 
-#### Scenario: Tool without available_when is always visible
+#### Scenario: Tool without available_when is always visible — 没有 available_when 的工具始终可见
 
-- **WHEN** a tool has `available_when=None`
-- **THEN** the tool SHALL appear in the LLM's tool list regardless of runtime context
+- **WHEN** 工具的 `available_when=None`
+- **THEN** 该工具 SHALL 出现在 LLM 的工具列表中，无论运行时上下文如何
 
-#### Scenario: Tool with available_when expression
+#### Scenario: Tool with available_when expression — 带 available_when 表达式的工具
 
-- **WHEN** a tool has `available_when="user_role == 'admin'"`
-- **AND** the runtime context has `user_role='admin'`
-- **THEN** the tool SHALL appear in the LLM's tool list
+- **WHEN** 工具具有 `available_when="user_role == 'admin'"`
+- **AND** 运行时上下文有 `user_role='admin'`
+- **THEN** 该工具 SHALL 出现在 LLM 的工具列表中
 
-#### Scenario: Tool with available_when expression evaluates to False
+#### Scenario: Tool with available_when expression evaluates to False — 带 available_when 表达式的工具评估为 False
 
-- **WHEN** a tool has `available_when="user_role == 'admin'"`
-- **AND** the runtime context has `user_role='guest'`
-- **THEN** the tool SHALL NOT appear in the LLM's tool list
+- **WHEN** 工具具有 `available_when="user_role == 'admin'"`
+- **AND** 运行时上下文有 `user_role='guest'`
+- **THEN** 该工具 SHALL NOT 出现在 LLM 的工具列表中
 
-### Requirement: ToolGateEvaluator evaluates expressions in restricted namespace
+### Requirement: ToolGateEvaluator evaluates expressions in restricted namespace — ToolGateEvaluator 在受限命名空间中评估表达式
 
-The system SHALL provide a `ToolGateEvaluator` class in `engine/tool_gate.py` that evaluates `available_when` expressions using Python's `eval()` with a restricted namespace (`__builtins__: {}`, no `__import__`, no built-in functions). The evaluator SHALL only have access to variables explicitly provided in the runtime context dict.
+系统 SHALL 在 `engine/tool_gate.py` 中提供一个 `ToolGateEvaluator` 类，使用 Python 的 `eval()` 在受限命名空间（`__builtins__: {}`，无 `__import__`，无内置函数）中评估 `available_when` 表达式。评估器 SHALL 只能访问运行时上下文字典中显式提供的变量。
 
-#### Scenario: Simple equality expression
+#### Scenario: Simple equality expression — 简单相等表达式
 
-- **WHEN** `evaluator.evaluate("user_role == 'admin'", {"user_role": "admin"})` is called
-- **THEN** it SHALL return `True`
+- **WHEN** 调用 `evaluator.evaluate("user_role == 'admin'", {"user_role": "admin"})`
+- **THEN** 它 SHALL 返回 `True`
 
-#### Scenario: Compound expression with and/or
+#### Scenario: Compound expression with and/or — 带 and/or 的复合表达式
 
-- **WHEN** `evaluator.evaluate("phase == 'EXECUTE' and budget > 1000", {"phase": "EXECUTE", "budget": 5000})` is called
-- **THEN** it SHALL return `True`
+- **WHEN** 调用 `evaluator.evaluate("phase == 'EXECUTE' and budget > 1000", {"phase": "EXECUTE", "budget": 5000})`
+- **THEN** 它 SHALL 返回 `True`
 
-#### Scenario: Membership check expression
+#### Scenario: Membership check expression — 成员检查表达式
 
-- **WHEN** `evaluator.evaluate("'delete' in permissions", {"permissions": ["read", "write", "delete"]})` is called
-- **THEN** it SHALL return `True`
+- **WHEN** 调用 `evaluator.evaluate("'delete' in permissions", {"permissions": ["read", "write", "delete"]})`
+- **THEN** 它 SHALL 返回 `True`
 
-#### Scenario: Expression cannot access builtins
+#### Scenario: Expression cannot access builtins — 表达式无法访问内置函数
 
-- **WHEN** `evaluator.evaluate("__import__('os').system('rm -rf /')", {})` is called
-- **THEN** the expression SHALL raise `NameError` and the evaluator SHALL return `False` (fail-closed)
+- **WHEN** 调用 `evaluator.evaluate("__import__('os').system('rm -rf /')", {})`
+- **THEN** 表达式 SHALL 抛出 `NameError`，评估器 SHALL 返回 `False`（故障关闭）
 
-#### Scenario: Expression referencing undefined variable fails closed
+#### Scenario: Expression referencing undefined variable fails closed — 引用未定义变量的表达式故障关闭
 
-- **WHEN** `evaluator.evaluate("user_role == 'admin'", {})` is called (no `user_role` in context)
-- **THEN** the expression SHALL raise `NameError` and the evaluator SHALL return `False`
+- **WHEN** 调用 `evaluator.evaluate("user_role == 'admin'", {})`（上下文中没有 `user_role`）
+- **THEN** 表达式 SHALL 抛出 `NameError`，评估器 SHALL 返回 `False`
 
-#### Scenario: Syntax error in expression fails closed
+#### Scenario: Syntax error in expression fails closed — 表达式中的语法错误故障关闭
 
-- **WHEN** `evaluator.evaluate("user_role == ", {"user_role": "admin"})` is called
-- **THEN** the expression SHALL raise `SyntaxError` and the evaluator SHALL return `False`
+- **WHEN** 调用 `evaluator.evaluate("user_role == ", {"user_role": "admin"})`
+- **THEN** 表达式 SHALL 抛出 `SyntaxError`，评估器 SHALL 返回 `False`
 
-### Requirement: ToolGateEvaluator filters tool list
+### Requirement: ToolGateEvaluator filters tool list — ToolGateEvaluator 过滤工具列表
 
-The `ToolGateEvaluator` SHALL provide a `filter_tools(tools, context)` method that accepts a list of tool dicts and a runtime context dict, and returns a new list containing only tools whose `available_when` evaluates to `True` (or has no `available_when`).
+`ToolGateEvaluator` SHALL 提供一个 `filter_tools(tools, context)` 方法，接受工具字典列表和运行时上下文字典，并返回一个新列表，仅包含其 `available_when` 评估为 `True`（或没有 `available_when`）的工具。
 
-#### Scenario: Mixed tools with and without available_when
+#### Scenario: Mixed tools with and without available_when — 混合工具（有和没有 available_when）
 
-- **WHEN** `filter_tools` receives 3 tools: one with `available_when=None`, one with `available_when="user_role == 'admin'"` (True), one with `available_when="user_role == 'admin'"` (False)
-- **THEN** the result SHALL contain exactly 2 tools (the always-available one and the one that evaluates True)
+- **WHEN** `filter_tools` 接收 3 个工具：一个 `available_when=None`，一个 `available_when="user_role == 'admin'"`（True），一个 `available_when="user_role == 'admin'"`（False）
+- **THEN** 结果 SHALL 恰好包含 2 个工具（始终可用的那个和评估为 True 的那个）
 
-#### Scenario: All tools filtered out
+#### Scenario: All tools filtered out — 所有工具被过滤掉
 
-- **WHEN** `filter_tools` receives 3 tools, all with `available_when` evaluating to `False`
-- **THEN** the result SHALL be an empty list
+- **WHEN** `filter_tools` 接收 3 个工具，所有工具的 `available_when` 都评估为 `False`
+- **THEN** 结果 SHALL 是一个空列表
 
-#### Scenario: Empty tool list passthrough
+#### Scenario: Empty tool list passthrough — 空工具列表透传
 
-- **WHEN** `filter_tools` receives an empty list
-- **THEN** the result SHALL be an empty list
+- **WHEN** `filter_tools` 接收一个空列表
+- **THEN** 结果 SHALL 是一个空列表
 
-### Requirement: LLMWorker filters tools before LLM invocation
+### Requirement: LLMWorker filters tools before LLM invocation — LLMWorker 在 LLM 调用前过滤工具
 
-`LLMWorker.execute()` and `execute_stream()` SHALL filter the tool list using `ToolGateEvaluator` after extracting tools from `node_config` and before passing tools to `PreLLMHook`, `context_assemble`, or `llm_invoke`.
+`LLMWorker.execute()` 和 `execute_stream()` SHALL 在从 `node_config` 提取工具后、将工具传递给 `PreLLMHook`、`context_assemble` 或 `llm_invoke` 之前，使用 `ToolGateEvaluator` 过滤工具列表。
 
-#### Scenario: Filtered tools reach the LLM
+#### Scenario: Filtered tools reach the LLM — 过滤后的工具到达 LLM
 
-- **WHEN** a node has 5 tools, 2 of which have `available_when` that evaluates to `False`
-- **THEN** the `llm_invoke` call SHALL receive only 3 tools in its config
+- **WHEN** 一个节点有 5 个工具，其中 2 个的 `available_when` 评估为 `False`
+- **THEN** `llm_invoke` 调用 SHALL 在其配置中只接收 3 个工具
 
-#### Scenario: PreLLMHook sees filtered tools
+#### Scenario: PreLLMHook sees filtered tools — PreLLMHook 看到过滤后的工具
 
-- **WHEN** tools are filtered by `available_when`
-- **THEN** the `PreLLMHook.on_pre_llm_call()` SHALL receive the filtered tool list, not the original
+- **WHEN** 工具被 `available_when` 过滤
+- **THEN** `PreLLMHook.on_pre_llm_call()` SHALL 接收过滤后的工具列表，而不是原始列表
 
-#### Scenario: No available_when on any tools — behavior unchanged
+#### Scenario: No available_when on any tools — behavior unchanged — 任何工具都没有 available_when——行为不变
 
-- **WHEN** none of the tools have `available_when` set
-- **THEN** the tool list SHALL pass through unchanged (backward compatible)
+- **WHEN** 所有工具都没有设置 `available_when`
+- **THEN** 工具列表 SHALL 原样通过（向后兼容）
 
-### Requirement: Runtime context is assembled from execution_context and channel_snapshot
+### Requirement: Runtime context is assembled from execution_context and channel_snapshot — 运行时上下文从 execution_context 和 channel_snapshot 组装
 
-The runtime context for `available_when` evaluation SHALL be assembled by merging relevant keys from `execution_context` and `channel_snapshot` into a flat dict. The following variables SHALL be available when present in the source data:
+用于 `available_when` 评估的运行时上下文 SHALL 通过将 `execution_context` 和 `channel_snapshot` 中的相关键合并到扁平字典中来组装。当源数据中存在以下变量时，以下变量 SHALL 可用：
 
-- `session_id` (from execution_context)
-- `superstep` (from execution_context)
-- `user_id` (from channel_snapshot `_user_id`)
-- `agent_id` (from channel_snapshot `_agent_id`)
-- `turn_index` (from channel_snapshot `_turn_index`)
+- `session_id`（来自 execution_context）
+- `superstep`（来自 execution_context）
+- `user_id`（来自 channel_snapshot `_user_id`）
+- `agent_id`（来自 channel_snapshot `_agent_id`）
+- `turn_index`（来自 channel_snapshot `_turn_index`）
 
-Additional derived variables (`phase`, `budget_remaining`, `user_role`) MAY be added when the corresponding features (Task Phase Detection 4.9, Token Budget 4.10, RBAC) are active.
+当相应功能（任务阶段检测 4.9、Token 预算 4.10、RBAC）激活时，MAY 添加其他派生变量（`phase`、`budget_remaining`、`user_role`）。
 
-#### Scenario: Basic context variables available
+#### Scenario: Basic context variables available — 基本上下文变量可用
 
-- **WHEN** `LLMWorker.execute()` runs with `execution_context={"session_id": "abc", "superstep": 3}` and `channel_snapshot={"_user_id": "user123", "_turn_index": 5}`
-- **THEN** the runtime context for `available_when` SHALL contain `session_id="abc"`, `superstep=3`, `user_id="user123"`, `turn_index=5`
+- **WHEN** `LLMWorker.execute()` 以 `execution_context={"session_id": "abc", "superstep": 3}` 和 `channel_snapshot={"_user_id": "user123", "_turn_index": 5}` 运行
+- **THEN** 用于 `available_when` 的运行时上下文 SHALL 包含 `session_id="abc"`、`superstep=3`、`user_id="user123"`、`turn_index=5`
 
-#### Scenario: Missing channel_snapshot keys are omitted
+#### Scenario: Missing channel_snapshot keys are omitted — 缺失的 channel_snapshot 键被省略
 
-- **WHEN** `channel_snapshot` does not contain `_user_id`
-- **THEN** the runtime context SHALL NOT contain `user_id` key (expressions referencing it will fail-closed)
+- **WHEN** `channel_snapshot` 不包含 `_user_id`
+- **THEN** 运行时上下文 SHALL NOT 包含 `user_id` 键（引用它的表达式将故障关闭）
 
-### Requirement: Tool CRUD schemas support available_when field
+### Requirement: Tool CRUD schemas support available_when field — 工具 CRUD 模式支持 available_when 字段
 
-`ToolCreateSchema` and `ToolUpdateSchema` SHALL accept an optional `available_when: str | None` field. `ToolReadSchema` SHALL include the `available_when` field in its output.
+`ToolCreateSchema` 和 `ToolUpdateSchema` SHALL 接受可选的 `available_when: str | None` 字段。`ToolReadSchema` SHALL 在其输出中包含 `available_when` 字段。
 
-#### Scenario: Create tool with available_when
+#### Scenario: Create tool with available_when — 使用 available_when 创建工具
 
-- **WHEN** `POST /api/tools` is called with `{"name": "admin_delete", "available_when": "user_role == 'admin'", ...}`
-- **THEN** the tool SHALL be created with the `available_when` field stored in the database
+- **WHEN** 使用 `{"name": "admin_delete", "available_when": "user_role == 'admin'", ...}` 调用 `POST /api/tools`
+- **THEN** 工具 SHALL 被创建，`available_when` 字段存储在数据库中
 
-#### Scenario: Create tool without available_when
+#### Scenario: Create tool without available_when — 不包含 available_when 创建工具
 
-- **WHEN** `POST /api/tools` is called without `available_when` in the request body
-- **THEN** the tool SHALL be created with `available_when=None` (always available)
+- **WHEN** 调用 `POST /api/tools` 而请求体中不包含 `available_when`
+- **THEN** 工具 SHALL 以 `available_when=None` 创建（始终可用）
 
-#### Scenario: Read tool includes available_when
+#### Scenario: Read tool includes available_when — 读取工具包含 available_when
 
-- **WHEN** `GET /api/tools/{id}` is called for a tool with `available_when="user_role == 'admin'"`
-- **THEN** the response SHALL include `"available_when": "user_role == 'admin'"`
+- **WHEN** 对 `available_when="user_role == 'admin'"` 的工具调用 `GET /api/tools/{id}`
+- **THEN** 响应 SHALL 包含 `"available_when": "user_role == 'admin'"`

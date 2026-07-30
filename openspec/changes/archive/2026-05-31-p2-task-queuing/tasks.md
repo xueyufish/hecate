@@ -1,40 +1,40 @@
-## 1. Backend: Session Lock Manager
+## 1. 后端：会话锁管理器
 
-- [x] 1.1 Create `src/hecate/services/session_lock.py` with `SessionLockManager` class that manages `asyncio.Lock` per session_id
-- [x] 1.2 Implement `acquire(session_id, timeout=300)` method that returns lock context manager, raises timeout after 5 minutes
-- [x] 1.3 Implement `get_queue_position(session_id)` method returning 0 if idle, 1+ if queued
-- [x] 1.4 Add singleton instance `session_lock_manager` at module level
+- [x] 1.1 创建 `src/hecate/services/session_lock.py`，包含 `SessionLockManager` 类，管理每个 session_id 的 `asyncio.Lock`
+- [x] 1.2 实现 `acquire(session_id, timeout=300)` 方法，返回锁上下文管理器，5 分钟后抛出超时异常
+- [x] 1.3 实现 `get_queue_position(session_id)` 方法，空闲时返回 0，排队中返回 1+
+- [x] 1.4 在模块级别添加单例实例 `session_lock_manager`
 
-## 2. Backend: Conversation Service Integration
+## 2. 后端：Conversation Service 集成
 
-- [x] 2.1 Update `ConversationService.chat()` to accept optional `session_id` parameter for locking
-- [x] 2.2 Wrap the chat processing logic in `session_lock_manager.acquire(session_id)` when session_id is provided
-- [x] 2.3 Add queue position tracking: increment counter on acquire, decrement on release
+- [x] 2.1 更新 `ConversationService.chat()` 以接受可选的 `session_id` 参数用于加锁
+- [x] 2.2 在提供 session_id 时将聊天处理逻辑包装在 `session_lock_manager.acquire(session_id)` 中
+- [x] 2.3 添加队列位置追踪：获取时增加计数，释放时减少计数
 
-## 3. Backend: Chat API Integration
+## 3. 后端：聊天 API 集成
 
-- [x] 3.1 Update `/v1/chat/completions` endpoint to extract `session_id` from request (from conversation or generate)
-- [x] 3.2 Wrap endpoint handler in session lock acquisition with timeout handling
-- [x] 3.3 Add `X-Queue-Position` and `X-Queue-Wait-Ms` response headers
-- [x] 3.4 Return HTTP 408 when queue timeout is exceeded
+- [x] 3.1 更新 `/v1/chat/completions` 端点，从请求中提取 `session_id`（从对话中或生成）
+- [x] 3.2 将端点处理程序包装在会话锁获取中，带超时处理
+- [x] 3.3 添加 `X-Queue-Position` 和 `X-Queue-Wait-Ms` 响应头
+- [x] 3.4 当队列超时时返回 HTTP 408
 
-## 4. Backend: Tests
+## 4. 后端：测试
 
-- [x] 4.1 Add unit tests for `SessionLockManager`: acquire/release, queue position, timeout
-- [x] 4.2 Add integration tests: concurrent messages for same session processed sequentially
-- [x] 4.3 Add integration tests: different sessions process independently
-- [x] 4.4 Add test for queue timeout returning 408
+- [x] 4.1 为 `SessionLockManager` 添加单元测试：获取/释放、队列位置、超时
+- [x] 4.2 添加集成测试：同一会话的并发消息按顺序处理
+- [x] 4.3 添加集成测试：不同会话独立处理
+- [x] 4.4 添加队列超时返回 408 的测试
 
-## 5. Frontend: Queue Indicator
+## 5. 前端：队列指示器
 
-- [x] 5.1 Update chat page to read `X-Queue-Position` header from streaming response
-- [x] 5.2 Display "Queued (position N)..." indicator when position > 0
-- [x] 5.3 Remove indicator when response starts streaming
+- [x] 5.1 更新聊天页面以从流式响应读取 `X-Queue-Position` 头
+- [x] 5.2 当 position > 0 时显示"Queued (position N)..."指示器
+- [x] 5.3 响应开始流式传输时移除指示器
 
-## 6. Verification
+## 6. 验证
 
-- [x] 6.1 Run `ruff check src/hecate/ tests/` — zero errors (1 pre-existing S101)
-- [x] 6.2 Run `ruff format --check src/ tests/` — zero errors
-- [x] 6.3 Run `mypy src/` — zero errors
-- [x] 6.4 Run `python -m pytest tests/ -q` — all tests pass
-- [x] 6.5 Run `npm run lint` and `npm run build` in `web/` — zero errors
+- [x] 6.1 运行 `ruff check src/hecate/ tests/` — 零错误（1 个预先存在的 S101）
+- [x] 6.2 运行 `ruff format --check src/ tests/` — 零错误
+- [x] 6.3 运行 `mypy src/` — 零错误
+- [x] 6.4 运行 `python -m pytest tests/ -q` — 所有测试通过
+- [x] 6.5 在 `web/` 目录运行 `npm run lint` 和 `npm run build` — 零错误

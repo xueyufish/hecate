@@ -1,87 +1,87 @@
-## Context
+## Context — 背景
 
-Hecate's `ConversationService` orchestrates the full chat loop: security check → context assembly → LLM invocation → tool calling → response streaming. The Agent model (`AgentModel`) stores persona, tools, knowledge bases, and LLM config. The OpenAI-compatible chat endpoint (`/v1/chat/completions`) supports both streaming (SSE) and non-streaming responses.
+Hecate 的 `ConversationService` 编排完整的聊天循环：安全检查 → 上下文组装 → LLM 调用 → 工具调用 → 响应流式输出。Agent 模型（`AgentModel`）存储角色设定、工具、知识库和 LLM 配置。兼容 OpenAI 的聊天端点（`/v1/chat/completions`）支持流式（SSE）和非流式响应。
 
-Currently, when a user starts a new conversation, they receive no greeting or guidance. After each response, there are no follow-up suggestions. This proposal adds auto-generated opening remarks and contextual follow-up suggestions.
+目前，当用户开始新对话时，他们不会收到问候或指引。每次回复后，也没有后续建议。本提案添加了自动生成的开场白和上下文相关的后续建议。
 
-Key existing patterns:
-- SSE streaming yields typed events: `{"type": "content"}`, `{"type": "citations"}`, `{"type": "done"}`
-- Non-streaming responses use `ChatCompletionResponse` with `annotations` on messages
-- `AgentModel.persona` stores the agent's system prompt / personality
-- LLM calls go through `llm_service.chat()` and `llm_service.chat_stream()`
+关键现有模式：
+- SSE 流式输出类型化事件：`{"type": "content"}`、`{"type": "citations"}`、`{"type": "done"}`
+- 非流式响应使用 `ChatCompletionResponse`，消息中包含 `annotations`
+- `AgentModel.persona` 存储 Agent 的系统提示词/个性
+- LLM 调用通过 `llm_service.chat()` 和 `llm_service.chat_stream()` 进行
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Auto-generate opening remarks (greeting + 3 starter questions) when a conversation begins
-- Generate 3-5 contextual follow-up questions after each assistant response
-- Support both streaming and non-streaming response modes
-- Allow agents to disable suggestions or provide a static opening greeting
-- Minimize latency impact — suggestions generated in parallel with response delivery
+**目标：**
+- 在对话开始时自动生成开场白（问候 + 3 个起始问题）
+- 每次助手回复后生成 3-5 个上下文相关的后续问题
+- 同时支持流式和非流式响应模式
+- 允许 Agent 禁用建议或提供静态开场问候
+- 最小化延迟影响 — 建议与响应交付并行生成
 
-**Non-Goals:**
-- Frontend UI for rendering suggestions (client responsibility)
-- Suggestion persistence beyond the current response (no database storage)
-- User feedback on suggestions (thumbs up/down) — P3 concern
-- Suggestion personalization based on user history — future enhancement
-- Opening remarks for workflow-mode agents (only chat mode supported)
+**非目标：**
+- 用于渲染建议的前端 UI（客户端责任）
+- 建议持久化超出当前响应（不存入数据库）
+- 用户对建议的反馈（赞/踩）— P3 关注点
+- 基于用户历史的建议个性化 — 未来增强
+- 工作流模式 Agent 的开场白（仅支持聊天模式）
 
-## Decisions
+## Decisions — 决策
 
-### D1: LLM-driven generation with static fallback
+### D1：LLM 驱动生成，带静态回退
 
-**Decision**: Use the configured LLM to generate suggestions via a secondary call. If the LLM call fails or times out (2s), fall back to extracting questions from the agent's persona text.
+**决策**：使用配置的 LLM 通过辅助调用生成建议。如果 LLM 调用失败或超时（2 秒），回退到从 Agent 角色设定文本中提取问题。
 
-**Rationale**: LLM-generated suggestions are contextually relevant and adapt to conversation flow. Static fallback ensures the feature never blocks the user experience.
+**理由**：LLM 生成的建议具有上下文相关性并能适应对话流程。静态回退确保该功能绝不阻塞用户体验。
 
-**Alternatives considered:**
-- *Pure static suggestions from persona*: Too rigid, doesn't adapt to conversation context.
-- *Dedicated suggestion model*: Over-engineered for P2, adds deployment complexity.
-- *Pre-computed suggestions at agent creation*: Can't adapt to conversation context.
+**考虑过的替代方案：**
+- *仅从角色设定生成静态建议*：过于僵化，无法适应对话上下文。
+- *专用建议模型*：对 P2 过度设计，增加了部署复杂性。
+- *在 Agent 创建时预计算建议*：无法适应对话上下文。
 
-### D2: Suggestions as SSE event type
+### D2：建议作为 SSE 事件类型
 
-**Decision**: Emit `{"type": "suggestions", "questions": [...]}` as a new SSE event, following the same pattern as the existing `citations` event.
+**决策**：发送 `{"type": "suggestions", "questions": [...]}` 作为新的 SSE 事件，遵循与现有 `citations` 事件相同的模式。
 
-**Rationale**: Consistent with the existing streaming architecture. Frontend already handles typed events — adding a new type is minimal effort. Non-streaming responses add `suggested_questions` to the message object.
+**理由**：与现有流式架构一致。前端已处理类型化事件 — 添加新类型工作量最小。非流式响应在消息对象中添加 `suggested_questions`。
 
-**Alternatives considered:**
-- *Include suggestions in the final chunk*: Breaks the clean event model, mixes concerns.
-- *Separate WebSocket channel*: Over-engineered, breaks SSE compatibility.
+**考虑过的替代方案：**
+- *在最后一个分块中包含建议*：破坏了清晰的事件模型，关注点混杂。
+- *单独的 WebSocket 通道*：过度设计，破坏了 SSE 兼容性。
 
-### D3: Agent-level configuration fields
+### D3：Agent 级配置字段
 
-**Decision**: Add `opening_remarks` (TEXT, nullable) and `enable_suggestions` (BOOLEAN, default true) to `AgentModel`. API request includes `generate_opening` and `generate_suggestions` boolean flags.
+**决策**：向 `AgentModel` 添加 `opening_remarks`（TEXT，可为空）和 `enable_suggestions`（BOOLEAN，默认 true）。API 请求包含 `generate_opening` 和 `generate_suggestions` 布尔标志。
 
-**Rationale**: Agent-level config allows per-agent customization. Request-level flags give the client control over when to request suggestions. Static `opening_remarks` bypasses LLM generation entirely for predictable greetings.
+**理由**：Agent 级配置允许每个 Agent 自定义。请求级标志让客户端控制何时请求建议。静态 `opening_remarks` 完全绕过 LLM 生成，用于可预测的问候。
 
-**Alternatives considered:**
-- *Configuration in model_config JSON*: Harder to query and validate.
-- *No per-agent config, always generate*: Too rigid — some agents may not want suggestions.
+**考虑过的替代方案：**
+- *配置在 model_config JSON 中*：更难以查询和验证。
+- *无每 Agent 配置，始终生成*：过于僵化 — 某些 Agent 可能不想要建议。
 
-### D4: Suggestion generation prompt strategy
+### D4：建议生成提示策略
 
-**Decision**: Use a structured prompt template that includes: agent persona, conversation history (last 2 turns), and the current response. The prompt asks the LLM to return a JSON array of 3-5 questions.
+**决策**：使用结构化提示模板，包含：Agent 角色设定、对话历史（最近 2 轮）和当前回复。提示要求 LLM 返回包含 3-5 个问题的 JSON 数组。
 
-**Rationale**: Including persona ensures suggestions match the agent's domain. Limiting history to 2 turns keeps the prompt short and fast. JSON array format is easy to parse.
+**理由**：包含角色设定确保建议与 Agent 领域匹配。将历史限制在 2 轮保持提示简短快速。JSON 数组格式易于解析。
 
-**Alternatives considered:**
-- *Include full conversation history*: Token-heavy, slow, unnecessary for suggestion quality.
-- *Include knowledge base context*: Over-engineered for P2, increases latency.
+**考虑过的替代方案：**
+- *包含完整对话历史*：Token 过多、速度慢，对建议质量不必要。
+- *包含知识库上下文*：对 P2 过度设计，增加延迟。
 
-### D5: Opening remarks trigger
+### D5：开场白触发条件
 
-**Decision**: Opening remarks are triggered when `generate_opening=true` in the request AND the messages array contains only the first user message (single message with role "user"). The system generates a greeting and starter questions as the assistant response.
+**决策**：当请求中包含 `generate_opening=true` 且 messages 数组仅包含第一条用户消息（单条 role 为 "user" 的消息）时，触发开场白。系统生成问候和起始问题作为助手回复。
 
-**Rationale**: Explicit trigger via request flag gives the client control. Checking message count (1 message) ensures it's truly the start of a conversation. The greeting is returned as the assistant's content with suggested questions.
+**理由**：通过请求标志显式触发让客户端控制。检查消息数量（1 条）确保这确实是对话的开始。问候作为助手的 content 和 suggested_questions 返回。
 
-**Alternatives considered:**
-- *Auto-detect from conversation state*: Requires session/conversation tracking in the stateless chat endpoint.
-- *Separate `/opening` endpoint*: Adds API surface unnecessarily.
+**考虑过的替代方案：**
+- *从对话状态自动检测*：在无状态的聊天端点中需要会话/对话追踪。
+- *单独的 `/opening` 端点*：不必要地增加 API 面。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[Latency]** Secondary LLM call for suggestions adds 1-3s → Mitigation: suggestions stream after content, non-blocking; 2s timeout with static fallback.
-- **[LLM cost]** Extra token usage per response for suggestion generation → Mitigation: use a small/fast model (e.g., gpt-4o-mini) if available; static opening_remarks bypasses LLM entirely.
-- **[Suggestion quality]** LLM may generate irrelevant or duplicate suggestions → Mitigation: structured prompt with persona context; future P3 can add user feedback loop.
-- **[Migration]** Two new columns on AgentModel → Mitigation: nullable/defaults ensure zero-downtime migration.
+- **[延迟]** 用于建议的辅助 LLM 调用增加 1-3 秒 → 缓解措施：建议在内容之后流式输出，非阻塞；2 秒超时并带静态回退。
+- **[LLM 成本]** 每次回复用于建议生成的额外 Token 使用 → 缓解措施：使用小型/快速模型（如 gpt-4o-mini）（如可用）；静态 opening_remarks 完全绕过 LLM。
+- **[建议质量]** LLM 可能生成不相关或重复的建议 → 缓解措施：带角色设定上下文的结构化提示；未来 P3 可添加用户反馈循环。
+- **[迁移]** `AgentModel` 上的两个新列 → 缓解措施：nullable/defaults 确保零停机迁移。

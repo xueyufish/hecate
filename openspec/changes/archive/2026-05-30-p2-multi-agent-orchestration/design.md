@@ -1,49 +1,49 @@
-## Context
+## Context — 背景
 
-Hecate's P2 Workflow Canvas is complete with 6 node types (conversation, tool-call, condition, agent, knowledge-retrieval, variable-set) and a visual DAG editor. The engine already supports:
+Hecate 的 P2 Workflow Canvas 已完成，包含 6 种节点类型（conversation, tool-call, condition, agent, knowledge-retrieval, variable-set）和可视化 DAG 编辑器。引擎已支持：
 
-- `NodeType.AGENT` — defined but only has mock execution in `_TestWorker`
-- `Command(goto=...)` — engine-level control transfer that overrides normal edge resolution
-- `EnginePort` — abstract boundary between engine and services (llm_invoke, tool_execute, knowledge_query, etc.)
-- `Worker` / `WorkerPool` — dispatch abstraction for node execution
-- `PregelRuntime` — BSP execution loop with interrupt/resume and checkpointing
+- `NodeType.AGENT` — 已定义但仅在 `_TestWorker` 中有模拟执行
+- `Command(goto=...)` — 引擎级别控制转移，覆盖正常边解析
+- `EnginePort` — 引擎和服务之间的抽象边界（llm_invoke, tool_execute, knowledge_query 等）
+- `Worker` / `WorkerPool` — 节点执行的分发抽象
+- `PregelRuntime` — 带中断/恢复和 checkpoint 的 BSP 执行循环
 
-The missing pieces are:
-1. **Real Agent execution**: AGENT nodes need to resolve an AgentModel, build its context, invoke its LLM, and return results
-2. **Handoff mechanism**: An Agent should be able to transfer control to another Agent mid-conversation (Swarm-style)
-3. **Agent-as-Tool**: Agents should be invocable as tools by other Agents (synchronous delegation)
-4. **Canvas multi-Agent support**: Visual tooling for composing multi-Agent workflows
+缺失的部分：
+1. **真实 Agent 执行**: AGENT 节点需要解析 AgentModel，构建其上下文，调用其 LLM，并返回结果
+2. **Handoff 机制**: Agent 应能在对话中途将控制转移给另一个 Agent（Swarm 风格）
+3. **Agent-as-Tool**: Agent 应可作为工具被其他 Agent 调用（同步委派）
+4. **画布多 Agent 支持**: 用于组合多 Agent 工作流的可视化工具
 
-Per AD-7, all orchestration patterns are Graph templates. P2 scope = Handoff + Multi-Agent visual orchestration. Pipeline and Broadcast are P3.
+根据 AD-7，所有编排模式都是 Graph 模板。P2 范围 = Handoff + 多 Agent 可视化编排。Pipeline 和 Broadcast 为 P3。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- G1: AGENT node type performs real Agent execution — resolves AgentModel by ID, builds isolated context (system prompt, tools, knowledge bases), invokes LLM, returns result to parent graph
-- G2: Handoff — an Agent can return `Command(goto=target_agent_node_id)` to transfer control; conversation context flows with the handoff
-- G3: Agent-as-Tool — expose other Agents as callable tools so an LLM can invoke them via tool calling (hierarchical delegation)
-- G4: Orchestration templates — pre-built Graph DSL definitions for common patterns (triage, pipeline, hierarchical)
-- G5: Canvas multi-Agent support — agent palette, handoff/delegation edge types, template picker
+**目标:**
+- G1: AGENT 节点类型执行真实的 Agent 执行——按 ID 解析 AgentModel，构建隔离上下文（system prompt、工具、知识库），调用 LLM，将结果返回父图
+- G2: Handoff——Agent 可返回 `Command(goto=target_agent_node_id)` 转移控制；对话上下文随 handoff 流动
+- G3: Agent-as-Tool——将其他 Agent 暴露为可调用工具，使 LLM 可通过工具调用调用它们（层级委派）
+- G4: 编排模板——常见模式的预构建 Graph DSL 定义（分类、管线、层级）
+- G5: 画布多 Agent 支持——Agent 调色板、handoff/委派边类型、模板选择器
 
-**Non-Goals:**
-- Pipeline pattern (sequential deterministic chain) — deferred to P3
-- Broadcast pattern (shared message space) — deferred to P3
-- Agent-to-Agent communication protocol (A2A) — P4
-- Distributed multi-Agent execution across processes — already designed via WorkerPool, P3 Temporal
-- Memory isolation between Agents — uses existing Channel isolation, dedicated L1/L3 memory per Agent is P2 memory system work
-- Conflict resolution for concurrent multi-Agent writes — P3
+**非目标:**
+- Pipeline 模式（顺序确定性链）——推迟到 P3
+- Broadcast 模式（共享消息空间）——推迟到 P3
+- Agent 到 Agent 通信协议（A2A）——P4
+- 跨进程分布式多 Agent 执行——已通过 WorkerPool 设计，P3 Temporal
+- Agent 间的记忆隔离——使用现有 Channel 隔离，每个 Agent 的专用 L1/L3 记忆是 P2 记忆系统的工作
+- 并发多 Agent 写入的冲突解决——P3
 
-## Decisions
+## Decisions — 决策
 
-### D1: Agent Execution via EnginePort
+### D1: 通过 EnginePort 的 Agent 执行
 
-**Decision**: Add `agent_execute` method to `EnginePort` for real Agent node execution. The engine calls this port when processing an AGENT-type node.
+**决策**: 向 `EnginePort` 添加 `agent_execute` 方法，用于真实的 Agent 节点执行。引擎在处理 AGENT 类型节点时调用此端口。
 
-**Rationale**: Engine has zero external deps by design. Adding Agent resolution logic inside the engine would break the layer boundary. The port pattern keeps the engine clean — it just passes the agent_id and channel snapshot to the port, gets back a WorkerResult.
+**理由**: 引擎按设计零外部依赖。在引擎内部添加 Agent 解析逻辑会破坏层边界。端口模式保持引擎干净——它只需将 agent_id 和 channel 快照传递给端口，取回 WorkerResult。
 
-**Alternative considered**: Direct AgentModel lookup inside a `AgentWorker` class in the engine layer — rejected because it would import SQLAlchemy models into the engine.
+**考虑的替代方案**: 在引擎层的 `AgentWorker` 类内直接查找 AgentModel——被拒绝，因为它会将 SQLAlchemy 模型导入引擎。
 
-**Port method**:
+**端口方法**:
 ```python
 async def agent_execute(
     self,
@@ -52,89 +52,89 @@ async def agent_execute(
     channel_snapshot: dict,
     context: dict | None = None,
 ) -> dict:
-    """Execute an agent and return its response.
+    """执行 agent 并返回其响应。
     
-    Returns dict with keys:
-    - response: the agent's response message
-    - tool_calls: any tool calls made during execution
-    - usage: token usage stats
+    返回包含以下键的 dict:
+    - response: agent 的响应消息
+    - tool_calls: 执行期间产生的工具调用
+    - usage: token 使用统计
     """
 ```
 
-### D2: Handoff via Command(goto) + HandoffTool
+### D2: 通过 Command(goto) + HandoffTool 的 Handoff
 
-**Decision**: Handoff is implemented as a special tool (`handoff_to_agent`) that the LLM can call. The tool returns a `Command(goto=target_node_id)`. The Pregel runtime already handles `Command(goto=...)` in `_resolve_next_nodes()`.
+**决策**: Handoff 实现为一个特殊工具（`handoff_to_agent`），LLM 可调用。该工具返回 `Command(goto=target_node_id)`。Pregel 运行时已在 `_resolve_next_nodes()` 中处理 `Command(goto=...)`。
 
-**Rationale**: The engine already supports `Command(goto=...)` — no engine changes needed. The handoff tool is auto-injected into the Agent's tool list when the graph has agent nodes connected via handoff edges. This follows the Swarm pattern where handoff is a tool call.
+**理由**: 引擎已支持 `Command(goto=...)`——无需引擎变更。当图具有通过 handoff 边连接的 agent 节点时，handoff 工具自动注入到 Agent 的工具列表中。这遵循 Swarm 模式，其中 handoff 是一个工具调用。
 
-**Flow**:
-1. Graph DSL defines an edge with `type: "handoff"` between agent nodes
-2. When the source agent's LLM is invoked, a `handoff_to_agent` tool is injected
-3. LLM calls `handoff_to_agent(target="specialist")`
-4. Worker returns `Command(goto="specialist")`
-5. Pregel resolves next node as "specialist", executing that agent node
+**流程**:
+1. Graph DSL 在 agent 节点之间定义一条带有 `type: "handoff"` 的边
+2. 源 Agent 的 LLM 被调用时，注入 `handoff_to_agent` 工具
+3. LLM 调用 `handoff_to_agent(target="specialist")`
+4. Worker 返回 `Command(goto="specialist")`
+5. Pregel 将下一个节点解析为 "specialist"，执行该 agent 节点
 
-**Alternative considered**: Handoff as a separate node type — rejected because it would require engine changes and doesn't match the Swarm mental model.
+**考虑的替代方案**: Handoff 作为单独的节点类型——被拒绝，因为它需要引擎变更且不符合 Swarm 心智模型。
 
-### D3: Agent-as-Tool via Dynamic Tool Registration
+### D3: 通过动态工具注册的 Agent-as-Tool
 
-**Decision**: Agents can be exposed as tools to other Agents. When configuring an AGENT node with `invocation_mode: "tool"`, the target Agent is registered as a callable tool in the source Agent's tool list. The LLM invokes it like any other tool.
+**决策**: Agent 可作为工具暴露给其他 Agent。在配置 AGENT 节点时设置 `invocation_mode: "tool"`，目标 Agent 注册为源 Agent 工具列表中的可调用工具。LLM 像调用其他工具一样调用它。
 
-**Rationale**: Hierarchical delegation (parent→child) is the most common multi-Agent pattern. Exposing Agents as tools lets the LLM decide when to delegate, which is more flexible than hardcoded graph edges.
+**理由**: 层级委派（父→子）是最常见的多 Agent 模式。将 Agent 暴露为工具让 LLM 决定何时委派，这比硬编码的图边更灵活。
 
-**Tool schema**:
+**工具 schema**:
 ```json
 {
   "name": "agent_{agent_name}",
-  "description": "Delegate to {agent_name}: {agent_persona}",
+  "description": "委派给 {agent_name}: {agent_persona}",
   "parameters": {
     "type": "object",
     "properties": {
-      "task": {"type": "string", "description": "The task to delegate"}
+      "task": {"type": "string", "description": "要委派的任务"}
     }
   }
 }
 ```
 
-**Alternative considered**: Sub-graph nesting (agent node contains a full sub-graph) — deferred to P3 because it requires state mapping between parent and child graphs.
+**考虑的替代方案**: 子图嵌套（agent 节点包含完整的子图）——推迟到 P3，因为需要父图和子图之间的状态映射。
 
-### D4: Context Isolation Strategy
+### D4: 上下文隔离策略
 
-**Decision**: Each Agent execution gets an isolated context. The system prompt, tools, and knowledge bases come from the AgentModel definition. Conversation messages are passed from the parent graph via channel mapping.
+**决策**: 每个 Agent 执行获得隔离的上下文。System prompt、工具和知识库来自 AgentModel 定义。对话消息通过 channel 映射从父图传递。
 
-**Rationale**: Agents should be self-contained units. A specialist Agent shouldn't see the generalist's system prompt, and vice versa. This matches the "agent as independent entity" mental model.
+**理由**: Agent 应是自包含的单元。专业 Agent 不应看到通用 Agent 的 system prompt，反之亦然。这匹配"Agent 作为独立实体"的心智模型。
 
-**Implementation**: 
-- `agent_execute` port method receives the agent_id and messages
-- Port implementation loads AgentModel, builds isolated context (system_prompt + agent's tools + agent's knowledge bases)
-- Messages from parent graph are passed as the conversation history
-- Agent's response is returned to the parent graph
+**实现**: 
+- `agent_execute` 端口方法接收 agent_id 和 messages
+- 端口实现加载 AgentModel，构建隔离上下文（system_prompt + agent 的工具 + agent 的知识库）
+- 来自父图的消息作为对话历史传递
+- Agent 的响应返回给父图
 
-### D5: Orchestration Templates as Graph DSL JSON
+### D5: 编排模板作为 Graph DSL JSON
 
-**Decision**: Orchestration templates are stored as Graph DSL JSON files, served via API. No new DB table needed — templates are static resources bundled with the application.
+**决策**: 编排模板作为 Graph DSL JSON 文件存储，通过 API 提供。无需新 DB 表——模板是与应用捆绑的静态资源。
 
-**Rationale**: Templates are immutable starting points. Users pick a template, the canvas loads it, they customize it. No need for a template management system. Simple and aligned with the "everything is a Graph" principle.
+**理由**: 模板是不可变的起点。用户选择模板，画布加载它，用户自定义。无需模板管理系统。简单且与"一切都是 Graph"原则一致。
 
-**Templates**:
-1. **Customer Service Triage**: Router agent → (billing | technical | general) specialist agents
-2. **Content Pipeline**: Researcher → Writer → Reviewer (sequential agent chain)
-3. **Hierarchical Supervisor**: Supervisor agent → N worker agents (tool-based delegation)
+**模板**:
+1. **客服分类**: 路由器 agent →（账单 | 技术 | 通用）专业 agent
+2. **内容管线**: 研究员 → 写手 → 评审（顺序 agent 链）
+3. **层级监督者**: 监督者 agent → N 个工作 agent（基于工具的委派）
 
-### D6: Canvas Multi-Agent Enhancements
+### D6: 画布多 Agent 增强
 
-**Decision**: Extend the existing canvas with agent-specific features:
-- Agent palette: sidebar showing available agents to drag onto canvas
-- Edge type differentiation: solid = invoke-as-tool (synchronous), dashed = handoff (control transfer)
-- Template picker: modal to select and load orchestration templates
-- Multi-Agent execution view: show which agent is currently executing during test runs
+**决策**: 用 Agent 特定功能扩展现有画布：
+- Agent 调色板：侧边栏显示可拖入画布的可用 Agent
+- 边类型区分：实线 = invoke-as-tool（同步），虚线 = handoff（控制转移）
+- 模板选择器：用于选择和加载编排模板的模态框
+- 多 Agent 执行视图：在测试运行期间显示当前正在执行的 Agent
 
-**Rationale**: Reuse the existing canvas infrastructure. No new canvas component needed — just enhance the agent node, add an agent palette, and differentiate edge rendering.
+**理由**: 复用现有画布基础设施。无需新画布组件——只需增强 agent 节点、添加 agent 调色板、区分边渲染。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险与权衡
 
-- **[Risk] Agent execution latency**: Each agent node invokes an LLM, compounding latency. → Mitigation: streaming support per-agent node, test-runner mock mode for development.
-- **[Risk] Circular handoff loops**: Agent A hands off to B, B hands off back to A. → Mitigation: Pregel max_supersteps limit (default 100). Add cycle detection in compiler for handoff edges.
-- **[Risk] Context explosion**: Multi-agent graphs pass growing conversation history. → Mitigation: context budget per agent node (reuse BudgetManager), L2 compression in P2 memory work.
-- **[Trade-off] Sub-graph nesting deferred**: AGENT nodes execute the agent's LLM directly (via port), not as a nested sub-graph. This is simpler but less flexible than full state mapping. → Acceptable for P2; sub-graph nesting is P3.
-- **[Trade-off] Templates are static files, not DB-managed**: Cannot create/edit templates via API. → Acceptable for P2; template marketplace is P4.
+- **[风险] Agent 执行延迟**: 每个 agent 节点调用一次 LLM，延迟累积。→ 缓解措施：每个 agent 节点支持流式，开发模式使用测试运行器模拟模式。
+- **[风险] 循环 handoff**: Agent A 移交给 B，B 移交给 A。→ 缓解措施：Pregel max_supersteps 限制（默认 100）。为 handoff 边在编译器中添加循环检测。
+- **[风险] 上下文膨胀**: 多 agent 图传递增长的对话历史。→ 缓解措施：每个 agent 节点的上下文预算（复用 BudgetManager），P2 记忆工作中的 L2 压缩。
+- **[权衡] 子图嵌套推迟**: AGENT 节点直接执行 agent 的 LLM（通过端口），而不是作为嵌套子图。这更简单但不如完整状态映射灵活。→ P2 可接受；子图嵌套是 P3。
+- **[权衡] 模板为静态文件，非 DB 管理**: 无法通过 API 创建/编辑模板。→ P2 可接受；模板市场是 P4。

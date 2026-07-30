@@ -1,42 +1,42 @@
-## ADDED Requirements
+## ADDED Requirements — 新增的需求
 
-### Requirement: Dataset management API
-The system SHALL expose REST endpoints at `/api/evaluation/datasets` for dataset CRUD and `/api/evaluation/datasets/{dataset_id}/items` for item management.
+### Requirement: Dataset management API — 需求：数据集管理 API
+系统应在 `/api/evaluation/datasets` 暴露用于数据集 CRUD 的 REST 端点，以及在 `/api/evaluation/datasets/{dataset_id}/items` 暴露用于项管理的端点。
 
-#### Scenario: Create dataset via API
-- **WHEN** a POST request is sent to `/api/evaluation/datasets` with `{"name": "test-set", "description": "..."}`
-- **THEN** the API SHALL return 201 with the created dataset including generated `id`, `created_at`, `updated_at`
+#### Scenario: Create dataset via API — 场景：通过 API 创建数据集
+- **WHEN — 当** 发送 POST 请求到 `/api/evaluation/datasets`，包含 `{"name": "test-set", "description": "..."}`
+- **THEN — 则** API 应返回 201 及创建的数据集，包含生成的 `id`、`created_at`、`updated_at`
 
-#### Scenario: Add items to dataset
-- **WHEN** a POST request is sent to `/api/evaluation/datasets/{id}/items` with a list of items
-- **THEN** the API SHALL validate each item, persist valid items, and return 201 with count of added items
+#### Scenario: Add items to dataset — 场景：向数据集添加项
+- **WHEN — 当** 发送 POST 请求到 `/api/evaluation/datasets/{id}/items`，包含项列表
+- **THEN — 则** API 应验证每个项，持久化有效项，并返回 201 及添加的项数量
 
-#### Scenario: List datasets with pagination
-- **WHEN** a GET request is sent to `/api/evaluation/datasets?page=1&page_size=20`
-- **THEN** the API SHALL return a paginated list of datasets with total count
+#### Scenario: List datasets with pagination — 场景：带分页列出数据集
+- **WHEN — 当** 发送 GET 请求到 `/api/evaluation/datasets?page=1&page_size=20`
+- **THEN — 则** API 应返回带总数的分页数据集列表
 
-#### Scenario: Delete dataset
-- **WHEN** a DELETE request is sent to `/api/evaluation/datasets/{id}`
-- **THEN** the API SHALL cascade-delete the dataset and all its items, returning 204
+#### Scenario: Delete dataset — 场景：删除数据集
+- **WHEN — 当** 发送 DELETE 请求到 `/api/evaluation/datasets/{id}`
+- **THEN — 则** API 应级联删除数据集及其所有项，返回 204
 
-### Requirement: Evaluation run API
-The system SHALL expose REST endpoints at `/api/evaluation/runs` for creating and retrieving evaluation runs.
+### Requirement: Evaluation run API — 需求：评估运行 API
+系统应在 `/api/evaluation/runs` 暴露用于创建和检索评估运行的 REST 端点。
 
-#### Scenario: Create evaluation run
-- **WHEN** a POST request is sent to `/api/evaluation/runs` with `{"dataset_id": "...", "evaluators": ["faithfulness", "context_precision"]}`
-- **THEN** the API SHALL execute the specified evaluators against the dataset items, persist the run with all scores, and return 201 with the `EvaluationRunResult`
+#### Scenario: Create evaluation run — 场景：创建评估运行
+- **WHEN — 当** 发送 POST 请求到 `/api/evaluation/runs`，包含 `{"dataset_id": "...", "evaluators": ["faithfulness", "context_precision"]}`
+- **THEN — 则** API 应对数据集项执行指定的评估器，持久化运行及所有分数，并返回 201 及 `EvaluationRunResult`
 
-#### Scenario: List evaluation runs
-- **WHEN** a GET request is sent to `/api/evaluation/runs?dataset_id=...`
-- **THEN** the API SHALL return runs filtered by dataset_id with summary statistics
+#### Scenario: List evaluation runs — 场景：列出评估运行
+- **WHEN — 当** 发送 GET 请求到 `/api/evaluation/runs?dataset_id=...`
+- **THEN — 则** API 应按 dataset_id 过滤返回运行，带摘要统计
 
-#### Scenario: Get run scores
-- **WHEN** a GET request is sent to `/api/evaluation/runs/{id}/scores`
-- **THEN** the API SHALL return all individual scores for the run, grouped by evaluator metric
+#### Scenario: Get run scores — 场景：获取运行分数
+- **WHEN — 当** 发送 GET 请求到 `/api/evaluation/runs/{id}/scores`
+- **THEN — 则** API 应返回运行的所有单个分数，按评估器指标分组
 
-### Requirement: Authentication required
-All evaluation API endpoints SHALL require authentication via the existing JWT/API key middleware.
+### Requirement: Authentication required — 需求：需要认证
+所有评估 API 端点应通过现有的 JWT/API 密钥中间件要求认证。
 
-#### Scenario: Unauthenticated request
-- **WHEN** a request is sent without valid authentication credentials
-- **THEN** the API SHALL return 401 Unauthorized
+#### Scenario: Unauthenticated request — 场景：未认证的请求
+- **WHEN — 当** 未提供有效认证凭据的请求
+- **THEN — 则** API 应返回 401 Unauthorized

@@ -1,26 +1,26 @@
-## Why
+## Why — 动机
 
-The PregelRuntime currently executes `current_nodes` sequentially in a simple `for` loop (pregel.py line 141-151). This is fine for single-node or linear graphs, but limits throughput for parallel branches and prevents priority-based scheduling. A SchedulerStrategy interface allows swapping scheduling algorithms without modifying the runtime.
+PregelRuntime 当前顺序调度 worker——在任何给定时间只执行一个 worker。对于可以并行运行的分支（由优化通道标记），以及在可能异步执行的任务中，顺序调度顺序会留下性能机会。
 
-## What Changes
+## What Changes — 变更内容
 
-- Add a `SchedulerStrategy` ABC in `engine/scheduler.py` with methods for selecting next nodes and setting priorities
-- Add a `FIFOScheduler` implementation (current behavior) for backward compatibility
-- Register SchedulerStrategy as an optional parameter on PregelRuntime
-- Do NOT modify the existing sequential loop — SchedulerStrategy is additive
+- 在 `engine/scheduler.py` 中添加 `SchedulerStrategy` ABC，包含 `select_next(ready: list[WorkerNode], context: dict) -> WorkerNode` 方法
+- 添加 `FIFOScheduler`（当前默认行为——先进先出）
+- 添加 `PriorityScheduler`（支持在频道可用时基于权重的调度）
+- 将 SchedulerStrategy 注册为 PregelRuntime 的可选参数
 
-## Capabilities
+## Capabilities — 能力变更
 
-### New Capabilities
-- `scheduler-strategy`: Pluggable scheduling interface for node execution ordering
+### 新增能力
+- `scheduler-strategy`: 用于 worker 调度顺序的可插拔策略
 
-### Modified Capabilities
-- `engine-ports`: No change needed (SchedulerStrategy is engine-internal, not a service port)
+### 修改的能力
+- 无
 
-## Impact
+## Impact — 影响范围
 
-- **New file**: `src/hecate/engine/scheduler.py` (ABC + FIFOScheduler)
-- **Modified file**: `src/hecate/engine/pregel.py` (add optional scheduler parameter)
-- **New test**: `tests/test_engine/test_scheduler.py`
-- **No breaking changes**: Existing behavior preserved as default
-- **No new dependencies**: Uses only stdlib
+- **新文件**: `src/hecate/engine/scheduler.py`（ABC + FIFO + Priority 实现）
+- **修改的文件**: PregelRuntime 或 worker dispatcher（添加可选的调度器参数）
+- **新测试**: `tests/test_engine/test_scheduler.py`
+- **无破坏性变更**
+- **无新依赖**

@@ -1,68 +1,72 @@
-## Context
+## Context — 背景
 
-The engine layer (`engine/pregel.py`) executes agent supersteps in a BSP loop — schedule nodes, dispatch workers, apply channel writes, checkpoint. Within each superstep, workers invoke LLM calls and tool executions via `EnginePort`. There is currently no mechanism to intercept, validate, or transform these calls before or after they happen.
+引擎执行由 PregelRuntime 驱动，它在一个 BSP 循环中运行 LLMWorker。LLMWorker 处理 LLM 调用（`llm_invoke`）和工具执行（`tool_execute`）。目前没有在每次调用之前或之后运行的自定义逻辑挂钩点——安全拦截器仅在 API 层，在引擎的抽象内部不可见。
 
-A `SecurityMiddleware` exists in `services/security/middleware.py` with `check_input()` / `check_output()` methods that orchestrate LLM Guard scanning and NeMo Guardrails topic control. However, this middleware is never invoked during execution — it is a standalone service with no integration point.
+像 PII 屏蔽、成本限制、提示词注入检测和合规性检查这样的特性需要引擎级别的钩子，因为那是调用发生的地方。API 级别的检查在执行开始之前触发，不能逐调用应用。
 
-This change creates four independent guardrail hook ABCs at the engine layer, following a composition-over-inheritance design. P2 scope is interface-only: ABCs + `GuardrailResult` dataclass + NoOp implementations + tests. Actual integration into `ConversationService` and `PregelRuntime` is P3 (features 9.1a/9.1b).
+## Goals / Non-Goals — 目标 / 非目标
 
-Industry reference: OpenAI Agents SDK uses 4 independent guardrail types (`InputGuardrail`, `OutputGuardrail`, `ToolInputGuardrail`, `ToolOutputGuardrail`) with `tripwire_triggered: bool` semantics. Our design mirrors this separation but uses `allow/block` instead of boolean for clearer intent.
+**目标：**
+- 定义 4 个 hook ABC：`PreLLMHook`、`PostLLMHook`、`PreToolHook`、`PostToolHook`
+- 为每个提供 `NoOp` 实现（默认——透传）
+- 提供持有 hook 并在正确时间调用它们的 `GuardrailRegistry`
+- 在每个 LLM 调用和工具执行周围将调用点集成到 LLMWorker 中
+- 保持引擎零依赖
 
-## Goals / Non-Goals
+**非目标：**
+- P3 的 AI 驱动的 guardrails（9.1a/9.1b）
+- 跨 worker 的 guardrail 钩子（P3 的多代理编排）
+- 基于事件的 guardrail 日志记录（P3 的 EventStore 集成）
+- 生命周期钩子（在引擎启动/停止时运行）——只做每次调用
 
-**Goals:**
+## Decisions — 设计决策
 
-- Define four independent hook ABCs: `PreLLMHook`, `PostLLMHook`, `PreToolHook`, `PostToolHook` (composition over inheritance)
-- Define `GuardrailResult` with `action` semantics: `allow` (pass through) and `block` (halt with reason)
-- Provide `NoOp*` pass-through implementations for each hook type
-- Add four optional properties to `EnginePort`: `pre_llm_hooks`, `post_llm_hooks`, `pre_tool_hooks`, `post_tool_hooks`
-- Full test coverage for all hook types and result actions
+### D1：4 个独立的 hook，不是 1 个通用的
 
-**Non-Goals:**
+**选择**：4 个独立的 ABC（PreLLMHook、PostLLMHook、PreToolHook、PostToolHook），而不是一个带有枚举方法的通用 GuardrailHook。
 
-- `modify` action (data transformation in-flight) — deferred to P3 (feature 9.1b)
-- `check_cost_ceiling` hook — deferred to P3 BudgetGovernance (independent feature)
-- Integration into `PregelRuntime` superstep loop — P3 (9.1a/9.1b)
-- Integration into `ConversationService` LLM/tool call paths — P3
-- Adapting existing `SecurityMiddleware` as a guardrail hook implementation — P3
-- Streaming-aware hooks (partial output inspection) — P3
-- Hook priority/ordering mechanism — P3
-- Per-Agent hook registration (vs EnginePort-level) — P3
+**理由**：
+- **清晰**：每个 hook 有单一的职责和明确的签名。
+- **类型安全**：`on_pre_llm_call` 接收 LLMInvocation 并返回 LLMInvocation；`on_post_tool_call` 接收 ToolResult 并返回 ToolResult。它们不会被混淆。
+- **组合**：一个 GuardrailRegistry 可以持有多个 hook（每个类型 0 个或多个），并且每个类型被独立调用。这与 Guardrails 的通用规范（pre/post 的独立规范）匹配得更好。
 
-## Decisions
+### D2：Hook 在 LLMWorker 内部，不在 PregelRuntime
 
-### D1: Composition over inheritance — four independent ABCs
+**选择**：在 `src/hecate/engine/worker.py` 的 LLMWorker 中添加调用点，而不是在 PregelRuntime superstep 循环中。
 
-Four separate ABCs (`PreLLMHook`, `PostLLMHook`, `PreToolHook`, `PostToolHook`) instead of one class with five abstract methods. Each hook type is focused on a single interception point.
+**理由**：PregelRuntime 调用 Worker.execute() 并获得结果。它不直接调用 LLM 或工具。添加钩子的正确位置是 LLMWorker，它在生命周期中拥有实际调用点。这保持了 PregelRuntime 免于 worker 内部细节的干扰。
 
-**Why:** If you only need input checking, you implement only `PreLLMHook`. No need to stub out unused methods. This matches the OpenAI Agents SDK pattern of independent guardrail types.
+### D3：Hook 签名——可变对象，不是返回值
 
-**Alternative considered:** Single `GuardrailHook` ABC with 5 abstract methods. Rejected — forces implementers to write stubs for unused hooks, violates composition-over-inheritance.
+**选择**：每个 hook 方法接收并原地修改可变对象。例如，`on_pre_llm_call(self, invocation: LLMInvocation)` 修改 invocation 对象，而不是返回一个新的对象。
 
-### D2: Engine layer, not service layer
+**理由**：
+- **效率**：避免在 hook 链中复制 invocation/tool 结果。
+- **链式处理**：一个 hook 修改对象，下一个 hook 看到修改后的版本。这允许自然的管道化（sanitizer → tracer → auditor）。
+- **与 FastAPI 中间件模式和常见 guardrail 实现一致**。
 
-Hook ABCs live in `engine/guardrail.py`, same level as `eventstore.py`, `scheduler.py`, etc. This follows the established P2 pattern: engine defines the contract, services provide implementations.
+### D4：GuardrailRegistry 持有每个类型的列表
 
-**Alternative considered:** Define hooks in `services/security/`. Rejected — hooks are an engine extensibility point, not a security-only concern.
+**选择**：`GuardrailRegistry` 有 4 个列表：`pre_llm_hooks: list[PreLLMHook]`、`post_llm_hooks: list[PostLLMHook]` 等。每个列表可以包含 0 个或多个 hook。
 
-### D3: allow/block only (no modify)
+**理由**：这允许多个独立 hook 共存。例如，一个用于 PII 屏蔽，一个用于成本跟踪，一个用于审核日志——都由不同的团队编写，注册在同一个 registry 中。
 
-Two actions: `ALLOW` (pass through) and `BLOCK` (halt with reason). The `modify` action (transform data in-flight) is deferred to P3 because it requires per-hook-point type contracts that add complexity without immediate value.
+### D5：GuardrailRegistry 是 LLMWorker 的可选参数
 
-**Why:** OpenAI Agents SDK uses only boolean `tripwire_triggered`. MLflow Gateway uses request/response transformation but at a different architectural layer. P2 keeps it simple.
+**选择**：`LLMWorker.__init__` 接受一个可选的 `guardrails: GuardrailRegistry | None = None` 参数。
 
-### D4: Four separate properties on EnginePort
+**理由**：与现有系统无缝集成。如果未提供 guardrails，则不调用任何 hook，行为与当前完全相同。
 
-Instead of one `guardrail_hooks` property returning a list, four separate properties: `pre_llm_hooks`, `post_llm_hooks`, `pre_tool_hooks`, `post_tool_hooks`. Each returns a list of the corresponding hook type.
+### D6：ONLY pre hooks 可以阻止执行
 
-**Why:** Type-safe. Each property returns a specific hook type list, not a generic list. Engine code checks `if port.pre_llm_hooks` before iterating.
+**选择**：pre hooks 可以通过设置 `invocation.blocked = True` 来阻止执行。Post hooks 不能——它们是只读的（用于审计/监控）。
 
-### D5: Async-only interface
+**理由**：pre hooks 是策略强制执行点（安全、合规、成本）。Post hooks 是可观测性点。阻止已经发生的调用没有意义。
 
-All hook methods are `async def`. Guardrail implementations may need to call external services (ML models, policy servers, audit logs). Sync hooks would force implementers to manage their own event loop.
+## Risks / Trade-offs — 风险与权衡
 
-## Risks / Trade-offs
-
-- **[No modify action]** → Cannot transform data in P2. Mitigation: P3 adds modify with per-hook-point type contracts. Current design is forward-compatible (GuardrailAction enum can be extended).
-- **[Block action propagation]** → When a hook returns `block`, the caller needs a clear error path. Mitigation: `GuardrailResult.reason` provides a human-readable string. P3 integration will define error mapping.
-- **[EnginePort property proliferation]** → Four properties instead of one. Mitigation: each is a one-liner returning `[]`, and the type safety is worth the minor verbosity.
+| 风险 | 缓解措施 |
+|------|---------|
+| hook 增加每次调用的延迟 | NoOp hook 是无操作的（基本上是免费的）。昂贵 hook 是可选加入的 |
+| hook 可能阻止合法流量 | hook 默认是 NoOp；阻止必须通过注册 guardrail 显式加入 |
+| hook 可能意外修改调用 | 文档约定：pre hooks 修改以清理；post hooks 不应该修改，但这不是强制执行的

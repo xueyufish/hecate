@@ -1,23 +1,23 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Validate LLM output against schema
-The system SHALL validate LLM responses against expected output schemas.
+### 需求：根据 Schema 校验 LLM 输出
+系统须根据预期的输出 schema 校验 LLM 响应。
 
-#### Scenario: Valid JSON output
-- **WHEN** LLM returns valid JSON matching schema
-- **THEN** the system accepts the response
+#### 场景：有效的 JSON 输出
+- **当** LLM 返回匹配 schema 的有效 JSON
+- **则** 系统接受响应
 
-#### Scenario: Invalid JSON output
-- **WHEN** LLM returns invalid JSON
-- **THEN** the system logs error and requests retry with error context
+#### 场景：无效的 JSON 输出
+- **当** LLM 返回无效 JSON
+- **则** 系统记录错误并请求带着错误上下文重试
 
-### Requirement: Auto-repair common format errors
-The system SHALL attempt to auto-repair common LLM output format errors.
+### 需求：自动修复常见格式错误
+系统须尝试自动修复常见的 LLM 输出格式错误。
 
-#### Scenario: Missing quotes
-- **WHEN** LLM returns `{name: "Alice"}` (missing quotes on key)
-- **THEN** the system auto-repairs to `{"name": "Alice"}`
+#### 场景：缺少引号
+- **当** LLM 返回 `{name: "Alice"}`（键缺少引号）
+- **则** 系统自动修复为 `{"name": "Alice"}`
 
-#### Scenario: Trailing comma
-- **WHEN** LLM returns `{"name": "Alice",}` (trailing comma)
-- **THEN** the system auto-repairs to `{"name": "Alice"}`
+#### 场景：尾部逗号
+- **当** LLM 返回 `{"name": "Alice",}`（尾部逗号）
+- **则** 系统自动修复为 `{"name": "Alice"}`

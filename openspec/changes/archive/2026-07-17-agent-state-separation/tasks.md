@@ -1,29 +1,29 @@
-## 1. AgentState Data Model
+## 1. AgentState Data Model — AgentState 数据模型
 
-- [x] 1.1 Create `src/hecate/services/state/__init__.py` — export AgentState, AgentStateStore, InMemoryStateStore
-- [x] 1.2 Create `src/hecate/services/state/state.py` — AgentState Pydantic model with fields: session_id (UUID), agent_id (UUID), summary (str), context (list[dict]), permission_context (dict), tool_context (dict), task_context (dict), environment_root (str | None), metadata (dict)
+- [x] 1.1 创建 `src/hecate/services/state/__init__.py` — 导出 AgentState、AgentStateStore、InMemoryStateStore
+- [x] 1.2 创建 `src/hecate/services/state/state.py` — AgentState Pydantic 模型，字段：session_id（UUID）、agent_id（UUID）、summary（str）、context（list[dict]）、permission_context（dict）、tool_context（dict）、task_context（dict）、environment_root（str | None）、metadata（dict）
 
 ## 2. AgentStateStore
 
-- [x] 2.1 Create `src/hecate/services/state/store.py` — AgentStateStore ABC with abstract methods: save(agent_id, session_id, state), load(agent_id, session_id), delete(agent_id, session_id), list_sessions(agent_id)
-- [x] 2.2 Implement InMemoryStateStore in store.py — dict-based storage, asyncio.Lock per session key for concurrent safety
+- [x] 2.1 创建 `src/hecate/services/state/store.py` — AgentStateStore ABC，包含抽象方法：save(agent_id, session_id, state)、load(agent_id, session_id)、delete(agent_id, session_id)、list_sessions(agent_id)
+- [x] 2.2 在 store.py 中实现 InMemoryStateStore — 基于字典的存储，每个会话键使用 asyncio.Lock 保证并发安全
 
-## 3. WorkflowExecutionService Integration
+## 3. WorkflowExecutionService Integration — WorkflowExecutionService 集成
 
-- [x] 3.1 Add `state_store: AgentStateStore | None = None` parameter to WorkflowExecutionService.__init__
-- [x] 3.2 Add state load at execute() entry — load existing state or create fresh AgentState, inject into execution_context["_agent_state"]
-- [x] 3.3 Add state save at execute() exit — save AgentState after both _non_stream_execute and _stream_execute complete
-- [x] 3.4 Populate AgentState.environment_root from EnvironmentManager when available
+- [x] 3.1 向 WorkflowExecutionService.__init__ 添加 `state_store: AgentStateStore | None = None` 参数
+- [x] 3.2 在 execute() 入口添加状态加载 — 加载现有状态或创建新的 AgentState，注入到 execution_context["_agent_state"]
+- [x] 3.3 在 execute() 退出时添加状态保存 — 在 _non_stream_execute 和 _stream_execute 完成后保存 AgentState
+- [x] 3.4 从 EnvironmentManager（如果可用）填充 AgentState.environment_root
 
-## 4. Tests
+## 4. Tests — 测试
 
-- [x] 4.1 Test AgentState model — creation with defaults, creation with explicit values, model_dump round-trip, model_validate from dict
-- [x] 4.2 Test InMemoryStateStore — save/load, load non-existent returns None, delete, list_sessions, different sessions independent
-- [x] 4.3 Test InMemoryStateStore concurrent safety — two coroutines save same key, no corruption
-- [x] 4.4 Test WorkflowExecutionService integration — state loaded at entry, saved at exit, persists across calls, environment_root populated
+- [x] 4.1 测试 AgentState 模型 — 使用默认值创建、使用显式值创建、model_dump 往返、从字典 model_validate
+- [x] 4.2 测试 InMemoryStateStore — 保存/加载、加载不存在返回 None、删除、list_sessions、不同会话独立
+- [x] 4.3 测试 InMemoryStateStore 并发安全 — 两个协程保存相同键，无损坏
+- [x] 4.4 测试 WorkflowExecutionService 集成 — 入口加载状态、退出保存状态、跨调用持久化、environment_root 填充
 
-## 5. Verification
+## 5. Verification — 验证
 
-- [x] 5.1 Run `ruff check src/hecate/ tests/ && ruff format --check src/ tests/` — 0 errors
-- [x] 5.2 Run `mypy src/` — 0 errors
-- [x] 5.3 Run `python -m pytest tests/test_services/test_state/ -q` — all pass
+- [x] 5.1 运行 `ruff check src/hecate/ tests/ && ruff format --check src/ tests/` — 0 错误
+- [x] 5.2 运行 `mypy src/` — 0 错误
+- [x] 5.3 运行 `python -m pytest tests/test_services/test_state/ -q` — 全部通过

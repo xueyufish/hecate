@@ -1,102 +1,56 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Agent Configurator form layout
-The system SHALL provide an `AgentConfigurator` component that displays a tabbed form for configuring an Agent. The form SHALL have 4 tabs: Basic, Knowledge, Tools, and Advanced. The component SHALL support both create mode (empty form) and edit mode (pre-populated form).
+### 需求：Agent 配置表单
+系统须提供用于创建和编辑 Agent 的 UI 表单。表单须包含 3 个部分：基本信息（名称、描述、persona）、模型配置（model_name、temperature、max_tokens）和工具/知识库选择。
 
-#### Scenario: Create mode displays empty form
-- **WHEN** the user navigates to `/agents/new`
-- **THEN** the system SHALL display the AgentConfigurator with all fields empty and default values
+#### 场景：创建新 Agent
+- **当** 用户打开 `/agents/new` 路由
+- **则** 显示空表单，包含 3 个部分：基本信息、模型配置、工具/知识库
+- **当** 用户填写必填字段并点击"创建"
+- **则** 系统调用 `POST /api/agents` 并重定向到 agent 列表页面
 
-#### Scenario: Edit mode displays populated form
-- **WHEN** the user navigates to `/agents/[id]`
-- **THEN** the system SHALL fetch the agent data and display the AgentConfigurator with fields pre-populated
+#### 场景：编辑已有 Agent
+- **当** 用户打开 `/agents/{id}/edit` 路由
+- **则** 表单预填充现有 agent 数据（从 `GET /api/agents/{id}` 加载）
+- **当** 用户修改字段并点击"保存"
+- **则** 系统调用 `PATCH /api/agents/{id}` 并显示成功通知
 
-#### Scenario: Tab navigation
-- **WHEN** the user clicks a tab
-- **THEN** the system SHALL display the corresponding section without losing data in other tabs
+#### 场景：必填字段验证
+- **当** 用户提交表单时名称或 persona 字段为空
+- **则** 表单显示内联验证错误，且不提交
 
-### Requirement: Basic tab fields
-The Basic tab SHALL contain: Name (required text input), Persona (textarea for system prompt), Model (grouped dropdown with provider sections), and Mode (select: chat/three_layer).
+### 需求：PATCH API 用于部分 Agent 更新
+系统须暴露 `PATCH /api/agents/{id}` 端点，接受 agent 数据的 JSON body。仅更新请求中提供的字段。
 
-#### Scenario: Name validation
-- **WHEN** the user leaves the Name field empty and submits
-- **THEN** the system SHALL display a validation error and prevent submission
+#### 场景：部分更新仅名称
+- **当** 调用 `PATCH /api/agents/{id}` 且 body 为 `{"name": "new-name"}`
+- **则** 仅更新 agent 的名称，其他字段保持不变
+- **则** 响应包含更新后 agent 的所有字段
 
-#### Scenario: Model selector with provider grouping
-- **WHEN** the Model dropdown is opened
-- **THEN** the system SHALL display models grouped by provider with availability indicators
+#### 场景：完全更新
+- **当** 调用 `PATCH /api/agents/{id}` 且 body 包含所有 agent 字段
+- **则** 更新所有提供的字段
 
-#### Scenario: Mode selection
-- **WHEN** the user selects a mode
-- **THEN** the system SHALL store the selection and use it for agent creation/update
+#### 场景：Agent 未找到
+- **当** 调用 `PATCH /api/agents/nonexistent`
+- **则** 响应为 404，错误码 `NOT_FOUND`
 
-### Requirement: Knowledge tab fields
-The Knowledge tab SHALL contain: Knowledge Bases (multi-select from available KBs) and Skills (multi-select from available skills).
+### 需求：Agent 复制
+系统须允许用户通过复制现有 agent 的配置来创建新 agent。复制操作须将所有字段复制到新 agent，appended agent 名称添加"Copy"后缀。
 
-#### Scenario: Knowledge base selection
-- **WHEN** the user opens the Knowledge Bases selector
-- **THEN** the system SHALL display all available knowledge bases and allow multi-select
+#### 场景：从现有 Agent 复制
+- **当** 用户在编辑页面上点击"复制"操作
+- **则** 新表单预填充原始 agent 的所有字段，名称修改为 `{original_name} (Copy)`
 
-#### Scenario: Skill selection
-- **WHEN** the user opens the Skills selector
-- **THEN** the system SHALL display all available skills and allow multi-select
+### 需求：内联 Agent 测试面板
+系统须在 Agent 配置页面上提供内联测试面板。测试面板须允许用户在保存更改前发送消息并查看 agent 响应。
 
-#### Scenario: Empty state when no KBs/skills exist
-- **WHEN** there are no knowledge bases or skills configured
-- **THEN** the system SHALL display an empty state message with a link to create one
+#### 场景：内联测试面板
+- **当** 用户在 agent 编辑页面上
+- **则** 可折叠的测试面板位于表单下方，包含消息输入和对话显示
+- **当** 用户输入消息并发送
+- **则** 系统将消息发送到 `POST /api/conversations`，并将 agent 响应显示在聊天显示区域中
 
-### Requirement: Tools tab fields
-The Tools tab SHALL contain: Tools (multi-select from available tools, optionally grouped by category).
-
-#### Scenario: Tool selection
-- **WHEN** the user opens the Tools selector
-- **THEN** the system SHALL display all available tools and allow multi-select
-
-#### Scenario: Tool deselection
-- **WHEN** the user deselects a tool
-- **THEN** the system SHALL remove it from the agent's tool list
-
-### Requirement: Advanced tab fields
-The Advanced tab SHALL contain: Risk Level (select: LOW/MEDIUM/HIGH), Opening Remarks (optional textarea), Enable Suggestions (toggle, default true), and Mode-specific settings.
-
-#### Scenario: Risk level selection
-- **WHEN** the user selects a risk level
-- **THEN** the system SHALL store the selection and use it for agent creation/update
-
-#### Scenario: Opening remarks configuration
-- **WHEN** the user enters opening remarks text
-- **THEN** the system SHALL store the text as the agent's static opening greeting
-
-#### Scenario: Suggestions toggle
-- **WHEN** the user toggles "Enable Suggestions" off
-- **THEN** the system SHALL set `enable_suggestions` to false for the agent
-
-### Requirement: Form submission
-The form SHALL submit all configured fields to the API. In create mode, it SHALL POST to `/api/agents`. In edit mode, it SHALL PUT to `/api/agents/{id}`. On success, it SHALL navigate to the agent detail page.
-
-#### Scenario: Successful creation
-- **WHEN** the user fills in required fields and clicks "Create"
-- **THEN** the system SHALL POST to `/api/agents` and navigate to `/agents/{new_id}`
-
-#### Scenario: Successful update
-- **WHEN** the user modifies fields and clicks "Save"
-- **THEN** the system SHALL PUT to `/api/agents/{id}` and show a success message
-
-#### Scenario: Submission error
-- **WHEN** the API returns an error
-- **THEN** the system SHALL display the error message and keep the form data intact
-
-### Requirement: Data loading for selectors
-The system SHALL load available tools, skills, and knowledge bases from the API when the configurator mounts. Loading states SHALL be displayed while data is being fetched.
-
-#### Scenario: Parallel data loading
-- **WHEN** the configurator mounts
-- **THEN** the system SHALL fetch tools, skills, knowledge bases, and models in parallel
-
-#### Scenario: Loading state
-- **WHEN** data is being fetched
-- **THEN** the system SHALL display skeleton loaders in the selector fields
-
-#### Scenario: Error state
-- **WHEN** data fetching fails
-- **THEN** the system SHALL display an error message with a retry button
+#### 场景：重置测试对话
+- **当** 用户在测试面板中点击"清除"
+- **则** 聊天历史被清除，准备新对话

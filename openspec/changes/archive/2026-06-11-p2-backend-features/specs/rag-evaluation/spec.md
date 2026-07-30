@@ -1,37 +1,37 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: Context Precision evaluator
-The system SHALL provide a `ContextPrecisionEvaluator` that measures whether relevant items in retrieved context are ranked higher. It SHALL use Ragas's `ContextPrecision` metric when `ragas` is installed. The evaluator SHALL accept `generated_answer` from the evaluation item when available, or invoke the RAG pipeline automatically when `generated_answer` is empty.
+### 需求：Context Precision 评估器
+系统应提供 `ContextPrecisionEvaluator`，衡量检索上下文中相关项是否排名更高。当安装了 `ragas` 时，它应使用 Ragas 的 `ContextPrecision` 指标。评估器应在可用时接受评估项中的 `generated_answer`，或在 `generated_answer` 为空时自动调用 RAG 管道
 
-#### Scenario: Evaluate with pre-generated answer
-- **WHEN** an evaluation item has a non-empty `generated_answer` field
-- **THEN** the evaluator SHALL use that answer for evaluation instead of invoking the RAG pipeline
+#### 场景：使用预生成答案评估
+- **当** 评估项具有非空的 `generated_answer` 字段
+- **则** 评估器应使用该答案进行评估，而不是调用 RAG 管道
 
-#### Scenario: Evaluate with RAG pipeline auto-generation
-- **WHEN** an evaluation item has an empty `generated_answer` field and the evaluation run specifies `answer_source="pipeline"`
-- **THEN** the system SHALL invoke the RAG pipeline with the item's query and retrieved contexts to generate an answer, then evaluate the generated answer
+#### 场景：使用 RAG 管道自动生成评估
+- **当** 评估项的 `generated_answer` 字段为空且评估运行指定 `answer_source="pipeline"`
+- **则** 系统应使用项的查询和检索到的上下文调用 RAG 管道生成答案，然后评估生成的答案
 
-#### Scenario: Ragas not installed
-- **WHEN** a user attempts to use `ContextPrecisionEvaluator` without `ragas` installed
-- **THEN** the system SHALL raise an `ImportError` with message explaining how to install: `pip install hecate[rag]`
+#### 场景：未安装 Ragas
+- **当** 用户尝试使用 `ContextPrecisionEvaluator` 但未安装 `ragas`
+- **则** 系统应抛出 `ImportError`，附带说明如何安装的消息：`pip install hecate[rag]`
 
-### Requirement: Context Recall evaluator
-The system SHALL provide a `ContextRecallEvaluator` that measures whether retrieved context aligns with the expected answer. It SHALL use Ragas's `ContextRecall` metric. The evaluator SHALL support both pre-generated and pipeline-generated answers.
+### 需求：Context Recall 评估器
+系统应提供 `ContextRecallEvaluator`，衡量检索到的上下文是否与期望答案一致。它应使用 Ragas 的 `ContextRecall` 指标。评估器应支持预生成和管道生成的答案
 
-#### Scenario: Evaluate context coverage with pipeline-generated answer
-- **WHEN** a RAG evaluation runs with `answer_source="pipeline"` and an item has no `generated_answer`
-- **THEN** the evaluator SHALL invoke the RAG pipeline to generate an answer, then measure context recall against the expected answer
+#### 场景：使用管道生成答案评估上下文覆盖率
+- **当** RAG 评估运行时使用 `answer_source="pipeline"` 且项没有 `generated_answer`
+- **则** 评估器应调用 RAG 管道生成答案，然后根据期望答案衡量上下文召回率
 
-### Requirement: Faithfulness evaluator
-The system SHALL provide a `FaithfulnessEvaluator` that measures whether the generated answer is factually consistent with retrieved context (hallucination detection). The evaluator SHALL support both pre-generated and pipeline-generated answers.
+### 需求：Faithfulness 评估器
+系统应提供 `FaithfulnessEvaluator`，衡量生成的答案是否与检索到的上下文在事实上一致（幻觉检测）。评估器应支持预生成和管道生成的答案
 
-#### Scenario: Detect hallucinated claims with pipeline-generated answer
-- **WHEN** a RAG pipeline generates an answer containing claims not supported by retrieved context
-- **THEN** the evaluator SHALL return a Score with `metric_name="faithfulness"` and `value` penalized for each unsupported claim
+#### 场景：检测带管道生成答案的幻觉主张
+- **当** RAG 管道生成的答案包含检索上下文不支持的主张
+- **则** 评估器应返回 `metric_name="faithfulness"` 的 Score，每个不支持的主张会惩罚 `value`
 
-### Requirement: Answer Relevancy evaluator
-The system SHALL provide an `AnswerRelevancyEvaluator` that measures how relevant the generated answer is to the user's question. The evaluator SHALL support both pre-generated and pipeline-generated answers.
+### 需求：Answer Relevancy 评估器
+系统应提供 `AnswerRelevancyEvaluator`，衡量生成的答案与用户问题的相关程度。评估器应支持预生成和管道生成的答案
 
-#### Scenario: Evaluate answer relevance with pipeline-generated answer
-- **WHEN** a RAG pipeline generates an answer for a query
-- **THEN** the evaluator SHALL return a Score with `metric_name="answer_relevancy"` indicating semantic similarity between answer and question intent
+#### 场景：使用管道生成答案评估答案相关性
+- **当** RAG 管道为查询生成答案
+- **则** 评估器应返回 `metric_name="answer_relevancy"` 的 Score，指示答案与问题意图之间的语义相似性

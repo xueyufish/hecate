@@ -1,76 +1,76 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: ModelDeploymentModel ORM model
-The system SHALL define `ModelDeploymentModel(BaseModel)` in `models/model_deployment.py` with fields: `model_id` (String 255, the provider model name), `channel` (String 20, one of: dev, staging, prod), `version` (String 50, nullable), `deployment_config` (JSON, overrides for this deployment), `approval_status` (String 20, one of: pending, approved, rejected, default pending), `approved_by` (UUID, nullable), `approved_at` (DateTime, nullable), `deprecated_at` (DateTime, nullable), `sunset_at` (DateTime, nullable), `workspace_id` (UUID).
+### Requirement: ModelDeploymentModel ORM 模型 — ModelDeploymentModel ORM model
+系统应在 `models/model_deployment.py` 中定义 `ModelDeploymentModel(BaseModel)`，包含字段：`model_id`（String 255，提供者模型名称）、`channel`（String 20，取值：dev、staging、prod）、`version`（String 50，可空）、`deployment_config`（JSON，此部署的覆盖）、`approval_status`（String 20，取值：pending、approved、rejected，默认 pending）、`approved_by`（UUID，可空）、`approved_at`（DateTime，可空）、`deprecated_at`（DateTime，可空）、`sunset_at`（DateTime，可空）、`workspace_id`（UUID）。
 
-#### Scenario: Create deployment
-- **WHEN** a ModelDeploymentModel is created with `model_id="gpt-4o"`, `channel="dev"`, `approval_status="pending"`
-- **THEN** the record is persisted with the specified channel and pending approval
+#### Scenario: 创建部署 — Create deployment
+- **WHEN** 使用 `model_id="gpt-4o"`、`channel="dev"`、`approval_status="pending"` 创建 ModelDeploymentModel
+- **THEN** 记录以指定通道和待审批状态持久化
 
-#### Scenario: Unique model per channel
-- **WHEN** a deployment is created for a model_id + channel combination that already exists
-- **THEN** the system SHALL reject the duplicate and return an error
+#### Scenario: 每个通道唯一模型 — Unique model per channel
+- **WHEN** 为已存在的 model_id + channel 组合创建部署
+- **THEN** 系统应拒绝重复并返回错误
 
-### Requirement: Model promotion workflow
-The system SHALL expose `/api/models/{model_id}/promote` endpoint that moves a model from one channel to the next (dev → staging → prod).
+### Requirement: 模型提升工作流 — Model promotion workflow
+系统应暴露 `/api/models/{model_id}/promote` 端点，将模型从一个通道移动到下一个通道（dev → staging → prod）。
 
-#### Scenario: Promote from dev to staging
-- **WHEN** POST `/api/models/gpt-4o/promote` with `{"from": "dev", "to": "staging"}` is received
-- **THEN** the system SHALL create a new ModelDeploymentModel with `channel="staging"`, `approval_status="pending"`
+#### Scenario: 从 dev 提升到 staging — Promote from dev to staging
+- **WHEN** 收到 POST `/api/models/gpt-4o/promote`，带 `{"from": "dev", "to": "staging"}`
+- **THEN** 系统应创建新的 ModelDeploymentModel，`channel="staging"`、`approval_status="pending"`
 
-#### Scenario: Approve promotion
-- **WHEN** POST `/api/models/gpt-4o/promote/{deployment_id}/approve` is received by a workspace admin
-- **THEN** the system SHALL set `approval_status="approved"`, `approved_by=<user_id>`, `approved_at=now`
+#### Scenario: 审批提升 — Approve promotion
+- **WHEN** 工作区管理员收到 POST `/api/models/gpt-4o/promote/{deployment_id}/approve`
+- **THEN** 系统应设置 `approval_status="approved"`、`approved_by=<user_id>`、`approved_at=now`
 
-#### Scenario: Reject promotion
-- **WHEN** POST `/api/models/gpt-4o/promote/{deployment_id}/reject` with reason is received
-- **THEN** the system SHALL set `approval_status="rejected"` and keep the previous channel active
+#### Scenario: 拒绝提升 — Reject promotion
+- **WHEN** 收到带原因的 POST `/api/models/gpt-4o/promote/{deployment_id}/reject`
+- **THEN** 系统应设置 `approval_status="rejected"` 并保持之前的通道活动
 
-#### Scenario: Promotion without approval
-- **WHEN** a pending deployment is used before approval
-- **THEN** the system SHALL reject model invocations for that deployment with error "Deployment pending approval"
+#### Scenario: 无审批的提升 — Promotion without approval
+- **WHEN** 待审批的部署在批准前被使用
+- **THEN** 系统应拒绝该部署的模型调用，错误为 "Deployment pending approval"
 
-### Requirement: Model deprecation scheduling
-The system SHALL expose `/api/models/{model_id}/deprecate` endpoint to schedule model deprecation with a sunset date.
+### Requirement: 模型弃用调度 — Model deprecation scheduling
+系统应暴露 `/api/models/{model_id}/deprecate` 端点，用于调度模型弃用并设置日落日期。
 
-#### Scenario: Schedule deprecation
-- **WHEN** POST `/api/models/gpt-4o/deprecate` with `{"sunset_at": "2026-08-01T00:00:00Z"}` is received
-- **THEN** the system SHALL set `deprecated_at=now` and `sunset_at` on the prod deployment
+#### Scenario: 调度弃用 — Schedule deprecation
+- **WHEN** 收到 POST `/api/models/gpt-4o/deprecate`，带 `{"sunset_at": "2026-08-01T00:00:00Z"}`
+- **THEN** 系统应在 prod 部署上设置 `deprecated_at=now` 和 `sunset_at`
 
-#### Scenario: Sunset notification at 30 days
-- **WHEN** the sunset date is 30 days away
-- **THEN** the system SHALL trigger an AlertService notification "Model gpt-4o sunsetting in 30 days"
+#### Scenario: 30 天时的日落通知 — Sunset notification at 30 days
+- **WHEN** 日落日期还有 30 天
+- **THEN** 系统应触发 AlertService 通知 "Model gpt-4o sunsetting in 30 days"
 
-#### Scenario: Automatic disable at sunset
-- **WHEN** the current time exceeds `sunset_at`
-- **THEN** the system SHALL set the deployment `is_enabled=False` and reject further invocations
+#### Scenario: 日落时自动禁用 — Automatic disable at sunset
+- **WHEN** 当前时间超过 `sunset_at`
+- **THEN** 系统应设置部署 `is_enabled=False` 并拒绝进一步的调用
 
-#### Scenario: Cancel deprecation
-- **WHEN** POST `/api/models/gpt-4o/deprecate/cancel` is received
-- **THEN** the system SHALL clear `deprecated_at` and `sunset_at`, restoring normal operation
+#### Scenario: 取消弃用 — Cancel deprecation
+- **WHEN** 收到 POST `/api/models/gpt-4o/deprecate/cancel`
+- **THEN** 系统应清除 `deprecated_at` 和 `sunset_at`，恢复正常操作
 
-### Requirement: Deployment listing API
-The system SHALL expose `/api/models/deployments` endpoint for listing all model deployments with their channel and approval status.
+### Requirement: 部署列表 API — Deployment listing API
+系统应暴露 `/api/models/deployments` 端点，用于列出所有模型部署及其通道和审批状态。
 
-#### Scenario: List all deployments
-- **WHEN** GET `/api/models/deployments` is received
-- **THEN** the system SHALL return all deployments with model_id, channel, approval_status, version, deprecated_at, sunset_at
+#### Scenario: 列出所有部署 — List all deployments
+- **WHEN** 收到 GET `/api/models/deployments`
+- **THEN** 系统应返回所有部署，包含 model_id、channel、approval_status、version、deprecated_at、sunset_at
 
-#### Scenario: Filter by channel
-- **WHEN** GET `/api/models/deployments?channel=prod` is received
-- **THEN** the system SHALL return only deployments in the prod channel
+#### Scenario: 按通道过滤 — Filter by channel
+- **WHEN** 收到 GET `/api/models/deployments?channel=prod`
+- **THEN** 系统应仅返回 prod 通道中的部署
 
-#### Scenario: Filter by approval status
-- **WHEN** GET `/api/models/deployments?approval_status=pending` is received
-- **THEN** the system SHALL return only pending deployments awaiting approval
+#### Scenario: 按审批状态过滤 — Filter by approval status
+- **WHEN** 收到 GET `/api/models/deployments?approval_status=pending`
+- **THEN** 系统应仅返回等待审批的待审批部署
 
-### Requirement: Model rollback
-The system SHALL expose `/api/models/{model_id}/rollback` endpoint to revert a model to a previous deployment version.
+### Requirement: 模型回滚 — Model rollback
+系统应暴露 `/api/models/{model_id}/rollback` 端点，用于将模型恢复到之前的部署版本。
 
-#### Scenario: Rollback to previous version
-- **WHEN** POST `/api/models/gpt-4o/rollback` with `{"to_version": "v1.0"}` is received
-- **THEN** the system SHALL create a new deployment pointing to the previous version and mark the current one as rolled_back
+#### Scenario: 回滚到之前版本 — Rollback to previous version
+- **WHEN** 收到 POST `/api/models/gpt-4o/rollback`，带 `{"to_version": "v1.0"}`
+- **THEN** 系统应创建指向之前版本的新部署，并将当前部署标记为 rolled_back
 
-#### Scenario: Rollback creates audit trail
-- **WHEN** a rollback is executed
-- **THEN** the system SHALL record who initiated the rollback, when, and the reason in the deployment history
+#### Scenario: 回滚创建审计跟踪 — Rollback creates audit trail
+- **WHEN** 执行回滚
+- **THEN** 系统应在部署历史中记录谁发起了回滚、时间和原因

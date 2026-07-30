@@ -1,84 +1,84 @@
-## Context
+## Context — 背景
 
-Hecate's engine layer has 9 template builder functions in `engine/templates.py` that generate `GraphConfig` instances for common patterns: chat, three-layer, fan-out, conditional, reflection, sequential, broadcast, negotiation, and debate. The `data/orchestration_templates/` directory contains 8 JSON template files loaded by the API. The canvas frontend (React Flow) already supports template customization mode, `dslToReactFlow()` for loading templates, and `reactFlowToDsl()` for saving.
+Hecate 的引擎层在 `engine/templates.py` 中有 9 个模板构建器函数，为常见模式生成 `GraphConfig` 实例：chat、three-layer、fan-out、conditional、reflection、sequential、broadcast、negotiation 和 debate。`data/orchestration_templates/` 目录包含 8 个由 API 加载的 JSON 模板文件。画布前端（React Flow）已支持模板自定义模式、用于加载模板的 `dslToReactFlow()` 和用于保存的 `reactFlowToDsl()`。
 
-**Current state**: No unified pattern vocabulary exists. Templates use free-form `category` strings ("pipeline", "broadcast", "delegation", "customer-service", "content"). There is no `PatternType` enum, no pattern inference, and no API to generate graphs from a pattern selection. Two patterns (negotiation, debate) have builder functions in templates.py but lack JSON template files.
+**当前状态**：不存在统一的模式词汇表。模板使用自由形式的 `category` 字符串（"pipeline"、"broadcast"、"delegation"、"customer-service"、"content"）。没有 `PatternType` 枚举，没有模式推断，也没有从模式选择生成图谱的 API。两种模式（negotiation、debate）在 templates.py 中有构建器函数，但缺少 JSON 模板文件。
 
-**Constraints**:
-- Engine layer has zero external deps (only `jsonschema` exception)
-- Canvas page uses `useState` (no Zustand store)
-- Graph DSL schema is versioned at `schemas/graph-dsl.schema.json`
-- API templates are loaded from static JSON files (not database)
+**约束**：
+- 引擎层零外部依赖（仅 `jsonschema` 例外）
+- 画布页面使用 `useState`（无 Zustand 存储）
+- Graph DSL 模式在 `schemas/graph-dsl.schema.json` 中版本化管理
+- API 模板从静态 JSON 文件加载（非数据库）
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Provide a canonical `CollaborationPattern` enum as the single source of truth for 6 pattern types
-- Enable backend pattern inference from any `GraphConfig`
-- Enable graph generation from pattern selection with configurable parameters
-- Expose pattern listing and generation via REST API
-- Provide a frontend pattern selector with card grid UI and configuration dialog
-- Fill the 2 missing JSON template gaps (negotiation, debate)
-- Enhance existing template API to include inferred `pattern_type`
+**目标：**
+- 提供规范的 `CollaborationPattern` 枚举，作为 6 种模式类型的单一事实来源
+- 启用从任何 `GraphConfig` 进行后端模式推断
+- 支持通过可配置参数从模式选择生成图谱
+- 通过 REST API 暴露模式列表和生成
+- 提供带卡片网格 UI 和配置对话框的前端模式选择器
+- 填补 2 个缺失的 JSON 模板（negotiation、debate）
+- 增强现有模板 API，包含推断的 `pattern_type`
 
-**Non-Goals:**
-- Persisting user-created patterns to database (future P3+)
-- Visual graph editor for modifying pattern templates before generation
-- Pattern composition (combining multiple patterns into one graph)
-- Custom pattern creation by users
-- Changes to the Pregel runtime, compiler, or core engine types (GraphConfig, Edge, etc.)
+**非目标：**
+- 将用户创建的模式持久化到数据库（未来的 P3+）
+- 用于在生成前修改模式模板的可视化图谱编辑器
+- 模式组合（将多个模式合并到一个图谱中）
+- 用户自定义模式创建
+- 对 Pregel 运行时、编译器或核心引擎类型（GraphConfig、Edge 等）的变更
 
-## Decisions
+## Decisions — 决策
 
-### D1: New `engine/patterns.py` module (not extending templates.py)
+### D1：新建 `engine/patterns.py` 模块（不扩展 templates.py）
 
-**Decision**: Create a new `engine/patterns.py` module for `CollaborationPattern` enum, `infer_pattern()`, and `build_graph_from_pattern()`.
+**决策**：创建一个新的 `engine/patterns.py` 模块，包含 `CollaborationPattern` 枚举、`infer_pattern()` 和 `build_graph_from_pattern()`。
 
-**Rationale**: `templates.py` is a collection of factory functions (9 functions, 964 lines). Pattern classification and inference are fundamentally different concerns — one produces graphs, the other analyzes them. Separating them keeps `templates.py` focused on graph construction and makes the pattern system independently testable. The builder function delegates to existing template functions where applicable.
+**理由**：`templates.py` 是一个工厂函数集合（9 个函数，964 行）。模式分类和推断是根本不同的关注点 — 一个生成图谱，另一个分析图谱。将它们分离有助于保持 `templates.py` 专注于图谱构建，并使模式系统可独立测试。构建器函数在适用时委托给现有的模板函数。
 
-**Alternatives considered**:
-- Adding to `types.py`: Rejected — `types.py` is pure data definitions (dataclasses/enums with no logic)
-- Adding to `templates.py`: Rejected — would mix graph construction with graph analysis; file is already 964 lines
+**备选方案**：
+- 添加到 `types.py`：已拒绝 — `types.py` 是纯数据定义（数据类/枚举，无逻辑）
+- 添加到 `templates.py`：已拒绝 — 会将图谱构建与图谱分析混合；文件已有 964 行
 
-### D2: Pattern builder delegates to existing template functions
+### D2：模式构建器委托给现有模板函数
 
-**Decision**: `build_graph_from_pattern()` SHALL delegate to the appropriate `build_*` function from `templates.py` (e.g., `build_sequential_pipeline()` for SEQUENTIAL). It acts as a facade that normalizes the parameter interface.
+**决策**：`build_graph_from_pattern()` 应委托给 `templates.py` 中相应的 `build_*` 函数（例如，SEQUENTIAL 使用 `build_sequential_pipeline()`）。它作为一个规范化参数接口的外观。
 
-**Rationale**: Avoids duplicating graph construction logic. The 9 template functions are well-tested and encode the correct graph topologies. The pattern builder translates the unified parameter schema to function-specific arguments.
+**理由**：避免重复图谱构建逻辑。9 个模板函数经过充分测试，编码了正确的图谱拓扑。模式构建器将统一参数模式转换为函数特定的参数。
 
-### D3: Pattern inference uses structural heuristics (not ML)
+### D3：模式推断使用结构启发式方法（非机器学习）
 
-**Decision**: `infer_pattern()` uses deterministic structural rules based on node types, edge triggers, and channel configurations.
+**决策**：`infer_pattern()` 使用基于节点类型、边触发器和通道配置的确定性结构规则。
 
-**Rationale**: The patterns have clear structural signatures — FAN_OUT/MERGE nodes → parallel, handoff triggers → handoff, shared TOPIC → broadcast, loop with condition → negotiation/debate. No ML or fuzzy matching needed.
+**理由**：模式具有清晰的结构特征 — FAN_OUT/MERGE 节点 → parallel、handoff 触发器 → handoff、共享 TOPIC → broadcast、带条件的循环 → negotiation/debate。无需机器学习或模糊匹配。
 
-### D4: Pattern selector as dialog (not inline panel)
+### D4：模式选择器作为对话框（非内联面板）
 
-**Decision**: The pattern selector opens as a modal dialog with a 3×2 card grid, followed by a second-step configuration dialog.
+**决策**：模式选择器以模态对话框形式打开，包含 3×2 卡片网格，随后是第二步配置对话框。
 
-**Rationale**: Matches the existing template picker interaction pattern (dialog overlay). A 2-step flow (select → configure) is cleaner than cramming everything into one panel. Consistent with Coze and Dify's template/pattern selectors.
+**理由**：与现有模板选择器交互模式（对话框覆盖）一致。两步流程（选择 → 配置）比将所有内容塞入一个面板更清晰。与 Coze 和 Dify 的模板/模式选择器一致。
 
-### D5: No Graph DSL schema changes
+### D5：无需 Graph DSL 模式变更
 
-**Decision**: Do NOT add a `pattern_type` field to the Graph DSL JSON Schema. Pattern type is inferred at runtime, not stored in the graph definition.
+**决策**：不要向 Graph DSL JSON Schema 添加 `pattern_type` 字段。模式类型在运行时推断，不存储在图谱定义中。
 
-**Rationale**: Keeping pattern inference separate from the DSL avoids schema versioning complexity and keeps graph definitions portable. A graph generated from a pattern is indistinguishable from a hand-built graph — both are valid Graph DSL.
+**理由**：保持模式推断与 DSL 分离可避免模式版本化复杂性，并保持图谱定义的可移植性。从模式生成的图谱与手工构建的图谱无法区分 — 两者都是有效的 Graph DSL。
 
-**Alternatives considered**:
-- Adding optional `pattern_type` to schema: Rejected — adds metadata that can become stale if the graph is edited; inference is more reliable
+**备选方案**：
+- 向模式添加可选的 `pattern_type`：已拒绝 — 添加的元数据在图谱被编辑时可能过时；推断更可靠
 
-### D6: New API file for pattern endpoints
+### D6：用于模式端点的新 API 文件
 
-**Decision**: Create `api/management/collaboration_patterns.py` for the pattern listing and generation endpoints, separate from `orchestration_templates.py`.
+**决策**：创建 `api/management/collaboration_patterns.py` 用于模式列表和生成端点，与 `orchestration_templates.py` 分开。
 
-**Rationale**: Templates are static JSON files; patterns are a dynamic generation system. Different concerns, different endpoints, different caching strategies. Templates may eventually move to database storage (P3+), while patterns will remain engine-layer logic.
+**理由**：模板是静态 JSON 文件；模式是动态生成系统。不同的关注点，不同的端点，不同的缓存策略。模板最终可能迁移到数据库存储（P3+），而模式将保持为引擎层逻辑。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-**[Pattern inference accuracy]** → Heuristic rules may misclassify edge-case graphs (e.g., a graph with FAN_OUT and handoff edges). **Mitigation**: `infer_pattern()` returns `None` for ambiguous graphs; the template API gracefully handles `null` pattern types.
+**[模式推断准确性]** → 启发式规则可能错误分类边缘情况图谱（例如，同时包含 FAN_OUT 和 handoff 边的图谱）。**缓解措施**：`infer_pattern()` 对模糊图谱返回 `None`；模板 API 优雅地处理 `null` 模式类型。
 
-**[Builder parameter explosion]** → 6 patterns with different parameters make the API surface complex. **Mitigation**: Each pattern has a well-defined JSON Schema for its parameters; the frontend dynamically renders fields based on the schema returned by `GET /api/collaboration-patterns`.
+**[构建器参数爆炸]** → 6 种具有不同参数的模式使 API 表面复杂化。**缓解措施**：每种模式都有定义良好的 JSON Schema 参数；前端根据 `GET /api/collaboration-patterns` 返回的模式动态渲染字段。
 
-**[Frontend dialog complexity]** → 6 different configuration forms could lead to code duplication. **Mitigation**: Use a dynamic form renderer driven by the pattern parameter schema from the API; only the "stages/workers list" UI needs custom components.
+**[前端对话框复杂度]** → 6 种不同的配置表单可能导致代码重复。**缓解措施**：使用由 API 的模式参数模式驱动的动态表单渲染器；只有"阶段/工作者列表"UI 需要自定义组件。
 
-**[Template catalog growing beyond 8]** → Adding negotiation.json and debate.json brings catalog to 10 templates. **Mitigation**: Templates are lightweight JSON files; no performance concern at this scale.
+**[模板目录增长超过 8]** → 添加 negotiation.json 和 debate.json 将目录增加到 10 个模板。**缓解措施**：模板是轻量级 JSON 文件；此规模下无性能问题。

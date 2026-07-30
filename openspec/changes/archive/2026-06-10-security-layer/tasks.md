@@ -1,120 +1,120 @@
-## 1. Engine Foundation — GuardrailAction.SANITIZE
+## 1. 引擎基础——GuardrailAction.SANITIZE
 
-- [x] 1.1 Add `SANITIZE = "sanitize"` to `GuardrailAction` enum in `src/hecate/engine/guardrail.py`
-- [x] 1.2 Add `modified_data: dict | None = None` field to `GuardrailResult` dataclass
-- [x] 1.3 Update module docstring to remove "Deferred to P3: modify action" note
-- [x] 1.4 Write tests: `GuardrailAction` has 3 members, SANITIZE string value, `GuardrailResult` with modified_data
+- [x] 1.1 在 `src/hecate/engine/guardrail.py` 的 `GuardrailAction` 枚举中添加 `SANITIZE = "sanitize"`
+- [x] 1.2 向 `GuardrailResult` 数据类添加 `modified_data: dict | None = None` 字段
+- [x] 1.3 更新模块文档字符串，移除"推迟到 P3：修改动作"注释
+- [x] 1.4 编写测试：`GuardrailAction` 有 3 个成员、SANITIZE 字符串值、带 modified_data 的 `GuardrailResult`
 
-## 2. Worker SANITIZE Handling
+## 2. Worker SANITIZE 处理
 
-- [x] 2.1 Update `LLMWorker.execute()` to handle SANITIZE from PreLLMHook: use `modified_data["messages"]` for LLM call
-- [x] 2.2 Update `LLMWorker.execute()` to handle SANITIZE from PostLLMHook: use `modified_data["response"]` in channel updates
-- [x] 2.3 Update `LLMWorker.execute_stream()` to handle SANITIZE from PreLLMHook (same as execute)
-- [x] 2.4 Update `LLMWorker.execute_stream()` to handle SANITIZE from PostLLMHook in streaming path
-- [x] 2.5 Update `ToolWorker._execute_single_tool()` to handle SANITIZE from PostToolHook: use `modified_data["result"]`
-- [x] 2.6 Add warning log when SANITIZE returned with `modified_data=None` (treat as ALLOW)
-- [x] 2.7 Write tests: LLMWorker SANITIZE from pre-hook, SANITIZE from post-hook, ToolWorker SANITIZE, SANITIZE with None data
+- [x] 2.1 更新 `LLMWorker.execute()` 处理来自 PreLLMHook 的 SANITIZE：使用 `modified_data["messages"]` 进行 LLM 调用
+- [x] 2.2 更新 `LLMWorker.execute()` 处理来自 PostLLMHook 的 SANITIZE：在通道更新中使用 `modified_data["response"]`
+- [x] 2.3 更新 `LLMWorker.execute_stream()` 处理来自 PreLLMHook 的 SANITIZE（与 execute 相同）
+- [x] 2.4 更新 `LLMWorker.execute_stream()` 处理流式路径中来自 PostLLMHook 的 SANITIZE
+- [x] 2.5 更新 `ToolWorker._execute_single_tool()` 处理来自 PostToolHook 的 SANITIZE：使用 `modified_data["result"]`
+- [x] 2.6 当 SANITIZE 返回但 `modified_data=None` 时添加警告日志（视为 ALLOW）
+- [x] 2.7 编写测试：来自前钩子的 LLMWorker SANITIZE、来自后钩子的 SANITIZE、ToolWorker SANITIZE、带 None 数据的 SANITIZE
 
-## 3. AgentModel guardrail_config Column
+## 3. AgentModel guardrail_config 列
 
-- [x] 3.1 Add `guardrail_config` JSONB nullable column to `AgentModel` in `src/hecate/models/agent.py`
-- [x] 3.2 Add `guardrail_config` field to `AgentCreateSchema` with default None
-- [x] 3.3 Add `guardrail_config` field to `AgentUpdateSchema` with default None
-- [x] 3.4 Add `guardrail_config` field to `AgentReadSchema` with default None
-- [x] 3.5 Create Alembic migration: add `guardrail_config` JSONB column to `agents` table (nullable, default NULL)
-- [x] 3.6 Write tests: AgentModel CRUD with guardrail_config, default None, JSON round-trip
+- [x] 3.1 在 `src/hecate/models/agent.py` 的 `AgentModel` 中添加可空 `guardrail_config` JSONB 列
+- [x] 3.2 向 `AgentCreateSchema` 添加 `guardrail_config` 字段，默认 None
+- [x] 3.3 向 `AgentUpdateSchema` 添加 `guardrail_config` 字段，默认 None
+- [x] 3.4 向 `AgentReadSchema` 添加 `guardrail_config` 字段，默认 None
+- [x] 3.5 创建 Alembic 迁移：向 `agents` 表添加 `guardrail_config` JSONB 列（可空，默认 NULL）
+- [x] 3.6 编写测试：带 guardrail_config 的 AgentModel CRUD、默认 None、JSON 往返
 
-## 4. Delete NeMo Guardrails Stub
+## 4. 删除 NeMo Guardrails 骨架
 
-- [x] 4.1 Delete `src/hecate/services/security/nemo_guardrails.py`
-- [x] 4.2 Remove `nemo_config` import from `src/hecate/services/security/middleware.py`
-- [x] 4.3 Refactor `SecurityMiddleware.check_input()` to remove NeMo call, use LLMGuardScanner only
-- [x] 4.4 Remove `nemoguardrails` from `pyproject.toml` `[security]` extras (will re-add in 9.1a)
-- [x] 4.5 Update `services/security/__init__.py` if it exports `nemo_config`
-- [x] 4.6 Write tests: SecurityMiddleware without NeMo, middleware check_input/output still works
+- [x] 4.1 删除 `src/hecate/services/security/nemo_guardrails.py`
+- [x] 4.2 从 `src/hecate/services/security/middleware.py` 移除 `nemo_config` 导入
+- [x] 4.3 重构 `SecurityMiddleware.check_input()` 以移除 NeMo 调用，仅使用 LLMGuardScanner
+- [x] 4.4 从 `pyproject.toml` 的 `[security]` extras 中移除 `nemoguardrails`（将在 9.1a 重新添加）
+- [x] 4.5 更新 `services/security/__init__.py`（如果它导出了 `nemo_config`）
+- [x] 4.6 编写测试：不带 NeMo 的 SecurityMiddleware，中间件 check_input/output 仍正常工作
 
-## 5. InputSecurityHook (Feature 9.1)
+## 5. InputSecurityHook（特性 9.1）
 
-- [x] 5.1 Create `src/hecate/services/security/hooks/` package with `__init__.py`
-- [x] 5.2 Implement `InputSecurityHook` class (PreLLMHook) in `hooks/input_security.py`
-- [x] 5.3 Implement PII anonymization in messages using `PIIAnonymizer` with configurable entity types
-- [x] 5.4 Implement prompt injection detection using `LLMGuardScanner`
-- [x] 5.5 Implement secrets detection using `LLMGuardScanner`
-- [x] 5.6 Implement configurable behavior: `block_on_injection` flag (True=BLOCK, False=SANITIZE with warning)
-- [x] 5.7 Store PII mappings in execution context `_pii_mappings` for downstream deanonymization
-- [x] 5.8 Handle `enabled=False` and `guardrail_config=None` (return ALLOW immediately)
-- [x] 5.9 Write tests: clean messages, PII detection, injection detection, secrets detection, disabled config, entity type filtering
+- [x] 5.1 创建 `src/hecate/services/security/hooks/` 包，含 `__init__.py`
+- [x] 5.2 在 `hooks/input_security.py` 中实现 `InputSecurityHook` 类（PreLLMHook）
+- [x] 5.3 使用 `PIIAnonymizer` 在消息中实现 PII 匿名化，带可配置的实体类型
+- [x] 5.4 使用 `LLMGuardScanner` 实现提示注入检测
+- [x] 5.5 使用 `LLMGuardScanner` 实现密钥检测
+- [x] 5.6 实现可配置行为：`block_on_injection` 标志（True=BLOCK，False=带警告的 SANITIZE）
+- [x] 5.7 在执行上下文 `_pii_mappings` 中存储 PII 映射以供下游去匿名化
+- [x] 5.8 处理 `enabled=False` 和 `guardrail_config=None`（立即返回 ALLOW）
+- [x] 5.9 编写测试：干净消息、PII 检测、注入检测、密钥检测、禁用配置、实体类型过滤
 
-## 6. OutputSecurityHook (Feature 9.2)
+## 6. OutputSecurityHook（特性 9.2）
 
-- [x] 6.1 Implement `OutputSecurityHook` class (PostLLMHook) in `hooks/output_security.py`
-- [x] 6.2 Implement output toxicity detection using `LLMGuardScanner`
-- [x] 6.3 Implement PII deanonymization in non-streaming response using session `_pii_mappings`
-- [x] 6.4 Handle `deanonymize=False` config (pass placeholders through)
-- [x] 6.5 Handle `enabled=False` and `guardrail_config=None` (return ALLOW immediately)
-- [x] 6.6 Write tests: clean response, toxicity detection, deanonymization, disabled config, missing mappings
+- [x] 6.1 在 `hooks/output_security.py` 中实现 `OutputSecurityHook` 类（PostLLMHook）
+- [x] 6.2 使用 `LLMGuardScanner` 实现输出毒性检测
+- [x] 6.3 使用会话 `_pii_mappings` 在非流式响应中实现 PII 去匿名化
+- [x] 6.4 处理 `deanonymize=False` 配置（原样传递占位符）
+- [x] 6.5 处理 `enabled=False` 和 `guardrail_config=None`（立即返回 ALLOW）
+- [x] 6.6 编写测试：干净响应、毒性检测、去匿名化、禁用配置、缺少映射
 
-## 7. StreamDeanonymizer (Feature 9.2 Streaming)
+## 7. StreamDeanonymizer（特性 9.2 流式）
 
-- [x] 7.1 Implement `StreamDeanonymizer` class in `hooks/stream_deanonymizer.py`
-- [x] 7.2 Implement token buffering: detect `[` start, accumulate until `]` end
-- [x] 7.3 Implement placeholder lookup and deanonymization for complete placeholders
-- [x] 7.4 Implement immediate pass-through for non-PII tokens
-- [x] 7.5 Implement `flush()` method for stream end: deanonymize complete placeholders, emit partial as-is
-- [x] 7.6 Implement error handling: flush buffer on exception, propagate error
-- [x] 7.7 Write tests: non-PII tokens, split placeholder, multiple placeholders, flush complete, flush partial, error during streaming
+- [x] 7.1 在 `hooks/stream_deanonymizer.py` 中实现 `StreamDeanonymizer` 类
+- [x] 7.2 实现 token 缓冲：检测 `[` 开始，累积直到 `]` 结束
+- [x] 7.3 对完整占位符实现占位符查找和去匿名化
+- [x] 7.4 对非 PII token 实现立即直通
+- [x] 7.5 实现 `flush()` 方法用于流结束：去匿名化完整占位符，原样发出部分
+- [x] 7.6 实现错误处理：异常时刷新缓冲区，传播错误
+- [x] 7.7 编写测试：非 PII token、分割占位符、多个占位符、完全刷新、部分刷新、流式期间错误
 
-## 8. ToolResultSecurityHook (Feature 9.5)
+## 8. ToolResultSecurityHook（特性 9.5）
 
-- [x] 8.1 Implement `ToolResultSecurityHook` class (PostToolHook) in `hooks/tool_result_security.py`
-- [x] 8.2 Implement PII detection and masking in tool result strings using `PIIAnonymizer`
-- [x] 8.3 Handle `mask_tool_results=False` config (pass through)
-- [x] 8.4 Handle `data_security` not configured (return ALLOW)
-- [x] 8.5 Write tests: clean result, PII in result, masking disabled, security disabled
+- [x] 8.1 在 `hooks/tool_result_security.py` 中实现 `ToolResultSecurityHook` 类（PostToolHook）
+- [x] 8.2 使用 `PIIAnonymizer` 在工具结果字符串中实现 PII 检测和掩码
+- [x] 8.3 处理 `mask_tool_results=False` 配置（直通）
+- [x] 8.4 处理未配置 `data_security`（返回 ALLOW）
+- [x] 8.5 编写测试：干净结果、结果中的 PII、掩码禁用、安全禁用
 
-## 9. Data Security — Storage and Encryption (Feature 9.5)
+## 9. 数据安全——存储和加密（特性 9.5）
 
-- [x] 9.1 Create `PIIMappingModel` ORM model in `src/hecate/models/pii_mapping.py` with fields: id, session_id, placeholder, encrypted_value, pii_type, created_at
-- [x] 9.2 Add unique constraint on (session_id, placeholder)
-- [x] 9.3 Add `PIIMappingModel` to `Base.metadata` via import in models `__init__.py`
-- [x] 9.4 Create Alembic migration: create `pii_mappings` table
-- [x] 9.5 Implement Fernet encryption/decryption helper in `services/security/encryption.py`
-- [x] 9.6 Implement `mask_and_encrypt` mode: encrypt original PII, store in `PIIMappingModel`
-- [x] 9.7 Implement `ConfigurationError` when `mask_and_encrypt` requested without `FERNET_KEY`
-- [x] 9.8 Implement `mask_only` mode: replace PII with irreversible placeholders, no storage
-- [x] 9.9 Write tests: PIIMappingModel CRUD, Fernet encrypt/decrypt, both storage modes, missing Fernet key
+- [x] 9.1 在 `src/hecate/models/pii_mapping.py` 中创建 `PIIMappingModel` ORM 模型，字段包括：id、session_id、placeholder、encrypted_value、pii_type、created_at
+- [x] 9.2 在 (session_id, placeholder) 上添加唯一约束
+- [x] 9.3 通过 models `__init__.py` 中的导入将 `PIIMappingModel` 添加到 `Base.metadata`
+- [x] 9.4 创建 Alembic 迁移：创建 `pii_mappings` 表
+- [x] 9.5 在 `services/security/encryption.py` 中实现 Fernet 加密/解密辅助函数
+- [x] 9.6 实现 `mask_and_encrypt` 模式：加密原始 PII，存储在 `PIIMappingModel` 中
+- [x] 9.7 当请求 `mask_and_encrypt` 但没有 `FERNET_KEY` 时实现 `ConfigurationError`
+- [x] 9.8 实现 `mask_only` 模式：将 PII 替换为不可逆占位符，不存储
+- [x] 9.9 编写测试：PIIMappingModel CRUD、Fernet 加密/解密、两种存储模式、缺少 Fernet 密钥
 
-## 10. Security Hook Factory
+## 10. 安全钩子工厂
 
-- [x] 10.1 Implement `create_security_hooks(guardrail_config: dict | None) -> SecurityHookSet` factory function
-- [x] 10.2 Define `SecurityHookSet` named tuple: `(pre_llm_hook, post_llm_hook, pre_tool_hook, post_tool_hook)`
-- [x] 10.3 Factory returns NoOp hooks when config is None or all sections disabled
-- [x] 10.4 Factory constructs InputSecurityHook with `input_security` config section
-- [x] 10.5 Factory constructs OutputSecurityHook with `output_security` config section
-- [x] 10.6 Factory constructs ToolResultSecurityHook with `data_security` config section
-- [x] 10.7 Export `create_security_hooks` and `SecurityHookSet` from `hooks/__init__.py`
-- [x] 10.8 Write tests: factory with None config, factory with disabled sections, factory with full config
+- [x] 10.1 实现 `create_security_hooks(guardrail_config: dict | None) -> SecurityHookSet` 工厂函数
+- [x] 10.2 定义 `SecurityHookSet` 命名元组：`(pre_llm_hook, post_llm_hook, pre_tool_hook, post_tool_hook)`
+- [x] 10.3 当配置为 None 或所有部分禁用时，工厂返回 NoOp 钩子
+- [x] 10.4 使用 `input_security` 配置部分构造 InputSecurityHook
+- [x] 10.5 使用 `output_security` 配置部分构造 OutputSecurityHook
+- [x] 10.6 使用 `data_security` 配置部分构造 ToolResultSecurityHook
+- [x] 10.7 从 `hooks/__init__.py` 导出 `create_security_hooks` 和 `SecurityHookSet`
+- [x] 10.8 编写测试：带 None 配置的工厂、带禁用部分的工厂、带完整配置的工厂
 
-## 11. LLMGuardScanner Enhancement
+## 11. LLMGuardScanner 增强
 
-- [x] 11.1 Add `sanitized_text: str | None = None` field to `ScanResult` dataclass
-- [x] 11.2 Update `scan_prompt()` to capture and return sanitized text from Anonymize scanner
-- [x] 11.3 Update `scan_output()` to capture and return sanitized text from output scanners
-- [x] 11.4 Update mock scanner to return sanitized_text
-- [x] 11.5 Write tests: ScanResult with sanitized_text, scan_prompt returns anonymized text
+- [x] 11.1 向 `ScanResult` 数据类添加 `sanitized_text: str | None = None` 字段
+- [x] 11.2 更新 `scan_prompt()` 以捕获并返回来自 Anonymize 扫描器的清洗后文本
+- [x] 11.3 更新 `scan_output()` 以捕获并返回来自输出扫描器的清洗后文本
+- [x] 11.4 更新 mock 扫描器以返回 sanitized_text
+- [x] 11.5 编写测试：带 sanitized_text 的 ScanResult、scan_prompt 返回匿名化文本
 
-## 12. PII Audit Events
+## 12. PII 审计事件
 
-- [x] 12.1 Add `PII_DETECTED` event type to `EventType` enum in `engine/eventstore.py`
-- [x] 12.2 Implement audit logging in InputSecurityHook when `audit_pii_events` is True
-- [x] 12.3 Implement audit logging in OutputSecurityHook when `audit_pii_events` is True
-- [x] 12.4 Implement audit logging in ToolResultSecurityHook when `audit_pii_events` is True
-- [x] 12.5 Ensure audit events contain pii_type and placeholder count but NOT original PII values
-- [x] 12.6 Write tests: audit events emitted, audit events do not contain original PII, audit disabled
+- [x] 12.1 在 `engine/eventstore.py` 的 `EventType` 枚举中添加 `PII_DETECTED` 事件类型
+- [x] 12.2 在 `audit_pii_events` 为 True 时，在 InputSecurityHook 中实现审计日志记录
+- [x] 12.3 在 `audit_pii_events` 为 True 时，在 OutputSecurityHook 中实现审计日志记录
+- [x] 12.4 在 `audit_pii_events` 为 True 时，在 ToolResultSecurityHook 中实现审计日志记录
+- [x] 12.5 确保审计事件包含 pii_type 和占位符计数，但不包含原始 PII 值
+- [x] 12.6 编写测试：审计事件已发出、审计事件不包含原始 PII、审计禁用
 
-## 13. Feature Catalog & Roadmap Update
+## 13. 功能目录和路线图更新
 
-- [x] 13.1 Update `docs/features/feature-catalog.md`: mark features 9.1, 9.2 with ✅ after verification
-- [x] 13.2 Update `docs/features/feature-catalog.md`: move `GuardrailAction.modify` (SANITIZE) from P3 to P2 status
-- [x] 13.3 Update `docs/features/roadmap.md`: mark security milestone items as complete
-- [x] 13.4 Update statistics counts in feature catalog
+- [x] 13.1 更新 `docs/features/feature-catalog.md`：验证后将特性 9.1、9.2 标记为 ✅
+- [x] 13.2 更新 `docs/features/feature-catalog.md`：将 `GuardrailAction.modify`（SANITIZE）从 P3 移至 P2 状态
+- [x] 13.3 更新 `docs/features/roadmap.md`：将安全里程碑项标记为完成
+- [x] 13.4 更新功能目录中的统计计数

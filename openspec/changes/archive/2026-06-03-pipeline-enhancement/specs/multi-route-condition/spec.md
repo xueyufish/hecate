@@ -1,35 +1,35 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Multi-key conditional routing
-The CONDITION node SHALL support routing to more than two branches by allowing the edge target dict to contain arbitrary string keys beyond "true" and "false". The `_route` value written by the CONDITION node's expression evaluation SHALL be used as the lookup key in the edge target dict.
+### Requirement: 多键条件路由 — 多键条件路由
+CONDITION 节点 SHALL 支持路由到超过两个分支，允许边目标字典包含超出 "true" 和 "false" 的任意字符串键。由 CONDITION 节点表达式求值写入的 `_route` 值 SHALL 用作边目标字典中的查找键。
 
-#### Scenario: Multi-key routing with three branches
-- **WHEN** a CONDITION node evaluates expression and writes `_route: "high"`
-- **AND** the outgoing edge target is `{"high": "priority_handler", "medium": "standard_handler", "low": "batch_handler"}`
-- **THEN** execution SHALL route to "priority_handler"
+#### Scenario: 三个分支的多键路由
+- **WHEN** CONDITION 节点求值表达式并写入 `_route: "high"`
+- **AND** 出向边目标为 `{"high": "priority_handler", "medium": "standard_handler", "low": "batch_handler"}`
+- **THEN** 执行 SHALL 路由到 "priority_handler"
 
-#### Scenario: Fallback to default key
-- **WHEN** a CONDITION node evaluates expression and writes `_route: "unknown"`
-- **AND** the edge target dict has a "default" key
-- **THEN** execution SHALL route to the node specified by the "default" key
+#### Scenario: 回退到默认键
+- **WHEN** CONDITION 节点求值表达式并写入 `_route: "unknown"`
+- **AND** 边目标字典有 "default" 键
+- **THEN** 执行 SHALL 路由到 "default" 键指定的节点
 
-#### Scenario: Backward compatibility with true/false routing
-- **WHEN** a CONDITION node evaluates expression and writes `_route: "true"`
-- **AND** the edge target is `{"true": "node_a", "false": "node_b"}`
-- **THEN** execution SHALL route to "node_a" — identical to current behavior
+#### Scenario: 与 true/false 路由向后兼容
+- **WHEN** CONDITION 节点求值表达式并写入 `_route: "true"`
+- **AND** 边目标为 `{"true": "node_a", "false": "node_b"}`
+- **THEN** 执行 SHALL 路由到 "node_a"——与当前行为相同
 
-#### Scenario: Legacy false fallback preserved
-- **WHEN** a CONDITION node evaluates expression and writes `_route: "unknown"`
-- **AND** the edge target dict has no "default" key but has a "false" key
-- **THEN** execution SHALL fall back to the "false" key for backward compatibility
+#### Scenario: 保留旧版 false 回退
+- **WHEN** CONDITION 节点求值表达式并写入 `_route: "unknown"`
+- **AND** 边目标字典没有 "default" 键但有 "false" 键
+- **THEN** 执行 SHALL 回退到 "false" 键以保持向后兼容
 
-### Requirement: Condition expression evaluation produces route key
-The CONDITION node's `expression` config field SHALL support comparison expressions that produce a string route key, not just a boolean. Supported expressions SHALL include: equality (`field == value`), greater-than (`field > threshold`), less-than (`field < threshold`), and direct field reference.
+### Requirement: 条件表达式求值产生路由键 — 条件表达式求值产生路由键
+CONDITION 节点的 `expression` 配置字段 SHALL 支持比较表达式，产生字符串路由键而不仅仅是布尔值。支持的表达式 SHALL 包括：相等（`field == value`）、大于（`field > threshold`）、小于（`field < threshold`）和直接字段引用。
 
-#### Scenario: Equality expression produces route key
-- **WHEN** a CONDITION node has expression `category` and channel value for "category" is "finance"
-- **THEN** the `_route` value SHALL be "finance"
+#### Scenario: 相等表达式产生路由键
+- **WHEN** CONDITION 节点的表达式为 `category` 且 "category" 的通道值为 "finance"
+- **THEN** `_route` 值 SHALL 为 "finance"
 
-#### Scenario: Threshold expression produces route key
-- **WHEN** a CONDITION node has expression `score > 80 ? "high" : "low"` and channel value for "score" is 90
-- **THEN** the `_route` value SHALL be "high"
+#### Scenario: 阈值表达式产生路由键
+- **WHEN** CONDITION 节点的表达式为 `score > 80 ? "high" : "low"` 且 "score" 的通道值为 90
+- **THEN** `_route` 值 SHALL 为 "high"

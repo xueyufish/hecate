@@ -1,83 +1,66 @@
-## Context
+## Context — 背景
 
-Hecate's engine layer currently persists execution state via `CheckpointStore` — a snapshot-based model that captures the full channel state, superstep counter, and pending writes at discrete points. This design works for pause/resume (interrupt) but cannot support:
+Hecate 的引擎层当前通过 `CheckpointStore` 持久化执行状态——这是一种基于快照的模型，在离散的时间点捕获完整的 channel 状态、超级步计数器和待处理写入。这种设计适用于暂停/恢复（中断），但无法支持：
 
-- **Fine-grained audit trails**: Checkpoints are opaque blobs; you cannot see *which* tool call produced *which* intermediate result.
-- **Incremental state reconstruction**: Loading a checkpoint requires the full snapshot; partial replay from a known point is impossible.
-- **Event-driven debugging**: No way to subscribe to state changes as they happen.
-- **Replay-based testing**: Cannot replay an execution from event N to verify behavior.
+- **细粒度审计追踪**: Checkpoint 是不透明的 blob；你无法看到*哪个*工具调用产生了*哪个*中间结果。
+- **增量状态重建**: 加载 checkpoint 需要完整的快照；无法从已知点进行部分重放。
+- **事件驱动调试**: 无法订阅状态变更的发生。
+- **基于重放的测试**: 无法从事件 N 重放执行以验证行为。
 
-The engine's architecture is port-and-adapter: `EnginePort` (ABC) decouples the engine from services. `CheckpointStore` (ABC) decouples persistence. Adding `EventStore` follows this exact pattern.
+引擎的架构是端口和适配器模式：`EnginePort`（ABC）将引擎与服务解耦。`CheckpointStore`（ABC）将持久化解耦。添加 `EventStore` 遵循完全相同的模式。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Define an `EventStore` ABC with append, query, and replay methods
-- Define an `Event` dataclass that captures granular execution state (node start/end, tool call/result, channel write, LLM request/response)
-- Provide an `InMemoryEventStore` for testing
-- Reserve the interface on `EnginePort` as an optional property
-- Keep the engine zero-dependency (no external libraries)
+**目标：**
+- 定义包含追加、查询和重放方法的 `EventStore` ABC
+- 定义捕获细粒度执行状态的 `Event` 数据类（节点开始/结束、工具调用/结果、channel 写入、LLM 请求/响应）
+- 提供用于测试的 `InMemoryEventStore`
+- 在 `EnginePort` 上预留接口作为可选属性
+- 保持引擎零依赖（无外部库）
 
-**Non-Goals:**
-- Postgres-backed EventStore implementation (P3)
-- Integration with PregelRuntime to emit events automatically (P3, when GuardrailHook is implemented)
-- Event schema versioning or migration
-- Event compaction or retention policies
-- Distributed event streaming (Kafka/NATS)
+**非目标：**
+- Postgres 后端的 EventStore 实现（P3）
+- 与 PregelRuntime 集成以自动发出事件（P3，当 GuardrailHook 实现时）
+- 事件 schema 版本控制或迁移
+- 事件压缩或保留策略
+- 分布式事件流（Kafka/NATS）
 
-## Decisions
+## Decisions — 设计决策
 
-### D1: EventStore is a standalone ABC, not a CheckpointStore extension
+### D1：EventStore 是独立的 ABC，不是 CheckpointStore 的扩展
 
-**Choice**: Separate `EventStore` ABC in its own module (`engine/eventstore.py`), parallel to `engine/checkpoint.py`.
+**选择**：创建 `engine/eventstore.py`，与 `engine/checkpoint.py` 并列。
 
-**Alternatives considered**:
-- Extending `CheckpointStore` with event methods → rejected: CheckpointStore is snapshot-oriented; events are a fundamentally different access pattern (append-only vs overwrite)
-- Adding event methods to `EnginePort` → rejected: EventStore is an engine-internal concern, not a service boundary
+**理由**：CheckpointStore（快照）和 EventStore（流）有本质上不同的 API 和存储需求。将它们分开可保持各自的接口精炼且无耦合。
 
-**Rationale**: Mirrors the CheckpointStore pattern exactly. Clear separation of concerns. Each can evolve independently.
+### D2：Event 数据类包含元数据，而非泛型 blob
 
-### D2: Event is a frozen dataclass with typed fields
+**选择**：冻结的 Event 数据类，包含具体字段（`session_id`、`superstep`、`event_type`、`node_id`、`timestamp`、`payload`、`version`），加上用于扩展的通用 `payload: dict`。
 
-**Choice**: Use `@dataclass(frozen=True)` with explicit typed fields: `event_type`, `session_id`, `superstep`, `node_id`, `timestamp`, `payload`.
+**理由**：类型安全字段支持查询和过滤而不解析。`payload` 字典允许 EventType 特定的数据而无需每类型子类化。
 
-**Alternatives considered**:
-- Dict-based events → rejected: no type safety, easy to introduce typos
-- Pydantic model → rejected: adds dependency in engine layer (engine must be zero-dep)
+### D3：版本号用于增量查询和重放
 
-**Rationale**: Frozen dataclass is immutable, hashable, type-safe, and requires no external dependencies. Matches engine layer constraints.
+**选择**：每个事件在每个会话中获得一个单调递增的 `version`（从 1 开始）。`get_events(session_id, from_version=0)` 和 `replay(session_id, from_version=0)` 使用此版本号进行增量查询。
 
-### D3: Event types as string enum, not class hierarchy
+**理由**：版本号允许调用者只请求它们尚未看到的事件（即仅增量）。这对于长期运行的会话和重放场景至关重要。
 
-**Choice**: `EventType` string enum (`NODE_START`, `NODE_END`, `TOOL_CALL`, `TOOL_RESULT`, `CHANNEL_WRITE`, `LLM_REQUEST`, `LLM_RESPONSE`, `INTERRUPT`, `RESUME`, `CUSTOM`).
+### D4：`replay` 是异步生成器
 
-**Alternatives considered**:
-- Event subclass per type → rejected: over-engineering for an interface reservation
-- Free-form strings → rejected: no discoverability
+**选择**：`replay(session_id, from_version=0) -> AsyncGenerator[Event, None]`
 
-**Rationale**: Enum is explicit and extensible (CUSTOM for user events). Easy to serialize. No class hierarchy overhead.
+**理由**：匹配引擎的异步特性。生成器避免将整个事件流加载到内存中——对于具有数千个事件的长时间会话很重要。
 
-### D4: EventStore is an optional EnginePort property, not a required parameter
+### D5：EnginePort 上的可选属性（非方法）
 
-**Choice**: Add `event_store` as an optional property on `EnginePort` with a default of `None`. The engine checks `if port.event_store is not None` before appending.
+**选择**：`event_store: EventStore | None = None` 作为属性，默认为 None。
 
-**Rationale**: P2 is interface reservation only. No production code should emit events yet. Making it optional ensures zero disruption to existing flows.
+**理由**：与预期的 P3 集成一致：PregelRuntime 将检查 `if port.event_store` 来决定是否发出事件。属性模式比方法更简单（无参数，预期为 None）。
 
-### D5: Replay returns an AsyncGenerator, not a list
+## Risks / Trade-offs — 风险与权衡
 
-**Choice**: `async def replay(session_id, from_version) -> AsyncGenerator[Event, None]`
-
-**Rationale**: Large sessions may have thousands of events. AsyncGenerator avoids loading all into memory. Consistent with the engine's async-first design.
-
-## Risks / Trade-offs
-
-| Risk | Mitigation |
-|------|-----------|
-| Event schema may need to change in P3 when GuardrailHook emits events | P2 only defines the interface; InMemoryEventStore is the only implementation and can be freely modified |
-| `EventType` enum may be insufficient for future event types | `CUSTOM` type with arbitrary `payload` dict covers unknown cases |
-| Optional property on EnginePort adds branching logic | Single `if event_store` check is negligible; can be removed when EventStore becomes required in P3 |
-| InMemoryEventStore grows unbounded in long-running tests | Document that it's for testing only; production PostgresEventStore (P3) will have retention |
-
-## Open Questions
-
-None — this is a well-bounded interface reservation with clear precedent (CheckpointStore).
+| 风险 | 缓解措施 |
+|------|---------|
+| 事件数据类字段集可能在 P3 中被证明不完整 | payload dict 提供扩展；添加新字段不是破坏性变更 |
+| InMemoryEventStore 未针对生产性能调优 | 设计用于测试；P3 PostgresEventStore 将添加索引和批量写入 |
+| AsyncGenerator 在非异步上下文中难以测试 | InMemoryEventStore 的 get_events（列表）提供同步替代方案 |

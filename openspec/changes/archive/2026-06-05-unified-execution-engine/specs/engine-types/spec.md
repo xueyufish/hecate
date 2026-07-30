@@ -1,28 +1,28 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: NodeType enum defines 6 execution behaviors
-The `NodeType` enum SHALL define: CONVERSATION, TOOL_CALL, CONDITION, AGENT, KNOWLEDGE_RETRIEVAL, VARIABLE_SET, SUGGESTION, FAN_OUT, MERGE.
+### Requirement: NodeType 枚举定义了 6 种执行行为 — NodeType enum defines 6 execution behaviors
+`NodeType` 枚举应定义：CONVERSATION、TOOL_CALL、CONDITION、AGENT、KNOWLEDGE_RETRIEVAL、VARIABLE_SET、SUGGESTION、FAN_OUT、MERGE。
 
-#### Scenario: Conversation node
-- **WHEN** a node has type CONVERSATION
-- **THEN** the worker SHALL invoke an LLM with context assembly, memory, and provider shaping
+#### Scenario：会话节点 — Conversation node
+- **当** 节点的类型为 CONVERSATION
+- **则** Worker 应调用 LLM，包含上下文组装、记忆和 provider 塑造
 
-#### Scenario: Condition node
-- **WHEN** a node has type CONDITION
-- **THEN** the worker SHALL evaluate an expression against channel state to determine routing
+#### Scenario：条件节点 — Condition node
+- **当** 节点的类型为 CONDITION
+- **则** Worker 应针对通道状态评估表达式以确定路由
 
-#### Scenario: Agent node
-- **WHEN** a node has type AGENT
-- **THEN** the worker SHALL delegate execution to a sub-graph representing another agent
+#### Scenario：Agent 节点 — Agent node
+- **当** 节点的类型为 AGENT
+- **则** Worker 应将执行委派给代表另一个 agent 的子图
 
-#### Scenario: Suggestion node
-- **WHEN** a node has type SUGGESTION
-- **THEN** the worker SHALL generate opening remarks or follow-up suggestions
+#### Scenario：建议节点 — Suggestion node
+- **当** 节点的类型为 SUGGESTION
+- **则** Worker 应生成开场白或跟进建议
 
-#### Scenario: Fan-out node
-- **WHEN** a node has type FAN_OUT
-- **THEN** the runtime SHALL dispatch all branch nodes concurrently without invoking a worker on the FAN_OUT node itself
+#### Scenario：扇出节点 — Fan-out node
+- **当** 节点的类型为 FAN_OUT
+- **则** 运行时应在不调用 FAN_OUT 节点本身的 Worker 的情况下，并发地调度所有分支节点
 
-#### Scenario: Merge node
-- **WHEN** a node has type MERGE
-- **THEN** the worker SHALL collect results from all fan-out branch sub-channels and produce an aggregated output
+#### Scenario：合并节点 — Merge node
+- **当** 节点的类型为 MERGE
+- **则** Worker 应从所有扇出分支子通道收集结果并产生聚合输出

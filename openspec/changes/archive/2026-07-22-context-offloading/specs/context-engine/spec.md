@@ -1,77 +1,68 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: LLMWorker applies context pipeline before LLM invocation
+### 需求：LLMWorker 在 LLM 调用前应用上下文管道
 
-LLMWorker SHALL check execution_context for a ContextEngine instance. When present, LLMWorker SHALL apply a 5-step context pipeline to the messages extracted from channel_snapshot before passing them to `port.llm_invoke()`:
+LLMWorker 应检查 execution_context 中的 ContextEngine 实例。当存在时，LLMWorker 应对从 channel_snapshot 提取的消息应用一个 5 步上下文管道，然后再传递给 `port.llm_invoke()`：
 
-1. Tool result truncation: cap each tool result content to `tool_result_limit` tokens (default 2000)
-2. Token estimation: call `context_engine.estimate_tokens(messages)`
-3. Message selection: if estimated tokens exceed budget, call `context_engine.select_messages(messages, budget)`
-4. Context offloading: if a `ContextOffloader` is available in `execution_context["context_offloader"]` and the dropped messages meet the offload threshold, offload the dropped messages to the environment and replace them with a compact reference stub
-5. Compression: if the `[stub + selected]` messages still exceed budget, call `context_engine.compress(selected)` as a last resort
+1. 工具结果截断：将每个工具结果内容限制在 `tool_result_limit` tokens（默认 2000）
+2. Token 估算：调用 `context_engine.estimate_tokens(messages)`
+3. 消息选择：如果估算的 tokens 超过预算，调用 `context_engine.select_messages(messages, budget)`
+4. 上下文卸载：如果 `execution_context["context_offloader"]` 中有 `ContextOffloader` 可用，且丢弃的消息达到卸载阈值，则将丢弃的消息卸载到环境并替换为紧凑的引用桩
+5. 压缩：如果 `[stub + selected]` 消息仍然超出预算，最后手段调用 `context_engine.compress(selected)`
 
-The pipeline SHALL be applied in both `execute()` and `execute_stream()` methods.
+管道应在 `execute()` 和 `execute_stream()` 两个方法中都应用。
 
-#### Scenario: Context pipeline applied when ContextEngine is present
+#### 场景：存在 ContextEngine 时应用上下文管道
+- **当** LLMWorker 收到包含 `"context_engine"` 的 execution_context 时
+- **且** 消息列表超出 token 预算
+- **则** LLMWorker 应应用消息选择以适配预算
+- **且** 过滤后的消息应传递给 `port.llm_invoke()` 而非完整列表
 
-- **WHEN** LLMWorker receives an execution_context containing `"context_engine"`
-- **AND** the messages list exceeds the token budget
-- **THEN** LLMWorker SHALL apply message selection to fit within the budget
-- **AND** the filtered messages SHALL be passed to `port.llm_invoke()` instead of the full list
+#### 场景：ContextEngine 不存在时跳过上下文管道
+- **当** LLMWorker 收到没有 `"context_engine"` 的 execution_context 时
+- **则** LLMWorker 应像之前一样将完整消息列表传递给 `port.context_assemble()` 和 `port.llm_invoke()`
+- **且** 不应发生过滤、选择、卸载或压缩
 
-#### Scenario: Context pipeline skipped when ContextEngine is absent
+#### 场景：execute 和 execute_stream 都应用管道
+- **当** ContextEngine 存在且消息超出预算时
+- **则** `execute()` 和 `execute_stream()` 都应应用相同的上下文管道
+- **且** 流式传输的 tokens 应对应于过滤后的消息，而非完整历史
 
-- **WHEN** LLMWorker receives an execution_context without `"context_engine"`
-- **THEN** LLMWorker SHALL pass the full messages list to `port.context_assemble()` and `port.llm_invoke()` as before
-- **AND** no filtering, selection, offloading, or compression SHALL occur
+#### 场景：卸载器可用时调用卸载步骤
+- **当** execution_context 包含 `"context_offloader"` 及有效的 ContextOffloader 时
+- **且** 消息选择丢弃的总 token 数至少达到 `CONTEXT_OFFLOAD_THRESHOLD_TOKENS`
+- **则** 丢弃的消息应作为 JSON 文件卸载到环境
+- **且** 紧凑的引用桩应替换活动上下文中被丢弃的块
+- **且** 管道应在决定是否压缩之前在 `[stub + selected]` 上重新计算 token 数
 
-#### Scenario: Both execute and execute_stream apply pipeline
+#### 场景：卸载器不存在时跳过卸载
+- **当** execution_context 不包含 `"context_offloader"` 时
+- **且** 选择后消息仍超出预算
+- **则** 管道应直接进入压缩（第 5 步）
+- **且** 不应发生文件写入
+- **且** 行为应与卸载前的 4 步管道完全一致
 
-- **WHEN** ContextEngine is present and messages exceed budget
-- **THEN** both `execute()` and `execute_stream()` SHALL apply the same context pipeline
-- **AND** streaming tokens SHALL correspond to the filtered messages, not the full history
+#### 场景：卸载不足时压缩触发
+- **当** 卸载已发生（stub + selected）但 token 数仍然超出预算时
+- **则** 管道应对 `[stub + selected]` 列表调用 `context_engine.compress()`
+- **且** 压缩应从 `[stub + selected]` 列表中丢弃最旧的项目作为最后手段
 
-#### Scenario: Offload step invoked when offloader is available
+### 需求：上下文管道是非破坏性的
 
-- **WHEN** execution_context contains `"context_offloader"` with a valid ContextOffloader
-- **AND** message selection drops messages totaling at least `CONTEXT_OFFLOAD_THRESHOLD_TOKENS`
-- **THEN** the dropped messages SHALL be offloaded to the environment as a JSON file
-- **AND** a compact reference stub SHALL replace the dropped block in the live context
-- **AND** the pipeline SHALL recompute token count on `[stub + selected]` before deciding whether to compress
+上下文管道不应修改 channel 快照、channel 状态或 checkpoint 数据。过滤后的消息应是仅用于当前 LLM 调用的临时副本。channel 中的原始 `messages` 列表应保留所有消息。卸载的文件应是存储在环境中的额外工件 — 它们不会替换或删除 channel 的消息历史。
 
-#### Scenario: Offload skipped when offloader is absent
+#### 场景：LLM 调用后 channel 消息不变
+- **当** LLMWorker 应用上下文管道，将消息从 100 条过滤到 20 条时
+- **且** WorkerResult 通过 `_apply_writes` 应用到 channels
+- **则** channel `messages` 字段应包含原始的 100 条消息加上新的 assistant 消息
+- **且** 不应有消息被上下文管道移除
 
-- **WHEN** execution_context does NOT contain `"context_offloader"`
-- **AND** messages exceed budget after selection
-- **THEN** the pipeline SHALL proceed directly to compression (step 5)
-- **AND** no file writes SHALL occur
-- **AND** behavior SHALL match the pre-offload 4-step pipeline exactly
+#### 场景：Checkpoint 保留完整的消息历史
+- **当** PregelRuntime 在应用上下文管道的超步后保存 checkpoint 时
+- **则** checkpoint 应包含完整、未过滤的消息历史
+- **且** 从此 checkpoint 恢复应提供对所有消息的访问
 
-#### Scenario: Compression fires when offload insufficient
-
-- **WHEN** offload has occurred (stub + selected) but token count still exceeds budget
-- **THEN** the pipeline SHALL call `context_engine.compress()` on the `[stub + selected]` list
-- **AND** compression SHALL drop oldest items from the `[stub + selected]` list as the last resort
-
-### Requirement: Context pipeline is non-destructive
-
-The context pipeline SHALL NOT modify the channel snapshot, channel state, or checkpoint data. The filtered messages SHALL be a temporary copy used only for the current LLM invocation. The original `messages` list in the channel SHALL retain all messages. Offloaded files SHALL be additional artifacts stored in the environment — they do NOT replace or remove the channel's message history.
-
-#### Scenario: Channel messages unchanged after LLM call
-
-- **WHEN** LLMWorker applies the context pipeline, filtering messages from 100 to 20
-- **AND** the WorkerResult is applied to channels via `_apply_writes`
-- **THEN** the channel `messages` field SHALL contain the original 100 messages plus the new assistant message
-- **AND** no messages SHALL have been removed by the context pipeline
-
-#### Scenario: Checkpoint retains full message history
-
-- **WHEN** PregelRuntime saves a checkpoint after a superstep where context pipeline was applied
-- **THEN** the checkpoint SHALL contain the complete, unfiltered message history
-- **AND** restoring from this checkpoint SHALL provide access to all messages
-
-#### Scenario: Offload does not mutate channel messages
-
-- **WHEN** the offload step writes dropped messages to the environment
-- **THEN** the channel's `messages` list SHALL remain unchanged
-- **AND** the offloaded file SHALL be a separate copy stored in the environment filesystem
+#### 场景：卸载不改变 channel 消息
+- **当** 卸载步骤将丢弃的消息写入环境时
+- **则** channel 的 `messages` 列表应保持不变
+- **且** 卸载的文件应是存储在环境文件系统中的独立副本

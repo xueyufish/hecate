@@ -1,114 +1,76 @@
-## Context
+## Context — 背景
 
-Hecate's engine layer provides a Graph DSL with 6 node types and a Pregel/BSP runtime that executes graphs in superstep cycles. The runtime already supports executing multiple nodes per superstep (`current_nodes` is a list, iterated in a `for` loop), but there is no formal mechanism for parallel dispatch and result aggregation.
+自 2026-05-06 统一执行引擎变更以来，Hecate 的 Pregel 运行时已完全功能化。运行时已经支持每个 superstep 多个节点（通过 `PregelRuntime.superstep()` 中的 `current_nodes` 列表），但图 DSL 和编译器没有表达并行语义的方式。
 
-The existing CONDITION node type supports boolean branching via the `_route` key in channel updates, limited to `{"true": "...", "false": "..."}` dict targets. Multi-key routing (e.g., routing by score ranges or category labels) requires expressing each case as a separate condition node, which is cumbersome.
+当前图 DSL Graph Schema：
+- 6 种节点类型：CONVERSATION、TOOL_CALL、CONDITION、AGENT、KNOWLEDGE_RETRIEVAL、VARIABLE_SET
+- 1 种边类型：带有 `source`/`target` 引用的 `Edge`
+- 1 个图结构：平面的 `nodes`/`edges` 列表
 
-Three JSON templates exist in `src/hecate/data/orchestration_templates/` and are served by the orchestration-templates API.
+此次变更将 DSL 扩展到 10 种节点类型并增加类型化边。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Add FAN_OUT node type that dispatches to N parallel branches concurrently
-- Add MERGE node type that collects results from all fan-out branches
-- Enhance CONDITION node to support multi-key routing (more than true/false)
-- Implement concurrent branch execution in PregelRuntime via `asyncio.gather`
-- Add compiler validation for FAN_OUT/MERGE structural constraints
-- Add 3 new orchestration templates demonstrating the new patterns
-- Maintain backward compatibility — existing graphs work unchanged
+**目标：**
 
-**Non-Goals:**
-- Variable aggregation functions (sum, average, etc.) at MERGE nodes — keep it simple: MERGE collects all branch outputs into a dict
-- Nested fan-out (fan-out within a fan-out branch) — out of scope for this change
-- Dynamic fan-out (number of branches determined at runtime) — branches are defined at graph definition time
-- Frontend Canvas changes for visual fan-out rendering — that belongs to the canvas feature
-- NL2Workflow generation of these patterns — that is P4 feature 1.1.11
+- **Fan-out/Fan-in**：向 DSL 添加 `FAN_OUT` 和 `MERGE` 节点类型。Fan-out 节点引用一个目标节点集（分支）。Merge 节点等待所有分支完成，然后使用可配置的 reducer 聚合。
+- **子图**：向 DSL 添加 `SUBGRAPH` 节点类型。子图拥有自己的 `nodes`/`edges` 列表和输入/输出通道映射。编译器递归解析子图，展平为单个执行计划。
+- **多代理模式**：添加 6 个模板工厂，用于层级、交接、管道、广播、协商和辩论模式——每个都使用标准节点和边生成一个有效的 DSL 图。
+- **类型化边**：添加 `EdgeType` 枚举（MESSAGE、CONDITIONAL、CONTROL、SUBSCRIBE）。编译器验证边类型兼容性（例如，CONDITIONAL 边必须连接到 CONDITION 节点）。
+- **向后兼容性**：没有边类型的现有图默认使用 `EdgeType.MESSAGE`。
 
-## Decisions
+**非目标：**
 
-### Decision 1: FAN_OUT and MERGE as new node types (not edge semantics)
+- 运行时动态 fan-out（所有分支在编译时已知）
+- 跨子图的持久状态共享（每个子图是隔离的）
+- DSLA 用于代理路由的高级声明性语言——模式模板是工厂函数，不是新的 DSL
+- 协商/辩论收敛算法的自定义——使用固定的简单多数制/100 轮限制
 
-**Options considered:**
-- A. New node types `FAN_OUT` and `MERGE` with standard edges connecting branches
-- B. Edge-level parallel semantics (a special edge type that triggers parallel execution)
-- C. A single `PARALLEL` node type that internally manages sub-graphs
+## Decisions — 设计决策
 
-**Choice: A — Separate FAN_OUT and MERGE node types**
+### D1：Fan-out 是显式的 DSL 节点
 
-Rationale:
-- Aligns with how Versatile, n8n, and Dify model parallel execution (split node + merge node)
-- Works naturally with the existing edge model — FAN_OUT has N outgoing edges to branch nodes, branch nodes have edges to MERGE
-- Compiler can validate structural constraints (every FAN_OUT must have a MERGE downstream)
-- Keeps PregelRuntime changes minimal — the runtime just needs to identify FAN_OUT nodes and dispatch their branches concurrently
+**选择**：`FAN_OUT` 是一个 DSL 节点，带有 `branches: list[str]` 属性。编译器在准备就绪时将消息复制到所有分支。
 
-### Decision 2: Channel isolation for parallel branches
+**理由**：这与当前编译器如何处理节点一致。Fan-out 节点是图的显式部分，使其对用户可见且可调试。
 
-**Approach:** Each FAN_OUT branch writes to a branch-scoped sub-channel (e.g., `_fanout_{node_id}_{branch_index}`), and the MERGE node reads all sub-channels and combines them into a dict on a single output channel.
+**备选方案**：隐式 fan-out（基于出度检测）。否决：对用户隐藏了并发性。
 
-**Rationale:** This prevents parallel branches from overwriting each other's channel state. The existing `ChannelManager.write()` with TOPIC channels would silently interleave results, which is incorrect for deterministic pipelines.
+### D2：Merge 使用可配置的 reducer
 
-**Implementation:**
-- FAN_OUT node config specifies `branches`: list of branch node IDs
-- The runtime creates a temporary sub-channel per branch (type LAST_VALUE)
-- Each branch worker writes to its sub-channel
-- MERGE node reads all sub-channels and outputs a dict `{branch_id: result}` to the output channel
+**选择**：`MERGE` 节点有 `reducer: str` 属性，值为 `"concat"`（默认——连接结果）、`"select_first"`（使用第一个非空结果）或 `"custom"`（调用用户函数）。`"custom"` reducer 引用一个注册的自定义 reducer 函数名。
 
-### Decision 3: Multi-key CONDITION via enhanced edge target dict
+**理由**：不同的场景需要不同的合并语义。连接用于并行检索（RAG），select-first 用于带有回退的编排，自定义用于复杂聚合。
 
-**Approach:** Allow CONDITION nodes to write any string value to `_route` (not just "true"/"false"), and allow edge targets to have arbitrary string keys matching those values.
+### D3：子图被展平
 
-**Current behavior:**
-```python
-route_key = str(result.channel_updates.get("_route", "true"))
-target = edge.target.get(route_key, edge.target.get("false"))
-```
+**选择**：编译器递归解析 `SUBGRAPH` 节点，在其父图中包含/排除它们，将它们展平为单个执行计划。子图输出通道被重命名为避免冲突。
 
-**Enhanced behavior:**
-```python
-route_key = str(result.channel_updates.get("_route", ""))
-# Try exact match first, then fall back to "default" key
-target = edge.target.get(route_key) or edge.target.get("default")
-```
+**理由**：Pregel 运行时操作于平面节点集。展平避免了修改运行时。
 
-This is backward-compatible — existing true/false routing still works because "true" and "false" are valid dict keys. The fallback changes from `edge.target.get("false")` to `edge.target.get("default")`, but we'll support both for backward compatibility.
+**备选方案**：在运行时保留子图作为嵌套执行上下文。否决：为运行时增加了不必要的复杂性。
 
-### Decision 4: FAN_OUT execution model in PregelRuntime
+### D4：模式模板是工厂函数
 
-**Approach:** When the runtime encounters a FAN_OUT node, it:
-1. Reads the FAN_OUT node config to get the list of branch node IDs
-2. Dispatches all branch workers concurrently via `asyncio.gather`
-3. Collects all WorkerResults
-4. Advances to the MERGE node (resolved via edge lookup)
-5. MERGE reads all branch sub-channels and outputs aggregated result
+**选择**：模式在 `engine/patterns/` 中定义为接受参数（agent_id、model_name）并返回有效 DSL 字典的工厂函数。
 
-The FAN_OUT node itself is a "virtual" node — it doesn't execute a worker, it just triggers parallel dispatch of its branch nodes. This is important: the FAN_OUT config contains `branches` (list of node IDs), not model/prompt settings.
+**理由**：模式是*约定*，不是 DSL 特性。工厂函数使它们明确且可组合。
 
-### Decision 5: Template design for 3 new templates
+**备选方案**：DSL 中的声明性模式关键字。否决：在 P3 之前为 DSL Schema 增加了不必要的复杂性。
 
-**fan-out-pipeline.json:** Research → Fan-out to 3 analyst agents → Merge → Summary
-```
-researcher → fanout → [analyst_a, analyst_b, analyst_c] → merge → summarizer → __end__
-```
+### D5：类型化边默认向后兼容
 
-**conditional-pipeline.json:** Input → Classify → Route by category → Process → __end__
-```
-classifier → check_category → {finance: finance_agent, tech: tech_agent, legal: legal_agent} → __end__
-```
+**选择**：`EdgeType` 枚举（MESSAGE、CONDITIONAL、CONTROL、SUBSCRIBE）。未指定边类型的现有图默认使用 `EdgeType.MESSAGE`。
 
-**reflection-loop.json:** Draft → Review → (check quality) → Revise or Finish
-```
-drafter → reviewer → check_quality → {needs_improvement: reviser, approved: __end__}
-reviser → reviewer (loop)
-```
+**理由**：零破坏性变更。现有的 2026-05-06 和 2026-05-26 图无需修改即可继续工作。
 
-## Risks / Trade-offs
+**备选方案**：每次都要求边类型。否决：破坏了现有的图定义。
 
-**[Risk] Parallel branch failure** → If one branch fails, the entire fan-out fails. This is the simplest semantics and matches n8n/Dify behavior. Partial success (continue with available results) can be added later as an opt-in config.
+## Risks / Trade-offs — 风险与权衡
 
-**[Risk] Sub-channel namespace collision** → `_fanout_{node_id}_{branch_index}` naming could collide if node IDs contain underscores. Mitigation: use a unique separator like `__fanout__` and validate node IDs don't contain double underscores.
-
-**[Risk] Backward compatibility of CONDITION fallback** → Changing `edge.target.get("false")` to `edge.target.get("default")` could break existing graphs that only have "true"/"false" keys. Mitigation: support both fallbacks — try the route key first, then "default", then "false" for backward compatibility.
-
-**[Trade-off] No nested fan-out** → This limits expressiveness but significantly reduces implementation complexity. Nested fan-out can be added in a future iteration if needed.
-
-**[Trade-off] Branch count fixed at graph definition time** → Dynamic fan-out (e.g., "fan out to N agents based on input") requires a different architecture. This is out of scope but the FAN_OUT config can be extended later with a `dynamic_branch_source` field.
+| 风险 | 缓解措施 |
+|------|---------|
+| 扇出分支同时完成增加运行时复杂性 | 运行时在进入下一个 superstep 之前等待所有分支 |
+| 子图展平丢失上下文信息 | 编译器在展平时为子图节点添加 `subgraph_id` 属性 |
+| 协商模式的收敛限制可能不符合预期 | 100 轮限制可配置；有 defaults.py 常量 |
+| 类型化边可能被忽略 | 编译器验证边类型兼容性；不兼容时引发 SchemaError |

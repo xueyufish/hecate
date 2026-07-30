@@ -1,58 +1,58 @@
-## 1. Engine — ToolGateEvaluator
+## 1. 引擎 — ToolGateEvaluator
 
-- [x] 1.1 Create `src/hecate/engine/tool_gate.py` with `ToolGateEvaluator` class
-- [x] 1.2 Implement `evaluate(expression: str, context: dict) -> bool` — uses `eval()` with restricted namespace (`__builtins__: {}`), catches all exceptions and returns `False` (fail-closed), logs WARNING on evaluation failure
-- [x] 1.3 Implement `filter_tools(tools: list[dict], context: dict) -> list[dict]` — iterates tools, evaluates `available_when` field, returns filtered list; tools without `available_when` or with `None` pass through
-- [x] 1.4 `from __future__ import annotations` at top, type annotations on all methods, full docstrings on module/class/public methods
-- [x] 1.5 Engine layer constraint: zero imports from services/ or models/
+- [x] 1.1 创建 `src/hecate/engine/tool_gate.py`，包含 `ToolGateEvaluator` 类
+- [x] 1.2 实现 `evaluate(expression: str, context: dict) -> bool` — 使用带受限命名空间（`__builtins__: {}`）的 `eval()`，捕获所有异常并返回 `False`（故障关闭），评估失败时记录 WARNING
+- [x] 1.3 实现 `filter_tools(tools: list[dict], context: dict) -> list[dict]` — 迭代工具，评估 `available_when` 字段，返回过滤后的列表；没有 `available_when` 或为 `None` 的工具原样通过
+- [x] 1.4 顶部使用 `from __future__ import annotations`，所有方法有类型注解，模块/类/公共方法有完整文档字符串
+- [x] 1.5 引擎层约束：不从 services/ 或 models/ 导入
 
-## 2. Models — ToolModel + Schemas
+## 2. Models — ToolModel + 模式
 
-- [x] 2.1 Add `available_when: Mapped[str | None]` to `ToolModel` in `models/tool.py` — nullable column, default None
-- [x] 2.2 Add `available_when: str | None = None` to `ToolCreateSchema` and `ToolUpdateSchema`
-- [x] 2.3 Add `available_when: str | None = None` to `ToolReadSchema`
-- [x] 2.4 Add Alembic migration to add `available_when` column to `tools` table (nullable, backwards-compatible)
+- [x] 2.1 向 `models/tool.py` 中的 `ToolModel` 添加 `available_when: Mapped[str | None]` — 可为空的列，默认为 None
+- [x] 2.2 向 `ToolCreateSchema` 和 `ToolUpdateSchema` 添加 `available_when: str | None = None`
+- [x] 2.3 向 `ToolReadSchema` 添加 `available_when: str | None = None`
+- [x] 2.4 添加 Alembic 迁移以向 `tools` 表添加 `available_when` 列（可为空，向后兼容）
 
-## 3. LLMWorker Integration
+## 3. LLMWorker 集成
 
-- [x] 3.1 Add `ToolGateEvaluator` instance to `LLMWorker.__init__` (or create per-call — confirm with existing pattern)
-- [x] 3.2 Add private `_filter_tools(tools, execution_context, channel_snapshot) -> list[dict]` method — builds flat context dict from execution_context + channel_snapshot, delegates to `ToolGateEvaluator.filter_tools()`
-- [x] 3.3 In `LLMWorker.execute()`: call `self._filter_tools(tools, execution_context, channel_snapshot)` after line 191 (`tools = node_config.get("tools")`) and before PreLLMHook call
-- [x] 3.4 In `LLMWorker.execute_stream()`: call `self._filter_tools(tools, execution_context, channel_snapshot)` after line 330 (`tools = node_config.get("tools")`) and before PreLLMHook call
-- [x] 3.5 Context dict assembly: merge `session_id`, `superstep` from execution_context; `_user_id` → `user_id`, `_agent_id` → `agent_id`, `_turn_index` → `turn_index` from channel_snapshot
+- [x] 3.1 向 `LLMWorker.__init__` 添加 `ToolGateEvaluator` 实例（或每次调用创建——与现有模式确认）
+- [x] 3.2 添加私有 `_filter_tools(tools, execution_context, channel_snapshot) -> list[dict]` 方法——从 execution_context + channel_snapshot 构建扁平上下文字典，委托给 `ToolGateEvaluator.filter_tools()`
+- [x] 3.3 在 `LLMWorker.execute()` 中：在第 191 行（`tools = node_config.get("tools")`）之后、PreLLMHook 调用之前调用 `self._filter_tools(tools, execution_context, channel_snapshot)`
+- [x] 3.4 在 `LLMWorker.execute_stream()` 中：在第 330 行（`tools = node_config.get("tools")`）之后、PreLLMHook 调用之前调用 `self._filter_tools(tools, execution_context, channel_snapshot)`
+- [x] 3.5 上下文字典组装：合并来自 execution_context 的 `session_id`、`superstep`；来自 channel_snapshot 的 `_user_id` → `user_id`、`_agent_id` → `agent_id`、`_turn_index` → `turn_index`
 
-## 4. Tests — ToolGateEvaluator
+## 4. 测试 — ToolGateEvaluator
 
-- [x] 4.1 Test `evaluate()` with simple equality expression returns True/False correctly
-- [x] 4.2 Test `evaluate()` with compound `and`/`or` expressions
-- [x] 4.3 Test `evaluate()` with membership `in` check
-- [x] 4.4 Test `evaluate()` blocks `__import__` access (returns False, no exception propagated)
-- [x] 4.5 Test `evaluate()` blocks `__builtins__` access (returns False)
-- [x] 4.6 Test `evaluate()` with undefined variable → returns False (fail-closed) + logs WARNING
-- [x] 4.7 Test `evaluate()` with syntax error → returns False (fail-closed) + logs WARNING
-- [x] 4.8 Test `filter_tools()` with mixed tools (some with available_when, some without)
-- [x] 4.9 Test `filter_tools()` with all tools filtered out → empty list
-- [x] 4.10 Test `filter_tools()` with empty input → empty list
-- [x] 4.11 Test `filter_tools()` preserves tool dict structure (no mutation of original dicts)
+- [x] 4.1 测试 `evaluate()` 使用简单相等表达式正确返回 True/False
+- [x] 4.2 测试 `evaluate()` 使用复合 `and`/`or` 表达式
+- [x] 4.3 测试 `evaluate()` 使用成员 `in` 检查
+- [x] 4.4 测试 `evaluate()` 阻止 `__import__` 访问（返回 False，不传播异常）
+- [x] 4.5 测试 `evaluate()` 阻止 `__builtins__` 访问（返回 False）
+- [x] 4.6 测试 `evaluate()` 使用未定义变量 → 返回 False（故障关闭）+ 记录 WARNING
+- [x] 4.7 测试 `evaluate()` 使用语法错误 → 返回 False（故障关闭）+ 记录 WARNING
+- [x] 4.8 测试 `filter_tools()` 使用混合工具（有些有 available_when，有些没有）
+- [x] 4.9 测试 `filter_tools()` 所有工具被过滤掉 → 空列表
+- [x] 4.10 测试 `filter_tools()` 使用空输入 → 空列表
+- [x] 4.11 测试 `filter_tools()` 保留工具字典结构（不修改原始字典）
 
-## 5. Tests — LLMWorker Integration
+## 5. 测试 — LLMWorker 集成
 
-- [x] 5.1 Test `execute()` filters tools with `available_when` before passing to `llm_invoke`
-- [x] 5.2 Test `execute()` passes tools unchanged when no `available_when` is set (backward compatible)
-- [x] 5.3 Test `execute()` PreLLMHook receives filtered tool list
-- [x] 5.4 Test `execute_stream()` filters tools identically to `execute()`
-- [x] 5.5 Test context dict assembly from execution_context and channel_snapshot
-- [x] 5.6 Test missing channel_snapshot keys are omitted from context (fail-closed behavior)
+- [x] 5.1 测试 `execute()` 在传递给 `llm_invoke` 之前过滤带有 `available_when` 的工具
+- [x] 5.2 测试 `execute()` 当没有设置 `available_when` 时原样传递工具（向后兼容）
+- [x] 5.3 测试 `execute()` PreLLMHook 接收过滤后的工具列表
+- [x] 5.4 测试 `execute_stream()` 与 `execute()` 相同地过滤工具
+- [x] 5.5 测试从 execution_context 和 channel_snapshot 组装上下文字典
+- [x] 5.6 测试缺失的 channel_snapshot 键从上下文中省略（故障关闭行为）
 
-## 6. Tests — Model + Schema
+## 6. 测试 — 模型 + 模式
 
-- [x] 6.1 Test `ToolModel` accepts `available_when` field and persists to database
-- [x] 6.2 Test `ToolCreateSchema` accepts optional `available_when` string
-- [x] 6.3 Test `ToolCreateSchema` without `available_when` defaults to None
-- [x] 6.4 Test `ToolReadSchema` includes `available_when` in serialized output
+- [x] 6.1 测试 `ToolModel` 接受 `available_when` 字段并持久化到数据库
+- [x] 6.2 测试 `ToolCreateSchema` 接受可选的 `available_when` 字符串
+- [x] 6.3 测试 `ToolCreateSchema` 没有 `available_when` 时默认为 None
+- [x] 6.4 测试 `ToolReadSchema` 在序列化输出中包含 `available_when`
 
-## 7. Documentation
+## 7. 文档
 
-- [x] 7.1 Update AGENTS.md: add `tool_gate.py` to key files table if applicable
-- [x] 7.2 Verify engine layer has zero new external dependencies
-- [x] 7.3 Run ruff check + ruff format --check + mypy + pytest — all must pass
+- [x] 7.1 更新 AGENTS.md：如果适用，将 `tool_gate.py` 添加到关键文件表
+- [x] 7.2 验证引擎层没有新的外部依赖
+- [x] 7.3 运行 ruff check + ruff format --check + mypy + pytest — 全部通过

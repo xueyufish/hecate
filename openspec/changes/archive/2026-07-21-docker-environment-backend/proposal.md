@@ -1,39 +1,39 @@
-## Why
+## Why — 为什么
 
-Hecate's `AgentEnvironment` ABC (1.3.15) only ships with `LocalEnvironment` — a filesystem-backed implementation that provides no process-level isolation between agents. In multi-tenant deployments where agents run user-supplied code, a container escape or path traversal could expose one tenant's files to another. Every comparable platform (AgentScope, DeerFlow, Bedrock AgentCore, Google Gemini) provides containerized or microVM-isolated execution environments. This change adds a `DockerEnvironment` backend so agents can run inside Docker containers with isolated filesystems, processes, and optional gVisor hardening — all self-hosted with no external cloud dependency.
+Hecate 的 `AgentEnvironment` ABC（1.3.15）仅附带 `LocalEnvironment` — 一种基于文件系统的实现，不提供 Agent 之间的进程级隔离。在运行用户提供代码的多租户部署中，容器逃逸或路径遍历可能将一个租户的文件暴露给另一个。每个可比较的平台（AgentScope、DeerFlow、Bedrock AgentCore、Google Gemini）都提供容器化或 microVM 隔离的执行环境。此变更添加了 `DockerEnvironment` 后端，以便 Agent 可以在具有隔离文件系统、进程和可选的 gVisor 加固的 Docker 容器内运行 — 全部自托管，无外部云依赖。
 
-## What Changes
+## What Changes — 变更内容
 
-- **Add `exec_shell()` to `AgentEnvironment` ABC** — the existing ABC has only file I/O methods (read/write/list/delete/exists/ensure_dirs). Container backends need shell execution to operate (file ops via `docker exec`, package installation, tool setup). Adding `exec_shell(command) -> ExecResult` brings Hecate to parity with AgentScope's `BackendBase` and DeerFlow's `Sandbox` interface.
-- **Add `ExecResult` dataclass** — structured return type for `exec_shell`: `exit_code`, `stdout`, `stderr`.
-- **Implement `DockerEnvironment`** — new `AgentEnvironment` implementation backed by Docker containers via `aiodocker`. Each agent gets its own long-running container with a named volume for persistent filesystem (sessions/, files/, memory/, skills/). File operations use Docker's `exec` / `get_archive` / `put_archive` APIs. Container lifecycle managed with warm pool reuse.
-- **Implement `LocalEnvironment.exec_shell()`** — the existing `LocalEnvironment` gains an `exec_shell` implementation using `asyncio.create_subprocess_exec` on the host.
-- **Refactor `EnvironmentManager` for backend selection** — currently hardcoded to `LocalEnvironment`. Add config-driven backend selection (`AGENT_ENV_BACKEND=local|docker`) and a warm pool for container reuse (informed by existing `SandboxPool` 9.4d patterns).
-- **Add `aiodocker` dependency** — async Docker API client for Python. Added to `[tools]` optional dependency group in `pyproject.toml`.
-- **Add Docker configuration** — new settings: `AGENT_ENV_BACKEND`, `DOCKER_AGENT_IMAGE`, `DOCKER_RUNTIME` (runc/runsc), `DOCKER_NETWORK_MODE`.
-- **Optional gVisor support** — when `DOCKER_RUNTIME=runsc`, containers use gVisor user-space kernel for stronger isolation. Requires `runsc` installed on host.
+- **向 `AgentEnvironment` ABC 添加 `exec_shell()`** — 现有的 ABC 只有文件 I/O 方法（read/write/list/delete/exists/ensure_dirs）。容器后端需要 Shell 执行来操作（通过 `docker exec` 进行文件操作、包安装、工具设置）。添加 `exec_shell(command) -> ExecResult` 使 Hecate 与 AgentScope 的 `BackendBase` 和 DeerFlow 的 `Sandbox` 接口达到同等水平。
+- **添加 `ExecResult` 数据类** — `exec_shell` 的结构化返回类型：`exit_code`、`stdout`、`stderr`。
+- **实现 `DockerEnvironment`** — 新的 `AgentEnvironment` 实现，后端由 Docker 容器通过 `aiodocker` 支持。每个 Agent 拥有自己的长运行容器，带有用于持久文件系统的命名卷（sessions/、files/、memory/、skills/）。文件操作使用 Docker 的 `exec` / `get_archive` / `put_archive` API。容器生命周期通过热池复用管理。
+- **实现 `LocalEnvironment.exec_shell()`** — 现有的 `LocalEnvironment` 通过 `asyncio.create_subprocess_exec` 在主机上获得 `exec_shell` 实现。
+- **重构 `EnvironmentManager` 以支持后端选择** — 当前硬编码为 `LocalEnvironment`。添加配置驱动的后端选择（`AGENT_ENV_BACKEND=local|docker`）和用于容器复用的热池（参考现有的 `SandboxPool` 9.4d 模式）。
+- **添加 `aiodocker` 依赖** — 用于 Python 的异步 Docker API 客户端。添加到 `pyproject.toml` 的 `[tools]` 可选依赖组。
+- **添加 Docker 配置** — 新设置：`AGENT_ENV_BACKEND`、`DOCKER_AGENT_IMAGE`、`DOCKER_RUNTIME`（runc/runsc）、`DOCKER_NETWORK_MODE`。
+- **可选的 gVisor 支持** — 当 `DOCKER_RUNTIME=runsc` 时，容器使用 gVisor 用户空间内核实现更强的隔离。需要主机上安装 `runsc`。
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
+### 新能力
 
-_(none — all capabilities reference existing specs)_
+_(无 — 所有能力引用现有规范)_
 
-### Modified Capabilities
+### 修改的能力
 
-- `agent-environment`: Add `exec_shell` abstract method to `AgentEnvironment` ABC. Add `DockerEnvironment` as a second backend implementation alongside `LocalEnvironment`. Add `ExecResult` return type. Refactor `EnvironmentManager` to support backend selection and warm pool.
+- `agent-environment`：向 `AgentEnvironment` ABC 添加 `exec_shell` 抽象方法。在 `LocalEnvironment` 旁边添加 `DockerEnvironment` 作为第二个后端实现。添加 `ExecResult` 返回类型。重构 `EnvironmentManager` 以支持后端选择和热池。
 
-## Impact
+## Impact — 影响
 
-- **Modified files**:
-  - `src/hecate/services/environment/environment.py` — add `exec_shell` to ABC + `LocalEnvironment`; add `ExecResult` dataclass; add `DockerEnvironment` class
-  - `src/hecate/services/environment/manager.py` — refactor `get_or_create()` for backend selection; add warm pool logic
-  - `src/hecate/core/config.py` — new settings: `AGENT_ENV_BACKEND`, `DOCKER_AGENT_IMAGE`, `DOCKER_RUNTIME`, `DOCKER_NETWORK_MODE`
-  - `pyproject.toml` — add `aiodocker` to `[tools]` group
-- **New files**:
-  - `src/hecate/services/environment/docker_environment.py` — `DockerEnvironment` implementation (or co-located in `environment.py` if size permits)
-  - `tests/test_services/test_environment/test_docker_environment.py` — unit tests for `DockerEnvironment`
-  - `tests/test_services/test_environment/test_exec_shell.py` — tests for `exec_shell` across backends
-- **No breaking changes**: `AGENT_ENV_BACKEND` defaults to `"local"`. Existing `LocalEnvironment` callers see no behavior change. `exec_shell` is additive to the ABC.
-- **New dependencies**: `aiodocker` (async Docker client). Only imported when `AGENT_ENV_BACKEND=docker`.
-- **Infrastructure requirement**: Docker daemon must be available when using `docker` backend. gVisor (`runsc`) optional for stronger isolation.
+- **修改的文件**：
+  - `src/hecate/services/environment/environment.py` — 向 ABC + `LocalEnvironment` 添加 `exec_shell`；添加 `ExecResult` 数据类；添加 `DockerEnvironment` 类
+  - `src/hecate/services/environment/manager.py` — 为后端选择重构 `get_or_create()`；添加热池逻辑
+  - `src/hecate/core/config.py` — 新设置：`AGENT_ENV_BACKEND`、`DOCKER_AGENT_IMAGE`、`DOCKER_RUNTIME`、`DOCKER_NETWORK_MODE`
+  - `pyproject.toml` — 将 `aiodocker` 添加到 `[tools]` 组
+- **新文件**：
+  - `src/hecate/services/environment/docker_environment.py` — `DockerEnvironment` 实现（如果大小允许也可与 `environment.py` 放在一起）
+  - `tests/test_services/test_environment/test_docker_environment.py` — `DockerEnvironment` 的单元测试
+  - `tests/test_services/test_environment/test_exec_shell.py` — 跨后端 `exec_shell` 的测试
+- **无破坏性变更**：`AGENT_ENV_BACKEND` 默认为 `"local"`。现有的 `LocalEnvironment` 调用者看不到行为变化。`exec_shell` 是 ABC 的新增功能。
+- **新依赖**：`aiodocker`（异步 Docker 客户端）。仅在 `AGENT_ENV_BACKEND=docker` 时导入。
+- **基础设施要求**：使用 `docker` 后端时 Docker 守护进程必须可用。gVisor（`runsc`）可选用于更强的隔离。

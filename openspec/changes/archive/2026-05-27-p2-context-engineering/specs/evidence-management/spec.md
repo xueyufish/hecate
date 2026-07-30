@@ -1,56 +1,56 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Evidence Tracker captures tool call results
-The system SHALL intercept tool execution results and store them as structured evidence records with normalized content, source metadata, and importance scoring.
+### 需求：证据追踪器捕获工具调用结果
+系统须拦截工具执行结果，并将其存储为结构化证据记录，包含归一化内容、来源元数据和重要性评分。
 
-#### Scenario: Successful tool result captured
-- **WHEN** a tool call returns a result string "Executed web_search with args {'query': 'Hecate architecture'}"
-- **THEN** the evidence tracker SHALL create an evidence record containing: tool name, original arguments, normalized result content, execution timestamp, and source type "tool"
+#### 场景：成功工具结果被捕获
+- **当** 工具调用返回结果字符串 "Executed web_search with args {'query': 'Hecate architecture'}"
+- **则** 证据追踪器须创建包含以下内容的证据记录：工具名称、原始参数、归一化结果内容、执行时间戳、来源类型 "tool"
 
-#### Scenario: Error tool result captured
-- **WHEN** a tool call fails with an exception
-- **THEN** the evidence tracker SHALL create an evidence record with the error message as content, flagged with `is_error=True`, and importance score of 0
+#### 场景：错误工具结果被捕获
+- **当** 工具调用抛异常失败
+- **则** 证据追踪器须创建证据记录，以错误消息为内容，标记 `is_error=True`，重要性评分为 0
 
-### Requirement: Evidence normalization transforms raw tool output
-The system SHALL normalize raw tool output into a structured format with consistent fields regardless of the source tool.
+### 需求：证据归一化转换原始工具输出
+系统须将原始工具输出归一化为结构化格式，无论来源工具为何，均保持一致的字段。
 
-#### Scenario: JSON tool output normalization
-- **WHEN** a tool returns a JSON string `{"status": "ok", "data": [1, 2, 3]}`
-- **THEN** the evidence tracker SHALL parse the JSON and store the structured data as the normalized content
+#### 场景：JSON 工具输出归一化
+- **当** 工具返回 JSON 字符串 `{"status": "ok", "data": [1, 2, 3]}`
+- **则** 证据追踪器须解析 JSON 并将结构化数据存储为归一化内容
 
-#### Scenario: Plain text tool output normalization
-- **WHEN** a tool returns a plain text string
-- **THEN** the evidence tracker SHALL store the text as-is in normalized content with a metadata flag `format: "text"`
+#### 场景：纯文本工具输出归一化
+- **当** 工具返回纯文本字符串
+- **则** 证据追踪器须按原样存储文本为归一化内容，附带元数据标记 `format: "text"`
 
-### Requirement: Evidence provenance tracking
-The system SHALL track the provenance chain for each evidence record: which tool produced it, which arguments were used, which conversation turn it belongs to, and which message it is associated with.
+### 需求：证据来源追踪
+系统须追踪每条证据记录的来源链：由哪个工具产生、使用了哪些参数、属于哪个对话轮次、关联到哪条消息。
 
-#### Scenario: Full provenance chain
-- **WHEN** an evidence record is created
-- **THEN** it SHALL contain: `tool_name`, `tool_arguments`, `session_id`, `conversation_id`, `message_id`, `turn_index`, and `created_at`
+#### 场景：完整来源链
+- **当** 创建证据记录时
+- **则** 须包含：`tool_name`, `tool_arguments`, `session_id`, `conversation_id`, `message_id`, `turn_index`, `created_at`
 
-### Requirement: Evidence importance scoring
-The system SHALL assign an importance score (0.0 to 1.0) to each evidence record based on configurable rules.
+### 需求：证据重要性评分
+系统须根据可配置规则为每条证据记录分配重要性评分（0.0 到 1.0）。
 
-#### Scenario: Default importance scoring
-- **WHEN** an evidence record is created and no custom scoring rules are configured
-- **THEN** the tracker SHALL assign a default score of 0.5
+#### 场景：默认重要性评分
+- **当** 创建证据记录且未配置自定义评分规则
+- **则** 追踪器须分配默认评分 0.5
 
-#### Scenario: Error results get zero importance
-- **WHEN** an evidence record has `is_error=True`
-- **THEN** the importance score SHALL be 0.0 regardless of custom rules
+#### 场景：错误结果的重要性为零
+- **当** 证据记录有 `is_error=True`
+- **则** 重要性评分须为 0.0，无论自定义规则如何
 
-#### Scenario: Evidence referenced in subsequent turns gets boosted
-- **WHEN** an evidence record is referenced (included in context) in a subsequent conversation turn
-- **THEN** its importance score SHALL be incremented by 0.1, capped at 1.0
+#### 场景：在后续轮次中被引用的证据获得加分
+- **当** 证据记录在后续对话轮次中被引用（包含在上下文中）
+- **则** 其重要性评分须增加 0.1，上限 1.0
 
-### Requirement: Evidence storage and retrieval
-The system SHALL persist evidence records in the database and provide query interfaces for retrieval by session, tool type, time range, and importance threshold.
+### 需求：证据存储和检索
+系统须将证据记录持久化到数据库，并提供按会话、工具类型、时间范围和重要性阈值的查询接口。
 
-#### Scenario: Query evidence by session
-- **WHEN** a query is made for all evidence in a given session
-- **THEN** the tracker SHALL return all evidence records for that session ordered by creation time
+#### 场景：按会话查询证据
+- **当** 查询指定会话中的所有证据
+- **则** 追踪器须返回该会话中按创建时间排序的所有证据记录
 
-#### Scenario: Query evidence by importance threshold
-- **WHEN** a query is made for evidence with importance >= 0.7
-- **THEN** the tracker SHALL return only evidence records meeting the threshold
+#### 场景：按重要性阈值查询证据
+- **当** 查询重要性 >= 0.7 的证据
+- **则** 追踪器须仅返回满足阈值的证据记录

@@ -1,23 +1,23 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Chat graph template produces correct topology
-The `build_chat_graph()` function SHALL return a GraphConfig that replicates ConversationService's orchestration as a graph: conversation node, optional tool-calling loop, and optional suggestion node.
+### Requirement：聊天图模板生成正确的拓扑 — Chat graph template produces correct topology
+`build_chat_graph()` 函数应返回一个 GraphConfig，将 ConversationService 的编排复制为图：会话节点、可选的工具调用循环和可选的建议节点。
 
-#### Scenario: Basic chat without tools or suggestions
-- **WHEN** `build_chat_graph(model="gpt-4o", system_prompt="You are helpful")` is called
-- **THEN** the returned GraphConfig SHALL have: one CONVERSATION node ("llm"), one entry edge from "llm" to "check_tools", one CONDITION node ("check_tools"), edge "check_tools" → `{"true": "tool_call", "false": "__end__"}`
+#### Scenario：没有工具或建议的基本聊天 — Basic chat without tools or suggestions
+- **当** `build_chat_graph(model="gpt-4o", system_prompt="You are helpful")` 被调用时
+- **则** 返回的 GraphConfig 应具有：一个 CONVERSATION 节点（"llm"）、一条从 "llm" 到 "check_tools" 的入口边、一个 CONDITION 节点（"check_tools"）、边 "check_tools" → `{"true": "tool_call", "false": "__end__"}`
 
-#### Scenario: Chat with suggestions enabled
-- **WHEN** `build_chat_graph(model="gpt-4o", enable_suggestions=True)` is called
-- **THEN** the returned GraphConfig SHALL route from "check_tools" (false branch) to a SUGGESTION node ("suggestions") before `__end__`
+#### Scenario：启用建议的聊天 — Chat with suggestions enabled
+- **当** `build_chat_graph(model="gpt-4o", enable_suggestions=True)` 被调用时
+- **则** 返回的 GraphConfig 应从 "check_tools"（false 分支）路由到 `__end__` 之前的 SUGGESTION 节点（"suggestions"）
 
-#### Scenario: Chat with tool calling
-- **WHEN** `build_chat_graph(model="gpt-4o")` is called
-- **THEN** the tool_call loop SHALL be: "llm" → "check_tools" → (true) → "tool_call" → "llm" (cycle)
+#### Scenario：带工具调用的聊天 — Chat with tool calling
+- **当** `build_chat_graph(model="gpt-4o")` 被调用时
+- **则** tool_call 循环应为："llm" → "check_tools" → (true) → "tool_call" → "llm"（循环）
 
-### Requirement: Chat graph state channels
-The `build_chat_graph()` SHALL define channels: `messages` (TOPIC), `_has_tool_call` (LAST_VALUE), `_route` (LAST_VALUE), and session metadata channels.
+### Requirement：聊天图状态通道 — Chat graph state channels
+`build_chat_graph()` 应定义通道：`messages`（TOPIC）、`_has_tool_call`（LAST_VALUE）、`_route`（LAST_VALUE）以及会话元数据通道。
 
-#### Scenario: Channel definitions
-- **WHEN** the graph is compiled
-- **THEN** channels SHALL include: `messages` (TOPIC, default=[]), `_has_tool_call` (LAST_VALUE), `_route` (LAST_VALUE), `_session_id` (LAST_VALUE), `_agent_id` (LAST_VALUE), `_user_id` (LAST_VALUE), `_turn_index` (LAST_VALUE)
+#### Scenario：通道定义 — Channel definitions
+- **当** 图被编译时
+- **则** 通道应包括：`messages`（TOPIC，默认=[]）、`_has_tool_call`（LAST_VALUE）、`_route`（LAST_VALUE）、`_session_id`（LAST_VALUE）、`_agent_id`（LAST_VALUE）、`_user_id`（LAST_VALUE）、`_turn_index`（LAST_VALUE）

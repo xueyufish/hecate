@@ -1,81 +1,56 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Citation data model
-The system SHALL define a `Citation` schema with fields: `position` (int, 1-indexed), `kb_id` (UUID), `kb_name` (str), `document_name` (str), `chunk_id` (str), `score` (float), `content_snippet` (str, max 150 chars). Citations SHALL be serialized as OpenAI-compatible `annotations` on the assistant message with `type: "kb_citation"`.
+### 需求：引用 Schema
+系统须为引用元数据定义 schema，包含 source_type（knowledge_base, tool_call 或 message）、source_id、excerpt、relevance_score、title 和 url。
 
-#### Scenario: Citation serialization
-- **WHEN** an assistant message has associated citations
-- **THEN** the API response SHALL include an `annotations` array on the message object, where each entry has `type: "kb_citation"` and a `kb_citation` payload containing all citation fields
+#### 场景：创建引用对象
+- **当** 系统从知识库查询结果创建引用
+- **则** 引用对象包含 source_type="knowledge_base"、source_id（段落 ID）、excerpt（匹配文本）、relevance_score（分值）、title（文档标题）
 
-### Requirement: Knowledge retrieval in conversation flow
-The system SHALL accept optional `kb_ids` in `ConversationService.chat()`. When provided, it SHALL retrieve relevant chunks via `KnowledgeBaseService.search()` for each KB, rank by score, and pass the top-k chunks to the context assembler. The knowledge retrieval step SHALL be graceful — errors SHALL be logged and the conversation SHALL proceed without citations.
+#### 场景：从工具调用结果创建引用
+- **当** 系统从工具执行结果创建引用
+- **则** 引用对象包含 source_type="tool_call"、source_id（工具调用 ID）、excerpt（结果摘要）、title（工具名称）
 
-#### Scenario: Chat with knowledge bases
-- **WHEN** `kb_ids` is provided to `ConversationService.chat()`
-- **THEN** the service SHALL call `knowledge_base_service.search()` for each KB, aggregate results, sort by score descending, and pass the top-k (default 5) chunks to `ContextAssembler.assemble(knowledge=...)`
+### 需求：消息响应中的引用
+系统须在消息响应中包含引用数据。`MessageReadSchema` 须包含可选的 `citations` 字段。
 
-#### Scenario: Chat without knowledge bases
-- **WHEN** `kb_ids` is not provided or is empty
-- **THEN** the conversation SHALL proceed as before with no knowledge retrieval or citation attachment
+#### 场景：消息响应包含引用
+- **当** LLM 回复伴有一个知识库查询和两个工具调用
+- **则** `MessageReadSchema` 响应包含 3 个引用对象，包含 source_type、excerpt 和相关性分值
 
-#### Scenario: Knowledge retrieval failure
-- **WHEN** `knowledge_base_service.search()` raises an exception for a KB
-- **THEN** the service SHALL log the error, skip that KB, and continue with remaining KBs or no citations
+#### 场景：无引用时的消息响应
+- **当** LLM 回复不涉及知识库查询或工具调用
+- **则** `MessageReadSchema` 响应包含 `citations: []`
 
-### Requirement: Numbered reference prompt injection
-The system SHALL format retrieved knowledge chunks as numbered reference blocks (e.g., `[1] "chunk text..." (Source: filename)`) and inject them into the LLM prompt context. Each chunk SHALL be assigned a sequential position number starting from 1.
+### 需求：引用提取 —— 知识库
+系统须从向量搜索结果中提取引用。每个带有元数据的知识库查询结果须转换为 `CitationSchema` 对象。
 
-#### Scenario: Prompt with 3 retrieved chunks
-- **WHEN** 3 chunks are retrieved from knowledge bases
-- **THEN** the system SHALL format them as `[1] "text..." (Source: doc.pdf)\n[2] "text..." (Source: report.docx)\n[3] "text..." (Source: guide.md)` and prepend them to the system message or inject as a dedicated context block
+#### 场景：从知识库结果提取引用
+- **当** `knowledge_query()` 返回带有 `source_id`, `excerpt`, `relevance_score`, `document_title` 的结果
+- **则** 每个结果转换为包含这些字段的 `CitationSchema` 对象
 
-#### Scenario: Chunk text truncation
-- **WHEN** a chunk's content exceeds 500 characters
-- **THEN** the system SHALL truncate it to 500 characters with an ellipsis suffix
+### 需求：引用提取 —— 工具调用
+系统须从工具执行结果中提取引用。当工具结果 JSON 包含标准引用字段时，它们须转换为 `CitationSchema` 对象。
 
-### Requirement: Citations in REST API response
-The system SHALL include an `annotations` field on `ChatCompletionResponse.choices[0].message` containing the `kb_citation` annotations for the response. Each annotation SHALL map to a retrieved chunk with its position, source metadata, and score.
+#### 场景：从工具结果提取引用（有引用字段）
+- **当** 工具返回 `{"result": "success", "source": "database://orders/123", "reference": "Order #123"}`
+- **则** 创建引用对象，source_type="tool_call"、source_id="database://orders/123"、title="Order #123"
 
-#### Scenario: Non-streaming response with citations
-- **WHEN** a non-streaming chat completion uses knowledge bases
-- **THEN** the response SHALL contain `message.annotations` with one `kb_citation` entry per retrieved chunk, each including position, kb_id, kb_name, document_name, chunk_id, score, and content_snippet
+#### 场景：从工具结果提取引用（无引用字段）
+- **当** 工具返回 `{"result": "42", "unit": "celsius"}`
+- **则** 无引用创建
 
-### Requirement: Citations in SSE streaming
-The system SHALL emit a dedicated `citations` SSE event after all content chunks but before the `[DONE]` sentinel. The event SHALL contain the full citations array.
+### 需求：内联引用 UI
+系统须在消息气泡内渲染引用。引用编号标记（如 [1]、[2]）须作为可交互元素内联出现，可点击展开显示引用细节。
 
-#### Scenario: Streaming response with citations
-- **WHEN** a streaming chat completion uses knowledge bases
-- **THEN** the SSE stream SHALL include `data: {"type": "citations", "citations": [...]}\n\n` before `data: [DONE]\n\n`
+#### 场景：内联引用标签
+- **当** Agent 回复包含文本 "根据政策 [1]，年假为 20 天 [2]"
+- **则** "[1]" 和 "[2]" 渲染为可交互标签，不可点击时为带下划线的灰色数字，可展开
 
-#### Scenario: Streaming response without knowledge bases
-- **WHEN** a streaming chat completion does not use knowledge bases
-- **THEN** the SSE stream SHALL NOT include a `citations` event
+#### 场景：展开引用卡片
+- **当** 用户点击引用标签 "[1]"
+- **则** 展开的引用卡片显示在消息气泡内，包含标题、摘录文本和相关性分值
 
-### Requirement: Citation persistence
-The system SHALL store the citations array in `MessageModel.metadata_["citations"]` when the assistant message is persisted. The stored citations SHALL include all fields from the `Citation` schema.
-
-#### Scenario: Message stored with citations
-- **WHEN** an assistant message is persisted after a RAG-enabled conversation
-- **THEN** the message's `metadata_` column SHALL contain a `citations` key with the full citations array
-
-### Requirement: Citation retrieval endpoint
-The system SHALL provide `GET /api/messages/{id}/citations` that returns the citations array for a given message. If the message has no citations, it SHALL return an empty array.
-
-#### Scenario: Retrieve citations for a message
-- **WHEN** a client calls `GET /api/messages/{id}/citations` for a message with citations
-- **THEN** the response SHALL be `{"citations": [...], "message_id": "uuid"}`
-
-#### Scenario: Message not found
-- **WHEN** a client calls `GET /api/messages/{id}/citations` for a non-existent message
-- **THEN** the response SHALL be 404
-
-### Requirement: Chat completion request accepts kb_ids
-The `ChatCompletionRequest` model SHALL accept an optional `kb_ids` field (list of UUID strings). When provided, the endpoint SHALL forward it to `ConversationService.chat()`.
-
-#### Scenario: Request with kb_ids
-- **WHEN** a client sends `POST /v1/chat/completions` with `kb_ids: ["uuid1", "uuid2"]`
-- **THEN** the endpoint SHALL pass these IDs to the conversation service for knowledge retrieval
-
-#### Scenario: Request without kb_ids
-- **WHEN** a client sends `POST /v1/chat/completions` without `kb_ids`
-- **THEN** the endpoint SHALL proceed without knowledge retrieval (backward compatible)
+#### 场景：引用卡片可折叠
+- **当** 用户点击展开的引用卡片
+- **则** 卡片折叠回内联标签状态

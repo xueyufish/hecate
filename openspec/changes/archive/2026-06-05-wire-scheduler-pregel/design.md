@@ -1,84 +1,84 @@
-## Context
+## Context — 上下文
 
-`SchedulerStrategy` ABC and `FIFOScheduler` exist in `engine/scheduler.py` (implemented in change `2026-06-02-scheduler-strategy-interface`) but are not wired into `PregelRuntime`. The runtime's `execute()` method iterates `current_nodes` directly at line 144:
+`SchedulerStrategy` ABC 和 `FIFOScheduler` 存在于 `engine/scheduler.py` 中（在变更 `2026-06-02-scheduler-strategy-interface` 中实现），但尚未接入 `PregelRuntime`。运行时的 `execute()` 方法在第 144 行直接迭代 `current_nodes`：
 
 ```python
 for node_id in current_nodes:
-    # dispatch each node...
+    # 调度每个节点...
 ```
 
-The published spec (`openspec/specs/scheduler-strategy/spec.md`) already declares "PregelRuntime SHALL accept an optional `scheduler` parameter" but the code does not implement this. This change closes that gap.
+已发布的规范（`openspec/specs/scheduler-strategy/spec.md`）已经声明了 "PregelRuntime 应接受可选的 `scheduler` 参数"，但代码并未实现这一点。本变更填补了这一差距。
 
-Two services instantiate `PregelRuntime`:
-- `services/workflow/execution_service.py` L216
-- `services/workflow/test_runner.py` L199
+两个服务实例化 `PregelRuntime`：
+- `services/workflow/execution_service.py` 第 216 行
+- `services/workflow/test_runner.py` 第 199 行
 
-Both must remain compatible via the default parameter.
+两者必须通过默认参数保持兼容。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标/非目标
 
-**Goals:**
-- Wire `SchedulerStrategy` into `PregelRuntime` constructor and superstep loop
-- Pass execution context (superstep number, channel snapshot) to `select_next`
-- Verify wiring with integration tests that confirm the scheduler is called during execution
-- Keep existing behavior identical (FIFOScheduler is identity function)
+**目标：**
+- 将 `SchedulerStrategy` 接入 `PregelRuntime` 构造函数和超步循环
+- 将执行上下文（超步编号、通道快照）传递给 `select_next`
+- 通过集成测试验证调度器在执行期间被调用
+- 保持现有行为不变（FIFOScheduler 是恒等函数）
 
-**Non-Goals:**
-- Parallel execution of nodes (WorkerPool's responsibility)
-- Async `select_next` (keep sync per engine zero-dependency principle)
-- Typed context object (keep `dict` per YAGNI — no real scheduler implementations to drive field discovery)
-- Scheduler awareness of FAN_OUT/MERGE node types (not needed — `_resolve_next_nodes()` guarantees same-superstep nodes are semantically independent)
-- Dynamic weight changes during execution (P3+)
+**非目标：**
+- 节点并行执行（WorkerPool 的职责）
+- 异步 `select_next`（根据引擎零依赖原则保持同步）
+- 类型化上下文对象（根据 YAGNI 原则保持 `dict`——尚无真实调度器实现来驱动字段发现）
+- 调度器感知 FAN_OUT/MERGE 节点类型（不需要——`_resolve_next_nodes()` 保证同超步节点语义独立）
+- 执行期间的动态权重变更（P3+）
 
-## Decisions
+## Decisions — 决策
 
-### D1: Scheduler is an optional constructor parameter with FIFOScheduler default
+### D1：调度器是可选的构造函数参数，默认使用 FIFOScheduler
 
-**Choice**: `scheduler: SchedulerStrategy | None = None` → stored as `self._scheduler = scheduler or FIFOScheduler()`
+**选择**：`scheduler: SchedulerStrategy | None = None` → 存储为 `self._scheduler = scheduler or FIFOScheduler()`
 
-**Alternatives considered**:
-- Required parameter → rejected: breaks existing instantiation sites
-- No parameter, always FIFOScheduler → rejected: defeats the pluggability purpose
+**考虑的替代方案**：
+- 必需参数 → 被拒绝：破坏现有的实例化点
+- 无参数，始终使用 FIFOScheduler → 被拒绝：违背了可插拔的目的
 
-**Rationale**: Optional with default preserves backward compatibility. `None` sentinel avoids mutable default argument issues and makes intent explicit at call sites.
+**理由**：可选带默认值保持了向后兼容性。`None` 哨兵避免了可变默认参数问题，并使调用点的意图清晰明确。
 
-### D2: `select_next` called once per superstep, before the `for` loop
+### D2：每个超步调用一次 `select_next`，在 `for` 循环之前
 
-**Choice**: Replace `current_nodes` with `scheduled_nodes = self._scheduler.select_next(current_nodes, context)` at line 144, then iterate `scheduled_nodes`.
+**选择**：在第 144 行用 `scheduled_nodes = self._scheduler.select_next(current_nodes, context)` 替换 `current_nodes`，然后迭代 `scheduled_nodes`。
 
-**Alternatives considered**:
-- Call inside the loop per node → rejected: N calls for N nodes, overhead with no benefit
-- Wrap the entire superstep block in a scheduler method → rejected: over-engineering, scheduler only needs to order, not orchestrate
+**考虑的替代方案**：
+- 在循环内每个节点调用 → 被拒绝：N 个节点 N 次调用，有开销无收益
+- 将整个超步块包装在调度器方法中 → 被拒绝：过度设计，调度器只需要排序，不需要编排
 
-**Rationale**: Single call is simple and matches `select_next`'s contract (takes list, returns ordered list). The scheduler reorders but does not filter — it always returns the same node IDs.
+**理由**：单次调用简洁且符合 `select_next` 的契约（接受列表，返回有序列表）。调度器重新排序但不过滤——它总是返回相同的节点 ID。
 
-### D3: Context dict includes superstep number and channel snapshot
+### D3：上下文字典包含超步编号和通道快照
 
-**Choice**: `context = {"superstep": self._superstep, "channel_snapshot": snapshot}`
+**选择**：`context = {"superstep": self._superstep, "channel_snapshot": snapshot}`
 
-**Alternatives considered**:
-- Typed dataclass → rejected: YAGNI — no scheduler implementation exists to drive field discovery
-- Empty dict → rejected: useless for any non-trivial scheduler
-- Include graph metadata (node configs, edge list) → rejected: over-exposes engine internals
+**考虑的替代方案**：
+- 类型化数据类 → 被拒绝：YAGNI——尚无调度器实现来驱动字段发现
+- 空字典 → 被拒绝：对任何非平凡调度器都无用
+- 包含图元数据（节点配置、边列表）→ 被拒绝：过度暴露引擎内部
 
-**Rationale**: Superstep number enables priority decay strategies. Channel snapshot enables content-aware scheduling. Both are cheap to provide. Future schedulers can ignore keys they don't need.
+**理由**：超步编号支持优先级衰减策略。通道快照支持内容感知调度。两者提供成本都很低。未来的调度器可以忽略它们不需要的键。
 
-### D4: Scheduler does not filter or reject nodes
+### D4：调度器不过滤或拒绝节点
 
-**Choice**: `select_next` MUST return the same set of node IDs (possibly reordered). The runtime does not validate this, but a scheduler that drops nodes would cause graph execution to stall.
+**选择**：`select_next` 必须返回相同的节点 ID 集合（可能重新排序）。运行时不验证这一点，但丢弃节点的调度器会导致图执行停滞。
 
-**Rationale**: Filtering is a scheduling concern but we have no use case for it. If needed in P3, add a `filter_next` method rather than overloading `select_next`.
+**理由**：过滤是调度关注点，但我们没有用例。如果在 P3 中需要，添加 `filter_next` 方法而不是重载 `select_next`。
 
-### D5: FAN_OUT/MERGE nodes passed through scheduler transparently
+### D5：FAN_OUT/MERGE 节点透明地通过调度器传递
 
-**Choice**: The scheduler receives all `current_nodes` including any FAN_OUT/MERGE nodes. The special handling inside the loop (L151-159) runs after scheduling.
+**选择**：调度器接收所有 `current_nodes`，包括任何 FAN_OUT/MERGE 节点。循环内的特殊处理（第 151-159 行）在调度之后运行。
 
-**Rationale**: `_resolve_next_nodes()` guarantees that nodes in the same `current_nodes` list are semantically independent. FAN_OUT branches are dispatched by `_dispatch_fan_out()` internally — they don't appear in `current_nodes`. Reordering FAN_OUT/MERGE relative to regular nodes within the same superstep is safe by construction.
+**理由**：`_resolve_next_nodes()` 保证同一 `current_nodes` 列表中的节点在语义上是独立的。FAN_OUT 分支由 `_dispatch_fan_out()` 内部调度——它们不会出现在 `current_nodes` 中。在同一超步内重新排序 FAN_OUT/MERGE 与普通节点之间的顺序是安全的。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险/权衡
 
-| Risk | Mitigation |
-|------|-----------|
-| Scheduler drops nodes, causing execution stall | Document contract clearly; FIFOScheduler guarantees passthrough; trust model for custom schedulers |
-| Context dict keys may change in future | Document current keys; treat as advisory — schedulers should handle unknown keys gracefully |
-| Overhead from scheduler call on single-node supersteps | FIFOScheduler is O(1) passthrough; negligible compared to LLM calls |
+| 风险 | 缓解措施 |
+|------|---------|
+| 调度器丢弃节点，导致执行停滞 | 明确记录契约；FIFOScheduler 保证透传；自定义调度器采用信任模型 |
+| 上下文字典键将来可能变更 | 记录当前键；视为建议性——调度器应优雅处理未知键 |
+| 单节点超步上调度器调用的开销 | FIFOScheduler 是 O(1) 透传；与 LLM 调用相比可忽略 |

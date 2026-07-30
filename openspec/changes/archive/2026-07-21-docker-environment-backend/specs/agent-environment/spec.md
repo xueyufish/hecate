@@ -1,155 +1,162 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Shell command execution in AgentEnvironment
-The `AgentEnvironment` ABC SHALL provide an `exec_shell(command, *, cwd, timeout) -> ExecResult` method for executing shell commands inside the environment. `ExecResult` SHALL contain `exit_code: int`, `stdout: bytes`, and `stderr: bytes`. All implementations (`LocalEnvironment`, `DockerEnvironment`) MUST implement this method.
+### 需求：在 AgentEnvironment 中执行 Shell 命令
 
-#### Scenario: LocalEnvironment exec_shell runs on host
-- **WHEN** `exec_shell(["echo", "hello"])` is called on a `LocalEnvironment`
-- **THEN** the command runs via `asyncio.create_subprocess_exec` on the host
-- **AND** the returned `ExecResult` has `exit_code=0`, `stdout=b"hello\n"`
+`AgentEnvironment` ABC 应提供一个 `exec_shell(command, *, cwd, timeout) -> ExecResult` 方法，用于在环境内执行 Shell 命令。`ExecResult` 应包含 `exit_code: int`、`stdout: bytes` 和 `stderr: bytes`。所有实现（`LocalEnvironment`、`DockerEnvironment`）必须实现此方法。
 
-#### Scenario: exec_shell with working directory
-- **WHEN** `exec_shell(["ls"], cwd="files/")` is called
-- **THEN** the command executes with the specified directory as its working directory
+#### 场景：LocalEnvironment exec_shell 在主机上运行
+- **当** 在 `LocalEnvironment` 上调用 `exec_shell(["echo", "hello"])` 时
+- **则** 命令通过 `asyncio.create_subprocess_exec` 在主机上运行
+- **且** 返回的 `ExecResult` 具有 `exit_code=0`、`stdout=b"hello\n"`
 
-#### Scenario: exec_shell with timeout
-- **WHEN** `exec_shell(["sleep", "10"], timeout=1.0)` is called
-- **THEN** the command is terminated after 1 second
-- **AND** the returned `ExecResult` has `exit_code=-1` and `stderr` containing a timeout message
+#### 场景：带工作目录的 exec_shell
+- **当** 调用 `exec_shell(["ls"], cwd="files/")` 时
+- **则** 命令以指定目录作为其工作目录执行
 
-#### Scenario: exec_shell captures stderr separately
-- **WHEN** a command writes to stderr
-- **THEN** `ExecResult.stderr` contains the stderr output and `ExecResult.stdout` contains only stdout
+#### 场景：带超时的 exec_shell
+- **当** 调用 `exec_shell(["sleep", "10"], timeout=1.0)` 时
+- **则** 命令在 1 秒后被终止
+- **且** 返回的 `ExecResult` 具有 `exit_code=-1` 且 `stderr` 包含超时消息
 
-### Requirement: DockerEnvironment container backend
-The system SHALL provide a `DockerEnvironment` implementation of `AgentEnvironment` that isolates an agent's files and processes inside a Docker container. Each agent SHALL have its own container with a named volume (`agent-{agent_id}`) mounted at `/env` containing subdirectories `sessions/`, `files/`, `memory/`, `skills/`.
+#### 场景：exec_shell 分别捕获 stderr
+- **当** 命令写入 stderr 时
+- **则** `ExecResult.stderr` 包含 stderr 输出，`ExecResult.stdout` 仅包含 stdout
 
-#### Scenario: DockerEnvironment creates container on first access
-- **WHEN** `EnvironmentManager.get_or_create(agent_id)` is called with `AGENT_ENV_BACKEND=docker`
-- **THEN** a Docker container is created with image `DOCKER_AGENT_IMAGE`, volume `agent-{agent_id}` mounted at `/env`, and runtime `DOCKER_RUNTIME`
-- **AND** the container's `/env` directory has `sessions/`, `files/`, `memory/`, `skills/` subdirectories
+### 需求：DockerEnvironment 容器后端
 
-#### Scenario: DockerEnvironment reuses warm container
-- **WHEN** a container for `agent_id` exists in the warm pool
-- **THEN** `get_or_create(agent_id)` reuses that container instead of creating a new one
-- **AND** the TTL timer is reset
+系统应提供 `DockerEnvironment` 实现 `AgentEnvironment`，将 Agent 的文件和进程隔离在 Docker 容器内。每个 Agent 应有自己的容器，带有命名卷（`agent-{agent_id}`）挂载到 `/env`，包含子目录 `sessions/`、`files/`、`memory/`、`skills/`。
 
-#### Scenario: DockerEnvironment file write and read
-- **WHEN** `write_file("files/report.txt", b"hello")` is called on a `DockerEnvironment`
-- **THEN** the file is written inside the container at `/env/files/report.txt`
-- **AND** `read_file("files/report.txt")` returns `b"hello"`
+#### 场景：DockerEnvironment 在首次访问时创建容器
+- **当** 使用 `AGENT_ENV_BACKEND=docker` 调用 `EnvironmentManager.get_or_create(agent_id)` 时
+- **则** 创建 Docker 容器，使用镜像 `DOCKER_AGENT_IMAGE`，卷 `agent-{agent_id}` 挂载到 `/env`，运行时 `DOCKER_RUNTIME`
+- **且** 容器的 `/env` 目录具有 `sessions/`、`files/`、`memory/`、`skills/` 子目录
 
-#### Scenario: DockerEnvironment exec_shell runs inside container
-- **WHEN** `exec_shell(["pip", "install", "pandas"])` is called on a `DockerEnvironment`
-- **THEN** the command runs inside the container via `docker exec`
-- **AND** the returned `ExecResult` reflects the command's exit code and output from inside the container
+#### 场景：DockerEnvironment 复用热容器
+- **当** `agent_id` 的容器存在于热池中时
+- **则** `get_or_create(agent_id)` 复用该容器而非创建新容器
+- **且** TTL 计时器被重置
 
-#### Scenario: DockerEnvironment container isolation
-- **WHEN** agent A's container is running
-- **THEN** agent A cannot access agent B's volume or files
-- **AND** agent A's processes are isolated from agent B's processes via container namespaces
+#### 场景：DockerEnvironment 文件写入和读取
+- **当** 在 `DockerEnvironment` 上调用 `write_file("files/report.txt", b"hello")` 时
+- **则** 文件被写入容器内的 `/env/files/report.txt`
+- **且** `read_file("files/report.txt")` 返回 `b"hello"`
 
-#### Scenario: DockerEnvironment with gVisor runtime
-- **WHEN** `DOCKER_RUNTIME=runsc` is configured
-- **THEN** containers are created with the `runsc` runtime
-- **AND** syscalls inside the container are intercepted by gVisor's user-space kernel
+#### 场景：DockerEnvironment exec_shell 在容器内运行
+- **当** 在 `DockerEnvironment` 上调用 `exec_shell(["pip", "install", "pandas"])` 时
+- **则** 命令通过 `docker exec` 在容器内运行
+- **且** 返回的 `ExecResult` 反映容器内命令的退出代码和输出
 
-### Requirement: EnvironmentManager backend selection
-The `EnvironmentManager` SHALL support selecting the environment backend via the `AGENT_ENV_BACKEND` config setting. Valid values are `"local"` (default) and `"docker"`.
+#### 场景：DockerEnvironment 容器隔离
+- **当** Agent A 的容器正在运行时
+- **则** Agent A 无法访问 Agent B 的卷或文件
+- **且** Agent A 的进程通过容器命名空间与 Agent B 的进程隔离
 
-#### Scenario: Default backend is local
-- **WHEN** `AGENT_ENV_BACKEND` is not set
-- **THEN** `EnvironmentManager` creates `LocalEnvironment` instances (existing behavior)
+#### 场景：带 gVisor 运行时的 DockerEnvironment
+- **当** 配置了 `DOCKER_RUNTIME=runsc` 时
+- **则** 容器以 `runsc` 运行时创建
+- **且** 容器内的系统调用被 gVisor 的用户空间内核拦截
 
-#### Scenario: Docker backend selection
-- **WHEN** `AGENT_ENV_BACKEND=docker` is set
-- **THEN** `EnvironmentManager` creates `DockerEnvironment` instances
+### 需求：EnvironmentManager 后端选择
 
-#### Scenario: Invalid backend rejected at startup
-- **WHEN** `AGENT_ENV_BACKEND` is set to an unrecognized value (e.g., `"e2b"`)
-- **THEN** the system raises a `ValueError` at `EnvironmentManager` initialization
+`EnvironmentManager` 应支持通过 `AGENT_ENV_BACKEND` 配置设置选择环境后端。有效值为 `"local"`（默认）和 `"docker"`。
 
-### Requirement: Warm pool for container reuse
-The `EnvironmentManager` SHALL maintain a warm pool of idle Docker containers to reduce cold-start latency. When a container is closed, it moves to the warm pool instead of being destroyed. The warm pool has a configurable maximum size and idle timeout.
+#### 场景：默认后端为 local
+- **当** 未设置 `AGENT_ENV_BACKEND` 时
+- **则** `EnvironmentManager` 创建 `LocalEnvironment` 实例（现有行为）
 
-#### Scenario: Container moves to warm pool on close
-- **WHEN** `close(agent_id)` is called
-- **THEN** the container is stopped but not destroyed
-- **AND** it is placed in the warm pool for potential reuse
+#### 场景：选择 Docker 后端
+- **当** 设置 `AGENT_ENV_BACKEND=docker` 时
+- **则** `EnvironmentManager` 创建 `DockerEnvironment` 实例
 
-#### Scenario: Warm pool reuse on re-access
-- **WHEN** `get_or_create(agent_id)` is called after a close
-- **AND** the container is still in the warm pool
-- **THEN** the container is restarted and reused
+#### 场景：在启动时拒绝无效后端
+- **当** `AGENT_ENV_BACKEND` 设置为未识别的值（例如 `"e2b"`）时
+- **则** 系统在 `EnvironmentManager` 初始化时抛出 `ValueError`
 
-#### Scenario: Warm pool eviction when full
-- **WHEN** the warm pool is at maximum capacity
-- **AND** a new container needs to be evicted
-- **THEN** the oldest idle container is destroyed (its volume persists)
+### 需求：用于容器复用的热池
 
-#### Scenario: Warm pool idle timeout
-- **WHEN** a container has been idle in the warm pool longer than the configured timeout
-- **THEN** the container is destroyed on the next sweep (its volume persists)
+`EnvironmentManager` 应维护一个空闲 Docker 容器的热池，以减少冷启动延迟。当容器关闭时，它移动到热池而不是被销毁。热池具有可配置的最大大小和空闲超时。
 
-## MODIFIED Requirements
+#### 场景：关闭时容器移动到热池
+- **当** 调用 `close(agent_id)` 时
+- **则** 容器被停止但不被销毁
+- **且** 它被放入热池以备将来复用
 
-### Requirement: AgentEnvironment abstraction
-The system SHALL provide an `AgentEnvironment` ABC that represents the agent's persistent execution environment. Each environment is scoped to a single agent and contains subdirectories for sessions, files, memory, and skills. The ABC SHALL include an `exec_shell(command, *, cwd, timeout) -> ExecResult` method for executing shell commands inside the environment.
+#### 场景：重新访问时的热池复用
+- **当** 在关闭后调用 `get_or_create(agent_id)` 时
+- **且** 容器仍在热池中
+- **则** 容器被重启并复用
 
-#### Scenario: Environment has required subdirectories
-- **WHEN** an agent environment is created
-- **THEN** the environment contains `sessions/`, `files/`, `memory/`, and `skills/` subdirectories
+#### 场景：热池满时驱逐
+- **当** 热池达到最大容量时
+- **且** 需要驱逐新容器
+- **则** 最旧的空闲容器被销毁（其卷持久存在）
 
-#### Scenario: Environment is scoped to agent
-- **WHEN** an environment is accessed for agent A
-- **THEN** agent A cannot access agent B's environment files
+#### 场景：热池空闲超时
+- **当** 容器在热池中空闲超过配置的超时时
+- **则** 容器在下一次清理时被销毁（其卷持久存在）
 
-#### Scenario: exec_shell is available on all implementations
-- **WHEN** any `AgentEnvironment` implementation is used
-- **THEN** `exec_shell(command)` is available and returns an `ExecResult`
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: LocalEnvironment filesystem implementation
-The system SHALL provide a `LocalEnvironment` implementation that stores agent data on the local filesystem at `{WORKSPACE_ROOT}/{agent_id}/`. The `LocalEnvironment` SHALL implement `exec_shell` by running commands on the host via `asyncio.create_subprocess_exec`.
+### 需求：AgentEnvironment 抽象
 
-#### Scenario: File write and read
-- **WHEN** a file is written to `files/report.txt` in the environment
-- **THEN** the file can be read back with the same content
+系统应提供一个 `AgentEnvironment` ABC，表示 Agent 的持久执行环境。每个环境作用于单个 Agent，包含会话、文件、内存和技能的子目录。ABC 应包含 `exec_shell(command, *, cwd, timeout) -> ExecResult` 方法，用于在环境内执行 Shell 命令。
 
-#### Scenario: File listing
-- **WHEN** files exist in the `files/` subdirectory
-- **THEN** `list_files("files/")` returns the file list with metadata
+#### 场景：环境包含必需的子目录
+- **当** 创建 Agent 环境时
+- **则** 环境包含 `sessions/`、`files/`、`memory/` 和 `skills/` 子目录
 
-#### Scenario: File deletion
-- **WHEN** a file is deleted from the environment
-- **THEN** subsequent `exists()` returns False
+#### 场景：环境作用于 Agent
+- **当** 访问 Agent A 的环境时
+- **则** Agent A 无法访问 Agent B 的环境文件
 
-#### Scenario: exec_shell runs on host
-- **WHEN** `exec_shell(["whoami"])` is called
-- **THEN** the command runs on the host and returns the host user
+#### 场景：exec_shell 在所有实现上可用
+- **当** 使用任何 `AgentEnvironment` 实现时
+- **则** `exec_shell(command)` 可用并返回 `ExecResult`
 
-### Requirement: EnvironmentManager lifecycle
-The system SHALL provide an `EnvironmentManager` that manages environment lifecycle with lazy creation, TTL-based eviction, and configurable backend selection (`AGENT_ENV_BACKEND`). When `AGENT_ENV_BACKEND=docker`, the manager SHALL maintain a warm pool of idle containers for reuse.
+### 需求：LocalEnvironment 文件系统实现
 
-#### Scenario: Lazy creation on first use
-- **WHEN** `get_environment(agent_id)` is called for an agent with no existing environment
-- **THEN** a new environment is created and returned
+系统应提供一个 `LocalEnvironment` 实现，将 Agent 数据存储在本地文件系统的 `{WORKSPACE_ROOT}/{agent_id}/`。`LocalEnvironment` 应通过 `asyncio.create_subprocess_exec` 在主机上运行命令来实现 `exec_shell`。
 
-#### Scenario: Cached environment reuse
-- **WHEN** `get_environment(agent_id)` is called twice for the same agent
-- **THEN** the same environment instance is returned (cached)
+#### 场景：文件写入和读取
+- **当** 文件写入环境的 `files/report.txt` 时
+- **则** 该文件可以以相同内容被读取回来
 
-#### Scenario: TTL eviction
-- **WHEN** an environment has been idle for longer than the configured TTL
-- **THEN** the environment is closed and removed from cache on next access
+#### 场景：文件列表
+- **当** 文件存在于 `files/` 子目录中时
+- **则** `list_files("files/")` 返回文件列表及元数据
 
-#### Scenario: TTL reset on interaction
-- **WHEN** a file operation is performed on an environment
-- **THEN** the environment's TTL timer is reset
+#### 场景：文件删除
+- **当** 文件从环境中被删除时
+- **则** 后续的 `exists()` 返回 False
 
-#### Scenario: Close all environments
-- **WHEN** `close_all()` is called (e.g., on application shutdown)
-- **THEN** all cached environments are closed
+#### 场景：exec_shell 在主机上运行
+- **当** 调用 `exec_shell(["whoami"])` 时
+- **则** 命令在主机上运行并返回主机用户
 
-#### Scenario: Backend selection via config
-- **WHEN** `AGENT_ENV_BACKEND=docker` is set
-- **THEN** the manager creates `DockerEnvironment` instances instead of `LocalEnvironment`
+### 需求：EnvironmentManager 生命周期
+
+系统应提供一个 `EnvironmentManager`，使用懒创建、基于 TTL 的驱逐和可配置的后端选择（`AGENT_ENV_BACKEND`）来管理环境生命周期。当 `AGENT_ENV_BACKEND=docker` 时，管理器应维护一个空闲容器的热池以供复用。
+
+#### 场景：首次使用懒创建
+- **当** 为没有现有环境的 Agent 调用 `get_environment(agent_id)` 时
+- **则** 创建并返回一个新环境
+
+#### 场景：缓存环境复用
+- **当** 为同一 Agent 调用两次 `get_environment(agent_id)` 时
+- **则** 返回同一环境实例（缓存）
+
+#### 场景：TTL 驱逐
+- **当** 环境空闲时间超过配置的 TTL 时
+- **则** 下次访问时环境被关闭并从缓存中移除
+
+#### 场景：交互时 TTL 重置
+- **当** 对环境执行文件操作时
+- **则** 环境的 TTL 计时器被重置
+
+#### 场景：关闭所有环境
+- **当** 调用 `close_all()`（例如应用关闭时）
+- **则** 所有缓存的环境被关闭
+
+#### 场景：通过配置选择后端
+- **当** 设置 `AGENT_ENV_BACKEND=docker` 时
+- **则** 管理器创建 `DockerEnvironment` 实例而非 `LocalEnvironment`

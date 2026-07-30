@@ -1,101 +1,101 @@
-## 1. Engine Types & Data Model
+## 1. Engine Types & Data Model — 引擎类型与数据模型
 
-- [x] 1.1 Add `ChannelAccess` dataclass to `engine/types.py` with `readable: set[str]` and `writable: set[str]` fields
-- [x] 1.2 Add `channel_access: dict[str, ChannelAccess]` field to `CompiledGraph` dataclass (default empty dict)
-- [x] 1.3 Add `routing_mode: str | None` and `routing_config: dict[str, Any] | None` fields to `NodeConfig` dataclass in `engine/types.py`
-- [x] 1.4 Add `RoutingMode` StrEnum in `engine/types.py` with values `CONDITION`, `INTENT`, `DYNAMIC`
-- [x] 1.5 Add `IntentPattern` dataclass in `engine/types.py` with `pattern: str` and `target: str` fields
+- [x] 1.1 向 `engine/types.py` 添加 `ChannelAccess` 数据类，包含 `readable: set[str]` 和 `writable: set[str]` 字段
+- [x] 1.2 向 `CompiledGraph` 数据类添加 `channel_access: dict[str, ChannelAccess]` 字段（默认空字典）
+- [x] 1.3 向 `engine/types.py` 中的 `NodeConfig` 数据类添加 `routing_mode: str | None` 和 `routing_config: dict[str, Any] | None` 字段
+- [x] 1.4 在 `engine/types.py` 中添加 `RoutingMode` StrEnum，值为 `CONDITION`、`INTENT`、`DYNAMIC`
+- [x] 1.5 在 `engine/types.py` 中添加 `IntentPattern` 数据类，包含 `pattern: str` 和 `target: str` 字段
 
-## 2. Graph DSL Schema & Parser
+## 2. Graph DSL Schema & Parser — Graph DSL 模式与解析器
 
-- [x] 2.1 Update `schemas/graph-dsl.schema.json` — add `routing_mode` (enum: condition/intent/dynamic) and `routing_config` (object with intent_patterns, candidate_agents, routing_prompt, allow_repeated_speaker) to CONDITION node config properties
-- [x] 2.2 Update `schemas/graph-dsl.schema.json` — add `"dynamic_handoff"` to edge `trigger` enum values
-- [x] 2.3 Update `engine/graph_dsl.py` `parse_graph()` to parse `routing_mode` and `routing_config` from CONDITION node config
-- [x] 2.4 Update `engine/graph_dsl.py` to validate `routing_mode` values — raise `GraphValidationError` for unknown modes
-- [x] 2.5 Add test: parse_graph with intent routing config produces correct NodeConfig
-- [x] 2.6 Add test: parse_graph with dynamic routing config produces correct NodeConfig
-- [x] 2.7 Add test: parse_graph with invalid routing_mode raises GraphValidationError
-- [x] 2.8 Add test: parse_graph with dynamic_handoff trigger produces correct Edge
+- [x] 2.1 更新 `schemas/graph-dsl.schema.json` — 向 CONDITION 节点配置属性添加 `routing_mode`（枚举：condition/intent/dynamic）和 `routing_config`（包含 intent_patterns、candidate_agents、routing_prompt、allow_repeated_speaker 的对象）
+- [x] 2.2 更新 `schemas/graph-dsl.schema.json` — 向边 `trigger` 枚举值添加 `"dynamic_handoff"`
+- [x] 2.3 更新 `engine/graph_dsl.py` 的 `parse_graph()` 以从 CONDITION 节点配置解析 `routing_mode` 和 `routing_config`
+- [x] 2.4 更新 `engine/graph_dsl.py` 以验证 `routing_mode` 值 — 对未知模式抛出 `GraphValidationError`
+- [x] 2.5 添加测试：使用意图路由配置的 parse_graph 产生正确的 NodeConfig
+- [x] 2.6 添加测试：使用动态路由配置的 parse_graph 产生正确的 NodeConfig
+- [x] 2.7 添加测试：使用无效 routing_mode 的 parse_graph 抛出 GraphValidationError
+- [x] 2.8 添加测试：使用 dynamic_handoff 触发器的 parse_graph 产生正确的 Edge
 
-## 3. Compiler Validation
+## 3. Compiler Validation — 编译器验证
 
-- [x] 3.1 Add `_validate_channel_access()` method to `GraphCompiler` — iterate nodes, check readable/writable against state channels, log WARNING for mismatches
-- [x] 3.2 Add `_validate_routing_config()` method to `GraphCompiler` — validate intent mode has intent_patterns, dynamic mode has candidate_agents, candidate agents reference existing nodes
-- [x] 3.3 Populate `CompiledGraph.channel_access` map in `compile()` from node config channels
-- [x] 3.4 Integrate both new validation methods into `compile()` pipeline (after existing validations, before CompiledGraph construction)
-- [x] 3.5 Add test: compiler warns when node declares readable channel not in state
-- [x] 3.6 Add test: compiler warns when node declares writable channel not in state
-- [x] 3.7 Add test: compiler raises GraphValidationError for intent mode without intent_patterns
-- [x] 3.8 Add test: compiler raises GraphValidationError for dynamic mode without candidate_agents
-- [x] 3.9 Add test: compiler raises GraphValidationError for dynamic mode with nonexistent candidate
-- [x] 3.10 Add test: compiler populates channel_access map correctly
-- [x] 3.11 Add test: compiler accepts valid intent routing config
-- [x] 3.12 Add test: compiler accepts valid dynamic routing config
+- [x] 3.1 向 `GraphCompiler` 添加 `_validate_channel_access()` 方法 — 遍历节点，对照状态通道检查 readable/writable，对不匹配记录 WARNING
+- [x] 3.2 向 `GraphCompiler` 添加 `_validate_routing_config()` 方法 — 验证意图模式有 intent_patterns，动态模式有 candidate_agents，候选 agent 引用现有节点
+- [x] 3.3 在 `compile()` 中从节点配置通道填充 `CompiledGraph.channel_access` 映射
+- [x] 3.4 将两个新验证方法集成到 `compile()` 管道中（在现有验证之后，CompiledGraph 构建之前）
+- [x] 3.5 添加测试：节点声明不在状态中的可读通道时编译器发出警告
+- [x] 3.6 添加测试：节点声明不在状态中的可写通道时编译器发出警告
+- [x] 3.7 添加测试：意图模式无 intent_patterns 时编译器抛出 GraphValidationError
+- [x] 3.8 添加测试：动态模式无 candidate_agents 时编译器抛出 GraphValidationError
+- [x] 3.9 添加测试：动态模式包含不存在的候选时编译器抛出 GraphValidationError
+- [x] 3.10 添加测试：编译器正确填充 channel_access 映射
+- [x] 3.11 添加测试：编译器接受有效的意图路由配置
+- [x] 3.12 添加测试：编译器接受有效的动态路由配置
 
-## 4. Runtime Channel Access Enforcement
+## 4. Runtime Channel Access Enforcement — 运行时通道访问执行
 
-- [x] 4.1 Add optional `node_id: str | None = None` parameter to `ChannelManager.read()`
-- [x] 4.2 Add optional `node_id: str | None = None` parameter to `ChannelManager.write()`
-- [x] 4.3 In `ChannelManager.read()` — when `node_id` provided, check against compiled graph's channel_access map and log WARNING for undeclared access
-- [x] 4.4 In `ChannelManager.write()` — when `node_id` provided, check against compiled graph's channel_access map and log WARNING for undeclared access
-- [x] 4.5 Pass `node_id` from PregelRuntime's node execution loop to ChannelManager calls
-- [x] 4.6 Add test: ChannelManager.read() logs warning for undeclared channel access
-- [x] 4.7 Add test: ChannelManager.write() logs warning for undeclared channel access
-- [x] 4.8 Add test: ChannelManager.read() does not warn when node_id is None
-- [x] 4.9 Add test: ChannelManager.read() does not warn for declared channel access
+- [x] 4.1 向 `ChannelManager.read()` 添加可选参数 `node_id: str | None = None`
+- [x] 4.2 向 `ChannelManager.write()` 添加可选参数 `node_id: str | None = None`
+- [x] 4.3 在 `ChannelManager.read()` 中 — 当提供 `node_id` 时，对照已编译图谱的 channel_access 映射检查，对未声明访问记录 WARNING
+- [x] 4.4 在 `ChannelManager.write()` 中 — 当提供 `node_id` 时，对照已编译图谱的 channel_access 映射检查，对未声明访问记录 WARNING
+- [x] 4.5 从 PregelRuntime 的节点执行循环向 ChannelManager 调用传递 `node_id`
+- [x] 4.6 添加测试：ChannelManager.read() 对未声明的通道访问记录警告
+- [x] 4.7 添加测试：ChannelManager.write() 对未声明的通道访问记录警告
+- [x] 4.8 添加测试：node_id 为 None 时 ChannelManager.read() 不发出警告
+- [x] 4.9 添加测试：ChannelManager.read() 对已声明的通道访问不发出警告
 
-## 5. Routing Mode Evaluation Engine
+## 5. Routing Mode Evaluation Engine — 路由模式评估引擎
 
-- [x] 5.1 Add `evaluate_condition_routing()` function to new `engine/routing.py` — dispatches based on routing_mode
-- [x] 5.2 Implement condition mode evaluation (delegates to existing expression evaluator)
-- [x] 5.3 Implement intent mode evaluation — iterate intent_patterns, regex match against input, return target on first match
-- [x] 5.4 Implement intent mode LLM fallback — call `EnginePort.llm_invoke()` with routing_prompt when no pattern matches
-- [x] 5.5 Implement dynamic mode evaluation — call `EnginePort.llm_invoke()` with candidate_agents list and routing_prompt
-- [x] 5.6 Implement dynamic mode `allow_repeated_speaker` — filter last speaker from candidates before LLM call
-- [x] 5.7 Implement dynamic mode response validation — check LLM response against candidate_agents, fall back to "default" target
-- [x] 5.8 Integrate routing evaluation into PregelRuntime's condition node execution path
-- [x] 5.9 Add test: intent mode with matching pattern returns correct target
-- [x] 5.10 Add test: intent mode with no pattern match and LLM fallback returns LLM-classified target
-- [x] 5.11 Add test: intent mode with no pattern match and no routing_prompt returns "default"
-- [x] 5.12 Add test: dynamic mode returns valid agent from LLM response
-- [x] 5.13 Add test: dynamic mode invalid LLM response falls back to "default"
-- [x] 5.14 Add test: dynamic mode allow_repeated_speaker=false excludes last speaker
+- [x] 5.1 向新的 `engine/routing.py` 添加 `evaluate_condition_routing()` 函数 — 根据 routing_mode 分发
+- [x] 5.2 实现 condition 模式评估（委托给现有表达式求值器）
+- [x] 5.3 实现 intent 模式评估 — 遍历 intent_patterns，对输入进行正则匹配，找到第一个匹配时返回目标
+- [x] 5.4 实现 intent 模式 LLM 后备 — 当无模式匹配时，使用 routing_prompt 调用 `EnginePort.llm_invoke()`
+- [x] 5.5 实现 dynamic 模式评估 — 使用 candidate_agents 列表和 routing_prompt 调用 `EnginePort.llm_invoke()`
+- [x] 5.6 实现 dynamic 模式 `allow_repeated_speaker` — 在 LLM 调用前从候选中过滤上一个发言者
+- [x] 5.7 实现 dynamic 模式响应验证 — 对照 candidate_agents 检查 LLM 响应，回退到 "default" 目标
+- [x] 5.8 将路由评估集成到 PregelRuntime 的条件节点执行路径中
+- [x] 5.9 添加测试：意图模式匹配模式返回正确目标
+- [x] 5.10 添加测试：意图模式无模式匹配且 LLM 后备返回 LLM 分类的目标
+- [x] 5.11 添加测试：意图模式无模式匹配且无 routing_prompt 返回 "default"
+- [x] 5.12 添加测试：动态模式从 LLM 响应返回有效 agent
+- [x] 5.13 添加测试：动态模式无效 LLM 响应回退到 "default"
+- [x] 5.14 添加测试：动态模式 allow_repeated_speaker=false 排除上一个发言者
 
-## 6. Dynamic Handoff Support
+## 6. Dynamic Handoff Support — 动态 Handoff 支持
 
-- [x] 6.1 Update `_validate_handoff_edges()` in compiler to also validate `dynamic_handoff` trigger edges
-- [x] 6.2 Update handoff tool injection logic — when edge trigger is `dynamic_handoff`, inject `handoff_to_agent` with multiple target candidates
-- [x] 6.3 Update handoff tool execution — validate target against allowed candidate list, return error for invalid targets
-- [x] 6.4 Add test: dynamic handoff edge triggers tool injection with multiple targets
-- [x] 6.5 Add test: dynamic handoff invalid target returns error
-- [x] 6.6 Add test: dynamic handoff cycle detection works
+- [x] 6.1 更新编译器中的 `_validate_handoff_edges()` 以同时验证 `dynamic_handoff` 触发器边
+- [x] 6.2 更新 handoff 工具注入逻辑 — 当边触发器为 `dynamic_handoff` 时，注入包含多个目标候选的 `handoff_to_agent`
+- [x] 6.3 更新 handoff 工具执行 — 对照允许的候选列表验证目标，对无效目标返回错误
+- [x] 6.4 添加测试：动态 handoff 边触发包含多个目标的工具注入
+- [x] 6.5 添加测试：动态 handoff 无效目标返回错误
+- [x] 6.6 添加测试：动态 handoff 循环检测正常工作
 
-## 7. Frontend — Channel Access Summary
+## 7. Frontend — Channel Access Summary — 前端 — 通道访问摘要
 
-- [x] 7.1 Add channel access summary section to agent node config panel in `web/src/components/workflow/config-panel.tsx`
-- [x] 7.2 Display readable/writable channels grouped by type with broadcast participation highlights
-- [x] 7.3 Show "No channel access configured" message for nodes without channel declarations
-- [x] 7.4 Add broadcast icon for TOPIC channels shared with other agents
+- [x] 7.1 在 `web/src/components/workflow/config-panel.tsx` 的 agent 节点配置面板中添加通道访问摘要部分
+- [x] 7.2 按类型分组的可读/可写通道显示，带广播参与高亮
+- [x] 7.3 对无通道声明的节点显示"未配置通道访问"消息
+- [x] 7.4 为与其他 agent 共享的 TOPIC 通道添加广播图标
 
-## 8. Frontend — Routing Mode Config Panel
+## 8. Frontend — Routing Mode Config Panel — 前端 — 路由模式配置面板
 
-- [x] 8.1 Add routing mode selector (Condition/Intent/Dynamic) to condition node config panel
-- [x] 8.2 Implement Intent mode UI — intent pattern rows (add/remove) with regex input and target node selector
-- [x] 8.3 Implement Intent mode UI — optional routing prompt textarea
-- [x] 8.4 Implement Dynamic mode UI — candidate agents multi-select, routing prompt textarea, allow_repeated_speaker toggle
-- [x] 8.5 Persist routing_mode and routing_config to graph DSL node data on change
-- [x] 8.6 Condition mode (default) shows existing expression field only
+- [x] 8.1 向 condition 节点配置面板添加路由模式选择器（Condition/Intent/Dynamic）
+- [x] 8.2 实现 Intent 模式 UI — 带正则输入和目标节点选择器的意图模式行（添加/删除）
+- [x] 8.3 实现 Intent 模式 UI — 可选的 routing prompt 文本域
+- [x] 8.4 实现 Dynamic 模式 UI — 候选 agent 多选、routing prompt 文本域、allow_repeated_speaker 开关
+- [x] 8.5 在变更时将 routing_mode 和 routing_config 持久化到图谱 DSL 节点数据
+- [x] 8.6 Condition 模式（默认）仅显示现有表达式字段
 
-## 9. Frontend — Dynamic Handoff Edge
+## 9. Frontend — Dynamic Handoff Edge — 前端 — 动态 Handoff 边
 
-- [x] 9.1 Add "Dynamic Handoff" option to edge type selector in `edge-type-selector.tsx`
-- [x] 9.2 Render dynamic handoff edges with distinct style (dashed purple + sparkle icon)
-- [x] 9.3 Support multi-target selection when creating dynamic handoff edges
+- [x] 9.1 在 `edge-type-selector.tsx` 中的边类型选择器添加"动态 Handoff"选项
+- [x] 9.2 使用独特样式渲染动态 handoff 边（紫色虚线 + 闪光图标）
+- [x] 9.3 创建动态 handoff 边时支持多目标选择
 
-## 10. Verification
+## 10. Verification — 验证
 
-- [x] 10.1 Run `ruff check src/hecate/ tests/` — 0 errors
-- [x] 10.2 Run `ruff format --check src/ tests/` — 0 errors
-- [x] 10.3 Run `mypy src/` — 0 errors
-- [x] 10.4 Run `python -m pytest tests/test_engine/ -q` — all pass (495 passed)
-- [x] 10.5 Run `npx tsc --noEmit` in web/ — 0 new errors (1 pre-existing in dsl-bridge.test.ts)
+- [x] 10.1 运行 `ruff check src/hecate/ tests/` — 0 错误
+- [x] 10.2 运行 `ruff format --check src/ tests/` — 0 错误
+- [x] 10.3 运行 `mypy src/` — 0 错误
+- [x] 10.4 运行 `python -m pytest tests/test_engine/ -q` — 全部通过（495 通过）
+- [x] 10.5 在 web/ 中运行 `npx tsc --noEmit` — 0 新错误（dsl-bridge.test.ts 中有 1 个预先存在的错误）

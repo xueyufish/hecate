@@ -1,45 +1,45 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: ModelRegistryModel stores structured model metadata
-The system SHALL add a `model_metadata` JSON column to `ModelRegistryModel` containing `modalities` (input/output arrays), `capabilities` (boolean flags), and `limits` (context/output integers).
+### Requirement: ModelRegistryModel 存储结构化模型元数据 — ModelRegistryModel stores structured model metadata
+系统应在 `ModelRegistryModel` 上添加 `model_metadata` JSON 列，包含 `modalities`（输入/输出数组）、`capabilities`（布尔标志）和 `limits`（上下文/输出整数）。
 
-#### Scenario: Multi-modal model metadata
-- **WHEN** a model like GPT-4o is registered with `model_metadata: {modalities: {input: ["text", "image", "audio"], output: ["text"]}, capabilities: {reasoning: true, tool_call: true, vision: true}, limits: {context: 128000, output: 16384}}`
-- **THEN** the system SHALL store and serve this metadata for routing, catalog display, and capability filtering
+#### Scenario: 多模态模型元数据 — Multi-modal model metadata
+- **WHEN** 像 GPT-4o 这样的模型注册时带有 `model_metadata: {modalities: {input: ["text", "image", "audio"], output: ["text"]}, capabilities: {reasoning: true, tool_call: true, vision: true}, limits: {context: 128000, output: 16384}}`
+- **THEN** 系统应存储并提供此元数据，用于路由、目录显示和能力过滤
 
-#### Scenario: Text-only model metadata
-- **WHEN** a model like text-embedding-ada-002 is registered with `model_metadata: {modalities: {input: ["text"], output: ["embedding"]}, capabilities: {}, limits: {context: 8192}}`
-- **THEN** the system SHALL correctly identify it as an embedding model not suitable for chat
+#### Scenario: 纯文本模型元数据 — Text-only model metadata
+- **WHEN** 像 text-embedding-ada-002 这样的模型注册时带有 `model_metadata: {modalities: {input: ["text"], output: ["embedding"]}, capabilities: {}, limits: {context: 8192}}`
+- **THEN** 系统应正确识别其为嵌入模型，不适合聊天
 
-### Requirement: System migrates existing model_type to model_metadata
-The system SHALL populate `model_metadata` for existing rows during migration based on the current `model_type` value, using conservative defaults.
+### Requirement: 系统将现有 model_type 迁移到 model_metadata — System migrates existing model_type to model_metadata
+系统应在迁移期间根据当前的 `model_type` 值，为现有行填充 `model_metadata`，使用保守的默认值。
 
-#### Scenario: Migrate chat models
-- **WHEN** an existing model has `model_type = "chat"`
-- **THEN** migration SHALL set `model_metadata = {modalities: {input: ["text"], output: ["text"]}, capabilities: {tool_call: false}, limits: {}}`
+#### Scenario: 迁移聊天模型 — Migrate chat models
+- **WHEN** 现有模型的 `model_type = "chat"`
+- **THEN** 迁移应设置 `model_metadata = {modalities: {input: ["text"], output: ["text"]}, capabilities: {tool_call: false}, limits: {}}`
 
-#### Scenario: Migrate embedding models
-- **WHEN** an existing model has `model_type = "embedding"`
-- **THEN** migration SHALL set `model_metadata = {modalities: {input: ["text"], output: ["embedding"]}, capabilities: {}, limits: {}}`
+#### Scenario: 迁移嵌入模型 — Migrate embedding models
+- **WHEN** 现有模型的 `model_type = "embedding"`
+- **THEN** 迁移应设置 `model_metadata = {modalities: {input: ["text"], output: ["embedding"]}, capabilities: {}, limits: {}}`
 
-### Requirement: System provides backward-compatible model_type accessor
-The system SHALL compute `model_type` from `model_metadata` for backward compatibility with existing code that reads the `model_type` field.
+### Requirement: 系统提供向后兼容的 model_type 访问器 — System provides backward-compatible model_type accessor
+系统应从 `model_metadata` 计算 `model_type`，以向后兼容读取 `model_type` 字段的现有代码。
 
-#### Scenario: Derive chat type from metadata
-- **WHEN** `model_metadata.modalities.output` contains `"text"` and `input` contains `"text"` only
-- **THEN** the computed `model_type` SHALL be `"chat"`
+#### Scenario: 从元数据派生聊天类型 — Derive chat type from metadata
+- **WHEN** `model_metadata.modalities.output` 包含 `"text"` 且 `input` 仅包含 `"text"`
+- **THEN** 计算出的 `model_type` 应为 `"chat"`
 
-#### Scenario: Derive embedding type from metadata
-- **WHEN** `model_metadata.modalities.output` contains `"embedding"`
-- **THEN** the computed `model_type` SHALL be `"embedding"`
+#### Scenario: 从元数据派生嵌入类型 — Derive embedding type from metadata
+- **WHEN** `model_metadata.modalities.output` 包含 `"embedding"`
+- **THEN** 计算出的 `model_type` 应为 `"embedding"`
 
-### Requirement: Catalog displays capability badges from model_metadata
-The system SHALL render capability badges (vision, tool_call, reasoning, streaming) in the Model Catalog UI based on `model_metadata.capabilities` and `model_metadata.modalities`.
+### Requirement: 目录显示来自 model_metadata 的能力徽章 — Catalog displays capability badges from model_metadata
+系统应基于 `model_metadata.capabilities` 和 `model_metadata.modalities`，在 Model Catalog UI 中渲染能力徽章（vision、tool_call、reasoning、streaming）。
 
-#### Scenario: Vision badge for multi-modal model
-- **WHEN** a model has `capabilities.vision: true` or `modalities.input` includes `"image"`
-- **THEN** the catalog SHALL display a vision capability badge
+#### Scenario: 多模态模型的视觉徽章 — Vision badge for multi-modal model
+- **WHEN** 模型的 `capabilities.vision: true` 或 `modalities.input` 包含 `"image"`
+- **THEN** 目录应显示视觉能力徽章
 
-#### Scenario: Context window display
-- **WHEN** a model has `limits.context: 128000`
-- **THEN** the catalog SHALL display "128K context" badge
+#### Scenario: 上下文窗口显示 — Context window display
+- **WHEN** 模型的 `limits.context: 128000`
+- **THEN** 目录应显示 "128K context" 徽章

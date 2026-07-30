@@ -1,95 +1,95 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: ToolDecisionModel data model
-The system SHALL provide a `ToolDecisionModel` ORM table (`tool_decisions`) that stores structured tool policy decision events. Each event SHALL capture: agent_id, workspace_id, session_id (nullable), tool_name, arguments_hash (SHA-256), decision, reason, policy_version, on_behalf_of_user (nullable), timestamp, and per-layer decision breakdown.
+### 需求：ToolDecisionModel 数据模型
+系统应提供一个 `ToolDecisionModel` ORM 表（`tool_decisions`），存储结构化的工具策略决策事件。每个事件应捕获：agent_id、workspace_id、session_id（可空）、tool_name、arguments_hash（SHA-256）、decision、reason、policy_version、on_behalf_of_user（可空）、timestamp 和每层决策分解。
 
-#### Scenario: Decision event created on policy evaluation
-- **WHEN** `ToolPolicyPipeline.evaluate_execution()` returns a decision for tool `bash`
-- **THEN** a `ToolDecisionModel` row is created with the tool name, final decision, reason, and per-layer results
+#### 场景：策略评估时创建决策事件
+- **当** `ToolPolicyPipeline.evaluate_execution()` 为工具 `bash` 返回决策时
+- **则** 创建 `ToolDecisionModel` 行，包含工具名、最终决策、原因和每层结果
 
-#### Scenario: Arguments stored as hash not raw
-- **WHEN** a tool call with arguments `{"command": "rm -rf /tmp/data"}` is evaluated
-- **THEN** the decision event stores `arguments_hash` as SHA-256 of the arguments
-- **AND** raw arguments are NOT stored in the decision table
+#### 场景：参数以哈希而非原始形式存储
+- **当** 使用参数 `{"command": "rm -rf /tmp/data"}` 的工具调用被评估时
+- **则** 决策事件存储 `arguments_hash` 作为参数的 SHA-256
+- **且** 原始参数不存储在决策表中
 
-#### Scenario: Policy version recorded
-- **WHEN** a policy evaluation occurs
-- **THEN** the decision event records `policy_version` as a hash of the effective policy configuration at evaluation time
+#### 场景：记录策略版本
+- **当** 发生策略评估时
+- **则** 决策事件记录 `policy_version` 作为评估时有效策略配置的哈希
 
-### Requirement: Async batch write for decision events
-The system SHALL buffer tool decision events in memory and flush to the database in batches (every `AGENT_ENV_DECISION_BATCH_SIZE` events or `AGENT_ENV_DECISION_FLUSH_INTERVAL` seconds, whichever comes first).
+### 需求：决策事件的异步批量写入
+系统应在内存中缓冲工具决策事件，并以批处理方式刷新到数据库（每 `AGENT_ENV_DECISION_BATCH_SIZE` 个事件或 `AGENT_ENV_DECISION_FLUSH_INTERVAL` 秒，以先到者为准）。
 
-#### Scenario: Events buffered until threshold
-- **WHEN** 30 decision events are generated within the flush interval
-- **THEN** events remain in the in-memory buffer (not yet written to database)
+#### 场景：事件在达到阈值前缓冲
+- **当** 在刷新间隔内生成了 30 个决策事件时
+- **则** 事件保留在内存缓冲区中（尚未写入数据库）
 
-#### Scenario: Flush on event count threshold
-- **WHEN** the batch size threshold is reached
-- **THEN** all buffered events are flushed to the database in a single batch write
-- **AND** the buffer is cleared
+#### 场景：事件计数阈值触发刷新
+- **当** 达到批大小阈值时
+- **则** 所有缓冲事件在单个批量写入中刷新到数据库
+- **且** 缓冲区被清除
 
-#### Scenario: Flush on time threshold
-- **WHEN** the flush interval elapses and the buffer has pending events
-- **THEN** all events are flushed to the database
-- **AND** the buffer is cleared
+#### 场景：时间阈值触发刷新
+- **当** 刷新间隔过去且缓冲区有待处理事件时
+- **则** 所有事件刷新到数据库
+- **且** 缓冲区被清除
 
-#### Scenario: Flush on graceful shutdown
-- **WHEN** the application receives a shutdown signal
-- **THEN** all buffered events are flushed before shutdown completes
+#### 场景：优雅关闭时刷新
+- **当** 应用程序收到关闭信号时
+- **则** 所有缓冲的事件在关闭完成前刷新
 
-### Requirement: Decision event emission from policy evaluations
-The system SHALL automatically emit tool decision events from three emission points: `ToolPolicyPipeline.evaluate_visibility()`, `ToolPolicyPipeline.evaluate_execution()`, and `ToolAccessPolicy.evaluate()`.
+### 需求：策略评估的决策事件发射
+系统应从三个发射点自动发出工具决策事件：`ToolPolicyPipeline.evaluate_visibility()`、`ToolPolicyPipeline.evaluate_execution()` 和 `ToolAccessPolicy.evaluate()`。
 
-#### Scenario: Visibility evaluation emits per-tool event
-- **WHEN** `evaluate_visibility()` filters out a tool (HIDE or DENY)
-- **THEN** a decision event is emitted with the tool name, layer that caused hiding, and decision
+#### 场景：可见性评估为每个工具发出事件
+- **当** `evaluate_visibility()` 过滤掉一个工具（HIDE 或 DENY）时
+- **则** 发出决策事件，包含工具名、导致隐藏的层和决策
 
-#### Scenario: Execution evaluation emits final decision event
-- **WHEN** `evaluate_execution()` returns a final decision with per-layer results
-- **THEN** a decision event is emitted with the final decision, reason, and all layer results
+#### 场景：执行评估发出最终决策事件
+- **当** `evaluate_execution()` 返回带有每层结果的最终决策时
+- **则** 发出决策事件，包含最终决策、原因和所有层结果
 
-#### Scenario: ToolAccessPolicy emits access decision event
-- **WHEN** `ToolAccessPolicy.evaluate()` returns `REQUIRE_APPROVAL`
-- **THEN** a decision event is emitted with the access decision, matched rule, and risk level
+#### 场景：ToolAccessPolicy 发出访问决策事件
+- **当** `ToolAccessPolicy.evaluate()` 返回 `REQUIRE_APPROVAL` 时
+- **则** 发出决策事件，包含访问决策、匹配规则和风险级别
 
-### Requirement: REST API for decision event query
-The system SHALL expose a REST API endpoint at `GET /api/security/decisions` for querying tool decision events with filtering by agent_id, workspace_id, session_id, decision, tool_name, and time range.
+### 需求：决策事件查询的 REST API
+系统应公开一个 REST API 端点 `GET /api/security/decisions`，用于查询工具决策事件，支持按 agent_id、workspace_id、session_id、decision、tool_name 和时间范围过滤。
 
-#### Scenario: Query by agent
-- **WHEN** a client requests `GET /api/security/decisions?agent_id={agent_id}`
-- **THEN** the system returns all decision events for that agent within the default time window
+#### 场景：按 Agent 查询
+- **当** 客户端请求 `GET /api/security/decisions?agent_id={agent_id}` 时
+- **则** 系统返回该 Agent 在默认时间窗口内的所有决策事件
 
-#### Scenario: Query by decision
-- **WHEN** a client requests `GET /api/security/decisions?decision=DENY`
-- **THEN** the system returns only decision events where the decision was DENY
+#### 场景：按决策查询
+- **当** 客户端请求 `GET /api/security/decisions?decision=DENY` 时
+- **则** 系统仅返回决策为 DENY 的决策事件
 
-#### Scenario: Query by time range
-- **WHEN** a client requests `GET /api/security/decisions?start=...&end=...`
-- **THEN** the system returns only events within the specified time range
+#### 场景：按时间范围查询
+- **当** 客户端请求 `GET /api/security/decisions?start=...&end=...` 时
+- **则** 系统仅返回指定时间范围内的事件
 
-#### Scenario: Pagination
-- **WHEN** a client requests `GET /api/security/decisions?limit=50&offset=100`
-- **THEN** the system returns 50 events starting from offset 100
+#### 场景：分页
+- **当** 客户端请求 `GET /api/security/decisions?limit=50&offset=100` 时
+- **则** 系统从偏移量 100 开始返回 50 个事件
 
-### Requirement: Configurable retention with auto-cleanup
-The system SHALL automatically delete decision events older than the configured retention period (`AGENT_ENV_DECISION_RETENTION_DAYS`, default 30 days).
+### 需求：可配置保留期与自动清理
+系统应自动删除超过配置保留期的决策事件（`AGENT_ENV_DECISION_RETENTION_DAYS`，默认 30 天）。
 
-#### Scenario: Default retention is 30 days
-- **WHEN** `AGENT_ENV_DECISION_RETENTION_DAYS` is not set
-- **THEN** events older than 30 days are eligible for cleanup
+#### 场景：默认保留期为 30 天
+- **当** 未设置 `AGENT_ENV_DECISION_RETENTION_DAYS` 时
+- **则** 超过 30 天的事件符合清理条件
 
-#### Scenario: Decision logging disabled
-- **WHEN** `AGENT_ENV_DECISION_ENABLED=false`
-- **THEN** no `ToolDecisionModel` rows are created
-- **AND** policy evaluations proceed without decision logging overhead
+#### 场景：决策日志禁用
+- **当** `AGENT_ENV_DECISION_ENABLED=false` 时
+- **则** 不创建 `ToolDecisionModel` 行
+- **且** 策略评估在没有决策日志开销的情况下进行
 
-### Requirement: Backward-compatible config aliases
-The system SHALL accept legacy config keys (`AGENT_ENV_AUDIT_*`) as aliases for the new keys (`AGENT_ENV_DECISION_*`). When both are set, the new key takes precedence.
+### 需求：向后兼容的配置别名
+系统应接受旧配置键（`AGENT_ENV_AUDIT_*`）作为新键（`AGENT_ENV_DECISION_*`）的别名。当两者都设置时，新键优先。
 
-#### Scenario: Legacy config key works
-- **WHEN** `.env` contains `AGENT_ENV_AUDIT_ENABLED=true` but not `AGENT_ENV_DECISION_ENABLED`
-- **THEN** the system enables decision logging as if `AGENT_ENV_DECISION_ENABLED=true` was set
+#### 场景：旧配置键有效
+- **当** `.env` 包含 `AGENT_ENV_AUDIT_ENABLED=true` 但不包含 `AGENT_ENV_DECISION_ENABLED` 时
+- **则** 系统启用决策日志，如同设置了 `AGENT_ENV_DECISION_ENABLED=true`
 
-#### Scenario: New key takes precedence
-- **WHEN** `.env` contains both `AGENT_ENV_AUDIT_ENABLED=false` and `AGENT_ENV_DECISION_ENABLED=true`
-- **THEN** the system enables decision logging (new key wins)
+#### 场景：新键优先
+- **当** `.env` 同时包含 `AGENT_ENV_AUDIT_ENABLED=false` 和 `AGENT_ENV_DECISION_ENABLED=true` 时
+- **则** 系统启用决策日志（新键获胜）

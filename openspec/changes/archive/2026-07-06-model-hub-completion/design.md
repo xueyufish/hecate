@@ -1,80 +1,80 @@
-## Context
+## Context — 背景
 
-Hecate's Model Hub phase 1 (Model Catalog 6.44, Lifecycle Manager 6.45, Intelligent Router 6.14) established the foundation: model discovery, staging channels, and semantic caching router. The existing `CostService` provides pricing CRUD and cost calculation from `TraceModel.usage`. `ModelRegistryModel.model_type` is a single string defaulting to `"chat"`. The frontend (`web/`) has a Next.js model management page with provider CRUD, model list, and a debug playground.
+Hecate 的 Model Hub 第一阶段（Model Catalog 6.44、Lifecycle Manager 6.45、Intelligent Router 6.14）奠定了基础设施：模型发现、分阶段通道和语义缓存路由。现有的 `CostService` 提供定价 CRUD 和基于 `TraceModel.usage` 的成本计算。`ModelRegistryModel.model_type` 是单个字符串，默认值为 `"chat"`。前端（`web/`）有一个 Next.js 模型管理页面，包含提供商 CRUD、模型列表和调试 playground。
 
-Industry research across 12+ platforms (vLLM, OpenAI, Bedrock, Vertex AI, watsonx, Salesforce Agentforce, Palantir AIP, Dify, LiteLLM, NullSpend, ai-finops-radar, OpenLLMetry) confirms clear patterns: agent platforms do NOT orchestrate inference servers (only cloud infra platforms do); fine-tuning is provider-API-based (not local training); LLM observability is converging on OpenTelemetry GenAI semantic conventions; model classification is moving from enums to structured metadata (modalities + capabilities).
+对 12+ 平台（vLLM、OpenAI、Bedrock、Vertex AI、watsonx、Salesforce Agentforce、Palantir AIP、Dify、LiteLLM、NullSpend、ai-finops-radar、OpenLLMetry）的行业研究确认了清晰的模式：Agent 平台不编排推理服务器（只有云基础设施平台才做这件事）；微调是基于提供商 API 的（非本地训练）；LLM 可观测性正在汇聚到 OpenTelemetry GenAI 语义约定；模型分类正从枚举转向结构化元数据（模态 + 能力）。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Complete Model Hub with 5 remaining features (6.4, 6.11, 6.5, 6.6, O10+G4)
-- Cost governance with configurable enforcement (alert or block)
-- Multi-modal model classification that enables modality-aware routing
-- External inference endpoint management (registration + health + metrics)
-- Fine-tuning workflow via provider APIs with pluggable backend
-- Monitoring console with trend visualization (full-stack: API + frontend)
+**目标：**
+- 完成 Model Hub 的 5 个剩余功能（6.4、6.11、6.5、6.6、O10+G4）
+- 带可配置执行策略（告警或阻断）的成本治理
+- 支持模态感知路由的多模态模型分类
+- 外部推理端点管理（注册 + 健康 + 指标）
+- 基于提供商 API 且可插拔后端的微调工作流
+- 带趋势可视化的监控控制台（全栈：API + 前端）
 
-**Non-Goals:**
-- Inference server lifecycle orchestration (start/stop vLLM, GPU allocation, K8s scaling) — that is vLLM production-stack / AIBrix / KServe territory
-- Local fine-tuning (GPU training) — we delegate to provider APIs (OpenAI, Bedrock)
-- Quality regression detection — deferred to Sprint 7 (depends on Evaluation Suite)
-- Multi-provider fine-tuning adapters (Bedrock, Vertex) — OpenAI is the reference; others added later via the same ABC
+**非目标：**
+- 推理服务器生命周期编排（启动/停止 vLLM、GPU 分配、K8s 扩缩容）——这属于 vLLM production-stack / AIBrix / KServe 的范畴
+- 本地微调（GPU 训练）——我们委托给提供商 API（OpenAI、Bedrock）
+- 质量回归检测——推迟到 Sprint 7（依赖于 Evaluation Suite）
+- 多提供商微调适配器（Bedrock、Vertex）——OpenAI 是参考实现；其他提供商通过相同的 ABC 后续添加
 
-## Decisions
+## Decisions — 决策
 
-### D1: Model metadata schema — structured modalities JSON (Option B)
+### D1: 模型元数据模式——结构化模态 JSON（选项 B）
 
-**Decision**: Replace `model_type: str` with `model_metadata: JSON` containing `{modalities: {input: [], output: []}, capabilities: {}, limits: {}}`.
+**决策**：将 `model_type: str` 替换为 `model_metadata: JSON`，包含 `{modalities: {input: [], output: []}, capabilities: {}, limits: {}}`。
 
-**Rationale**: Structured modalities (input/output separation) naturally express multi-modal models (GPT-4o: input=[text,image,audio]) and generation models (DALL-E: output=[image]) without enumerating every combination. Aligns with basellm/llm-metadata and IETF ACPM draft. Dify's enum+features approach requires new enum values per new model category.
+**理由**：结构化模态（输入/输出分离）自然地表达了多模态模型（GPT-4o：input=[text,image,audio]）和生成模型（DALL-E：output=[image]），无需枚举每种组合。与 basellm/llm-metadata 和 IETF ACPM 草案一致。Dify 的枚举+功能方法需要为每个新的模型类别添加新的枚举值。
 
-**Backward compatibility**: `model_type` column remains; `model_metadata` is additive. A computed accessor derives `model_type` from `model_metadata.modalities` for backward-compat reads. Migration populates `model_metadata` for existing rows based on current `model_type` value.
+**向后兼容性**：`model_type` 列保留；`model_metadata` 是附加的。计算访问器从 `model_metadata.modalities` 派生 `model_type`，用于向后兼容的读取操作。迁移根据当前的 `model_type` 值为现有行填充 `model_metadata`。
 
-**Alternatives considered**: Dify-style enum (`model_type` + `features[]`) — simpler but extensible only by changing the enum; doesn't separate input/output modalities.
+**考虑的备选方案**：Dify 风格的枚举（`model_type` + `features[]`）——更简单但只能通过修改枚举来扩展；不区分输入/输出模态。
 
-### D2: Cost budget enforcement — configurable policy via PreLLMHook
+### D2: 成本预算执行——通过 PreLLMHook 的可配置策略
 
-**Decision**: Budget enforcement uses `policy: "alert" | "block"` config. When `block`, a PreLLMHook checks budget before each LLM invocation and raises `BudgetExceededError` if exceeded.
+**决策**：预算使用 `policy: "alert" | "block"` 配置。当为 `block` 时，PreLLMHook 在每次 LLM 调用前检查预算，如果超限则抛出 `BudgetExceededError`。
 
-**Rationale**: Pure alerting (post-hoc) risks runaway costs at 3 AM. Full blocking is too aggressive for development. Configurable policy lets each workspace choose. PreLLMHook is the existing extension point for pre-invocation interception. Pattern inspired by NullSpend's pre-request enforcement.
+**理由**：纯告警（事后）存在凌晨 3 点成本失控的风险。全阻断在开发阶段过于激进。可配置策略让每个工作区自行选择。PreLLMHook 是现有的调用前拦截扩展点。模式受 NullSpend 的请求前执行机制启发。
 
-**Anomaly detection**: Z-score on rolling-window daily spend (30-day window, configurable). Same algorithm applied to performance metrics (latency, error rate) for drift detection in O10+G4.
+**异常检测**：滚动窗口（30 天窗口，可配置）每日支出的 Z-score。同一算法也用于性能指标（延迟、错误率）的漂移检测（O10+G4）。
 
-**Alternatives considered**: Post-hoc alert only (risk of overrun); velocity circuit breaker (NullSpend pattern — more complex, deferred).
+**考虑的备选方案**：仅事后告警（超限风险）；速度熔断器（NullSpend 模式——更复杂，已推迟）。
 
-### D3: Inference endpoint management — registration + health, NOT orchestration
+### D3: 推理端点管理——注册 + 健康，非编排
 
-**Decision**: `InferenceBackendABC` with `health_check(endpoint)` and `invoke(endpoint, request)`. Hecate stores endpoint metadata (URL, model_id, backend_type) and polls `/health` periodically. Does NOT start/stop servers or manage GPUs.
+**决策**：`InferenceBackendABC`，包含 `health_check(endpoint)` 和 `invoke(endpoint, request)`。Hecate 存储端点元数据（URL、model_id、backend_type）并定期轮询 `/health`。不启动/停止服务器或管理 GPU。
 
-**Rationale**: All surveyed agent platforms (Salesforce BYOLLM, Palantir AIP, Dify, Claude Code) connect to external endpoints without managing infrastructure. Only cloud platforms (Bedrock, Vertex AI, watsonx) manage inference — because infrastructure IS their product. vLLM production-stack handles orchestration; Hecate consumes its OpenAI-compatible API.
+**理由**：所有被调研的 Agent 平台（Salesforce BYOLLM、Palantir AIP、Dify、Claude Code）都连接外部端点而不管理基础设施。只有云平台（Bedrock、Vertex AI、watsonx）管理推理——因为基础设施本身就是它们的产品。vLLM production-stack 处理编排；Hecate 消费其 OpenAI 兼容的 API。
 
-**Alternatives considered**: Full inference orchestration (vLLM lifecycle management) — would require K8s integration, GPU scheduling, and duplicate vLLM production-stack functionality.
+**考虑的备选方案**：完整的推理编排（vLLM 生命周期管理）——需要 K8s 集成、GPU 调度，并重复 vLLM production-stack 的功能。
 
-### D4: Fine-tuning — provider API orchestration with ABC
+### D4: 微调——基于 ABC 的提供商 API 编排
 
-**Decision**: `FineTuningBackendABC` with `submit_job`, `poll_status`, `cancel_job`, `get_result`. OpenAI adapter is the reference implementation. InMemory stub for testing. Other providers (Bedrock, Vertex) added later via same interface.
+**决策**：`FineTuningBackendABC`，包含 `submit_job`、`poll_status`、`cancel_job`、`get_result`。OpenAI 适配器是参考实现。InMemory 存根用于测试。其他提供商（Bedrock、Vertex）后续通过相同接口添加。
 
-**Rationale**: Fine-tuning APIs differ radically across providers (OpenAI: JSONL upload; Bedrock: S3+IAM+VPC; Vertex: different SDK). No universal abstraction exists in the ecosystem (LiteLLM's fine-tuning module only covers OpenAI+Azure+Anthropic). ABC normalizes the workflow (upload → create → poll → deploy) while adapters handle provider specifics.
+**理由**：不同提供商的微调 API 差异很大（OpenAI：JSONL 上传；Bedrock：S3+IAM+VPC；Vertex：不同的 SDK）。生态系统中不存在通用的抽象（LiteLLM 的微调模块只覆盖 OpenAI+Azure+Anthropic）。ABC 规范化工作流（上传 → 创建 → 轮询 → 部署），同时适配器处理提供商特定细节。
 
-**Dataset storage**: `DatasetModel` stores metadata + file reference (MinIO URL or upload path). Actual file content stored in MinIO (already deployed), not in database.
+**数据集存储**：`DatasetModel` 存储元数据 + 文件引用（MinIO URL 或上传路径）。实际文件内容存储在 MinIO（已部署）中，非数据库。
 
-**Alternatives considered**: Local training (needs GPU infrastructure); multi-provider from day one (Bedrock/Vertex complexity without immediate need).
+**考虑的备选方案**：本地训练（需要 GPU 基础设施）；从第一天起多提供商（Bedrock/Vertex 的复杂性没有即时需求）。
 
-### D5: Monitoring console — full-stack with Recharts
+### D5: 监控控制台——使用 Recharts 的全栈
 
-**Decision**: Backend aggregation APIs (`/api/monitoring/models/{id}/performance`, `/api/monitoring/cost/trends`) + frontend Dashboard pages using Recharts (bundled via shadcn/ui Chart components).
+**决策**：后端聚合 API（`/api/monitoring/models/{id}/performance`、`/api/monitoring/cost/trends`）+ 使用 Recharts（通过 shadcn/ui Chart 组件捆绑）的前端 Dashboard 页面。
 
-**Rationale**: shadcn/ui already includes Recharts-based chart components — zero additional dependency, style consistency. The needed charts (line trends, bar comparisons, donut breakdowns) are standard. ECharts' advanced features (heatmap, network graph) are unnecessary.
+**理由**：shadcn/ui 已经包含基于 Recharts 的图表组件——零额外依赖，样式一致性。需要的图表（线形趋势图、柱状比较图、环形分解图）是标准化的。ECharts 的高级功能（热力图、网络图）不必要。
 
-**Drift detection**: Z-score on performance time series (same algorithm as cost anomaly detection, different metric input).
+**漂移检测**：性能时间序列的 Z-score（与成本异常检测相同的算法，不同的指标输入）。
 
-**Quality regression**: Deferred to Sprint 7. Recorded as TBD in roadmap under Evaluation Suite.
+**质量回归**：推迟到 Sprint 7。在路线图中记录为 TBD，位于 Evaluation Suite 下。
 
-**Alternatives considered**: ECharts (heavier, inconsistent with shadcn/ui); API-only delivery without frontend (repo is full-stack, not backend-only).
+**考虑的备选方案**：ECharts（更重、与 shadcn/ui 不一致）；仅 API 无前端的交付（仓库是全栈的，非仅后端）。
 
-### D6: Module structure
+### D6: 模块结构
 
-New code lives in existing `src/hecate/model_hub/` alongside phase 1 modules:
+新代码位于现有的 `src/hecate/model_hub/` 中，与第一阶段模块并列：
 
 ```
 model_hub/
@@ -88,16 +88,16 @@ model_hub/
 └── monitoring.py             (NEW — O10+G4: aggregation queries)
 ```
 
-New models in `src/hecate/models/`. New API routes in `src/hecate/api/management/`. Frontend pages under `web/src/app/(dashboard)/settings/models/`.
+新模型在 `src/hecate/models/` 中。新 API 路由在 `src/hecate/api/management/` 中。前端页面在 `web/src/app/(dashboard)/settings/models/` 下。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[model_metadata migration]** Existing rows have `model_type="chat"` only → Migration populates `model_metadata` with conservative defaults `{modalities: {input: ["text"], output: ["text"]}, capabilities: {}, limits: {}}`. Users can enrich metadata per model manually or via provider sync.
+- **[model_metadata 迁移]** 现有行只有 `model_type="chat"` → 迁移使用保守默认值 `{modalities: {input: ["text"], output: ["text"]}, capabilities: {}, limits: {}}` 填充 `model_metadata`。用户可手动或通过提供商同步丰富每个模型的元数据。
 
-- **[Budget enforcement latency]** PreLLMHook budget check adds one DB query per LLM invocation → Query is indexed by (workspace_id, model_id, period). Sub-millisecond overhead. Acceptable.
+- **[预算执行延迟]** PreLLMHook 预算检查为每次 LLM 调用增加一次数据库查询 → 查询按 (workspace_id, model_id, period) 建立索引。亚毫秒级开销。可接受。
 
-- **[Inference health check false positives]** External endpoints may briefly become unreachable → Configurable retry (3 attempts, 5s interval) before marking unhealthy. Health status is informational, not blocking (requests route to healthy endpoints but don't fail if one is transiently down).
+- **[推理健康检查误报]** 外部端点可能短暂不可达 → 可配置重试（3 次尝试，5 秒间隔），然后标记为不健康。健康状态是信息性的，非阻断性（请求路由到健康端点，但如果一个端点临时不可用，不会失败）。
 
-- **[Fine-tuning job long-running]** Provider fine-tuning jobs can take hours → Async polling with configurable interval (default 60s). Job state persisted in DB. Webhook notification when job completes (optional).
+- **[微调任务长时间运行]** 提供商的微调任务可能需要数小时 → 带有可配置间隔（默认 60 秒）的异步轮询。任务状态持久化在数据库中。任务完成时的 Webhook 通知（可选）。
 
-- **[Recharts bundle size]** ~100KB added to frontend → Lazy-loaded only on monitoring pages. Acceptable for admin console.
+- **[Recharts 包大小]** 前端增加约 100KB → 仅监控页面延迟加载。对管理控制台可接受。

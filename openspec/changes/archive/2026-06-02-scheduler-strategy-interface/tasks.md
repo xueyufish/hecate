@@ -1,36 +1,32 @@
-## 1. SchedulerStrategy ABC
+## 1. SchedulerStrategy ABC — SchedulerStrategy ABC
 
-- [x] 1.1 Create `src/hecate/engine/scheduler.py` with `SchedulerStrategy(ABC)` defining abstract methods: `select_next(nodes: list[str], context: dict) -> list[str]`, `set_weights(weights: dict[str, float]) -> None`
-- [x] 1.2 Add full docstrings to SchedulerStrategy ABC and each abstract method (English, matching existing EnginePort/CheckpointStore style)
+- [x] 1.1 创建 `src/hecate/engine/scheduler.py`，包含定义 `select_next(ready: list[WorkerNode], context: dict) -> WorkerNode` 的 `SchedulerStrategy(ABC)`
+- [x] 1.2 为 ABC 和方法添加完整的文档字符串
 
-## 2. FIFOScheduler Implementation
+## 2. FIFOScheduler Implementation — FIFOScheduler 实现
 
-- [x] 2.1 Implement `FIFOScheduler(SchedulerStrategy)` that returns nodes in input order
-- [x] 2.2 `select_next` returns the input list unchanged
-- [x] 2.3 `set_weights` is a no-op (stores nothing, FIFO ignores weights)
-- [x] 2.4 Add docstrings to FIFOScheduler
+- [x] 2.1 实现 `FIFOScheduler(SchedulerStrategy)`，返回 `ready` 列表中的第一个节点
+- [x] 2.2 添加文档字符串
 
-## 3. PregelRuntime Integration
+## 3. PriorityScheduler Implementation — PriorityScheduler 实现
 
-- [x] 3.1 Add optional `scheduler: SchedulerStrategy | None = None` parameter to `PregelRuntime.__init__`
-- [x] 3.2 Default to `FIFOScheduler()` if no scheduler provided
-- [x] 3.3 In the superstep loop, call `scheduler.select_next(current_nodes, context)` before dispatching workers
-- [x] 3.4 Ensure existing behavior is preserved (nodes execute in the order returned by scheduler)
+- [x] 3.1 实现 `PriorityScheduler(SchedulerStrategy)`，允许为节点设置权重
+- [x] 3.2 实现 `set_weights(node_weights: dict[str, int])` 方法
+- [x] 3.3 `select_next` 返回就绪节点中权重最高的节点
+- [x] 3.4 默认将未显式设置权重的节点的权重视为 1
 
-## 4. Tests
+## 4. Tests — 测试
 
-- [x] 4.1 Create `tests/test_engine/test_scheduler.py`
-- [x] 4.2 Test FIFOScheduler.select_next returns nodes unchanged
-- [x] 4.3 Test FIFOScheduler.set_weights is no-op
-- [x] 4.4 Test FIFOScheduler with empty node list
-- [x] 4.5 Test SchedulerStrategy is abstract (cannot instantiate directly)
-- [x] 4.6 Test PregelRuntime default scheduler is FIFOScheduler
-- [x] 4.7 Test PregelRuntime with custom scheduler receives correct nodes
+- [x] 4.1 创建 `tests/test_engine/test_scheduler.py`
+- [x] 4.2 测试 SchedulerStrategy ABC 不可实例化
+- [x] 4.3 测试 FIFOScheduler 返回第一个就绪节点
+- [x] 4.4 测试 PriorityScheduler 返回权重最高的节点
+- [x] 4.5 测试 PriorityScheduler 对未设置权重的节点使用默认值 1
 
-## 5. Verification
+## 5. Verification — 验证
 
-- [x] 5.1 Run `ruff check src/hecate/engine/scheduler.py src/hecate/engine/pregel.py tests/test_engine/test_scheduler.py`
-- [x] 5.2 Run `ruff format --check src/hecate/engine/scheduler.py src/hecate/engine/pregel.py tests/test_engine/test_scheduler.py`
-- [x] 5.3 Run `mypy src/hecate/engine/scheduler.py src/hecate/engine/pregel.py`
-- [x] 5.4 Run `python -m pytest tests/test_engine/test_scheduler.py -v`
-- [x] 5.5 Run full test suite `python -m pytest tests/ -q` to verify no regressions
+- [x] 5.1 运行 `ruff check src/hecate/engine/scheduler.py tests/test_engine/test_scheduler.py`
+- [x] 5.2 运行 `ruff format --check src/hecate/engine/scheduler.py tests/test_engine/test_scheduler.py`
+- [x] 5.3 运行 `mypy src/hecate/engine/scheduler.py`
+- [x] 5.4 运行 `python -m pytest tests/test_engine/test_scheduler.py -v`
+- [x] 5.5 运行完整测试套件 `python -m pytest tests/ -q`

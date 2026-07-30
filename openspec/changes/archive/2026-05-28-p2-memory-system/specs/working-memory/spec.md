@@ -1,55 +1,55 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Create memory block
-The system SHALL provide an API endpoint `POST /api/agents/{agent_id}/memory-blocks` that creates a new memory block for an agent.
+### 需求：创建记忆块
+系统须提供 API 端点 `POST /api/agents/{agent_id}/memory-blocks`，为 agent 创建新的记忆块。
 
-#### Scenario: Successful creation
-- **WHEN** a user sends a POST request with label, content, position, and limit
-- **THEN** the system creates a MemoryBlockModel and returns 201 with the block data
+#### 场景：成功创建
+- **当** 用户发送带有 label, content, position 和 limit 的 POST 请求
+- **则** 系统创建 MemoryBlockModel 并返回 201 及 block 数据
 
-#### Scenario: Duplicate label
-- **WHEN** a user sends a POST request with a label that already exists for the agent
-- **THEN** the system returns 409 Conflict
+#### 场景：重复标签
+- **当** 用户发送 POST 请求，但标签在该 agent 下已存在
+- **则** 系统返回 409 Conflict
 
-### Requirement: Read memory block
-The system SHALL provide an API endpoint `GET /api/agents/{agent_id}/memory-blocks/{block_id}` that returns a memory block.
+### 需求：读取记忆块
+系统须提供 API 端点 `GET /api/agents/{agent_id}/memory-blocks/{block_id}`，返回记忆块。
 
-#### Scenario: Block exists
-- **WHEN** a user sends a GET request with valid agent_id and block_id
-- **THEN** the system returns 200 with the block data
+#### 场景：Block 存在
+- **当** 用户使用有效的 agent_id 和 block_id 发送 GET 请求
+- **则** 系统返回 200 及 block 数据
 
-#### Scenario: Block not found
-- **WHEN** a user sends a GET request for a non-existent block
-- **THEN** the system returns 404
+#### 场景：Block 不存在
+- **当** 用户对不存在的 block 发送 GET 请求
+- **则** 系统返回 404
 
-### Requirement: Update memory block
-The system SHALL provide an API endpoint `PUT /api/agents/{agent_id}/memory-blocks/{block_id}` that updates a memory block's content.
+### 需求：更新记忆块
+系统须提供 API 端点 `PUT /api/agents/{agent_id}/memory-blocks/{block_id}`，更新记忆块的内容。
 
-#### Scenario: Successful update
-- **WHEN** a user sends a PUT request with updated content
-- **THEN** the system updates the block and returns 200
+#### 场景：成功更新
+- **当** 用户发送包含更新内容的 PUT 请求
+- **则** 系统更新 block 并返回 200
 
-### Requirement: Delete memory block
-The system SHALL provide an API endpoint `DELETE /api/agents/{agent_id}/memory-blocks/{block_id}` that deletes a memory block.
+### 需求：删除记忆块
+系统须提供 API 端点 `DELETE /api/agents/{agent_id}/memory-blocks/{block_id}`，删除记忆块。
 
-#### Scenario: Successful deletion
-- **WHEN** a user sends a DELETE request
-- **THEN** the system deletes the block and returns 204
+#### 场景：成功删除
+- **当** 用户发送 DELETE 请求
+- **则** 系统删除 block 并返回 204
 
-### Requirement: List memory blocks
-The system SHALL provide an API endpoint `GET /api/agents/{agent_id}/memory-blocks` that returns all memory blocks for an agent.
+### 需求：列出记忆块
+系统须提供 API 端点 `GET /api/agents/{agent_id}/memory-blocks`，返回 agent 的所有记忆块。
 
-#### Scenario: List blocks
-- **WHEN** a user sends a GET request
-- **THEN** the system returns 200 with all blocks ordered by position
+#### 场景：列出 blocks
+- **当** 用户发送 GET 请求
+- **则** 系统返回 200 及按 position 排序的所有 blocks
 
-### Requirement: Memory blocks in context assembly
-The system SHALL include memory blocks in the context assembly process when building the LLM prompt.
+### 需求：上下文组装中的记忆块
+系统须在构建 LLM prompt 时，将记忆块纳入上下文组装流程。
 
-#### Scenario: Blocks included in context
-- **WHEN** context is assembled for an agent with memory blocks
-- **THEN** the blocks SHALL be inserted into the messages array at their configured positions, respecting their token limits
+#### 场景：Blocks 包含在上下文中
+- **当** 为具有记忆块的 agent 组装上下文
+- **则** blocks 须按其配置的 position 插入到 messages 数组中，并遵守其 token 限制
 
-#### Scenario: No blocks configured
-- **WHEN** an agent has no memory blocks
-- **THEN** the context assembly SHALL proceed without memory blocks
+#### 场景：未配置 blocks
+- **当** agent 没有记忆块
+- **则** 上下文组装须正常进行，不包含记忆块

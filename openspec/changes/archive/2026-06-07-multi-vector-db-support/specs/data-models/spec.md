@@ -1,24 +1,24 @@
-## MODIFIED Requirements
+## MODIFIED Requirements — 修改的需求
 
-### Requirement: KnowledgeBaseModel with embedding and search config
-The `KnowledgeBaseModel` SHALL use `collection_name` as the column storing the vector store collection identifier, replacing the previous `qdrant_collection` column. An Alembic migration SHALL rename the existing column.
+### Requirement: KnowledgeBaseModel with embedding and search config — 需求：带嵌入和搜索配置的 KnowledgeBaseModel
+`KnowledgeBaseModel` 应使用 `collection_name` 作为存储向量存储集合标识符的列，替换之前的 `qdrant_collection` 列。Alembic 迁移应重命名现有列。
 
-#### Scenario: Default embedding model
-- **WHEN** a knowledge base is created
-- **THEN** `embedding_model` SHALL default to "BAAI/bge-m3"
+#### Scenario: Default embedding model — 场景：默认嵌入模型
+- **WHEN — 当** 创建知识库时
+- **THEN — 则** `embedding_model` 应默认为 "BAAI/bge-m3"
 
-#### Scenario: Search mode options
-- **WHEN** search_mode is set
-- **THEN** it SHALL accept "hybrid" (default), "dense", or "sparse"
+#### Scenario: Search mode options — 场景：搜索模式选项
+- **WHEN — 当** 设置 search_mode
+- **THEN — 则** 应接受 "hybrid"（默认）、"dense" 或 "sparse"
 
-#### Scenario: Collection name field
-- **WHEN** a knowledge base is created and a vector store collection is initialized
-- **THEN** `collection_name` SHALL store the backend-agnostic collection identifier
+#### Scenario: Collection name field — 场景：集合名称字段
+- **WHEN — 当** 创建知识库并初始化向量存储集合时
+- **THEN — 则** `collection_name` 应存储与后端无关的集合标识符
 
-#### Scenario: CreateSchema uses collection_name
-- **WHEN** `KnowledgeBaseCreateSchema` is constructed
-- **THEN** the collection field SHALL be named `collection_name` (not `qdrant_collection`)
+#### Scenario: CreateSchema uses collection_name — 场景：CreateSchema 使用 collection_name
+- **WHEN — 当** 构造 `KnowledgeBaseCreateSchema`
+- **THEN — 则** 集合字段应命名为 `collection_name`（而非 `qdrant_collection`）
 
-#### Scenario: ReadSchema serializes collection_name
-- **WHEN** `KnowledgeBaseReadSchema` is serialized
-- **THEN** the collection field SHALL appear as `collection_name` in the JSON output
+#### Scenario: ReadSchema serializes collection_name — 场景：ReadSchema 序列化 collection_name
+- **WHEN — 当** 序列化 `KnowledgeBaseReadSchema`
+- **THEN — 则** 集合字段应在 JSON 输出中显示为 `collection_name`

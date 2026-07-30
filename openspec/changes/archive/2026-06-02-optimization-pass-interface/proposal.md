@@ -1,32 +1,26 @@
-## Why
+## Why — 动机
 
-The GraphCompiler currently only validates graph structure (entry, edges, reachability) but performs no optimization. For large graphs (50+ nodes), this leaves performance on the table:
-- Unreachable nodes are detected but not removed
-- Parallel branches are not identified
-- Channels written but never read waste memory
+图编译器目前在一个计划步骤中编译整个图。对于包含数十个节点和多种并行分支的大图，这产生了任何优化都难以触及的单一执行计划。OptimizationPass 接口允许将优化步骤注入到不同阶段：编译后的计划可以在一次执行和下一次执行之间通过死节点消除或并行分支检测等方式进行优化。
 
-An OptimizationPass interface allows pluggable graph optimizations after validation.
+## What Changes — 变更内容
 
-## What Changes
+- 在 `engine/optimization.py` 中添加 `OptimizationPass` ABC，包含 `optimize(plan: GraphPlan) -> GraphPlan` 方法
+- 添加 `DeadNodeElimination`（移除没有入边且不是入口的节点）
+- 添加 `ParallelBranchDetection`（识别可以并发运行的分支）
+- 将 OptimizationPass 注册为 PregelRuntime 或编译器调用者的可选参数
 
-- Add `OptimizationPass` ABC in `engine/optimization.py` with `optimize(graph) -> CompiledGraph`
-- Add `DeadNodeElimination` pass (removes unreachable nodes)
-- Add `ParallelBranchDetection` pass (marks independent branches for parallel execution)
-- Register optimization passes as optional parameter on GraphCompiler
-- Do NOT change default behavior — optimization is opt-in
+## Capabilities — 能力变更
 
-## Capabilities
+### 新增能力
+- `optimization-pass`: 每次执行后对图计划运行可插拔的优化
 
-### New Capabilities
-- `optimization-pass`: Pluggable graph optimization interface
+### 修改的能力
+- 无
 
-### Modified Capabilities
-- None
+## Impact — 影响范围
 
-## Impact
-
-- **New file**: `src/hecate/engine/optimization.py` (ABC + 2 implementations)
-- **Modified file**: `src/hecate/engine/compiler.py` (add optional passes parameter)
-- **New test**: `tests/test_engine/test_optimization.py`
-- **No breaking changes**: Existing behavior preserved as default
-- **No new dependencies**: Uses only stdlib
+- **新文件**: `src/hecate/engine/optimization.py`（ABC + 实现）
+- **修改的文件**: 编译器或 PregelRuntime（添加可选的优化参数）
+- **新测试**: `tests/test_engine/test_optimization.py`
+- **无破坏性变更**
+- **无新依赖**

@@ -1,29 +1,29 @@
-## Why
+## Why — 动机
 
-The Hecate frontend codebase contains ~236 hardcoded Chinese strings across 26 files. As the project prepares to go public on GitHub after P2, all code must be in English to maintain a professional, consistent codebase alongside the recently translated documentation.
+Hecate 前端代码库在 26 个文件中包含约 236 个硬编码的中文字符串。随着项目准备在 P2 后公开到 GitHub，所有代码必须使用英语，以与最近翻译的文档保持一致，维护专业、一致的代码库。
 
-## What Changes
+## What Changes — 变更内容
 
-- Translate all Chinese UI text in `web/src/` to English (labels, placeholders, alerts, status messages, node type names)
-- Fix the "handoff" edge label inconsistency: change `"移交"` to `"Handoff"` across `dsl-bridge.ts` and `canvas-area.tsx`, and update all equality checks
-- Fix typo: `"knowledge-rerieval"` → `"knowledge-retrieval"` in `config-panel.tsx`
-- Update `dsl-bridge.test.ts` assertions to match translated strings
-- Update `node-palette.tsx` Chinese type labels to English
-- Translate all `alert()` messages (validation success/failure, errors)
+- 将 `web/src/` 中所有中文 UI 文本翻译成英语（标签、占位符、提示、状态消息、节点类型名称）
+- 修复"handoff"边标签不一致问题：将 `"移交"` 改为 `"Handoff"`，涉及 `dsl-bridge.ts` 和 `canvas-area.tsx`，并更新所有相等性检查
+- 修复拼写错误：`"knowledge-rerieval"` → `"knowledge-retrieval"`（在 `config-panel.tsx` 中）
+- 更新 `dsl-bridge.test.ts` 中的断言以匹配翻译后的字符串
+- 将 `node-palette.tsx` 中的中文类型标签翻译成英语
+- 翻译所有 `alert()` 消息（验证成功/失败、错误）
 
-## Capabilities
+## Capabilities — 能力变更
 
-### New Capabilities
+### 新增能力
 
-_(none — this is a translation/refactoring change, no new capabilities)_
+（无——这是一个翻译/重构变更，没有新能力）
 
-### Modified Capabilities
+### 修改的能力
 
-_(none — no spec-level behavior changes, only UI text translation)_
+（无——没有规范级别的行为变更，仅 UI 文本翻译）
 
-## Impact
+## Impact — 影响范围
 
-- **Frontend**: All 26 files in `web/src/` with Chinese strings (components, pages, lib, tests)
-- **Tests**: `dsl-bridge.test.ts` has Chinese assertions that must be updated
-- **No backend/API changes**: Only frontend string literals affected
-- **No breaking changes**: Functionality remains identical, only display text changes
+- **前端**: `web/src/` 中所有 26 个包含中文字符串的文件（组件、页面、库、测试）
+- **测试**: `dsl-bridge.test.ts` 包含必须更新的中文断言
+- **无后端/API 变更**: 仅影响前端字符串字面量
+- **无破坏性变更**: 功能保持相同，仅显示文本更改

@@ -1,34 +1,34 @@
-## Why
+## Why — 为什么
 
-When conversation context exceeds the token budget, the LLMWorker pipeline currently calls `InMemoryContextEngine.compress()`, which simply discards the oldest messages (`messages[-max_messages:]`). This causes **irreversible information loss**: early user requirements, large tool results, and reasoning chains are permanently dropped, and the LLM has no way to recover them. The existing four-layer memory system (L1 Working / L2 Session / L3 User / L4 Knowledge) handles persistence of *extracted facts*, but does not preserve the raw conversation turns that were filtered out by the engine-layer context pipeline.
+当对话上下文超过 token 预算时，LLMWorker 管道目前调用 `InMemoryContextEngine.compress()`，它简单地丢弃最旧的消息（`messages[-max_messages:]`）。这导致**不可逆的信息丢失**：早期的用户需求、大型工具结果和推理链被永久丢弃，LLM 无法恢复它们。现有的四层记忆系统（L1 工作 / L2 会话 / L3 用户 / L4 知识）处理*提取的事实*的持久化，但不保留被引擎层上下文管道过滤掉的原始对话轮次。
 
-We now have `AgentEnvironment` (1.3.15) with `write_file`/`read_file`/`exec_shell` and per-agent persistent storage. This unlocks a superior strategy: instead of deleting overflow context, **offload it to the environment filesystem** and let the agent retrieve it on demand via `read_file` — matching the pattern used by AgentScope (Offloader protocol), Claude Code (file-based compaction), and Amazon Bedrock AgentCore (`/mnt/workspace` session storage).
+我们现在拥有了 `AgentEnvironment`（1.3.15），提供 `write_file`/`read_file`/`exec_shell` 和每个 Agent 的持久存储。这解锁了一个更优的策略：不再删除溢出的上下文，而是**将其卸载到环境文件系统**，让 Agent 通过 `read_file` 按需检索 — 匹配 AgentScope（Offloader 协议）、Claude Code（基于文件的压缩）和 Amazon Bedrock AgentCore（`/mnt/workspace` 会话存储）使用的模式。
 
-## What Changes
+## What Changes — 变更内容
 
-- **NEW**: `ContextOffloader` class in `services/context/offloader.py` — serializes overflow messages to the AgentEnvironment filesystem (`memory/sessions/{session_id}/offloaded_{timestamp}.json`), returns a compact reference message with a brief summary and `read_file` retrieval hint.
-- **MODIFIED**: `LLMWorker._apply_context_pipeline()` — insert an **offload step** between message selection and compression. Offload is attempted first; compression (deletion) is only used as a last resort if offload is unavailable or budget is still exceeded after offload.
-- **MODIFIED**: PregelRuntime execution_context — inject the agent's `AgentEnvironment` (when available) so LLMWorker can access environment storage. Propagated via `execution_context["environment"]`.
-- **NEW**: Config setting `CONTEXT_OFFLOAD_THRESHOLD_TOKENS` (default 6000) — minimum token overflow that triggers offload. Prevents offloading for trivially small overflows.
-- **NEW**: Config setting `CONTEXT_OFFLOAD_ENABLED` (default `true`) — global on/off switch.
-- **Backward compatible**: When no `AgentEnvironment` is present in execution_context, the pipeline falls back to the existing `InMemoryContextEngine.compress()` behavior. No environment → no offload → no regression.
+- **新增**：`services/context/offloader.py` 中的 `ContextOffloader` 类 — 将溢出的消息序列化到 AgentEnvironment 文件系统（`memory/sessions/{session_id}/offloaded_{timestamp}.json`），返回带有简短摘要和 `read_file` 检索提示的紧凑引用消息。
+- **修改**：`LLMWorker._apply_context_pipeline()` — 在消息选择和压缩之间插入一个**卸载步骤**。首先尝试卸载；只有在卸载不可用或卸载后预算仍然超出时，才使用压缩（删除）作为最后手段。
+- **修改**：PregelRuntime execution_context — 注入 Agent 的 `AgentEnvironment`（当可用时），以便 LLMWorker 可以访问环境存储。通过 `execution_context["environment"]` 传播。
+- **新增**：配置设置 `CONTEXT_OFFLOAD_THRESHOLD_TOKENS`（默认 6000）— 触发卸载的最小 token 溢出量。防止微不足道的小溢出触发卸载。
+- **新增**：配置设置 `CONTEXT_OFFLOAD_ENABLED`（默认 `true`）— 全局开关。
+- **向后兼容**：当 execution_context 中没有 `AgentEnvironment` 时，管道回退到现有的 `InMemoryContextEngine.compress()` 行为。无环境 → 不卸载 → 无回归。
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `context-offloading`: A new capability covering the ContextOffloader component — its contract, storage layout, message format, and retrieval semantics. This is a sub-capability of context management, scoped to the offloading mechanism itself.
+### 新能力
+- `context-offloading`：一个涉及 ContextOffloader 组件的新能力 — 其契约、存储布局、消息格式和检索语义。这是上下文管理的子能力，范围限定在卸载机制本身。
 
-### Modified Capabilities
-- `context-engine`: The `LLMWorker` context pipeline behavior changes — a new offload step is inserted before compression, and the pipeline can now optionally consume an `AgentEnvironment` from `execution_context`. The ContextEngine ABC itself is unchanged; the modification is to how `LLMWorker` orchestrates context_engine + environment.
+### 修改的能力
+- `context-engine`：`LLMWorker` 上下文管道行为发生变化 — 在压缩之前插入一个新的卸载步骤，管道现在可以选择从 `execution_context` 消费 `AgentEnvironment`。ContextEngine ABC 本身不变；修改的是 `LLMWorker` 如何编排 context_engine + environment。
 
-## Impact
+## Impact — 影响
 
-- **Code**:
-  - `src/hecate/services/context/offloader.py` (NEW) — ContextOffloader class
-  - `src/hecate/engine/workers/llm_worker.py` (MODIFIED) — `_apply_context_pipeline()` gains offload step
-  - `src/hecate/engine/pregel.py` (MODIFIED) — execution_context injects environment when available
-  - `src/hecate/core/config.py` (MODIFIED) — two new settings
-- **APIs**: No external API changes. Internal execution_context contract gains optional `"environment"` key.
-- **Dependencies**: No new external dependencies. Reuses existing `AgentEnvironment.write_file()` / `read_file()`.
-- **Storage**: Offloaded context stored under `{WORKSPACE_ROOT}/{agent_id}/memory/sessions/{session_id}/offloaded_*.json` (LocalEnvironment) or `/env/memory/sessions/...` (DockerEnvironment).
-- **Tests**: New test suite for ContextOffloader and modified LLMWorker pipeline behavior.
+- **代码**：
+  - `src/hecate/services/context/offloader.py`（新增）— ContextOffloader 类
+  - `src/hecate/engine/workers/llm_worker.py`（修改）— `_apply_context_pipeline()` 增加卸载步骤
+  - `src/hecate/engine/pregel.py`（修改）— execution_context 在可用时注入 environment
+  - `src/hecate/core/config.py`（修改）— 两个新设置
+- **API**：无外部 API 变更。内部 execution_context 契约增加可选的 `"environment"` 键。
+- **依赖**：无新的外部依赖。复用现有的 `AgentEnvironment.write_file()` / `read_file()`。
+- **存储**：卸载的上下文存储在 `{WORKSPACE_ROOT}/{agent_id}/memory/sessions/{session_id}/offloaded_*.json`（LocalEnvironment）或 `/env/memory/sessions/...`（DockerEnvironment）。
+- **测试**：ContextOffloader 的新测试套件和修改后的 LLMWorker 管道行为测试。

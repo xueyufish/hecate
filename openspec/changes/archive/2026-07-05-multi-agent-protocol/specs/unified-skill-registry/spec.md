@@ -1,76 +1,76 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: SkillRegistry resolves heterogeneous skill references
-The system SHALL provide a `SkillRegistry` service that resolves `SkillRef` objects (containing `ref_type` and `ref_id`) into `ResolvedSkill` objects with uniform metadata, regardless of whether the underlying resource is a Tool, Skill, Knowledge Base, Workflow, or Agent.
+### Requirement: SkillRegistry 解析异构技能引用 — SkillRegistry resolves heterogeneous skill references
+系统应提供一个 `SkillRegistry` 服务，将 `SkillRef` 对象（包含 `ref_type` 和 `ref_id`）解析为具有统一元数据的 `ResolvedSkill` 对象，无论底层资源是 Tool、Skill、Knowledge Base、Workflow 还是 Agent。
 
-#### Scenario: Resolve a tool reference
-- **WHEN** SkillRegistry.resolve() receives a SkillRef with `ref_type: "tool"` and `ref_id: "weather_api"`
-- **THEN** the system queries ToolModel by name and returns a ResolvedSkill with `name`, `description`, `parameters` (JSON Schema), and `source: "tool"`
+#### Scenario: 解析工具引用 — Resolve a tool reference
+- **WHEN** SkillRegistry.resolve() 接收到 `ref_type: "tool"` 和 `ref_id: "weather_api"` 的 SkillRef
+- **THEN** 系统按名称查询 ToolModel，并返回包含 `name`、`description`、`parameters`（JSON Schema）和 `source: "tool"` 的 ResolvedSkill
 
-#### Scenario: Resolve a knowledge base reference
-- **WHEN** SkillRegistry.resolve() receives a SkillRef with `ref_type: "knowledge"` and a valid KB UUID
-- **THEN** the system queries KnowledgeBaseModel by UUID and returns a ResolvedSkill with `name`, `description`, and `source: "knowledge"`
+#### Scenario: 解析知识库引用 — Resolve a knowledge base reference
+- **WHEN** SkillRegistry.resolve() 接收到 `ref_type: "knowledge"` 和有效 KB UUID 的 SkillRef
+- **THEN** 系统按 UUID 查询 KnowledgeBaseModel，并返回包含 `name`、`description` 和 `source: "knowledge"` 的 ResolvedSkill
 
-#### Scenario: Resolve a workflow reference
-- **WHEN** SkillRegistry.resolve() receives a SkillRef with `ref_type: "workflow"` and a valid workflow UUID
-- **THEN** the system queries WorkflowModel by UUID and returns a ResolvedSkill with `name`, `description`, and `source: "workflow"`
+#### Scenario: 解析工作流引用 — Resolve a workflow reference
+- **WHEN** SkillRegistry.resolve() 接收到 `ref_type: "workflow"` 和有效工作流 UUID 的 SkillRef
+- **THEN** 系统按 UUID 查询 WorkflowModel，并返回包含 `name`、`description` 和 `source: "workflow"` 的 ResolvedSkill
 
-#### Scenario: Resolve an agent reference
-- **WHEN** SkillRegistry.resolve() receives a SkillRef with `ref_type: "agent"` and a valid agent UUID
-- **THEN** the system queries AgentModel by UUID and returns a ResolvedSkill with `name`, `description`, and `source: "agent"`
+#### Scenario: 解析 Agent 引用 — Resolve an agent reference
+- **WHEN** SkillRegistry.resolve() 接收到 `ref_type: "agent"` 和有效 Agent UUID 的 SkillRef
+- **THEN** 系统按 UUID 查询 AgentModel，并返回包含 `name`、`description` 和 `source: "agent"` 的 ResolvedSkill
 
-#### Scenario: Resolve unknown reference returns error
-- **WHEN** SkillRegistry.resolve() receives a SkillRef that cannot be found
-- **THEN** the system raises a `SkillNotFoundError` with the ref_type and ref_id
+#### Scenario: 解析未知引用返回错误 — Resolve unknown reference returns error
+- **WHEN** SkillRegistry.resolve() 接收到无法找到的 SkillRef
+- **THEN** 系统抛出 `SkillNotFoundError`，包含 ref_type 和 ref_id
 
-### Requirement: SkillRegistry invokes resolved skills uniformly
-The system SHALL provide a `SkillRegistry.invoke()` method that executes any resolved skill via the appropriate execution path (tool_execute, agent_execute, workflow_execute, knowledge_query, or skill instruction injection).
+### Requirement: SkillRegistry 统一调用已解析的技能 — SkillRegistry invokes resolved skills uniformly
+系统应提供一个 `SkillRegistry.invoke()` 方法，通过适当的执行路径（tool_execute、agent_execute、workflow_execute、knowledge_query 或 skill 指令注入）执行任何已解析的技能。
 
-#### Scenario: Invoke a tool skill
-- **WHEN** SkillRegistry.invoke() is called with a tool-type SkillRef and arguments
-- **THEN** the system delegates to EnginePort.tool_execute() with the tool name and arguments
+#### Scenario: 调用工具类技能 — Invoke a tool skill
+- **WHEN** 使用工具类型的 SkillRef 和参数调用 SkillRegistry.invoke()
+- **THEN** 系统委托给 EnginePort.tool_execute()，传入工具名称和参数
 
-#### Scenario: Invoke a knowledge skill
-- **WHEN** SkillRegistry.invoke() is called with a knowledge-type SkillRef and a query
-- **THEN** the system delegates to EnginePort.knowledge_query() with the KB ID and query
+#### Scenario: 调用知识类技能 — Invoke a knowledge skill
+- **WHEN** 使用知识类型的 SkillRef 和查询调用 SkillRegistry.invoke()
+- **THEN** 系统委托给 EnginePort.knowledge_query()，传入 KB ID 和查询
 
-#### Scenario: Invoke a workflow skill
-- **WHEN** SkillRegistry.invoke() is called with a workflow-type SkillRef and input
-- **THEN** the system delegates to EnginePort.workflow_execute() with the workflow ID and input
+#### Scenario: 调用工作流类技能 — Invoke a workflow skill
+- **WHEN** 使用工作流类型的 SkillRef 和输入调用 SkillRegistry.invoke()
+- **THEN** 系统委托给 EnginePort.workflow_execute()，传入工作流 ID 和输入
 
-#### Scenario: Invoke an agent skill
-- **WHEN** SkillRegistry.invoke() is called with an agent-type SkillRef and a task message
-- **THEN** the system delegates to EnginePort.agent_execute() with the agent ID and messages
+#### Scenario: 调用 Agent 类技能 — Invoke an agent skill
+- **WHEN** 使用 Agent 类型的 SkillRef 和任务消息调用 SkillRegistry.invoke()
+- **THEN** 系统委托给 EnginePort.agent_execute()，传入 Agent ID 和消息
 
-### Requirement: SkillRegistry formats skills for LLM context injection
-The system SHALL provide a `SkillRegistry.format_for_llm()` method that produces a uniform text representation of resolved skills suitable for LLM system prompt injection.
+### Requirement: SkillRegistry 为 LLM 上下文注入格式化技能 — SkillRegistry formats skills for LLM context injection
+系统应提供一个 `SkillRegistry.format_for_llm()` 方法，生成已解析技能的统⼀文本表示，适用于 LLM 系统提示注入。
 
-#### Scenario: Format tools for LLM
-- **WHEN** format_for_llm() receives a list of ResolvedSkills including tools
-- **THEN** the output contains tool names, descriptions, and parameter schemas in a standardized format (e.g., XML or JSON)
+#### Scenario: 为 LLM 格式化工具 — Format tools for LLM
+- **WHEN** format_for_llm() 接收包含工具的 ResolvedSkill 列表
+- **THEN** 输出包含工具名称、描述和参数模式，采用标准化格式（例如 XML 或 JSON）
 
-#### Scenario: Format knowledge bases for LLM
-- **WHEN** format_for_llm() receives a list of ResolvedSkills including knowledge bases
-- **THEN** the output describes each KB as a searchable knowledge source with retrieval instructions
+#### Scenario: 为 LLM 格式化知识库 — Format knowledge bases for LLM
+- **WHEN** format_for_llm() 接收包含知识库的 ResolvedSkill 列表
+- **THEN** 输出将每个 KB 描述为可搜索的知识源，并附有检索说明
 
-### Requirement: AgentModel supports unified skill_ids field
-The system SHALL add an optional `skill_ids` JSON field to AgentModel that stores a list of SkillRef objects, complementing (not replacing) the existing `tools`, `skills`, `knowledge_base_ids` fields.
+### Requirement: AgentModel 支持统一的 skill_ids 字段 — AgentModel supports unified skill_ids field
+系统应在 AgentModel 上添加一个可选的 `skill_ids` JSON 字段，存储 SkillRef 对象列表，补充（而非替换）现有的 `tools`、`skills`、`knowledge_base_ids` 字段。
 
-#### Scenario: Agent with unified skill_ids
-- **WHEN** an agent is created with `skill_ids: [{"ref_type": "tool", "ref_id": "search"}, {"ref_type": "knowledge", "ref_id": "<uuid>"}]`
-- **THEN** the SkillRegistry SHALL resolve both references and the agent SHALL have access to both the tool and the knowledge base
+#### Scenario: 具有统一 skill_ids 的 Agent — Agent with unified skill_ids
+- **WHEN** 使用 `skill_ids: [{"ref_type": "tool", "ref_id": "search"}, {"ref_type": "knowledge", "ref_id": "<uuid>"}]` 创建 Agent
+- **THEN** SkillRegistry 应解析两个引用，且该 Agent 应能同时访问该工具和知识库
 
-#### Scenario: Backward compatibility with existing fields
-- **WHEN** an agent has `tools: ["search"]` but no `skill_ids`
-- **THEN** the SkillRegistry SHALL still resolve the tool via the legacy `tools` field, ensuring existing agents work without migration
+#### Scenario: 与现有字段的向后兼容性 — Backward compatibility with existing fields
+- **WHEN** Agent 的 `tools: ["search"]` 但没有 `skill_ids`
+- **THEN** SkillRegistry 仍应通过旧的 `tools` 字段解析该工具，确保现有 Agent 无需迁移即可工作
 
-### Requirement: SkillRegistry resolves A2A remote agents
-The system SHALL support `ref_type: "remote_agent"` in SkillRef, resolving to A2A remote agents discovered via AgentCard, enabling agents to use remote A2A agents as skills.
+### Requirement: SkillRegistry 解析 A2A 远程 Agent — SkillRegistry resolves A2A remote agents
+系统应支持 SkillRef 中的 `ref_type: "remote_agent"`，解析为通过 AgentCard 发现的 A2A 远程 Agent，使 Agent 能够将远程 A2A Agent 作为技能使用。
 
-#### Scenario: Resolve remote agent skill
-- **WHEN** SkillRegistry.resolve() receives a SkillRef with `ref_type: "remote_agent"` and a URL
-- **THEN** the system fetches the remote AgentCard and returns a ResolvedSkill with capabilities from the card
+#### Scenario: 解析远程 Agent 技能 — Resolve remote agent skill
+- **WHEN** SkillRegistry.resolve() 接收到 `ref_type: "remote_agent"` 和 URL 的 SkillRef
+- **THEN** 系统获取远程 AgentCard 并返回包含卡片中能力的 ResolvedSkill
 
-#### Scenario: Invoke remote agent skill
-- **WHEN** SkillRegistry.invoke() is called with a remote_agent SkillRef
-- **THEN** the system delegates to A2AClient.send_message() with the remote agent URL
+#### Scenario: 调用远程 Agent 技能 — Invoke remote agent skill
+- **WHEN** 使用 remote_agent 类型的 SkillRef 调用 SkillRegistry.invoke()
+- **THEN** 系统委托给 A2AClient.send_message()，传入远程 Agent URL

@@ -1,139 +1,139 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: SecurityEvent unified data model
-The system SHALL define a `SecurityEvent` dataclass that normalizes events from AuditLog, ToolDecision, and SecurityFinding into a single schema. Each SecurityEvent SHALL contain: event_type (`api` | `tool_policy` | `anomaly`), severity (`info` | `low` | `medium` | `high` | `critical`), source (`audit_log` | `tool_decision` | `security_finding`), timestamp, actor (user_id and/or agent_id), action, decision, resource, and metadata (extensible).
+### 需求：SecurityEvent 统一数据模型
+系统应定义一个 `SecurityEvent` 数据类，将来自 AuditLog、ToolDecision 和 SecurityFinding 的事件归一化为单个模式。每个 SecurityEvent 应包含：event_type（`api` | `tool_policy` | `anomaly`）、severity（`info` | `low` | `medium` | `high` | `critical`）、source（`audit_log` | `tool_decision` | `security_finding`）、timestamp、actor（user_id 和/或 agent_id）、action、decision、resource 和 metadata（可扩展）。
 
-#### Scenario: AuditLog normalized to SecurityEvent
-- **WHEN** an AuditLog record with `action="agent.create"` and `success=true` is collected
-- **THEN** a SecurityEvent is created with `event_type="api"`, `severity="info"`, `source="audit_log"`
+#### 场景：AuditLog 归一化为 SecurityEvent
+- **当** 收集到 `action="agent.create"` 且 `success=true` 的 AuditLog 记录时
+- **则** 创建 event_type="api"、severity="info"、source="audit_log" 的 SecurityEvent
 
-#### Scenario: ToolDecision normalized to SecurityEvent
-- **WHEN** a ToolDecision with `decision="DENY"` is collected
-- **THEN** a SecurityEvent is created with `event_type="tool_policy"`, `severity="high"`, `source="tool_decision"`
+#### 场景：ToolDecision 归一化为 SecurityEvent
+- **当** 收集到 decision="DENY" 的 ToolDecision 时
+- **则** 创建 event_type="tool_policy"、severity="high"、source="tool_decision" 的 SecurityEvent
 
-#### Scenario: SecurityFinding normalized to SecurityEvent
-- **WHEN** a SecurityFinding with `severity="critical"` is collected
-- **THEN** a SecurityEvent is created with `event_type="anomaly"`, `severity="critical"`, `source="security_finding"`
+#### 场景：SecurityFinding 归一化为 SecurityEvent
+- **当** 收集到 severity="critical" 的 SecurityFinding 时
+- **则** 创建 event_type="anomaly"、severity="critical"、source="security_finding" 的 SecurityEvent
 
-### Requirement: SIEMExporter pluggable interface
-The system SHALL define a `SIEMExporter` ABC with an `export(events: list[SecurityEvent])` async method. Multiple exporters MAY be registered simultaneously. The system SHALL provide a `NullSIEMExporter` as the default no-op implementation.
+### 需求：SIEMExporter 可插拔接口
+系统应定义一个 `SIEMExporter` ABC，带有一个 `export(events: list[SecurityEvent])` 异步方法。可以同时注册多个导出器。系统应提供一个 `NullSIEMExporter` 作为默认的无操作实现。
 
-#### Scenario: Multiple exporters receive same events
-- **WHEN** a batch of 10 SecurityEvents is flushed
-- **THEN** each registered exporter receives the same batch of 10 events
+#### 场景：多个导出器接收相同事件
+- **当** 刷新一批 10 个 SecurityEvent 时
+- **则** 每个注册的导出器接收相同的一批 10 个事件
 
-#### Scenario: Exporter failure does not affect other exporters
-- **WHEN** the webhook exporter fails to send events
-- **THEN** the syslog exporter still receives and processes the batch
-- **AND** the error is logged
+#### 场景：导出器故障不影响其他导出器
+- **当** webhook 导出器发送事件失败时
+- **则** syslog 导出器仍然接收并处理该批事件
+- **且** 错误被记录
 
-### Requirement: WebhookSIEMExporter
-The system SHALL provide a `WebhookSIEMExporter` that sends SecurityEvent batches as JSON HTTP POST requests to a configurable endpoint. It SHALL support authentication via bearer token or custom headers. It SHALL use configurable batch size and flush interval.
+### 需求：WebhookSIEMExporter
+系统应提供一个 `WebhookSIEMExporter`，将 SecurityEvent 批作为 JSON HTTP POST 请求发送到可配置的端点。它应支持通过 bearer token 或自定义标头进行身份验证。它应使用可配置的批大小和刷新间隔。
 
-#### Scenario: Splunk HEC format
-- **WHEN** `SIEM_WEBHOOK_FORMAT=splunk_hec` and events are flushed
-- **THEN** the exporter sends a POST with each event wrapped as `{"event": {...}, "time": timestamp}` to the configured URL with `Authorization: Splunk <token>` header
+#### 场景：Splunk HEC 格式
+- **当** `SIEM_WEBHOOK_FORMAT=splunk_hec` 且事件被刷新时
+- **则** 导出器发送 POST，每个事件包装为 `{"event": {...}, "time": timestamp}` 到配置的 URL，带 `Authorization: Splunk <token>` 标头
 
-#### Scenario: Generic JSON format
-- **WHEN** `SIEM_WEBHOOK_FORMAT=json` and events are flushed
-- **THEN** the exporter sends a POST with `{"events": [...]}` JSON body to the configured URL
+#### 场景：通用 JSON 格式
+- **当** `SIEM_WEBHOOK_FORMAT=json` 且事件被刷新时
+- **则** 导出器发送带 `{"events": [...]}` JSON 体的 POST 到配置的 URL
 
-#### Scenario: Authentication via bearer token
-- **WHEN** `SIEM_WEBHOOK_TOKEN` is set
-- **THEN** the exporter adds `Authorization: Bearer <token>` header to all requests
+#### 场景：通过 bearer token 进行身份验证
+- **当** 设置了 `SIEM_WEBHOOK_TOKEN` 时
+- **则** 导出器向所有请求添加 `Authorization: Bearer <token>` 标头
 
-#### Scenario: Retry on transient failure
-- **WHEN** the webhook endpoint returns HTTP 503
-- **THEN** the exporter retries up to 3 times with exponential backoff (1s, 2s, 4s)
-- **AND** logs a warning on each retry
+#### 场景：临时故障重试
+- **当** webhook 端点返回 HTTP 503 时
+- **则** 导出器最多重试 3 次，使用指数退避（1s、2s、4s）
+- **且** 每次重试记录警告
 
-#### Scenario: Drop on permanent failure
-- **WHEN** the webhook endpoint returns HTTP 401 after retries
-- **THEN** the exporter logs an error and drops the batch (does not block the pipeline)
+#### 场景：永久故障时丢弃
+- **当** webhook 端点在重试后返回 HTTP 401 时
+- **则** 导出器记录错误并丢弃批（不阻塞管道）
 
-### Requirement: SyslogSIEMExporter
-The system SHALL provide a `SyslogSIEMExporter` that sends SecurityEvents as RFC 5424 syslog messages over TCP or UDP with optional TLS. It SHALL support configurable facility and severity mapping.
+### 需求：SyslogSIEMExporter
+系统应提供一个 `SyslogSIEMExporter`，通过 TCP 或 UDP 带可选的 TLS 发送 SecurityEvent 作为 RFC 5424 syslog 消息。它应支持可配置的 facility 和严重级别映射。
 
-#### Scenario: TCP transport
-- **WHEN** `SIEM_SYSLOG_PROTOCOL=tcp` and events are flushed
-- **THEN** the exporter opens a TCP connection to the configured host:port and sends one syslog message per event
+#### 场景：TCP 传输
+- **当** `SIEM_SYSLOG_PROTOCOL=tcp` 且事件被刷新时
+- **则** 导出器打开到配置的 host:port 的 TCP 连接，并为每个事件发送一条 syslog 消息
 
-#### Scenario: UDP transport
-- **WHEN** `SIEM_SYSLOG_PROTOCOL=udp` and events are flushed
-- **THEN** the exporter sends UDP datagrams (no connection state, fire-and-forget)
+#### 场景：UDP 传输
+- **当** `SIEM_SYSLOG_PROTOCOL=udp` 且事件被刷新时
+- **则** 导出器发送 UDP 数据报（无连接状态，即发即忘）
 
-#### Scenario: TLS encryption
-- **WHEN** `SIEM_SYSLOG_TLS=true`
-- **THEN** the exporter wraps the TCP connection in TLS with certificate verification (configurable CA bundle)
+#### 场景：TLS 加密
+- **当** `SIEM_SYSLOG_TLS=true` 时
+- **则** 导出器将 TCP 连接包装在带证书验证的 TLS 中（可配置 CA 包）
 
-#### Scenario: RFC 5424 format compliance
-- **WHEN** an event with severity HIGH is exported
-- **THEN** the syslog message uses PRI calculated as `facility * 8 + severity` where severity maps from SecurityEvent severity (critical=0, high=1, ...)
+#### 场景：RFC 5424 格式合规
+- **当** 严重级别为 HIGH 的事件被导出时
+- **则** syslog 消息使用 `facility * 8 + severity` 计算的 PRI，其中 severity 映射自 SecurityEvent 严重级别（critical=0、high=1...）
 
-#### Scenario: Connection failure logged
-- **WHEN** the syslog server is unreachable
-- **THEN** the exporter logs an error, drops the current batch, and attempts reconnection on the next flush
+#### 场景：连接失败记录
+- **当** syslog 服务器不可达时
+- **则** 导出器记录错误，丢弃当前批，并在下次刷新时尝试重新连接
 
-### Requirement: OCSFFormatter
-The system SHALL provide an `OCSFFormatter` that maps SecurityEvents to OCSF v1.5 schema classes. API events map to Activity class (4001), tool decisions map to Authorization class (2201), and findings map to Security Finding class (2001). The formatter is a transformation layer that wraps another exporter (typically webhook).
+### 需求：OCSFFormatter
+系统应提供一个 `OCSFFormatter`，将 SecurityEvent 映射到 OCSF v1.5 模式类。API 事件映射到 Activity class（4001），工具决策映射到 Authorization class（2201），发现结果映射到 Security Finding class（2001）。格式化器是一个转换层，包装另一个导出器（通常是 webhook）。
 
-#### Scenario: API event mapped to OCSF Activity
-- **WHEN** a SecurityEvent with `event_type="api"` is formatted
-- **THEN** the output JSON contains `class_uid: 4001`, `activity_name`, `actor.user`, `time`, and `severity_id`
+#### 场景：API 事件映射到 OCSF Activity
+- **当** event_type="api" 的 SecurityEvent 被格式化时
+- **则** 输出 JSON 包含 class_uid: 4001、activity_name、actor.user、time 和 severity_id
 
-#### Scenario: Tool decision mapped to OCSF Authorization
-- **WHEN** a SecurityEvent with `event_type="tool_policy"` and `decision="DENY"` is formatted
-- **THEN** the output JSON contains `class_uid: 2201`, `decision="deny"`, `action_id`, and `actor` fields
+#### 场景：工具决策映射到 OCSF Authorization
+- **当** event_type="tool_policy" 且 decision="DENY" 的 SecurityEvent 被格式化时
+- **则** 输出 JSON 包含 class_uid: 2201、decision="deny"、action_id 和 actor 字段
 
-#### Scenario: Finding mapped to OCSF Security Finding
-- **WHEN** a SecurityEvent with `event_type="anomaly"` is formatted
-- **THEN** the output JSON contains `class_uid: 2001`, `finding_info`, `severity_id`, and `resources`
+#### 场景：发现结果映射到 OCSF Security Finding
+- **当** event_type="anomaly" 的 SecurityEvent 被格式化时
+- **则** 输出 JSON 包含 class_uid: 2001、finding_info、severity_id 和 resources
 
-### Requirement: SecurityEventCollector
-The system SHALL provide a `SecurityEventCollector` that subscribes to AuditLog, ToolDecision, and SecurityFinding event streams. The collector normalizes events into SecurityEvent, applies configurable filtering, and routes to registered SIEMExporters via async batch flushing.
+### 需求：SecurityEventCollector
+系统应提供一个 `SecurityEventCollector`，订阅 AuditLog、ToolDecision 和 SecurityFinding 事件流。收集器将事件归一化为 SecurityEvent，应用可配置过滤，并通过异步批量刷新路由到注册的 SIEMExporter。
 
-#### Scenario: Event from AuditMiddleware collected
-- **WHEN** the AuditMiddleware produces an event for `POST /api/agents`
-- **THEN** the collector normalizes it into a SecurityEvent and buffers it
+#### 场景：从 AuditMiddleware 收集的事件
+- **当** AuditMiddleware 为 `POST /api/agents` 产生事件时
+- **则** 收集器将其归一化为 SecurityEvent 并缓冲
 
-#### Scenario: Event from ToolDecisionEmitter collected
-- **WHEN** the ToolDecisionEmitter produces a DENY event for tool `bash`
-- **THEN** the collector normalizes it into a SecurityEvent with severity HIGH and buffers it
+#### 场景：从 ToolDecisionEmitter 收集的事件
+- **当** ToolDecisionEmitter 为工具 `bash` 产生 DENY 事件时
+- **则** 收集器将其归一化为 severity HIGH 的 SecurityEvent 并缓冲
 
-#### Scenario: Event from FindingEngine collected
-- **WHEN** the FindingEngine persists a SecurityFinding
-- **THEN** the collector normalizes it into a SecurityEvent and buffers it
+#### 场景：从 FindingEngine 收集的事件
+- **当** FindingEngine 持久化一个 SecurityFinding 时
+- **则** 收集器将其归一化为 SecurityEvent 并缓冲
 
-#### Scenario: Event type filtering
-- **WHEN** `SIEM_FILTER_EVENT_TYPES=tool_policy,anomaly` (API events excluded)
-- **THEN** the collector skips AuditLog events and only processes ToolDecision and SecurityFinding events
+#### 场景：事件类型过滤
+- **当** `SIEM_FILTER_EVENT_TYPES=tool_policy,anomaly`（排除 API 事件）时
+- **则** 收集器跳过 AuditLog 事件，仅处理 ToolDecision 和 SecurityFinding 事件
 
-#### Scenario: Severity threshold filtering
-- **WHEN** `SIEM_MIN_SEVERITY=medium`
-- **THEN** the collector only buffers events with severity MEDIUM, HIGH, or CRITICAL
-- **AND** INFO and LOW severity events are silently dropped
+#### 场景：严重级别阈值过滤
+- **当** `SIEM_MIN_SEVERITY=medium` 时
+- **则** 收集器仅缓冲 severity MEDIUM、HIGH 或 CRITICAL 的事件
+- **且** INFO 和 LOW 严重事件静默丢弃
 
-#### Scenario: Batch flush
-- **WHEN** the collector's buffer reaches `SIEM_BATCH_SIZE` events
-- **THEN** all buffered events are flushed to registered exporters
-- **AND** the buffer is cleared
+#### 场景：批量刷新
+- **当** 收集器的缓冲区达到 `SIEM_BATCH_SIZE` 事件时
+- **则** 所有缓冲事件刷新到注册的导出器
+- **且** 缓冲区被清除
 
-#### Scenario: Time-based flush
-- **WHEN** `SIEM_FLUSH_INTERVAL` seconds elapse since the last flush
-- **THEN** all buffered events are flushed regardless of buffer size
+#### 场景：基于时间的刷新
+- **当** 自上次刷新后经过 `SIEM_FLUSH_INTERVAL` 秒时
+- **则** 无论缓冲区大小如何，所有缓冲事件都被刷新
 
-### Requirement: SIEM pipeline disabled by default
-The system SHALL default to `SIEM_ENABLED=false`. When disabled, the collector is not started, no exporters are registered, and events are not collected or exported. The pipeline startup and shutdown SHALL be managed by the application lifespan.
+### 需求：SIEM 管道默认禁用
+系统应默认 `SIEM_ENABLED=false`。禁用时，不启动收集器，不注册导出器，不收集或导出事件。管道启动和关闭应由应用程序生命周期管理。
 
-#### Scenario: No overhead when disabled
-- **WHEN** `SIEM_ENABLED=false`
-- **THEN** no SecurityEventCollector is instantiated
-- **AND** no event normalization or buffering occurs
+#### 场景：禁用时无开销
+- **当** `SIEM_ENABLED=false` 时
+- **则** 不实例化 SecurityEventCollector
+- **且** 不发生事件归一化或缓冲
 
-#### Scenario: Startup on enable
-- **WHEN** `SIEM_ENABLED=true` and the application starts
-- **THEN** the collector initializes, registers configured exporters (webhook/syslog/ocsf), and begins collecting events
+#### 场景：启用时启动
+- **当** `SIEM_ENABLED=true` 且应用程序启动时
+- **则** 收集器初始化，注册已配置的导出器（webhook/syslog/ocsf），并开始收集事件
 
-#### Scenario: Graceful shutdown flushes buffer
-- **WHEN** the application shuts down with events still in the buffer
-- **THEN** the collector flushes all remaining events before shutdown completes
+#### 场景：优雅关闭刷新缓冲区
+- **当** 应用程序关闭时缓冲区中仍有事件
+- **则** 收集器在关闭完成前刷新所有剩余事件

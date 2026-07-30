@@ -1,13 +1,13 @@
 # Product Step 2: Model Provider 管理后台
 
-## Problem
+## Problem — 问题
 
 当前模型管理方案存在两个问题：
 
 1. **模型列表不可控** — `/v1/models` 直接调用 LiteLLM `get_valid_models()` 返回所有模型（200+），用户在创建 Agent 时下拉列表过长且包含不相关模型（如 image generation、realtime 等）
 2. **Provider 配置不灵活** — API Key 写在 `.env` 文件里，需要重启服务才能生效，无法在 UI 上管理
 
-## Solution
+## Solution — 解决方案
 
 参考 Dify 和 FastGPT 的模式，实现 **Model Provider 管理后台**：
 
@@ -101,11 +101,11 @@ decrypted_key = fernet.decrypt(encrypted_key.encode()).decode()
 - `FERNET_KEY` 未设置时：明文存储（开发环境）
 - `FERNET_KEY` 已设置时：Fernet 加密存储（生产环境）
 
-## Priority
+## Priority — 优先级
 
 P2 — Step 2 范围，与 Workflow Canvas、Memory System 同期实现
 
-## References
+## References — 参考
 
 - Dify Model Providers: `Settings → Model Providers`，分组展示，状态指示
 - FastGPT: 两层配置（模型定义 + 通道/API Key）

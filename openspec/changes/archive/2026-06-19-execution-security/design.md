@@ -1,87 +1,87 @@
-## Context
+## Context — 背景
 
-ToolModel stores `risk_level` (String, default "LOW"), `approval_required` (Boolean, default False), `sandbox_enabled` (Boolean, default False), and `sandbox_config` (JSON) fields. AgentModel stores `risk_level` and `guardrail_config` (JSON). A Docker SandboxExecutor and container pool are fully implemented (9.4c/9.4d). EnginePort exposes `tool_execute_sandbox()` as an optional method.
+ToolModel 存储了 `risk_level`（String，默认 "LOW"）、`approval_required`（Boolean，默认 False）、`sandbox_enabled`（Boolean，默认 False）和 `sandbox_config`（JSON）字段。AgentModel 存储了 `risk_level` 和 `guardrail_config`（JSON）。Docker SandboxExecutor 和容器池已完全实现（9.4c/9.4d）。EnginePort 将 `tool_execute_sandbox()` 暴露为可选方法。
 
-However, ToolWorker calls `port.tool_execute()` unconditionally — none of these fields influence execution. The platform has zero tool-level security enforcement.
+然而，ToolWorker 无条件地调用 `port.tool_execute()`——这些字段都不影响执行。该平台没有零工具级安全执行。
 
-A 10-platform research survey (Claude Code, Salesforce Agentforce, Google ADK, IBM watsonx, HermesAgent, OpenClaw, openJiuwen, Huawei AgentArts, Alibaba AgentScope, AutoGPT) revealed that no platform uses an explicit 4-level risk taxonomy, but the industry is converging on allow/deny/ask rule engines (Claude Code, HermesAgent RFC #21849) combined with sandbox isolation. HermesAgent's container-bypass-approval pattern was identified as CVE-2026-29607 (9.9 Critical) — we explicitly avoid it.
+一项 10 平台研究调查（Claude Code、Salesforce Agentforce、Google ADK、IBM watsonx、HermesAgent、OpenClaw、openJiuwen、Huawei AgentArts、Alibaba AgentScope、AutoGPT）显示，没有平台使用明确的 4 级风险分类法，但行业正在向 allow/deny/ask 规则引擎（Claude Code、HermesAgent RFC #21849）结合沙箱隔离的方向趋同。HermesAgent 的容器绕过批准模式被识别为 CVE-2026-29607（9.9 严重）——我们明确避免它。
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Enforce `approval_required`, `sandbox_enabled`, and `risk_level` fields that already exist on ToolModel
-- Provide a rule engine for precise per-tool allow/deny/ask pattern matching
-- Route sandbox-enabled tools to `tool_execute_sandbox()` instead of `tool_execute()`
-- Support human-in-the-loop approval via a blocking callback with fail-closed timeout
-- Persist approval decisions for scope-based caching (SESSION/PROJECT/GLOBAL)
-- Maintain backward compatibility (no policy configured = EXECUTE for all tools)
+**目标：**
+- 执行 ToolModel 上已经存在的 `approval_required`、`sandbox_enabled` 和 `risk_level` 字段
+- 提供一个规则引擎，用于精确的每工具 allow/deny/ask 模式匹配
+- 将启用沙箱的工具路由到 `tool_execute_sandbox()` 而不是 `tool_execute()`
+- 通过带故障关闭超时的阻塞回调支持人工审批
+- 为基于作用域的缓存（SESSION/PROJECT/GLOBAL）持久化批准决策
+- 保持向后兼容（无策略配置 = 所有工具 EXECUTE）
 
-**Non-Goals:**
-- Approval API endpoints (deferred to feature 9.4e)
-- Async approval mode with session resumption (OpenClaw pattern — future enhancement)
-- Graph-level interrupt integration for approval (Command.interrupt re-enter semantics — future engine hardening)
-- Multi-channel approval routing (Slack/Discord/Telegram — future enhancement)
-- Per-operation granular toggles (feature 9.4a — 40+ operations)
-- Trusted workspace auto-allow (feature 9.4b)
-- Content moderation (feature 9.2a)
+**非目标：**
+- 批准 API 端点（推迟到功能 9.4e）
+- 带会话恢复的异步批准模式（OpenClaw 模式——未来增强）
+- 用于批准的图形级中断集成（Command.interrupt 重新进入语义——未来引擎加固）
+- 多渠道批准路由（Slack/Discord/Telegram——未来增强）
+- 每操作粒度切换（功能 9.4a——40+ 操作）
+- 可信工作空间自动允许（功能 9.4b）
+- 内容审核（功能 9.2a）
 
-## Decisions
+## Decisions — 决策
 
-### D24: RiskLevel as StrEnum (LOW/MEDIUM/HIGH/CRITICAL)
+### D24: RiskLevel 作为 StrEnum（LOW/MEDIUM/HIGH/CRITICAL）
 
-Define `RiskLevel(StrEnum)` in `engine/tool_access.py`. Storage on ToolModel remains `String(20)` for backward compatibility — code uses the enum, DB stores the string value. No migration needed for existing data.
+在 `engine/tool_access.py` 中定义 `RiskLevel(StrEnum)`。ToolModel 上的存储保持为 `String(20)` 以实现向后兼容——代码使用枚举，数据库存储字符串值。现有数据无需迁移。
 
-Each level maps to a default enforcement behavior when no explicit rules apply:
-- LOW: auto-execute (read-only, idempotent tools)
-- MEDIUM: auto-execute; sandbox if `sandbox_enabled` is set
-- HIGH: require approval unless `sandbox_enabled` is set
-- CRITICAL: always require approval regardless of sandbox
+每个级别映射到当没有明确规则适用时的默认执行行为：
+- LOW：自动执行（只读、幂等工具）
+- MEDIUM：自动执行；如果设置了 `sandbox_enabled` 则使用沙箱
+- HIGH：需要批准，除非设置了 `sandbox_enabled`
+- CRITICAL：无论是否使用沙箱，始终需要批准
 
-**Alternatives rejected:**
-- Migrate column to native enum type — unnecessary migration risk for no functional gain
-- Keep as free-form string — loses type safety and default semantics
-- Use Salesforce MCP annotations (readOnly/destructive/idempotent/openWorld) — hints not enforcement; orthogonal to risk levels
+**被拒绝的替代方案：**
+- 将列迁移为本机枚举类型——无功能增益的不必要迁移风险
+- 保持为自由格式字符串——失去类型安全和默认语义
+- 使用 Salesforce MCP 注解（readOnly/destructive/idempotent/openWorld）——提示而非执行；与风险级别正交
 
-### D25: Three-layer evaluation (rules → risk level → sandbox)
+### D25: 三层评估（规则 → 风险级别 → 沙箱）
 
-Evaluation order in `ToolAccessPolicy.evaluate()`:
+`ToolAccessPolicy.evaluate()` 中的评估顺序：
 
 ```
-Layer 1: Rule Engine (precise — Claude Code / HermesAgent pattern)
-  → Workspace-level deny rules (ToolPolicyModel) — absolute, cannot be overridden
-  → Agent-level allow/ask rules (guardrail_config) — per-agent customization
-  → Pattern matching: tool_name(glob), e.g. "terminal(rm *)", "write_file(.env*)"
+第 1 层：规则引擎（精确——Claude Code / HermesAgent 模式）
+  → 工作空间级拒绝规则（ToolPolicyModel）——绝对的，不能被覆盖
+  → Agent 级允许/询问规则（guardrail_config）——每 Agent 定制
+  → 模式匹配：工具名称（glob），例如"terminal(rm *)"、"write_file(.env*)"
 
-Layer 2: Risk Level Policy (default — our differentiator)
-  → If no rule matched, use risk_level to determine default behavior
+第 2 层：风险级别策略（默认——我们的差异化优势）
+  → 如果没有规则匹配，使用 risk_level 确定默认行为
   → LOW → EXECUTE
-  → MEDIUM → EXECUTE (or EXECUTE_SANDBOX if sandbox_enabled)
-  → HIGH → REQUIRE_APPROVAL (or EXECUTE_SANDBOX if sandbox_enabled)
-  → CRITICAL → REQUIRE_APPROVAL (always, regardless of sandbox)
+  → MEDIUM → EXECUTE（如果 sandbox_enabled 则为 EXECUTE_SANDBOX）
+  → HIGH → REQUIRE_APPROVAL（如果 sandbox_enabled 则为 EXECUTE_SANDBOX）
+  → CRITICAL → REQUIRE_APPROVAL（始终，无论 sandbox 如何）
 
-Layer 3: Sandbox Routing (isolation — existing infrastructure)
-  → If sandbox_enabled: route to port.tool_execute_sandbox()
-  → If not: route to port.tool_execute()
-  → Sandbox does NOT bypass approval (contra HermesAgent CVE-2026-29607)
+第 3 层：沙箱路由（隔离——现有基础设施）
+  → 如果 sandbox_enabled：路由到 port.tool_execute_sandbox()
+  → 如果没有：路由到 port.tool_execute()
+  → 沙箱不会绕过批准（与 HermesAgent CVE-2026-29607 相反）
 ```
 
-**Alternatives rejected:**
-- Risk-level-only (no rule engine) — too coarse, cannot express "allow git but deny rm"
-- Rule-engine-only (no risk levels) — loses default semantics, 10-platform research shows this is the gap HermesAgent's RFC #21849 is trying to fill
-- Sandbox bypasses approval (HermesAgent pattern) — CVE-2026-29607 (9.9 Critical), explicitly rejected
+**被拒绝的替代方案：**
+- 仅风险级别（无规则引擎）——过于粗糙，无法表达"允许 git 但拒绝 rm"
+- 仅规则引擎（无风险级别）——失去默认语义，10 平台研究显示这是 HermesAgent 的 RFC #21849 试图填补的空白
+- 沙箱绕过批准（HermesAgent 模式）——CVE-2026-29607（9.9 严重），明确拒绝
 
-### D26: ToolAccessPolicy in engine layer (zero dependencies)
+### D26: 引擎层中的 ToolAccessPolicy（零依赖）
 
-`ToolAccessPolicy` is a concrete class in `engine/tool_access.py` (consistent with `ToolGateEvaluator` in `engine/tool_gate.py`). It takes tool metadata + rules + context as parameters and returns an `AccessDecision`. Does not query the database — rule data is passed in by the caller (ToolWorker).
+`ToolAccessPolicy` 是 `engine/tool_access.py` 中的一个具体类（与 `engine/tool_gate.py` 中的 `ToolGateEvaluator` 一致）。它将工具元数据 + 规则 + 上下文作为参数，并返回 `AccessDecision`。不查询数据库——规则数据由调用者（ToolWorker）传入。
 
-**Alternatives rejected:**
-- ABC with pluggable implementations — over-engineering at this stage, one evaluation strategy suffices
-- Service-layer class — would break engine's zero-dependency constraint
-- PreToolHook implementation — GuardrailAction only has ALLOW/BLOCK/SANITIZE, no REQUIRE_APPROVAL outcome
+**被拒绝的替代方案：**
+- 带可插拔实现的 ABC——现阶段过度设计，一种评估策略就足够了
+- 服务层类——会破坏引擎的零依赖约束
+- PreToolHook 实现——GuardrailAction 只有 ALLOW/BLOCK/SANITIZE，没有 REQUIRE_APPROVAL 结果
 
-### D27: ApprovalCallback blocking pattern (not Command.interrupt)
+### D27: ApprovalCallback 阻塞模式（不是 Command.interrupt）
 
-Approval is implemented as a blocking async callback within ToolWorker, NOT via `Command.interrupt`. The existing interrupt mechanism resumes to the NEXT node after the interrupted node, but the tool hasn't executed yet — this would produce a conversation without tool results.
+批准通过 ToolWorker 内的阻塞异步回调实现，而不是通过 `Command.interrupt`。现有的中断机制在被中断节点之后恢复到下一个节点，但工具尚未执行——这将产生没有工具结果的对话。
 
 ```python
 class ApprovalCallback(ABC):
@@ -96,76 +96,76 @@ class ApprovalDecision:
     scope: ApprovalScope = ApprovalScope.ONCE
 ```
 
-ToolWorker awaits `approval_callback.request_approval()` which blocks until a decision arrives or timeout expires. Timeout = deny (fail-closed), consistent with HermesAgent and OpenClaw.
+ToolWorker 等待 `approval_callback.request_approval()`，它会阻塞直到决策到达或超时到期。超时 = 拒绝（故障关闭），与 HermesAgent 和 OpenClaw 一致。
 
-**Alternatives rejected:**
-- Command.interrupt — resume jumps to next node, tool never executes (see analysis above)
-- Modify PregelRuntime to support re-enter on interrupt — too invasive, changes interrupt contract for all use cases
-- Async mode (OpenClaw pattern) — returns immediately with approval_id, session continues — too complex for MVP, deferred to future enhancement
+**被拒绝的替代方案：**
+- Command.interrupt——恢复跳转到下一个节点，工具永远不会执行（见上面的分析）
+- 修改 PregelRuntime 以支持中断时重新进入——过于侵入性，为所有用例更改中断契约
+- 异步模式（OpenClaw 模式）——立即返回 approval_id，会话继续——对于 MVP 来说太复杂，推迟到未来增强
 
-### D28: Rule storage — workspace-level ToolPolicyModel + agent-level guardrail_config
+### D28: 规则存储——工作空间级 ToolPolicyModel + Agent 级 guardrail_config
 
-Two-layer rule storage with Claude Code-style precedence:
+两层规则存储，具有 Claude Code 风格的优先级：
 
 ```
-Layer 1: ToolPolicyModel (workspace-level, DB table)
-  → Primarily for DENY rules (security baseline, set by workspace admin)
-  → Cannot be overridden by agent-level rules
-  → Fields: workspace_id, rule_action (DENY/ASK/ALLOW), tool_pattern, priority
+第 1 层：ToolPolicyModel（工作空间级，数据库表）
+  → 主要用于 DENY 规则（安全基线，由工作空间管理员设置）
+  → 不能被 Agent 级规则覆盖
+  → 字段：workspace_id、rule_action（DENY/ASK/ALLOW）、tool_pattern、priority
 
-Layer 2: AgentModel.guardrail_config (agent-level, JSON dict)
-  → Per-agent customization
-  → Can ADD allow/ask rules but cannot override workspace DENY
-  → Format: {"tool_rules": {"allow": ["terminal(git:*)"], "ask": ["write_file(.env*)"]}}
-  → Can also set "min_auto_approve_risk" (e.g., "MEDIUM" = tools above MEDIUM need approval)
+第 2 层：AgentModel.guardrail_config（Agent 级，JSON 字典）
+  → 每 Agent 定制
+  → 可以添加 allow/ask 规则但不能覆盖工作空间 DENY
+  → 格式：{"tool_rules": {"allow": ["terminal(git:*)"], "ask": ["write_file(.env*)"]}}
+  → 也可以设置"min_auto_approve_risk"（例如，"MEDIUM" = 高于 MEDIUM 的工具需要批准）
 ```
 
-Evaluation order: workspace DENY → agent DENY → agent ASK → agent ALLOW → risk_level fallback.
+评估顺序：工作空间 DENY → Agent DENY → Agent ASK → Agent ALLOW → risk_level 回退。
 
-**Alternatives rejected:**
-- Rules only in guardrail_config (no DB table) — no workspace-level baseline, cannot enforce admin-set deny rules
-- Rules only in DB table (no agent config) — too rigid, agents can't customize
-- Settings hierarchy like Claude Code (Managed > CLI > Local > Shared > User) — over-engineered for our single-tenant-per-workspace model
+**被拒绝的替代方案：**
+- 仅在 guardrail_config 中的规则（无数据库表）——没有工作空间级基线，无法执行管理员设置的拒绝规则
+- 仅在数据库表中的规则（无 Agent 配置）——过于僵化，Agent 无法定制
+- 像 Claude Code（Managed > CLI > Local > Shared > User）这样的设置层次结构——对于我们的每工作空间单租户模型来说过度设计
 
-### D29: Fail-closed timeout (deny on timeout)
+### D29: 故障关闭超时（超时即拒绝）
 
-Default timeout: 60 seconds (configurable per agent via `guardrail_config.approval_timeout`). On timeout, `ApprovalDecision(approved=False, reason="Approval timeout")` is returned. For automation/cron scenarios (no interactive user), `guardrail_config.approval_mode = "deny"` short-circuits to immediate deny without waiting.
+默认超时：60 秒（可通过 `guardrail_config.approval_timeout` 每 Agent 配置）。超时时，返回 `ApprovalDecision(approved=False, reason="Approval timeout")`。对于自动化/定时任务场景（无交互用户），`guardrail_config.approval_mode = "deny"` 短路为立即拒绝而不等待。
 
-This matches HermesAgent (`approvals.timeout: 60`, deny on timeout) and OpenClaw (deny on timeout) patterns. No platform uses fail-open (allow on timeout).
+这与 HermesAgent（`approvals.timeout: 60`，超时即拒绝）和 OpenClaw（超时即拒绝）模式匹配。没有平台使用故障开放（超时即允许）。
 
-### D30: ApprovalScope (ONCE/SESSION/PROJECT/GLOBAL)
+### D30: ApprovalScope（ONCE/SESSION/PROJECT/GLOBAL）
 
 ```python
 class ApprovalScope(StrEnum):
-    ONCE = "once"        # Re-approve every invocation (default)
-    SESSION = "session"  # Cache for current session (in-memory)
-    PROJECT = "project"  # Persist to DB, valid across sessions in workspace
-    GLOBAL = "global"    # Admin-level auto-approve (config-based)
+    ONCE = "once"        # 每次调用重新批准（默认）
+    SESSION = "session"  # 为当前会话缓存（内存中）
+    PROJECT = "project"  # 持久化到数据库，在工作空间中的会话间有效
+    GLOBAL = "global"    # 管理员级自动批准（基于配置）
 ```
 
-ApprovalCallbackImpl checks scope cache before blocking:
-- ONCE: always call `request_approval()`
-- SESSION: check in-memory dict `{(session_id, tool_name): decision}`
-- PROJECT: query ApprovalRecord table for active approval
-- GLOBAL: check agent/workspace config for auto-approve rules
+ApprovalCallbackImpl 在阻塞前检查作用域缓存：
+- ONCE：始终调用 `request_approval()`
+- SESSION：检查内存字典 `{(session_id, tool_name): decision}`
+- PROJECT：查询 ApprovalRecord 表获取活动批准
+- GLOBAL：检查 Agent/工作空间配置获取自动批准规则
 
-**Alternatives rejected:**
-- Only ONCE and ALWAYS (Claude Code simplified) — loses granularity for team workflows
-- Only ONCE (Google ADK invocation-based) — too much friction for repeated tool calls
+**被拒绝的替代方案：**
+- 仅 ONCE 和 ALWAYS（Claude Code 简化）——失去团队工作流的粒度
+- 仅 ONCE（Google ADK 基于调用的）——对重复工具调用来说摩擦太大
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-**Risk: ToolWorker blocking on approval stalls the event loop**
-Mitigation: `ApprovalCallback.request_approval()` is async; the event loop continues processing other tasks. Only the specific tool call is blocked.
+**风险：ToolWorker 在批准上阻塞会阻塞事件循环**
+缓解：`ApprovalCallback.request_approval()` 是异步的；事件循环继续处理其他任务。只有特定的工具调用被阻塞。
 
-**Risk: No crash recovery during approval wait**
-Trade-off: Tool-level blocking (not graph-level interrupt) means no checkpoint during wait. If the process crashes, the pending approval is lost. Accepted for MVP — graph-level interrupt hardening is a future enhancement.
+**风险：批准等待期间没有崩溃恢复**
+权衡：工具级阻塞（不是图形级中断）意味着等待期间没有检查点。如果进程崩溃，待处理的批准将丢失。MVP 接受——图形级中断加固是未来的增强。
 
-**Risk: Rule engine complexity**
-Mitigation: Start simple — tool-name glob patterns only. Content matching (argument patterns like Claude Code's `Bash(git *)`) deferred to 9.4a.
+**风险：规则引擎复杂性**
+缓解：从简单开始——仅工具名称 glob 模式。内容匹配（如 Claude Code 的 `Bash(git *)` 的参数模式）推迟到 9.4a。
 
-**Trade-off: Workspace-level rules require DB query on every tool call**
-Mitigation: ToolPolicyModel results cached per-session in ToolWorker. Rules are workspace-scoped and rarely change.
+**权衡：工作空间级规则每次工具调用都需要数据库查询**
+缓解：ToolPolicyModel 结果按会话缓存在 ToolWorker 中。规则是工作空间作用域的，很少更改。
 
-**Trade-off: ApprovalScope caching could approve stale tool calls**
-Mitigation: PROJECT/GLOBAL approvals are tool-name scoped, not argument-scoped. Argument-scoped approval deferred to 9.4a.
+**权衡：ApprovalScope 缓存可能批准过时的工具调用**
+缓解：PROJECT/GLOBAL 批准是工具名称作用域的，不是参数作用域的。参数作用域的批准推迟到 9.4a。

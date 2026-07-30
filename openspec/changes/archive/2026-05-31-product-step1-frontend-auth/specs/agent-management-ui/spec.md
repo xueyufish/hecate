@@ -1,45 +1,45 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Agent list page
-The system SHALL display all agents owned by the current user in a list with name, model, and status.
+### Requirement: Agent list page — 需求：Agent 列表页面
+系统应以列表形式展示当前用户拥有的所有 Agent，包含名称、模型和状态。
 
-#### Scenario: View agent list
-- **WHEN** user navigates to the Agents page
-- **THEN** system shows a list of agents with name, model name, creation date, and a "Create Agent" button
+#### Scenario: View agent list — 场景：查看 Agent 列表
+- **WHEN** 用户导航到 Agents 页面
+- **THEN** 系统显示 Agent 列表，包含名称、模型名称、创建日期和"Create Agent"按钮
 
-#### Scenario: Empty state
-- **WHEN** user has no agents
-- **THEN** system shows an empty state with a prompt to create the first agent
+#### Scenario: Empty state — 场景：空状态
+- **WHEN** 用户没有 Agent
+- **THEN** 系统显示空状态，引导创建第一个 Agent
 
-### Requirement: Create agent
-The system SHALL allow users to create a new agent with name, description, model selection, and system prompt.
+### Requirement: Create agent — 需求：创建 Agent
+系统应允许用户使用名称、描述、模型选择和系统提示词创建新 Agent。
 
-#### Scenario: Successful creation
-- **WHEN** user fills in agent name, selects a model, optionally sets system prompt, and clicks Create
-- **THEN** system creates the agent via API and redirects to the agent detail page
+#### Scenario: Successful creation — 场景：创建成功
+- **WHEN** 用户填写 Agent 名称，选择模型，可选设置系统提示词，点击 Create
+- **THEN** 系统通过 API 创建 Agent 并重定向到 Agent 详情页面
 
-#### Scenario: Model selection
-- **WHEN** user opens model selector
-- **THEN** system shows available models fetched from `GET /v1/models`
+#### Scenario: Model selection — 场景：模型选择
+- **WHEN** 用户打开模型选择器
+- **THEN** 系统显示从 `GET /v1/models` 获取的可用模型
 
-### Requirement: Agent detail and configuration
-The system SHALL allow users to view and edit agent configuration including tools and knowledge bases.
+### Requirement: Agent detail and configuration — 需求：Agent 详情和配置
+系统应允许用户查看和编辑 Agent 配置，包括工具和知识库。
 
-#### Scenario: View agent config
-- **WHEN** user opens an agent's detail page
-- **THEN** system shows current config: name, description, model, system prompt, bound tools, bound knowledge bases
+#### Scenario: View agent config — 场景：查看 Agent 配置
+- **WHEN** 用户打开 Agent 的详情页面
+- **THEN** 系统显示当前配置：名称、描述、模型、系统提示词、绑定的工具、绑定的知识库
 
-#### Scenario: Bind tools
-- **WHEN** user opens tool binding section
-- **THEN** system shows available tools (from `GET /api/tools`) with toggle to bind/unbind each tool
+#### Scenario: Bind tools — 场景：绑定工具
+- **WHEN** 用户打开工具绑定部分
+- **THEN** 系统显示可用工具（来自 `GET /api/tools`），带切换开关绑定/解绑每个工具
 
-#### Scenario: Bind knowledge bases
-- **WHEN** user opens knowledge base binding section
-- **THEN** system shows available knowledge bases (from `GET /api/knowledge-bases`) with toggle to bind/unbind
+#### Scenario: Bind knowledge bases — 场景：绑定知识库
+- **WHEN** 用户打开知识库绑定部分
+- **THEN** 系统显示可用知识库（来自 `GET /api/knowledge-bases`），带切换开关绑定/解绑
 
-### Requirement: Delete agent
-The system SHALL allow users to delete an agent with confirmation.
+### Requirement: Delete agent — 需求：删除 Agent
+系统应允许用户通过确认后删除 Agent。
 
-#### Scenario: Delete with confirmation
-- **WHEN** user clicks delete and confirms
-- **THEN** system deletes the agent and redirects to agent list
+#### Scenario: Delete with confirmation — 场景：确认后删除
+- **WHEN** 用户点击删除并确认
+- **THEN** 系统删除 Agent 并重定向到 Agent 列表

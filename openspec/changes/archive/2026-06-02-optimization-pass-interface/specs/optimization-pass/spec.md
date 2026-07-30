@@ -1,45 +1,30 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: OptimizationPass ABC defines pluggable graph optimization
-The engine SHALL define an `OptimizationPass` ABC in `engine/optimization.py` with abstract method: `optimize(graph: CompiledGraph) -> CompiledGraph`.
+### Requirement：OptimizationPass ABC 定义可插拔的计划优化 — OptimizationPass ABC 定义可插拔的计划优化
+引擎 SHALL 在 `engine/optimization.py` 中定义一个 `OptimizationPass` ABC，包含接受并返回 `GraphPlan` 的 `optimize(plan: GraphPlan) -> GraphPlan` 方法。
 
-#### Scenario: Optimize returns new graph
-- **WHEN** `optimize(graph)` is called with a CompiledGraph
-- **THEN** it SHALL return a new CompiledGraph (not modify the input)
+#### Scenario：优化图计划
+- **WHEN** 调用 `pass.optimize(plan)`
+- **THEN** 它 SHALL 返回一个新的 `GraphPlan` 实例（或原地修改后返回相同的计划）
 
-### Requirement: DeadNodeElimination removes unreachable nodes
-A `DeadNodeElimination` SHALL implement OptimizationPass by removing nodes not reachable from the entry point.
+### Requirement：DeadNodeElimination 移除不可达节点 — DeadNodeElimination 移除不可达节点
+`DeadNodeElimination` SHALL 移除任何没有入边的节点（入口节点除外）。这避免了为无法被触发的节点分配资源。
 
-#### Scenario: Remove unreachable nodes
-- **WHEN** a graph has nodes A (entry), B, C where C is unreachable
-- **THEN** the optimized graph SHALL contain only A and B
+#### Scenario：移除去往不可达节点的边
+- **WHEN** 一个图包含入口节点 A → B → C 和 C → E，其中 D 是引用 E 的无人到达的节点
+- **THEN** 优化 SHALL 移除 D（没有入边且不是入口节点）
 
-#### Scenario: Preserve reachable nodes
-- **WHEN** a graph has all nodes reachable
-- **THEN** the optimized graph SHALL be identical to the input
+#### Scenario：保留入口节点
+- **WHEN** 入口节点没有入边
+- **THEN** 它 SHALL 保留在计划中
 
-#### Scenario: No entry point
-- **WHEN** a graph has no entry point
-- **THEN** the optimized graph SHALL be identical to the input (no elimination possible)
+### Requirement：ParallelBranchDetection 标记并行区域 — ParallelBranchDetection 标记并行区域
+`ParallelBranchDetection` SHALL 识别可以安全并发执行的分支（共享共同的父节点但彼此之间没有路径）。它 SHALL 标记这些区域而不改变计划结构。
 
-### Requirement: ParallelBranchDetection marks independent branches
-A `ParallelBranchDetection` SHALL implement OptimizationPass by detecting branches that can execute in parallel and marking them in graph metadata.
+#### Scenario：识别并行分支
+- **WHEN** 一个图包含 A → B、A → C（B 和 C 之间无路径）
+- **THEN** B 和 C SHALL 被标记为可并行运行
 
-#### Scenario: Detect parallel branches
-- **WHEN** a graph has entry node A with edges to B and C (no dependencies between B and C)
-- **THEN** the optimized graph SHALL have metadata["parallel_branches"] containing [B, C]
-
-#### Scenario: No parallel branches
-- **WHEN** a graph is linear (A→B→C)
-- **THEN** the optimized graph SHALL have no parallel_branches metadata
-
-### Requirement: GraphCompiler accepts optional optimization passes
-GraphCompiler SHALL accept an optional `passes` parameter in its constructor, defaulting to empty list.
-
-#### Scenario: Default no optimization
-- **WHEN** GraphCompiler is created without passes parameter
-- **THEN** it SHALL compile without optimization (current behavior)
-
-#### Scenario: With optimization passes
-- **WHEN** GraphCompiler is created with passes=[DeadNodeElimination()]
-- **THEN** it SHALL apply the passes after validation
+#### Scenario：不标记串行分支
+- **WHEN** 一个图包含 A → B → C
+- **THEN** SHALL 不标记任何区域为并行

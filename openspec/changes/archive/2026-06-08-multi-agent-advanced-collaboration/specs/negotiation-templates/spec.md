@@ -1,50 +1,50 @@
-## ADDED Requirements
+## 新增的需求
 
-### Requirement: Negotiation graph template
-The system SHALL provide a `build_negotiation_graph` factory function in `engine/templates.py` that returns a `GraphConfig` implementing a two-agent negotiation protocol: proposal → response → accept/reject, with configurable max rounds.
+### 需求：协商图模板
+系统应在 `engine/templates.py` 中提供 `build_negotiation_graph` 工厂函数，返回实现双智能体协商协议的 `GraphConfig`：提案 → 回应 → 接受/拒绝，并支持可配置的最大轮数。
 
-#### Scenario: Negotiation template structure
-- **WHEN** `build_negotiation_graph(agent_a_model, agent_b_model, max_rounds=5)` is called
-- **THEN** the graph SHALL contain: 2 AGENT nodes (proposer, responder), 1 CONDITION node (check_agreement), edges forming a negotiation loop, and a `negotiation_channel` LAST_VALUE channel for inter-agent proposals
+#### 场景：协商模板结构
+- **当** 调用 `build_negotiation_graph(agent_a_model, agent_b_model, max_rounds=5)`
+- **则** 图应包含：2 个 AGENT 节点（提案方、回应方）、1 个 CONDITION 节点（check_agreement）、形成协商循环的边，以及用于智能体间提案的 `negotiation_channel` LAST_VALUE 通道
 
-#### Scenario: Negotiation round trip
-- **WHEN** the negotiation graph executes and the proposer sends a proposal
-- **THEN** the responder SHALL receive the proposal via the shared negotiation channel and respond with accept or counter-proposal
+#### 场景：协商轮次往返
+- **当** 协商图执行且提案方发送提案
+- **则** 回应方应通过共享的协商通道接收提案，并以接受或反提案回应
 
-#### Scenario: Negotiation terminates on agreement
-- **WHEN** the responder accepts a proposal (writes `agreement_status="accepted"` to the channel)
-- **THEN** the CONDITION node SHALL route to `__end__` without further rounds
+#### 场景：协商在达成一致时终止
+- **当** 回应方接受提案（向通道写入 `agreement_status="accepted"`）
+- **则** CONDITION 节点应路由到 `__end__`，不进行进一步轮次
 
-#### Scenario: Negotiation terminates on max rounds
-- **WHEN** the negotiation reaches `max_rounds` without agreement
-- **THEN** the graph SHALL terminate with `agreement_status="max_rounds_reached"`
+#### 场景：协商在最大轮数时终止
+- **当** 协商达到 `max_rounds` 而未达成一致
+- **则** 图应以 `agreement_status="max_rounds_reached"` 终止
 
-### Requirement: Debate graph template
-The system SHALL provide a `build_debate_graph` factory function returning a `GraphConfig` implementing a multi-round debate between 2 agents with an optional judge.
+### 需求：辩论图模板
+系统应提供 `build_debate_graph` 工厂函数，返回实现两个智能体之间多轮辩论（带可选法官）的 `GraphConfig`。
 
-#### Scenario: Debate template structure
-- **WHEN** `build_debate_graph(debater_a_model, debater_b_model, judge_model, rounds=3)` is called
-- **THEN** the graph SHALL contain: 2 AGENT nodes (debater_a, debater_b), 1 optional AGENT node (judge), a round counter LAST_VALUE channel, edges for alternating debate turns, and judge evaluation at the end
+#### 场景：辩论模板结构
+- **当** 调用 `build_debate_graph(debater_a_model, debater_b_model, judge_model, rounds=3)`
+- **则** 图应包含：2 个 AGENT 节点（辩手_a、辩手_b）、1 个可选的 AGENT 节点（法官）、一个轮次计数器 LAST_VALUE 通道、用于交替辩论轮次的边，以及最后的法官评估
 
-#### Scenario: Debate round execution
-- **WHEN** the debate graph executes round 1
-- **THEN** debater_a writes an argument, debater_b reads it and writes a rebuttal, then the round counter increments
+#### 场景：辩论轮次执行
+- **当** 辩论图执行第 1 轮
+- **则** 辩手_a 写入论点，辩手_b 读取它并写入反驳，然后轮次计数器递增
 
-#### Scenario: Debate with judge
-- **WHEN** all debate rounds complete and a judge is configured
-- **THEN** the judge node SHALL read all arguments and produce a final verdict
+#### 场景：带法官的辩论
+- **当** 所有辩论轮次完成且配置了法官
+- **则** 法官节点应读取所有论点并产生最终裁决
 
-#### Scenario: Debate without judge
-- **WHEN** all debate rounds complete and no judge is configured
-- **THEN** the graph SHALL terminate with all arguments accumulated in the messages channel
+#### 场景：不带法官的辩论
+- **当** 所有辩论轮次完成且未配置法官
+- **则** 图应终止，所有论点累积在消息通道中
 
-### Requirement: Templates follow existing conventions
-Both negotiation and debate template functions SHALL follow the established pattern: accept model/prompt parameters, return `GraphConfig`, use `NodeType.AGENT` for agent nodes, and define channels in the `state` dict.
+### 需求：模板遵循现有约定
+协商和辩论模板函数均应遵循已建立的模式：接受模型/提示参数、返回 `GraphConfig`、使用 `NodeType.AGENT` 作为智能体节点，并在 `state` 字典中定义通道。
 
-#### Scenario: Import template factory
-- **WHEN** `from hecate.engine.templates import build_negotiation_graph, build_debate_graph` is executed
-- **THEN** the import SHALL succeed
+#### 场景：导入模板工厂
+- **当** 执行 `from hecate.engine.templates import build_negotiation_graph, build_debate_graph`
+- **则** 导入应成功
 
-#### Scenario: Returned GraphConfig is compilable
-- **WHEN** `build_negotiation_graph(...)` produces a GraphConfig
-- **THEN** `GraphCompiler.compile(graph_config)` SHALL succeed without errors
+#### 场景：返回的 GraphConfig 可编译
+- **当** `build_negotiation_graph(...)` 生成一个 GraphConfig
+- **则** `GraphCompiler.compile(graph_config)` 应无错误地成功

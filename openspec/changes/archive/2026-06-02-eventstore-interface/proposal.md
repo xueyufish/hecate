@@ -1,26 +1,26 @@
-## Why
+## Why — 动机
 
-The engine currently uses a **snapshot-based** checkpoint model (`CheckpointStore.save/load`) that captures full channel state at discrete superstep boundaries. This is sufficient for pause/resume, but precludes several P2+ capabilities: fine-grained audit trails, incremental state reconstruction, event-driven debugging, and replay-based testing. An append-only EventStore interface provides the foundation for these capabilities with minimal implementation cost (ABC only in P2).
+引擎当前使用基于**快照**的 checkpoint 模型（`CheckpointStore.save/load`），在离散的超级步边界捕获完整的 channel 状态。这对于暂停/恢复已经足够，但排除了多个 P2+ 能力：细粒度审计追踪、增量状态重建、事件驱动调试和基于重放的测试。仅追加的 EventStore 接口以最小的实现成本（P2 中仅为 ABC）为这些能力提供了基础。
 
-## What Changes
+## What Changes — 变更内容
 
-- Add a new `EventStore` ABC in `engine/eventstore.py` with methods for appending, querying, and replaying events
-- Add an `InMemoryEventStore` implementation for testing
-- Register EventStore as an optional engine dependency alongside CheckpointStore
-- Do NOT modify existing CheckpointStore or PregelRuntime — EventStore is additive and independently usable
+- 在 `engine/eventstore.py` 中添加新的 `EventStore` ABC，包含追加、查询和重放事件的方法
+- 添加用于测试的 `InMemoryEventStore` 实现
+- 将 EventStore 注册为与 CheckpointStore 并列的可选引擎依赖
+- 不修改现有的 CheckpointStore 或 PregelRuntime——EventStore 是附加性的，可独立使用
 
-## Capabilities
+## Capabilities — 能力变更
 
-### New Capabilities
-- `eventstore`: Append-only event persistence interface for fine-grained execution state tracking
+### 新增能力
+- `eventstore`: 仅追加的事件持久化接口，用于细粒度执行状态跟踪
 
-### Modified Capabilities
-- `engine-ports`: Add optional `event_store` property to EnginePort for P2 interface reservation
+### 修改的能力
+- `engine-ports`: 为 EnginePort 添加可选的 `event_store` 属性，用于 P2 接口预留
 
-## Impact
+## Impact — 影响范围
 
-- **New file**: `src/hecate/engine/eventstore.py` (ABC + InMemoryEventStore)
-- **Modified file**: `src/hecate/engine/ports.py` (add optional `event_store` property)
-- **New test**: `tests/test_engine/test_eventstore.py`
-- **No breaking changes**: EventStore is entirely additive; no existing code requires modification
-- **No new dependencies**: Uses only stdlib (`abc`, `uuid`, `dataclasses`)
+- **新文件**: `src/hecate/engine/eventstore.py`（ABC + InMemoryEventStore）
+- **修改的文件**: `src/hecate/engine/ports.py`（添加可选的 `event_store` 属性）
+- **新测试**: `tests/test_engine/test_eventstore.py`
+- **无破坏性变更**: EventStore 完全是附加性的；现有代码无需修改
+- **无新依赖**: 仅使用 stdlib（`abc`、`uuid`、`dataclasses`）

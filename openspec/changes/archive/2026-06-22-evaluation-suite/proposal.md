@@ -1,39 +1,39 @@
-## Why
+## Why — 为什么
 
-The platform currently has 9 evaluators (4 RAG + 5 Agent) and basic dataset/run/score infrastructure. To deliver enterprise-grade evaluation capabilities, we need to expand to 40+ built-in evaluators covering result quality, process correctness, interaction coherence, and safety — and add regression test infrastructure with dataset versioning, assertion-based pass/fail, run comparison, and CI/CD integration. This completes features 7.2a and 7.6, enabling teams to detect quality regressions before deployment and continuously measure Agent performance across releases.
+平台目前有 9 个评估器（4 个 RAG + 5 个 Agent）和基本的数据集/运行/分数基础设施。为了提供企业级评估能力，我们需要扩展到 40+ 个内置评估器，涵盖结果质量、过程正确性、交互连贯性和安全——并添加带有数据集版本管理、基于断言的通过/失败、运行比较和 CI/CD 集成的回归测试基础设施。这完成了功能 7.2a 和 7.6，使团队能够在部署前检测质量回归，并持续衡量跨版本的 Agent 性能。
 
-## What Changes
+## What Changes — 变更内容
 
-- Expand evaluator library from 9 to 41 evaluators across four categories: Result Layer (output quality), Process Layer (tool/reasoning), Interaction Layer (multi-turn), and Generic/Programmatic (deterministic, LLM-judge, code execution, safety)
-- Refactor evaluator registry from inline dict to a structured package with auto-registration decorator and category-based file organization
-- Standardize LLM-as-Judge prompt templates with a `JudgePromptTemplate` schema (scoring_scale, system_prompt, user_prompt_template, output_format)
-- Extend `EvalInput` with optional fields: `conversation_history`, `system_prompt`, `agent_id`, `session_id` for multi-turn and process evaluators
-- Add dataset versioning: `version` tag, `baseline_run_id` for regression comparison, `is_locked` to freeze golden datasets
-- Add per-item assertion model: `assertions` JSON array on `EvaluationItemModel` (type + threshold), with Dataset-level default threshold fallback
-- Add run comparison API: POST `/api/evaluation/runs/compare` returning per-metric delta and regression flags (score drop > configurable threshold)
-- Add regression trigger API: POST `/api/evaluation/regression/run` for CI/CD integration (returns pass/fail + report)
-- Add evaluator listing API: GET `/api/evaluation/evaluators` returning all registered evaluators with category, description, and required input fields
-- Integrate evaluation regression with 8.6 Alerting: `evaluation_regression` alert type triggers when run scores drop below baseline
-- Evaluation LLM calls use a separate cost tracking marker (`purpose=evaluation`) to avoid consuming user quota
+- 将评估器库从 9 个扩展到 41 个，覆盖四个类别：结果层（输出质量）、过程层（工具/推理）、交互层（多轮）和通用/编程层（确定性、LLM-judge、代码执行、安全）
+- 将评估器注册表从内联字典重构为结构化包，使用自动注册装饰器和基于类别的文件组织
+- 使用 `JudgePromptTemplate` 模式（评分量表、系统提示、用户提示模板、输出格式）标准化 LLM-as-Judge 提示模板
+- 使用可选字段扩展 `EvalInput`：`conversation_history`、`system_prompt`、`agent_id`、`session_id`，用于多轮和过程评估器
+- 添加数据集版本管理：`version` 标签、用于回归比较的 `baseline_run_id`、用于冻结黄金数据集的 `is_locked`
+- 添加逐项断言模型：`EvaluationItemModel` 上的 `assertions` JSON 数组（类型 + 阈值），带有数据集级别默认阈值后备
+- 添加运行比较 API：POST `/api/evaluation/runs/compare` 返回每指标增量和回归标记（分数下降 > 可配置阈值）
+- 添加回归触发 API：POST `/api/evaluation/regression/run` 用于 CI/CD 集成（返回通过/失败 + 报告）
+- 添加评估器列表 API：GET `/api/evaluation/evaluators` 返回所有已注册评估器，包含类别、描述和必需输入字段
+- 将评估回归与 8.6 告警系统集成：当运行分数低于基线时触发 `evaluation_regression` 告警类型
+- 评估 LLM 调用使用单独的成本跟踪标记（`purpose=evaluation`）以避免消耗用户配额
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `builtin-evaluators`: 32 new built-in evaluators across four layers (Result, Process, Interaction, Generic/Programmatic) with standardized LLM-as-Judge prompt templates and auto-registration registry
-- `regression-testing`: Dataset versioning, per-item assertion model with thresholds, run comparison with regression detection, and CI/CD integration API for automated quality gating
+### New Capabilities — 新增能力
+- `builtin-evaluators`：32 个新的内置评估器，跨越四个层（结果、过程、交互、通用/编程），带有标准化 LLM-as-Judge 提示模板和自动注册注册表
+- `regression-testing`：数据集版本管理、带阈值的逐项断言模型、带回归检测的运行比较，以及用于自动化质量门控的 CI/CD 集成 API
 
-### Modified Capabilities
-- `evaluation-framework`: EvalInput expansion (conversation_history, system_prompt, agent_id, session_id), registry refactor to category-based package with decorator registration, deterministic evaluator parallel execution optimization
-- `evaluation-dataset`: Dataset versioning fields (version, baseline_run_id, is_locked), item assertion JSON field, item tags for grouping
-- `evaluation-api`: New endpoints for evaluator listing, run comparison, regression trigger, and dataset versioning
-- `alerting`: New `evaluation_regression` alert type for score regression detection
+### Modified Capabilities — 修改的能力
+- `evaluation-framework`：EvalInput 扩展（conversation_history、system_prompt、agent_id、session_id）、注册表重构为基于类别的包带装饰器注册、确定性评估器并行执行优化
+- `evaluation-dataset`：数据集版本管理字段（version、baseline_run_id、is_locked）、项断言 JSON 字段、项标签用于分组
+- `evaluation-api`：用于评估器列表、运行比较、回归触发和数据集版本管理的新端点
+- `alerting`：新的 `evaluation_regression` 告警类型，用于分数回归检测
 
-## Impact
+## Impact — 影响
 
-- **New files**: `services/evaluation/evaluators/` package (format.py, content.py, citation.py, tool.py, multi_turn.py, judge.py, safety.py, programmatic.py), `services/regression_service.py`, `services/evaluation/prompt_templates.py`
-- **Modified models**: `models/evaluation.py` (version, baseline_run_id, is_locked on DatasetModel; assertions, tags on ItemModel), `models/alert.py` (new AlertType)
-- **Modified services**: `services/evaluation/evaluator.py` (registry refactor), `services/evaluation/types.py` (EvalInput expansion), `services/evaluation/engine.py` (parallel deterministic execution)
-- **Modified API**: `api/evaluation.py` (new endpoints), `api/management/alerts.py` (new signal provider)
-- **Migration**: New Alembic migration for dataset versioning + item assertion columns
-- **Dependencies**: No new external packages — all evaluators use existing LLMService or deterministic logic
-- **Tests**: Per-evaluator unit tests + regression comparison tests + CI/CD API tests
+- **新文件**：`services/evaluation/evaluators/` 包（format.py、content.py、citation.py、tool.py、multi_turn.py、judge.py、safety.py、programmatic.py）、`services/regression_service.py`、`services/evaluation/prompt_templates.py`
+- **修改的模型**：`models/evaluation.py`（DatasetModel 上的 version、baseline_run_id、is_locked；ItemModel 上的 assertions、tags）、`models/alert.py`（新的 AlertType）
+- **修改的服务**：`services/evaluation/evaluator.py`（注册表重构）、`services/evaluation/types.py`（EvalInput 扩展）、`services/evaluation/engine.py`（并行确定性执行）
+- **修改的 API**：`api/evaluation.py`（新端点）、`api/management/alerts.py`（新的信号提供者）
+- **迁移**：新的 Alembic 迁移用于数据集版本管理 + 项断言列
+- **依赖**：无新的外部包——所有评估器使用现有的 LLMService 或确定性逻辑
+- **测试**：每评估器单元测试 + 回归比较测试 + CI/CD API 测试

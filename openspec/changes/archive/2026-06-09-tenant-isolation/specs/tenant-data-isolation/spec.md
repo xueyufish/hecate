@@ -1,62 +1,62 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: Workspace-scoped data isolation for all resource models
-Every resource model that belongs to a tenant SHALL have a `workspace_id` UUID column with a foreign key to `WorkspaceModel.id`. All service-layer queries for these models SHALL filter by `workspace_id` to prevent cross-tenant data access. The models in scope are: ConversationModel, MessageModel, SessionModel, DocumentModel, EvidenceModel, CheckpointModel, BudgetSnapshotModel, WorkflowVersionModel, WorkflowRunModel, PromptVersionModel, EvaluationDatasetModel, EvaluationItemModel, EvaluationRunModel, EvaluationScoreModel.
+### 需求：所有资源模型的工作区限定数据隔离
+每个属于租户的资源模型应有一个 `workspace_id` UUID 列，带有指向 `WorkspaceModel.id` 的外键。这些模型的所有服务层查询应通过 `workspace_id` 进行过滤以防止跨租户数据访问。涉及的模型包括：ConversationModel、MessageModel、SessionModel、DocumentModel、EvidenceModel、CheckpointModel、BudgetSnapshotModel、WorkflowVersionModel、WorkflowRunModel、PromptVersionModel、EvaluationDatasetModel、EvaluationItemModel、EvaluationRunModel、EvaluationScoreModel
 
-#### Scenario: Query conversations within workspace
-- **WHEN** `ConversationService.list(db, workspace_id=ws_id)` is called
-- **THEN** only conversations where `workspace_id == ws_id` SHALL be returned
+#### 场景：查询工作区内的对话
+- **当** 调用 `ConversationService.list(db, workspace_id=ws_id)`
+- **则** 仅返回 `workspace_id == ws_id` 的对话
 
-#### Scenario: Query messages within workspace
-- **WHEN** `MessageModel` rows are queried for a conversation in workspace `ws_id`
-- **THEN** only messages where `workspace_id == ws_id` SHALL be returned
+#### 场景：查询工作区内的消息
+- **当** 查询工作区 `ws_id` 中某对话的 `MessageModel` 行
+- **则** 仅返回 `workspace_id == ws_id` 的消息
 
-#### Scenario: Query sessions within workspace
-- **WHEN** sessions are listed for a workspace
-- **THEN** only sessions where `workspace_id == ws_id` SHALL be returned
+#### 场景：查询工作区内的会话
+- **当** 列出工作区的会话
+- **则** 仅返回 `workspace_id == ws_id` 的会话
 
-#### Scenario: Query documents within workspace
-- **WHEN** documents are listed for a knowledge base in workspace `ws_id`
-- **THEN** only documents where `workspace_id == ws_id` SHALL be returned
+#### 场景：查询工作区内的文档
+- **当** 列出工作区 `ws_id` 中知识库的文档
+- **则** 仅返回 `workspace_id == ws_id` 的文档
 
-#### Scenario: Cross-tenant access denied
-- **WHEN** a request authenticated as workspace A attempts to read a resource in workspace B
-- **THEN** the service SHALL return no results (empty list) or raise 404 for single-resource lookups
+#### 场景：跨租户访问被拒绝
+- **当** 认证为工作区 A 的请求尝试读取工作区 B 中的资源
+- **则** 服务应返回空结果（空列表）或对单个资源查找抛出 404
 
-#### Scenario: Create resource inherits workspace
-- **WHEN** a new resource (conversation, message, session, document, etc.) is created
-- **THEN** the resource `workspace_id` SHALL be set from the authenticated `AuthContext.workspace_id`
+#### 场景：创建资源继承工作区
+- **当** 创建新资源（对话、消息、会话、文档等）
+- **则** 资源 `workspace_id` 应从认证的 `AuthContext.workspace_id` 设置
 
-### Requirement: Vector store workspace payload filtering
-All vector store adapters (Qdrant, Chroma) SHALL include `workspace_id` in the payload metadata on every vector insertion and SHALL apply a mandatory `workspace_id` filter condition on every search query.
+### 需求：向量存储工作区负载过滤
+所有向量存储适配器（Qdrant、Chroma）应在每次向量插入时在负载元数据中包含 `workspace_id`，并在每个搜索查询上应用强制 `workspace_id` 过滤条件
 
-#### Scenario: Vector insertion includes workspace_id payload
-- **WHEN** a document chunk is embedded and stored in the vector store
-- **THEN** the point payload SHALL include `workspace_id` matching the knowledge base's workspace
+#### 场景：向量插入包含 workspace_id 负载
+- **当** 文档块被嵌入并存储在向量存储中
+- **则** 点负载应包括与知识库工作区匹配的 `workspace_id`
 
-#### Scenario: Vector search filters by workspace_id
-- **WHEN** a hybrid or dense search is executed for a workspace
-- **THEN** the search query SHALL include a payload filter `workspace_id == ws_id`
+#### 场景：向量搜索按 workspace_id 过滤
+- **当** 为某个工作区执行混合或密集搜索
+- **则** 搜索查询应包括负载过滤器 `workspace_id == ws_id`
 
-#### Scenario: Vector search without workspace_id falls back gracefully
-- **WHEN** a vector point lacks the `workspace_id` payload field (legacy data)
-- **THEN** the search SHALL fall back to `knowledge_base_id` filtering and log a warning
+#### 场景：没有 workspace_id 的向量搜索优雅降级
+- **当** 向量点缺少 `workspace_id` 负载字段（遗留数据）
+- **则** 搜索应回退到 `knowledge_base_id` 过滤并记录警告
 
-### Requirement: Alembic migration with backfill
-A single Alembic migration SHALL add `workspace_id` columns to all 14 tables with composite indexes, backfill existing rows via parent entity relationships in topological order, then add NOT NULL and FK constraints.
+### 需求：带回填的 Alembic 迁移
+单个 Alembic 迁移应向所有 14 张表添加 `workspace_id` 列并附带复合索引，通过父实体关系按拓扑顺序回填现有行，然后添加 NOT NULL 和 FK 约束
 
-#### Scenario: Migration adds columns and indexes
-- **WHEN** `alembic upgrade head` is run
-- **THEN** all 14 tables have new `workspace_id` UUID columns with `idx_<table>_workspace` composite indexes
+#### 场景：迁移添加列和索引
+- **当** 运行 `alembic upgrade head`
+- **则** 所有 14 张表都有新的 `workspace_id` UUID 列，带有 `idx_<table>_workspace` 复合索引
 
-#### Scenario: Backfill populates workspace_id from parents
-- **WHEN** migration runs on an existing database
-- **THEN** existing rows get `workspace_id` populated from their parent entity's `workspace_id`
+#### 场景：回填从父级填充 workspace_id
+- **当** 迁移在现有数据库上运行
+- **则** 现有行从其父实体的 `workspace_id` 获取 workspace_id
 
-#### Scenario: Backfill order respects dependencies
-- **WHEN** migration backfills data
-- **THEN** parent models (ConversationModel, SessionModel, EvaluationDatasetModel, etc.) are backfilled before child models (MessageModel, EvidenceModel, EvaluationItemModel, etc.)
+#### 场景：回填顺序尊重依赖关系
+- **当** 迁移回填数据
+- **则** 父模型（ConversationModel、SessionModel、EvaluationDatasetModel 等）在子模型（MessageModel、EvidenceModel、EvaluationItemModel 等）之前回填
 
-#### Scenario: Default workspace for orphaned rows
-- **WHEN** a row has no resolvable parent entity (orphaned data)
-- **THEN** its `workspace_id` SHALL be set to the zero-UUID default workspace
+#### 场景：孤立行的默认工作区
+- **当** 一行没有可解析的父实体（孤立数据）
+- **则** 其 `workspace_id` 应设置为零 UUID 默认工作区

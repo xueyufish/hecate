@@ -1,38 +1,38 @@
-## Why
+## Why — 为什么
 
-The engine supports all primitives for sequential pipelines and broadcast patterns (TOPIC channels, sequential edge resolution, FAN_OUT/MERGE, AgentWorker), but developers must manually construct Graph DSL dicts with correct channel wiring for every node. Two common multi-agent patterns — linear sequential pipelines (CrewAI `Process.sequential`, AgentScope `sequential_pipeline`) and shared-channel broadcast (AgentScope `MsgHub`, AutoGen `RoundRobinGroupChat`) — lack first-class factory functions, forcing users to understand low-level channel semantics to express simple multi-step workflows.
+引擎支持顺序管道和广播模式的所有原语（TOPIC 通道、顺序边解析、FAN_OUT/MERGE、AgentWorker），但开发人员必须为每个节点手动构造具有正确通道接线的 Graph DSL 字典。两种常见的多智能体模式——线性顺序管道（CrewAI `Process.sequential`、AgentScope `sequential_pipeline`）和共享通道广播（AgentScope `MsgHub`、AutoGen `RoundRobinGroupChat`）——缺乏一流的工厂函数，迫使用户理解底层通道语义来表达简单的多步骤工作流。
 
-A `content-pipeline.json` template exists for the researcher→writer→reviewer pattern, but it is a single hardcoded use case. The engine needs generic, parameterized factory functions that accept a list of stages (or participants) and produce correctly wired Graph DSL automatically.
+存在一个 `content-pipeline.json` 模板用于 researcher→writer→reviewer 模式，但它是一个单一的硬编码用例。引擎需要通用的、参数化的工厂函数，接受阶段（或参与者）列表并自动产生正确接线的 Graph DSL。
 
-## What Changes
+## What Changes — 变更内容
 
-- Add `build_sequential_pipeline()` factory function to `engine/templates.py` — accepts a list of stage definitions and produces a linear A→B→C→... graph with auto-wired TOPIC + LAST_VALUE channels, optional revision loop, and optional quality gate.
-- Add `build_broadcast_pipeline()` factory function to `engine/templates.py` — accepts a list of participant definitions and produces a sequential round-robin graph where all participants share the same TOPIC channel, with optional turn limits and termination conditions.
-- Add JSON templates: `sequential-pipeline.json` and `broadcast-pipeline.json` to `data/orchestration_templates/`.
-- Update `orchestration-templates` API responses with new template metadata.
+- 向 `engine/templates.py` 添加 `build_sequential_pipeline()` 工厂函数——接受阶段定义列表并生成线性 A→B→C→... 图，带自动接线的 TOPIC + LAST_VALUE 通道、可选的修订循环和可选的质量门。
+- 向 `engine/templates.py` 添加 `build_broadcast_pipeline()` 工厂函数——接受参与者定义列表并生成顺序轮询图，所有参与者共享同一个 TOPIC 通道，带可选的轮次限制和终止条件。
+- 添加 JSON 模板：`sequential-pipeline.json` 和 `broadcast-pipeline.json` 到 `data/orchestration_templates/`。
+- 用新的模板元数据更新 `orchestration-templates` API 响应。
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `sequential-pipeline`: Factory function and template for deterministic multi-step sequential pipelines with auto-wired channels, optional revision loops, and inter-stage data flow
-- `broadcast-pipeline`: Factory function and template for shared-channel broadcast patterns with sequential round-robin execution and shared message visibility
+### New Capabilities — 新能力
+- `sequential-pipeline`：用于确定性多步骤顺序管道的工厂函数和模板，带自动接线通道、可选的修订循环和阶段间数据流
+- `broadcast-pipeline`：用于共享通道广播模式的工厂函数和模板，带顺序轮询执行和共享消息可见性
 
-### Modified Capabilities
-- `orchestration-templates`: Add sequential-pipeline and broadcast-pipeline to the template catalog; update list endpoint metadata
+### Modified Capabilities — 修改的能力
+- `orchestration-templates`：将顺序管道和广播管道添加到模板目录；更新列表端点元数据
 
-## Impact
+## Impact — 影响
 
-**Engine layer** (`src/hecate/engine/`):
-- `templates.py` — 2 new factory functions (~120 lines each)
-- No changes to types.py, compiler.py, pregel.py, or graph_dsl.py — all primitives exist
+**引擎层**（`src/hecate/engine/`）：
+- `templates.py`——2 个新的工厂函数（各约 120 行）
+- 无需更改 types.py、compiler.py、pregel.py 或 graph_dsl.py——所有原语已存在
 
-**Data** (`src/hecate/data/orchestration_templates/`):
-- 2 new JSON template files
+**数据**（`src/hecate/data/orchestration_templates/`）：
+- 2 个新的 JSON 模板文件
 
-**Tests** (`tests/`):
-- New test cases for both factory functions (Graph DSL structure validation, channel wiring verification)
-- No integration test changes (engine-layer only)
+**测试**（`tests/`）：
+- 两个工厂函数的新测试用例（Graph DSL 结构验证、通道接线验证）
+- 无需更改集成测试（仅引擎层）
 
-**API/Services**: No code changes — existing orchestration-templates API auto-discovers new JSON files from the data directory.
+**API/服务**：无需代码变更——现有的 orchestration-templates API 从数据目录自动发现新的 JSON 文件。
 
-**Breaking changes**: None — purely additive.
+**破坏性变更**：无——纯新增。

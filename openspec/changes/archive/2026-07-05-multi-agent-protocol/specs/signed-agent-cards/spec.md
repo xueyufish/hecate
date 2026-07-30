@@ -1,63 +1,63 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: System generates ES256 key pairs for AgentCard signing
-The system SHALL generate ECDSA P-256 key pairs for signing AgentCards using the ES256 algorithm (RFC 7518).
+### Requirement: 系统为 AgentCard 签名生成 ES256 密钥对 — System generates ES256 key pairs for AgentCard signing
+系统应使用 ES256 算法（RFC 7518）生成 ECDSA P-256 密钥对，用于签署 AgentCard。
 
-#### Scenario: Generate new signing key pair
-- **WHEN** an administrator requests key generation for a workspace
-- **THEN** the system generates an ECDSA P-256 key pair, assigns a `kid` (key ID), and stores it in the `agent_card_keys` table
+#### Scenario: 生成新的签名密钥对 — Generate new signing key pair
+- **WHEN** 管理员请求为工作区生成密钥
+- **THEN** 系统生成 ECDSA P-256 密钥对，分配一个 `kid`（密钥 ID），并将其存储在 `agent_card_keys` 表中
 
-#### Scenario: Key rotation with grace period
-- **WHEN** an administrator rotates the signing key
-- **THEN** the system generates a new key pair, marks the old key as `rotating` for a configurable grace period (default 7 days), and serves both keys in JWKS during the grace period
+#### Scenario: 带宽限期的密钥轮换 — Key rotation with grace period
+- **WHEN** 管理员轮换签名密钥
+- **THEN** 系统生成新的密钥对，将旧密钥标记为 `rotating` 状态，持续一个可配置的宽限期（默认 7 天），并在宽限期内同时在 JWKS 中提供两个密钥
 
-### Requirement: System signs AgentCards with JWS signatures
-The system SHALL sign AgentCards using JWS (RFC 7515) with the ES256 algorithm, canonicalizing the card via RFC 8785 JSON Canonicalization Scheme before signing.
+### Requirement: 系统使用 JWS 签名签署 AgentCard — System signs AgentCards with JWS signatures
+系统应使用 JWS（RFC 7515）和 ES256 算法签署 AgentCard，在签名前通过 RFC 8785 JSON 规范化方案对卡片进行规范化。
 
-#### Scenario: Sign an AgentCard
-- **WHEN** the A2A server generates an AgentCard for a workspace with signing enabled
-- **THEN** the AgentCard SHALL include a `signatures` array with a JWS object containing `protected` (base64url header with `alg: ES256`, `kid`), `signature` (base64url signature), and the signature SHALL verify against the canonicalized card
+#### Scenario: 签署 AgentCard — Sign an AgentCard
+- **WHEN** A2A 服务器为启用签名的工作区生成 AgentCard
+- **THEN** AgentCard 应包含一个 `signatures` 数组，其中包含一个 JWS 对象，包含 `protected`（base64url 编码头，含 `alg: ES256`、`kid`）、`signature`（base64url 签名），且签名应能针对规范化后的卡片进行验证
 
-#### Scenario: Unsigned card when signing disabled
-- **WHEN** the A2A server generates an AgentCard for a workspace with signing disabled
-- **THEN** the AgentCard SHALL NOT include a `signatures` field
+#### Scenario: 签名禁用时提供未签名卡片 — Unsigned card when signing disabled
+- **WHEN** A2A 服务器为禁用签名的工作区生成 AgentCard
+- **THEN** AgentCard 不应包含 `signatures` 字段
 
-### Requirement: System serves JWKS at well-known endpoint
-The system SHALL serve a JWKS (JSON Web Key Set) document at `/.well-known/jwks.json` containing public keys for AgentCard signature verification.
+### Requirement: 系统在知名端点提供 JWKS — System serves JWKS at well-known endpoint
+系统应在 `/.well-known/jwks.json` 提供 JWKS（JSON Web Key Set）文档，其中包含用于 AgentCard 签名验证的公钥。
 
-#### Scenario: Fetch JWKS
-- **WHEN** any HTTP client sends `GET /.well-known/jwks.json`
-- **THEN** the system returns a JWKS document with public keys in JWK format including `kty`, `crv`, `x`, `y`, `kid`, and `alg` fields
+#### Scenario: 获取 JWKS — Fetch JWKS
+- **WHEN** 任何 HTTP 客户端发送 `GET /.well-known/jwks.json`
+- **THEN** 系统返回 JWKS 文档，其中以 JWK 格式包含公钥，包括 `kty`、`crv`、`x`、`y`、`kid` 和 `alg` 字段
 
-#### Scenario: JWKS excludes private key material
-- **WHEN** the JWKS endpoint is fetched
-- **THEN** the response SHALL NOT contain any private key fields (`d` for EC keys)
+#### Scenario: JWKS 排除私钥材料 — JWKS excludes private key material
+- **WHEN** 获取 JWKS 端点
+- **THEN** 响应不应包含任何私钥字段（EC 密钥的 `d`）
 
-### Requirement: System verifies signed AgentCards from remote agents
-The system SHALL verify JWS signatures on remote AgentCards using public keys from the remote JWKS endpoint or embedded in the card.
+### Requirement: 系统验证来自远程 Agent 的已签名 AgentCard — System verifies signed AgentCards from remote agents
+系统应使用来自远程 JWKS 端点或嵌入在卡片中的公钥，验证远程 AgentCard 上的 JWS 签名。
 
-#### Scenario: Verify valid signature
-- **WHEN** the A2AClient fetches a signed AgentCard from a remote endpoint
-- **THEN** the system canonicalizes the card (excluding `signatures`), fetches the JWKS, finds the key by `kid`, and verifies the ES256 signature
+#### Scenario: 验证有效签名 — Verify valid signature
+- **WHEN** A2AClient 从远程端点获取签名的 AgentCard
+- **THEN** 系统对卡片进行规范化（排除 `signatures`），获取 JWKS，通过 `kid` 查找密钥，并验证 ES256 签名
 
-#### Scenario: Reject invalid signature
-- **WHEN** a remote AgentCard has a signature that does not verify against its JWKS
-- **THEN** the system rejects the AgentCard and returns a verification error
+#### Scenario: 拒绝无效签名 — Reject invalid signature
+- **WHEN** 远程 AgentCard 的签名无法通过其 JWKS 验证
+- **THEN** 系统拒绝该 AgentCard 并返回验证错误
 
-#### Scenario: Reject alg:none downgrade
-- **WHEN** a remote AgentCard signature has `alg: none` in the protected header
-- **THEN** the system rejects the AgentCard with a downgrade-attack error
+#### Scenario: 拒绝 alg:none 降级攻击 — Reject alg:none downgrade
+- **WHEN** 远程 AgentCard 签名的受保护头中包含 `alg: none`
+- **THEN** 系统拒绝该 AgentCard，并返回降级攻击错误
 
-### Requirement: System pins to ES256 algorithm
-The system SHALL only accept ES256 signatures for AgentCard verification, rejecting all other algorithms including `none`, `RS256`, and `HS256`.
+### Requirement: 系统固定使用 ES256 算法 — System pins to ES256 algorithm
+系统只应接受 ES256 签名用于 AgentCard 验证，拒绝所有其他算法，包括 `none`、`RS256` 和 `HS256`。
 
-#### Scenario: Reject RS256 signature
-- **WHEN** a remote AgentCard signature specifies `alg: RS256`
-- **THEN** the system rejects the signature with an algorithm-mismatch error
+#### Scenario: 拒绝 RS256 签名 — Reject RS256 signature
+- **WHEN** 远程 AgentCard 签名指定 `alg: RS256`
+- **THEN** 系统拒绝该签名，并返回算法不匹配错误
 
-### Requirement: System caches JWKS responses
-The system SHALL cache JWKS responses with a configurable TTL (default 1 hour) to reduce network overhead during signature verification.
+### Requirement: 系统缓存 JWKS 响应 — System caches JWKS responses
+系统应使用可配置的 TTL（默认 1 小时）缓存 JWKS 响应，以减少签名验证期间的网络开销。
 
-#### Scenario: JWKS cache hit
-- **WHEN** the system verifies a second AgentCard from the same remote origin within the TTL
-- **THEN** the system uses the cached JWKS without making a new HTTP request
+#### Scenario: JWKS 缓存命中 — JWKS cache hit
+- **WHEN** 系统在 TTL 内验证来自同一远程来源的第二个 AgentCard
+- **THEN** 系统使用缓存的 JWKS，无需发起新的 HTTP 请求

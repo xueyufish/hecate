@@ -1,37 +1,37 @@
-## ADDED Requirements
+## 新增需求
 
-### Requirement: Render template with variables
-The system SHALL render Jinja2 templates with provided variables.
+### 需求：使用变量渲染模板
+系统须使用提供的变量渲染 Jinja2 模板。
 
-#### Scenario: Simple variable substitution
-- **WHEN** a template contains `{{ name }}` and variables = {"name": "Alice"}
-- **THEN** the system renders "Hello Alice"
+#### 场景：简单变量替换
+- **当** 模板包含 `{{ name }}` 且变量 = {"name": "Alice"}
+- **则** 系统渲染为 "Hello Alice"
 
-#### Scenario: Missing variable
-- **WHEN** a template contains `{{ name }}` but name is not provided
-- **THEN** the system renders with empty string or raises validation error
+#### 场景：缺失变量
+- **当** 模板包含 `{{ name }}` 但未提供 name
+- **则** 系统渲染为空字符串或抛出验证错误
 
-### Requirement: Template validation
-The system SHALL validate templates before saving.
+### 需求：模板验证
+系统须在保存前验证模板。
 
-#### Scenario: Valid template
-- **WHEN** a user saves a valid Jinja2 template
-- **THEN** the system accepts it
+#### 场景：有效模板
+- **当** 用户保存有效的 Jinja2 模板
+- **则** 系统接受它
 
-#### Scenario: Invalid template syntax
-- **WHEN** a user saves a template with invalid Jinja2 syntax
-- **THEN** the system returns 422 with syntax error details
+#### 场景：无效模板语法
+- **当** 用户保存带有无效 Jinja2 语法的模板
+- **则** 系统返回 422 及语法错误详情
 
-### Requirement: Sandboxed rendering
-The system SHALL use Jinja2 SandboxedEnvironment to prevent code injection.
+### 需求：沙箱渲染
+系统须使用 Jinja2 SandboxedEnvironment 防止代码注入。
 
-#### Scenario: Blocked unsafe operations
-- **WHEN** a template contains `{{ ''.__class__.__mro__ }}`
-- **THEN** the system raises SecurityError
+#### 场景：阻止不安全操作
+- **当** 模板包含 `{{ ''.__class__.__mro__ }}`
+- **则** 系统抛出 SecurityError
 
-### Requirement: Variable extraction
-The system SHALL automatically extract variables from templates.
+### 需求：变量提取
+系统须自动从模板中提取变量。
 
-#### Scenario: Extract variables
-- **WHEN** a template contains `{{ name }}` and `{{ age }}`
-- **THEN** the system extracts variables = ["name", "age"]
+#### 场景：提取变量
+- **当** 模板包含 `{{ name }}` 和 `{{ age }}`
+- **则** 系统提取变量 = ["name", "age"]

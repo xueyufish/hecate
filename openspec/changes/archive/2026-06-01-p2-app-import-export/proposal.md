@@ -1,28 +1,28 @@
-## Why
+## Why — 动机
 
-Users configure agents with specific personas, tools, skills, knowledge bases, and workflows. Currently, there's no way to export an agent's complete configuration for backup, migration, or sharing. The feature catalog describes this as "Agent 应用整体导入导出，支持备份、迁移、跨环境复制" with reference to AgentArts.
+用户配置的代理具有特定的角色、工具、技能、知识库和工作流。目前，无法导出代理的完整配置以进行备份、迁移或共享。功能目录将其描述为"Agent 应用整体导入导出，支持备份、迁移、跨环境复制"，并参考了 AgentArts。
 
-This change adds import/export functionality that allows users to download an agent's complete configuration as a JSON file and import it into another environment.
+本次变更增加了导入/导出功能，允许用户将代理的完整配置下载为 JSON 文件，并将其导入到另一个环境中。
 
-## What Changes
+## What Changes — 变更内容
 
-- Add **Export endpoint** — `GET /api/agents/{id}/export` returns a JSON file with agent config, workflow, and memory blocks
-- Add **Import endpoint** — `POST /api/agents/import` creates a new agent from exported JSON
-- Add **Frontend export button** — "Export" button on agent detail page
-- Add **Frontend import page** — "Import Agent" button on agents list page with file upload
-- Add **Export format** — JSON schema for portable agent configuration
+- 添加**导出端点** — `GET /api/agents/{id}/export` 返回包含代理配置、工作流和内存块的 JSON 文件
+- 添加**导入端点** — `POST /api/agents/import` 从导出的 JSON 创建新代理
+- 添加**前端导出按钮** — 在代理详情页面上添加"导出"按钮
+- 添加**前端导入页面** — 在代理列表页面上添加"导入代理"按钮，支持文件上传
+- 添加**导出格式** — 可移植代理配置的 JSON Schema
 
-## Capabilities
+## Capabilities — 能力
 
-### New Capabilities
-- `app-import-export`: Agent configuration export/import for backup, migration, and sharing
+### New Capabilities — 新能力
+- `app-import-export`：代理配置的导出/导入，用于备份、迁移和共享
 
-### Modified Capabilities
-- (none — new feature)
+### Modified Capabilities — 修改的能力
+- （无 — 新功能）
 
-## Impact
+## Impact — 影响范围
 
-- **Backend**: New endpoints in `src/hecate/api/management/agents.py`
-- **Frontend**: Export button on agent detail, import button on agents list
-- **Tests**: Export/import endpoint tests
-- **Format**: JSON with agent config, workflow graph DSL, memory blocks
+- **后端**：在 `src/hecate/api/management/agents.py` 中添加新端点
+- **前端**：在代理详情页添加导出按钮，在代理列表页添加导入按钮
+- **测试**：导出/导入端点测试
+- **格式**：包含代理配置、工作流图 DSL、内存块的 JSON

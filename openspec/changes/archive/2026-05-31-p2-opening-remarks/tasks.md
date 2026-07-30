@@ -1,53 +1,53 @@
-## 1. Data Model & Migration
+## 1. 数据模型与迁移
 
-- [x] 1.1 Add `opening_remarks` (TEXT nullable) and `enable_suggestions` (BOOLEAN default true) columns to `AgentModel` in `src/hecate/models/agent.py`
-- [x] 1.2 Add `opening_remarks` and `enable_suggestions` fields to `AgentCreateSchema`, `AgentUpdateSchema`, `AgentReadSchema`
-- [x] 1.3 Generate Alembic migration for the two new columns
-- [x] 1.4 Write tests for new agent schema fields in `tests/test_models/test_agent.py`
+- [x] 1.1 在 `src/hecate/models/agent.py` 的 `AgentModel` 中添加 `opening_remarks`（TEXT 可为空）和 `enable_suggestions`（BOOLEAN 默认 true）列
+- [x] 1.2 在 `AgentCreateSchema`、`AgentUpdateSchema`、`AgentReadSchema` 中添加 `opening_remarks` 和 `enable_suggestions` 字段
+- [x] 1.3 为两个新列生成 Alembic 迁移
+- [x] 1.4 在 `tests/test_models/test_agent.py` 中编写新的 Agent schema 字段测试
 
-## 2. Suggestion Types & Prompt Templates
+## 2. 建议类型和提示模板
 
-- [x] 2.1 Create `src/hecate/services/suggestions/types.py` with `SuggestionResult` Pydantic schema (questions: list[str], model: str, usage: dict)
-- [x] 2.2 Create `src/hecate/services/suggestions/prompts.py` with `build_opening_prompt()` and `build_followup_prompt()` functions
-- [x] 2.3 Write tests for prompt template functions in `tests/test_services/test_suggestions/test_prompts.py`
+- [x] 2.1 创建 `src/hecate/services/suggestions/types.py`，包含 `SuggestionResult` Pydantic schema（questions: list[str]、model: str、usage: dict）
+- [x] 2.2 创建 `src/hecate/services/suggestions/prompts.py`，包含 `build_opening_prompt()` 和 `build_followup_prompt()` 函数
+- [x] 2.3 在 `tests/test_services/test_suggestions/test_prompts.py` 中编写提示模板函数的测试
 
-## 3. Suggestion Service
+## 3. 建议服务
 
-- [x] 3.1 Create `src/hecate/services/suggestions/__init__.py` with module docstring
-- [x] 3.2 Create `src/hecate/services/suggestions/service.py` with `SuggestionService` class containing `generate_opening()` and `generate_suggestions()` methods
-- [x] 3.3 Implement LLM-based suggestion generation with 2-second timeout and JSON array parsing
-- [x] 3.4 Implement static fallback: extract questions from agent persona when LLM fails
-- [x] 3.5 Write tests for SuggestionService in `tests/test_services/test_suggestions/test_service.py`
+- [x] 3.1 创建 `src/hecate/services/suggestions/__init__.py`，包含模块文档字符串
+- [x] 3.2 创建 `src/hecate/services/suggestions/service.py`，包含 `SuggestionService` 类，含 `generate_opening()` 和 `generate_suggestions()` 方法
+- [x] 3.3 实现基于 LLM 的建议生成，2 秒超时并解析 JSON 数组
+- [x] 3.4 实现静态回退：当 LLM 失败时从 Agent 角色设定中提取问题
+- [x] 3.5 在 `tests/test_services/test_suggestions/test_service.py` 中编写 SuggestionService 测试
 
-## 4. Conversation Service Integration
+## 4. Conversation Service 集成
 
-- [x] 4.1 Add `generate_opening` and `generate_suggestions` parameters to `ConversationService.chat()` method signature
-- [x] 4.2 Implement `_generate_opening_remarks()` method that checks agent config and calls SuggestionService
-- [x] 4.3 Implement `_generate_followup_suggestions()` method that generates suggestions after response
-- [x] 4.4 Integrate opening remarks into `_complete_chat()` — return greeting with suggested_questions
-- [x] 4.5 Integrate opening remarks into `_stream_chat()` — yield content then suggestions event
-- [x] 4.6 Integrate follow-up suggestions into `_complete_chat()` — append suggested_questions to result
-- [x] 4.7 Integrate follow-up suggestions into `_stream_chat()` — yield suggestions event before done
+- [x] 4.1 为 `ConversationService.chat()` 方法签名添加 `generate_opening` 和 `generate_suggestions` 参数
+- [x] 4.2 实现 `_generate_opening_remarks()` 方法，检查 Agent 配置并调用 SuggestionService
+- [x] 4.3 实现 `_generate_followup_suggestions()` 方法，在回复后生成建议
+- [x] 4.4 将开场白集成到 `_complete_chat()` — 返回带 suggested_questions 的问候语
+- [x] 4.5 将开场白集成到 `_stream_chat()` — 输出内容后输出 suggestions 事件
+- [x] 4.6 将后续建议集成到 `_complete_chat()` — 将 suggested_questions 追加到结果中
+- [x] 4.7 将后续建议集成到 `_stream_chat()` — 在 done 之前输出 suggestions 事件
 
-## 5. API Layer
+## 5. API 层
 
-- [x] 5.1 Add `generate_opening` (bool default false) and `generate_suggestions` (bool default false) to `ChatCompletionRequest`
-- [x] 5.2 Add `suggested_questions` (list[str] | None) field to `ChatMessage`
-- [x] 5.3 Update `create_chat_completion()` to pass new flags to ConversationService when provided
-- [x] 5.4 Handle opening remarks flow in streaming mode — yield greeting content, then suggestions, then done
-- [x] 5.5 Handle opening remarks flow in non-streaming mode — return greeting with suggested_questions
-- [x] 5.6 Write API integration tests in `tests/test_api/test_opening_remarks.py`
+- [x] 5.1 向 `ChatCompletionRequest` 添加 `generate_opening`（bool 默认 false）和 `generate_suggestions`（bool 默认 false）
+- [x] 5.2 向 `ChatMessage` 添加 `suggested_questions`（list[str] | None）字段
+- [x] 5.3 更新 `create_chat_completion()`，在提供时将新标志传递给 ConversationService
+- [x] 5.4 处理流式模式的开场白流程 — 输出问候内容，然后是 suggestions，最后是 done
+- [x] 5.5 处理非流式模式的开场白流程 — 返回带 suggested_questions 的问候语
+- [x] 5.6 在 `tests/test_api/test_opening_remarks.py` 中编写 API 集成测试
 
-## 6. Context Assembler Enhancement
+## 6. Context Assembler 增强
 
-- [x] 6.1 Add `suggestion_mode` parameter to `ContextAssembler.assemble()` method
-- [x] 6.2 Implement opening suggestion mode — build system prompt with agent metadata
-- [x] 6.3 Implement followup suggestion mode — build system prompt with last 2 turns
-- [x] 6.4 Write tests for suggestion mode assembly in `tests/test_services/test_context/test_suggestion_mode.py`
+- [x] 6.1 为 `ContextAssembler.assemble()` 方法添加 `suggestion_mode` 参数
+- [x] 6.2 实现开场建议模式 — 使用 Agent 元数据构建系统提示词
+- [x] 6.3 实现后续建议模式 — 使用最近 2 轮对话构建系统提示词
+- [x] 6.4 在 `tests/test_services/test_context/test_suggestion_mode.py` 中编写建议模式组装测试
 
-## 7. Feature Catalog & Verification
+## 7. 功能目录与验证
 
-- [x] 7.1 Update feature catalog `docs/features/feature-catalog.md` to mark 1.3.8 as ✅
-- [x] 7.2 Run `ruff check src/hecate/ tests/` and `ruff format --check src/ tests/` — zero errors
-- [x] 7.3 Run `mypy src/` — zero new errors
-- [x] 7.4 Run `python -m pytest tests/ -q` — all tests passing
+- [x] 7.1 更新功能目录 `docs/features/feature-catalog.md`，标记 1.3.8 为 ✅
+- [x] 7.2 运行 `ruff check src/hecate/ tests/` 和 `ruff format --check src/ tests/` — 零错误
+- [x] 7.3 运行 `mypy src/` — 无新增错误
+- [x] 7.4 运行 `python -m pytest tests/ -q` — 所有测试通过

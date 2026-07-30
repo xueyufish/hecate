@@ -1,30 +1,30 @@
-## ADDED Requirements
+## ADDED Requirements — 新增需求
 
-### Requirement: PluginManifest dataclass
-The system SHALL define a `PluginManifest` dataclass that describes plugin metadata. The dataclass MUST be frozen (immutable) and include the following fields:
-- `type`: str — plugin type identifier (e.g., "tool", "evaluator", "channel", "auth_provider", "notifier")
-- `name`: str — unique plugin name within its type
-- `version`: str — semantic version string (e.g., "1.0.0")
-- `api_version`: str — API version this plugin targets
-- `min_platform_version`: str — minimum platform version required
-- `description`: str — human-readable description
-- `permissions`: list[str] — required permissions (e.g., ["network:https", "filesystem:read"])
+### Requirement: PluginManifest 数据类 — PluginManifest dataclass
+系统应定义一个 `PluginManifest` 数据类，描述插件元数据。数据类必须是冻结的（不可变）并包含以下字段：
+- `type`: str — 插件类型标识符（例如 "tool"、"evaluator"、"channel"、"auth_provider"、"notifier"）
+- `name`: str — 在其类型中唯一的插件名称
+- `version`: str — 语义版本字符串（例如 "1.0.0"）
+- `api_version`: str — 此插件目标的 API 版本
+- `min_platform_version`: str — 所需的最低平台版本
+- `description`: str — 人类可读的描述
+- `permissions`: list[str] — 所需的权限（例如 ["network:https", "filesystem:read"]）
 
-#### Scenario: Create PluginManifest
-- **WHEN** a developer creates a PluginManifest instance with all required fields
-- **THEN** the instance is immutable (frozen) and all fields are accessible
+#### Scenario: 创建 PluginManifest — Create PluginManifest
+- **WHEN** 开发者使用所有必需字段创建 PluginManifest 实例
+- **THEN** 实例是不可变的（冻结）且所有字段可访问
 
-#### Scenario: PluginManifest with optional fields
-- **WHEN** a developer creates a PluginManifest with only required fields
-- **THEN** optional fields default to empty string or empty list as appropriate
+#### Scenario: 具有可选字段的 PluginManifest — PluginManifest with optional fields
+- **WHEN** 开发者仅使用必需字段创建 PluginManifest
+- **THEN** 可选字段默认为空字符串或空列表
 
-### Requirement: PluginManifest equality and hashing
-The system SHALL support equality comparison and hashing of PluginManifest instances based on type + name + version.
+### Requirement: PluginManifest 相等性和哈希 — PluginManifest equality and hashing
+系统应支持基于 type + name + version 的 PluginManifest 实例的相等比较和哈希。
 
-#### Scenario: Compare equal manifests
-- **WHEN** two PluginManifest instances have the same type, name, and version
-- **THEN** they are equal and have the same hash
+#### Scenario: 比较相等的清单 — Compare equal manifests
+- **WHEN** 两个 PluginManifest 实例具有相同的 type、name 和 version
+- **THEN** 它们相等且具有相同的哈希值
 
-#### Scenario: Compare different manifests
-- **WHEN** two PluginManifest instances differ in type, name, or version
-- **THEN** they are not equal
+#### Scenario: 比较不同的清单 — Compare different manifests
+- **WHEN** 两个 PluginManifest 实例在 type、name 或 version 上不同
+- **THEN** 它们不相等

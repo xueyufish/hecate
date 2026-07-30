@@ -1,60 +1,60 @@
-## Context
+## Context — 背景
 
-The workflow editor at `/workflows/[id]` has:
-- Canvas editor with React Flow
-- Save button (auto-save with debounce)
-- Test Run button calling `POST /api/workflows/{id}/test-run`
-- Basic result display showing per-node status (completed/failed)
+`/workflows/[id]` 的工作流编辑器拥有：
+- 带 React Flow 的画布编辑器
+- 保存按钮（带防抖的自动保存）
+- 调用 `POST /api/workflows/{id}/test-run` 的测试运行按钮
+- 显示每个节点状态（completed/failed）的基本结果展示
 
-The backend `WorkflowTestRunner` already:
-- Compiles the workflow graph
-- Executes nodes via PregelRuntime
-- Returns per-node status, output, error_message, duration_ms
+后端 `WorkflowTestRunner` 已经：
+- 编译工作流图
+- 通过 PregelRuntime 执行节点
+- 返回每个节点的状态、输出、错误消息、耗时
 
-What's missing:
-- Input customization (currently hardcoded to `{messages: [{role: "user", content: "test"}]}`)
-- Node output display (output data is returned but not shown in UI)
-- Execution logs (no logging during test runs)
-- Visual feedback on canvas (nodes don't change color during execution)
-- Run history (no persistence of test runs)
+缺少的内容：
+- 输入自定义（目前硬编码为 `{messages: [{role: "user", content: "test"}]}`）
+- 节点输出显示（输出数据已返回但 UI 未展示）
+- 执行日志（测试运行期间无日志记录）
+- 画布上的可视化反馈（执行期间节点不改变颜色）
+- 运行历史（测试运行未持久化）
 
-## Goals / Non-Goals
+## Goals / Non-Goals — 目标 / 非目标
 
-**Goals:**
-- Custom input form for test runs
-- Node output panel (click node → see input/output)
-- Execution logs panel (per-node logs with timestamps)
-- Node status badges on canvas (pending/running/completed/failed)
-- Run history list (last 10 runs with timestamps and status)
+**目标：**
+- 测试运行的自定义输入表单
+- 节点输出面板（点击节点 → 查看输入/输出）
+- 执行日志面板（每个节点的带时间戳日志）
+- 画布上的节点状态徽章（pending/running/completed/failed）
+- 运行历史列表（最近 10 次运行，带时间戳和状态）
 
-**Non-Goals:**
-- Step-through debugging (pause/resume between nodes) — complex, deferred
-- Breakpoint support — deferred
-- Real-time streaming of execution progress — deferred
-- Persistent test run storage in database — in-memory for now
+**非目标：**
+- 逐步调试（在节点间暂停/恢复）— 复杂，推迟
+- 断点支持 — 推迟
+- 执行进度的实时流式传输 — 推迟
+- 测试运行的持久化数据库存储 — 目前内存中
 
-## Decisions
+## Decisions — 决策
 
-### D1: Node outputs stored in run result (not database)
+### D1：节点输出存储在运行结果中（非数据库）
 
-**Decision**: Keep test run results in-memory on the frontend. The backend returns all node outputs in the response.
+**决策**：将测试运行结果保持在前端内存中。后端在响应中返回所有节点输出。
 
-**Rationale**: Test runs are ephemeral debugging artifacts. No need for database persistence.
+**理由**：测试运行是临时的调试产物。不需要数据库持久化。
 
-### D2: Click node to see output panel
+### D2：点击节点查看输出面板
 
-**Decision**: When a test run completes, clicking a node on the canvas opens a side panel showing that node's input, output, error, and duration.
+**决策**：测试运行完成后，点击画布上的节点会打开一个侧面板，显示该节点的输入、输出、错误和耗时。
 
-**Rationale**: Non-intrusive UX. Users can inspect any node without cluttering the canvas.
+**理由**：非侵入式用户体验。用户可以检查任何节点而不使画布杂乱。
 
-### D3: Node status as badges (not canvas overlay)
+### D3：节点状态作为徽章（非画布覆盖层）
 
-**Decision**: Show node status as small colored badges on each node, not as a separate canvas overlay.
+**决策**：在每个节点上显示小型彩色徽章作为节点状态，而非独立的画布覆盖层。
 
-**Rationale**: Simpler implementation, works with existing React Flow node components.
+**理由**：实现更简单，与现有 React Flow 节点组件兼容。
 
-## Risks / Trade-offs
+## Risks / Trade-offs — 风险 / 权衡
 
-- **[No real-time progress]** → Users see results only after full run completes. Mitigation: fast execution (mock mode).
-- **[In-memory only]** → Run history lost on page refresh. Acceptable for debugging tool.
-- **[Large output truncation]** → Node outputs could be large. Mitigation: truncate to 1000 chars with expand option.
+- **[无实时进度]** → 用户仅在完整运行完成后看到结果。缓解措施：快速执行（mock 模式）。
+- **[仅内存]** → 页面刷新后运行历史丢失。对调试工具可接受。
+- **[大输出截断]** → 节点输出可能很大。缓解措施：截断至 1000 字符，带展开选项。
