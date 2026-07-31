@@ -32,6 +32,7 @@ from hecate.models import (  # noqa: F401
     alert,
     api_key,
     approval,
+    backup,
     budget,
     checkpoint,
     conversation,
