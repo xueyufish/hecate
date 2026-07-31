@@ -455,6 +455,11 @@ app.include_router(tool_cache_router)
 app.include_router(hooks_router)
 app.include_router(environment_router)
 
+# Backup & Recovery API
+from hecate.api.system.backup import router as backup_router  # noqa: E402
+
+app.include_router(backup_router, tags=["backup"])
+
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
     from hecate.services.mcp.server import create_mcp_server

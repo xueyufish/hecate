@@ -268,6 +268,23 @@ class Settings(BaseSettings):
     COST_ROLLING_WINDOW_DAYS: int = 30
     COST_DEFAULT_POLICY: str = "alert"
 
+    # Data Backup & Recovery (13.5): full system backup with per-tenant restore.
+    BACKUP_STORAGE_TYPE: str = "minio"  # "minio" or "s3"
+    BACKUP_MINIO_BUCKET: str = "hecate-backups"
+    BACKUP_S3_ENDPOINT: str = ""
+    BACKUP_S3_BUCKET: str = ""
+    BACKUP_S3_ACCESS_KEY: str = ""
+    BACKUP_S3_SECRET_KEY: str = ""
+    BACKUP_S3_REGION: str = "us-east-1"
+    BACKUP_SCHEDULE_ENABLED: bool = False
+    BACKUP_SCHEDULE_CRON: str = "0 2 * * *"  # daily at 02:00
+    BACKUP_RETENTION_HOURLY: int = 24
+    BACKUP_RETENTION_DAILY: int = 14
+    BACKUP_RETENTION_MONTHLY: int = 12
+    BACKUP_VERIFY_ENABLED: bool = False
+    BACKUP_VERIFY_SCHEDULE: str = "0 4 * * 0"  # weekly Sunday 04:00
+    BACKUP_PG_DUMP_JOBS: int = 1  # parallel jobs for pg_restore
+
     @property
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""
