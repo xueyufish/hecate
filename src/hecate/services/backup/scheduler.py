@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import select
 
 from hecate.core.config import settings
@@ -13,6 +12,9 @@ from hecate.core.database import async_session_factory
 from hecate.models.backup import BackupRecordModel, BackupScope, BackupStatus
 
 from .orchestrator import create_backup
+
+if TYPE_CHECKING:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,8 @@ _scheduler: AsyncIOScheduler | None = None
 def get_scheduler() -> AsyncIOScheduler:
     global _scheduler
     if _scheduler is None:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
         _scheduler = AsyncIOScheduler()
     return _scheduler
 
@@ -31,6 +35,8 @@ def start_backup_scheduler() -> None:
     if not settings.BACKUP_SCHEDULE_ENABLED:
         logger.info("Backup scheduling is disabled")
         return
+
+    from apscheduler.triggers.cron import CronTrigger
 
     scheduler = get_scheduler()
     trigger = CronTrigger.from_crontab(settings.BACKUP_SCHEDULE_CRON)

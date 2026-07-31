@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+pytest.importorskip("apscheduler")
+
 
 def test_get_scheduler_returns_singleton():
     """get_scheduler returns the same scheduler instance."""
