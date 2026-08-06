@@ -20,7 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
+from hecate.core.deps_event_store import get_event_store
+from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
+from hecate.engine.eventstore import EventStore
+from hecate.engine.session_state import SessionStateStore
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 from hecate.services.llm.service import llm_service
 from hecate.services.session_lock import session_lock_manager
@@ -132,6 +136,8 @@ async def create_chat_completion(
     request: ChatCompletionRequest,
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    event_store: Annotated[EventStore, Depends(get_event_store)],
+    session_state_store: Annotated[SessionStateStore, Depends(get_session_state_store)],
 ):
     """Create a chat completion via the unified execution engine.
 
@@ -141,6 +147,8 @@ async def create_chat_completion(
         request: The chat completion request.
         ctx: The authenticated context.
         db: The async database session.
+        event_store: The wired ``EventStore`` singleton (app.state).
+        session_state_store: The wired ``SessionStateStore`` singleton (app.state).
 
     Returns:
         StreamingResponse if stream=True, otherwise ChatCompletionResponse dict.
@@ -152,7 +160,9 @@ async def create_chat_completion(
     if session_id:
         try:
             async with session_lock_manager.acquire(session_id) as lock_info:
-                result = await _process_chat(request, db, ctx.user_id, ctx.workspace_id)
+                result = await _process_chat(
+                    request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store
+                )
                 if isinstance(result, StreamingResponse):
                     result.headers["X-Queue-Position"] = str(lock_info["queue_position"])
                     result.headers["X-Queue-Wait-Ms"] = str(lock_info["wait_ms"])
@@ -169,7 +179,7 @@ async def create_chat_completion(
                 },
             ) from None
     else:
-        return await _process_chat(request, db, ctx.user_id, ctx.workspace_id)
+        return await _process_chat(request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store)
 
 
 async def _process_chat(
@@ -177,6 +187,8 @@ async def _process_chat(
     db: AsyncSession,
     user_id: uuid.UUID,
     workspace_id: uuid.UUID | None = None,
+    event_store: EventStore | None = None,
+    session_state_store: SessionStateStore | None = None,
 ) -> dict | StreamingResponse:
     """Process a chat completion request via WorkflowExecutionService."""
     msg_dicts = _messages_to_dicts(request.messages)
@@ -214,6 +226,8 @@ async def _process_chat(
         exec_service = WorkflowExecutionService(
             port=port,
             db=db,
+            event_store=event_store,
+            checkpoint_store=session_state_store,
         )
 
         if request.stream:

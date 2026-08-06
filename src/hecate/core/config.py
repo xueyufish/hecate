@@ -38,6 +38,16 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "postgresql+asyncpg://hecate:hecate@localhost:5432/hecate"
 
+    # SessionStateStore backend selection (session-state-store & horizontal-scaling changes)
+    SESSION_STATE_STORE_BACKEND: str = "memory"  # "memory" | "redis" | "postgres" | "tiered"
+    SESSION_STATE_TTL_DAYS: int = 7  # idle TTL applied to both Redis EX and PG query filter
+    SESSION_STATE_REDIS_URL: str = ""  # Redis connection URL (e.g., "redis://localhost:6379/0")
+    SESSION_STATE_KEY_PREFIX: str = "hecate:state:"  # Redis key prefix for multi-app isolation
+
+    # EventStore backend selection (eventstore-pg-wiring change)
+    EVENT_STORE_BACKEND: str = "memory"  # "memory" | "postgres"
+    EVENT_STORE_PG_TABLE: str = "events"  # PG table name (operator-customizable)
+
     VECTOR_STORE_TYPE: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""

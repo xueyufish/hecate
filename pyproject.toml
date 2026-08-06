@@ -87,6 +87,11 @@ tools = [
     "a2a-sdk>=1.1.0",
     "aiodocker>=0.23.0",
 ]
+redis = [
+    "redis>=5.0.0",
+    "fakeredis>=2.23.0",
+    "psycopg[binary]>=3.1.0",
+]
 observability = [
     "opentelemetry-api>=1.20.0",
     "opentelemetry-sdk>=1.20.0",
@@ -134,6 +139,11 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "S", "SIM"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "perf: performance benchmarks, excluded from default suite via -m not perf",
+    "integration: requires Docker, opt-in via RUN_INTEGRATION_TESTS=1",
+]
+addopts = ["-m", "not perf"]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
