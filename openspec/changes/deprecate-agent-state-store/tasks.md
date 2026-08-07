@@ -42,9 +42,9 @@
 
 ## 6. PR 与 merge
 
-- [ ] 6.1 跑 `git diff main` 审查：仅改 `src/hecate/services/state/store.py`、`src/hecate/services/workflow/execution_service.py`、`docs/features/feature-catalog.md`、`docs/features/roadmap.md`、新增 `docs/migrations/agent-state-store.md`
-- [ ] 6.2 创建 branch `feat/deprecate-agent-state-store`
-- [ ] 6.3 提交（commit message 格式 `feat(deprecation): mark AgentStateStore deprecated, hard removal in 13.4a-7`）
-- [ ] 6.4 推送 + 开 PR
-- [ ] 6.5 等 pre-commit hook 通过（ruff / format / mypy / pytest scoped）
+- [x] 6.1 跑 `git diff main` 审查：仅改 `src/hecate/services/state/store.py`、`src/hecate/services/workflow/execution_service.py`、`docs/features/feature-catalog.md`、`docs/features/roadmap.md`、新增 `docs/migrations/agent-state-store.md`
+- [x] 6.2 创建 branch `feat/deprecate-agent-state-store`
+- [x] 6.3 提交（commit message 格式 `feat(deprecation): mark AgentStateStore deprecated, hard removal in 13.4a-7`）
+- [x] 6.4 推送 + 开 PR
+- [x] 6.5 等 pre-commit hook 通过（ruff / format / mypy / pytest scoped）
 - [ ] 6.6 合并到 main
