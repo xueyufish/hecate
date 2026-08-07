@@ -44,6 +44,6 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -e ".[dev,scheduling]"
+          pip install -e ".[dev,scheduling,redis]"
       - name: Run tests
         run: pytest tests/ -q

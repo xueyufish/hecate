@@ -13,19 +13,24 @@ the ``RUN_INTEGRATION_TESTS=1`` environment variable.
 
 from __future__ import annotations
 
-import fakeredis.aioredis
+import pytest
 import pytest_asyncio
 
 
 @pytest_asyncio.fixture
-async def fakeredis_client() -> fakeredis.aioredis.FakeRedis:
+async def fakeredis_client():
     """Yield a fresh in-memory fakeredis async client per test.
 
     The client implements the full ``redis.asyncio`` API surface (GET, SET,
     SCAN_ITER, etc.) so the store under test cannot tell the difference
     from a real Redis connection.
+
+    ``fakeredis`` lives in the optional ``[redis]`` extra (not installed by
+    default in CI); when it is absent this fixture is skipped via
+    ``importorskip`` so the module still collects.
     """
-    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    fakeredis_aioredis = pytest.importorskip("fakeredis.aioredis")
+    client = fakeredis_aioredis.FakeRedis(decode_responses=True)
     try:
         yield client
     finally:
