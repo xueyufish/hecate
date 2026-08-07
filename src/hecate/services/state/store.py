@@ -2,17 +2,35 @@
 
 Provides AgentStateStore ABC defining the persistence contract, and
 InMemoryStateStore for single-process use and testing.
+
+.. deprecated::
+    This module is deprecated as of 13.4a-6. Use
+    ``hecate.engine.session_state.SessionStateStore`` instead, which provides
+    multi-tenant keying ``(org_id, user_id, session_id)``, multi-backend
+    support (Redis / Postgres / Tiered), and distributed lock semantics.
+    See ``docs/migrations/agent-state-store.md`` for the migration guide.
+    Hard removal is planned for ``13.4a-7`` (≥ next minor version).
 """
 
 from __future__ import annotations
 
 import asyncio
 import uuid
+import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from hecate.services.state.state import AgentState
+
+# PEP 562 module-level deprecation marker. Recognized by Sphinx, pydoc, and
+# IDE tooling. Does NOT auto-emit DeprecationWarning at import time — runtime
+# warnings are emitted by InMemoryStateStore.__init__ and
+# WorkflowExecutionService(state_store=...) construction.
+__deprecated__ = (
+    "Use hecate.engine.session_state.SessionStateStore instead. "
+    "See docs/migrations/agent-state-store.md for migration.",
+)
 
 
 @dataclass
@@ -30,6 +48,12 @@ class SessionSummary:
 
 class AgentStateStore(ABC):
     """Abstract interface for persisting AgentState.
+
+    .. deprecated::
+        ``AgentStateStore`` is deprecated as of 13.4a-6. Use
+        ``hecate.engine.session_state.SessionStateStore`` instead, which
+        provides multi-tenant keying, multi-backend support, and lock
+        semantics. See ``docs/migrations/agent-state-store.md``.
 
     Implementations store per-session AgentState keyed by (agent_id, session_id).
     The store is optional — WorkflowExecutionService functions without one.
@@ -85,11 +109,23 @@ class AgentStateStore(ABC):
 class InMemoryStateStore(AgentStateStore):
     """In-memory AgentStateStore for single-process use and testing.
 
+    .. deprecated::
+        ``InMemoryStateStore`` is deprecated as of 13.4a-6. Use
+        ``hecate.engine.session_state.InMemorySessionStateStore`` instead.
+        See ``docs/migrations/agent-state-store.md``.
+
     Uses a dict keyed by (agent_id, session_id) with asyncio.Lock per key
     for concurrent access safety. State is lost on process restart.
     """
 
     def __init__(self) -> None:
+        warnings.warn(
+            "InMemoryStateStore is deprecated. "
+            "Use hecate.engine.session_state.InMemorySessionStateStore instead. "
+            "See docs/migrations/agent-state-store.md for migration.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._store: dict[tuple[uuid.UUID, uuid.UUID], AgentState] = {}
         self._timestamps: dict[tuple[uuid.UUID, uuid.UUID], datetime] = {}
         self._locks: dict[tuple[uuid.UUID, uuid.UUID], asyncio.Lock] = {}

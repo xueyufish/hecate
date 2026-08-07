@@ -14,6 +14,7 @@ import asyncio
 import logging
 import random
 import uuid
+import warnings
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -134,6 +135,11 @@ class WorkflowExecutionService:
     Accepts execution parameters (mode, messages, model, tools, etc.),
     resolves the appropriate graph template, compiles it, creates production
     Workers with Guardrail Hooks, and runs PregelRuntime.
+
+    .. note::
+        The ``state_store`` parameter is deprecated as of 13.4a-6. Use
+        ``checkpoint_store: SessionStateStore`` instead. See
+        ``docs/migrations/agent-state-store.md``.
     """
 
     def __init__(
@@ -158,6 +164,14 @@ class WorkflowExecutionService:
         self._pre_tool_hook = pre_tool_hook
         self._post_tool_hook = post_tool_hook
         self._environment_manager = environment_manager
+        if state_store is not None:
+            warnings.warn(
+                "WorkflowExecutionService(state_store=...) is deprecated. "
+                "Use checkpoint_store=SessionStateStore instead. "
+                "See docs/migrations/agent-state-store.md for migration.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         self._state_store = state_store
         self._checkpoint_store = checkpoint_store
         self._event_store = event_store
