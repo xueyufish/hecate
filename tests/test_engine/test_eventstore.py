@@ -14,7 +14,13 @@ import uuid
 
 import pytest
 
-from hecate.engine.eventstore import Event, EventStore, EventType, InMemoryEventStore
+from hecate.engine.eventstore import (
+    Event,
+    EventStore,
+    EventType,
+    EventVersionConflictError,
+    InMemoryEventStore,
+)
 
 # --- EventType tests ---
 
@@ -264,3 +270,30 @@ def test_eventstore_is_abstract():
     """EventStore SHALL NOT be instantiable directly."""
     with pytest.raises(TypeError):
         EventStore()  # type: ignore[abstract]
+
+
+# --- acquire_event_lock default no-op ---
+
+
+async def test_acquire_event_lock_default_is_noop(session_id: uuid.UUID):
+    """EventStore.acquire_event_lock SHALL be a no-op by default.
+
+    InMemoryEventStore inherits the default (no override) and yields without
+    blocking, raising, or acquiring any real lock.
+    """
+
+    store = InMemoryEventStore()
+    async with store.acquire_event_lock(session_id):
+        pass
+    async with store.acquire_event_lock(session_id, timeout_ms=1000):
+        await store.append(Event(session_id=session_id, superstep=0, event_type=EventType.NODE_START))
+    assert await store.get_version(session_id) == 1
+
+
+def test_event_version_conflict_error_message_includes_session_id(session_id: uuid.UUID):
+    """EventVersionConflictError message SHALL include the offending session_id."""
+
+    err = EventVersionConflictError(session_id, version=5)
+    assert err.session_id == session_id
+    assert err.version == 5
+    assert str(session_id) in str(err)

@@ -146,6 +146,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     register_secret_providers()
 
+    # Initialize process-wide EventStore and SessionStateStore singletons
+    # (eventstore-pg-wiring + session-state-store changes): wired into
+    # chat/completions via get_event_store / get_session_state_store Depends.
+    from hecate.core.config import settings as _state_settings
+    from hecate.services.event_state import create_event_store
+    from hecate.services.session_state import create_session_state_store
+
+    app.state.event_store = create_event_store(_state_settings)
+    app.state.session_state_store = create_session_state_store(_state_settings)
+    logger.info("EventStore backend=%s", _state_settings.EVENT_STORE_BACKEND)
+    logger.info("SessionStateStore backend=%s", _state_settings.SESSION_STATE_STORE_BACKEND)
+
     # Discover and register plugins from the plugins directory
     try:
         from hecate.services.plugin.service import PluginService

@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -65,6 +66,18 @@ class Event:
     payload: dict[str, Any] = field(default_factory=dict)
     trace_id: str | None = None
     version: int = 0
+
+
+class EventVersionConflictError(Exception):
+    """Raised when concurrent ``append`` calls collide on the same ``(session_id, version)``.
+
+    The message SHALL include the offending ``session_id`` for diagnostics.
+    """
+
+    def __init__(self, session_id: uuid.UUID, version: int) -> None:
+        self.session_id = session_id
+        self.version = version
+        super().__init__(f"Event version conflict for session_id={session_id} at version={version}")
 
 
 class EventStore(ABC):
@@ -132,6 +145,34 @@ class EventStore(ABC):
             The highest version number, or 0 if no events exist.
         """
         ...
+
+    @asynccontextmanager
+    async def acquire_event_lock(
+        self,
+        session_id: uuid.UUID,
+        *,
+        timeout_ms: int = 30000,
+    ) -> AsyncGenerator[None, None]:
+        """Acquire an exclusive lock for event writes on ``session_id``.
+
+        Default implementation is a no-op (yields immediately). Single-process
+        implementations (e.g. ``InMemoryEventStore``) and implementations whose
+        ``append`` already serializes via storage-level locks (e.g.
+        ``PostgresEventStore`` which uses ``SELECT ... FOR UPDATE``) do not
+        need to override this.
+
+        Distributed implementations (e.g. a future Redis-backed event store)
+        SHOULD override this with ``SET NX PX`` semantics, raising
+        ``EventVersionConflictError`` if acquisition fails after retries.
+
+        Args:
+            session_id: The session whose event log is being mutated.
+            timeout_ms: Advisory lock TTL in milliseconds.
+
+        Yields:
+            None — callers enter the critical section after ``yield``.
+        """
+        yield
 
 
 class InMemoryEventStore(EventStore):

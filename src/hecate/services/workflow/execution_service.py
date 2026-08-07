@@ -10,7 +10,9 @@ ConversationService orchestration.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import random
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -21,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.engine.checkpoint import InMemoryCheckpointStore
 from hecate.engine.compiler import GraphCompiler
 from hecate.engine.context import InMemoryContextEngine
+from hecate.engine.eventstore import EventStore
 from hecate.engine.graph_dsl import parse_graph
 from hecate.engine.guardrail import (
     PostLLMHook,
@@ -29,6 +32,7 @@ from hecate.engine.guardrail import (
     PreToolHook,
 )
 from hecate.engine.pregel import PregelRuntime
+from hecate.engine.session_state import SessionState, SessionStateConflictError, SessionStateStore
 from hecate.engine.types import StreamMode
 from hecate.engine.workers.agent_worker import AgentWorker
 from hecate.engine.workers.condition_worker import ConditionWorker
@@ -43,6 +47,28 @@ from hecate.services.state.state import AgentState
 from hecate.services.state.store import AgentStateStore
 
 logger = logging.getLogger(__name__)
+
+# Jitter retry budget for lock acquisition when multiple replicas contend on
+# the same session key (Horizontal-Scaling validation). Exposed as module
+# constants so tests can tighten the sleep bounds.
+_LOCK_MAX_RETRIES = 3
+_LOCK_RETRY_MIN_S = 0.02
+_LOCK_RETRY_MAX_S = 0.150
+
+
+async def _sync_event_position(
+    state: SessionState, event_store: EventStore | None, session_id: uuid.UUID
+) -> SessionState:
+    """Sync ``SessionState.event_position`` with ``event_store.get_version(session_id)``.
+
+    Returns a new ``SessionState`` instance via ``model_copy`` when the store
+    is provided; returns the original instance unchanged when ``event_store``
+    is ``None`` (no-op, backward compatible).
+    """
+    if event_store is None:
+        return state
+    position = await event_store.get_version(session_id)
+    return state.model_copy(update={"event_position": position})
 
 
 class _CompositeWorker:
@@ -121,6 +147,8 @@ class WorkflowExecutionService:
         post_tool_hook: PostToolHook | None = None,
         environment_manager: Any = None,
         state_store: AgentStateStore | None = None,
+        checkpoint_store: SessionStateStore | None = None,
+        event_store: EventStore | None = None,
     ) -> None:
         self._port = port
         self._db = db
@@ -131,6 +159,8 @@ class WorkflowExecutionService:
         self._post_tool_hook = post_tool_hook
         self._environment_manager = environment_manager
         self._state_store = state_store
+        self._checkpoint_store = checkpoint_store
+        self._event_store = event_store
 
     async def execute(
         self,
@@ -306,10 +336,15 @@ class WorkflowExecutionService:
             return self._stream_execute(runtime, session_id, initial_input, stream_mode, execution_mode, agent_state)
 
         response = await self._non_stream_execute(runtime, session_id, initial_input, execution_mode)
-        # Save AgentState after non-streaming execution
-        if self._state_store and agent_id:
-            agent_uuid = agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id))
-            await self._state_store.save(agent_uuid, session_id, agent_state)
+        # Save AgentState after non-streaming execution (single atomic snapshot)
+        if agent_state is not None and user_id is not None:
+            await self._persist_session_state(
+                agent_state=agent_state,
+                session_id=session_id,
+                agent_id=agent_state.agent_id,
+                org_id=user_id,  # chat path does not thread a separate org_id
+                user_id=user_id,
+            )
         return response
 
     async def _non_stream_execute(
@@ -367,8 +402,17 @@ class WorkflowExecutionService:
         stream_mode: StreamMode,
         execution_mode: str = "conversational",
         agent_state: AgentState | None = None,
+        org_id: str | uuid.UUID | None = None,
+        user_id: str | uuid.UUID | None = None,
+        agent_id: str | uuid.UUID | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Execute streaming and yield events.
+
+        Persists ``agent_state`` via the wired ``SessionStateStore`` exactly
+        once when the generator exhausts normally. On client disconnect /
+        mid-stream exception, best-effort persist is attempted (failures are
+        swallowed) and the original exception is re-raised. The legacy
+        ``self._state_store`` save path is intentionally not used.
 
         Args:
             runtime: The configured PregelRuntime.
@@ -377,20 +421,102 @@ class WorkflowExecutionService:
             stream_mode: Stream mode for PregelRuntime.
             execution_mode: Execution mode (conversational or task).
             agent_state: AgentState to save after stream completes.
+            org_id: Tenant identifier for the wired ``SessionStateStore``.
+            user_id: User identifier for the wired ``SessionStateStore``.
+            agent_id: Agent identifier for the wired ``SessionStateStore``.
 
         Yields:
             Event dicts from PregelRuntime.
         """
-        async for event in runtime.execute(
-            session_id=session_id,
-            initial_input=initial_input,
-            stream_mode=stream_mode,
-            execution_mode=execution_mode,
-        ):
-            yield event
-        # Save AgentState after streaming completes
-        if self._state_store and agent_state:
-            await self._state_store.save(agent_state.agent_id, session_id, agent_state)
+        try:
+            async for event in runtime.execute(
+                session_id=session_id,
+                initial_input=initial_input,
+                stream_mode=stream_mode,
+                execution_mode=execution_mode,
+            ):
+                yield event
+        except BaseException as exc:
+            # Best-effort save on disconnect; swallow save failures so the
+            # original exception remains the one that surfaces.
+            if agent_state is not None:
+                try:
+                    await self._persist_session_state(
+                        agent_state=agent_state,
+                        session_id=session_id,
+                        agent_id=agent_id or agent_state.agent_id,
+                        org_id=org_id,
+                        user_id=user_id,
+                    )
+                except Exception:  # noqa: BLE001 - best-effort, never masks original
+                    logger.warning("session_state_persist_failed", exc_info=True)
+            raise exc
+        # Save AgentState exactly once after streaming completes normally.
+        if agent_state is not None:
+            await self._persist_session_state(
+                agent_state=agent_state,
+                session_id=session_id,
+                agent_id=agent_id or agent_state.agent_id,
+                org_id=org_id,
+                user_id=user_id,
+            )
+
+    async def _persist_session_state(
+        self,
+        *,
+        agent_state: AgentState,
+        session_id: uuid.UUID,
+        agent_id: str | uuid.UUID | None,
+        org_id: str | uuid.UUID | None,
+        user_id: str | uuid.UUID | None,
+    ) -> None:
+        """Persist ``agent_state`` as a ``SessionState`` snapshot (best-effort).
+
+        Builds a ``SessionState`` whose ``agent_state`` field is the JSON
+        serialization of ``AgentState.model_dump(mode="json")``, synchronizes
+        ``event_position`` with the wired ``EventStore``, and writes it via the
+        wired ``SessionStateStore`` under the ``(org_id, user_id, session_id)``
+        tenant-scoped key.
+
+        When no ``checkpoint_store`` is wired, this is a no-op and never falls
+        back to the deprecated ``AgentStateStore`` (removed in
+        horizontal-scaling-validation). Non-lock save failures are swallowed
+        (best-effort persistence). Lock-acquisition ``SessionStateConflictError``
+        propagates so the requesting turn fails fast rather than splitting state
+        across two stores.
+
+        Args:
+            agent_state: The typed ``AgentState`` to persist.
+            session_id: Session identifier.
+            agent_id: Agent identifier.
+            org_id: Tenant identifier.
+            user_id: User identifier.
+        """
+        if self._checkpoint_store is None:
+            return
+
+        org_uuid = org_id if isinstance(org_id, uuid.UUID) else uuid.UUID(str(org_id)) if org_id else None
+        user_uuid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id)) if user_id else None
+        if org_uuid is None or user_uuid is None:
+            return
+
+        snapshot = SessionState(agent_state=agent_state.model_dump(mode="json"))
+        snapshot = await _sync_event_position(snapshot, self._event_store, session_id)
+
+        # Lock acquisition retries with jitter; lock contention fails fast after
+        # the retry budget is exhausted. Non-lock save failures are swallowed.
+        for attempt in range(_LOCK_MAX_RETRIES):
+            try:
+                async with self._checkpoint_store.acquire_session_lock(org_uuid, user_uuid, session_id):
+                    await self._checkpoint_store.save(org_uuid, user_uuid, session_id, snapshot)
+                return
+            except SessionStateConflictError:
+                if attempt >= _LOCK_MAX_RETRIES - 1:
+                    raise
+                await asyncio.sleep(random.uniform(_LOCK_RETRY_MIN_S, _LOCK_RETRY_MAX_S))  # noqa: S311 - jitter, not crypto
+            except Exception:  # noqa: BLE001 - best-effort persistence
+                logger.warning("session_state_persist_failed", exc_info=True)
+                return
 
     def _create_composite_worker(
         self,
