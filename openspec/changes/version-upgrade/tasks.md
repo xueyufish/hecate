@@ -8,7 +8,7 @@
 
 ## 2. SIGTERM Graceful Shutdown
 
-- [ ] [x]在 `src/hecate/main.py` 定义全局 `SHOULD_ACCEPT_TRAFFIC: bool = True` 和 `ACTIVE_REQUESTS: int = 0`
+- [x]在 `src/hecate/main.py` 定义全局 `SHOULD_ACCEPT_TRAFFIC: bool = True` 和 `ACTIVE_REQUESTS: int = 0`
 - [x] 2.2 注册 `signal.signal(signal.SIGTERM, _handle_sigterm)` handler，置 `SHOULD_ACCEPT_TRAFFIC = False`
 - [x] 2.3 添加 ASGI middleware 在每个请求进入时 `ACTIVE_REQUESTS += 1`、退出时 `-= 1`
 - [x] 2.4 lifespan shutdown 部分增加 `await _drain_requests()` 逻辑：等待 `ACTIVE_REQUESTS == 0` 或 `SHUTDOWN_DRAIN_TIMEOUT` 超时
@@ -17,7 +17,7 @@
 
 ## 3. hecate-migrate 独立迁移入口
 
-- [ ] [x]创建 `src/hecate/cli/migrate.py`，实现 `main()` 函数（argparse: 默认 `upgrade head` / `--check` / `--downgrade N` / `--expand-only` / `--contract-only`）
+- [x]创建 `src/hecate/cli/migrate.py`，实现 `main()` 函数（argparse: 默认 `upgrade head` / `--check` / `--downgrade N` / `--expand-only` / `--contract-only`）
 - [x] 3.1 创建 `src/hecate/cli/migrate.py`，实现 `main()` 函数（argparse: 默认 `upgrade head` / `--check` / `--downgrade N` / `--expand-only` / `--contract-only`）
 - [x] 3.2 在 `pyproject.toml` `[project.scripts]` 注册 `hecate-migrate = "hecate.cli.migrate:main"`
 - [x] 3.3 修改 `docker/docker-compose.yml`：新增 `hecate-migrate` 一次性服务（`command: hecate-migrate`、`restart: "no"`），`hecate` 服务 `depends_on: hecate-migrate: condition: service_completed_successfully`，`hecate` 服务 command 移除 `alembic upgrade head &&`
@@ -25,7 +25,7 @@
 
 ## 4. Alembic lock_timeout + Expand-Contract Autogenerate
 
-- [ ] [x]在 `alembic/env.py` 的 `run_migrations_online` 中添加 `SET lock_timeout = %s` 执行（值从 `ALEMBIC_LOCK_TIMEOUT` 环境变量读取，默认 `'2s'`）
+- [x]在 `alembic/env.py` 的 `run_migrations_online` 中添加 `SET lock_timeout = %s` 执行（值从 `ALEMBIC_LOCK_TIMEOUT` 环境变量读取，默认 `'2s'`）
 - [x] 4.2 在 `alembic/env.py` 实现 `process_revision_directives` hook 函数：拦截 autogenerate 的 `ops` 列表，按 operation 类型拆分为 expand ops（`CreateTableOp` / `AddColumnOp` / `CreateIndexOp` / `CreateConstraintOp`）和 contract ops（`DropTableOp` / `DropColumnOp` / `DropIndexOp` / `DropConstraintOp` / `AlterColumnOp`），不确定的 op raise `NotImplementedError`
 - [x] 4.3 在 `alembic/env.py` 的 `context.configure()` 调用中传入 `process_revision_directives=hook`
 - [x] 4.4 创建 `docs/migrations/expand-contract-guide.md` 编写 expand-contract 迁移编写规范
@@ -73,23 +73,23 @@
 
 ## 9. 验证
 
-- [ ] 9.1 跑 `ruff check src/hecate/ tests/` — 干净
-- [ ] 9.2 跑 `ruff format --check src/ tests/` — formatted
-- [ ] 9.3 跑 `mypy src/` — no issues
-- [ ] 9.4 跑 `python -m pytest tests/ -q` — 全部通过（既有测试零回归）
-- [ ] 9.5 跑 `hecate-migrate --check` — 输出 pending=0
-- [ ] 9.6 跑 `hecate preflight` — 所有检查 PASS
-- [ ] 9.7 跑 `hecate flag-audit` — 无 flag 时输出空表
-- [ ] 9.8 跑 `openspec validate version-upgrade --strict` — valid
-- [ ] 9.9 手动验证：`docker compose up -d` → hecate-migrate 先完成 → hecate 启动 → `GET /health/live` 200 → `GET /health/ready` 200 → `GET /version` 返回完整信息
-- [ ] 9.10 手动验证：创建 feature flag → 评估 → 变更 → 缓存失效 → 再评估得到新结果
+- [x] 9.1 跑 `ruff check src/hecate/ tests/` — 干净
+- [x] 9.2 跑 `ruff format --check src/ tests/` — formatted
+- [x] 9.3 跑 `mypy src/` — no issues
+- [x] 9.4 跑 `python -m pytest tests/ -q` — 全部通过（既有测试零回归）
+- [x] 9.5 跑 `hecate-migrate --check` — 输出 pending=0
+- [x] 9.6 跑 `hecate preflight` — 所有检查 PASS
+- [x] 9.7 跑 `hecate flag-audit` — 无 flag 时输出空表
+- [x] 9.8 跑 `openspec validate version-upgrade --strict` — valid
+- [x] 9.9 手动验证：`docker compose up -d` → hecate-migrate 先完成 → hecate 启动 → `GET /health/live` 200 → `GET /health/ready` 200 → `GET /version` 返回完整信息
+- [x] 9.10 手动验证：创建 feature flag → 评估 → 变更 → 缓存失效 → 再评估得到新结果
 
 ## 10. PR + Merge
 
-- [ ] 10.1 创建 branch `feat/version-upgrade`
-- [ ] 10.2 提交（commit message 格式 `feat(version-upgrade): add health checks, migration safety, feature flags, preflight, blue-green`）
-- [ ] 10.3 推送 + 开 PR
-- [ ] 10.4 等 pre-commit hook + CI 通过
-- [ ] 10.5 合并到 main
-- [ ] 10.6 更新 `docs/features/feature-catalog.md` + `roadmap.md` + `p3-mvp-audit.md`
-- [ ] 10.7 `/opsx-archive version-upgrade`
+- [x] 10.1 创建 branch `feat/version-upgrade`
+- [x] 10.2 提交（commit message 格式 `feat(version-upgrade): add health checks, migration safety, feature flags, preflight, blue-green`）
+- [x] 10.3 推送 + 开 PR
+- [x] 10.4 等 pre-commit hook + CI 通过
+- [x] 10.5 合并到 main
+- [x] 10.6 更新 `docs/features/feature-catalog.md` + `roadmap.md` + `p3-mvp-audit.md`
+- [x] 10.7 `/opsx-archive version-upgrade`
