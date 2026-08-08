@@ -11,13 +11,14 @@ Initializes the FastAPI application with:
 from __future__ import annotations
 
 import logging
+import signal
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from contextlib import asynccontextmanager as _asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response as StarletteResponse
 
@@ -51,6 +52,7 @@ from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.cost_management import router as cost_management_router
 from hecate.api.management.costs import router as costs_router
 from hecate.api.management.environment import router as environment_router
+from hecate.api.management.feature_flags import router as feature_flags_router
 from hecate.api.management.fine_tuning import router as fine_tuning_router
 from hecate.api.management.hooks import router as hooks_router
 from hecate.api.management.i18n import router as i18n_router
@@ -69,6 +71,7 @@ from hecate.api.management.ops_center_overview import router as ops_center_overv
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
 from hecate.api.management.orgs import router as orgs_router
 from hecate.api.management.plugins import router as plugins_router
+from hecate.api.management.preflight import router as preflight_router
 from hecate.api.management.prompts import router as prompts_router
 from hecate.api.management.quotas import quotas_router
 from hecate.api.management.sessions import router as sessions_router
@@ -308,12 +311,76 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+# Graceful shutdown state
+SHOULD_ACCEPT_TRAFFIC: bool = True
+ACTIVE_REQUESTS: int = 0
+_APP_STARTUP_COMPLETE: bool = False
+
+
+def _handle_sigterm(signum: int, frame: object) -> None:
+    global SHOULD_ACCEPT_TRAFFIC
+    SHOULD_ACCEPT_TRAFFIC = False
+    logger.info("sigterm_received", extra={"signum": signum})
+
+
+if hasattr(signal, "SIGTERM"):
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
+
+async def _drain_active_requests(timeout: int = 30) -> None:
+    """Wait for active requests to finish or timeout."""
+    import asyncio
+
+    deadline = asyncio.get_event_loop().time() + timeout
+    while ACTIVE_REQUESTS > 0:
+        if asyncio.get_event_loop().time() >= deadline:
+            logger.warning("drain_timeout", extra={"active": ACTIVE_REQUESTS, "timeout": timeout})
+            break
+        await asyncio.sleep(0.1)
+
+
+@asynccontextmanager
+async def _request_counter_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Wrap existing lifespan to track startup completion and drain in-flight requests on shutdown."""
+    global _APP_STARTUP_COMPLETE
+    async with lifespan(app):
+        _APP_STARTUP_COMPLETE = True
+        try:
+            yield
+        finally:
+            _APP_STARTUP_COMPLETE = False
+            timeout = 30
+            try:
+                if hasattr(_settings, "shutdown_drain_timeout"):
+                    timeout = int(_settings.shutdown_drain_timeout)
+            except Exception:
+                pass
+            await _drain_active_requests(timeout=timeout)
+
+
+app.router.lifespan_context = _request_counter_lifespan
+
+
 # Audit middleware — captures all HTTP requests as audit events
 app.add_middleware(AuditMiddleware)
 
+
+async def _request_counter_dispatch(request: Request, call_next: RequestResponseEndpoint) -> StarletteResponse:
+    """Track in-flight request count for graceful shutdown drain."""
+    global ACTIVE_REQUESTS
+    ACTIVE_REQUESTS += 1
+    try:
+        return await call_next(request)
+    finally:
+        ACTIVE_REQUESTS -= 1
+
+
+app.add_middleware(BaseHTTPMiddleware, dispatch=_request_counter_dispatch)
+
+
 # OTel attribute enrichment middleware
 app.add_middleware(_OTelAttributeMiddleware)
-
 # CORS middleware - allow all origins for development
 app.add_middleware(
     CORSMiddleware,
@@ -354,14 +421,127 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
 
 
-@app.get("/health")
-async def health_check() -> dict[str, str]:
-    """Health check endpoint.
+async def _check_db_ready() -> bool:
+    """Execute SELECT 1 via app.state session_factory, if available."""
+    try:
+        session_factory = getattr(app.state, "session_factory", None)
+        if session_factory is None:
+            return True
+        async with session_factory() as session:
+            from sqlalchemy import text
 
-    Returns:
-        dict: ``{"status": "ok"}`` indicating the service is running.
+            await session.execute(text("SELECT 1"))
+        return True
+    except Exception as exc:
+        logger.warning("readiness_db_check_failed", exc_info=exc)
+        return False
+
+
+async def _check_redis_ready() -> bool:
+    """PING Redis if session_state_store uses Redis."""
+    try:
+        session_state_store = getattr(app.state, "session_state_store", None)
+        if session_state_store is None:
+            return True
+        redis_client = getattr(session_state_store, "_redis", None)
+        if redis_client is None:
+            return True
+        result = redis_client.ping()
+        if hasattr(result, "__await__"):
+            await result
+        return True
+    except Exception as exc:
+        logger.warning("readiness_redis_check_failed", exc_info=exc)
+        return False
+
+
+async def _check_qdrant_ready() -> bool:
+    """Ping Qdrant if a client is configured on app.state."""
+    try:
+        qdrant_client = getattr(app.state, "qdrant_client", None)
+        if qdrant_client is None:
+            return True
+        result = qdrant_client.get_collections()
+        if hasattr(result, "__await__"):
+            await result
+        return True
+    except Exception as exc:
+        logger.warning("readiness_qdrant_check_failed", exc_info=exc)
+        return False
+
+
+@app.get("/health/live")
+async def health_live() -> dict[str, str]:
+    """Liveness probe: process is alive. No external dependency checks."""
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def health_ready() -> Response:
+    """Readiness probe: process can serve requests.
+
+    Checks: SHOULD_ACCEPT_TRAFFIC flag + DB + Redis (if configured) + Qdrant (if configured).
     """
-    return {"status": "ok"}
+    checks: dict[str, bool] = {
+        "draining": SHOULD_ACCEPT_TRAFFIC,
+    }
+    if not SHOULD_ACCEPT_TRAFFIC:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "checks": checks, "failed": ["draining"]},
+        )
+    checks["database"] = await _check_db_ready()
+    checks["redis"] = await _check_redis_ready()
+    checks["qdrant"] = await _check_qdrant_ready()
+    failed = [k for k, v in checks.items() if not v]
+    if failed:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "checks": checks, "failed": failed},
+        )
+    return JSONResponse(content={"status": "ready", "checks": checks})
+
+
+@app.get("/health/startup")
+async def health_startup() -> Response:
+    """Startup probe: lifespan initialization complete."""
+    if not _APP_STARTUP_COMPLETE:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "starting", "startup_complete": False},
+        )
+    return JSONResponse(content={"status": "started", "startup_complete": True})
+
+
+@app.get("/version")
+async def version_info() -> dict[str, str]:
+    """Build info: version, commit, alembic head, python version, build date."""
+    import os
+    import platform
+
+    from hecate import __version__
+
+    git_commit = os.environ.get("GIT_COMMIT", "unknown")
+    build_date = os.environ.get("BUILD_DATE", "unknown")
+
+    alembic_head = "unknown"
+    try:
+        from alembic.config import Config as AlembicConfig
+        from alembic.script import ScriptDirectory
+
+        cfg = AlembicConfig("alembic.ini")
+        script_dir = ScriptDirectory.from_config(cfg)
+        alembic_head = script_dir.get_current_head() or "unknown"
+    except Exception:
+        pass
+
+    return {
+        "version": __version__,
+        "commit": git_commit,
+        "alembic_head": alembic_head,
+        "python": platform.python_version(),
+        "build_date": build_date,
+    }
 
 
 @app.get("/metrics")
@@ -458,6 +638,8 @@ app.include_router(a2a_management_router)
 app.include_router(skill_registry_router)
 app.include_router(tool_analytics_router)
 app.include_router(agent_health_router)
+app.include_router(feature_flags_router)
+app.include_router(preflight_router)
 app.include_router(conversation_analytics_router)
 app.include_router(ops_center_overview_router)
 app.include_router(plugins_router)
