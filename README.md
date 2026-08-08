@@ -3,96 +3,44 @@
 [![CI](https://github.com/xueyufish/hecate/actions/workflows/ci.yml/badge.svg)](https://github.com/xueyufish/hecate/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-fe5196.svg)](https://conventionalcommits.org)
+[![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/xueyufish/hecate)
 
-**Enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform.**
+Enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform.
 
-Build, orchestrate, and run AI Agent applications on cloud SaaS or self-hosted infrastructure — no vendor lock-in.
+Hecate is an enterprise-grade Agent platform with a self-developed Pregel execution runtime. It speaks MCP and A2A natively, integrates 100+ LLMs, and exposes an OpenAI-compatible API so existing tools integrate without change. Multi-agent orchestration, engine-level guardrails, and Docker-isolated sandbox execution are first-class concerns.
 
 ---
 
-## Highlights
+## Who is this for?
 
-- **Graph-First Engine** — Self-built Pregel runtime with JSON DSL, compiler, and channel system. Zero external framework dependencies (not even LangChain).
-- **15 Extension Points** — 11 Core extension points (scheduling, eviction, optimization, conflict resolution, event sourcing, context engine, guardrails) + 4 SPI extension points (evaluator, channel, auth provider, notifier).
-- **Visual Canvas** — React Flow-based drag-and-drop workflow builder with 6 multi-agent collaboration patterns, typed edges, and fan-out/merge nodes.
-- **Multi-Agent Orchestration** — Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, and Debate patterns — all unified as Graph templates.
-- **MCP Bidirectional** — Native MCP Client (consume external tools) + MCP Server (expose Hecate as tool provider).
-- **Model-Agnostic** — 100+ LLM providers via LiteLLM with intelligent routing, circuit breaker, and A/B testing.
-- **Multi-Tenant** — Organization → Workspace → RBAC with data-level tenant isolation across 15 models.
-- **Enterprise Security** — Engine-level guardrail hooks (Pre/Post LLM/Tool), PII masking with encryption, audit trail, and Docker sandbox execution.
-- **Context Engineering** — 6-component pipeline: assembler, evidence tracker, phase detection, token budget governance, provider shaping, and message prioritization.
-- **Spec-Driven Development** — 86 feature specs + 62 completed change proposals via OpenSpec workflow. Every feature has requirements, scenarios, and design docs.
+Hecate is a good fit if you need any of the following:
 
-## Project Stats
+- **A flexible agent runtime** — code-first Python API for engineers and a visual canvas for non-developers
+- **Engine-level extensibility** — 11 core + 4 SPI extension points let you swap schedulers, checkpointers, guardrails
+- **Self-hosted on your own infrastructure** — your prompts never leave your network; LLM traffic uses your API keys
+- **Multi-agent orchestration with persistence** — graph-based state, durable checkpoints, human-in-the-loop
+- **A multi-tenant foundation** — Organization → Workspace → RBAC for an internal agent platform product
+- **To study or extend an agent runtime** — layered architecture with a self-developed Pregel engine and no framework lock-in
 
-| Metric | Value |
-|--------|-------|
-| Features (P1–P5) | 343 total (123 implemented) |
-| Tests | 1,700+ |
-| Extension Points | 15 (11 Core + 4 SPI) |
-| OpenSpec specs | 86 |
-| Completed changes | 62 |
-| LLM Providers | 100+ via LiteLLM |
-| Database Backends | PostgreSQL, MySQL, SQLite |
-| Vector DB Backends | Qdrant, Chroma |
-| Python | 3.12+ |
+Hecate is **not** a good fit if you want a managed cloud service — Hecate is OSS, self-hosted, and you run it on your own infrastructure. (Dify or n8n may be better fits if your team is non-developer-first and you want a pure GUI-driven, no-code experience.)
 
-## Architecture
-
-![Hecate L1 Architecture](docs/design/images/hecate_l1_architecture.png)
-
-> **Legend**: ✅ Green = Implemented | 📋 Yellow dashed = Planned
+---
 
 ## Quick Start
 
-### Prerequisites
-
-- Python 3.12+
-- PostgreSQL 16
-- Qdrant (vector database)
-- MinIO (object storage)
-
-> **Note:** MySQL and SQLite are also supported as database backends. PostgreSQL is recommended for production and is the default in Docker Compose.
-
-### Installation
-
 ```bash
-# Clone the repository
 git clone https://github.com/xueyufish/hecate.git
 cd hecate
-
-# Create virtual environment and install dependencies
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-
-# Set up environment
-cp .env.example .env
-# Edit .env with your configuration
-
-# Run database migrations
+docker compose -f docker/docker-compose.yml up -d
+source .venv/bin/activate && uv pip install -e ".[dev]"
+cp .env.example .env       # edit API keys and DB URLs
 alembic upgrade head
-
-# Start the server
 uvicorn hecate.main:app --reload
 ```
 
-### Docker Compose
+Then send your first chat request:
 
 ```bash
-# Start infrastructure (PostgreSQL, Qdrant, MinIO)
-docker compose -f docker/docker-compose.yml up -d
-
-# Then install and run as above
-```
-
-## API Overview
-
-### OpenAI-Compatible Endpoints
-
-```bash
-# Chat completion (drop-in replacement)
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer your-api-key" \
   -H "Content-Type: application/json" \
@@ -100,125 +48,78 @@ curl -X POST http://localhost:8000/v1/chat/completions \
     "model": "gpt-4o",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
-
-# List models
-curl http://localhost:8000/v1/models \
-  -H "Authorization: Bearer your-api-key"
 ```
 
-### Management API
+Interactive API docs are available at `http://localhost:8000/docs` (Swagger UI) and `/redoc`.
 
-```bash
-# Create agent
-curl -X POST http://localhost:8000/api/agents \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "My Agent",
-    "model_config": {"model": "gpt-4o"},
-    "mode": "chat"
-  }'
+![Hecate L1 Architecture](docs/design/images/hecate_l1_architecture.png)
 
-# Create knowledge base
-curl -X POST http://localhost:8000/api/knowledge-bases \
-  -H "Authorization: Bearer your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "My KB", "description": "Knowledge base for docs"}'
+---
 
-# Upload document
-curl -X POST http://localhost:8000/api/knowledge-bases/{kb_id}/documents \
-  -H "Authorization: Bearer your-api-key" \
-  -F "file=@document.pdf"
-```
+## Features
 
-## Configuration
+- **Graph-First Engine** — Self-built Pregel/BSP runtime with 11 core + 4 SPI extension points. Zero external framework dependencies for the engine.
+- **Context Engineering** — An extensible pipeline (assembler, evidence tracker, phase detector, token budget, provider shaping, message prioritization, tool filtering, offloader) that keeps long-running agents on-budget and on-task.
+- **MCP + A2A Native** — Bidirectional MCP client and server, plus Linux Foundation A2A protocol support for cross-framework agent communication.
+- **Multi-Agent Orchestration** — Six collaboration patterns (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate) unified as Graph templates.
+- **Multi-Tenant** — Organization → Workspace → RBAC with workspace_id on 35 data models for tenant isolation.
+- **Engine-Level Guardrails** — Four hook types (Pre/Post LLM/Tool) at every LLM and Tool boundary; the same hooks power PII masking, audit logging, and human-in-the-loop flows.
 
-Key environment variables (see `.env.example` for full list):
+---
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | Database connection string | `postgresql+asyncpg://hecate:hecate@localhost:5432/hecate` |
-| `QDRANT_URL` | Qdrant endpoint | `http://localhost:6333` |
-| `MINIO_URL` | MinIO endpoint | `localhost:9000` |
-| `HECATE_API_KEYS` | Comma-separated API keys | — |
-| `LLM_GUARD_ENABLED` | Enable prompt/output scanning | `true` |
-| `RATE_LIMIT_RPM` | Requests per minute per key | `60` |
+## Engineering Approach
 
-## Development
+Hecate's design follows three disciplines common to serious agent platforms:
 
-```bash
-# Run all tests (1,700+ tests)
-python -m pytest tests/ -q
+- **Harness engineering** — the runtime is the harness. Every LLM call passes through the Pregel superstep loop, with durable checkpoints, retry policies, and 11 core + 4 SPI extension points providing observability and control at every boundary.
+- **Loop engineering** — agent control loops are first-class. The superstep iteration is complemented by `interrupt()`/`Command()` for human-in-the-loop, `RetryStrategy` for failure recovery, and multi-agent delegation patterns where each subgraph runs its own execution loop.
+- **Graph engineering** — workflows are graphs. A JSON DSL describes nodes and edges; the compiler validates, optimizes, and emits an executable `CompiledGraph`. Six multi-agent collaboration patterns ship as static graph templates.
 
-# Run a specific test file
-python -m pytest tests/test_engine/test_pregel.py -v
+---
 
-# Lint
-ruff check src/hecate/ tests/
+## Trust & Security
 
-# Format check
-ruff format --check src/ tests/
+Built for on-premises and regulated deployments:
 
-# Type check
-mypy src/
+- **PII masking and data isolation** — guardrail hooks redact sensitive content before it leaves your network
+- **Audit trail** — every LLM call, tool invocation, and checkpoint is logged to your own PostgreSQL
+- **Sandboxed tool execution** — Docker-isolated runtime with explicit permission scopes per agent
+- **No external data retention** — prompts and completions go directly to your LLM provider; Hecate does not store them
 
-# All four checks (also runs as pre-commit hook)
-ruff check src/hecate/ tests/ && ruff format --check src/ tests/ && mypy src/ && python -m pytest tests/ -q
-```
+---
 
-## Engine Layer Design
+## CLI Tools
 
-The execution engine is Hecate's core differentiator — a self-built Pregel runtime with zero external framework dependencies:
+Hecate ships two console-script entry points:
 
-```
-JSON DSL → Compiler (schema validation + optimization passes) → CompiledGraph
-                                                                    │
-                                                                    ▼
-                                                           Pregel Runtime
-                                                    (BSP superstep loop)
-                                                    │               │
-                                         Channel System      Worker Pool
-                                         (4 types +          (thread pool →
-                                          pluggable registry)  cross-process)
-                                                    │
-                                         Checkpoint Store
-                                         (PostgreSQL + memory cache)
-```
+- **`hecate`** — the main CLI for managing agents, sessions, knowledge bases, workflows, and other resources. See [`docs/reference/cli.md`](docs/reference/cli.md) for the full command list.
+- **`hecate-migrate`** — standalone migration runner. Designed for one-shot use as a Docker Compose init service, a Kubernetes init container, or a Helm pre-install hook — runs Alembic migrations without booting the full web application.
 
-**15 Extension Points** enable pluggable extensibility — 11 Core + 4 SPI:
+After `uv pip install -e ".[dev]"`, both commands are available on your `PATH`.
 
-**Core Extension Points (11)**:
-
-| Extension Point | Purpose |
-|-----|---------|
-| `EnginePort` | Service-to-engine adapter (LLM, tools, knowledge, checkpoint) |
-| `Worker` / `WorkerPool` | Node execution dispatch |
-| `CheckpointStore` | State persistence and recovery |
-| `EventStore` | Append-only event logging with replay |
-| `ContextEngine` | Message selection, compression, token estimation |
-| `SchedulerStrategy` | Node scheduling (FIFO default, pluggable) |
-| `EvictionPolicy` | Channel memory management |
-| `OptimizationPass` | Graph optimization (dead node elimination, parallel detection) |
-| `ConflictResolver` | Concurrent channel update resolution |
-| `Guardrail Hooks (×4)` | Pre/Post LLM/Tool interception |
-
-**SPI Extension Points (4)** — 🔌 Planned, within the Engine layer:
-
-| Extension Point | Purpose |
-|-----|---------|
-| `Evaluator` | Evaluator interface; 40+ built-in evaluators |
-| `Channel` | Channel adapter; REST/WS/CLI built-in |
-| `AuthProvider` | Auth provider; JWT/APIKey built-in |
-| `Notifier` | Notifier; Email/Webhook built-in |
+---
 
 ## Documentation
 
-| Document | Location | Description |
-|----------|----------|-------------|
-| Architecture Design | `docs/design/architecture.md` | 5-layer architecture, 28 ADRs, engine design |
-| OpenSpec Specs | `openspec/specs/` | 86 feature specifications with requirements and scenarios |
-| OpenSpec Archive | `openspec/changes/archive/` | 62 completed change proposals with design docs |
-| Graph DSL Schema | `src/hecate/engine/graph-dsl.schema.json` | JSON Schema for graph definition |
+- [Getting Started](docs/getting-started/) — install and run Hecate
+- [Tutorials](docs/tutorials/) — end-to-end examples (first agent, knowledge base, MCP, multi-agent)
+- [How-to Guides](docs/how-to/) — task-oriented recipes (LLM providers, deployment, backup)
+- [API Reference](docs/reference/) — REST and CLI references
+- [Architecture](docs/design/) — engine design, concepts, ADRs
+
+---
+
+## Inspired by
+
+Hecate builds on the shoulders of giants: [LangGraph](https://github.com/langchain-ai/langgraph), [Model Context Protocol](https://modelcontextprotocol.io/), [A2A Protocol](https://a2a-protocol.org/), [FastAPI](https://fastapi.tiangolo.com/), [Pydantic](https://docs.pydantic.dev/), [SQLAlchemy](https://www.sqlalchemy.org/), [LiteLLM](https://github.com/BerriAI/litellm). Full credits and specific inspirations are in [docs/about/inspired-by.md](docs/about/inspired-by.md).
+
+---
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, coding conventions, and how to file issues. Every feature ships through the [OpenSpec](openspec/) workflow with requirements, scenarios, and design docs.
+
+---
 
 ## License
 
