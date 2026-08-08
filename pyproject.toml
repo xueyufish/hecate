@@ -53,6 +53,8 @@ Issues = "https://github.com/xueyufish/hecate/issues"
 
 [project.scripts]
 hecate = "hecate.cli.main:app"
+hecate-migrate = "hecate.cli.migrate:main"
+hecate-flag-audit = "hecate.cli.flag_audit:main"
 
 [project.optional-dependencies]
 llm = [
@@ -134,6 +136,10 @@ select = ["E", "F", "I", "N", "W", "UP", "B", "S", "SIM"]
 "tests/**" = ["S101", "S607", "S105"]
 "alembic/versions/**" = ["S608"]
 "src/hecate/models/alert.py" = ["S105"]
+"src/hecate/cli/migrate.py" = ["S603", "S607"]
+"src/hecate/main.py" = ["S110"]
+"src/hecate/services/preflight.py" = ["S603", "S607"]
+"src/hecate/cli/flag_audit.py" = ["SIM102"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
