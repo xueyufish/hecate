@@ -1,0 +1,55 @@
+name: Docs Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - ".github/workflows/docs-check.yml"
+      - ".opencode/skills/hecate-docs-sync/**"
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - ".github/workflows/docs-check.yml"
+      - ".opencode/skills/hecate-docs-sync/**"
+
+permissions:
+  contents: read
+
+jobs:
+  docs-check:
+    name: README audit + link check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Semantic README audit (offline)
+        run: |
+          python .opencode/skills/hecate-docs-sync/scripts/sync_specs.py \
+            --audit-readme --audit-offline
+
+      - name: Semantic README audit (online, with network)
+        continue-on-error: true
+        run: |
+          python .opencode/skills/hecate-docs-sync/scripts/sync_specs.py \
+            --audit-readme
+
+      - name: Markdown link check
+        uses: step-security/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          folder-path: "."
+          config-file: ".github/markdown-link-check.json"
+
+      - name: Summary on failure
+        if: failure()
+        run: |
+          echo "::warning::docs-check failed. Review the steps above for details."
+          echo "See docs/contributing.md (TODO) for the audit mode output format."
