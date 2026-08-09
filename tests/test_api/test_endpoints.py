@@ -34,9 +34,9 @@ def auth_headers(api_key: str) -> dict[str, str]:
 @pytest.mark.asyncio
 async def test_health_check(client: AsyncClient) -> None:
     """Test health check endpoint returns 200."""
-    response = await client.get("/health")
+    response = await client.get("/health/live")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "alive"}
 
 
 @pytest.mark.asyncio

@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     JWT_SECRET: str = ""
     LLM_GUARD_ENABLED: bool = True
     RATE_LIMIT_RPM: int = 60
+    SHUTDOWN_DRAIN_TIMEOUT: int = 30
 
     MCP_SERVER_ENABLED: bool = False
     MCP_SERVER_HOST: str = "0.0.0.0"  # noqa: S104
@@ -302,3 +303,14 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+class FeatureSettings(BaseSettings):
+    """Boot-time feature flags (Tier 1).
+
+    Flags declared here affect startup-time paths (e.g. backend selection).
+    Changes require a process restart. For runtime flags (can be toggled
+    without restart), use the FeatureFlagModel REST API instead.
+    """
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
