@@ -5,10 +5,11 @@
 # orchestrate worktrees so concurrent sessions don't pollute each other.
 #
 # Usage:
-#   ./scripts/dev-worktree.sh start <name>        # create worktree + start opencode
-#   ./scripts/dev-worktree.sh list               # list active worktrees
-#   ./scripts/dev-worktree.sh push <name>        # push worktree branch to origin
-#   ./scripts/dev-worktree.sh clean              # remove finished worktrees
+#   ./scripts/worktree-help.sh start <name>        # create worktree + start opencode
+#   ./scripts/worktree-help.sh list               # list active worktrees
+#   ./scripts/worktree-help.sh push <name>        # push worktree branch to origin
+#   ./scripts/worktree-help.sh delete <name>      # remove worktree(s) + branch(es), comma-separated
+#   ./scripts/worktree-help.sh remove <name>      # remove worktree(s) only, keep branches
 #
 # The worktree path is namespaced by OpenSpec change name so multiple
 # sessions (code vs docs) for the SAME change don't collide.
@@ -90,31 +91,70 @@ case "${cmd}" in
         fi
         ;;
 
-    clean)
-        name="${2:-}"
-        if [[ -n "${name}" ]]; then
-            git worktree remove --force "${WT_ROOT}/${name}" || true
-            git branch -d "feat/${name}" 2>/dev/null || true
-        else
-            for wt in $(git worktree list --porcelain | grep "worktree ${WT_ROOT}/" | awk '{print $2}'); do
-                git worktree remove --force "${wt}" || true
-            done
+    delete|remove)
+        names="${2:-}"
+        if [[ -z "${names}" ]]; then
+            echo "Error: missing worktree name" >&2
+            echo "Usage: $0 ${cmd} <name>[,<name>...]" >&2
+            echo "Example: $0 ${cmd} change-a,change-b" >&2
+            exit 1
         fi
+
+        IFS=',' read -ra name_list <<< "${names}"
+        for name in "${name_list[@]}"; do
+            name="${name#"${name%%[![:space:]]*}"}"
+            name="${name%"${name##*[![:space:]]}"}"
+            [[ -z "${name}" ]] && continue
+
+            wt_path="${WT_ROOT}/${name}"
+            branch="feat/${name}"
+
+            if [[ ! -d "${wt_path}" ]]; then
+                echo "Warning: worktree not found: ${wt_path} (skipped)" >&2
+            else
+                if git worktree remove --force "${wt_path}" 2>/dev/null; then
+                    echo "Removed worktree: ${wt_path}"
+                else
+                    echo "Warning: failed to remove worktree: ${wt_path}" >&2
+                fi
+            fi
+
+            if [[ "${cmd}" == "delete" ]]; then
+                if git rev-parse --verify "${branch}" >/dev/null 2>&1; then
+                    if git branch -D "${branch}" >/dev/null 2>&1; then
+                        echo "Deleted branch: ${branch}"
+                    else
+                        echo "Warning: failed to delete branch: ${branch}" >&2
+                    fi
+                else
+                    echo "Warning: branch not found: ${branch} (skipped)" >&2
+                fi
+            fi
+        done
+        ;;
+
+    clean)
+        echo "Error: 'clean' is not a valid command" >&2
+        echo "Use '$0 delete <name>' to remove worktree + branch" >&2
+        echo "Use '$0 remove <name>' to remove worktree only" >&2
+        exit 1
         ;;
 
     help|*)
         cat <<EOF
 Usage:
   $0 start <name> [--background]  # create worktree + start opencode
-  $0 list                        # list active worktrees
-  $0 push <name>                 # push worktree branch to origin
-  $0 clean [<name>]              # remove worktree(s)
+  $0 list                         # list active worktrees
+  $0 push <name>                  # push worktree branch to origin
+  $0 delete <name>[,<name>...]    # remove worktree(s) + branch(es)
+  $0 remove <name>[,<name>...]    # remove worktree(s), keep branches
 
 Workflow:
-  $0 start feat-my-change        # creates worktree + branch feat/feat-my-change
+  $0 start feat-my-change         # creates worktree + branch feat/feat-my-change
   # ... do work in worktree ...
-  $0 push feat-my-change         # pushes feat/feat-my-change to origin
-  $0 clean feat-my-change        # removes worktree + branch after merge
+  $0 push feat-my-change          # pushes feat/feat-my-change to origin
+  $0 delete feat-my-change        # removes worktree + branch after merge
+  $0 remove feat-my-change        # removes worktree, keeps branch
 EOF
         ;;
 esac

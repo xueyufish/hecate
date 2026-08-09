@@ -2,7 +2,7 @@
 # OpenSpec + worktree unified flow.
 #
 # This is the ONLY entry point for all OpenSpec-related work on the main repo.
-# It wraps dev-worktree.sh with OpenSpec-specific subcommands so the agent
+# It wraps worktree-help.sh with OpenSpec-specific subcommands so the agent
 # (and you) never need to run plain `git checkout -b` from the main checkout.
 #
 # Usage:
@@ -12,8 +12,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-WT_SCRIPT="${REPO_ROOT}/scripts/dev-worktree.sh"
-[[ -f "${WT_SCRIPT}" ]] || { echo "dev-worktree.sh not found"; exit 1; }
+WT_SCRIPT="${REPO_ROOT}/scripts/worktree-help.sh"
+[[ -f "${WT_SCRIPT}" ]] || { echo "worktree-help.sh not found"; exit 1; }
 
 HECATE_WORKTREE_ROOT="${HECATE_WORKTREE_ROOT:-${REPO_ROOT}/../.worktrees}"
 
