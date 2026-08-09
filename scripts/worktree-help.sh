@@ -71,6 +71,19 @@ case "${cmd}" in
         else
             echo "  (none)"
         fi
+
+        stale=""
+        while IFS= read -r dir; do
+            [[ -z "${dir}" ]] && continue
+            if ! git worktree list --porcelain | awk -v d="${dir}" '$1=="worktree" && $2==d {found=1} END{exit !found}'; then
+                stale="${stale}${dir}\n"
+            fi
+        done < <(find "${WT_ROOT}" -maxdepth 1 -mindepth 1 -type d 2>/dev/null)
+        if [[ -n "${stale}" ]]; then
+            echo ""
+            echo "Stale directories (not registered as git worktrees):"
+            printf "${stale}" | sed 's/^/  /'
+        fi
         ;;
 
     push)
