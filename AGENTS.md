@@ -92,6 +92,7 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 
 - **Python env**: uv + Python 3.12, venv at `.venv/`. Use `uv pip install`, not bare `pip install`.
 - **Git**: GitHub Flow — all changes via PR to `main`. **NEVER commit directly to `main`** — always create a feature branch first (`feat/xxx`, `fix/xxx`, `docs/xxx`, `chore/xxx`). CI runs on push and PR to `main`. Tag releases from `main` commits.
+- **Pre-push hook** (`scripts/pre-push.sh`, installed to `.git/hooks/pre-push`): every `git push` automatically fetches `origin` and rebases against `origin/main` if the branch has fallen behind. If the rebase hits conflicts, the push is aborted and the hook prints resolution steps (`add → rebase --continue → re-push`). Install once per clone: `cp scripts/pre-push.sh .git/hooks/pre-push && chmod +x .git/hooks/pre-push`. Worktrees share hooks with the main repo, so installing in the main `.git/hooks/` covers all worktrees.
 - **CheckpointModel** inherits `Base` (not `BaseModel`) — intentionally immutable, no `updated_at`/`deleted_at`.
 - **AgentModel.model_config_db** — ORM column named `model_config` via `mapped_column("model_config", JSON)` to avoid Pydantic's `model_config` collision. CreateSchema uses `alias="model_config"`, ReadSchema uses `serialization_alias="model_config"`.
 - **metadata_ alias** — 5 models use `metadata_` (Python) → `metadata` (SQL) to avoid SQLAlchemy's reserved `metadata` attribute. ReadSchema uses `Field(validation_alias="metadata_")`.
@@ -170,5 +171,6 @@ We may converse in Chinese. Code artifacts are always English; OpenSpec change d
 - **Don't** use `as any`, `@ts-ignore` or equivalent type suppression.
 - **Don't** import from `engine/` in `api/` — route through `services/` + `EnginePort`.
 - **Don't** use `git commit --no-verify` to skip pre-commit hooks.
+- **Don't** push directly without letting the pre-push hook rebase against `origin/main`. If you need to skip the hook for a force-push or special case, use `git push --no-verify` and explain why.
 - **Don't** assume test failures are "pre-existing" without investigating.
 - **Don't** delegate OpenSpec implementation tasks (`/opsx-apply`) to background agents. Implementation requires full design/specs/tasks context which causes background agent timeouts. Always implement directly as the main agent.

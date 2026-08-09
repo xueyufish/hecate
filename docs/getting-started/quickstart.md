@@ -283,6 +283,7 @@ Activate the virtual environment first: `source .venv/bin/activate`. The console
 
 ## Next steps
 
+- **[Build your first agent](../tutorials/01-first-agent.md)** — go deeper: tool binding, sessions, CLI workflows, and agent management.
 - **[Create a knowledge base](../tutorials/02-knowledge-base.md)** — upload documents and let your agent answer from them via RAG.
 - **[Connect MCP tools](../tutorials/03-mcp-integration.md)** — wire up external tool servers (or expose Hecate itself as an MCP server).
 - **[Build a multi-agent workflow](../tutorials/04-multi-agent.md)** — orchestrate several agents with handoff, pipeline, or broadcast patterns.
