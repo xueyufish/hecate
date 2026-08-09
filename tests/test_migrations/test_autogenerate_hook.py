@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
 from alembic.operations import ops as alembic_ops
+
 from hecate.db.migrations.expand_contract import build_split_directives, split_expand_contract
 
 
