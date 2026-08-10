@@ -498,9 +498,10 @@ For patterns the generators don't cover, write the DSL directly. The schema is `
     }
   },
   "edges": [
-    {"source": "writer", "target": "critic"},
-    {"source": "critic", "target": "exit_check"},
-    {"source": "exit_check", "target": {"true": "__end__", "false": "writer"}}
+    { "source": "__start__", "target": "writer" },
+    { "source": "writer", "target": "critic" },
+    { "source": "critic", "target": "exit_check" },
+    { "source": "exit_check", "target": {"true": "__end__", "false": "writer"} }
   ]
 }
 ```

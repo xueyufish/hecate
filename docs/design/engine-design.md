@@ -64,14 +64,9 @@ Graphs are defined as JSON documents conforming to a JSON Schema (bundled in the
         { "source": "__start__", "target": "guard" },
         { "source": "guard", "target": "plan" },
         { "source": "plan", "target": "execute" },
-        { "source": "execute", "target": "should_continue" },
-        {
-            "source": "should_continue",
-            "targets": {
-                "true": "plan",
-                "false": "__end__"
-            }
-        }
+        { "source": "execute", "target": "increment" },
+        { "source": "increment", "target": "should_continue" },
+        { "source": "should_continue", "target": {"true": "plan", "false": "__end__"} }
     ]
 }
 ```

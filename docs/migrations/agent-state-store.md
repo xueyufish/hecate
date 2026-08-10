@@ -160,6 +160,6 @@ python -m pytest -W always::DeprecationWarning
 
 - [distributed-session-state-store spec](../../openspec/specs/distributed-session-state-store/spec.md)
 - [ADR-020: Async Execution & Distributed State](../design/adr/020-async-execution-distributed-state.md)
-- [OpenSpec change: deprecate-agent-state-store](../../openspec/changes/deprecate-agent-state-store/)
+- [OpenSpec change: deprecate-agent-state-store](../../openspec/changes/archive/2026-08-07-deprecate-agent-state-store/)
 
 > **Hard removal scheduled for ≥ next minor version** (13.4a-7).
