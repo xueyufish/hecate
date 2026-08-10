@@ -16,7 +16,7 @@ The engine defines eleven extension points that provide pluggable behavior for e
 
 ## Graph DSL
 
-Graphs are defined as JSON documents conforming to a JSON Schema (bundled in the engine package via `importlib.resources`). The DSL supports four node types (`llm`, `code`, `condition`, `tool`, `agent`, `subgraph`, `input`, `output`) and four channel types.
+Graphs are defined as JSON documents conforming to a JSON Schema (bundled in the engine package via `importlib.resources`). The DSL supports nine node types (`conversation`, `tool-call`, `condition`, `agent`, `knowledge-retrieval`, `variable-set`, `suggestion`, `fan-out`, `merge`) and four channel types. See the [Graph DSL Reference](../reference/graph-dsl.md) for the complete schema.
 
 ### Example: Three-Layer Agent Template
 
@@ -31,7 +31,7 @@ Graphs are defined as JSON documents conforming to a JSON Schema (bundled in the
     },
     "nodes": {
         "guard": {
-            "type": "llm",
+            "type": "conversation",
             "config": {
                 "model": "auto",
                 "system_prompt": "You are a security guard...",
@@ -39,7 +39,7 @@ Graphs are defined as JSON documents conforming to a JSON Schema (bundled in the
             }
         },
         "plan": {
-            "type": "llm",
+            "type": "conversation",
             "config": {
                 "model": "auto",
                 "system_prompt": "You are a task planner...",
@@ -51,6 +51,13 @@ Graphs are defined as JSON documents conforming to a JSON Schema (bundled in the
             "config": {
                 "skill_ref": "{{ current_plan.selected_skill }}",
                 "allowed_tools": "{{ current_plan.allowed_tools }}"
+            }
+        },
+        "increment": {
+            "type": "variable-set",
+            "config": {
+                "variable_name": "iterations",
+                "value": "{{ iterations + 1 }}"
             }
         },
         "should_continue": {
@@ -79,7 +86,6 @@ Channels are the state management primitive. Each channel type defines write sem
 |------|-----------|---------------|-------------|
 | `last_value` | Keeps the last value | New value overwrites old value | Current plan, current state |
 | `topic` | Message stream | Append (supports reducer) | Conversation messages, tool call records, audit logs |
-| `accumulator` | Accumulator | Aggregate via specified function | Iteration counter, token usage statistics |
 | `accumulator` | Accumulator | Aggregate via specified function | Iteration counter, token usage statistics |
 
 The channel system is managed by a `ChannelManager` with a pluggable `ChannelTypeRegistry`. Writes to unregistered channels are silently skipped; reads from unregistered channels raise `KeyError`. State restoration (from Checkpoint) bypasses write semantics and directly sets the underlying value.
@@ -246,7 +252,7 @@ Command(resume=value, update={"user_decision": "approved"})
 
 ## Subgraph Composition
 
-Subgraphs allow nesting one Workflow inside another. The outer graph contains a `subgraph` node that references an inner graph. State is mapped between the two scopes:
+Subgraphs allow nesting one Workflow inside another. The outer graph contains an `agent` node that references an inner graph (via `agent_id` or `invocation_mode`). State is mapped between the two scopes:
 
 ```
 Outer Graph:
@@ -617,4 +623,6 @@ The per-target description priority is: `handoff.description` (node-level overri
 | [Access Channel Design](access-channel-design.md) | API surfaces, authentication, gateway control plane |
 | [Core Concepts](concepts.md) | Entity definitions, relationships, data model |
 | [ADR Directory](adr/) | Architecture Decision Records |
+| [Graph DSL Reference](../reference/graph-dsl.md) | Node types, channel types, edge forms, validation rules |
+| [Extension Points](../reference/extension-points.md) | 11 core ABCs for customizing execution |
 | [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition |

@@ -166,6 +166,7 @@ You do not configure the pipeline per agent — it runs automatically. But knowi
 
 ## Further reading
 
+- [Extension Points](../reference/extension-points.md) — the `ContextEngine` ABC and its `select_messages`, `compress`, `estimate_tokens` methods
 - [Engine Design](../design/engine-design.md) — where the context pipeline plugs into the Pregel runtime
 - [Memory System](memory.md) — the four-level memory architecture and how L2 compression relates
 - [Agents and Execution Modes](agents.md) — how the pipeline applies in `chat`, `three_layer`, and `workflow` modes

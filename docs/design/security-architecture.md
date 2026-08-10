@@ -664,6 +664,7 @@ SecurityFinding ──┘    (normalize + filter)    ├── Webhook (Splunk H
 | [Architecture](architecture.md) | System overview, module architecture |
 | [RAG Pipeline Design](rag-pipeline-design.md) | Document ingestion and retrieval pipeline |
 | [Engine Design](engine-design.md) | Guardrail hooks, Pregel runtime, worker pool |
+| [Extension Points](../reference/extension-points.md) | The four guardrail hook ABCs and their method signatures |
 | [ADR-008: Security via Hooks](adr/008-security-via-hooks.md) | Decision record for hook-based security architecture |
 | [ADR-018: Zero Trust Identity Architecture](adr/018-zero-trust-identity-architecture.md) | Zero Trust principles and agent identity |
 | [ADR-014: Ontology Action System](adr/014-ontology-action-system.md) | Decision record for action system with security controls |
