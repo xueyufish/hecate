@@ -1,27 +1,47 @@
-# Concepts
+# Architecture Overview
 
-Hecate is an enterprise-grade, multi-tenant, model-agnostic Agent platform built around a self-developed Pregel execution engine. This section explains the core ideas you need to understand before building agents, configuring workflows, or operating a deployment.
+Hecate is organized in five code layers and ten product modules, with Security and Ecosystem as cross-cutting concerns.
 
-If you prefer a hands-on introduction, start with the [Quickstart](../getting-started/quickstart.md) and the [tutorials](../tutorials/). For deep technical detail, see the [design documents](../design/).
+## Code layers
 
----
+| Layer | Path | May import | Key rule |
+|-------|------|-----------|----------|
+| `engine/` | `src/hecate/engine/` | `jsonschema` only | Zero deps on services, api, models. Sole external exception: `jsonschema` for DSL validation. |
+| `services/` | `src/hecate/services/` | `models/`, `engine/ports` | Depends on engine abstract interfaces only, never on engine implementations. |
+| `api/` | `src/hecate/api/` | `services/`, `models/` | Never imports `engine/` directly — routes through services + `EnginePort`. |
+| `models/` | `src/hecate/models/` | SQLAlchemy, Pydantic | Pure data definitions. No business logic. |
+| `core/` | `src/hecate/core/` | config, database, DI, rate limiting | Infrastructure shared across all layers. |
 
-## Topic articles
+The engine layer defines 11 core + 4 SPI extension points. Services provide concrete implementations. The API layer orchestrates services. This separation keeps the engine testable with lightweight stubs.
 
-| Article | What it explains |
-|---------|------------------|
-| [Agents and Execution Modes](agents.md) | The Agent abstraction — persona, model, tools, knowledge, memory — and the three execution modes: `chat`, `three_layer`, and `workflow`. |
-| [The Execution Engine](engine.md) | How the Pregel runtime turns a graph definition into executed supersteps using channels, workers, and checkpoints. |
-| [Guardrails and Hooks](guardrails.md) | The four engine-level hook types that intercept every LLM and tool boundary, and how they power PII masking, audit logging, and human-in-the-loop. |
-| [Context Engineering](context-engineering.md) | The pipeline that keeps long-running agents on-budget and on-task: assembly, evidence tracking, phase detection, token budgets, and prioritization. |
-| [Multi-Tenancy](multi-tenancy.md) | The Organization → Workspace → User hierarchy and how `workspace_id` enforces data-level isolation across the platform. |
-| [Memory System](memory.md) | The four-level memory architecture — working, conversation, user, and knowledge memory — and how each level persists agent state differently. |
+## Product modules
 
----
+Hecate comprises ten modules organized in a layered dependency hierarchy:
 
-## From here
+1. **Access Channel** — entry point for all external requests (OpenAI-compatible API, Management API, MCP Server, A2A endpoint)
+2. **Agent Studio** — visual canvas (React Flow), agent configurator, prompt management, workflow builder
+3. **Agent Engine** — self-built Pregel runtime with channel system, checkpoint persistence, and worker pool
+4. **Ops Center** — observability, alerting, evaluation, cost governance, compliance
+5. **Model Hub** — LiteLLM-powered LLM integration with routing, circuit breaker, A/B testing
+6. **Tool Platform** — MCP-first tool ecosystem with Docker sandbox execution
+7. **Knowledge & Memory** — RAG pipeline (Docling, BGE-M3, Qdrant) and four-level memory system
+8. **Enterprise Foundation** — multi-tenancy (Org → Workspace → RBAC), async database, Alembic migrations
+9. **Security** — cross-cutting: guardrail hooks, PII masking, LLM Guard, audit trail, RBAC
+10. **Ecosystem** — cross-cutting: MCP, A2A, webhooks, OpenAI-compatible API
 
-- **Building an agent?** Read [Agents and Execution Modes](agents.md), then follow the [first agent tutorial](../tutorials/01-first-agent.md).
-- **Designing a workflow?** Read [The Execution Engine](engine.md), then follow the [multi-agent tutorial](../tutorials/04-multi-agent.md).
-- **Securing a deployment?** Read [Guardrails and Hooks](guardrails.md), then the [security architecture](../design/security-architecture.md).
-- **Onboarding an organization?** Read [Multi-Tenancy](multi-tenancy.md), then the [SSO and SCIM guide](../how-to/configure-sso-scim.md).
+## Request lifecycle
+
+```
+Client → Access Channel (auth, rate limit)
+    → Agent Engine (load agent, compile graph, Pregel superstep loop)
+        → EnginePort (LLM invoke / tool execute / knowledge query / checkpoint)
+    → Response (streamed or complete)
+```
+
+At any point during execution, a node may call `interrupt()` to pause for human-in-the-loop approval. The Checkpoint system enables resuming from exactly that point.
+
+## Further reading
+
+- [Engine Design](../design/engine-design.md) — Pregel runtime, compiler pipeline, channel system, checkpoints
+- [Core Concepts](../design/concepts.md) — entity definitions, relationships, data model
+- [Architecture Decision Records](../design/adr/) — 28 decisions with context and rationale

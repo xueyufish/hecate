@@ -31,6 +31,30 @@ copy_worktreeinclude_files() {
     done < .worktreeinclude
 }
 
+sync_openspec_change() {
+    local name="$1"
+    local wt_path="$2"
+    local src="${REPO_ROOT}/openspec/changes/${name}"
+    local dst="${wt_path}/openspec/changes/${name}"
+
+    [[ -d "${src}" ]] || return 0
+
+    if [[ -d "${dst}" ]]; then
+        echo "openspec/changes/${name} already present in worktree — skipping sync"
+        return 0
+    fi
+
+    local porcelain
+    porcelain="$(cd "${REPO_ROOT}" && git status --porcelain -- "openspec/changes/${name}" 2>/dev/null || true)"
+    [[ -n "${porcelain}" ]] || return 0
+
+    echo "Detected uncommitted OpenSpec change '${name}' in main repo."
+    echo "  Syncing to worktree (clean up main with: rm -rf openspec/changes/${name})..."
+    mkdir -p "$(dirname "${dst}")"
+    cp -R "${src}" "${dst}"
+    echo "  Synced: ${src} → ${dst}"
+}
+
 case "${cmd}" in
     start)
         name="${2:?Usage: $0 start <change-name>}"
@@ -49,6 +73,7 @@ case "${cmd}" in
             fi
             cd "${wt_path}"
             copy_worktreeinclude_files "${wt_path}"
+            sync_openspec_change "${name}" "${wt_path}"
             echo "Created worktree: ${wt_path} (branch: ${branch})"
         fi
 

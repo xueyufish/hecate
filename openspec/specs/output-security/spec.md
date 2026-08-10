@@ -1,7 +1,11 @@
-## ADDED Requirements
+# output-security Specification
 
+## Purpose
+
+Define the OutputSecurityHook PostLLMHook providing output toxicity detection and PII deanonymization for LLM responses.
+## Requirements
 ### Requirement: OutputSecurityHook implements PostLLMHook
-The `OutputSecurityHook` SHALL implement the `PostLLMHook` ABC, providing output toxicity detection and PII deanonymization for LLM responses.
+The `OutputSecurityHook` SHALL implement the `PostLLMHook` ABC, providing output toxicity detection, PII deanonymization, and post-deanonymization DLP egress scanning for LLM responses.
 
 #### Scenario: Clean response passes through
 - **WHEN** `on_post_llm_call(response, messages)` is called with a response containing no toxicity and no PII placeholders
@@ -52,3 +56,35 @@ The `StreamDeanonymizer` SHALL flush any buffered content when the stream termin
 #### Scenario: Error during streaming
 - **WHEN** an exception occurs during streaming with buffered content
 - **THEN** the buffer SHALL be flushed as-is, and the error SHALL propagate
+
+### Requirement: OutputSecurityHook applies DLP after deanonymization
+The `OutputSecurityHook` SHALL call `DLPScanner.scan(direction="llm_output")` on the deanonymized response text, after the deanonymization step but before returning to the user.
+
+#### Scenario: DLP enabled and deanonymized text clean
+- **WHEN** `DLP_ENABLED=True` and DLPScanner is injected, and the deanonymized response contains no sensitive entities
+- **THEN** the hook SHALL return `GuardrailResult(action=ALLOW, modified_data={"response": <deanonymized_response>})`
+
+#### Scenario: DLP BLOCK on deanonymized response
+- **WHEN** the deanonymized response contains secrets (e.g., AWS_ACCESS_KEY) and policy says BLOCK
+- **THEN** the hook SHALL return `GuardrailResult(action=BLOCK, reason="DLP blocked sensitive entity in llm_output: AWS_ACCESS_KEY")` — not returning the deanonymized response
+
+#### Scenario: DLP MASK on deanonymized response
+- **WHEN** the deanonymized response contains EMAIL and policy says MASK
+- **THEN** the hook SHALL return `GuardrailResult(action=SANITIZE, modified_data={"response": <text with EMAIL masked to [EMAIL]>})`
+
+#### Scenario: DLP AUDIT on deanonymized response
+- **WHEN** the deanonymized response contains EMAIL and policy says AUDIT
+- **THEN** the hook SHALL return the deanonymized response unchanged but record a SecurityFinding with `rule_name="dlp:email_audit"`
+
+#### Scenario: DLP disabled
+- **WHEN** `DLP_ENABLED=False` or DLPScanner is None
+- **THEN** the hook SHALL skip DLP scanning (backward compatibility)
+
+### Requirement: Deanonymization is trust boundary 1, DLP is trust boundary 2
+The `OutputSecurityHook` SHALL preserve deanonymization (trust boundary 1, reversibly restoring PII for the user) as a separate concern from DLP scanning (trust boundary 2, enforcing egress policy on real values). Deanonymization runs first, then DLP scans the restored values.
+
+#### Scenario: Two-stage processing
+- **WHEN** the LLM output contains `[EMAIL_1]` and the original was `john@example.com`
+- **THEN** Stage 1 (deanonymize) replaces `[EMAIL_1]` → `john@example.com`
+- **AND** Stage 2 (DLP scan) scans the text with `john@example.com` (real value) and applies policy
+

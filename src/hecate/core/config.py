@@ -158,6 +158,25 @@ class Settings(BaseSettings):
 
     FERNET_KEY: str = ""
 
+    # Outbound DLP Engine (4.x) — gate egress content for PII / secrets.
+    DLP_ENABLED: bool = True
+    DLP_STREAM_ENABLED: bool = True
+    DLP_STREAM_BUFFER_SIZE: int = 300
+    DLP_STREAM_OVERLAP: int = 10
+    DLP_STREAM_FINAL_SCAN: bool = True
+    DLP_STREAM_MASK_CORRECTION: bool = False
+    # Entity suppressions: comma-separated entity_type names skipped by
+    # the DLP scanner (e.g. "EMAIL,PHONE" for orgs that intentionally
+    # allow outbound PII).
+    DLP_DISABLED_ENTITIES: str = ""
+    # When true, the input security hook delegates secrets detection to
+    # the DLP scanner (boundary 1). Falls back to llm_guard_scanner
+    # when the DLP scanner is not configured.
+    DLP_INPUT_HOOK_ENABLED: bool = True
+    DLP_OUTPUT_HOOK_ENABLED: bool = True
+    DLP_TOOL_RESULT_HOOK_ENABLED: bool = True
+    DLP_MCP_RESPONSE_FILTER_ENABLED: bool = True
+
     PLUGINS_DIR: str = "./plugins"
     HOT_RELOAD: bool = False
 

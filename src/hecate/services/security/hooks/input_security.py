@@ -17,7 +17,14 @@ _DEFAULT_PII_ENTITIES = frozenset({"email", "phone", "credit_card", "ssn", "ip_a
 
 
 class InputSecurityHook(PreLLMHook):
-    """Pre-LLM hook that scans input for injection, PII, and secrets."""
+    """Pre-LLM hook that scans input for injection, PII, and secrets.
+
+    Secrets detection prefers a configured :class:`DLPScanner` (boundary
+    1 inherits the org's policy DB) and falls back to
+    :data:`llm_guard_scanner` when no DLP scanner is wired in. PII
+    anonymization stays in this hook — that is a boundary-1 mechanism
+    (the data is still in-flight) and not a DLP policy concern.
+    """
 
     def __init__(
         self,
@@ -30,6 +37,7 @@ class InputSecurityHook(PreLLMHook):
         event_store: Any = None,
         session_id: uuid.UUID | None = None,
         superstep: int = 0,
+        dlp_scanner: Any = None,
     ) -> None:
         self._enabled = enabled
         self._injection_threshold = prompt_injection_threshold
@@ -39,6 +47,7 @@ class InputSecurityHook(PreLLMHook):
         self._event_store = event_store
         self._session_id = session_id
         self._superstep = superstep
+        self._dlp_scanner = dlp_scanner
 
     async def on_pre_llm_call(
         self,
@@ -74,6 +83,21 @@ class InputSecurityHook(PreLLMHook):
         return None
 
     async def _check_secrets(self, text: str) -> GuardrailResult | None:
+        if self._dlp_scanner is not None:
+            return await self._check_secrets_via_dlp(text)
+        return await self._check_secrets_via_llm_guard(text)
+
+    async def _check_secrets_via_dlp(self, text: str) -> GuardrailResult | None:
+        result = self._dlp_scanner.scan(text, direction="llm_input")
+        if result.action.value == "block":
+            entity_types = ", ".join({finding.entity_type for finding in result.findings}) or "secrets"
+            return GuardrailResult(
+                action=GuardrailAction.BLOCK,
+                reason=f"DLP blocked input ({entity_types} detected)",
+            )
+        return None
+
+    async def _check_secrets_via_llm_guard(self, text: str) -> GuardrailResult | None:
         scan = await llm_guard_scanner.scan_prompt(text)
         for issue in scan.issues:
             if "Secrets" in issue:

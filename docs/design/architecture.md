@@ -269,8 +269,6 @@ For production deployments, each infrastructure component can be replaced with m
 | [Ecosystem Design](ecosystem-design.md) | ARD discovery, partner monetization, semantic marketplace, community gallery, cross-surface experience, governed catalog |
 | [Core Concepts](concepts.md) | Entity definitions, relationships, data model, storage design |
 | [ADR Directory](adr/) | Architecture Decision Records (28 decisions with context and rationale) |
-| [Graph DSL Reference](../reference/graph-dsl.md) | Node types, channel types, edge forms, validation rules (9 node types, 4 channel types) |
-| [Extension Points](../reference/extension-points.md) | 11 core + 4 SPI engine extension points with method signatures |
-| [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition (9 node types, 4 channel types) |
+| [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition (4 node types, 4 channel types) |
 | [OpenSpec Specs](../../openspec/specs/) | Feature-level specifications with requirements and scenarios |
 | [OpenSpec Archive](../../openspec/changes/archive/) | Completed change proposals with design docs and task tracking |

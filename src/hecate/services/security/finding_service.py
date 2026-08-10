@@ -6,6 +6,7 @@ Provides query methods for the REST API and retention cleanup.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, func, select
@@ -105,3 +106,34 @@ class SecurityFindingService:
             if deleted:
                 logger.info("Cleaned up %d expired security findings", deleted)
             return deleted
+
+    async def set_feedback(
+        self,
+        finding_id: uuid.UUID,
+        feedback: str,
+        feedback_user: str,
+        feedback_comment: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> SecurityFindingReadSchema | None:
+        """Record user feedback (true_positive / false_positive) on a finding.
+
+        Returns ``None`` if no finding with that ID exists.
+        """
+
+        async def _do(session: AsyncSession) -> SecurityFindingReadSchema | None:
+            finding = await session.get(SecurityFindingModel, finding_id)
+            if finding is None or finding.deleted:
+                return None
+            updated_metadata = dict(finding.metadata_)
+            updated_metadata["feedback"] = feedback
+            updated_metadata["feedback_user"] = feedback_user
+            updated_metadata["feedback_comment"] = feedback_comment
+            updated_metadata["feedback_at"] = datetime.now(UTC).isoformat()
+            finding.metadata_ = updated_metadata
+            await session.flush()
+            return SecurityFindingReadSchema.model_validate(finding)
+
+        if session is not None:
+            return await _do(session)
+        async with async_session_factory() as sess:
+            return await _do(sess)

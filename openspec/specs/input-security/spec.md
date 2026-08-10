@@ -1,5 +1,9 @@
-## ADDED Requirements
+# input-security Specification
 
+## Purpose
+
+Define the InputSecurityHook PreLLMHook providing prompt injection detection, PII anonymization, and harmful content filtering for user messages before they reach the LLM.
+## Requirements
 ### Requirement: InputSecurityHook implements PreLLMHook
 The `InputSecurityHook` SHALL implement the `PreLLMHook` ABC, providing prompt injection detection, PII anonymization, and harmful content filtering for user messages before they reach the LLM.
 
@@ -16,9 +20,9 @@ The `InputSecurityHook` SHALL implement the `PreLLMHook` ABC, providing prompt i
 - **THEN** it SHALL return `GuardrailResult(action=GuardrailAction.BLOCK, reason="Prompt injection detected: ...")` when `input_security.block_on_injection` is True
 - **THEN** it SHALL return `GuardrailResult(action=GuardrailAction.SANITIZE, reason="Prompt injection warning", modified_data={"messages": <messages_with_warning>})` when `input_security.block_on_injection` is False
 
-#### Scenario: Secrets detected in messages
-- **WHEN** the LLMGuardScanner Secrets scanner detects API keys, tokens, or credentials
-- **THEN** it SHALL return `GuardrailResult(action=GuardrailAction.BLOCK, reason="Secrets detected in input")`
+#### Scenario: Secrets detected via DLPScanner
+- **WHEN** messages contain secrets (AWS keys, JWT tokens, private keys) detected by DLPScanner.scan()
+- **THEN** the hook SHALL return `GuardrailResult(action=GuardrailAction.BLOCK, reason="DLPScanner detected secret in input: <entity_type>")`
 
 #### Scenario: Security disabled for agent
 - **WHEN** `input_security.enabled` is False or guardrail_config is None
@@ -45,3 +49,15 @@ The `InputSecurityHook` SHALL accept a configurable list of PII entity types to 
 #### Scenario: Default entity list
 - **WHEN** `pii_entities` is not specified
 - **THEN** all supported entity types (email, phone, credit_card, ssn, ip_address) SHALL be detected
+
+### Requirement: InputSecurityHook delegates secrets detection to DLPScanner
+The `InputSecurityHook` SHALL delegate secrets detection to `DLPScanner.scan(direction="llm_input")` instead of the previous LLMGuardScanner Secrets scanner, when DLPScanner is enabled.
+
+#### Scenario: DLPScanner enabled
+- **WHEN** `DLP_ENABLED=True` and a DLPScanner instance is injected
+- **THEN** secrets detection SHALL use DLPScanner.scan() with direction="llm_input"
+
+#### Scenario: DLPScanner disabled
+- **WHEN** `DLP_ENABLED=False` or DLPScanner is None
+- **THEN** secrets detection SHALL fall back to LLMGuardScanner (backward compatibility)
+
