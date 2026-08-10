@@ -16,4 +16,10 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 - **[Monitor with OpenTelemetry and Prometheus](monitor-opentelemetry.md)** — distributed tracing, Prometheus metrics, structured logging, Kubernetes-style health probes, and trace inspection.
 - **[Scale horizontally](deploy-production.md#horizontal-scaling)** — Redis session state store, multi-replica deployment.
 
-More guides are in progress.
+## Versioning and lifecycle
+
+- **[Version and roll back an agent or workflow](version-and-rollback-agent.md)** — save immutable versions, publish to production, roll back to any prior version, and audit every change.
+
+## Security
+
+- **[Configure tool permissions](configure-tool-permissions.md)** — workspace baselines, per-agent rules, and allow/deny lists for fine-grained tool access control.
