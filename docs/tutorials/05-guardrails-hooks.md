@@ -345,7 +345,7 @@ Key points:
 
 ### Wiring a custom hook into a Worker
 
-How custom hooks reach a running Worker depends on your integration layer. The built-in security hooks are wired by `create_security_hooks()` based on the agent's `guardrail_config`. For your own hooks, the standard pattern is to construct a `SecurityHookSet` (or a similar tuple) at Worker build time and pass it into the Worker constructor. See the [Engine Design doc](../design/engine-design.md) for the Worker lifecycle, and the [Engine Extension Points table in AGENTS.md](../../AGENTS.md) for the full interface inventory.
+How custom hooks reach a running Worker depends on your integration layer. The built-in security hooks are wired by `create_security_hooks()` based on the agent's `guardrail_config`. For your own hooks, the standard pattern is to construct a `SecurityHookSet` (or a similar tuple) at Worker build time and pass it into the Worker constructor. See the [Engine Design doc](../design/engine-design.md) for the Worker lifecycle, and the [Extension Points reference](../reference/extension-points.md) for the full interface inventory.
 
 > **The four hook ABCs are stable contract.** Subclasses are how Hecate itself implements PII masking, injection detection, toxicity scoring, and tool-result scanning. The same mechanism is available to you with no special registration — just construct and pass.
 
@@ -467,6 +467,7 @@ You now know how to:
 
 - **[Multi-Agent Orchestration](04-multi-agent.md)** — Use guardrails inside graph-based multi-agent workflows.
 - **[Security Architecture](../design/security-architecture.md)** — The 670-line design doc covering PII pipeline internals, streaming placeholder restoration, and audit trail design.
+- **[Extension Points](../reference/extension-points.md)** — The four guardrail hook ABCs and their method signatures.
 - **[ADR 008: Security via Hooks](../design/adr/008-security-via-hooks.md)** — The original rationale for choosing hooks over middleware.
 - **[Monitor with OpenTelemetry](../how-to/monitor-opentelemetry.md)** — Ship `PII_DETECTED` and other hook-emitted events to your observability stack.
 - **[CLI Reference](../reference/cli.md)** — The `hecate` command and all subcommand groups.

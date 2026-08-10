@@ -241,6 +241,7 @@ The same configuration applies across all three execution modes (`chat`, `three_
 ## Further reading
 
 - [Context Engineering](../concepts/context-engineering.md) — conceptual overview of the pipeline
+- [Extension Points](../reference/extension-points.md) — the `ContextEngine` ABC and its method signatures
 - [Memory System](../concepts/memory.md) — the four-level memory architecture and how L2 compression relates
 - [LLM Worker source](../../src/hecate/engine/workers/llm_worker.py) — the 5-step pipeline implementation
 - [Context Offloader source](../../src/hecate/services/context/offloader.py) — the offload mechanism

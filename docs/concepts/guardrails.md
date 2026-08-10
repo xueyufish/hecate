@@ -123,6 +123,7 @@ The same hook interface powers both built-in features and custom extensions. You
 
 ## Further reading
 
+- [Extension Points](../reference/extension-points.md) — the four guardrail hook ABCs (`PreLLMHook`, `PostLLMHook`, `PreToolHook`, `PostToolHook`) and their method signatures
 - [Security Architecture](../design/security-architecture.md) — full L2 breakdown: guardrail hooks, PII anonymization, LLM Guard, JWT/API Key auth, audit trail
 - [ADR-008: Security via Hooks](../design/adr/008-security-via-hooks.md) — the decision record explaining why hooks live in the engine
 - [The Execution Engine](engine.md) — where hooks fit in the superstep loop

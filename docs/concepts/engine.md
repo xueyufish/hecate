@@ -125,13 +125,14 @@ Unreachable nodes produce a warning, not an error — this lets work-in-progress
 | Recover a crashed session | The latest checkpoint captures the full state |
 | Run nodes in parallel | The worker pool dispatches all ready nodes each superstep |
 | Debug a failed run | Every superstep has a checkpoint you can inspect |
-| Add a custom node type | Implement the `Worker` extension point (see the design docs) |
+| Add a custom node type | Implement the `Worker` extension point (see [Extension Points](../reference/extension-points.md)) |
 
 ---
 
 ## Further reading
 
 - [Engine Design](../design/engine-design.md) — full deep dive: compiler internals, channel manager, worker pool, streaming modes
-- [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) — the JSON Schema for graph definitions
+- [Graph DSL Reference](../reference/graph-dsl.md) — node types, channel types, edge forms, and validation rules
+- [Extension Points](../reference/extension-points.md) — the 11 core ABCs you can implement to customize execution
 - [Agents and Execution Modes](agents.md) — how the `workflow` mode binds a graph to an agent
 - [Guardrails and Hooks](guardrails.md) — where interception fits in the superstep loop

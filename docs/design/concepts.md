@@ -72,14 +72,15 @@ Nodes have a position attribute for canvas rendering. Edges have source and targ
 
 | Type | Description | Channel Interaction |
 |------|-------------|---------------------|
-| `llm` | LLM inference node | Reads messages/tools → writes response |
-| `code` | Code execution node (sandboxed) | Reads input → writes output |
+| `conversation` | LLM inference node | Reads messages/tools → writes response |
+| `tool-call` | Tool invocation node (builtin, custom, or MCP) | Reads tool_name/args → writes result |
 | `condition` | Conditional branch node | Reads state → routes to branch |
-| `tool` | Tool invocation node | Reads tool_name/args → writes result |
-| `agent` | Sub-Agent node (references another Agent) | Maps parent state → child state → returns result |
-| `subgraph` | Subgraph node (nested Workflow) | Maps outer state → inner state → returns result |
-| `input` | Workflow input node | Receives external input |
-| `output` | Workflow output node | Outputs final result |
+| `agent` | Sub-Agent node (references another Agent or nested Workflow) | Maps parent state → child state → returns result |
+| `knowledge-retrieval` | Knowledge base RAG query node | Reads query → writes retrieved chunks |
+| `variable-set` | Channel variable assignment node | Evaluates expression → writes to channel |
+| `suggestion` | Follow-up suggestion generation node | Reads context → writes suggestions |
+| `fan-out` | Parallel branch dispatcher | Dispatches to N branches concurrently |
+| `merge` | Parallel branch aggregator | Collects results from fan-out branches |
 
 ---
 
