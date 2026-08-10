@@ -498,17 +498,17 @@ For patterns the generators don't cover, write the DSL directly. The schema is `
     }
   },
   "edges": [
-    { "source": "__start__", "target": "writer" },
-    { "source": "writer", "target": "critic" },
-    { "source": "critic", "target": "exit_check" },
-    { "source": "exit_check", "target": {"true": "__end__", "false": "writer"} }
+    {"from": "writer", "to": "critic"},
+    {"from": "critic", "to": "exit_check"},
+    {"from": "exit_check", "to": "writer", "when": "false"},
+    {"from": "exit_check", "to": "__end__", "when": "true"}
   ]
 }
 ```
 
-Node types (9): `conversation`, `tool-call`, `condition`, `agent`, `knowledge-retrieval`, `variable-set`, `fan-out`, `merge`, `suggestion`. Channel types: `last_value`, `topic` (with optional `reduce: "append"`), `accumulator`, plus the deprecated `persistent_topic` (auto-migrated to `topic` with `persistent: true`). Conditional routing is expressed by setting an edge's `target` to an object that maps the source node's evaluated result to a target node ID — for example, `{"true": "__end__", "false": "writer"}` selects `__end__` when the condition evaluates to `"true"` and `writer` when it evaluates to `"false"`.
+Node types: `agent`, `condition`, `fan_out`, `merge`. Channel types: `topic` (append-reduce), `last_value`. Edges can have `when` predicates for conditional routing.
 
-See the [Graph DSL Reference](../reference/graph-dsl.md) for the full node-type inventory with config fields, plus the bundled [Graph DSL JSON Schema](../../src/hecate/engine/graph-dsl.schema.json) for the authoritative source of truth.
+See the bundled [Graph DSL JSON Schema](../../src/hecate/engine/graph-dsl.schema.json) for the full schema definition.
 
 ---
 
@@ -518,10 +518,10 @@ See the [Graph DSL Reference](../reference/graph-dsl.md) for the full node-type 
 
 Read the error list — common causes:
 
-- **Unknown node type** — must be one of: `conversation`, `tool-call`, `condition`, `agent`, `knowledge-retrieval`, `variable-set`, `fan-out`, `merge`, `suggestion`
+- **Unknown node type** — only `agent`, `condition`, `fan_out`, `merge` are valid
 - **Cycle without exit** — every loop must have a `condition` node with a path to `__end__`
 - **Missing channels** — `agent` nodes must declare `readable` and `writable` channels
-- **Bad edge references** — `source`/`target` must reference existing node IDs or `__start__`/`__end__`
+- **Bad edge references** — `from`/`to` must reference existing node IDs or `__start__`/`__end__`
 
 ### Generator returns 422
 

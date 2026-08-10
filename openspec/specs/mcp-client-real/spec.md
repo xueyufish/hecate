@@ -1,5 +1,9 @@
-## ADDED Requirements
+# mcp-client-real Specification
 
+## Purpose
+
+Define the production MCP client using the official modelcontextprotocol Python SDK, supporting Streamable HTTP and stdio transports for connecting to external MCP servers.
+## Requirements
 ### Requirement: Real MCP Client using official SDK
 The system SHALL provide a production MCP Client using the official `mcp` Python SDK (`modelcontextprotocol/python-sdk`) that supports Streamable HTTP and stdio transports for connecting to external MCP servers.
 
@@ -44,3 +48,23 @@ The system SHALL provide `MCP_CLIENT_TIMEOUT: int` (default: `30`) setting for c
 #### Scenario: Timeout on slow server
 - **WHEN** an MCP server does not respond within `MCP_CLIENT_TIMEOUT` seconds
 - **THEN** the client raises a `TimeoutError` and the calling tool receives an error response
+
+### Requirement: HecateMCPClient applies egress filters on tool response
+The `HecateMCPClient` SHALL pass MCP tool responses through a configurable egress filter chain (list of `EgressFilter` instances) before returning to the caller.
+
+#### Scenario: Filters applied
+- **WHEN** `HecateMCPClient` is constructed with `egress_filters=[dlp_filter]`
+- **THEN** `call_tool()` SHALL pass the response through the filter chain
+
+#### Scenario: No filters configured
+- **WHEN** `HecateMCPClient` is constructed without `egress_filters`
+- **THEN** `call_tool()` SHALL return the raw MCP response (backward compatible)
+
+#### Scenario: First filter BLOCK stops chain
+- **WHEN** first filter returns `EgressResult(action=BLOCK)`
+- **THEN** subsequent filters SHALL NOT be called and `call_tool()` SHALL return the block message
+
+#### Scenario: Audit data written to SecurityFindingModel
+- **WHEN** any filter returns `audit_data`
+- **THEN** each entry SHALL be written to SecurityFindingModel with `rule_name` prefixed by the filter's name (e.g., `dlp:email_audit`)
+

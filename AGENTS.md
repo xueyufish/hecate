@@ -81,9 +81,9 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 | `docs/design/architecture.md` | Top-level architecture overview |
 | `docs/design/engine-design.md` | Execution engine deep dive |
 | `docs/design/concepts.md` | Core entity model and data design |
-| `docs/design/adr/` | Architecture Decision Records (28 ADRs) |
-| `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (9 node types, 4 channel types) — bundled in package |
-| `openspec/specs/` | 134 spec directories — the source of truth for each feature |
+| `docs/design/adr/` | Architecture Decision Records (20 ADRs) |
+| `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) — bundled in package |
+| `openspec/specs/` | 86 spec directories — the source of truth for each feature |
 | `openspec/changes/archive/` | Completed OpenSpec changes |
 
 > **Note**: `docs/features/feature-catalog.md` and `docs/features/roadmap.md` are local-only files (gitignored, not in the public repo). They contain competitive analysis and detailed feature tracking. If you need access, ask the maintainer.
@@ -113,6 +113,15 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 - Feature IDs: `X.Y.Z` pattern (e.g., `1.3.1`, `9.4a`). Append letter suffixes — never renumber.
 - **OpenSpec workflow is MANDATORY for ALL changes** — no exceptions. Every change MUST follow: `proposal → design → specs → tasks → implement → verify → archive`. Use `/opsx-propose` to create a change, then `/opsx-apply` to implement tasks, then run verification commands, then `/opsx-archive` to close. Never skip the propose step or implement outside an OpenSpec change directory. Mark tasks complete in `tasks.md` immediately.
 - **OpenSpec commands MUST be triggered by the user manually** — the AI agent SHALL NOT automatically invoke `/opsx-explore`, `/opsx-propose`, `/opsx-apply`, `/opsx-archive`, or any other `/opsx-*` command. The agent may suggest running a command, but MUST wait for explicit user approval.
+- **OpenSpec change file sync (worktree creation)** — `./scripts/opsx-flow.sh start <name>` (via `worktree-help.sh start`) automatically detects uncommitted OpenSpec change artifacts under `openspec/changes/<name>/` in the **main repo's working tree** and syncs them into the new worktree. This rescues the case where `/opsx-propose` was run in the main checkout by mistake (worktrees only inherit tracked files from the base branch). After the worktree is ready, clean up the main copy with `rm -rf openspec/changes/<name>`.
+- **Correct OpenSpec invocation sequence**:
+  1. (Optional, in main) `/opsx-explore` — initial scoping to decide the change name and high-level shape. Does not write OpenSpec artifacts, so it is safe to run in main.
+  2. `./scripts/opsx-flow.sh start <change-name>` — creates worktree on `feat/<change-name>` branch.
+  3. (Optional, in worktree) `/opsx-explore` — deep dive with file/code references to refine the design before proposing.
+  4. Inside the worktree: `/opsx-propose <change-name>` — generates `proposal.md` / `design.md` / `specs/*.md` / `tasks.md` under `openspec/changes/<change-name>/`.
+  5. Inside the worktree: `/opsx-apply <change-name>` — implements tasks from `tasks.md`.
+  6. `./scripts/opsx-flow.sh push <change-name>` — pushes branch to origin.
+  7. PR → merge → `/opsx-archive <change-name>` to close the change.
 - Feature catalog: maintain P1→P5 priority ordering, update counts when features change.
 - **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` (local-only files, not in public repo) before performing the archive move. This includes: updating ✅ markers for completed features, updating statistics counts, updating extension point integration status, and checking off milestone items. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
 - Run `ruff check` + `ruff format --check` + `mypy` + `pytest` before committing.

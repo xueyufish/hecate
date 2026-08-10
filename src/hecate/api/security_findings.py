@@ -1,17 +1,25 @@
 """Security findings API endpoints.
 
-Provides read-only access to security findings produced by the FindingEngine:
+Provides read and feedback access to security findings produced by
+the FindingEngine:
 
-- ``GET /api/security/findings`` — Query security findings with filters (paginated)
+- ``GET  /api/security/findings`` — Query security findings (paginated)
+- ``POST /api/security/findings/{id}/feedback`` — Record true-positive /
+  false-positive feedback on a finding (writes ``feedback``,
+  ``feedback_user``, ``feedback_comment``, ``feedback_at`` into the
+  finding's ``metadata_`` JSON column).
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel as PydanticBase
+from pydantic import Field
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps_workspace import get_auth_context
@@ -39,6 +47,13 @@ def set_security_finding_service(service: SecurityFindingService) -> None:
     _singleton_service = service
 
 
+class SecurityFindingFeedbackSchema(PydanticBase):
+    """Body schema for ``POST /api/security/findings/{id}/feedback``."""
+
+    feedback: str = Field(pattern=r"^(true_positive|false_positive)$")
+    feedback_comment: str | None = None
+
+
 @router.get("/findings")
 async def query_security_findings(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
@@ -57,8 +72,6 @@ async def query_security_findings(
     Returns filtered, paginated security findings produced by anomaly
     detection rules (bulk delete, off-hours ops, unusual IP, etc.).
     """
-    import uuid
-
     service = get_security_finding_service()
     params = SecurityFindingQuerySchema(
         org_id=uuid.UUID(org_id) if org_id else None,
@@ -78,3 +91,28 @@ async def query_security_findings(
         "limit": limit,
         "offset": offset,
     }
+
+
+@router.post("/findings/{finding_id}/feedback")
+async def submit_finding_feedback(
+    finding_id: uuid.UUID,
+    body: SecurityFindingFeedbackSchema,
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Record true-positive / false-positive feedback on a finding.
+
+    The feedback is stored in the finding's ``metadata_`` JSON column
+    under ``feedback``, ``feedback_user``, ``feedback_comment``, and
+    ``feedback_at`` keys. Used by the DLP engine to tune
+    ``detect-secrets`` and Presidio recognizer thresholds over time.
+    """
+    service = get_security_finding_service()
+    updated = await service.set_feedback(
+        finding_id=finding_id,
+        feedback=body.feedback,
+        feedback_user=str(ctx.user_id) if ctx.user_id else "anonymous",
+        feedback_comment=body.feedback_comment,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    return updated.model_dump(mode="json")

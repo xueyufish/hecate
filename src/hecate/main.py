@@ -161,6 +161,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("EventStore backend=%s", _state_settings.EVENT_STORE_BACKEND)
     logger.info("SessionStateStore backend=%s", _state_settings.SESSION_STATE_STORE_BACKEND)
 
+    # Initialize the DLP engine (4.x): build a base DLPScanner with the
+    # built-in recognizers (RegexRecognizer, DictionaryRecognizer with the
+    # canonical PII list, SecretsRecognizer and PresidioRecognizer when
+    # their optional dependencies are installed). Per-request DB-backed
+    # rules (DLPCustomRegexModel, DLPDictionaryModel) are layered on by
+    # the DLPService at request time — this base scanner is the fast
+    # in-memory fallback for callers that don't need DB-backed config.
+    if _state_settings.DLP_ENABLED:
+        from hecate.services.security.dlp.policy import (
+            DLPPolicyResolver,
+        )
+        from hecate.services.security.dlp.recognizer import (
+            DLPRecognizerRegistry,
+        )
+        from hecate.services.security.dlp.recognizers.regex import (
+            RegexRecognizer,
+        )
+        from hecate.services.security.dlp.scanner import (
+            DLPScanner,
+        )
+
+        base_registry = DLPRecognizerRegistry()
+        base_registry.register(RegexRecognizer())
+        app.state.dlp_scanner = DLPScanner(base_registry, policy=DLPPolicyResolver(rules=[]))
+        logger.info(
+            "DLP engine initialized (buffer=%d overlap=%d)",
+            _state_settings.DLP_STREAM_BUFFER_SIZE,
+            _state_settings.DLP_STREAM_OVERLAP,
+        )
+    else:
+        app.state.dlp_scanner = None
+        logger.info("DLP engine disabled (DLP_ENABLED=false)")
+
     # Discover and register plugins from the plugins directory
     try:
         from hecate.services.plugin.service import PluginService

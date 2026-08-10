@@ -47,21 +47,20 @@ Users can switch between visual and code editing at any time — both interfaces
 
 The canvas provides two tiers of node types:
 
-#### Engine-Level Node Types (9 types)
+#### Engine-Level Node Types (8 types)
 
 These are the abstract node types defined in the Graph DSL schema (`graph-dsl.schema.json`). All workflows compile to these primitives:
 
 | Type | Description | Channel Interaction |
 |------|-------------|---------------------|
-| `conversation` | LLM inference node | Reads messages/tools → writes response |
-| `tool-call` | Tool invocation node (builtin, custom, or MCP) | Reads tool_name/args → writes result |
+| `llm` | LLM inference node | Reads messages/tools → writes response |
+| `code` | Code execution node (sandboxed) | Reads input → writes output |
 | `condition` | Conditional branch node | Reads state → routes to branch |
+| `tool` | Tool invocation node | Reads tool_name/args → writes result |
 | `agent` | Sub-Agent node (references another Agent) | Maps parent state → child state → returns result |
-| `knowledge-retrieval` | Knowledge base RAG query node | Reads query → writes retrieved chunks |
-| `variable-set` | Channel variable assignment node | Evaluates expression → writes to channel |
-| `suggestion` | Follow-up suggestion generation node | Reads context → writes suggestions |
-| `fan-out` | Parallel branch dispatcher | Dispatches to N branches concurrently |
-| `merge` | Parallel branch aggregator | Collects results from fan-out branches |
+| `subgraph` | Subgraph node (nested Workflow) | Maps outer state → inner state → returns result |
+| `input` | Workflow input node | Receives external input |
+| `output` | Workflow output node | Outputs final result |
 
 #### High-Level Visual Node Types (4 types)
 
@@ -71,7 +70,7 @@ These are canvas-level abstractions that compile to engine primitives (see [ADR-
 |-------------|-------------|---------|
 | **Human Input / Form Node** (1.1.24) | `interrupt()` + `Command(resume)` | Structured HITL: form fields, dropdowns, approval routing |
 | **Trigger Node** (1.1.25) | `__start__` + external trigger mapping | Event-driven entry: webhook, schedule, event, MCP |
-| **Object CRUD Node** (1.1.26) | `tool-call` node + GraphStore binding | Ontology-aware entity operations: create, update, delete, query |
+| **Object CRUD Node** (1.1.26) | `tool` node + GraphStore binding | Ontology-aware entity operations: create, update, delete, query |
 | **Side-by-side Chat + Canvas** (1.1.27) | UX layer (split-pane layout) | Integrated dev/test: canvas left, live chat right |
 
 ### Edge Types and Visual Differentiation

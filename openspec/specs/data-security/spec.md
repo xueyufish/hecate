@@ -1,23 +1,23 @@
-## ADDED Requirements
+# data-security Specification
 
+## Purpose
+
+Define the ToolResultSecurityHook for masking sensitive entities in tool results, PII storage modes, PII audit event logging, and the AgentModel guardrail_config column.
+## Requirements
 ### Requirement: ToolResultSecurityHook implements PostToolHook
-The `ToolResultSecurityHook` SHALL implement the `PostToolHook` ABC, detecting and masking PII in tool execution results before they are stored in channels or returned to the LLM.
+The `ToolResultSecurityHook` SHALL implement the `PostToolHook` ABC, detecting and masking sensitive entities in tool execution results using DLPScanner before they are stored in channels or returned to the LLM.
 
 #### Scenario: Clean tool result passes through
-- **WHEN** `on_post_tool_call(name, result, context)` is called with a result containing no PII
+- **WHEN** `on_post_tool_call(name, result, context)` is called with a result containing no sensitive entities
 - **THEN** it SHALL return `GuardrailResult(action=GuardrailAction.ALLOW)`
 
-#### Scenario: PII detected in tool result
-- **WHEN** the tool result string contains PII patterns and `data_security.mask_tool_results` is True
-- **THEN** it SHALL anonymize PII in the result and return `GuardrailResult(action=GuardrailAction.SANITIZE, modified_data={"result": <masked_result>})`
+#### Scenario: Sensitive entity detected in tool result
+- **WHEN** the tool result string contains PII/secrets patterns and DLPScanner.scan() detects them
+- **THEN** the hook SHALL mask sensitive entities in the result and return `GuardrailResult(action=GuardrailAction.SANITIZE, modified_data={"result": <masked_result>})`
 
-#### Scenario: Tool result masking disabled
-- **WHEN** `data_security.mask_tool_results` is False
-- **THEN** tool results SHALL pass through without PII masking
-
-#### Scenario: Security disabled for agent
-- **WHEN** `data_security` is not configured or `guardrail_config` is None
-- **THEN** it SHALL return `GuardrailResult(action=GuardrailAction.ALLOW)` without scanning
+#### Scenario: Tool result security disabled
+- **WHEN** `data_security.enabled` is False or guardrail_config is None
+- **THEN** tool results SHALL pass through without scanning
 
 ### Requirement: PII storage mode configuration
 The system SHALL support two PII storage modes controlled by `guardrail_config.data_security.pii_storage_mode`.
@@ -38,7 +38,7 @@ The system SHALL support two PII storage modes controlled by `guardrail_config.d
 - **THEN** the system SHALL raise a `ConfigurationError` at hook construction time
 
 ### Requirement: PIIMappingModel for encrypted mappings
-The system SHALL define a `PIIMappingModel` ORM model for storing Fernet-encrypted PII mappings in `mask_and_encrypt` mode.
+The system SHALL define `PIIMappingModel` ORM model for storing Fernet-encrypted PII mappings in `mask_and_encrypt` mode.
 
 #### Scenario: Model fields
 - **WHEN** `PIIMappingModel` is defined
@@ -77,3 +77,15 @@ The `AgentModel` SHALL have a `guardrail_config` JSONB column for per-agent secu
 #### Scenario: Guardrail config updated
 - **WHEN** an agent is updated with a new `guardrail_config`
 - **THEN** the stored config SHALL be replaced atomically
+
+### Requirement: ToolResultSecurityHook delegates to DLPScanner
+The `ToolResultSecurityHook` SHALL delegate sensitive entity detection to `DLPScanner.scan(direction="tool_output")` instead of the previous hardcoded `PIIAnonymizer.PATTERNS`.
+
+#### Scenario: DLPScanner enabled
+- **WHEN** `DLP_ENABLED=True` and DLPScanner is injected
+- **THEN** the hook SHALL use DLPScanner.scan() for detection
+
+#### Scenario: DLPScanner disabled
+- **WHEN** `DLP_ENABLED=False` or DLPScanner is None
+- **THEN** the hook SHALL fall back to PIIAnonymizer (backward compatibility)
+
