@@ -16,4 +16,16 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 - **[Monitor with OpenTelemetry and Prometheus](monitor-opentelemetry.md)** — distributed tracing, Prometheus metrics, structured logging, Kubernetes-style health probes, and trace inspection.
 - **[Scale horizontally](deploy-production.md#horizontal-scaling)** — Redis session state store, multi-replica deployment.
 
-More guides are in progress.
+## Versioning and lifecycle
+
+- **[Version and roll back an agent or workflow](version-and-rollback-agent.md)** — save immutable versions, publish to production, roll back to any prior version, and audit every change.
+
+## Security
+
+- **[Configure tool permissions](configure-tool-permissions.md)** — workspace baselines, per-agent rules, and allow/deny lists for fine-grained tool access control.
+
+## Memory and quality
+
+- **[Manage agent memory](manage-agent-memory.md)** — configure L1 working-memory blocks, inspect and prune L3 user memories, manage L4 knowledge memories, and check L2 compression status.
+- **[Evaluate an agent](../tutorials/08-agent-evaluation.md)** — build a test dataset, run evaluators, and detect regressions (tutorial).
+>>>>>>> a244585 (docs: add agent evaluation, memory how-to, Architecture Center, llms.txt)

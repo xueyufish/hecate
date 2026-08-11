@@ -1,0 +1,79 @@
+# Hecate
+
+> Enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform with a self-developed Pregel execution engine. Built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. Self-hosted; speaks MCP and A2A natively; integrates 100+ LLMs via LiteLLM; exposes an OpenAI-compatible API.
+
+Hecate's documentation follows the Diátaxis framework: tutorials (learn), how-to guides (work), reference (look up), and concepts/explanation (understand) — plus an Architecture Center with deep dives and ADRs, operations runbooks, and migration guides.
+
+## Getting started
+- [Quickstart](docs/getting-started/quickstart.md): install, start infra, run migrations, send your first chat request in ~5 minutes
+
+## Concepts (explanation)
+- [Overview](docs/concepts/overview.md): what Hecate is and how the pieces fit together
+- [Agents and Execution Modes](docs/concepts/agents.md): the chat / three_layer / workflow modes
+- [The Execution Engine](docs/concepts/engine.md): Pregel/BSP runtime — graphs, channels, supersteps, checkpoints
+- [Context Engineering](docs/concepts/context-engineering.md): the per-call context pipeline, token budgets, offloading
+- [Memory System](docs/concepts/memory.md): the four-level memory architecture (L1–L4)
+- [Guardrails and Hooks](docs/concepts/guardrails.md): the four engine-level hook types
+- [Data Loss Prevention (DLP)](docs/concepts/dlp.md): outbound detection engine — recognizers, policy, actions, five trust boundaries
+- [Multi-Tenancy](docs/concepts/multi-tenancy.md): Organization → Workspace → User isolation
+- [Agent Evaluation](docs/concepts/evaluation.md): datasets, evaluators, runs, and scores
+
+## Tutorials (learn)
+- [Build Your First Agent](docs/tutorials/01-first-agent.md)
+- [Knowledge Base and RAG](docs/tutorials/02-knowledge-base.md)
+- [MCP Tool Integration](docs/tutorials/03-mcp-integration.md)
+- [Multi-Agent Orchestration](docs/tutorials/04-multi-agent.md)
+- [Guardrails and Hooks](docs/tutorials/05-guardrails-hooks.md)
+- [Human-in-the-Loop](docs/tutorials/06-human-in-the-loop.md)
+- [Context Engineering](docs/tutorials/07-context-engineering.md)
+- [Evaluate an Agent](docs/tutorials/08-agent-evaluation.md)
+
+## How-to guides (work)
+- [Configure LLM providers](docs/how-to/configure-llm-providers.md)
+- [Enable MCP Server](docs/how-to/enable-mcp-server.md)
+- [Enable A2A Server](docs/how-to/enable-a2a-server.md)
+- [Configure SSO and SCIM](docs/how-to/configure-sso-scim.md)
+- [Configure tool permissions](docs/how-to/configure-tool-permissions.md)
+- [Manage agent memory](docs/how-to/manage-agent-memory.md)
+- [Deploy to production](docs/how-to/deploy-production.md)
+- [Monitor with OpenTelemetry and Prometheus](docs/how-to/monitor-opentelemetry.md)
+- [Version and roll back an agent](docs/how-to/version-and-rollback-agent.md)
+
+## Reference (look up)
+- [REST API](docs/reference/rest-api.md): route map of the four API surfaces
+- [CLI Reference](docs/reference/cli.md): the hecate and hecate-migrate commands
+- [Environment Variables](docs/reference/env-vars.md): every config variable with defaults
+- [Graph DSL](docs/reference/graph-dsl.md): JSON Schema for workflow graphs — 9 node types, 4 channel types
+- [Extension Points](docs/reference/extension-points.md): 11 core + 4 SPI engine extension points
+- [Glossary](docs/reference/glossary.md): domain terms and acronyms
+- [FAQ](docs/reference/faq.md): common questions by topic
+- [AGENTS.md convention](docs/reference/agents-md.md): coding-agent instructions file
+
+## Architecture Center (deep dives)
+- [Hecate Architecture](docs/design/architecture.md): top-level system architecture
+- [Engine Design](docs/design/engine-design.md): Pregel runtime, compiler, channels, checkpoints
+- [Security Architecture](docs/design/security-architecture.md): guardrails, PII, LLM Guard, audit, OWASP ASI
+- [Knowledge & Memory Design](docs/design/knowledge-memory-design.md)
+- [RAG Pipeline Design](docs/design/rag-pipeline-design.md)
+- [Agent Studio Design](docs/design/agent-studio-design.md)
+- [Ops Center Design](docs/design/ops-center-design.md)
+- [Model Hub Design](docs/design/model-hub-design.md)
+- [Tool Platform Design](docs/design/tool-platform-design.md)
+- [Enterprise Foundation Design](docs/design/enterprise-foundation-design.md)
+- [Ecosystem Design](docs/design/ecosystem-design.md)
+- [Access Channel Design](docs/design/access-channel-design.md)
+- [Core Concepts](docs/design/concepts.md): entity definitions and data model
+- [Architecture Decision Records (28 ADRs)](docs/design/README.md#architecture-decision-records-adrs)
+
+## Operations (runbooks)
+- [Health Checks](docs/operations/health-checks.md): liveness/readiness/startup probes, /version, /metrics
+- [Backup and Restore](docs/operations/backup-restore.md): the /api/system backup + restore API
+- [Log Analysis](docs/operations/log-analysis.md): logs, OTel trace correlation, audit trail
+- [Rollback Runbook](docs/operations/rollback.md): four rollback paths
+
+## Migrations
+- [Migrating from AgentStateStore to SessionStateStore](docs/migrations/agent-state-store.md)
+- [Expand-Contract Migration Guide](docs/migrations/expand-contract-guide.md)
+
+## About
+- [Inspired by](docs/about/inspired-by.md): the projects, papers, and standards Hecate builds on

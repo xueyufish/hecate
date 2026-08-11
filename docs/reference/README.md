@@ -6,7 +6,10 @@ Technical reference material — API endpoints, CLI commands, configuration opti
 
 - **[CLI Reference](cli.md)** — the `hecate` and `hecate-migrate` commands with all subcommands and flags.
 - **[Environment Variables](env-vars.md)** — every configuration variable, with defaults and descriptions.
-- **REST API** — interactive Swagger UI at `/docs` (Swagger) or `/redoc` (ReDoc) when the server is running.
-- **[Graph DSL Schema](../design/)** — JSON Schema for graph definitions (`src/hecate/engine/graph-dsl.schema.json`).
-
-More reference material is in progress.
+- **[Graph DSL](graph-dsl.md)** — JSON Schema reference for workflow graph definitions: 9 node types, 4 channel types, edge forms, and validation rules.
+- **[Extension Points](extension-points.md)** — the 11 core + 4 SPI engine extension points, abstract methods, and default implementations.
+- **[Glossary](glossary.md)** — definitions for Hecate-specific terms and domain acronyms used across the documentation.
+- **[REST API](rest-api.md)** — route map of the four API surfaces (OpenAI-compatible `/v1`, management `/api`, identity/federation, system endpoints) with links to the interactive Swagger UI.
+- **[FAQ](faq.md)** — answers to the most common questions, grouped by topic.
+- **[AGENTS.md convention](agents-md.md)** — the coding-agent instructions file: what it is, how Hecate uses it, and how to work on Hecate with Claude Code, Codex, Cursor, and other coding agents.
+- **Interactive API docs** — Swagger UI at `/docs` (Swagger) or `/redoc` (ReDoc) when the server is running.

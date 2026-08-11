@@ -104,8 +104,10 @@ After `uv pip install -e ".[dev]"`, both commands are available on your `PATH`.
 - [Getting Started](docs/getting-started/) — install and run Hecate
 - [Tutorials](docs/tutorials/) — end-to-end examples (first agent, knowledge base, MCP, multi-agent)
 - [How-to Guides](docs/how-to/) — task-oriented recipes (LLM providers, deployment, backup)
-- [API Reference](docs/reference/) — REST and CLI references
-- [Architecture](docs/design/) — engine design, concepts, ADRs
+- [API Reference](docs/reference/) — REST API, CLI, Graph DSL, and extension point references
+- [Architecture Center](docs/design/) — architecture, subsystem deep dives, and ADRs
+- [Migrations](docs/migrations/) — schema migration guides and expand-contract patterns
+- [Operations](docs/operations/) — runbooks for production operations
 
 ---
 
