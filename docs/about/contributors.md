@@ -74,7 +74,7 @@ Hecate contributors follow a community standard of respectful collaboration. See
 
 ## Security researchers
 
-Researchers who report security issues responsibly are recognized in the [Security Hall of Fame](#) (when added). See [Threat Model](../design/threat-model.md) for how to report.
+Researchers who report security issues responsibly are recognized in release notes. See [Threat Model](../design/threat-model.md) for how to report.
 
 ---
 

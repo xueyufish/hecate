@@ -10,7 +10,7 @@ The scope includes 17 projects from our research plus the core infrastructure th
 
 ### Core inspiration
 
-- **[Google Pregel](https://research.google/pubs/large-scale-graph-computation-at-google/)** — the original Bulk Synchronous Parallel (BSP) graph computation paper. Hecate's superstep loop is named after and directly inspired by Pregel. We use the same conceptual model: vertices compute, barrier, message passing, repeat.
+- **[Google Pregel](https://research.google/pubs/pub37252/)** — the original Bulk Synchronous Parallel (BSP) graph computation paper. Hecate's superstep loop is named after and directly inspired by Pregel. We use the same conceptual model: vertices compute, barrier, message passing, repeat.
 - **[LangGraph](https://github.com/langchain-ai/langgraph)** — pioneered channel/checkpoint/Pregel patterns in the Python agent ecosystem. Hecate borrows the conceptual model (channel types, checkpoint persistence, interrupt/resume) but **re-implements the runtime from scratch** with zero external framework dependencies. The rationale is in [ADR-001](../design/adr/001-graph-first-orchestration.md).
 - **[Apache Beam](https://beam.apache.org/)** — the dataflow model that influenced how we think about bounded parallelism, watermarks, and event-time processing. Hecate's WorkerPool and asynchronous execution borrow from Beam's execution model.
 

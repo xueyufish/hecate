@@ -265,8 +265,8 @@ This duality is unique among the platforms researched. Most A2A implementations 
 
 Hecate implements **A2A v1.0 GA** (Linux Foundation). Interop with:
 
-- Official [`a2a-sdk`](https://github.com/a2a-mcp-python/a2a-python) (Python)
-- [`a2a-js`](https://github.com/a2a-mcp-js/a2a-js) (TypeScript)
+- Official `a2a-sdk` (Python) — see [a2a-protocol.org](https://a2a-protocol.org/) for SDK packages
+- `a2a-js` (TypeScript) — see [a2a-protocol.org](https://a2a-protocol.org/) for SDK packages
 - Any A2A-compliant agent framework (when they ship A2A support)
 
 Hecate's types wrap the official `a2a-sdk` types, so bumping the SDK brings the latest spec.
