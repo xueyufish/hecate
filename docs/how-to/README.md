@@ -2,6 +2,14 @@
 
 Task-oriented recipes for specific problems. Each guide is self-contained — jump to the one you need.
 
+## Quick recipes
+
+- **[Cookbook](cookbook.md)** — copy-paste recipes for the most common patterns: web-search agent, knowledge-grounded Q&A, model fallback, streaming, multi-agent handoff, MCP integration, local models, and more.
+
+## Development
+
+- **[Develop custom extensions](develop-extensions.md)** — implement custom CheckpointStore, GuardrailHook, SchedulerStrategy, and other extension points. Three concrete code examples with wiring and testing patterns.
+
 ## Configuration
 
 - **[Configure LLM providers](configure-llm-providers.md)** — set up OpenAI, Anthropic, DeepSeek, Qwen, GLM, Ollama, or any LiteLLM-supported provider via env vars or the database-backed provider registry.
@@ -22,10 +30,14 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 
 ## Security
 
+- **[Security hardening](security-hardening.md)** — production security checklist: secrets, TLS, SSO, guardrails, DLP, tool permissions, sandbox isolation, audit/SIEM, database encryption, and monitoring.
 - **[Configure tool permissions](configure-tool-permissions.md)** — workspace baselines, per-agent rules, and allow/deny lists for fine-grained tool access control.
 
 ## Memory and quality
 
 - **[Manage agent memory](manage-agent-memory.md)** — configure L1 working-memory blocks, inspect and prune L3 user memories, manage L4 knowledge memories, and check L2 compression status.
 - **[Evaluate an agent](../tutorials/08-agent-evaluation.md)** — build a test dataset, run evaluators, and detect regressions (tutorial).
->>>>>>> a244585 (docs: add agent evaluation, memory how-to, Architecture Center, llms.txt)
+
+## Troubleshooting
+
+- **[Troubleshooting guide](troubleshoot.md)** — common failure modes organized by problem domain: startup, database, LLM providers, tools/MCP, knowledge/RAG, authentication, workflows, and performance. Every error message sourced from the actual codebase.
