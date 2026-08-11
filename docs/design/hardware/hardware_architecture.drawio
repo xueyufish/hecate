@@ -43,10 +43,10 @@
         <mxCell id="eco_c" value="Ecosystem" style="swimlane;startSize=30;fillColor=#F3E5F5;strokeColor=#7B1FA2;fontSize=12;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
           <mxGeometry x="1490" y="90" width="185" height="720" as="geometry" />
         </mxCell>
-        <mxCell id="eco_a2a" value="📋 A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;fontStyle=1;" vertex="1" parent="eco_c">
+        <mxCell id="eco_a2a" value="✅ A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="eco_c">
           <mxGeometry x="15" y="80" width="155" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="eco_cards" value="📋 Agent Cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;" vertex="1" parent="eco_c">
+        <mxCell id="eco_cards" value="✅ Agent Cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10" vertex="1" parent="eco_c">
           <mxGeometry x="15" y="135" width="155" height="30" as="geometry" />
         </mxCell>
         <mxCell id="eco_market" value="📋 Asset Marketplace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#7B1FA2;dashed=1;fontSize=10;" vertex="1" parent="eco_c">
@@ -86,10 +86,10 @@
         <mxCell id="gw_mcp" value="✅ MCP Server (Streamable HTTP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="gw_c">
           <mxGeometry x="230" y="38" width="200" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="gw_multi_ch" value="📋 Multi-Channel Access" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=11;" vertex="1" parent="gw_c">
+        <mxCell id="gw_multi_ch" value="✅ Multi-Channel Access" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="gw_c">
           <mxGeometry x="440" y="38" width="180" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="gw_enterprise" value="📋 Enterprise Access (SSO/LDAP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=11;" vertex="1" parent="gw_c">
+        <mxCell id="gw_enterprise" value="✅ Enterprise Access (SSO/LDAP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="gw_c">
           <mxGeometry x="630" y="38" width="280" height="30" as="geometry" />
         </mxCell>
         <mxCell id="gw_enduser" value="📋 End-User Apps" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=11;" vertex="1" parent="gw_c">
@@ -164,7 +164,7 @@
         <mxCell id="e_resilience" value="✅ Resilience Infrastructure" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=11;" vertex="1" parent="engine_c">
           <mxGeometry x="810" y="38" width="230" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="e_a2a" value="📋 A2A Protocol" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=11;" vertex="1" parent="engine_c">
+        <mxCell id="e_a2a" value="✅ A2A Protocol" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="engine_c">
           <mxGeometry x="1050" y="38" width="190" height="30" as="geometry" />
         </mxCell>
         <!-- Row 2: Planned Core -->
@@ -181,22 +181,22 @@
           <mxGeometry x="810" y="78" width="240" height="30" as="geometry" />
         </mxCell>
         <!-- Row 3: SPI Extension Points -->
-        <mxCell id="spi_plugin" value="Plugin SPI Core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;dashed=1;fontSize=11;fontStyle=1;" vertex="1" parent="engine_c">
+        <mxCell id="spi_plugin" value="✅ Plugin SPI Core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11;fontStyle=1" vertex="1" parent="engine_c">
           <mxGeometry x="20" y="128" width="200" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="spi_eval" value="Evaluator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;dashed=1;fontSize=11;" vertex="1" parent="engine_c">
+        <mxCell id="spi_eval" value="✅ Evaluator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="engine_c">
           <mxGeometry x="230" y="128" width="190" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="spi_channel" value="Channel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;dashed=1;fontSize=11;" vertex="1" parent="engine_c">
+        <mxCell id="spi_channel" value="✅ Channel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="engine_c">
           <mxGeometry x="430" y="128" width="190" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="spi_auth" value="Auth Provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;dashed=1;fontSize=11;" vertex="1" parent="engine_c">
+        <mxCell id="spi_auth" value="✅ Auth Provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="engine_c">
           <mxGeometry x="630" y="128" width="200" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="spi_notify" value="Notifier" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;dashed=1;fontSize=11;" vertex="1" parent="engine_c">
+        <mxCell id="spi_notify" value="✅ Notifier" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="engine_c">
           <mxGeometry x="840" y="128" width="190" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="spi_i18n" value="i18n SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;dashed=1;fontSize=11;" vertex="1" parent="engine_c">
+        <mxCell id="spi_i18n" value="✅ i18n SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="engine_c">
           <mxGeometry x="1040" y="128" width="200" height="30" as="geometry" />
         </mxCell>
 
@@ -213,7 +213,7 @@
         <mxCell id="m_provider" value="✅ Provider Mgmt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;" vertex="1" parent="model_c">
           <mxGeometry x="270" y="38" width="115" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="m_cost" value="📋 Cost Mgmt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="model_c">
+        <mxCell id="m_cost" value="✅ Cost Mgmt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10" vertex="1" parent="model_c">
           <mxGeometry x="20" y="78" width="115" height="30" as="geometry" />
         </mxCell>
         <mxCell id="m_intel_router" value="📋 Intel. Router" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="model_c">
@@ -235,7 +235,7 @@
         <mxCell id="t_sandbox" value="✅ Exec. Security" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;" vertex="1" parent="tool_c">
           <mxGeometry x="280" y="38" width="115" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="t_plugin" value="📋 Extension Ecosystem" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="tool_c">
+        <mxCell id="t_plugin" value="✅ Extension Ecosystem" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10" vertex="1" parent="tool_c">
           <mxGeometry x="20" y="78" width="125" height="30" as="geometry" />
         </mxCell>
         <mxCell id="t_enterprise" value="📋 Enterprise Integ." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=10;" vertex="1" parent="tool_c">
@@ -280,7 +280,7 @@
         <mxCell id="f_deploy" value="✅ Deployment" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#616161;fontSize=11;" vertex="1" parent="found_c">
           <mxGeometry x="635" y="38" width="230" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="f_production" value="📋 Production Grade" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;dashed=1;fontSize=11;" vertex="1" parent="found_c">
+        <mxCell id="f_production" value="✅ Production Grade" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11" vertex="1" parent="found_c">
           <mxGeometry x="875" y="38" width="230" height="30" as="geometry" />
         </mxCell>
 

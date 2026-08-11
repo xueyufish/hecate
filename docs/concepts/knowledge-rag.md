@@ -155,7 +155,7 @@ Knowledge retrieval is **transparent to the Graph DSL** — there is no `knowled
 - [Memory System](memory.md) — RAG is L4 Knowledge Memory in the four-level architecture
 - [Multi-Tenancy](multi-tenancy.md) — the `workspace_id` isolation that governs knowledge base access
 - [Extension Points](../reference/extension-points.md) — the `EnginePort.knowledge_query` method signature
-- [RAG Pipeline Design](../design/rag-pipeline-design.md) — full L3 breakdown, GraphRAG/DRIFT/lazy-indexing roadmap
+- [RAG Pipeline Design](../design/rag-pipeline-design.md) — full L3 breakdown, GraphRAG/DRIFT/lazy-indexing (future)
 - [Knowledge & Memory Design](../design/knowledge-memory-design.md) — knowledge graph, ontology system, four-level memory target state
 - [ADR-017: Knowledge Graph Architecture](../design/adr/017-knowledge-graph-architecture.md) — the `GraphStore` ABC for the planned KG layer
 - [Knowledge Base and RAG tutorial](../tutorials/02-knowledge-base.md) — hands-on end-to-end

@@ -2,92 +2,240 @@
 
 > Enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform with a self-developed Pregel execution engine. Built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. Self-hosted; speaks MCP and A2A natively; integrates 100+ LLMs via LiteLLM; exposes an OpenAI-compatible API.
 
-Hecate's documentation follows the Diátaxis framework: tutorials (learn), how-to guides (work), reference (look up), and concepts/explanation (understand) — plus an Architecture Center with deep dives and ADRs, operations runbooks, and migration guides.
+Hecate is an open-source project (MIT license) currently in **alpha (0.1.x)**. APIs may change before 1.0. Documentation follows the Diátaxis framework: **tutorials** (learn), **how-to guides** (work), **reference** (look up), and **concepts** (understand) — plus an Architecture Center with deep dives and ADRs, operations runbooks, and migration guides.
+
+Key numbers (as of 2026-08):
+- **28** Architecture Decision Records (ADRs)
+- **100+** features shipped in alpha
+- **139** OpenSpec specs
+- **11** Core + **4** SPI extension points
+- **34** data models with `workspace_id` for multi-tenant isolation
+- **6** multi-agent collaboration patterns (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate)
 
 ## Getting started
-- [Quickstart](docs/getting-started/quickstart.md): install, start infra, run migrations, send your first chat request in ~5 minutes
 
-## Concepts (explanation)
-- [Overview](docs/concepts/overview.md): what Hecate is and how the pieces fit together
-- [Agents and Execution Modes](docs/concepts/agents.md): the chat / three_layer / workflow modes
+- [Quickstart](docs/getting-started/quickstart.md): install, start infra, run migrations, send your first chat request in ~5 minutes
+- [Getting Started README](docs/getting-started/README.md): choose-your-path table, system requirements, role-based next steps
+
+## Concepts (explanation — 23 articles)
+
+### Architecture & engine
+- [Overview](docs/concepts/overview.md): five-layer architecture, ten modules, key concepts cheat sheet
+- [Agents and Execution Modes](docs/concepts/agents.md): the `chat` / `three_layer` / `workflow` modes
 - [Workflows](docs/concepts/workflows.md): graph DSL — channels, nodes, edges, nine node types, six collaboration templates
 - [The Execution Engine](docs/concepts/engine.md): Pregel/BSP runtime — graphs, channels, supersteps, checkpoints
-- [Context Engineering](docs/concepts/context-engineering.md): the per-call context pipeline, token budgets, offloading
-- [Memory System](docs/concepts/memory.md): the four-level memory architecture (L1–L4)
-- [Knowledge and Retrieval](docs/concepts/knowledge-rag.md): RAG pipeline — ingestion, hybrid search, citations, vector backends
+- [Sessions](docs/concepts/sessions.md): runtime unit holding conversation state, resume, time-travel debugging
+- [Context Engineering](docs/concepts/context-engineering.md): per-call context pipeline, token budgets, offloading
+- [Memory System](docs/concepts/memory.md): four-level memory architecture (L1–L4)
+- [Knowledge and Retrieval](docs/concepts/knowledge-rag.md): RAG pipeline — Docling, BGE-M3, Qdrant, hybrid search, citations
+
+### Tools, protocols, and skills
 - [Tools, MCP, and A2A](docs/concepts/tools-and-mcp.md): tool sources, registry, MCP client/server, A2A protocol, policy pipeline
-- [Model Hub](docs/concepts/model-hub.md): LiteLLM 100+ providers, routing strategies, fallback, circuit breaker, A/B testing, gray release
-- [Guardrails and Hooks](docs/concepts/guardrails.md): the four engine-level hook types
+- [A2A Protocol](docs/concepts/a2a-protocol.md): Linux Foundation A2A — AgentCard, Task lifecycle, signed cards, trust model
+- [Plugins](docs/concepts/plugins.md): six plugin types (Tool / Evaluator / Channel / Auth / Notifier / Extension), permissions model
+- [Skills](docs/concepts/skills.md): SkillRegistry's unified abstraction over tools, knowledge bases, workflows, and agents
+- [Webhooks](docs/concepts/webhooks.md): async event reception, signature verification, retries, dead-letter queues
+
+### Operations & governance
+- [Model Hub](docs/concepts/model-hub.md): LiteLLM 100+ providers, routing, fallback, circuit breaker, A/B testing
+- [Budget & Cost](docs/concepts/budget.md): token tracking, per-workspace budgets, degradation levels, cost optimization
+- [Guardrails and Hooks](docs/concepts/guardrails.md): four engine-level hook types
 - [Observability](docs/concepts/observability.md): traces, metrics, logs, audit — the four production signals
 - [Multi-Tenancy](docs/concepts/multi-tenancy.md): Organization → Workspace → User isolation
 - [Authentication and Identity](docs/concepts/auth-identity.md): API Keys, JWTs, SSO (OIDC/SAML/LDAP), SCIM v2, AuthProviderABC
+- [Data Loss Prevention (DLP)](docs/concepts/dlp.md): outbound detection engine — recognizers, policy, actions
+- [Command-Line Interface](docs/concepts/cli.md): three entry points, plugin discovery, when to use CLI vs API vs canvas
+
+### Quality
 - [Agent Evaluation](docs/concepts/evaluation.md): datasets, evaluators, runs, and scores
-- [Data Loss Prevention (DLP)](docs/concepts/dlp.md): outbound detection engine — recognizers, policy, actions, five trust boundaries
 
-## Tutorials (learn)
-- [Build Your First Agent](docs/tutorials/01-first-agent.md)
-- [Knowledge Base and RAG](docs/tutorials/02-knowledge-base.md)
-- [MCP Tool Integration](docs/tutorials/03-mcp-integration.md)
-- [Multi-Agent Orchestration](docs/tutorials/04-multi-agent.md)
-- [Guardrails and Hooks](docs/tutorials/05-guardrails-hooks.md)
-- [Human-in-the-Loop](docs/tutorials/06-human-in-the-loop.md)
-- [Context Engineering](docs/tutorials/07-context-engineering.md)
-- [Evaluate an Agent](docs/tutorials/08-agent-evaluation.md)
+## Tutorials (learn — 11 hands-on guides)
 
-## How-to guides (work)
-- [Cookbook](docs/how-to/cookbook.md): copy-paste recipes — web-search agent, knowledge Q&A, model fallback, streaming, handoff, MCP, local models, versioning
-- [Security hardening](docs/how-to/security-hardening.md): production security checklist — secrets, TLS, SSO, guardrails, DLP, sandbox, audit, database encryption
-- [Configure LLM providers](docs/how-to/configure-llm-providers.md)
+- [Build Your First Agent](docs/tutorials/01-first-agent.md): 15 min, code-first walkthrough with REST + CLI
+- [Knowledge Base and RAG](docs/tutorials/02-knowledge-base.md): 25 min, ingestion to retrieval
+- [MCP Tool Integration](docs/tutorials/03-mcp-integration.md): 20 min, connect external MCP servers
+- [Multi-Agent Orchestration](docs/tutorials/04-multi-agent.md): 30 min, six collaboration patterns
+- [Guardrails and Hooks](docs/tutorials/05-guardrails-hooks.md): 20 min, PII masking + injection defense
+- [Human-in-the-Loop](docs/tutorials/06-human-in-the-loop.md): 15 min, `interrupt()` and `Command`
+- [Context Engineering](docs/tutorials/07-context-engineering.md): 25 min, observe the pipeline
+- [Evaluate an Agent](docs/tutorials/08-agent-evaluation.md): 20 min, build dataset, run evaluators
+- [A2A Protocol](docs/tutorials/09-a2a-protocol.md): 25 min, cross-framework agent communication
+- [OpenAI SDK Compatibility](docs/tutorials/10-openai-compatibility.md): 20 min, drop-in OpenAI replacement
+- [Visual Canvas](docs/tutorials/11-visual-canvas.md): 15 min, drag-and-drop workflow design
+
+## Use cases (end-to-end business scenarios)
+
+- [Customer Support Bot](docs/use-cases/01-customer-support-bot.md): RAG + guardrails + HITL + MCP
+- [Code Review Agent](docs/use-cases/02-code-review-agent.md): MCP + multi-agent + evaluation
+- [Research Team](docs/use-cases/03-research-team.md): multi-agent + streaming + context offload
+
+## How-to guides (work — 16 task-oriented recipes)
+
+### Configuration
+- [Configure LLM providers](docs/how-to/configure-llm-providers.md): 100+ providers via LiteLLM
+- [Configure budget and cost tracking](docs/how-to/configure-budget.md): per-workspace budgets, degradation profiles
+- [Set up webhooks](docs/how-to/set-up-webhooks.md): GitHub / Slack / custom
 - [Enable MCP Server](docs/how-to/enable-mcp-server.md)
 - [Enable A2A Server](docs/how-to/enable-a2a-server.md)
-- [Configure SSO and SCIM](docs/how-to/configure-sso-scim.md)
+- [Configure SSO and SCIM](docs/how-to/configure-sso-scim.md): OIDC, SAML, LDAP
 - [Configure tool permissions](docs/how-to/configure-tool-permissions.md)
-- [Manage agent memory](docs/how-to/manage-agent-memory.md)
-- [Deploy to production](docs/how-to/deploy-production.md)
-- [Monitor with OpenTelemetry and Prometheus](docs/how-to/monitor-opentelemetry.md)
-- [Version and roll back an agent](docs/how-to/version-and-rollback-agent.md)
-- [Troubleshooting](docs/how-to/troubleshoot.md): common failure modes by problem domain — startup, DB, LLM, tools/MCP, RAG, auth, workflows, performance
-- [Develop custom extensions](docs/how-to/develop-extensions.md): implement custom CheckpointStore, GuardrailHook, SchedulerStrategy with wiring and testing patterns
 
-## Reference (look up)
-- [Quick Reference](docs/reference/quick-reference.md): one-page cheat sheet — API surfaces, CLI, Docker ports, env vars, node types, memory levels, hooks
-- [Data Models](docs/reference/data-models.md): all 67 ORM tables grouped by domain, FK relationships, BaseModel pattern
-- [Deployment Architectures](docs/reference/deployment-architectures.md): topology patterns (single-host, blue-green, K8s), sizing guidelines, scaling model
+### Operations
+- [Deploy to production](docs/how-to/deploy-production.md): Docker Compose, blue-green, Kubernetes
+- [Monitor with OpenTelemetry and Prometheus](docs/how-to/monitor-opentelemetry.md)
+- [Manage agent memory](docs/how-to/manage-agent-memory.md): L1–L4 memory operations
+- [Security hardening](docs/how-to/security-hardening.md): production checklist
+- [Troubleshooting](docs/how-to/troubleshoot.md): common failures by domain
+
+### Development
+- [Develop custom extensions](docs/how-to/develop-extensions.md): CheckpointStore, GuardrailHook, SchedulerStrategy
+- [Version and roll back an agent or workflow](docs/how-to/version-and-rollback-agent.md)
+- [Cookbook](docs/how-to/cookbook.md): copy-paste recipes
+
+## Reference (look up — 14 documents)
+
+### API & data
+- [Quick Reference](docs/reference/quick-reference.md): one-page cheat sheet
+- [Data Models](docs/reference/data-models.md): all 67 ORM tables + BaseModel pattern
+- [Deployment Architectures](docs/reference/deployment-architectures.md): topology patterns + sizing
 - [REST API](docs/reference/rest-api.md): route map of the four API surfaces
-- [CLI Reference](docs/reference/cli.md): the hecate and hecate-migrate commands
-- [Environment Variables](docs/reference/env-vars.md): every config variable with defaults
-- [Graph DSL](docs/reference/graph-dsl.md): JSON Schema for workflow graphs — 9 node types, 4 channel types
-- [Extension Points](docs/reference/extension-points.md): 11 core + 4 SPI engine extension points
-- [Glossary](docs/reference/glossary.md): domain terms and acronyms
+- [Graph DSL](docs/reference/graph-dsl.md): JSON Schema for workflow graphs
+- [Plugin Manifest Schema](docs/reference/plugin-manifest.md): full PluginManifest field reference
+
+### Runtime & config
+- [CLI Reference](docs/reference/cli.md): all `hecate` / `hecate-migrate` / `hecate-flag-audit` commands
+- [Environment Variables](docs/reference/env-vars.md): every config variable
+- [Extension Points](docs/reference/extension-points.md): 11 core + 4 SPI ABCs
+- [Event Catalog](docs/reference/event-catalog.md): all event types emitted (lifecycle, chat, workflow, etc.)
+
+### Reference
+- [Glossary](docs/reference/glossary.md): Hecate-specific terms
 - [FAQ](docs/reference/faq.md): common questions by topic
 - [AGENTS.md convention](docs/reference/agents-md.md): coding-agent instructions file
 
-## Architecture Center (deep dives)
-- [Hecate Architecture](docs/design/architecture.md): top-level system architecture
-- [Engine Design](docs/design/engine-design.md): Pregel runtime, compiler, channels, checkpoints
-- [Security Architecture](docs/design/security-architecture.md): guardrails, PII, LLM Guard, audit, OWASP ASI
+## Architecture Center (deep dives — 15 documents)
+
+### Strategic & planning
+- [Positioning & Competitive Landscape](docs/design/positioning.md): vs Dify, LangGraph, Agentforce, Bedrock AgentCore, n8n + 9 others
+- Roadmap: phases P1–P5 from alpha to 1.0 GA
+- [Architecture Center README](docs/design/README.md): index + ADR index
+
+### Subsystem designs
+- [Hecate Architecture](docs/design/architecture.md): top-level v0.2
+- [Core Concepts](docs/design/concepts.md): entity model + data design
+- [Engine Design](docs/design/engine-design.md): Pregel runtime + compiler + channels
+- [Agent Studio Design](docs/design/agent-studio-design.md)
+- [Access Channel Design](docs/design/access-channel-design.md)
 - [Knowledge & Memory Design](docs/design/knowledge-memory-design.md)
 - [RAG Pipeline Design](docs/design/rag-pipeline-design.md)
-- [Agent Studio Design](docs/design/agent-studio-design.md)
-- [Ops Center Design](docs/design/ops-center-design.md)
-- [Model Hub Design](docs/design/model-hub-design.md)
 - [Tool Platform Design](docs/design/tool-platform-design.md)
+- [Model Hub Design](docs/design/model-hub-design.md)
+- [Ops Center Design](docs/design/ops-center-design.md)
 - [Enterprise Foundation Design](docs/design/enterprise-foundation-design.md)
 - [Ecosystem Design](docs/design/ecosystem-design.md)
-- [Access Channel Design](docs/design/access-channel-design.md)
-- [Core Concepts](docs/design/concepts.md): entity definitions and data model
-- [Architecture Decision Records (28 ADRs)](docs/design/README.md#architecture-decision-records-adrs)
 
-## Operations (runbooks)
-- [Health Checks](docs/operations/health-checks.md): liveness/readiness/startup probes, /version, /metrics
-- [Backup and Restore](docs/operations/backup-restore.md): the /api/system backup + restore API
-- [Log Analysis](docs/operations/log-analysis.md): logs, OTel trace correlation, audit trail
+### Cross-cutting (new in alpha)
+- [A2A Architecture](docs/design/a2a-architecture.md): A2A protocol deep-dive
+- [Extension SPI & Plugin Architecture](docs/design/extension-architecture.md): 11 core + 4 SPI + 6 plugin types
+- [Observability Architecture](docs/design/observability-architecture.md): four signals
+- [Multi-Tenancy Architecture](docs/design/multi-tenancy-architecture.md): 3-tier tenancy + RBAC
+- [Visual Canvas Architecture](docs/design/visual-canvas-architecture.md): React Flow + JSON DSL sync
+- [Reference Architectures](docs/design/reference-architectures.md): topology selection + failure modes
+- [Backup & Recovery Architecture](docs/design/backup-recovery-architecture.md): scopes, RPO/RTO, PITR
+- [Threat Model](docs/design/threat-model.md): STRIDE analysis + 6 critical gaps
+
+### ADR index
+- [ADR Index by Topic](docs/design/adr/INDEX.md): topic-grouped view of all 28 ADRs
+
+## Migrations (version-specific)
+
+- [Migrations README](docs/migrations/README.md): expand-contract pattern overview
+- [Migrating from 0.1.x (Alpha) to 0.2.x (Beta)](docs/migrations/v0.1-to-v0.2.md): upgrade guide for Beta
+- [Expand-Contract Migration Guide](docs/migrations/expand-contract-guide.md): schema migration pattern
+- [Migrating AgentStateStore → SessionStateStore](docs/migrations/agent-state-store.md): historical breaking change
+
+## Operations (production runbooks)
+
+- [Operations README](docs/operations/README.md): index
+- [Health Checks](docs/operations/health-checks.md): liveness / readiness / startup probes
+- [Backup and Restore](docs/operations/backup-restore.md): backup API + PITR
+- [Performance Baselines](docs/operations/performance-baselines.md): methodology + estimates + measurement template
+- [Log Analysis](docs/operations/log-analysis.md): log sources + correlation
 - [Rollback Runbook](docs/operations/rollback.md): four rollback paths
-- [Upgrade Guide](docs/operations/upgrade-guide.md): pre-upgrade checks, migrations, feature-flag rollout, verification, rollback
+- [Upgrade Guide](docs/operations/upgrade-guide.md): pre-upgrade checks + expand-contract
 
-## Migrations
-- [Migrating from AgentStateStore to SessionStateStore](docs/migrations/agent-state-store.md)
-- [Expand-Contract Migration Guide](docs/migrations/expand-contract-guide.md)
+## About (background)
 
-## About
-- [Inspired by](docs/about/inspired-by.md): the projects, papers, and standards Hecate builds on
+- [About README](docs/about/README.md): index
+- [Inspired by](docs/about/inspired-by.md): 17 surveyed projects + infrastructure stack
+- [License](docs/about/license.md): MIT + sub-project licenses
+- [Contributors](docs/about/contributors.md): contributor recognition + CLA policy
+- [Release Notes](docs/about/release-notes.md): human-readable highlights
+
+## Changelog & release tracking
+
+- [CHANGELOG.md](CHANGELOG.md): machine-readable changelog
+- [GitHub Releases](https://github.com/xueyufish/hecate/releases): full release history
+
+## Coding agent files (for AI assistants)
+
+- [AGENTS.md](AGENTS.md): repository-level instructions for AI coding agents
+- [CLAUDE.md](CLAUDE.md): Claude Code-specific guidance
+- [AGENTS.md convention reference](docs/reference/agents-md.md): how Hecate uses AGENTS.md files
+
+## Architecture diagrams (visual)
+
+- [L1 Architecture](docs/design/images/hecate_l1_architecture.png): high-level system map
+- [Engine L2](docs/design/images/engine-l2.png): engine internals
+- [Ops Center L2](docs/design/images/ops-center-l2.png): observability components
+- [Security L2](docs/design/images/security-l2.png), [Security L3](docs/design/images/security-l3.png)
+- [Tool Platform L2](docs/design/images/tool-platform-l2.png)
+- [RAG Pipeline L3](docs/design/images/rag-pipeline-l3.png)
+- [Agent Studio L2](docs/design/images/agent-studio-l2.png)
+- [Access Channel L2](docs/design/images/access-channel-l2.png)
+- [Model Hub L2](docs/design/images/model-hub-l2.png)
+- [Knowledge & Memory L2](docs/design/images/knowledge-memory-l2.png)
+- [Enterprise Foundation L2](docs/design/images/enterprise-foundation-l2.png)
+- [Ecosystem L2](docs/design/images/ecosystem-l2.png)
+
+## Source code map
+
+```
+src/hecate/
+├── engine/         # Pregel runtime, 11 core + 4 SPI extension points
+├── services/       # LLM, KB, memory, tools, backup, audit, etc.
+├── api/            # FastAPI routes (OpenAI-compat, management, MCP, A2A)
+├── models/         # SQLAlchemy ORM + Pydantic schemas
+├── cli/            # 3 entry points: hecate, hecate-migrate, hecate-flag-audit
+├── auth/           # 5 providers: JWT, API key, OIDC, SAML, LDAP
+├── a2a/            # A2A server + client (Linux Foundation v1.0)
+├── plugin/         # Plugin system: manifest + registry + SPI
+├── skill_registry/ # Unified skill abstraction (tool/skill/KB/workflow/agent)
+├── budget/         # Token cost tracking + governance
+├── observability/  # 4 signals: trace, metric, log, audit
+├── web/            # Visual canvas (Next.js + React Flow) [separate project]
+└── core/           # config, database, DI, rate limiting
+```
+
+## Key technical facts for AI assistants
+
+When working on Hecate code, remember:
+
+1. **Engine layer has zero external dependencies** (except `jsonschema` for DSL validation)
+2. **API layer never imports engine directly** — routes through services + `EnginePort` ABC
+3. **MCP and A2A are first-class protocols** — both client and server roles
+4. **OpenAI-compatible API is wire-compatible** — any OpenAI client works with `base_url` change
+5. **Multi-tenant by default** — 34 models with `workspace_id` for isolation
+6. **OpenSpec workflow** — every feature goes through proposal → design → specs → implementation → archive
+7. **Plugin manifest** — plugins declare `type`, `name`, `version`, `api_version`, `min_platform_version`, `permissions`, `entry`, `config_schema`
+8. **Sessions are universal unit of work** — chat, workflows, evaluations, A2A tasks all use sessions
+9. **Checkpoints are universal** — every event in execution produces a checkpoint
+10. **Audit is append-only** — hash chain; SIEM forwarding; immutable
+
+## Project context
+
+- **License**: MIT
+- **Repository**: github.com/xueyufish/hecate
+- **Status**: Alpha (0.1.x). APIs may change before 1.0.
+- **Stars / community**: alpha-stage, no public metrics yet
+- **Maintainer team**: Hecate core contributors (see [Contributors](docs/about/contributors.md))

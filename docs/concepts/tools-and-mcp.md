@@ -4,7 +4,7 @@ An LLM by itself only generates text. **Tools** are how an agent acts on the wor
 
 Understanding the three tool sources, how the registry routes execution, and where MCP and A2A fit will let you predict what your agent can call, how it gets authorized, and how other systems can call your agent.
 
-> **Custom tools are not yet wired in.** The `ToolModel.source` field accepts `"builtin"`, `"custom"`, and `"mcp"`, but the current `ToolRegistry` raises `NotImplementedError` for `"custom"` (see `services/tool/registry.py`). Custom-tool execution is on the roadmap; until then, extend the agent with MCP tools or sub-agent delegation.
+> **Custom tools are not yet wired in.** The `ToolModel.source` field accepts `"builtin"`, `"custom"`, and `"mcp"`, but the current `ToolRegistry` raises `NotImplementedError` for `"custom"` (see `services/tool/registry.py`). Custom-tool execution is not yet implemented; until then, extend the agent with MCP tools or sub-agent delegation.
 
 ---
 
@@ -15,7 +15,7 @@ Every tool registered in Hecate carries a `source` field on `ToolModel` (`models
 | Source | Where it lives | How it executes | Example |
 |--------|---------------|-----------------|---------|
 | **`builtin`** | Hardcoded in `services/tool/builtin.py` | In-process Python function | `web_search`, `read_file`, `write_file`, `list_files`, `execute_code` |
-| **`custom`** | `tools` table (DB-persisted) | *Roadmap — currently raises `NotImplementedError`* | User-defined Python/HTTP tools |
+| **`custom`** | `tools` table (DB-persisted) | *Not yet implemented — currently raises `NotImplementedError`* | User-defined Python/HTTP tools |
 | **`mcp`** | `tools` table, with `mcp_server` + `mcp_tool_name` fields | Routed to the originating MCP server via `MCPClientManager.call_tool()` | `tavily_search`, `github_create_issue`, … |
 
 A fourth, special-case source is **`AgentTool`** (`engine/agent_tool.py`): it wraps another Hecate agent as a callable tool for sub-agent delegation. It is registered in the parent agent's tool list at runtime rather than via the `tools` table.
@@ -53,7 +53,7 @@ ToolRegistry.execute(name, args, context)           # services/tool/registry.py
     ├── DB lookup → tool.source == "mcp"  ──►  MCPClientManager.call_tool(server, tool, args)
     │                                              (remote call to the MCP server)
     │
-    ├── DB lookup → tool.source == "custom"  ──►  NotImplementedError  (roadmap)
+    ├── DB lookup → tool.source == "custom"  ──►  NotImplementedError  (not yet implemented)
     │
     └── ToolCache consult/store (when cacheable=True)
 ```
@@ -164,7 +164,7 @@ This is how Hecate implements [multi-agent collaboration patterns](../tutorials/
 - [Agents and Execution Modes](agents.md) — how tools bind to agents across `chat`, `three_layer`, and `workflow` modes
 - [Guardrails and Hooks](guardrails.md) — `PreToolHook` / `PostToolHook` enforce the policy layers above
 - [Extension Points](../reference/extension-points.md) — the `EnginePort.tool_execute` and `tool_execute_sandbox` method signatures
-- [Tool Platform Design](../design/tool-platform-design.md) — full L2 breakdown, composable policy pipeline, plugin taxonomy, and AI-native tool roadmap
+- [Tool Platform Design](../design/tool-platform-design.md) — full L2 breakdown, composable policy pipeline, and plugin taxonomy
 - [Ecosystem Design](../design/ecosystem-design.md) — MCP, A2A, marketplace, and the broader integration architecture
 - [ADR-011: A2A Protocol Adoption](../design/adr/011-a2a-protocol-adoption.md) — why Hecate adopted A2A for cross-framework interop
 - [ADR-012: MCP Streamable HTTP](../design/adr/012-mcp-streamable-http.md) — transport decision for MCP servers

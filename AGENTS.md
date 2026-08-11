@@ -81,12 +81,12 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
 | `docs/design/architecture.md` | Top-level architecture overview |
 | `docs/design/engine-design.md` | Execution engine deep dive |
 | `docs/design/concepts.md` | Core entity model and data design |
-| `docs/design/adr/` | Architecture Decision Records (20 ADRs) |
+| `docs/design/adr/` | Architecture Decision Records (28 ADRs; see `docs/design/adr/INDEX.md` for topic index) |
 | `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) — bundled in package |
-| `openspec/specs/` | 86 spec directories — the source of truth for each feature |
+| `openspec/specs/` | 139 spec directories — the source of truth for each feature |
 | `openspec/changes/archive/` | Completed OpenSpec changes |
 
-> **Note**: `docs/features/feature-catalog.md` and `docs/features/roadmap.md` are local-only files (gitignored, not in the public repo). They contain competitive analysis and detailed feature tracking. If you need access, ask the maintainer.
+> **Note**: Hecate's public strategic docs live at `docs/design/positioning.md` (vs competitors). All ADRs are at `docs/design/adr/INDEX.md` (topic-grouped) and `docs/design/adr/001-028*.md` (chronological). For the full docs map, start at `docs/README.md`.
 
 ## Gotchas and non-obvious facts
 
@@ -123,7 +123,7 @@ EnginePort also has 4 optional methods with defaults: `context_assemble`, `evide
   6. `./scripts/opsx-flow.sh push <change-name>` — pushes branch to origin.
   7. PR → merge → `/opsx-archive <change-name>` to close the change.
 - Feature catalog: maintain P1→P5 priority ordering, update counts when features change.
-- **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` (local-only files, not in public repo) before performing the archive move. This includes: updating ✅ markers for completed features, updating statistics counts, updating extension point integration status, and checking off milestone items. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
+- **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/design/positioning.md` before performing the archive move. This includes: updating feature descriptions. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
 - Run `ruff check` + `ruff format --check` + `mypy` + `pytest` before committing.
 
 ### Coding rules (enforced by ruff E/F/I/N/W/UP/B/SIM)

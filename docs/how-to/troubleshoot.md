@@ -136,7 +136,7 @@ Common causes: the tool belongs to a different workspace, the tool was soft-dele
 
 **Source**: `services/tool/registry.py:92`
 
-The `custom` tool source is a roadmap feature. The `ToolModel.source` field accepts `"custom"` but the registry can't execute it yet. Use MCP tools or built-in tools instead. See [Tools, MCP, and A2A](../concepts/tools-and-mcp.md).
+The `custom` tool source is not yet implemented. The `ToolModel.source` field accepts `"custom"` but the registry can't execute it yet. Use MCP tools or built-in tools instead. See [Tools, MCP, and A2A](../concepts/tools-and-mcp.md).
 
 ### `MCPClientManager not configured in ToolRegistry`
 

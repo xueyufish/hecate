@@ -383,7 +383,7 @@ The A2A Server delegates to the **first non-deleted agent** in the workspace. If
 hecate agent create --name "A2A Default Agent" --model "gpt-4o-mini" --mode chat
 ```
 
-> **Current limitation:** the A2A Server always uses the first agent. If you need task routing to specific agents, you must arrange agent order in the database (or wait for multi-agent A2A routing — see [roadmap](../design/architecture.md)).
+> **Current limitation:** the A2A Server always uses the first agent. If you need task routing to specific agents, you must arrange agent order in the database (or wait for multi-agent A2A routing).
 
 ### `401 Unauthorized` / `403 Forbidden`
 

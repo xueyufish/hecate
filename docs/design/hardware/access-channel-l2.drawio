@@ -48,7 +48,7 @@
         <mxCell id="r1_mcp" value="MCP Client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
           <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r1_idp" value="📋 Enterprise IdP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+        <mxCell id="r1_idp" value="✅ Enterprise IdP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
           <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r1_a2a" value="🤖 A2A Remote Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
@@ -82,7 +82,7 @@
         <mxCell id="r2_im" value="📋 IM Bots (Feishu/Slack/DingTalk/WeCom)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" vertex="1" parent="r2_c">
           <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_enterprise" value="📋 Enterprise Gateway (SSO)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_enterprise" value="✅ Enterprise Gateway (SSO)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10" vertex="1" parent="r2_c">
           <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_a2a" value="📋 A2A Server" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
@@ -119,10 +119,10 @@
         <mxCell id="r3_apikey" value="✅ API Key Mgmt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r3_c">
           <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_sso" value="📋 SSO / OIDC / LDAP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_sso" value="✅ SSO / OIDC / LDAP" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10" vertex="1" parent="r3_c">
           <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_scim" value="📋 Enterprise RBAC (SCIM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_scim" value="✅ Enterprise RBAC (SCIM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10" vertex="1" parent="r3_c">
           <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <!-- Sub-row 3c: 5 × 170 = 850, + 4×15 gaps = 910 -->

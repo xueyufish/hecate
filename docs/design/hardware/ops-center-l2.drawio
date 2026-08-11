@@ -85,7 +85,7 @@
         <mxCell id="r2_simulateval" value="📋 Simulation Evaluation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
           <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_costtrack" value="📋 Cost Tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_costtrack" value="✅ Cost Tracking" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_multimodel" value="📋 Multi-Model Comparison" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
@@ -103,17 +103,17 @@
         <mxCell id="r3_health" value="📋 Health Monitoring (8.9a)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="230" y="30" width="220" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_analytics" value="📋 Conversation Analytics (8.9b)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_analytics" value="✅ Conversation Analytics (8.9b)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="465" y="30" width="220" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_testcenter" value="📋 Testing Center (7.9)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="700" y="30" width="210" height="26" as="geometry" />
         </mxCell>
         <!-- Sub-row 3b: 4 boxes -->
-        <mxCell id="r3_budget" value="📋 Budget Management (10.7)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_budget" value="✅ Budget Management (10.7)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="0" y="68" width="215" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_envmgr" value="📋 Environment Mgmt (13.17)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_envmgr" value="✅ Environment Mgmt (13.17)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="230" y="68" width="220" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_apimgr" value="📋 API Management (13.18)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
