@@ -382,8 +382,8 @@ Hecate implements **A2A v1.0 GA** as specified by the Linux Foundation. Specific
 
 Hecate can interoperate with any A2A-compliant client or server, including:
 
-- The official [`a2a-sdk`](https://github.com/a2a-mcp-python/a2a-python) (Python)
-- [`a2a-js`](https://github.com/a2a-mcp-js/a2a-js) (TypeScript)
+- The official `a2a-sdk` (Python) — see [a2a-protocol.org](https://a2a-protocol.org/) for the latest SDK packages
+- `a2a-js` (TypeScript) — see [a2a-protocol.org](https://a2a-protocol.org/) for the latest SDK packages
 - LangGraph A2A integration (when their A2A server ships)
 - CrewAI A2A integration (when it ships)
 

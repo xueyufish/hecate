@@ -102,14 +102,14 @@ After the Quickstart, continue with:
 - **[Contributing Guide](../../CONTRIBUTING.md)** — how to contribute code and docs.
 - **[About > Inspired by](about/inspired-by.md)** — the projects Hecate builds on.
 - **[CHANGELOG.md](../../CHANGELOG.md)** — what's been shipped.
-- **[GitHub Discussions](https://github.com/xueyufish/hecate/discussions)** — ask questions, share what you built.
+- **[GitHub Issues](https://github.com/xueyufish/hecate/issues)** — ask questions, share what you built.
 
 ---
 
 ## Help and support
 
 - **GitHub Issues** — [github.com/xueyufish/hecate/issues](https://github.com/xueyufish/hecate/issues) for bugs and feature requests
-- **GitHub Discussions** — [github.com/xueyufish/hecate/discussions](https://github.com/xueyufish/hecate/discussions) for Q&A
+- **GitHub Issues** — [github.com/xueyufish/hecate/issues](https://github.com/xueyufish/hecate/issues) for Q&A
 - **Documentation** — start at [Architecture Center](../design/README.md)
 
 ---
