@@ -48,6 +48,24 @@ For providers not listed here, see the [LiteLLM provider documentation](https://
 | `LLM_GUARD_ENABLED` | `true` | Enable input/output prompt scanning. |
 | `RATE_LIMIT_RPM` | `60` | Per-key requests per minute. |
 
+## Data Loss Prevention
+
+The DLP engine scans content at every trust boundary for sensitive data and applies a per-entity policy. See [DLP](../concepts/dlp.md). Fails open by default.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DLP_ENABLED` | `true` | Master switch. `false` disables all DLP scanning and falls back to legacy `PIIAnonymizer`. |
+| `DLP_DISABLED_ENTITIES` | `""` | Comma-separated entity types to skip globally. |
+| `DLP_INPUT_HOOK_ENABLED` | `true` | Scan inbound messages (PreLLM boundary). |
+| `DLP_OUTPUT_HOOK_ENABLED` | `true` | Scan LLM responses after deanonymization (PostLLM boundary). |
+| `DLP_TOOL_RESULT_HOOK_ENABLED` | `true` | Scan tool outputs (PostTool boundary). |
+| `DLP_MCP_RESPONSE_FILTER_ENABLED` | `true` | Scan MCP tool-server responses via `DLPEgressFilter`. |
+| `DLP_STREAM_ENABLED` | `true` | Incremental streaming scan for token-streamed output. |
+| `DLP_STREAM_BUFFER_SIZE` | `300` | Characters buffered per incremental scan. |
+| `DLP_STREAM_OVERLAP` | `10` | Overlap between buffers to catch cross-boundary patterns. |
+| `DLP_STREAM_FINAL_SCAN` | `true` | Run a full scan at stream end as a backstop. |
+| `DLP_STREAM_MASK_CORRECTION` | `false` | Emit a corrective message after a streamed MASK detection. |
+
 ## Session State Store
 
 | Variable | Default | Description |
