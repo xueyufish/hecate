@@ -14,4 +14,3 @@ If you are new, start with the [Quickstart](../getting-started/quickstart.md) fi
 6. **[Human-in-the-Loop](06-human-in-the-loop.md)** — add approval checkpoints using `interrupt()` and `Command`, resume sessions from durable pause points.
 7. **[Context Engineering](07-context-engineering.md)** — observe the per-call context pipeline, configure token budgets, and enable Context Offloading for long-running agents.
 8. **[Evaluate an Agent](08-agent-evaluation.md)** — build an evaluation dataset, run built-in evaluators, read scores, and detect regressions when you change an agent.
->>>>>>> a244585 (docs: add agent evaluation, memory how-to, Architecture Center, llms.txt)

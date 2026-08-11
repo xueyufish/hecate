@@ -4,6 +4,9 @@ Technical reference material — API endpoints, CLI commands, configuration opti
 
 ## Contents
 
+- **[Quick Reference](quick-reference.md)** — one-page cheat sheet: API surfaces, CLI commands, Docker ports, env vars, node types, memory levels, hooks, and more. Bookmark this.
+- **[Data Models](data-models.md)** — all 67 ORM tables grouped by domain, key foreign-key relationships, and the `BaseModel` pattern (UUID PK, timestamps, soft delete).
+- **[Deployment Architectures](deployment-architectures.md)** — reference topologies (single-host, blue-green, Kubernetes), component diagrams, sizing guidelines, and stateful vs. stateless scaling.
 - **[CLI Reference](cli.md)** — the `hecate` and `hecate-migrate` commands with all subcommands and flags.
 - **[Environment Variables](env-vars.md)** — every configuration variable, with defaults and descriptions.
 - **[Graph DSL](graph-dsl.md)** — JSON Schema reference for workflow graph definitions: 9 node types, 4 channel types, edge forms, and validation rules.

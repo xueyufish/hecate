@@ -10,6 +10,7 @@ For deployment, backup, monitoring, and scaling recipes, see the [how-to guides]
 - **[Backup and Restore](backup-restore.md)** — the `/api/system` backup and restore API: create, list, verify, and restore backups across PostgreSQL, Qdrant, MinIO, and the filesystem, with point-in-time recovery and conflict policies.
 - **[Log Analysis](log-analysis.md)** — log sources, the event-style logging convention, log-level control, and how to correlate stdout logs with OpenTelemetry traces and the audit trail.
 - **[Rollback Runbook](rollback.md)** — decision tree and procedures for four rollback paths: code revert, database downgrade (Alembic), feature-flag toggle, and blue-green switch. Includes timing and irreversibility constraints for contract migrations.
+- **[Upgrade Guide](upgrade-guide.md)** — end-to-end platform upgrade procedure: pre-upgrade checks, running migrations via `hecate-migrate`, expand-contract deployment sequence, feature-flag gated rollout, post-upgrade verification, and rollback decision matrix.
 
 ## Related guides
 

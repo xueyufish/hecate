@@ -10,13 +10,19 @@ Hecate's documentation follows the Diátaxis framework: tutorials (learn), how-t
 ## Concepts (explanation)
 - [Overview](docs/concepts/overview.md): what Hecate is and how the pieces fit together
 - [Agents and Execution Modes](docs/concepts/agents.md): the chat / three_layer / workflow modes
+- [Workflows](docs/concepts/workflows.md): graph DSL — channels, nodes, edges, nine node types, six collaboration templates
 - [The Execution Engine](docs/concepts/engine.md): Pregel/BSP runtime — graphs, channels, supersteps, checkpoints
 - [Context Engineering](docs/concepts/context-engineering.md): the per-call context pipeline, token budgets, offloading
 - [Memory System](docs/concepts/memory.md): the four-level memory architecture (L1–L4)
+- [Knowledge and Retrieval](docs/concepts/knowledge-rag.md): RAG pipeline — ingestion, hybrid search, citations, vector backends
+- [Tools, MCP, and A2A](docs/concepts/tools-and-mcp.md): tool sources, registry, MCP client/server, A2A protocol, policy pipeline
+- [Model Hub](docs/concepts/model-hub.md): LiteLLM 100+ providers, routing strategies, fallback, circuit breaker, A/B testing, gray release
 - [Guardrails and Hooks](docs/concepts/guardrails.md): the four engine-level hook types
-- [Data Loss Prevention (DLP)](docs/concepts/dlp.md): outbound detection engine — recognizers, policy, actions, five trust boundaries
+- [Observability](docs/concepts/observability.md): traces, metrics, logs, audit — the four production signals
 - [Multi-Tenancy](docs/concepts/multi-tenancy.md): Organization → Workspace → User isolation
+- [Authentication and Identity](docs/concepts/auth-identity.md): API Keys, JWTs, SSO (OIDC/SAML/LDAP), SCIM v2, AuthProviderABC
 - [Agent Evaluation](docs/concepts/evaluation.md): datasets, evaluators, runs, and scores
+- [Data Loss Prevention (DLP)](docs/concepts/dlp.md): outbound detection engine — recognizers, policy, actions, five trust boundaries
 
 ## Tutorials (learn)
 - [Build Your First Agent](docs/tutorials/01-first-agent.md)
@@ -29,6 +35,8 @@ Hecate's documentation follows the Diátaxis framework: tutorials (learn), how-t
 - [Evaluate an Agent](docs/tutorials/08-agent-evaluation.md)
 
 ## How-to guides (work)
+- [Cookbook](docs/how-to/cookbook.md): copy-paste recipes — web-search agent, knowledge Q&A, model fallback, streaming, handoff, MCP, local models, versioning
+- [Security hardening](docs/how-to/security-hardening.md): production security checklist — secrets, TLS, SSO, guardrails, DLP, sandbox, audit, database encryption
 - [Configure LLM providers](docs/how-to/configure-llm-providers.md)
 - [Enable MCP Server](docs/how-to/enable-mcp-server.md)
 - [Enable A2A Server](docs/how-to/enable-a2a-server.md)
@@ -38,8 +46,13 @@ Hecate's documentation follows the Diátaxis framework: tutorials (learn), how-t
 - [Deploy to production](docs/how-to/deploy-production.md)
 - [Monitor with OpenTelemetry and Prometheus](docs/how-to/monitor-opentelemetry.md)
 - [Version and roll back an agent](docs/how-to/version-and-rollback-agent.md)
+- [Troubleshooting](docs/how-to/troubleshoot.md): common failure modes by problem domain — startup, DB, LLM, tools/MCP, RAG, auth, workflows, performance
+- [Develop custom extensions](docs/how-to/develop-extensions.md): implement custom CheckpointStore, GuardrailHook, SchedulerStrategy with wiring and testing patterns
 
 ## Reference (look up)
+- [Quick Reference](docs/reference/quick-reference.md): one-page cheat sheet — API surfaces, CLI, Docker ports, env vars, node types, memory levels, hooks
+- [Data Models](docs/reference/data-models.md): all 67 ORM tables grouped by domain, FK relationships, BaseModel pattern
+- [Deployment Architectures](docs/reference/deployment-architectures.md): topology patterns (single-host, blue-green, K8s), sizing guidelines, scaling model
 - [REST API](docs/reference/rest-api.md): route map of the four API surfaces
 - [CLI Reference](docs/reference/cli.md): the hecate and hecate-migrate commands
 - [Environment Variables](docs/reference/env-vars.md): every config variable with defaults
@@ -70,6 +83,7 @@ Hecate's documentation follows the Diátaxis framework: tutorials (learn), how-t
 - [Backup and Restore](docs/operations/backup-restore.md): the /api/system backup + restore API
 - [Log Analysis](docs/operations/log-analysis.md): logs, OTel trace correlation, audit trail
 - [Rollback Runbook](docs/operations/rollback.md): four rollback paths
+- [Upgrade Guide](docs/operations/upgrade-guide.md): pre-upgrade checks, migrations, feature-flag rollout, verification, rollback
 
 ## Migrations
 - [Migrating from AgentStateStore to SessionStateStore](docs/migrations/agent-state-store.md)
