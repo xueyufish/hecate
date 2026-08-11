@@ -24,11 +24,12 @@ cmd="${1:-help}"
 
 copy_worktreeinclude_files() {
     local wt_path="$1"
-    [[ -f .worktreeinclude ]] || return 0
+    local include_file="${REPO_ROOT}/.worktreeinclude"
+    [[ -f "${include_file}" ]] || return 0
     while IFS= read -r path; do
         [[ -z "${path}" || "${path}" == \#* ]] && continue
         [[ -e "${REPO_ROOT}/${path}" ]] && mkdir -p "${wt_path}/$(dirname "${path}")" && cp -a "${REPO_ROOT}/${path}" "${wt_path}/${path}"
-    done < .worktreeinclude
+    done < "${include_file}"
 }
 
 sync_openspec_change() {
