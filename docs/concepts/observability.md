@@ -160,6 +160,6 @@ Query per-agent health via `GET /api/agent-health?agent_id=<uuid>`. The score (0
 - [Log Analysis runbook](../operations/log-analysis.md) — log/trace correlation, audit trail queries
 - [Guardrails and Hooks](guardrails.md) — what hooks emit security events into the audit trail
 - [Agent Evaluation](evaluation.md) — how evaluation runs integrate with the testing center
-- [Ops Center Design](../design/ops-center-design.md) — the unified operator console and full observability roadmap
+- [Ops Center Design](../design/ops-center-design.md) — the unified operator console and full observability breakdown
 - [ADR-028: Observability & Evaluation Enhancement](../design/adr/028-observability-evaluation-enhancement.md) — enhancement architecture decisions
 - [Extension Points](../reference/extension-points.md) — the SPI surface for plugging in custom trace providers and metrics stores

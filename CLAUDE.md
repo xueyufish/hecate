@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Hecate is an enterprise-grade, open-source, self-hosted, model-agnostic, MCP-first Agent platform built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. Currently in P1 implementation phase — the execution engine core is complete, API/service layers are under development.
+Hecate is an enterprise-grade, open-source, self-hosted, model-agnostic, MCP-first Agent platform built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async. Currently in **alpha (0.1.x)**.
 
 ## Commands
 
@@ -45,11 +45,10 @@ uvicorn hecate.main:app --reload
 
 | File | Purpose |
 |------|---------|
-| `docs/features/feature-catalog.md` | Authoritative feature list — 156 features across 14 capability domains, prioritized P1→P4 |
-| `docs/research/research-tracker.md` | Single source of truth for research progress — 5 phases, 80 research items |
-| `docs/research/reports/00-architecture-decisions.md` | 10 core architecture decisions (AD-1~AD-10) + tech stack overview |
-| `docs/design/architecture.md` | Top-level architecture v0.2 |
-| `openspec/changes/p1-execution-engine-core/` | P1 OpenSpec change — proposal, design, specs, tasks |
+| `docs/design/README.md` | Architecture Center index — links to all subsystem designs and the 28 ADRs |
+| `docs/design/positioning.md` | Strategic positioning vs Dify, LangGraph, Salesforce Agentforce, Bedrock AgentCore, n8n, etc. |
+| `docs/design/adr/INDEX.md` | Topic-grouped index of all 28 Architecture Decision Records |
+| `openspec/` | Source of truth for every shipped feature (139 specs, 100+ archived changes) |
 
 ## Architecture
 
@@ -92,7 +91,7 @@ Pydantic schemas follow naming: `XxxCreateSchema` / `XxxUpdateSchema` / `XxxRead
 
 ### Architecture Decisions (ADR-001~020)
 
-20 ADRs in `docs/design/adr/`: graph-first orchestration, five-layer architecture, checkpoint persistence, skill system, progressive worker pool, four-level memory, unified graph templates, security via hooks, dual API design, React Flow canvas, A2A protocol, MCP Streamable HTTP, Agentic RL, ontology action system, OAG, Platform SPI architecture, knowledge graph architecture, Zero Trust identity, visual workflow node types, async execution + distributed state. See `docs/research/reports/00-architecture-decisions.md` for the original research-phase analysis (AD-1~AD-10, now formalized as ADR-001~010).
+**28 ADRs** in `docs/design/adr/`: graph-first orchestration, five-layer architecture, checkpoint persistence, skill system, progressive worker pool, four-level memory, unified graph templates, security via hooks, dual API design, React Flow canvas, A2A protocol, MCP Streamable HTTP, Agentic RL, ontology action system, OAG, Platform SPI architecture, knowledge graph architecture, Zero Trust identity, visual workflow node types, async execution + distributed state, plus 8 enhancement ADRs (Ops Center, Model Hub, Tool Platform, Knowledge & Memory, Enterprise Foundation, Security Shield, Ecosystem, Observability & Evaluation). See `docs/design/adr/INDEX.md` for the topic-grouped view.
 
 ## Coding Conventions
 

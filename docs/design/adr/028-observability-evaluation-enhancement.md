@@ -86,6 +86,6 @@ Implement 2 new features and 8 enhancements across the Ops Center:
 
 - [Ops Center Design](../ops-center-design.md) — Design document for all OE enhancements
 - [Feature Catalog](../../features/feature-catalog.md) — 343 features including OE1-OE10
-- [Roadmap](../../features/roadmap.md) — Sprint 7: Observability & Evaluation Enhancement
+-  — Sprint 7: Observability & Evaluation Enhancement
 - [ADR-021: Ops Center Architecture](021-ops-center-architecture.md) — Ops Center composition architecture
 - [ADR-008: Security via Hooks](008-security-via-hooks.md) — Guardrail hooks for evaluation enforcement

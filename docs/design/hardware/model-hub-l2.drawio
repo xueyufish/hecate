@@ -66,10 +66,10 @@
         <mxCell id="r2_pricing" value="📋 Model Pricing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
           <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_shaping" value="📋 Provider Shaping" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_shaping" value="✅ Provider Shaping" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_anomaly" value="📋 Cost Anomaly Detect (G8)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_anomaly" value="✅ Cost Anomaly Detect (G8)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
         </mxCell>
 

@@ -69,23 +69,23 @@
         <mxCell id="r2_subgraph" value="✅ Subgraph / Patterns" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_plugin" value="Plugin SPI Core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_plugin" value="✅ Plugin SPI Core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <!-- Sub-row 2b -->
-        <mxCell id="r2_evaluator" value="Evaluator SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_evaluator" value="✅ Evaluator SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_channelspi" value="Channel SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_channelspi" value="✅ Channel SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_authspi" value="Auth Provider SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_authspi" value="✅ Auth Provider SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_notifier" value="Notifier SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_notifier" value="✅ Notifier SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_i18n" value="i18n SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_i18n" value="✅ i18n SPI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
         </mxCell>
 
@@ -94,10 +94,10 @@
           <mxGeometry x="20" y="305" width="910" height="145" as="geometry" />
         </mxCell>
         <!-- Sub-row 3a: 5 × 170 = 850 -->
-        <mxCell id="r3_a2a" value="📋 A2A Protocol (v1.0 GA)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_a2a" value="✅ A2A Protocol (v1.0 GA)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_cards" value="📋 Signed Agent Cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_cards" value="✅ Signed Agent Cards" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_distributed" value="📋 Distributed Execution" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
@@ -129,7 +129,7 @@
         <mxCell id="r3_asyncapi" value="📋 Async Execution API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="0" y="106" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_redis" value="📋 Distributed Session State (Redis)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_redis" value="✅ Distributed Session State (Redis)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="185" y="106" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_saga" value="📋 Saga / Compensation (Temporal)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">

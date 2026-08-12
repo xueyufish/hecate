@@ -2,7 +2,30 @@
 
 The authoritative source for *why* Hecate is built the way it is: top-level architecture, subsystem deep dives, cross-cutting concerns, and Architecture Decision Records (ADRs). When you need to understand the reasoning behind a design choice — not just how to use it — start here.
 
-For conceptual explanations aimed at users, see the [concepts](../concepts/) section. For task-oriented guides, see [how-to](../how-to/).
+For conceptual explanations aimed at users, see the [concepts](../concepts/) section. For task-oriented guides, see [how-to](../how-to/). For end-to-end business scenarios built on Hecate, see [use cases](../use-cases/README.md).
+
+---
+
+## Strategy & Planning
+
+Read these first to understand what Hecate is, where it fits, and where it's going:
+
+- **[Positioning & Competitive Landscape](positioning.md)** — where Hecate fits among Dify, LangGraph, Salesforce Agentforce, AWS Bedrock AgentCore, n8n, and 9 other agent platforms; when to choose Hecate and when not to.
+
+## Deployment & Operations
+
+For architects and SREs planning production deployments:
+
+- **[Reference Architectures](reference-architectures.md)** — "what to choose and why": topology patterns, component selection matrix, scaling characteristics, failure mode analysis, and RPO/RTO targets.
+- **[Backup & Recovery Architecture](backup-recovery-architecture.md)** — backup scopes (PG / Qdrant / MinIO / FS), storage backends, scheduler, verification (restore dry-run), recovery procedures, and compliance considerations.
+
+## End-to-End Examples
+
+- **[Customer support bot](../use-cases/01-customer-support-bot.md)** — RAG over docs + guardrails + human escalation + MCP (Zendesk/Slack).
+- **[Code review agent](../use-cases/02-code-review-agent.md)** — MCP (GitHub) + multi-agent (3 reviewers + 1 aggregator) + evaluation.
+- **[Research team](../use-cases/03-research-team.md)** — multi-agent pipeline (planner/researcher/writer) + streaming + context offload.
+
+Each use case combines multiple subsystems below into a working end-to-end recipe.
 
 ---
 
@@ -16,6 +39,7 @@ For conceptual explanations aimed at users, see the [concepts](../concepts/) sec
 - **[Engine Design](engine-design.md)** — the Pregel runtime, compiler, channel system, and checkpoint persistence.
 - **[Access Channel Design](access-channel-design.md)** — API surfaces, authentication, gateway control plane, multi-channel adaptation, and zero-trust identity.
 - **[Agent Studio Design](agent-studio-design.md)** — visual development environment: canvas, agent configurator, multi-agent orchestration, NL2X workflow generation, and testing tools.
+- **[Visual Canvas Architecture](visual-canvas-architecture.md)** — the React Flow + Next.js frontend (`web/`): bidirectional DSL sync, custom node types, multi-agent pattern templates, and canvas-to-backend protocol.
 
 ## Data and Knowledge
 
@@ -25,13 +49,17 @@ For conceptual explanations aimed at users, see the [concepts](../concepts/) sec
 ## Cross-Cutting Concerns
 
 - **[Security Architecture](security-architecture.md)** — guardrail hooks, PII anonymization, LLM Guard, authentication, audit trail, agent runtime protection, and OWASP ASI coverage.
+- **[Threat Model](threat-model.md)** — STRIDE analysis of Hecate: what threats are defended against, current mitigations, and gaps tracked in our backlog.
 - **[Tool Platform Design](tool-platform-design.md)** — MCP integration, plugin architecture, tool operations, security, observability, and AI-native tools.
+- **[A2A Architecture](a2a-architecture.md)** — Linux Foundation A2A protocol implementation: AgentCard discovery, JSON-RPC 2.0 task lifecycle, SSE streaming, signed AgentCards (JWS + RFC 8785), and the client-side plugin bridge.
+- **[Observability Architecture](observability-architecture.md)** — the four signals (trace / metric / log / audit): OTel-native tracing, Prometheus metrics, structured logging, audit pipeline with detection rules, and TimescaleDB storage.
 
 ## Platform Layer
 
 - **[Model Hub Design](model-hub-design.md)** — LLM integration, model catalog, lifecycle management, governance, monitoring, fine-tuning, and cost management.
 - **[Ops Center Design](ops-center-design.md)** — observability infrastructure, agent health monitoring, conversation analytics, testing center, budget governance, and compliance.
 - **[Enterprise Foundation Design](enterprise-foundation-design.md)** — multi-tenancy, security, observability, compliance, deployment, data governance, and secret management.
+- **[Multi-Tenancy Architecture](multi-tenancy-architecture.md)** — Organization → Workspace → User three-tier model, RBAC matrix, SSO (OIDC/SAML/LDAP), SCIM provisioning, cross-workspace operations, and audit boundaries.
 - **[Ecosystem Design](ecosystem-design.md)** — integration protocols, marketplace, partner monetization, agent discovery, and community gallery.
 
 ---

@@ -73,10 +73,10 @@
           <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <!-- Sub-row 2b -->
-        <mxCell id="r2_finegrained" value="📋 Fine-Grained Permissions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_finegrained" value="✅ Fine-Grained Permissions" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_dlp" value="📋 Outbound DLP Engine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_dlp" value="✅ Outbound DLP Engine" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_confidential" value="📋 Confidential Computing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
@@ -85,7 +85,7 @@
         <mxCell id="r2_zerotrust" value="📋 Zero Trust Architecture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
           <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_vault" value="📋 Enterprise Vault" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_vault" value="✅ Enterprise Vault" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
         </mxCell>
 

@@ -4,10 +4,19 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/xueyufish/hecate)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/xueyufish/hecate/blob/main/pyproject.toml)
+[![Type checked: mypy strict](https://img.shields.io/badge/mypy-strict-blue)](https://github.com/xueyufish/hecate/blob/main/pyproject.toml)
+[![Pre-commit enabled](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/xueyufish/hecate/blob/main/.pre-commit-config.yaml)
 
 Enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform.
 
 Hecate is an enterprise-grade Agent platform with a self-developed Pregel execution runtime. It speaks MCP and A2A natively, integrates 100+ LLMs, and exposes an OpenAI-compatible API so existing tools integrate without change. Multi-agent orchestration, engine-level guardrails, and Docker-isolated sandbox execution are first-class concerns.
+
+> ⚠️ **Hecate is alpha software.** APIs and config schemas may change before 1.0. Pin your version (`hecate==0.1.x`). Report issues → [GitHub Issues](https://github.com/xueyufish/hecate/issues).
+
+## At a glance
+
+![Hecate L1 Architecture](docs/design/images/hecate_l1_architecture.png)
 
 ---
 
@@ -28,21 +37,49 @@ Hecate is **not** a good fit if you want a managed cloud service — Hecate is O
 
 ## Quick Start
 
+**Pick your path:**
+
+| Goal | Where to start |
+|---|---|
+| 🧑‍💻 Build an agent runtime (Python API) | [Step 1 → 3](#step-1--start-infrastructure-and-install) below |
+| 🎨 Compose agents visually (no code) | After install, open [web/](web/) (the visual canvas) |
+| 🔌 Add MCP / A2A integration | [Enable MCP Server](docs/how-to/enable-mcp-server.md) · [Enable A2A Server](docs/how-to/enable-a2a-server.md) |
+| 🏢 Deploy to production (K8s / multi-tenant) | [Deploy to production](docs/how-to/deploy-production.md) |
+
+Get Hecate running in **~5 minutes**. **Prerequisites**: Docker, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and an LLM API key (OpenAI, Anthropic, DeepSeek, Qwen, GLM, Ollama, or any [LiteLLM-supported provider](https://docs.litellm.ai/docs/providers)). **System requirements**: 2 CPU cores, 4 GB RAM (8 GB recommended), 10 GB disk. macOS, Linux, and WSL2 supported; native Windows is experimental. Full guide: [Quickstart](docs/getting-started/quickstart.md).
+
+### Step 1 — Start infrastructure and install
+
 ```bash
-git clone https://github.com/xueyufish/hecate.git
-cd hecate
+git clone https://github.com/xueyufish/hecate.git && cd hecate
 docker compose -f docker/docker-compose.yml up -d
-source .venv/bin/activate && uv pip install -e ".[dev]"
-cp .env.example .env       # edit API keys and DB URLs
+uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
+cp .env.example .env       # add your LLM API key here
 alembic upgrade head
+
+# Sanity-check the setup before starting the server:
+hecate preflight
+# → [PASS] database: OK
+# → [PASS] alembic_head: ...
+# → [PASS] env_vars: all present
+# → Preflight PASSED.
+```
+
+### Step 2 — Start the server
+
+```bash
 uvicorn hecate.main:app --reload
 ```
 
-Then send your first chat request:
+Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive API explorer (Swagger UI) and `/redoc`.
+
+### Step 3 — Send your first chat request
+
+The API is **OpenAI-compatible** — any existing OpenAI client works by pointing `base_url` at Hecate:
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer your-api-key" \
+  -H "Authorization: Bearer $(grep ^OPENAI_API_KEY .env | cut -d= -f2)" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-4o",
@@ -50,20 +87,88 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-Interactive API docs are available at `http://localhost:8000/docs` (Swagger UI) and `/redoc`.
+**Expected response**: a JSON object with `choices[0].message.content` containing a greeting. If you see that, Hecate is running.
 
-![Hecate L1 Architecture](docs/design/images/hecate_l1_architecture.png)
+For streaming responses (SSE), add `"stream": true`:
+
+```bash
+curl -N -X POST http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer $(grep ^OPENAI_API_KEY .env | cut -d= -f2)" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "gpt-4o", "stream": true, "messages": [{"role": "user", "content": "Hello!"}]}'
+```
+
+`-N` disables curl buffering; tokens stream as they are generated.
+
+### Step 4 — Or use any OpenAI client (drop-in)
+
+Hecate's `/v1/chat/completions` is wire-compatible with OpenAI. Any existing OpenAI client works by pointing `base_url` at Hecate — no code rewrite:
+
+```python
+from openai import OpenAI
+
+api_key = next(
+    line.split("=", 1)[1].strip()
+    for line in open(".env")
+    if line.startswith("OPENAI_API_KEY=")
+)
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key=api_key,
+)
+
+resp = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(resp.choices[0].message.content)
+```
+
+Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-index` — any client that speaks OpenAI's wire protocol.
+
+### Troubleshooting
+
+| Symptom | First thing to check |
+|---|---|
+| `hecate preflight` reports `database: FAIL` | `docker compose -f docker/docker-compose.yml ps` — is Postgres up? |
+| `curl` returns `401 Unauthorized` | `cat .env` — is `OPENAI_API_KEY=` set (and uncommented)? |
+| `curl` returns `502 Bad Gateway` | `docker compose logs api` — the server may still be starting |
+| Port `8000` already in use | `lsof -i :8000` then `kill <pid>`, or run uvicorn on `--port 8080` |
+| Anything else | [Full troubleshooting guide](docs/how-to/troubleshoot.md) |
+
+### What's next
+
+**Tutorials** — feature-focused walkthroughs:
+
+- [Build your first agent](docs/tutorials/01-first-agent.md) — code-first Python walkthrough
+- [Add a knowledge base](docs/tutorials/02-knowledge-base.md) — RAG in 10 minutes
+- [Connect an MCP server](docs/tutorials/03-mcp-integration.md) — extend with external tools
+- [A2A Protocol](docs/tutorials/09-a2a-protocol.md) — cross-agent orchestration
+- [OpenAI SDK compatibility](docs/tutorials/10-openai-compatibility.md) — use Hecate as a drop-in for OpenAI
+- [Visual canvas](docs/tutorials/11-visual-canvas.md) — drag-and-drop workflow design
+
+**Use cases** — end-to-end business scenarios:
+
+- [Customer support bot](docs/use-cases/01-customer-support-bot.md) — RAG + Guardrails + HITL
+- [Code review agent](docs/use-cases/02-code-review-agent.md) — MCP + Multi-Agent
+- [Research team](docs/use-cases/03-research-team.md) — Multi-Agent + Streaming + Evaluation
 
 ---
 
 ## Features
 
 - **Graph-First Engine** — Self-built Pregel/BSP runtime with 11 core + 4 SPI extension points. Zero external framework dependencies for the engine.
-- **Context Engineering** — An extensible pipeline (assembler, evidence tracker, phase detector, token budget, provider shaping, message prioritization, tool filtering, offloader) that keeps long-running agents on-budget and on-task.
-- **MCP + A2A Native** — Bidirectional MCP client and server, plus Linux Foundation A2A protocol support for cross-framework agent communication.
+- **A2A Protocol Native** — Linux Foundation v1.0 GA — signed AgentCards (`/.well-known/agent-card.json`), JSON-RPC 2.0 task lifecycle, SSE streaming, and JWS+RFC 8785 trust model. Operates as both A2A server and A2A client.
+- **MCP Native** — Bidirectional Model Context Protocol: Hecate consumes external MCP servers (GitHub, Slack, etc.) and exposes its own as a server (Streamable HTTP transport).
+- **OpenAI SDK Drop-in** — Wire-compatible `/v1/chat/completions` endpoint. Any OpenAI client (Python, JS, litellm, langchain-openai, instructor, vllm) works against Hecate by changing `base_url`.
+- **Visual Canvas** — Drag-and-drop workflow editor in `web/` (React Flow + Next.js). Bidirectional sync with the JSON graph DSL — what you build visually is the same code-defined workflow.
 - **Multi-Agent Orchestration** — Six collaboration patterns (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate) unified as Graph templates.
-- **Multi-Tenant** — Organization → Workspace → RBAC with workspace_id on 35 data models for tenant isolation.
+- **Context Engineering** — An extensible pipeline (assembler, evidence tracker, phase detector, token budget, provider shaping, message prioritization, tool filtering, offloader) that keeps long-running agents on-budget and on-task.
+- **Multi-Tenant** — Organization → Workspace → RBAC with `workspace_id` on 34 data models for tenant isolation. SSO via OIDC/SAML/LDAP, SCIM v2 provisioning.
+- **Plugin System** — 6 plugin types (Tool / Evaluator / Channel / Auth / Notifier / Extension) with hot-reload, declared permissions, and versioned manifests. Plus Core extension points for engine-internal customization.
 - **Engine-Level Guardrails** — Four hook types (Pre/Post LLM/Tool) at every LLM and Tool boundary; the same hooks power PII masking, audit logging, and human-in-the-loop flows.
+- **OpenSpec Workflow** — Every feature shipped through structured proposal → design → specs → implementation → archive (similar to Python PEPs / Kubernetes KEPs / Rust RFCs). 28 ADRs and 100+ archived changes document the architecture.
 
 ---
 
@@ -101,13 +206,18 @@ After `uv pip install -e ".[dev]"`, both commands are available on your `PATH`.
 
 ## Documentation
 
-- [Getting Started](docs/getting-started/) — install and run Hecate
-- [Tutorials](docs/tutorials/) — end-to-end examples (first agent, knowledge base, MCP, multi-agent)
-- [How-to Guides](docs/how-to/) — task-oriented recipes (LLM providers, deployment, backup)
-- [API Reference](docs/reference/) — REST API, CLI, Graph DSL, and extension point references
-- [Architecture Center](docs/design/) — architecture, subsystem deep dives, and ADRs
-- [Migrations](docs/migrations/) — schema migration guides and expand-contract patterns
-- [Operations](docs/operations/) — runbooks for production operations
+- **[Getting Started](docs/getting-started/)** — install Hecate locally and send your first chat request in ~5 minutes.
+- **[Tutorials](docs/tutorials/)** — 11 end-to-end tutorials (first agent, knowledge base, MCP, multi-agent, A2A, OpenAI SDK, visual canvas, plus use cases).
+- **[How-to Guides](docs/how-to/)** — 16 task-oriented recipes (LLM providers, deployment, MCP, A2A, SSO, backups, webhooks, troubleshooting).
+- **[Concepts](docs/concepts/)** — 23 explanatory articles that help you understand Hecate's core ideas before building.
+- **[Reference](docs/reference/)** — REST API, CLI, Graph DSL, plugin manifest, event catalog, extension points, data models.
+- **[Architecture Center](docs/design/)** — 13 architecture deep dives + 28 ADRs + ADR index, plus strategy docs (positioning).
+- **[Use Cases](docs/use-cases/)** — end-to-end business scenarios (customer support bot, code review agent, research team).
+- **[Migrations](docs/migrations/)** — schema migration guides (expand-contract pattern, 0.1 → 0.2 upgrade).
+- **[Operations](docs/operations/)** — runbooks for production (health checks, backup, rollback, log analysis, performance).
+- **[About](docs/about/)** — inspired by, license, contributors, release notes.
+- **[CHANGELOG.md](CHANGELOG.md)** — machine-readable changelog.
+- **[GitHub Releases](https://github.com/xueyufish/hecate/releases)** — full release history with auto-generated notes.
 
 ---
 

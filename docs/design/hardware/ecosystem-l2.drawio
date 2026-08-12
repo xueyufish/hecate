@@ -42,7 +42,7 @@
         <mxCell id="r1_openapi" value="✅ OpenAPI Compatible" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;" vertex="1" parent="r1_c">
           <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r1_plugin" value="📋 Plugin System + SPI Core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+        <mxCell id="r1_plugin" value="✅ Plugin System + SPI Core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
           <mxGeometry x="225" y="68" width="200" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r1_marketplace" value="📋 Marketplace (EC3/EC6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
@@ -57,10 +57,10 @@
           <mxGeometry x="20" y="180" width="910" height="65" as="geometry" />
         </mxCell>
         <!-- 5 × 170 = 850 -->
-        <mxCell id="r2_a2a" value="📋 A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_a2a" value="✅ A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_cards" value="📋 Signed Cards + Trust (SS6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_cards" value="✅ Signed Cards + Trust (SS6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_ap2" value="📋 AP2 Payments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">

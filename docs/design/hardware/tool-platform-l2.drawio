@@ -63,10 +63,10 @@
         <mxCell id="r2_search" value="✅ Search Tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="225" y="30" width="205" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_skillversion" value="📋 Skill Versioning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_skillversion" value="✅ Skill Versioning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="455" y="30" width="210" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_pluginpkg" value="📋 Plugin Packaging" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_pluginpkg" value="✅ Plugin Packaging" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="690" y="30" width="220" height="26" as="geometry" />
         </mxCell>
         <!-- Sub-row 2b -->
@@ -76,7 +76,7 @@
         <mxCell id="r2_skilldetect" value="📋 Skill Auto-Detection" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
           <mxGeometry x="225" y="68" width="205" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_plugintypes" value="📋 Plugin Type Taxonomy + SDK (TP5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_plugintypes" value="✅ Plugin Type Taxonomy + SDK (TP5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="455" y="68" width="210" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_pluginsec" value="📋 Plugin Security &amp; Signing (TP1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">

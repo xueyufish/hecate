@@ -66,7 +66,7 @@
         <mxCell id="r2_risk" value="✅ 4-Level Risk Authorization" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_dlp" value="📋 Outbound DLP Engine (EF1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_dlp" value="✅ Outbound DLP Engine (EF1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
           <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_compliance" value="📋 Compliance &amp; Audit Center" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
@@ -103,14 +103,14 @@
         <mxCell id="r3_tracing" value="✅ Tracing + Metrics + Logging" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r3_c">
           <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_k8s" value="📋 K8s / Horizontal Scaling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_k8s" value="✅ K8s / Horizontal Scaling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_sovereignty" value="📋 Multi-Region Sovereignty (EF4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <!-- Sub-row 3b -->
-        <mxCell id="r3_backup" value="📋 Data Backup &amp; Recovery" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_backup" value="✅ Data Backup &amp; Recovery" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_alm" value="📋 Environment Mgmt / ALM" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
@@ -137,7 +137,7 @@
         <mxCell id="r4_rbac" value="✅ RBAC + Tenant Isolation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EEEEEE;strokeColor=#616161;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
           <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r4_vault" value="📋 Enterprise Vault (EF2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
+        <mxCell id="r4_vault" value="✅ Enterprise Vault (EF2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r4_c">
           <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r4_retention" value="📋 Zero Data Retention (EF5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
