@@ -40,7 +40,6 @@ Phase 8: Push (worktree)            ← single git push carries all commits
 Phase 9: PR + Merge                 ← single PR merges everything to main
 ```
 
-> **Note**: if a catalog edit is unusually large and needs an independent review (e.g. a wholesale rewrite of the feature description), you may extract it into a separate branch `chore-positioning-update-<name>` and ship it as a follow-up PR after Phase 9. This is the exception, not the default — default is "edit in the same worktree, commit, push, merge."
 
 ## Phase 1 — Explore (main checkout)
 
@@ -53,6 +52,8 @@ openspec/changes/<name>/
 ```
 
 Files in this phase are **uncommitted** in the main checkout. `scripts/opsx-flow.sh start` detects them and **syncs them into the worktree** as a rescue mechanism (see AGENTS.md § "OpenSpec change file sync").
+
+> **Note**: in early-development phases when the change name and shape are still fluid (e.g. scoping a P3 feature for the first time), Phase 1 may run in the main checkout. Artifacts are untracked; `git status` shows them as "Untracked files", and `main`'s HEAD is unchanged. Once the change name is locked, prefer running Phase 1 directly in the worktree — the rescue mechanism exists for the fluid case, not as the default path. The artifacts you wrote in main end up on a `feat/<name>` branch after `start` runs.
 
 > **Tip**: when Phase 1 produces a solid shape, **immediately** move to Phase 2. Do not run `/opsx-propose` in the main checkout — the AGENTS.md rule is "**Always run OpenSpec work inside a worktree**". If you accidentally run it in main, the worktree start will rescue your uncommitted artifacts.
 
