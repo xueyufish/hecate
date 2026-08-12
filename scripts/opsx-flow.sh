@@ -8,7 +8,9 @@
 # Usage:
 #   ./scripts/opsx-flow.sh start <name>   # create worktree + start session
 #   ./scripts/opsx-flow.sh push  <name>   # push worktree branch
-#   ./scripts/opsx-flow.sh clean <name>   # cleanup
+#   ./scripts/opsx-flow.sh clean [<name>] # remove worktree(s)
+#   ./scripts/opsx-flow.sh delete <name>  # remove worktree + branch after merge
+#   ./scripts/opsx-flow.sh remove <name>  # remove worktree only, keep branch
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -21,7 +23,7 @@ cmd="${1:-help}"
 shift || true
 
 case "${cmd}" in
-    start|push|clean|list)
+    start|push|clean|list|delete|remove)
         HECATE_WORKTREE_ROOT="${HECATE_WORKTREE_ROOT}" "${WT_SCRIPT}" "${cmd}" "$@"
         ;;
     help|*)
@@ -29,7 +31,9 @@ case "${cmd}" in
 Usage:
   $0 start <name>        # create worktree + start opencode in it
   $0 push  <name>        # push worktree branch to origin
-  $0 clean [<name>]      # remove worktree(s)
+  $0 delete <name>       # remove worktree + branch after merge
+  $0 remove <name>       # remove worktree only, keep branch
+  $0 list                # list active worktrees
 
 All OpenSpec work happens inside a worktree at \$HECATE_WORKTREE_ROOT/<name>.
 The main repo is never checked out for OpenSpec changes.
