@@ -40,14 +40,6 @@ Phase 8: Push (worktree)            ← single git push carries all commits
 Phase 9: PR + Merge                 ← single PR merges everything to main
 ```
 
-### Why Phase 6 (Archive) is before Phase 8 (Push)
-
-`/opsx-archive` produces a commit (`chore(archive): mv to archive/...`) on `feat/<change-name>`. For that commit to reach `main`, it must go through a PR + merge. The push (Phase 8) and PR (Phase 9) are the only way to land commits on `main` (it is a protected branch). So the archive commit **must** be on the branch **before** `git push` runs, otherwise it gets stranded on the local branch with no path to `main`.
-
-The same logic applies to the catalog commit in Phase 7 — it must also be on the branch before push.
-
----
-
 > **Note**: if a catalog edit is unusually large and needs an independent review (e.g. a wholesale rewrite of the feature description), you may extract it into a separate branch `chore-positioning-update-<name>` and ship it as a follow-up PR after Phase 9. This is the exception, not the default — default is "edit in the same worktree, commit, push, merge."
 
 ## Phase 1 — Explore (main checkout)
