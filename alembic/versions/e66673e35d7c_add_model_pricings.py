@@ -23,7 +23,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _DEFAULT_WORKSPACE = "00000000-0000-0000-0000-000000000000"
-_NOW = datetime.now(UTC)
+_NOW = datetime.now(UTC).replace(tzinfo=None)
 
 _SEED_PRICINGS = [
     {
@@ -91,7 +91,7 @@ def upgrade() -> None:
         sa.Column("workspace_id", sa.String(36), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(), nullable=True),
     )
     op.create_index(

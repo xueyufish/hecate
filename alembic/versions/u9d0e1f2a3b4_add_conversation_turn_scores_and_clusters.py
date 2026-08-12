@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "u9d0e1f2a3b4"
-down_revision: str = "t8c9d0e1f2a3"
+down_revision: str = "s7b8c9d0e1f2"
 branch_labels: str | None = None
 depends_on: str | None = None
 
@@ -38,7 +38,7 @@ def upgrade() -> None:
         sa.Column("scored_at", sa.DateTime(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
@@ -59,7 +59,7 @@ def upgrade() -> None:
         sa.Column("cohesion_score", sa.Float(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )

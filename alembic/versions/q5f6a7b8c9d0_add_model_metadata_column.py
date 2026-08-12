@@ -33,7 +33,7 @@ def upgrade() -> None:
 
     # Backfill existing rows with conservative defaults based on model_type
     conn = op.get_bind()
-    results = conn.execute(sa.text("SELECT id, model_type FROM model_registry WHERE deleted = 0")).fetchall()
+    results = conn.execute(sa.text("SELECT id, model_type FROM model_registry WHERE deleted = false")).fetchall()
     for row in results:
         meta = dict(_DEFAULT_METADATA)
         if row[1] == "embedding":

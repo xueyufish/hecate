@@ -38,7 +38,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean, nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("description", sa.String(500), nullable=True),
@@ -48,7 +48,7 @@ def upgrade() -> None:
         sa.Column("for_minutes", sa.Integer, nullable=False, server_default="2"),
         sa.Column("severity", sa.String(16), nullable=False, server_default="warning"),
         sa.Column("filters", sa.JSON, nullable=False, server_default="{}"),
-        sa.Column("enabled", sa.Boolean, nullable=False, server_default="1"),
+        sa.Column("enabled", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.Column("escalation_policy_id", sa.String(36), nullable=True),
         sa.Column("channel_ids", sa.JSON, nullable=False, server_default="[]"),
         sa.Column("workspace_id", sa.String(36), nullable=False, server_default=_DEFAULT_WORKSPACE),
@@ -61,7 +61,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean, nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("rule_id", sa.String(36), nullable=False),
         sa.Column("state", sa.String(16), nullable=False, server_default="pending"),
@@ -81,7 +81,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean, nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("start_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("end_at", sa.DateTime(timezone=True), nullable=False),
@@ -96,7 +96,7 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean, nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("steps", sa.JSON, nullable=False, server_default="[]"),
@@ -109,12 +109,12 @@ def upgrade() -> None:
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean, nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean, nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("channel_type", sa.String(32), nullable=False),
         sa.Column("config", sa.JSON, nullable=False, server_default="{}"),
-        sa.Column("enabled", sa.Boolean, nullable=False, server_default="1"),
+        sa.Column("enabled", sa.Boolean, nullable=False, server_default=sa.true()),
         sa.Column("workspace_id", sa.String(36), nullable=False, server_default=_DEFAULT_WORKSPACE),
     )
 
@@ -129,11 +129,11 @@ def upgrade() -> None:
                 "INSERT INTO escalation_policies "
                 "(id, created_at, updated_at, deleted, name, steps, "
                 "repeat_interval_min, workspace_id) "
-                "VALUES (:id, :now, :now, 0, :name, :steps, :repeat, :ws)"
+                "VALUES (:id, :now, :now, false, :name, :steps, :repeat, :ws)"
             ),
             {
                 "id": str(uuid.uuid4()),
-                "now": datetime.now(UTC),
+                "now": datetime.now(UTC).replace(tzinfo=None),
                 "name": "Standard Escalation",
                 "steps": (
                     '[{"delay_min": 0, "channel_types": ["webhook_feishu", "websocket"]}, '

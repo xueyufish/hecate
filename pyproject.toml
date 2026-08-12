@@ -43,6 +43,8 @@ dependencies = [
     "mcp>=1.0.0",
     "typer>=0.15.0",
     "rich>=13.0.0",
+    "litellm>=1.50.0",
+    "redis>=5.0.0",
 ]
 
 [project.urls]

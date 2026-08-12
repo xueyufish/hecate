@@ -48,7 +48,7 @@ def upgrade() -> None:
         sa.Column("settings", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("idx_orgs_slug_unique", "organizations", ["slug"], unique=True)
@@ -64,7 +64,7 @@ def upgrade() -> None:
         sa.Column("settings", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("idx_workspaces_org_slug", "workspaces", ["org_id", "slug"], unique=True)
@@ -91,7 +91,7 @@ def upgrade() -> None:
         sa.Column("role", workspace_role, nullable=False, server_default="viewer"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("idx_ws_members_user_workspace", "workspace_members", ["user_id", "workspace_id"], unique=True)
@@ -110,10 +110,10 @@ def upgrade() -> None:
         sa.Column("created_by", sa.Uuid(), nullable=False),
         sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="1"),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("idx_api_keys_hash", "api_keys", ["key_hash"], unique=True)

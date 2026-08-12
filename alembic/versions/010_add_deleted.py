@@ -65,7 +65,7 @@ def upgrade() -> None:
     for table in BASEMODEL_TABLES:
         op.add_column(
             table,
-            sa.Column("deleted", sa.Boolean(), nullable=False, server_default="0"),
+            sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         )
 
     # Step 2: Backfill deleted from deleted_at

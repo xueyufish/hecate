@@ -33,7 +33,7 @@ def upgrade() -> None:
         sa.Column("expires_at", sa.DateTime(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(), nullable=True),
     )
     op.create_index(
@@ -52,7 +52,7 @@ def upgrade() -> None:
         sa.Column("description", sa.String(500), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.text("0")),
+        sa.Column("deleted", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("deleted_at", sa.DateTime(), nullable=True),
     )
     op.create_index(

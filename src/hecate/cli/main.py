@@ -47,6 +47,15 @@ def version() -> None:
     console.print("hecate-cli 0.1.0")
 
 
+# --- Preflight ---
+@app.command(name="preflight")
+def preflight() -> None:
+    """Run preflight readiness checks (database, alembic, env vars) before starting the server."""
+    from hecate.cli.preflight import main as preflight_main
+
+    raise SystemExit(preflight_main())
+
+
 # --- Register subcommand groups ---
 # Each module creates its own typer.Typer app which gets added here
 
