@@ -38,22 +38,53 @@ sync_openspec_change() {
     local src="${REPO_ROOT}/openspec/changes/${name}"
     local dst="${wt_path}/openspec/changes/${name}"
 
-    [[ -d "${src}" ]] || return 0
+    [[ -d "${src}" ]] || return 1
 
     if [[ -d "${dst}" ]]; then
         echo "openspec/changes/${name} already present in worktree — skipping sync"
-        return 0
+        return 1
     fi
 
     local porcelain
     porcelain="$(cd "${REPO_ROOT}" && git status --porcelain -- "openspec/changes/${name}" 2>/dev/null || true)"
-    [[ -n "${porcelain}" ]] || return 0
+    [[ -n "${porcelain}" ]] || return 1
 
     echo "Detected uncommitted OpenSpec change '${name}' in main repo."
-    echo "  Syncing to worktree (clean up main with: rm -rf openspec/changes/${name})..."
+    echo "  Syncing to worktree..."
     mkdir -p "$(dirname "${dst}")"
     cp -R "${src}" "${dst}"
     echo "  Synced: ${src} → ${dst}"
+    return 0
+}
+
+cleanup_main_openspec_change() {
+    local name="$1"
+    local wt_path="$2"
+    local src="${REPO_ROOT}/openspec/changes/${name}"
+    local dst="${wt_path}/openspec/changes/${name}"
+
+    [[ -d "${src}" ]] || return 0
+
+    if [[ ! -d "${dst}" ]]; then
+        echo "  [cleanup] Skipped: worktree copy missing at ${dst}"
+        return 1
+    fi
+
+    if [[ ! -f "${src}/.openspec.yaml" || ! -f "${dst}/.openspec.yaml" ]]; then
+        echo "  [cleanup] Skipped: missing .openspec.yaml in src or dst (corrupt sync?)"
+        return 1
+    fi
+
+    if ! diff -rq "${src}" "${dst}" >/dev/null 2>&1; then
+        echo "  [cleanup] Skipped: src and dst differ:"
+        diff -rq "${src}" "${dst}" | sed 's/^/    /' | head -10
+        return 1
+    fi
+
+    echo "  [cleanup] Verified sync — removing main checkout copy..."
+    rm -rf "${src}"
+    echo "  [cleanup] Removed: ${src}"
+    return 0
 }
 
 case "${cmd}" in
@@ -74,7 +105,9 @@ case "${cmd}" in
             fi
             cd "${wt_path}"
             copy_worktreeinclude_files "${wt_path}"
-            sync_openspec_change "${name}" "${wt_path}"
+            if sync_openspec_change "${name}" "${wt_path}"; then
+                cleanup_main_openspec_change "${name}" "${wt_path}"
+            fi
             echo "Created worktree: ${wt_path} (branch: ${branch})"
         fi
 
