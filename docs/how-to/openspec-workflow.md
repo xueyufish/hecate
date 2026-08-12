@@ -33,22 +33,13 @@ Phase 5: Apply (worktree)
          ↓
 Phase 6: Archive (worktree)         ← /opsx-archive: spec sync + mv + commit
          ↓
-Phase 7: Catalog update (worktree)  ← edit docs/design/positioning.md, commit on same branch
+Phase 7: Catalog update (worktree)  ← update catalog files, commit on same branch
          ↓
 Phase 8: Push (worktree)            ← single git push carries all commits
          ↓
 Phase 9: PR + Merge                 ← single PR merges everything to main
 ```
 
-### Why Phase 6 (Archive) is before Phase 8 (Push)
-
-`/opsx-archive` produces a commit (`chore(archive): mv to archive/...`) on `feat/<change-name>`. For that commit to reach `main`, it must go through a PR + merge. The push (Phase 8) and PR (Phase 9) are the only way to land commits on `main` (it is a protected branch). So the archive commit **must** be on the branch **before** `git push` runs, otherwise it gets stranded on the local branch with no path to `main`.
-
-The same logic applies to the catalog commit in Phase 7 — it must also be on the branch before push.
-
----
-
-> **Note**: if a catalog edit is unusually large and needs an independent review (e.g. a wholesale rewrite of the feature description), you may extract it into a separate branch `chore-positioning-update-<name>` and ship it as a follow-up PR after Phase 9. This is the exception, not the default — default is "edit in the same worktree, commit, push, merge."
 
 ## Phase 1 — Explore (main checkout)
 
@@ -61,6 +52,8 @@ openspec/changes/<name>/
 ```
 
 Files in this phase are **uncommitted** in the main checkout. `scripts/opsx-flow.sh start` detects them and **syncs them into the worktree** as a rescue mechanism (see AGENTS.md § "OpenSpec change file sync").
+
+> **Note**: in early-development phases when the change name and shape are still fluid (e.g. scoping a P3 feature for the first time), Phase 1 may run in the main checkout. Artifacts are untracked; `git status` shows them as "Untracked files", and `main`'s HEAD is unchanged. Once the change name is locked, prefer running Phase 1 directly in the worktree — the rescue mechanism exists for the fluid case, not as the default path. The artifacts you wrote in main end up on a `feat/<name>` branch after `start` runs.
 
 > **Tip**: when Phase 1 produces a solid shape, **immediately** move to Phase 2. Do not run `/opsx-propose` in the main checkout — the AGENTS.md rule is "**Always run OpenSpec work inside a worktree**". If you accidentally run it in main, the worktree start will rescue your uncommitted artifacts.
 
@@ -221,18 +214,27 @@ After `/opsx-archive` finishes:
 
 ## Phase 7 — Catalog update (worktree — same branch)
 
-After Phase 6 (archive), still in the same worktree, edit **the single git-tracked catalog file** and add one more commit before pushing. This keeps the catalog update in the same PR as the feature and archive commits — one push, one review, one merge.
+After Phase 6 (archive), still in the same worktree, update **the catalog files** that the change touches and commit on the same branch. This keeps the catalog update in the same PR as the feature and archive commits — one push, one review, one merge.
+
+### Which catalog files exist (post-PR #63)
+
+Since PR #63 (`docs: add OpenSpec workflow guide and strengthen main branch protection`), the previously `.gitignored` working drafts under `docs/features/` are **git-tracked**. All four files now ride the normal PR flow:
+
+| File | Role |
+|---|---|
+| `docs/design/positioning.md` | Canonical competitive positioning + feature highlights. The single file AGENTS.md § "Catalog & Roadmap sync is MANDATORY" calls out by name. Update here for any feature that changes the positioning narrative. |
+| `docs/features/feature-catalog.md` | Full feature inventory: P1→P5 priority list, status counts, dependency notes, status-bar counters at the top. Update here for any feature that shifts the priority counts or lands in a new priority tier. |
+| `docs/features/roadmap.md` | Sprint-level schedule and ownership. Update here if the change moves a sprint boundary, adds a new workstream, or changes ownership. |
+| `docs/features/p3-mvp-audit.md` | P3 audit statistics — completed/in-progress/zero-code counts per sprint. Update here whenever the audit rolls forward. |
+
+Pick the file(s) the change actually affects. A bug fix that lands as P3 likely touches only `feature-catalog.md` and `p3-mvp-audit.md`. A new strategic positioning claim touches `positioning.md`. Large features may touch all four. If nothing in the change belongs in any catalog, skip the commit (the catalog step is no-op).
 
 ```bash
 # Still in the worktree from Phase 6:
-$EDITOR docs/design/positioning.md
-git add docs/design/positioning.md
-git commit -m "docs(positioning): mark <feature> with new status"
+$EDITOR docs/features/feature-catalog.md    # pick the file(s) the change touches
+git add docs/features/feature-catalog.md
+git commit -m "docs(catalog): mark <feature> as shipped in P3"
 ```
-
-> **Why `docs/design/positioning.md` specifically**: this is the git-tracked catalog that AGENTS.md § "Catalog & Roadmap sync is MANDATORY" requires updating. It contains the priority ordering (P1→P5), feature descriptions, and counts.
->
-> **Why not `docs/features/*`**: that directory is **.gitignored** (see `.gitignore` § "Local docs — not published to GitHub"). The `feature-catalog.md`, `roadmap.md`, and `p3-mvp-audit.md` files inside it are working drafts that exist on disk but never reach `main` — `git add` on them will silently fail. Editing them is wasted work.
 
 `feat/<change-name>` branch now contains (in chronological git log order):
 
@@ -241,8 +243,10 @@ git commit -m "docs(positioning): mark <feature> with new status"
 ├─ commit: feat: implement task 2
 ├─ commit: docs(spec): sync delta specs          (Phase 6 step 4 — only if Sync now chosen)
 ├─ commit: chore(archive): mv to archive/...    (Phase 6 step 5-6)
-└─ commit: docs(positioning): mark <feature> with new status  (this phase)
+└─ commit: docs(catalog): mark <feature> ...    (this phase; one commit per file touched)
 ```
+
+> **Why all four catalog files are git-tracked now**: before PR #63, `docs/features/` was excluded by `.gitignore`. Worktree ↔ main sync of catalog edits depended on ad-hoc copy. PR #63 removed the exclusion so catalog edits ride the normal worktree → push → PR → merge flow alongside feature code. See the PR description for context.
 
 ---
 
@@ -316,7 +320,7 @@ aaf5415 ─── main
    │      ├─ commit: feat: implement task 2               (Phase 5)
    │      ├─ commit: docs(spec): sync delta specs          (Phase 6 step 4 — only if Sync now chosen)
    │      ├─ commit: chore(archive): mv to archive/...    (Phase 6 step 5-6)
-   │      └─ commit: docs(positioning): mark <feature> ✅   (Phase 7)
+   │      └─ commit: docs(catalog): mark <feature> ...     (Phase 7 — see Phase 7 table for which file)
    │             ↓
    │             (PR merge) → main has archive/ tracked + catalog updated
 ```
@@ -332,7 +336,7 @@ aaf5415 ─── main
 Two rules make archive workflow stricter than feature work:
 
 1. **`/opsx-archive` must run inside the worktree** — never in the main checkout. The `mv` and the `git add` + `git commit` that follow both happen on the `feat/<change-name>` branch. The commit rides through the same PR as the feature code.
-2. **Catalog updates must go through a branch** — see [Catalog update PR](#catalog-update-pr). AGENTS.md § "Catalog & Roadmap sync is MANDATORY" requires updating `docs/design/positioning.md`; this too must commit on a non-`main` branch.
+2. **Catalog updates must go through a branch** — see [Phase 7](#phase-7--catalog-update-worktree--same-branch). AGENTS.md § "Catalog & Roadmap sync is MANDATORY" requires updating the relevant catalog file(s) (`docs/design/positioning.md` and/or files under `docs/features/`); this too must commit on a non-`main` branch.
 
 Both rules derive from the same constraint: `main` is a protected branch (AGENTS.md § Git). Any operation that would otherwise be performed in the main checkout must instead be performed on a feature branch and merged via PR.
 
@@ -363,9 +367,9 @@ git log --follow openspec/changes/archive/YYYY-MM-DD-<change-name>/proposal.md
 
 ### Pitfall 3: Catalog not updated after archive
 
-**Symptom**: the feature is archived but `docs/design/positioning.md` still describes the old status (e.g. "in progress" instead of "shipped").
+**Symptom**: the feature is archived but the catalog files still describe the old status (e.g. "in progress" instead of "shipped", or counts out of date).
 
-**Why**: `/opsx-archive` does not automatically update the catalog. Per AGENTS.md § "Catalog & Roadmap sync is MANDATORY", you must update `docs/design/positioning.md` in Phase 7 (or in a follow-up branch if you split the catalog into its own PR). The local working-draft files under `docs/features/` are **.gitignored** and never reach `main` — editing them is wasted work.
+**Why**: `/opsx-archive` does not automatically update the catalog. Per AGENTS.md § "Catalog & Roadmap sync is MANDATORY", you must update the relevant catalog file(s) in Phase 7 (or in a follow-up branch if you split the catalog into its own PR). Since PR #63 all four catalog files are git-tracked — see [Phase 7](#phase-7--catalog-update-worktree--same-branch) for which file to pick.
 
 ### Pitfall 4: Two changes in parallel with conflicting changes/<name>
 
