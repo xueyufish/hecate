@@ -4,7 +4,11 @@
 
 set -e
 
-# Activate venv if present
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "${SCRIPT_DIR}/prevent-main-commit.sh" ]; then
+    bash "${SCRIPT_DIR}/prevent-main-commit.sh" || exit 1
+fi
+
 VENV_DIR="$(git rev-parse --show-toplevel)/.venv"
 if [ -d "$VENV_DIR" ]; then
     source "$VENV_DIR/bin/activate"

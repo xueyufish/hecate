@@ -9,6 +9,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 ## Development
 
 - **[Develop custom extensions](develop-extensions.md)** — implement custom CheckpointStore, GuardrailHook, SchedulerStrategy, and other extension points. Three concrete code examples with wiring and testing patterns.
+- **[Use OpenSpec for change management](openspec-workflow.md)** — the eight-phase change lifecycle (explore → worktree → propose → apply → push → merge → archive), file lifecycle, git history, and the two safe archive workflows.
 
 ## Configuration
 
