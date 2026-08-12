@@ -34,7 +34,7 @@ def upgrade() -> None:
         sa.Column("timestamp", sa.DateTime(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.Column("deleted", sa.Boolean(), server_default="0", nullable=False),
+        sa.Column("deleted", sa.Boolean(), server_default=sa.false(), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )

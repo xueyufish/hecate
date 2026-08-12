@@ -19,6 +19,7 @@ from typing import Any
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
 from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text  # noqa: I001
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -90,7 +91,9 @@ class MemoryModel(BaseModel):
         default=_DEFAULT_WORKSPACE,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    scope: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    scope: Mapped[dict[str, Any]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=False, default=dict
+    )
     memory_type: Mapped[str] = mapped_column(String(50), nullable=False, default="semantic")
     importance: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     access_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -98,7 +101,7 @@ class MemoryModel(BaseModel):
 
     __table_args__ = (
         Index("idx_memories_workspace", "workspace_id", "deleted"),
-        Index("idx_memories_scope", "scope"),
+        Index("idx_memories_scope", "scope", postgresql_using="gin"),
         Index("idx_memories_type", "memory_type"),
         Index("idx_memories_importance", "importance"),
     )

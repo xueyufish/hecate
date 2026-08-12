@@ -50,7 +50,7 @@ services:
     ports:
       - "7233:7233"
     environment:
-      - DB=postgresql
+      - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_USER=hecate
       - POSTGRES_PWD=${POSTGRES_PASSWORD:-hecate}

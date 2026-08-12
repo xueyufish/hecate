@@ -13,7 +13,7 @@ from hecate.db.migrations.expand_contract import build_split_directives
 config = context.config
 config.set_main_option(
     "sqlalchemy.url",
-    os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url")),
+    os.getenv("DATABASE_URL") or config.get_main_option("sqlalchemy.url"),
 )
 
 if config.config_file_name is not None:
@@ -80,7 +80,7 @@ async def run_async_migrations():
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-    async with connectable.connect() as connection:
+    async with connectable.begin() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()
 

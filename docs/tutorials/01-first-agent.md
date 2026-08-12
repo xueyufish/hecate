@@ -22,6 +22,8 @@ This tutorial goes beyond the [Quickstart](../getting-started/quickstart.md). Yo
 
 Throughout this tutorial we use `dev-key-change-me` as the API key. Replace it with whatever you set in `HECATE_API_KEYS`.
 
+> **Using a non-OpenAI provider?** This tutorial uses `gpt-4o-mini` (OpenAI) throughout. Hecate routes all LLM traffic through [LiteLLM](https://github.com/BerriAI/litellm), so **100+ providers** work by changing the `model` string. Non-OpenAI providers need a LiteLLM prefix — e.g. Anthropic uses `claude-3-5-sonnet-20241022`, DeepSeek uses `deepseek/deepseek-chat`, GLM (Zhipu) uses `zhipu/glm-4-flash`, Ollama uses `ollama/llama3.1`. Replace every `gpt-4o-mini` in this tutorial (in `model_config.model` and in chat `model` fields) with your provider's model string, and set the matching env var in `.env`. See [Configure LLM Providers](../how-to/configure-llm-providers.md) for the full prefix table and the DB-backed provider registry.
+
 ---
 
 ## Step 1 — Understand the agent model
@@ -73,21 +75,28 @@ The response is the full agent object. Copy the `id` field — you'll use it in 
 ```json
 {
   "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "workspace_id": "00000000-0000-0000-0000-000000000000",
   "name": "Tech Support Agent",
   "persona": "You are a patient, precise technical support engineer...",
   "model_config": {"model": "gpt-4o-mini", "temperature": 0.3},
   "mode": "chat",
+  "workflow_id": null,
   "tools": [],
   "skills": [],
   "knowledge_base_ids": [],
   "risk_level": "LOW",
+  "opening_remarks": null,
   "enable_suggestions": true,
+  "guardrail_config": null,
   "created_at": "2026-01-15T10:30:00Z",
   "updated_at": "2026-01-15T10:30:00Z",
   "deleted": false,
-  "deleted_at": null
+  "deleted_at": null,
+  "model_available": true
 }
 ```
+
+> **New agent fields**: `workspace_id` is the tenant the agent belongs to (defaults to your workspace); `workflow_id` is set only for `workflow` mode agents; `opening_remarks` is an optional greeting the agent sends on first message; `guardrail_config` holds per-agent guardrail overrides; `model_available` reports whether the configured model is reachable. You can ignore most of these until later tutorials.
 
 > **`temperature: 0.3`** — tech-support answers should be consistent and factual, so we use a low temperature. For creative tasks like brainstorming, use 0.7 or higher.
 
@@ -98,6 +107,30 @@ Hecate stored the agent configuration in PostgreSQL. The agent is now addressabl
 ---
 
 ## Step 3 — Create an agent (CLI)
+
+### CLI authentication
+
+Before using any `hecate` CLI command, configure the API key once so the CLI can authenticate against the server:
+
+```bash
+hecate config set api_key dev-key-change-me
+```
+
+This must match a key listed in `HECATE_API_KEYS` on the server (the default `dev-key-change-me` works out of the box if you copied `.env.example`). If your server runs on a non-default host or port, also set the base URL:
+
+```bash
+hecate config set base_url http://localhost:8000
+```
+
+Verify the configuration:
+
+```bash
+hecate config show
+```
+
+Now every `hecate` command in the rest of this tutorial will authenticate automatically. See [CLI Reference](../reference/cli.md) for profile management and `hecate auth login` (JWT-based auth for multi-user deployments).
+
+### Create an agent
 
 The `hecate` CLI provides the same capability with a simpler interface. Create a second agent — a creative writing assistant:
 

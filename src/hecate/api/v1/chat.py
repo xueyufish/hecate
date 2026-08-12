@@ -25,6 +25,7 @@ from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
 from hecate.engine.eventstore import EventStore
 from hecate.engine.session_state import SessionStateStore
+from hecate.models.agent import AgentModel
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 from hecate.services.llm.service import llm_service
 from hecate.services.session_lock import session_lock_manager
@@ -193,6 +194,29 @@ async def _process_chat(
     """Process a chat completion request via WorkflowExecutionService."""
     msg_dicts = _messages_to_dicts(request.messages)
 
+    # Resolve "agent/<id>": load the agent, use its model_config.model, inject persona.
+    effective_model = request.model
+    agent_uuid: uuid.UUID | None = None
+    if request.model.startswith("agent/"):
+        from fastapi import HTTPException
+
+        agent_id_str = request.model.removeprefix("agent/").strip()
+        try:
+            agent_uuid = uuid.UUID(agent_id_str)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=f"Invalid agent id in model field: {agent_id_str}") from exc
+        agent_row = await db.execute(select(AgentModel).where(AgentModel.id == agent_uuid, ~AgentModel.deleted))
+        agent = agent_row.scalar_one_or_none()
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id_str}")
+        agent_cfg = agent.model_config_db or {}
+        resolved_model = agent_cfg.get("model") if isinstance(agent_cfg, dict) else getattr(agent_cfg, "model", None)
+        if not resolved_model:
+            raise HTTPException(status_code=500, detail="Agent has no model_config.model configured")
+        effective_model = resolved_model
+        if agent.persona and not any(m.get("role") == "system" for m in msg_dicts):
+            msg_dicts.insert(0, {"role": "system", "content": agent.persona})
+
     # Parse kb_ids if provided
     parsed_kb_ids: list[str] | None = None
     if request.kb_ids:
@@ -201,6 +225,8 @@ async def _process_chat(
     parsed_agent_id: str | uuid.UUID | None = None
     if request.agent_id:
         parsed_agent_id = request.agent_id
+    elif agent_uuid is not None:
+        parsed_agent_id = str(agent_uuid)
 
     use_enhanced = parsed_kb_ids or request.generate_opening or request.generate_suggestions
 
@@ -236,7 +262,7 @@ async def _process_chat(
                 result_gen = await exec_service.execute(
                     agent_mode="chat",
                     messages=msg_dicts,
-                    model=request.model,
+                    model=effective_model,
                     tools=request.tools,
                     stream=True,
                     session_id=request.session_id,
@@ -247,13 +273,13 @@ async def _process_chat(
                 )
 
                 if isinstance(result_gen, dict):
-                    yield _format_done_chunk(request.model)
+                    yield _format_done_chunk(effective_model)
                     return
 
                 async for event in result_gen:
                     if event.get("type") == "message":
                         chunk = ChatCompletionChunk(
-                            model=request.model,
+                            model=effective_model,
                             choices=[
                                 ChatCompletionChunkChoice(
                                     delta=ChatCompletionChunkDelta(content=event.get("content", "")),
@@ -268,7 +294,7 @@ async def _process_chat(
                         if suggested_questions:
                             yield f"data: {json.dumps({'type': 'suggestions', 'questions': suggested_questions})}\n\n"
 
-                yield _format_done_chunk(request.model)
+                yield _format_done_chunk(effective_model)
 
             return StreamingResponse(
                 _stream_with_workflow(),
@@ -279,7 +305,7 @@ async def _process_chat(
         result = await exec_service.execute(
             agent_mode="chat",
             messages=msg_dicts,
-            model=request.model,
+            model=effective_model,
             tools=request.tools,
             stream=False,
             session_id=request.session_id,
@@ -296,7 +322,7 @@ async def _process_chat(
         suggested_questions = result.get("suggested_questions")
 
         return ChatCompletionResponse(
-            model=result.get("model", request.model),
+            model=result.get("model", effective_model),
             choices=[
                 ChatCompletionChoice(
                     message=ChatMessage(
@@ -315,12 +341,12 @@ async def _process_chat(
         ).model_dump()
 
     # Simple passthrough: no KB, no suggestions — use LLM directly for lowest latency
-    provider_cfg = await _get_provider_config(db, request.model)
+    provider_cfg = await _get_provider_config(db, effective_model)
 
     if request.stream:
         return StreamingResponse(
             _stream_chat(
-                request.model,
+                effective_model,
                 msg_dicts,
                 request.temperature,
                 request.max_tokens,
@@ -333,7 +359,7 @@ async def _process_chat(
 
     response = await llm_service.chat(
         messages=msg_dicts,
-        model=request.model,
+        model=effective_model,
         tools=request.tools,
         temperature=request.temperature,
         max_tokens=request.max_tokens,
@@ -342,7 +368,7 @@ async def _process_chat(
     )
 
     return ChatCompletionResponse(
-        model=response.model or request.model,
+        model=response.model or effective_model,
         choices=[
             ChatCompletionChoice(
                 message=ChatMessage(
