@@ -211,6 +211,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.exception("Plugin discovery failed")
 
+    # Initialize IM channels (Feishu, Slack) — register adapters and
+    # spin up the asynchronous MessageBus used by the webhook endpoint to
+    # decouple webhook ACK from Agent execution (design.md D5).
+    try:
+        from hecate.channel.im.message_bus import IMMessageBus
+        from hecate.gateway.registration import register_channels, register_im_channels
+        from hecate.plugin.registry import PluginRegistry
+
+        plugin_registry = PluginRegistry()
+        register_channels(plugin_registry)
+        registered_im = register_im_channels(plugin_registry)
+        app.state.plugin_registry = plugin_registry
+
+        im_bus = IMMessageBus()
+        await im_bus.start()
+        app.state.im_message_bus = im_bus
+        logger.info("IM channels initialized: %d IM adapter(s) registered", registered_im)
+    except Exception:
+        logger.exception("IM channel initialization failed; continuing without IM support")
+
     # Register daily budget forecast snapshot task
     try:
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -329,6 +349,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if tool_decision_svc:
         decision_emitter.disable()
         await tool_decision_svc.stop()
+    # Shutdown: stop IM message bus
+    im_message_bus = getattr(app.state, "im_message_bus", None)
+    if im_message_bus is not None:
+        try:
+            await im_message_bus.stop()
+        except Exception:
+            logger.exception("IM message bus shutdown failed")
     # Shutdown: stop audit writer
     await audit_writer.stop()
     # Shutdown: stop monitoring service
@@ -686,6 +713,15 @@ app.include_router(environment_router)
 from hecate.api.system.backup import router as backup_router  # noqa: E402
 
 app.include_router(backup_router, tags=["backup"])
+
+# IM channel webhooks (Feishu + Slack) — registered after backup to keep
+# the system routers grouped together. The IMMessageBus is initialized in
+# the lifespan handler below.
+from hecate.api.v1.channels import router as im_channels_router  # noqa: E402
+from hecate.api.v1.im_bindings import router as im_bindings_router  # noqa: E402
+
+app.include_router(im_channels_router)
+app.include_router(im_bindings_router)
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:

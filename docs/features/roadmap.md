@@ -149,7 +149,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 11.2 | Web Widget | API ✅ | S |
-| 11.3 | Feishu (Lark) | Channel SDK | S |
+| 11.3 | Feishu (Lark) ✅ | Channel SDK | S |
 
 ### Milestone M2 (End of Sprint 2)
 
@@ -525,11 +525,11 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 11.2 | Web Widget (Simplified) *Wave 1 — internal Portal / embeddable for any Hecate deployment* | API ✅ | S (simplified) |
-| 11.3 | Feishu (Lark) *Wave 1 — China market anchor + first ChannelABC reference impl* | Channel SDK | M |
-| 11.4 | WeCom (WeChat Work) *Wave 2 — reuse 11.3 pattern* | 11.3 | S |
-| 11.5 | DingTalk *Wave 2 — reuse 11.3 pattern* | 11.3 | S |
+| 11.3 | Feishu (Lark) ✅ *Wave 1 — China market anchor + first ChannelABC reference impl (Delivered 2026-08-13)* | Channel SDK | M |
+| 11.4 | WeCom (WeChat Work) *Wave 2 — reuse 11.3 pattern* | 11.3 ✅ | S |
+| 11.5 | DingTalk *Wave 2 — reuse 11.3 pattern* | 11.3 ✅ | S |
 | 11.8 | Intent Recognition & Routing | Multi-Agent ✅ | M |
-| 11.9 | Slack/Discord/Telegram *Wave 1 — Slack (M, ChannelABC 2nd impl validating SPI generality); Wave 2 — Discord/Telegram (S each)* | ChannelABC ✅ | M (Slack) + S (Discord/Telegram) |
+| 11.9 | Slack ✅ / Discord/Telegram *Wave 1 — Slack (M, ChannelABC 2nd impl validating SPI generality, Delivered 2026-08-13); Wave 2 — Discord/Telegram (S each)* | ChannelABC ✅ | M (Slack) + S (Discord/Telegram) |
 
 **Deferred to P5 (按需触发, 不在当前 P3 主线)**:
 - 11.2 (full) — Web Widget 完整版（匿名 to-C 场景），trigger = 第一个公开网站/营销/客服场景的客户
@@ -540,8 +540,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | Wave | Feature | 触发条件 | 时机 |
 |---|---|---|---|
-| Wave 1 | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | 当前 Sprint |
-| Wave 2 | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | Wave 1 ship 后 1-2 Sprint 内补齐中国 IM 全覆盖 | Wave 1 后 |
+| Wave 1 | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | **2026-08-13: 11.3 ✅ + 11.9 Slack ✅ 交付;11.2 简化版待交付** |
+| Wave 2 | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | Wave 1 IM ship 后 1-2 Sprint 内补齐中国 IM 全覆盖 | Next |
 | Wave 3（按需） | 11.2 完整版 + 11.6 微信 + 11.10 Custom SDK | 不预定时间，等明确客户需求 | 不预定 |
 | 11.16 | Per-Token-Type Auth Pipeline | Auth ✅ | M |
 | 11.17 | Two-Tier Identity Model | Auth ✅ + RBAC ✅ | M |

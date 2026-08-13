@@ -97,6 +97,8 @@ tools = [
     "tavily-python>=0.5",
     "a2a-sdk>=1.1.0",
     "aiodocker>=0.23.0",
+    "lark-oapi[aiohttp]>=1.4.0",
+    "slack-bolt>=1.18.0",
 ]
 redis = [
     "redis>=5.0.0",

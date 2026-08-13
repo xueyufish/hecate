@@ -386,11 +386,11 @@ Multi-Database → Multi-Vector-DB → MCP Server Mode
 | # | Feature | Domain | Description | References |
 |---|---------|--------|-------------|------------|
 | 11.2 | Web Widget (Simplified) | Multi-Channel Access | Embedded web chat component — **simplified version (Wave 1, in P3)** = 内部 Portal / embeddable for any Hecate deployment（直接复用现有 `(dashboard)/chat` + 员工 JWT 登录），S。架构决策：**Web Widget 不走 ChannelABC**——浏览器直接调 `/v1/chat/completions`，与 IM 渠道（webhook 推送）是不同的抽象层。**完整版（公开匿名场景：WidgetModel + 临时 JWT 签发 + Origin 白名单 + RS256 + JS bundle）**——Deferred to P5（按需触发：to-C / 公开网站场景，trigger = first explicit customer demand），M。 | Coze, Dify, Intercom (JWT + bundle optimization), Salesforce Enhanced Web Chat (RS256 + identityToken API), Google Dialogflow Messenger (Web Component) |
-| 11.3 | Feishu (Lark) | Multi-Channel Access | Feishu bot SDK integration. **Status (2026-08-12, Wave 1)**: 工作量 S→M（首个 ChannelABC 真实实现——暴露当前 SPI 类型擦除（`raw: object`）等问题并推动 SPI 演进；webhook 签名验证 + tenant_access_token + 互动卡片）。完成后 Wave 2 中国 IM（11.4/11.5）复用模式，工作量 S each. | OpenClaw (Feishu channel), Hermes Agent (multi-platform gateway pattern), AgentScope (channels/feishu) |
+| 11.3 | Feishu (Lark) ✅ | Multi-Channel Access | Feishu bot SDK integration. **Status (2026-08-13, Delivered ✅)**: 首个 ChannelABC 真实实现——暴露当前 SPI 类型擦除（`raw: object`）等问题并推动 SPI 演进；webhook 签名验证 + tenant_access_token + 互动卡片。Wave 2 中国 IM（11.4/11.5）复用此模式，工作量 S each. | OpenClaw (Feishu channel), Hermes Agent (multi-platform gateway pattern), AgentScope (channels/feishu) |
 | 11.4 | WeCom (WeChat Work) | Multi-Channel Access | WeCom bot SDK integration. **Status (2026-08-12, Wave 2)**: 复用 11.3 模式（webhook + signature verification + 企业 IM 消息模板），S each. | OpenClaw (WeCom channel) |
 | 11.5 | DingTalk | Multi-Channel Access | DingTalk bot SDK integration. **Status (2026-08-12, Wave 2)**: 复用 11.3 模式，S each. | OpenClaw (DingTalk channel) |
 | 11.8 | Intent Recognition & Routing | Multi-Channel Access | Unified entry-level intent recognition and dispatch, accurately parse user instructions and auto-route to the best Agent or workflow | Versatile AgentSpace (intent framework), AgentArts (multi-level intent recognition) |
-| 11.9 | Slack/Discord/Telegram | Multi-Channel Access | International channels. **Status (2026-08-12)**: Wave 1 — Slack（M，ChannelABC 第二个实现，验证 SPI 通用性）+ 验证完成后 Wave 2 — Discord/Telegram（各 S，Bot API 模式复用）。 | OpenClaw (20+ channels), Hermes Agent (multi-platform gateway pattern) |
+| 11.9 | Slack ✅ / Discord/Telegram | Multi-Channel Access | International channels. **Status (2026-08-13)**: Wave 1 — Slack（M，ChannelABC 第二个实现，验证 SPI 通用性）**已交付 ✅**；Wave 2 — Discord/Telegram（各 S，Bot API 模式复用）待开发。 | OpenClaw (20+ channels), Hermes Agent (multi-platform gateway pattern) |
 
 ### Deployment & Operations
 

@@ -62,6 +62,10 @@ class ConversationModel(BaseModel):
     # Cluster assignment
     cluster_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
 
+    # IM channel provenance (multi-channel-feishu-slack)
+    source_channel: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    im_chat_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
     __table_args__ = (
         Index("idx_conversations_agent", "agent_id", "deleted"),
         Index("idx_conversations_workspace", "workspace_id", "deleted"),
@@ -89,6 +93,8 @@ class ConversationReadSchema(PydanticBase):
     agent_id: uuid.UUID
     title: str | None
     workspace_id: uuid.UUID
+    source_channel: str | None = None
+    im_chat_id: str | None = None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False

@@ -53,6 +53,9 @@ class SessionModel(BaseModel):
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
     )
 
+    # IM channel provenance (multi-channel-feishu-slack)
+    source_channel: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     __table_args__ = (
         Index("idx_sessions_agent", "agent_id"),
         Index("idx_sessions_conversation", "conversation_id"),
@@ -82,6 +85,7 @@ class SessionReadSchema(PydanticBase):
     current_node: str | None
     checkpoint_id: uuid.UUID | None
     workspace_id: uuid.UUID
+    source_channel: str | None = None
     metadata: dict = Field(validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
