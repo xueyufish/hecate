@@ -167,6 +167,43 @@ class EnginePort(ABC):
         """
         ...
 
+    async def llm_invoke_structured(
+        self,
+        messages: list[dict],
+        config: dict,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Invoke LLM with structured response yielding content and optional tool_calls (optional).
+
+        Enables the engine layer's Pregel chat graph tool-calling loop to detect when
+        the LLM requested tools and route execution through ``check_tools`` /
+        ``tool_call`` nodes. Chunks are dicts with keys:
+
+        - ``content`` (str | None): text token delta; ``None`` when this chunk carries
+          only structured metadata.
+        - ``tool_calls`` (list[dict] | None): accumulated tool calls; ``None`` if the
+          LLM did not request any tools in this response.
+
+        Default implementation delegates to ``llm_invoke``, collects all tokens, and
+        yields a single chunk ``{"content": <full text>, "tool_calls": None}``.
+        Concrete adapters SHOULD override this method to surface structured
+        ``tool_calls`` from the underlying LLM service.
+
+        This is an optional method — concrete EnginePort implementations are not
+        required to override it. Non-overriding ports degrade to plain token-stream
+        semantics and engine tool-calling detection will simply not activate.
+
+        Args:
+            messages: Conversation messages for the LLM.
+            config: Provider-specific configuration (model, tools, etc.).
+
+        Yields:
+            Structured chunk dicts as described above.
+        """
+        tokens: list[str] = []
+        async for token in self.llm_invoke(messages=messages, config=config):
+            tokens.append(token)
+        yield {"content": "".join(tokens), "tool_calls": None}
+
     async def context_assemble(
         self,
         messages: list[dict],

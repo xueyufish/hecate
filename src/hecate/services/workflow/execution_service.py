@@ -276,6 +276,7 @@ class WorkflowExecutionService:
                 system_prompt=system_prompt,
                 enable_suggestions=enable_suggestions or generate_opening,
                 generate_opening=generate_opening,
+                tools=tools,
             )
         elif agent_mode == "three_layer":
             graph_config = build_three_layer_graph(

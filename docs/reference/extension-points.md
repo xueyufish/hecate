@@ -100,6 +100,7 @@ These methods have default implementations and are only overridden when the corr
 | `agent_execute(agent_id, messages, channel_snapshot, context, agent_definition)` | Raises `NotImplementedError` | **Multi-Agent** — executes a sub-agent by ID with isolated context. Concrete adapters MUST override this. |
 | `tool_execute_sandbox(name, args, context)` | Falls back to `tool_execute` | **Security** — executes a tool inside a Docker-isolated sandbox container. Uses the sandbox pool when enabled. |
 | `workflow_execute(workflow_id, input_data, context)` | Raises `NotImplementedError` | **Workflow Embedding** — enables agents to invoke workflows as callable tools via SkillRegistry. |
+| `llm_invoke_structured(messages, config)` | Delegates to `llm_invoke`, yields a single chunk `{"content": <full text>, "tool_calls": None}` | **Tool Calling** — invokes the LLM yielding structured chunks (dicts with `content` and `tool_calls` keys) so the engine's Pregel chat graph can detect tool calls and route through the `check_tools` / `tool_call` loop. Production adapters override it to stream content and accumulate structured `tool_calls`. Non-overriding ports degrade to plain token-stream semantics. |
 
 ### SpanContext
 

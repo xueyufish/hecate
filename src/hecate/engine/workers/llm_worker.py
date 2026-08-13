@@ -316,8 +316,9 @@ class LLMWorker(Worker):
         llm_start = time.monotonic()
         first_token_time: float | None = None
 
-        # LLM invocation (non-streaming via llm_invoke)
         full_response = ""
+        structured_tool_calls: list[dict[str, Any]] | None = None
+        has_tools = bool(shaped_tools)
         if self._event_store and execution_context:
             await self._event_store.append(
                 Event(
@@ -329,13 +330,27 @@ class LLMWorker(Worker):
                 )
             )
         try:
-            async for token in self._port.llm_invoke(
-                messages=shaped_messages,
-                config={"model": model, "tools": shaped_tools},
-            ):
-                if first_token_time is None:
-                    first_token_time = time.monotonic()
-                full_response += token
+            if has_tools:
+                async for chunk in self._port.llm_invoke_structured(
+                    messages=shaped_messages,
+                    config={"model": model, "tools": shaped_tools},
+                ):
+                    content = chunk.get("content")
+                    chunk_tool_calls = chunk.get("tool_calls")
+                    if content:
+                        if first_token_time is None:
+                            first_token_time = time.monotonic()
+                        full_response += content
+                    if chunk_tool_calls:
+                        structured_tool_calls = chunk_tool_calls
+            else:
+                async for token in self._port.llm_invoke(
+                    messages=shaped_messages,
+                    config={"model": model, "tools": shaped_tools},
+                ):
+                    if first_token_time is None:
+                        first_token_time = time.monotonic()
+                    full_response += token
         except Exception as e:
             logger.warning("LLM invocation failed for node '%s': %s", node_id, e)
             if span_ctx:
@@ -370,6 +385,8 @@ class LLMWorker(Worker):
             "content": full_response,
             "model": model,
         }
+        if structured_tool_calls:
+            response_dict["tool_calls"] = structured_tool_calls
 
         # PostLLMHook
         post_result = await self._post_hook.on_post_llm_call(
@@ -400,11 +417,11 @@ class LLMWorker(Worker):
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": full_response}
         updates: dict[str, Any] = {"messages": [assistant_msg]}
 
-        # Check for tool calls in response (placeholder — actual tool call
-        # detection happens when LLM returns structured responses)
         if response_dict.get("tool_calls"):
             assistant_msg["tool_calls"] = response_dict["tool_calls"]
             updates["_has_tool_call"] = True
+        else:
+            updates["_has_tool_call"] = False
 
         return WorkerResult(node_id=node_id, channel_updates=updates)
 
@@ -470,17 +487,33 @@ class LLMWorker(Worker):
         llm_start = time.monotonic()
         first_token_time: float | None = None
 
-        # LLM invocation (streaming) — yield tokens as they arrive
         full_response = ""
+        structured_tool_calls: list[dict[str, Any]] | None = None
+        has_tools = bool(shaped_tools)
         try:
-            async for token in self._port.llm_invoke(
-                messages=shaped_messages,
-                config={"model": model, "tools": shaped_tools},
-            ):
-                if first_token_time is None:
-                    first_token_time = time.monotonic()
-                full_response += token
-                yield {"content": token}
+            if has_tools:
+                async for chunk in self._port.llm_invoke_structured(
+                    messages=shaped_messages,
+                    config={"model": model, "tools": shaped_tools},
+                ):
+                    content = chunk.get("content")
+                    chunk_tool_calls = chunk.get("tool_calls")
+                    if content:
+                        if first_token_time is None:
+                            first_token_time = time.monotonic()
+                        full_response += content
+                        yield {"content": content}
+                    if chunk_tool_calls:
+                        structured_tool_calls = chunk_tool_calls
+            else:
+                async for token in self._port.llm_invoke(
+                    messages=shaped_messages,
+                    config={"model": model, "tools": shaped_tools},
+                ):
+                    if first_token_time is None:
+                        first_token_time = time.monotonic()
+                    full_response += token
+                    yield {"content": token}
         except Exception as e:
             logger.warning("LLM streaming failed for node '%s': %s", node_id, e)
             if span_ctx:
@@ -506,6 +539,8 @@ class LLMWorker(Worker):
             "content": full_response,
             "model": model,
         }
+        if structured_tool_calls:
+            response_dict["tool_calls"] = structured_tool_calls
 
         # PostLLMHook
         post_result = await self._post_hook.on_post_llm_call(
@@ -540,5 +575,7 @@ class LLMWorker(Worker):
         if response_dict.get("tool_calls"):
             assistant_msg["tool_calls"] = response_dict["tool_calls"]
             updates["_has_tool_call"] = True
+        else:
+            updates["_has_tool_call"] = False
 
         yield WorkerResult(node_id=node_id, channel_updates=updates)

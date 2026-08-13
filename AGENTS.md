@@ -70,7 +70,7 @@ The engine layer defines these abstract interfaces (all in `src/hecate/engine/`)
 | PreLLMHook / PostLLMHook / PreToolHook / PostToolHook | `guardrail.py` | on_pre_llm_call / on_post_llm_call / on_pre_tool_call / on_post_tool_call | NoOp variants for each |
 | RetryStrategy | `retry.py` | should_retry, get_backoff, with_config | NoRetryStrategy |
 
-EnginePort also has 4 optional methods with defaults: `context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`.
+EnginePort also has 6 optional methods with defaults: `context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`, `workflow_execute`, `llm_invoke_structured`. `llm_invoke_structured` delegates to `llm_invoke` by default (yields a single `{"content", "tool_calls": None}` chunk); the production adapter overrides it to stream content and accumulate structured `tool_calls` for the chat graph tool loop.
 
 **Integration status**: ContextEngine wired into LLMWorker via PregelRuntime execution_context (Phase 1). GuardrailHooks are Worker-level only, not PregelRuntime-level (P3). RetryStrategy integrated into PregelRuntime via RetryExecutor (P3).
 

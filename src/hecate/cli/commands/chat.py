@@ -32,7 +32,7 @@ def send(
     client = HecateClient(get_profile_name())
 
     body: dict = {
-        "model": agent_id,
+        "model": f"agent/{agent_id}",
         "messages": [{"role": "user", "content": message}],
         "stream": False,
     }
@@ -95,7 +95,7 @@ def interactive_chat(
         # Build messages
         history.append({"role": "user", "content": user_input})
         body: dict = {
-            "model": agent_id,
+            "model": f"agent/{agent_id}",
             "messages": list(history),
             "stream": True,
         }

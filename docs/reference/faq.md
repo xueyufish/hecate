@@ -156,7 +156,7 @@ Implement the corresponding ABC — `SchedulerStrategy` (`select_next`, `set_wei
 
 ### What is the difference between an extension point and an SPI?
 
-Both are abstract interfaces, but an **extension point** is a full ABC you must implement to customize behavior (11 of them: `Worker`, `WorkerPool`, `CheckpointStore`, etc.), while the **4 SPI methods** on `EnginePort` (`context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`) ship with default implementations and are *optional* overrides for service-layer adapters. See [Extension Points](extension-points.md).
+Both are abstract interfaces, but an **extension point** is a full ABC you must implement to customize behavior (11 of them: `Worker`, `WorkerPool`, `CheckpointStore`, etc.), while the **6 SPI methods** on `EnginePort` (`context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`, `workflow_execute`, `llm_invoke_structured`) ship with default implementations and are *optional* overrides for service-layer adapters. See [Extension Points](extension-points.md).
 
 ---
 

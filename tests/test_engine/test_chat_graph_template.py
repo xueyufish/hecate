@@ -107,3 +107,197 @@ class TestBuildChatGraphWithSuggestions:
         """generate_opening flag is stored in suggestion node config."""
         graph = build_chat_graph(model="gpt-4o", enable_suggestions=True, generate_opening=True)
         assert graph.nodes["suggestions"].config["generate_opening"] is True
+
+
+class TestBuildChatGraphTools:
+    """Verify tools injection into the LLM node config."""
+
+    def test_tools_injected_into_llm_node(self):
+        """When tools is provided, the llm node config includes the 'tools' key."""
+        tools = [
+            {"type": "function", "function": {"name": "web_search", "description": "search"}},
+            {"type": "function", "function": {"name": "calc", "description": "calculate"}},
+        ]
+        graph = build_chat_graph(model="gpt-4o", tools=tools)
+        assert graph.nodes["llm"].config["tools"] == tools
+
+    def test_tools_omitted_when_none(self):
+        """When tools is None, the llm node config does not contain the 'tools' key."""
+        graph = build_chat_graph(model="gpt-4o")
+        assert "tools" not in graph.nodes["llm"].config
+
+    def test_tools_empty_list_preserved(self):
+        """An empty tools list is stored as an empty list (not omitted)."""
+        graph = build_chat_graph(model="gpt-4o", tools=[])
+        assert graph.nodes["llm"].config["tools"] == []
+
+    def test_tools_with_suggestions(self):
+        """Tools injection coexists with the suggestions node."""
+        tools = [{"type": "function", "function": {"name": "x"}}]
+        graph = build_chat_graph(model="gpt-4o", enable_suggestions=True, tools=tools)
+        assert graph.nodes["llm"].config["tools"] == tools
+        assert "suggestions" in graph.nodes
+
+
+class TestChatGraphToolLoopE2E:
+    """End-to-end chat graph tool-calling loop test."""
+
+    def _scripted_llm_port(self, scripts):
+        from collections.abc import AsyncGenerator
+
+        from hecate.engine.ports import EnginePort
+
+        class _ScriptedPort(EnginePort):
+            def __init__(self, scripts: list[list[dict]]) -> None:
+                self._scripts = list(scripts)
+                self._idx = 0
+                self.llm_invoke_calls = 0
+
+            async def llm_invoke_structured(self, messages, config) -> AsyncGenerator[dict, None]:
+                idx = self._idx
+                self._idx += 1
+                if idx < len(self._scripts):
+                    for chunk in self._scripts[idx]:
+                        yield chunk
+
+            async def llm_invoke(self, messages, config) -> AsyncGenerator[str, None]:
+                self.llm_invoke_calls += 1
+                return
+                yield ""
+
+            async def tool_execute(self, name, args, context=None):
+                return None
+
+            async def knowledge_query(self, query, kb_ids):
+                return []
+
+            async def checkpoint_save(self, state):
+                import uuid
+
+                return uuid.uuid4()
+
+            async def checkpoint_load(self, checkpoint_id):
+                return {}
+
+            async def conversation_load(self, session_id):
+                return []
+
+            async def conversation_save(self, session_id, messages):
+                return None
+
+            async def create_span(self, name, parent_id=None, attributes=None):
+                return None
+
+            async def end_span(self, span_id, output_data=None, usage=None):
+                return None
+
+        return _ScriptedPort(scripts)
+
+    async def test_tool_loop_runs_until_no_tool_call(self) -> None:
+        import uuid as _uuid
+
+        from hecate.engine.checkpoint import InMemoryCheckpointStore
+        from hecate.engine.compiler import GraphCompiler
+        from hecate.engine.pregel import PregelRuntime
+        from hecate.engine.types import StreamMode, WorkerResult
+        from hecate.engine.worker import Worker
+        from hecate.engine.workers.condition_worker import ConditionWorker
+        from hecate.engine.workers.llm_worker import LLMWorker
+
+        class _StubToolCallWorker(Worker):
+            async def execute(self, node_id, node_config, channel_snapshot, execution_context=None):
+                messages = channel_snapshot.get("messages", [])
+                for msg in reversed(messages):
+                    if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                        tool_calls = msg["tool_calls"]
+                        results = []
+                        for tc in tool_calls:
+                            func = tc.get("function", {})
+                            name = func.get("name", "?")
+                            results.append(
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": tc.get("id", ""),
+                                    "name": name,
+                                    "content": f"mock result for {name}",
+                                }
+                            )
+                        return WorkerResult(node_id=node_id, channel_updates={"messages": results})
+                return WorkerResult(node_id=node_id, channel_updates={"messages": []})
+
+        class _DispatchWorker(Worker):
+            def __init__(self, port):
+                super().__init__()
+                self._llm = LLMWorker(port=port)
+                self._cond = ConditionWorker()
+                self._tool = _StubToolCallWorker()
+                self._llm_call_count = 0
+
+            async def execute(self, node_id, node_config, channel_snapshot, execution_context=None):
+                if node_id == "llm":
+                    self._llm_call_count += 1
+                    return await self._llm.execute(node_id, node_config, channel_snapshot, execution_context)
+                if node_id == "check_tools":
+                    return await self._cond.execute(node_id, node_config, channel_snapshot, execution_context)
+                if node_id == "tool_call":
+                    return await self._tool.execute(node_id, node_config, channel_snapshot, execution_context)
+                return WorkerResult(node_id=node_id, channel_updates={})
+
+        tool_calls = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "web_search", "arguments": '{"query":"weather"}'},
+            },
+        ]
+        scripts = [
+            [
+                {"content": "Let me check.", "tool_calls": None},
+                {"content": None, "tool_calls": tool_calls},
+            ],
+            [
+                {"content": "It's ", "tool_calls": None},
+                {"content": "sunny.", "tool_calls": None},
+                {"content": None, "tool_calls": None},
+            ],
+        ]
+        port = self._scripted_llm_port(scripts)
+
+        graph = build_chat_graph(
+            model="gpt-4o",
+            tools=[{"type": "function", "function": {"name": "web_search"}}],
+        )
+        compiled = GraphCompiler().compile(graph)
+        runtime = PregelRuntime(
+            graph=compiled,
+            worker=_DispatchWorker(port),
+            checkpoint_store=InMemoryCheckpointStore(),
+        )
+
+        results: list = []
+        async for event in runtime.execute(
+            session_id=_uuid.uuid4(),
+            initial_input={
+                "messages": [{"role": "user", "content": "weather?"}],
+                "_session_id": "s",
+                "_agent_id": "a",
+                "_user_id": "u",
+                "_turn_index": 0,
+            },
+            stream_mode=StreamMode.VALUES,
+            execution_mode="conversational",
+        ):
+            results.append(event)
+
+        assert port._idx == 2
+        final_state = results[-1]["state"] if results else {}
+        messages = final_state.get("messages", [])
+        assistant_with_tool = [m for m in messages if m.get("role") == "assistant" and m.get("tool_calls")]
+        tool_results = [m for m in messages if m.get("role") == "tool"]
+        final_assistant_text = [m for m in messages if m.get("role") == "assistant" and not m.get("tool_calls")]
+        assert len(assistant_with_tool) >= 1
+        assert len(tool_results) >= 1
+        assert tool_results[0]["content"] == "mock result for web_search"
+        assert final_assistant_text[-1]["content"] == "It's sunny."
+        assert "_has_tool_call" in final_state
+        assert final_state["_has_tool_call"] is False
