@@ -22,7 +22,7 @@ This tutorial goes beyond the [Quickstart](../getting-started/quickstart.md). Yo
 
 Throughout this tutorial we use `dev-key-change-me` as the API key. Replace it with whatever you set in `HECATE_API_KEYS`.
 
-> **Using a non-OpenAI provider?** This tutorial uses `gpt-4o-mini` (OpenAI) throughout. Hecate routes all LLM traffic through [LiteLLM](https://github.com/BerriAI/litellm), so **100+ providers** work by changing the `model` string. Non-OpenAI providers need a LiteLLM prefix — e.g. Anthropic uses `claude-3-5-sonnet-20241022`, DeepSeek uses `deepseek/deepseek-chat`, GLM (Zhipu) uses `zhipu/glm-4-flash`, Ollama uses `ollama/llama3.1`. Replace every `gpt-4o-mini` in this tutorial (in `model_config.model` and in chat `model` fields) with your provider's model string, and set the matching env var in `.env`. See [Configure LLM Providers](../how-to/configure-llm-providers.md) for the full prefix table and the DB-backed provider registry.
+> **Using a non-OpenAI provider?** This tutorial uses `gpt-4o-mini` (OpenAI) throughout. Hecate routes all LLM traffic through [LiteLLM](https://github.com/BerriAI/litellm), so **100+ providers** work by changing the `model` string. Non-OpenAI providers need a LiteLLM prefix — e.g. Anthropic uses `anthropic/claude-3-5-sonnet-20241022`, DeepSeek uses `deepseek/deepseek-chat`, GLM (Zhipu) uses `zai/glm-4.7-flash`, Ollama uses `ollama/llama3.1`. Replace every `gpt-4o-mini` in this tutorial (in `model_config.model` and in chat `model` fields) with your provider's model string, and set the matching env var in `.env`. See [Configure LLM Providers](../how-to/configure-llm-providers.md) for the full prefix table and the DB-backed provider registry.
 
 ---
 

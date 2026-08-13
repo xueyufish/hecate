@@ -51,13 +51,15 @@ This installs Hecate in editable mode with the dev dependencies (pytest, ruff, m
 
 ## Step 2 — Start infrastructure
 
-From the repo root:
+From the repo root, copy the environment template first — Docker Compose requires the `.env` file to exist (you will fill in the API keys in [Step 3](#step-3--configure-environment)):
 
 ```bash
-docker compose -f docker/docker-compose.yml up -d
+cp .env.example .env
+
+docker compose -f docker/docker-compose.yml up -d postgres qdrant minio temporal
 ```
 
-This starts four services with healthchecks:
+This starts the four infrastructure services with healthchecks:
 
 | Service | Port | Purpose |
 |---------|------|---------|
@@ -78,11 +80,7 @@ All four should show `(healthy)` in the status column.
 
 ## Step 3 — Configure environment
 
-Copy the template and fill in two values:
-
-```bash
-cp .env.example .env
-```
+You copied the template in Step 2. Open `.env` and fill in two values:
 
 Open `.env` and set:
 
@@ -100,13 +98,13 @@ The defaults for `DATABASE_URL`, `QDRANT_URL`, `MINIO_URL`, and `POSTGRES_PASSWO
 
 ### Using other LLM providers
 
-Hecate routes all LLM traffic through [LiteLLM](https://github.com/BerriAI/litellm), so you can use 100+ providers — including open-source models hosted on Chinese cloud APIs or running locally. Set the provider's API key in `.env`, then use the corresponding model prefix in your API requests.
+Hecate routes all LLM traffic through [LiteLLM](https://github.com/BerriAI/litellm), so you can use 100+ providers — including open-source models hosted on cloud APIs or running locally. Set the provider's API key in `.env`, then use the corresponding model prefix in your API requests.
 
 | Provider | Env var in `.env` | Model string in request | Notes |
 |----------|-------------------|------------------------|-------|
 | DeepSeek | `DEEPSEEK_API_KEY=sk-...` | `deepseek/deepseek-chat` | DeepSeek-V3, DeepSeek-R1 |
-| Qwen (Alibaba) | `DASHSCOPE_API_KEY=sk-...` | `qwen-turbo`, `qwen-plus`, `qwen-max` | Tongyi Qianwen via DashScope |
-| GLM (Zhipu) | `ZHIPU_API_KEY=...` | `zhipu/glm-4`, `zhipu/glm-4-flash` | ChatGLM series |
+| Qwen (Alibaba) | `DASHSCOPE_API_KEY=sk-...` | `dashscope/qwen-turbo`, `dashscope/qwen-plus`, `dashscope/qwen-max` | Tongyi Qianwen via DashScope |
+| GLM (Zhipu) | `ZAI_API_KEY=...` | `zai/glm-4.7-flash`, `zai/glm-4-flash` | ChatGLM series |
 | Ollama (local) | — | `ollama/llama3.1`, `ollama/qwen2.5` | No API key; requires `ollama serve` running on `localhost:11434` |
 
 For example, to use DeepSeek:
@@ -195,7 +193,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 You should receive a JSON response shaped exactly like the OpenAI Chat Completions response — Hecate is a drop-in replacement at this endpoint.
 
-If you set `ANTHROPIC_API_KEY` instead, use a Claude model name in the `model` field (`claude-3-5-sonnet-20241022`, etc.). Hecate routes the request to the right provider via LiteLLM. For other providers (DeepSeek, Qwen, GLM, Ollama, etc.), see [Using other LLM providers](#using-other-llm-providers) above.
+If you set `ANTHROPIC_API_KEY` instead, use a Claude model name with the `anthropic/` prefix in the `model` field (`anthropic/claude-3-5-sonnet-20241022`, etc.). Hecate routes the request to the right provider via LiteLLM. For other providers (DeepSeek, Qwen, GLM, Ollama, etc.), see [Using other LLM providers](#using-other-llm-providers) above.
 
 ---
 
@@ -269,7 +267,7 @@ The `Authorization: Bearer <key>` header must match one of the keys in `HECATE_A
 
 ### 3. Chat request returns 500 with an LLM provider error
 
-The API key for the model you requested is missing or invalid. Open `.env`, verify the relevant provider key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY`, `ZHIPU_API_KEY`, etc.), and restart `uvicorn`.
+The API key for the model you requested is missing or invalid. Open `.env`, verify the relevant provider key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY`, `ZAI_API_KEY`, etc.), and restart `uvicorn`.
 
 ### 4. Port 5432 / 6333 / 9000 already in use
 

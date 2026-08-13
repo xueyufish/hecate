@@ -33,7 +33,7 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 DEEPSEEK_API_KEY=sk-...
 DASHSCOPE_API_KEY=sk-...         # Alibaba Qwen / Tongyi
-ZHIPU_API_KEY=...                # Zhipu GLM / ChatGLM
+ZAI_API_KEY=...                  # Zhipu GLM / ChatGLM
 GEMINI_API_KEY=...               # Google Gemini
 GROQ_API_KEY=gsk_...
 TOGETHERAI_API_KEY=...
@@ -60,11 +60,11 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 | Provider | Env var | Model string | Notes |
 |----------|---------|--------------|-------|
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o`, `gpt-4o-mini`, `o1-mini` | No prefix needed |
-| Anthropic | `ANTHROPIC_API_KEY` | `claude-3-5-sonnet-20241022`, `claude-3-opus-20240229` | No prefix needed |
+| OpenAI | `OPENAI_API_KEY` | `gpt-4o`, `gpt-4o-mini`, `openai/o1-mini` | No prefix needed for `gpt-*` models |
+| Anthropic | `ANTHROPIC_API_KEY` | `anthropic/claude-3-5-sonnet-20241022`, `anthropic/claude-3-opus-20240229` | `anthropic/` prefix |
 | DeepSeek | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat`, `deepseek/deepseek-reasoner` | DeepSeek-V3, DeepSeek-R1 |
-| Qwen (DashScope) | `DASHSCOPE_API_KEY` | `qwen-turbo`, `qwen-plus`, `qwen-max` | Alibaba Tongyi Qianwen |
-| GLM (Zhipu) | `ZHIPU_API_KEY` | `zhipu/glm-4`, `zhipu/glm-4-flash` | ChatGLM series |
+| Qwen (DashScope) | `DASHSCOPE_API_KEY` | `dashscope/qwen-turbo`, `dashscope/qwen-plus`, `dashscope/qwen-max` | Alibaba Tongyi Qianwen |
+| GLM (Zhipu) | `ZAI_API_KEY` | `zai/glm-4.7-flash`, `zai/glm-4-flash` | ChatGLM series |
 | Google Gemini | `GEMINI_API_KEY` | `gemini/gemini-1.5-pro`, `gemini/gemini-2.0-flash` | |
 | Groq | `GROQ_API_KEY` | `groq/llama-3.1-70b-versatile` | Fast inference |
 | Ollama (local) | — | `ollama/llama3.1`, `ollama/qwen2.5` | No API key; see below |

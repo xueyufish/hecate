@@ -60,7 +60,7 @@ Full reference: [CLI](cli.md).
 | Category | Key vars |
 |----------|----------|
 | Database | `DATABASE_URL` |
-| LLM | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY`, `ZHIPU_API_KEY` |
+| LLM | `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY`, `ZAI_API_KEY` |
 | Security | `HECATE_API_KEYS`, `JWT_SECRET`, `LLM_GUARD_ENABLED`, `RATE_LIMIT_RPM` |
 | Vector store | `VECTOR_STORE_TYPE` (qdrant/chroma), `QDRANT_URL` |
 | Object storage | `MINIO_URL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY` |
