@@ -55,6 +55,18 @@ async def test_register_im_channels_feishu_when_credentials_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Feishu credentials present -> exactly one adapter registered as 'feishu'."""
+    # The lark_oapi SDK is an optional [tools] dependency absent in CI. Stub
+    # the module-level availability flag and SDK class so registration logic
+    # is exercised without the real SDK; adapter behavior is covered by
+    # tests/test_channel/test_im_adapters.py.
+    import hecate.channel.im.feishu as feishu_mod
+
+    class _FakeLarkFeishuChannel:
+        def __init__(self, **_: object) -> None:
+            pass
+
+    monkeypatch.setattr(feishu_mod, "_LARK_AVAILABLE", True)
+    monkeypatch.setattr(feishu_mod, "LarkFeishuChannel", _FakeLarkFeishuChannel)
     monkeypatch.setenv("HECATE_IM_FEISHU_APP_ID", "cli_test")
     monkeypatch.setenv("HECATE_IM_FEISHU_APP_SECRET", "secret-test")
     monkeypatch.delenv("HECATE_IM_FEISHU_ENCRYPT_KEY", raising=False)
@@ -77,8 +89,18 @@ async def test_register_im_channels_slack_when_credentials_present(
 
     The Slack registration path uses ``token_verification_enabled=False``
     so tests do not contact Slack's auth.test endpoint during
-    instantiation.
+    instantiation. The slack_bolt SDK is an optional [tools] dependency
+    absent in CI; the module-level availability flag and SDK class are
+    stubbed so registration logic runs without the real SDK.
     """
+    import hecate.channel.im.slack as slack_mod
+
+    class _FakeSlackBoltApp:
+        def __init__(self, **_: object) -> None:
+            pass
+
+    monkeypatch.setattr(slack_mod, "_SLACK_AVAILABLE", True)
+    monkeypatch.setattr(slack_mod, "SlackBoltApp", _FakeSlackBoltApp)
     monkeypatch.delenv("HECATE_IM_FEISHU_APP_ID", raising=False)
     monkeypatch.delenv("HECATE_IM_FEISHU_APP_SECRET", raising=False)
     monkeypatch.setenv("HECATE_IM_SLACK_BOT_TOKEN", "xoxb-test")
