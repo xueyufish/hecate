@@ -4,7 +4,7 @@
 > **目的**: P3 阶段完成度审计，为 MVP 版本迭代提供决策依据
 > **范围**: P3 Trustworthy 阶段（138 项特性），含源码级实现状态验证
 > **方法**: Feature catalog 分析 + 源码 grep/glob 扫描验证部分实现
-> **最近更新**: 2026-08-12 — 11.x Multi-Channel 重新校准（通用平台 Wave 1/2/3 节奏）；11.6/11.10/11.2 完整版从 P3 挪到 P5 deferred（按需触发）；详见"11.x Wave 节奏"段
+> **最近更新**: 2026-08-13 — 11.x Multi-Channel 重新校准：Wave 1 已交付（11.3 飞书 + 11.9 Slack ✅，11.2 简化版待交付）；**Wave 2（11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram）从 P3 挪到 P5 deferred**（按客户需求触发）；11.6/11.10/11.2 完整版仍 P5 deferred；详见"11.x Wave 节奏"段
 
 ---
 
@@ -248,10 +248,10 @@
 |---|------|--------|------|------|
 | 11.2 | Web Widget (Simplified) | S | API ✅ | Wave 1 |
 | 11.3 | Feishu (Lark) | **M**（原 S）— 首个 ChannelABC 真实实现 | Channel SDK | Wave 1 |
-| 11.4 | WeCom (WeChat Work) | S | 11.3 | Wave 2 |
-| 11.5 | DingTalk | S | 11.3 | Wave 2 |
+| 11.4 | WeCom (WeChat Work) | S | 11.3 ✅ | **P5 deferred** |
+| 11.5 | DingTalk | S | 11.3 ✅ | **P5 deferred** |
 | 11.8 | Intent Recognition & Routing | M | Multi-Agent ✅ | 横切 |
-| 11.9 | Slack/Discord/Telegram | M (Slack) + S (Discord/Telegram) | ChannelABC ✅ | Wave 1 (Slack) + Wave 2 (D/T) |
+| 11.9 | Slack/Discord/Telegram | M (Slack) + S (Discord/Telegram) | ChannelABC ✅ | Wave 1 (Slack ✅) + **P5 deferred (D/T)** |
 
 #### Deployment & Operations（8 项）— Sprint 6
 
@@ -368,8 +368,8 @@
 
 | Wave | Feature | 触发条件 | 时机 |
 |---|---|---|---|
-| Wave 1（P3 主线） | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | 当前 Sprint |
-| Wave 2（P3 后续） | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | Wave 1 ship 后 1-2 Sprint 内补齐中国 IM 全覆盖 | Wave 1 后 |
+| Wave 1（P3 主线） | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | **2026-08-13: 11.3 ✅ + 11.9 Slack ✅ 已交付;11.2 简化版待交付** |
+| Wave 2（P5 deferred 2026-08-13） | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | 按客户需求触发 (企微/钉钉/Discord/Telegram 客户) | 暂停 |
 | Wave 3 / P5 deferred | 11.2 完整版 + 11.6 微信 to-C + 11.10 Custom Channel SDK | 按客户需求 / 社区请求 | 不预定 |
 
 **架构决策记录（2026-08-12）**：
