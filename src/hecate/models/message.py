@@ -51,6 +51,9 @@ class MessageModel(BaseModel):
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
     )
 
+    # IM channel provenance (multi-channel-feishu-slack)
+    source_channel: Mapped[str | None] = mapped_column(String(32), nullable=True)
+
     __table_args__ = (
         Index("idx_messages_conversation", "conversation_id", "created_at"),
         Index("idx_messages_workspace", "workspace_id", "deleted"),
@@ -83,5 +86,6 @@ class MessageReadSchema(PydanticBase):
     tool_calls: list | None
     tool_call_id: str | None
     workspace_id: uuid.UUID
+    source_channel: str | None = None
     metadata: dict = Field(validation_alias="metadata_")
     created_at: datetime

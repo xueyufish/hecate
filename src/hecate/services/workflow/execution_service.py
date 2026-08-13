@@ -193,6 +193,9 @@ class WorkflowExecutionService:
         agent_persona: str | None = None,
         workflow_id: uuid.UUID | None = None,
         max_iterations: int = 10,
+        channel_id: str | None = None,
+        channel_capabilities: object | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute an agent through the unified graph engine.
 
@@ -212,6 +215,15 @@ class WorkflowExecutionService:
             agent_persona: Agent persona description.
             workflow_id: Workflow ID (required for workflow mode).
             max_iterations: Maximum tool-calling iterations.
+            channel_id: Optional originating channel identifier (e.g.,
+                ``"feishu"``, ``"slack"``). When set, downstream workers
+                may adjust response style for the channel. ``None`` for
+                the OpenAI-compatible API path (existing behavior).
+            channel_capabilities: Optional :class:`ChannelCapabilities`
+                describing what the channel supports. Forwarded to
+                downstream rendering hooks. ``None`` for the API path.
+            workspace_id: Optional workspace scope for tenant-aware
+                filtering. ``None`` for the OpenAI-compatible API path.
 
         Returns:
             Response dict (non-streaming) or AsyncGenerator (streaming).

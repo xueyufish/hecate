@@ -167,6 +167,7 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 - **Context Engineering** — An extensible pipeline (assembler, evidence tracker, phase detector, token budget, provider shaping, message prioritization, tool filtering, offloader) that keeps long-running agents on-budget and on-task.
 - **Multi-Tenant** — Organization → Workspace → RBAC with `workspace_id` on 34 data models for tenant isolation. SSO via OIDC/SAML/LDAP, SCIM v2 provisioning.
 - **Plugin System** — 6 plugin types (Tool / Evaluator / Channel / Auth / Notifier / Extension) with hot-reload, declared permissions, and versioned manifests. Plus Core extension points for engine-internal customization.
+- **IM Channels** — Reach Hecate agents from Feishu (Lark) and Slack via inbound webhooks. Mandatory Bound Identity model ensures every IM user is bound to a Hecate user before any conversation starts. Same Hecate user shares one conversation thread across both channels. See [Configure Feishu and Slack](docs/how-to/configure-feishu-slack.md) and the [IM channel architecture overview](docs/concepts/im-channel-architecture.md).
 - **Engine-Level Guardrails** — Four hook types (Pre/Post LLM/Tool) at every LLM and Tool boundary; the same hooks power PII masking, audit logging, and human-in-the-loop flows.
 - **OpenSpec Workflow** — Every feature shipped through structured proposal → design → specs → implementation → archive (similar to Python PEPs / Kubernetes KEPs / Rust RFCs). 28 ADRs and 100+ archived changes document the architecture.
 

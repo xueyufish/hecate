@@ -205,6 +205,19 @@ class DockerEnvironment(AgentEnvironment):
                 raise FileNotFoundError(f"File not found: {path}") from exc
             raise
 
+        # ``get_archive`` returns an already-opened ``tarfile.TarFile`` in
+        # aiodocker >= 0.23; older versions returned raw bytes wrapped in
+        # BytesIO. Accept both shapes for compatibility.
+        if isinstance(tar_stream, tarfile.TarFile):
+            tf_cm: tarfile.TarFile = tar_stream
+            with tf_cm as tf:
+                for member in tf.getmembers():
+                    if member.isfile():
+                        f = tf.extractfile(member)
+                        if f is not None:
+                            return f.read()
+            raise FileNotFoundError(f"File not found: {path}")
+
         with tarfile.open(fileobj=io.BytesIO(tar_stream), mode="r") as tf:
             for member in tf.getmembers():
                 if member.isfile():
@@ -243,11 +256,16 @@ class DockerEnvironment(AgentEnvironment):
 
         files: list[FileInfo] = []
         for line in result.stdout.decode(errors="replace").splitlines()[1:]:
-            parts = line.split(None, 8)
-            if len(parts) < 9:
+            # ``ls -la --time-style=+%s`` emits perms, links, owner, group,
+            # size, single unix-timestamp mtime, and name — exactly 7
+            # whitespace-separated fields. Use rsplit so the file name
+            # (which may itself contain spaces) is always the last field.
+            if not line.strip():
                 continue
-            perms, _, _, _, size_str, mtime_str, _time, _name_full = parts[:7] if len(parts) >= 8 else parts
-            name = parts[-1]
+            parts = line.split(None, 6)
+            if len(parts) < 7:
+                continue
+            perms, _, _, _, size_str, mtime_str, name = parts
             if name in (".", ".."):
                 continue
             is_dir = perms.startswith("d")

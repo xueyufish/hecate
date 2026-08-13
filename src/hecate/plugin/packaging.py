@@ -43,7 +43,7 @@ def create_bundle(plugin_dir: Path, output_path: Path | None = None) -> Path:
         raise ValueError(msg)
 
     if output_path is None:
-        output_path = Path(f"{plugin_dir.name}{BUNDLE_EXTENSION}")
+        output_path = plugin_dir.parent / f"{plugin_dir.name}{BUNDLE_EXTENSION}"
 
     with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for child in plugin_dir.rglob("*"):
