@@ -52,9 +52,9 @@ Get Hecate running in **~5 minutes**. **Prerequisites**: Docker, Python 3.12+, [
 
 ```bash
 git clone https://github.com/xueyufish/hecate.git && cd hecate
-docker compose -f docker/docker-compose.yml up -d
+cp .env.example .env       # required by Docker Compose; add your LLM API key here
+docker compose -f docker/docker-compose.yml up -d postgres qdrant minio temporal
 uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
-cp .env.example .env       # add your LLM API key here
 alembic upgrade head
 
 # Sanity-check the setup before starting the server:
@@ -133,7 +133,7 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 |---|---|
 | `hecate preflight` reports `database: FAIL` | `docker compose -f docker/docker-compose.yml ps` — is Postgres up? |
 | `curl` returns `401 Unauthorized` | `cat .env` — is `OPENAI_API_KEY=` set (and uncommented)? |
-| `curl` returns `502 Bad Gateway` | `docker compose logs api` — the server may still be starting |
+| `curl` returns `502 Bad Gateway` | `docker compose logs hecate` — the server may still be starting |
 | Port `8000` already in use | `lsof -i :8000` then `kill <pid>`, or run uvicorn on `--port 8080` |
 | Anything else | [Full troubleshooting guide](docs/how-to/troubleshoot.md) |
 
