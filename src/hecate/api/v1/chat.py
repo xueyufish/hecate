@@ -27,8 +27,11 @@ from hecate.engine.eventstore import EventStore
 from hecate.engine.session_state import SessionStateStore
 from hecate.models.agent import AgentModel
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
-from hecate.services.llm.service import llm_service
+from hecate.models.tool import ToolModel
+from hecate.services.llm.service import LLMResponse, llm_service
+from hecate.services.llm.tool_calling import format_tools_for_llm, inject_tool_results, parse_tool_calls
 from hecate.services.session_lock import session_lock_manager
+from hecate.services.tool.registry import ToolRegistry
 from hecate.services.workflow.execution_service import WorkflowExecutionService
 
 logger = logging.getLogger(__name__)
@@ -197,6 +200,7 @@ async def _process_chat(
     # Resolve "agent/<id>": load the agent, use its model_config.model, inject persona.
     effective_model = request.model
     agent_uuid: uuid.UUID | None = None
+    agent: AgentModel | None = None
     if request.model.startswith("agent/"):
         from fastapi import HTTPException
 
@@ -217,6 +221,21 @@ async def _process_chat(
         if agent.persona and not any(m.get("role") == "system" for m in msg_dicts):
             msg_dicts.insert(0, {"role": "system", "content": agent.persona})
 
+    # Load the agent's configured tools (builtin + DB) and merge with any
+    # client-supplied tools; client tools take precedence on name conflict.
+    agent_tools: list[dict[str, Any]] = []
+    if agent is not None:
+        agent_tools = await _load_agent_tools(db, agent.tools or [])
+    effective_tools: list[dict[str, Any]] = list(agent_tools)
+    if request.tools:
+        client_names = {
+            t.get("function", {}).get("name")
+            for t in request.tools
+            if isinstance(t, dict) and isinstance(t.get("function"), dict)
+        }
+        effective_tools = [t for t in effective_tools if t.get("function", {}).get("name") not in client_names]
+        effective_tools.extend(t for t in request.tools if isinstance(t, dict))
+
     # Parse kb_ids if provided
     parsed_kb_ids: list[str] | None = None
     if request.kb_ids:
@@ -228,24 +247,69 @@ async def _process_chat(
     elif agent_uuid is not None:
         parsed_agent_id = str(agent_uuid)
 
+    if agent_tools:
+        # Agent-configured tools: drive the tool-calling loop directly —
+        # the LLM proposes tool calls, the registry executes them, and results
+        # feed back into the conversation (mirrors ConversationService).
+        tool_registry = _build_tool_registry(db)
+        provider_cfg = await _get_provider_config(db, effective_model)
+        if request.stream:
+            return StreamingResponse(
+                _stream_chat_with_tools(
+                    effective_model,
+                    msg_dicts,
+                    effective_tools,
+                    tool_registry,
+                    request.temperature,
+                    request.max_tokens,
+                    session_id=request.session_id,
+                    timeout=provider_cfg.get("timeout"),
+                    num_retries=provider_cfg.get("num_retries"),
+                ),
+                media_type="text/event-stream",
+            )
+
+        response = await _chat_with_tools(
+            msg_dicts,
+            effective_model,
+            effective_tools,
+            tool_registry,
+            request.temperature,
+            request.max_tokens,
+            session_id=request.session_id,
+            timeout=provider_cfg.get("timeout"),
+            num_retries=provider_cfg.get("num_retries"),
+        )
+        if response is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=500, detail="Tool call loop exceeded maximum iterations")
+
+        return ChatCompletionResponse(
+            model=response.model or effective_model,
+            choices=[
+                ChatCompletionChoice(
+                    message=ChatMessage(
+                        role="assistant",
+                        content=response.content,
+                        tool_calls=response.tool_calls,
+                    ),
+                    finish_reason=response.finish_reason or "stop",
+                )
+            ],
+            usage=ChatCompletionUsage(
+                prompt_tokens=response.usage.get("prompt_tokens", 0),
+                completion_tokens=response.usage.get("completion_tokens", 0),
+                total_tokens=response.usage.get("total_tokens", 0),
+            ),
+        ).model_dump()
+
     use_enhanced = parsed_kb_ids or request.generate_opening or request.generate_suggestions
 
     if use_enhanced:
-        from hecate.core.config import settings
         from hecate.services.orchestration.engine_port_adapter import create_engine_port
-        from hecate.services.tool.builtin import BuiltInToolExecutor
-        from hecate.services.tool.registry import ToolRegistry
-        from hecate.services.tool.search.factory import create_search_provider
 
-        search_provider = create_search_provider(
-            provider=settings.SEARCH_PROVIDER,
-            api_key=settings.SEARCH_API_KEY,
-        )
-        builtin_executor = BuiltInToolExecutor(
-            search_provider=search_provider,
-            workspace_root=settings.WORKSPACE_ROOT,
-        )
-        tool_registry = ToolRegistry(db=db, builtin_executor=builtin_executor)
+        tool_registry = _build_tool_registry(db)
 
         port = create_engine_port(db, llm_service, tool_registry=tool_registry)
 
@@ -492,3 +556,208 @@ async def _stream_chat(
     )
     yield f"data: {json.dumps(final_chunk.model_dump())}\n\n"
     yield "data: [DONE]\n\n"
+
+
+async def _load_agent_tools(db: AsyncSession, tool_names: list[str]) -> list[dict[str, Any]]:
+    """Resolve an agent's configured tools into OpenAI-format definitions.
+
+    Builtin tool names resolve from the in-memory ``BUILTIN_TOOL_DEFINITIONS``;
+    any other names are looked up in the ``ToolModel`` table.
+
+    Args:
+        db: The async database session.
+        tool_names: Tool names configured on the agent.
+
+    Returns:
+        Tool definitions formatted for LLM function calling.
+    """
+    if not tool_names:
+        return []
+    from hecate.services.tool.builtin import BUILTIN_TOOL_DEFINITIONS
+
+    definitions: list[dict[str, Any]] = []
+    db_names: list[str] = []
+    for name in tool_names:
+        if name in BUILTIN_TOOL_DEFINITIONS:
+            definitions.append({"name": name, **BUILTIN_TOOL_DEFINITIONS[name]})
+        else:
+            db_names.append(name)
+    if db_names:
+        result = await db.execute(select(ToolModel).where(ToolModel.name.in_(db_names), ~ToolModel.deleted))
+        for tool in result.scalars().all():
+            definitions.append(
+                {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "parameters": tool.parameters or {"type": "object", "properties": {}},
+                }
+            )
+    return format_tools_for_llm(definitions)
+
+
+def _build_tool_registry(db: AsyncSession) -> ToolRegistry:
+    """Construct a ToolRegistry wired to builtin + DB tools using app settings.
+
+    Args:
+        db: The async database session.
+
+    Returns:
+        A configured ToolRegistry.
+    """
+    from hecate.core.config import settings
+    from hecate.services.tool.builtin import BuiltInToolExecutor
+    from hecate.services.tool.search.factory import create_search_provider
+
+    search_provider = create_search_provider(
+        provider=settings.SEARCH_PROVIDER,
+        api_key=settings.SEARCH_API_KEY,
+    )
+    builtin_executor = BuiltInToolExecutor(
+        search_provider=search_provider,
+        workspace_root=settings.WORKSPACE_ROOT,
+    )
+    return ToolRegistry(db=db, builtin_executor=builtin_executor)
+
+
+async def _execute_tool_calls(
+    tool_registry: ToolRegistry,
+    tool_calls: list[dict[str, Any]],
+    session_id: str | None,
+) -> list[dict[str, Any]]:
+    """Execute parsed tool calls, returning results for inject_tool_results.
+
+    Args:
+        tool_registry: The tool registry to execute against.
+        tool_calls: Parsed tool calls (id, name, arguments).
+        session_id: Optional session id passed as tool context.
+
+    Returns:
+        List of result dicts with tool_call_id, result, and is_error.
+    """
+    results: list[dict[str, Any]] = []
+    for tc in tool_calls:
+        try:
+            result = await tool_registry.execute(
+                tc["name"],
+                tc["arguments"],
+                context={"session_id": session_id or ""},
+            )
+            results.append({"tool_call_id": tc["id"], "result": result, "is_error": False})
+        except Exception as exc:
+            logger.warning("Tool '%s' execution failed: %s", tc["name"], exc)
+            results.append({"tool_call_id": tc["id"], "result": str(exc), "is_error": True})
+    return results
+
+
+async def _chat_with_tools(
+    messages: list[dict[str, Any]],
+    model: str,
+    tools: list[dict[str, Any]],
+    tool_registry: ToolRegistry,
+    temperature: float | None,
+    max_tokens: int | None,
+    session_id: str | None = None,
+    timeout: float | None = None,
+    num_retries: int | None = None,
+    max_iterations: int = 5,
+) -> LLMResponse | None:
+    """Run a non-streaming chat with a tool-calling loop.
+
+    Iterates: the LLM proposes tool calls, the registry executes them, results
+    are injected back into the conversation, and the LLM responds again. Stops
+    when the LLM returns a final answer without tool calls.
+
+    Returns:
+        The final LLM response, or None when the loop exceeds max_iterations.
+    """
+    current_messages = list(messages)
+    for _ in range(max_iterations):
+        response = await llm_service.chat(
+            messages=current_messages,
+            model=model,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            num_retries=num_retries,
+        )
+        if not response.tool_calls:
+            return response
+        tool_calls = parse_tool_calls(response.tool_calls)
+        tool_results = await _execute_tool_calls(tool_registry, tool_calls, session_id)
+        # Append the assistant tool-call message so the tool results are
+        # well-formed (a tool message must follow its assistant tool_calls).
+        current_messages.append(
+            {
+                "role": "assistant",
+                "content": response.content,
+                "tool_calls": response.tool_calls,
+            }
+        )
+        current_messages = inject_tool_results(current_messages, response.tool_calls, tool_results)
+    return None
+
+
+async def _stream_chat_with_tools(
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    tool_registry: ToolRegistry,
+    temperature: float | None,
+    max_tokens: int | None,
+    session_id: str | None = None,
+    timeout: float | None = None,
+    num_retries: int | None = None,
+    max_iterations: int = 5,
+):
+    """Stream a chat with a tool-calling loop.
+
+    Intermediate tool iterations are executed silently; only the final LLM
+    answer is streamed as SSE chunks (mirrors ConversationService._stream_chat).
+
+    Yields:
+        str: SSE-formatted chunks, ending with a done chunk and [DONE].
+    """
+    current_messages = list(messages)
+    for _ in range(max_iterations):
+        tool_calls_buffer: list[dict[str, Any]] = []
+        content_buffer: list[str] = []
+        async for chunk in llm_service.chat_stream(
+            messages=current_messages,
+            model=model,
+            tools=tools,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            num_retries=num_retries,
+        ):
+            content = chunk.get("content")
+            if content:
+                content_buffer.append(content)
+                sse_chunk = ChatCompletionChunk(
+                    model=model,
+                    choices=[
+                        ChatCompletionChunkChoice(
+                            delta=ChatCompletionChunkDelta(content=content),
+                            finish_reason=chunk.get("finish_reason"),
+                        )
+                    ],
+                )
+                yield f"data: {json.dumps(sse_chunk.model_dump())}\n\n"
+            if chunk.get("tool_calls"):
+                tool_calls_buffer.extend(chunk["tool_calls"])
+        if not tool_calls_buffer:
+            break
+        tool_calls = parse_tool_calls(tool_calls_buffer)
+        tool_results = await _execute_tool_calls(tool_registry, tool_calls, session_id)
+        # Append the assistant tool-call message so the tool results are
+        # well-formed (a tool message must follow its assistant tool_calls).
+        current_messages.append(
+            {
+                "role": "assistant",
+                "content": "".join(content_buffer),
+                "tool_calls": tool_calls_buffer,
+            }
+        )
+        current_messages = inject_tool_results(current_messages, tool_calls_buffer, tool_results)
+    yield _format_done_chunk(model)
