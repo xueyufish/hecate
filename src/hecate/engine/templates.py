@@ -7,6 +7,8 @@ for customization via the Graph DSL.
 
 from __future__ import annotations
 
+from typing import Any
+
 from hecate.engine.types import (
     ChannelDef,
     ChannelType,
@@ -23,6 +25,7 @@ def build_chat_graph(
     enable_suggestions: bool = False,
     generate_opening: bool = False,
     max_tool_iterations: int = 10,
+    tools: list[dict[str, Any]] | None = None,
 ) -> GraphConfig:
     """Build a chat-mode graph template that replicates ConversationService orchestration.
 
@@ -59,19 +62,27 @@ def build_chat_graph(
         enable_suggestions: If True, add a SUGGESTION node after conversation.
         generate_opening: If True, configure the suggestion node for opening remarks.
         max_tool_iterations: Upper bound for tool-calling loop (enforced by PregelRuntime's max_supersteps).
+        tools: Optional tool definitions injected into the LLM node config so
+            LLMWorker can pass them to the underlying LLM service and detect
+            tool_call responses. When ``None`` the ``tools`` key is omitted
+            from the node config (tool-calling loop is disabled).
 
     Returns:
         A GraphConfig ready for compilation and execution.
     """
+    llm_config: dict[str, Any] = {
+        "model": model,
+        "system_prompt": system_prompt,
+        "channels": {"readable": ["messages"], "writable": ["messages"]},
+    }
+    if tools is not None:
+        llm_config["tools"] = tools
+
     nodes: dict[str, NodeConfig] = {
         "llm": NodeConfig(
             id="llm",
             type=NodeType.CONVERSATION,
-            config={
-                "model": model,
-                "system_prompt": system_prompt,
-                "channels": {"readable": ["messages"], "writable": ["messages"]},
-            },
+            config=llm_config,
         ),
         "check_tools": NodeConfig(
             id="check_tools",

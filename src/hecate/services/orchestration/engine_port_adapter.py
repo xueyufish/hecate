@@ -77,6 +77,74 @@ class _ProductionEnginePort(EnginePort):
 
         await self._record_cost(model, token_count)
 
+    async def llm_invoke_structured(
+        self,
+        messages: list[dict],
+        config: dict,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Structured LLM invocation exposing tool_calls for the engine tool loop.
+
+        Streams ``{"content": token, "tool_calls": None}`` chunks during streaming
+        and accumulates LiteLLM's per-chunk tool_call deltas (keyed by ``index``)
+        into complete tool_calls. Yields a final chunk
+        ``{"content": None, "tool_calls": <list>}`` carrying the assembled calls,
+        or ``tool_calls=None`` when the LLM did not request any tools.
+
+        Args:
+            messages: Conversation messages for the LLM.
+            config: Provider-specific configuration; ``model`` and ``tools`` are read.
+
+        Yields:
+            Structured chunks dict per stream iteration; the final chunk carries
+            the accumulated ``tool_calls`` (or ``None``).
+        """
+        model = config.get("model", "gpt-4o")
+        tools = config.get("tools")
+
+        tool_call_acc: dict[int, dict[str, Any]] = {}
+        token_count = 0
+
+        async for chunk in self._llm_service.chat_stream(
+            messages=messages,
+            model=model,
+            tools=tools,
+        ):
+            content = chunk.get("content")
+            if content:
+                token_count += len(content) // 4
+                yield {"content": content, "tool_calls": None}
+
+            delta_tool_calls = chunk.get("tool_calls")
+            if delta_tool_calls:
+                for tc in delta_tool_calls:
+                    idx = getattr(tc, "index", 0) or 0
+                    entry = tool_call_acc.setdefault(
+                        idx,
+                        {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
+                    )
+                    tc_id = getattr(tc, "id", None)
+                    if tc_id:
+                        entry["id"] = tc_id
+                    tc_type = getattr(tc, "type", None)
+                    if tc_type:
+                        entry["type"] = tc_type
+                    fn = getattr(tc, "function", None)
+                    if fn is not None:
+                        fn_name = getattr(fn, "name", None)
+                        if fn_name:
+                            entry["function"]["name"] = (entry["function"].get("name") or "") + fn_name
+                        fn_args = getattr(fn, "arguments", None)
+                        if fn_args:
+                            entry["function"]["arguments"] = (entry["function"].get("arguments") or "") + fn_args
+
+        final_tool_calls: list[dict[str, Any]] | None = None
+        if tool_call_acc:
+            final_tool_calls = [tool_call_acc[k] for k in sorted(tool_call_acc.keys())]
+
+        yield {"content": None, "tool_calls": final_tool_calls}
+
+        await self._record_cost(model, token_count)
+
     async def _record_cost(self, model: str, token_count: int) -> None:
         """Record cost usage against quotas after LLM invocation."""
         if _quota_service_factory is None or token_count == 0:

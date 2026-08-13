@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from hecate.engine.guardrail import GuardrailAction, GuardrailResult
@@ -16,15 +17,21 @@ def _make_port(tokens: list[str] | None = None) -> MagicMock:
 
     tokens = tokens or ["Hello", " world"]
 
-    invoke_tracker = MagicMock()
-    invoke_tracker.tokens = tokens
+    invoke_tracker = SimpleNamespace(tokens=tokens, call_args=None, structured_call_args=None)
 
     async def fake_llm_invoke(*args, **kwargs):
         invoke_tracker.call_args = (args, kwargs)
         for t in tokens:
             yield t
 
+    async def fake_llm_invoke_structured(*args, **kwargs):
+        invoke_tracker.structured_call_args = (args, kwargs)
+        for t in tokens:
+            yield {"content": t, "tool_calls": None}
+        yield {"content": None, "tool_calls": None}
+
     port.llm_invoke = fake_llm_invoke
+    port.llm_invoke_structured = fake_llm_invoke_structured
     port._invoke_tracker = invoke_tracker
     port.create_span = AsyncMock(return_value=None)
     port.end_span = AsyncMock(return_value=None)
@@ -204,7 +211,7 @@ class TestLLMWorker:
             },
             execution_context={},
         )
-        _, kwargs = port._invoke_tracker.call_args
+        _, kwargs = port._invoke_tracker.structured_call_args
         passed_tools = kwargs["config"]["tools"]
         assert len(passed_tools) == 1
         assert passed_tools[0]["name"] == "public_tool"
@@ -222,7 +229,7 @@ class TestLLMWorker:
             channel_snapshot={"messages": [{"role": "user", "content": "Hi"}]},
             execution_context={},
         )
-        _, kwargs = port._invoke_tracker.call_args
+        _, kwargs = port._invoke_tracker.structured_call_args
         assert len(kwargs["config"]["tools"]) == 2
 
     async def test_tool_gating_pre_hook_sees_filtered_tools(self) -> None:
@@ -260,7 +267,7 @@ class TestLLMWorker:
             execution_context={},
         ):
             events.append(event)
-        _, kwargs = port._invoke_tracker.call_args
+        _, kwargs = port._invoke_tracker.structured_call_args
         assert len(kwargs["config"]["tools"]) == 1
         assert kwargs["config"]["tools"][0]["name"] == "allowed"
 
@@ -281,7 +288,7 @@ class TestLLMWorker:
             channel_snapshot=channel,
             execution_context=ctx,
         )
-        _, kwargs = port._invoke_tracker.call_args
+        _, kwargs = port._invoke_tracker.structured_call_args
         passed = kwargs["config"]["tools"]
         assert len(passed) == 1
         assert passed[0]["name"] == "matching"
@@ -300,3 +307,141 @@ class TestLLMWorker:
         )
         _, kwargs = port._invoke_tracker.call_args
         assert kwargs["config"]["tools"] == []
+
+
+class TestLLMWorkerToolCallDetection:
+    """Tests for structured tool_calls detection in LLMWorker."""
+
+    def _make_structured_port(self, chunks: list[dict[str, object]]) -> MagicMock:
+        """Create a port mock whose llm_invoke_structured yields the given chunks."""
+        from unittest.mock import MagicMock
+
+        port = MagicMock()
+
+        async def fake_context_assemble(*args, **kwargs):
+            return {"messages": kwargs.get("messages", []), "tools": kwargs.get("tools"), "metadata": {}}
+
+        port.context_assemble = AsyncMock(side_effect=fake_context_assemble)
+
+        async def fake_structured(*args, **kwargs):
+            for c in chunks:
+                yield c
+
+        port.llm_invoke = MagicMock()  # should NOT be called when tools are present
+        port.llm_invoke_structured = fake_structured
+        port.create_span = AsyncMock(return_value=None)
+        port.end_span = AsyncMock(return_value=None)
+        return port
+
+    async def test_non_streaming_detects_tool_calls(self) -> None:
+        tool_calls = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "web_search", "arguments": '{"query":"weather"}'},
+            },
+        ]
+        port = self._make_structured_port(
+            [
+                {"content": "Let me ", "tool_calls": None},
+                {"content": "search.", "tool_calls": None},
+                {"content": None, "tool_calls": tool_calls},
+            ]
+        )
+        worker = LLMWorker(port=port)
+        result = await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": [{"type": "function"}]},
+            channel_snapshot={"messages": [{"role": "user", "content": "Weather?"}]},
+        )
+        assert result.error is None
+        assert result.channel_updates.get("_has_tool_call") is True
+        assistant = result.channel_updates["messages"][0]
+        assert assistant["role"] == "assistant"
+        assert assistant["content"] == "Let me search."
+        assert assistant["tool_calls"] == tool_calls
+
+    async def test_non_streaming_no_tool_calls(self) -> None:
+        port = self._make_structured_port(
+            [
+                {"content": "Hi", "tool_calls": None},
+                {"content": " there", "tool_calls": None},
+                {"content": None, "tool_calls": None},
+            ]
+        )
+        worker = LLMWorker(port=port)
+        result = await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": [{"type": "function"}]},
+            channel_snapshot={"messages": [{"role": "user", "content": "Hi"}]},
+        )
+        assert result.error is None
+        assert result.channel_updates["_has_tool_call"] is False
+        assistant = result.channel_updates["messages"][0]
+        assert "tool_calls" not in assistant
+
+    async def test_streaming_detects_tool_calls(self) -> None:
+        tool_calls = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "calc", "arguments": '{"expr":"2+2"}'},
+            },
+        ]
+        port = self._make_structured_port(
+            [
+                {"content": "Calc", "tool_calls": None},
+                {"content": "ing...", "tool_calls": None},
+                {"content": None, "tool_calls": tool_calls},
+            ]
+        )
+        worker = LLMWorker(port=port)
+        events: list = []
+        async for event in worker.execute_stream(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": [{"type": "function"}]},
+            channel_snapshot={"messages": [{"role": "user", "content": "Calc 2+2"}]},
+        ):
+            events.append(event)
+        token_events = [e for e in events if isinstance(e, dict) and "content" in e]
+        final_events = [e for e in events if not isinstance(e, dict)]
+        assert token_events == [{"content": "Calc"}, {"content": "ing..."}]
+        assert len(final_events) == 1
+        final = final_events[0]
+        assert final.channel_updates.get("_has_tool_call") is True
+        assert final.channel_updates["messages"][0]["tool_calls"] == tool_calls
+
+    async def test_streaming_no_tool_calls(self) -> None:
+        port = self._make_structured_port(
+            [
+                {"content": "Just", "tool_calls": None},
+                {"content": " text", "tool_calls": None},
+                {"content": None, "tool_calls": None},
+            ]
+        )
+        worker = LLMWorker(port=port)
+        events: list = []
+        async for event in worker.execute_stream(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": [{"type": "function"}]},
+            channel_snapshot={"messages": [{"role": "user", "content": "Hi"}]},
+        ):
+            events.append(event)
+        final_events = [e for e in events if not isinstance(e, dict)]
+        assert len(final_events) == 1
+        assert final_events[0].channel_updates["_has_tool_call"] is False
+
+    async def test_non_streaming_without_tools_uses_llm_invoke(self) -> None:
+        """Regression: no tools → llm_invoke path, no tool_call detection."""
+        port = _make_port(["plain", " ", "text"])
+        worker = LLMWorker(port=port)
+        result = await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o"},
+            channel_snapshot={"messages": [{"role": "user", "content": "Hi"}]},
+        )
+        assert result.error is None
+        assert result.channel_updates["_has_tool_call"] is False
+        assert result.channel_updates["messages"][0]["content"] == "plain text"
+        assert port._invoke_tracker.call_args is not None
+        assert port._invoke_tracker.structured_call_args is None
