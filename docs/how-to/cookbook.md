@@ -117,13 +117,13 @@ curl -X POST http://localhost:8000/api/agents \
     "execution_mode": "chat",
     "model_config": {
       "model": "gpt-4o",
-      "fallback_models": ["claude-3-5-sonnet-20241022", "gpt-4o-mini"]
+      "fallback_models": ["anthropic/claude-3-5-sonnet-20241022", "gpt-4o-mini"]
     },
     "system_prompt": "You are a helpful assistant."
   }'
 ```
 
-If `gpt-4o` fails (rate limit, timeout, outage), the [Model Hub](../concepts/model-hub.md) tries `claude-3-5-sonnet` next, then `gpt-4o-mini`. The per-provider [circuit breaker](../concepts/model-hub.md#resilience-fallback-and-circuit-breaking) trips on repeated failures to avoid waiting for timeouts.
+If `gpt-4o` fails (rate limit, timeout, outage), the [Model Hub](../concepts/model-hub.md) tries `anthropic/claude-3-5-sonnet-20241022` next, then `gpt-4o-mini`. The per-provider [circuit breaker](../concepts/model-hub.md#resilience-fallback-and-circuit-breaking) trips on repeated failures to avoid waiting for timeouts.
 
 ---
 

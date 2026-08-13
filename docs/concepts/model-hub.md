@@ -68,7 +68,7 @@ Two layers keep LLM traffic flowing when a provider fails:
 
 ### Per-provider circuit breaker
 
-`CircuitBreakerManager` (`services/llm/circuit_breaker.py`) tracks failure rates **per provider prefix** (e.g., `deepseek/`, `anthropic/`, `zhipu/`). When a provider's failure rate crosses the threshold, the breaker trips and subsequent calls to that provider skip immediately — no waiting for a timeout — and go straight to fallback. The breaker resets after a cooldown period, allowing the provider to recover.
+`CircuitBreakerManager` (`services/llm/circuit_breaker.py`) tracks failure rates **per provider prefix** (e.g., `deepseek/`, `anthropic/`, `zai/`). When a provider's failure rate crosses the threshold, the breaker trips and subsequent calls to that provider skip immediately — no waiting for a timeout — and go straight to fallback. The breaker resets after a cooldown period, allowing the provider to recover.
 
 This means a partial outage of one provider doesn't cascade into request timeouts across your fleet. The circuit breaker is what turns "DeepSeek is down" from a 30-second hang into a sub-millisecond redirect to OpenAI.
 

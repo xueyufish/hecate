@@ -35,7 +35,7 @@ All configuration is loaded from environment variables and an optional `.env` fi
 | `ANTHROPIC_API_KEY` | Anthropic API key. |
 | `DEEPSEEK_API_KEY` | DeepSeek API key. |
 | `DASHSCOPE_API_KEY` | Alibaba DashScope (Qwen) API key. |
-| `ZHIPU_API_KEY` | Zhipu (GLM) API key. |
+| `ZAI_API_KEY` | Zhipu (GLM) API key. |
 
 For providers not listed here, see the [LiteLLM provider documentation](https://docs.litellm.ai/docs/providers).
 
