@@ -1,8 +1,8 @@
 # Hecate Implementation Roadmap
 
 > **Date**: 2026-08-11
-> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 80/141 (57%), P4 4/98 (4%), P5 0/44
-> **Scope**: 12-month implementation plan covering 199 unimplemented features across P3–P5
+> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 80/125 (64%, 2026-08-14 re-scope), P4 4/100 (4%), P5 0/60
+> **Scope**: 12-month implementation plan covering 201 unimplemented features across P3–P5. 2026-08-14 re-scope (per docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md): 5 features dropped, 17 deferred to P5, 7 added (1.3.18/1.3.19/8.20 → P3, 2.13/8.21/13.20/6.27a → P4), 11.11 moved P5→P4.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
 ---
@@ -13,10 +13,10 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 141 | 80/141 (57%) | 61 |
-| **P4 Intelligent** | 98 | 4/98 (4%) | 94 |
-| **P5 Ecosystem** | 44 | 0/44 (0%) | 44 |
-| **Total** | **367** | **168/367 (46%)** | **199** |
+| **P3 Trustworthy** | 125 | 80/125 (64%) | 45 |
+| **P4 Intelligent** | 100 | 4/100 (4%) | 96 |
+| **P5 Ecosystem** | 60 | 0/60 (0%) | 60 |
+| **Total** | **369** | **168/369 (46%)** | **201** |
 
 ---
 
@@ -63,7 +63,7 @@ Sprint 3 (M5-6):   P2 Complete — Memory + Channels + Evaluation Foundation
 Sprint 4 (M7-8):   P3 Core — Resilience + Multi-Tenant + Security + Observability + Platform SPI Core
 Sprint 5 (M9-10):  P3 Enterprise — Platform SPI + Multi-Agent Protocol + Model Hub + Enterprise Identity
 Sprint 6 (M11-12): P3 Security & Ops — Ops Center + Security Enhancement + Plugin System + Deployment
-Sprint 7 (M13-14): P3 Complete — Advanced RAG + Multi-Channel + Evaluation + Canvas + Memory
+Sprint 7 (M13-14): P3 Complete — Log-as-Truth + Dynamic Orchestration + Run Replay + Browser Tool + Advanced RAG + Multi-Channel + Evaluation + Memory
 Sprint 8 (M15-16): P4 Kickoff — Self-Learning + Agentic AI + Memory Intelligence
 Sprint 9 (M17-18): P4 Complete — Knowledge Intelligence + Multi-Agent Intelligence + Execution Intelligence
 Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compliance
@@ -404,7 +404,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 5.9 | Environment Security (P0: 9.12 + 9.13 + 9.14 + 9.15) ✅ | 5.6 ✅ + 1.3.15 ✅ + 9.4 ✅ | L |
+| 5.14 | Environment Security (P0: 9.12 + 9.13 + 9.14 + 9.15) ✅ *(renamed from 5.9 on 2026-08-14 — resolves ID collision with 5.9 Skill Loading)* | 5.6 ✅ + 1.3.15 ✅ + 9.4 ✅ | L |
 | 9.12 | Environment Network Egress Control ✅ | 1.3.15a ✅ | M |
 | 9.13 | Sandbox Enforcement Integration ✅ | 9.4 ✅ + 9.4c ✅ + 1.3.15a ✅ | S |
 | 9.14 | Structured Security Audit Pipeline ✅ | 9.4 ✅ + 8.7 ✅ | M |
@@ -439,6 +439,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 5.7 ✅ | Tool Caching | Tool ✅ | S |
 | 5.8 | Enterprise System Integration Framework (Per-Tool Auth Scope) | MCP ✅ | M |
 | 5.4c | MCP Server Registry & Connection Management | MCP ✅ | M |
+| 5.4b (upg) | MCP 2026-07-28 Spec Migration (NEW work item, 2026-08-14 re-verification) — MCP shipped its largest revision 2026-07-28: stateless core (initialize/session removed, `_meta` self-describing requests), mandatory Mcp-Method/Mcp-Name header routing, Multi Round-Trip Requests replacing held-open elicitation streams, cacheable list results (ttlMs), RFC 9207 auth, DCR→CIMD, Roots/Sampling/Logging deprecated (12-month window). Hecate's 5.4b (2025-03-26 spec) client + server must migrate; official registry live (1,000+ servers) | 5.4b client ✅ | M |
 | 1.3.5i ✅ | Session Events + Tool Matchers | Settings ✅ | S |
 | 1.3.15 ✅ | Agent Environment | Session ✅ + Context ✅ | M |
 | 1.3.16 ✅ | Agent State Separation | 1.3.15 ✅ | S |
@@ -502,23 +503,44 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ## Sprint 7: P3 Complete (Month 13–14)
 
-> **Goal**: Complete P3 — Advanced RAG foundation, Multi-Channel expansion, Evaluation suite, Canvas enhancements, Memory improvements. All P3 features delivered.
+> **Goal**: Complete P3 — engine state architecture (log-as-truth), competitive gap features (dynamic orchestration, run replay, browser tool), rescoped Advanced RAG, Multi-Channel Wave 1, Evaluation suite, Memory improvements. 2026-08-14 re-scope per competitor analysis: 5 dropped, 15 deferred to P5, 4 added.
 
-### Advanced RAG & Knowledge
+### Engine Architecture: Event-Sourced State (NEW — 2026-08-14, Q4=A decision)
+
+> **Ordering**: 1.3.19 must land FIRST — 8.20 Run Replay, HITL durable audit pairs, and middleware waterfall events all consume the enriched event log. 1.3.18 / 6.27 / 5.9-enh are parallelizable.
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 3.1.2 | OCR | Docling | S |
-| 3.1.3 | Table Extraction | Docling | S |
-| 3.1.4 | Layout Analysis | Docling | S |
+| 1.3.19 | Event-Sourced Execution State (Log-as-Truth) — EventStore from observation log to state carrier: "model-visible ⟺ logged" runtime invariant, derive_messages() projection for model context, checkpoint = log-replay fold (snapshots demoted to materialized caches), incremental delta storage (O(N²)→near-linear; note: deer-flow's DeltaChannel is the reference but sits UNRELEASED in its 2.1.0 milestone — corrected 2026-08-14; OMA v1.15.0 durable-approval checkpoint schema v4 is the shipped production reference). Include a dsh-invariants-style runtime relational invariant layer (openTurn/openStep/pendingCalls, frozen result snapshots, dispatch-tree consistency) — gap found in 2026-08-14 re-verification | EventStore ✅ + CheckpointStore ✅ | L |
+| 5.9 | Skill Provider Registry (enhancement) — provider registry (source origins: project/user/bundled/custom) + rank precedence (lower wins) + kebab-case name grammar + model/user invocation policy separation; replaces plain directory scan | 5.9 Skill Loading ✅ | M |
+
+### Competitive Gap Features (NEW — 2026-08-14 competitor analysis)
+
+| # | Feature | Dependencies | Effort |
+|---|---------|------|--------|
+| 1.3.18 | Dynamic Orchestration — coordinator node: goal + agent roster → runtime task DAG → dispatch workers → synthesize result. 7th multi-agent pattern alongside 6 static ones; coordinator is a special node type emitting sub-graphs on Pregel at runtime | 2.7a ✅ + Pregel ✅ | M |
+| 8.20 | Run Replay & Debug Dashboard (Phase 1: execution replay) — runId → timeline replay of superstep × channel changes × tool calls × LLM request/response × guardrail results; web UI + DAG visualization on EventStore + OTel. Phase 2 (version binding) deferred to P5 | 1.3.19 (enriched log) | M |
+| 6.27 | Browser Automation Tool (moved from P4) — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ | M |
+
+### Completed-Feature Upgrades (NEW — 2026-08-14 research)
+
+> Upgrades to already-shipped features whose architecture the industry has moved past (dsh source analysis + 18-platform competitor survey). All sequence after 1.3.19 (they consume the enriched event log); spill into early Sprint 8 is acceptable if capacity is tight. No new feature IDs — recorded as planned enhancements on 1.3.5i (E3), 1.3.4, 9.4 in the catalog.
+
+| # | Feature | Dependencies | Effort |
+|---|---------|------|--------|
+| 1.3.5i (E3) | GuardrailHooks → Ordered Waterfall Middleware Chain — 4 flat hooks become stages in an ordered `next()`-delegation chain (agent/pre-step, agent/request, tools/pre-execute / execute / post-execute / result), scope-filtered per agent; HITL clarification becomes one stage (deer-flow ClarificationMiddleware pattern) | 1.3.19 + GuardrailHooks ✅ | M |
+| 1.3.4 | HITL Fail-Closed Approval — no answerer → deny; only allowed-once grants; ask/never policy state machine; approval/asked + approval/decided durable audit pair (turn-enclosed) | 1.3.4 ✅ + 1.3.19 (audit events) | M |
+| 9.4 | Content-Aware Tool Gating — bash pipeline static analysis beyond risk_level + monotonic denial invariant (guards can only deny, never resurrect) | 9.4 ✅ + 1.3.19 | M |
+
+### Advanced RAG & Knowledge (rescoped 2026-08-14)
+
+| # | Feature | Dependencies | Effort |
+|---|---------|------|--------|
 | 3.2.4 | Reranking | Vector Search ✅ | M |
 | 3.3.2 | Incremental Update | RAG ✅ | M |
 | 3.3.3 | Knowledge Quality Evaluation | Ragas | S |
-| 3.1.8 | Extended Document Processing | 3.1.2–4 | M |
-| 3.5.1 | Knowledge Graph Construction | LLM ✅ | L |
-| 3.5.2 | Graph Database Integration | — | M |
-| 3.5.3 | Community Detection & Summarization | 3.5.1 + 3.5.2 | M |
-| 3.5.5 | Knowledge Graph API | 3.5.2 | M |
+
+> **Deferred to P5 (2026-08-14)**: 3.1.2-3.1.4 (OCR / Table / Layout — integrate Docling/Unstructured instead of building), 3.1.8 (Extended Document Processing, from P4), 3.5.1-3.5.3 (Knowledge Graph suite — integrate GraphRAG/LlamaIndex), 3.5.5 (Knowledge Graph API, from P4), 3.4.2 (High-Throughput Retrieval — Qdrant deployment guide covers it). See Sprint 10 deferred table for triggers.
 
 ### Multi-Channel Expansion
 
@@ -558,9 +580,9 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 7.3 | Workflow Evaluation | 7.1 ✅ | M |
 | 7.4 | Human Annotation | 7.2 ✅ | M |
 | 7.4a | Human Score Calibration | 7.4 | S |
-| 7.5 | A/B Testing | Evaluation ✅ | S |
-| 7.6a | Prompt Auto-Optimization | 7.2a | M |
-| 7.6b | Prompt Comparison | 7.2a | S |
+| 7.5 | A/B Testing (rescoped to Agent-Level 2026-08-14) — agent/version-level controlled experiments; reuses 6.8a traffic-splitting + z-test machinery generalized from model routing; prompt comparison delegated to eval-platform integration (7.6b drop rationale) | 6.8a ✅ | S |
+
+> **Dropped (2026-08-14)**: 7.6a Prompt Auto-Optimization, 7.6b Prompt Comparison — specialized frameworks (DSPy, IBM AgentOps GEPA) and evaluation platforms (LangSmith, Salesforce A/B Testing API) have standardized this; self-building is negative ROI.
 
 > **TBD — Quality Regression Detection (G4 remainder)**: Once the Evaluation Suite produces per-model quality scores, add quality regression monitoring to the Model Monitoring Dashboard (O10+G4). Compare current-period quality scores against historical baseline; trigger alert when degradation exceeds threshold. Originated from `model-hub-completion` change where drift detection was shipped but quality regression was deferred pending evaluation data.
 
@@ -568,11 +590,10 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 1.1.18 | Agent-Workflow Canvas Embedding | 2.9a ✅ | M |
-| 1.1.19 | Unified Skill Selector | 2.9 ✅ | M |
-| 1.1.20 | Nested Graph Visualization | 1.1.18 | M |
 | 1.1.24 | Human Input / Form Node | interrupt() ✅ + Canvas ✅ | M |
 | 1.1.25 | Trigger Node | Scheduled Tasks ✅ + Webhook ✅ | M |
+
+> **Deferred to P5 (2026-08-14)**: 1.1.18 Agent-Workflow Canvas Embedding, 1.1.19 Unified Skill Selector, 1.1.20 Nested Graph Visualization — Canvas enhancements without user feedback are speculative; Dify's collaborative editing (Loro CRDT) is the direction to aim for when triggered.
 
 ### Memory Enhancement
 
@@ -589,32 +610,27 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 6.16 | NL2Agent / NL2Flow | Canvas ✅ + Graph DSL ✅ | M |
-| 6.17 | DSL Conversion Framework | Graph DSL ✅ | M |
 | 6.18 | Trace Annotation | EventStore ✅ + Audit ✅ | S |
-| 6.21 | Decision Lineage | EventStore ✅ + Audit ✅ | M |
+
+> **Dropped (2026-08-14)**: 6.17 DSL Conversion Framework — MCP/A2A protocol standardization plus Salesforce open-sourcing Agent Script indicates the industry is converging on standard agent definitions, not DSL compatibility layers.
+> **Deferred to P5 (2026-08-14)**: 6.21 Decision Lineage — full decision lineage requires an Ontology foundation (data + function + app version binding per trace, Palantir standard); effort was underestimated in the initial analysis.
 
 ### Milestone M7 (End of Sprint 7)
 
-- [ ] P3 = 138/138 (100%)
-- [ ] Advanced RAG: OCR + Table Extraction + Layout Analysis + Reranking
-- [ ] Knowledge Graph Construction with entity/relationship extraction
-- [ ] Graph Database Integration with Neo4j + in-memory backends
-- [ ] Community Detection with Leiden algorithm
-- [ ] Knowledge Graph API with Cypher queries
-- [ ] 8+ channels via ChannelABC plugins
-- [ ] Per-Token-Type Auth Pipeline
-- [ ] Two-Tier Identity Model
-- [ ] 40+ Built-in Evaluators
-- [ ] Evaluation Suite: AI-synthesized datasets, online/offline tasks, trace backflow
-- [ ] Workflow Evaluation and Human Annotation
-- [ ] A/B Testing operational
-- [ ] Prompt Auto-Optimization and Comparison
-- [ ] Canvas: Agent-Workflow embedding, Human Input/Form Node, Trigger Node
-- [ ] Memory Enhancement: importance scoring, multi-signal fusion, pressure alerts
-- [ ] NL2Agent/NL2Flow operational
-- [ ] DSL Conversion Framework
-- [ ] Trace Annotation with feedback
-- [ ] Decision Lineage for compliance
+- [ ] P3 re-scoped 125/125 (100%) — 2026-08-14 re-scope basis
+- [ ] Event-sourced execution state: log-as-truth invariant + derive_messages projection + DeltaChannel incremental checkpoint
+- [ ] Dynamic Orchestration (7th multi-agent pattern) on Pregel
+- [ ] Run Replay Phase 1 (execution replay) operational
+- [ ] Browser Automation builtin tool operational
+- [ ] Skill Provider Registry (rank + invocation policy) operational
+- [ ] Completed-feature upgrades: waterfall middleware chain (1.3.5i E3) + HITL fail-closed (1.3.4) + content-aware tool gating (9.4)
+- [ ] Advanced RAG: Reranking + Incremental Update + Knowledge Quality Evaluation
+- [ ] Multi-Channel Wave 1 complete (11.2 simplified)
+- [ ] Per-Token-Type Auth Pipeline + Two-Tier Identity Model
+- [ ] 40+ Built-in Evaluators + Evaluation Suite (AI-synthesized datasets, online/offline tasks, trace backflow, workflow eval, human annotation, A/B testing — 7.6a/b dropped)
+- [ ] Canvas: Human Input/Form Node + Trigger Node (1.1.18-20 deferred P5)
+- [ ] Memory Enhancement: importance scoring, multi-signal fusion, pressure alerts, layered memory
+- [ ] NL2Agent/NL2Flow + Trace Annotation (6.17 dropped, 6.21 deferred P5)
 
 ---
 
@@ -639,15 +655,15 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 |---|---------|------|--------|
 | 6.15 | Agentic RL Framework | Evaluation ✅ + LLM ✅ | L |
 | 6.19 | Prompt Self-Optimization | Evaluation ✅ + LLM ✅ | M |
-| 6.20 | Ontology Action System | Knowledge Graph (3.5.1) ✅ | L |
-| 6.22 | OAG (Ontology-Augmented Generation) | 6.20 + RAG ✅ | L |
+| 6.20 | Ontology Action System | Knowledge Graph (P5 deferred 2026-08-14 — rebase on GraphRAG/LlamaIndex integration when triggered) | L |
+| 6.22 | OAG (Ontology-Augmented Generation) | 6.20 + RAG ✅ *(blocked by 6.20's P5 KG dependency)* | L |
 
 ### Memory Intelligence
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 4.5 | Sleep-time Memory Consolidation | Memory System ✅ | M |
-| 4.13 | Context Engine Processor Chain | ContextEngine ✅ | M |
+| 4.13 | Context Engine Processor Chain (+ LLM-managed compaction via surface replacement — compaction events as checkpoint sources, per 2026-08-14 research) | ContextEngine ✅ + 1.3.19 | M |
 | 4.16 | LLM-Managed Memory | ContextEngine ✅ | M |
 | 4.18 | Conversation Recall Storage | Memory System ✅ | M |
 | 4.19 | Self-Editing Memory | Memory System ✅ | M |
@@ -672,18 +688,17 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ## Sprint 9: P4 Complete — Knowledge & Execution Intelligence (Month 17–18)
 
-> **Goal**: Complete P4 — Knowledge Intelligence (GraphRAG, Agentic RAG), Multi-Agent Intelligence (Peer Selection, Agent Teams), Execution Intelligence (Simulation, Browser-use, DataAgent, VibeCoding).
+> **Goal**: Complete P4 — Knowledge Intelligence (GraphRAG, Agentic RAG), Multi-Agent Intelligence (Peer Selection, Agent Teams, ACP), Execution Intelligence (Simulation, Computer-use, DataAgent, VibeCoding, Voice Pipeline).
 
 ### Knowledge Intelligence
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 3.2.10 | Agentic RAG | RAG ✅ + ContextEngine | M |
-| 3.5.4 | GraphRAG Query Engine | 3.5.1 + 3.5.2 + 3.5.3 | L |
-| 3.5.5 | Knowledge Graph API | 3.5.2 | M |
-| 3.5.6 | Agent-Native Graph Memory | 3.5.2 + Memory System | M |
+| 3.5.4 | GraphRAG Query Engine | 3.5.1 + 3.5.2 + 3.5.3 *(P5 deferred 2026-08-14 — rebase on GraphRAG/LlamaIndex integration when triggered)* | L |
+| 3.5.6 | Agent-Native Graph Memory | 3.5.2 + Memory System *(P5 deferred 2026-08-14 — same trigger)* | M |
 | 3.5.13 | Temporal Memory & Reasoning | Memory System ✅ | M |
-| 3.5.14 | Lazy GraphRAG | 3.5.1 + 3.5.2 | L |
+| 3.5.14 | Lazy GraphRAG | 3.5.1 + 3.5.2 *(P5 deferred 2026-08-14 — same trigger)* | L |
 
 ### Multi-Agent Intelligence
 
@@ -694,6 +709,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 2.6 | Inter-Agent Communication | Multi-Agent ✅ | M |
 | 2.6a | Multi-Agent Central Controller | 2.6 | M |
 | 2.11 | Agent Team Templates | Graph template ✅ | M |
+| 2.13 | ACP (Agent Client Protocol) Support (NEW — 2026-08-14) — external coding agents (Claude Code, Codex, Gemini CLI) as worker nodes in Hecate orchestration; subagent provider seam (in-process/fork/ACP); complements A2A (agent-to-agent) — ACP is host-to-coding-agent | A2A ✅ | M |
 | 13.15 | Distributed Team Orchestration | A2A ✅ (P3) | M |
 
 ### Execution Intelligence
@@ -706,7 +722,6 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 6.24 | Object Log & Decision Log | EventStore ✅ | M |
 | 6.25 | Object History Analysis | EventStore ✅ | M |
 | 6.26 | Simulation Environment | Ontology Actions (6.20) ✅ | L |
-| 6.27 | Browser-use / Computer-use | LLM ✅ | M |
 | 6.28 | DataAgent (NL2SQL) | RAG ✅ + LLM ✅ | M |
 | 6.29 | VibeCoding Tool Set | CLI Tools ✅ | M |
 | 6.30 | Fine-Grained Permission Control | Ontology Actions (6.20) ✅ | M |
@@ -715,7 +730,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 6.32a | Kata Containers Sandbox | Docker ✅ | M |
 | 6.33 | Decision Simulation | Ontology Actions (6.20) ✅ | M |
 | 11.18 | Multi-Stream Modes | Pregel Runtime ✅ | M |
-| 9.16 | External Policy Engine Interface (Cedar/OPA) | 9.4 ✅ + 5.9 | L |
+| 9.16 | External Policy Engine Interface (Cedar/OPA/**Dogwood** — AWS open-sourced Dogwood 2026-08-06: Cedar superset + MFOTL temporal logic governing action *sequences* (prerequisites, ordering, rate limits, escalation approval), deny-by-default, Apache 2.0, built into Bedrock AgentCore) | 9.4 ✅ + 5.14 | L |
 | 9.16a | Chaos Engineering for Multi-Replica (chaos-mesh + toxiproxy + pod-kill + node-drain) | 13.4 ✅ + 13.4b ✅ + 9.4 ✅ | L |
 | 9.17 | AI Auto-Approval | 9.4 ✅ + 9.14 | M |
 
@@ -726,28 +741,38 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 1.1.21 | Multi-Agent Controller Canvas | 2.6a | M |
 | 1.1.22 | Orchestration Mode Switching | 1.1.21 | M |
 | 1.1.23 | Execution State Visualization | Canvas ✅ | M |
-| 1.1.26 | Object CRUD Node | KG Construction (3.5.1) ✅ | M |
+| 1.1.26 | Object CRUD Node | KG Construction (P5 deferred 2026-08-14 — rebase on integration when triggered) | M |
 | 1.1.27 | Side-by-side Chat + Canvas | 1.1.23 | M |
+
+### 2026-08-14 Re-scope Additions (NEW)
+
+| # | Feature | Dependencies | Effort |
+|---|---------|------|--------|
+| 8.21 | Projection Registry — named projections over the event log (permission presets, agent profiles, derived views) + canonical setter events; zero-database state derivation with consistent rebuild semantics | 1.3.19 ✅ (P3) | M |
+| 13.20 | Atomic File Writes & Cross-Process File Locking — `<file>.lock` advisory locking + write-to-temp + atomic rename commit for multi-process file mutation (skills, plugin configs, state files); stale-lock recovery; ~150 LOC utility | — | S |
+| 11.11 | Voice Agent Pipeline (moved from P5) — STT → agent workflow → TTS end-to-end pipeline with configurable providers; barge-in support (interrupt TTS when user speaks) | API ✅ | M |
 
 ### Milestone M9 (End of Sprint 9)
 
-- [ ] P4 = 86/86 (100%)
-- [ ] GraphRAG Query Engine with Global/Local/Hybrid search
+- [ ] P4 = 96/96 (100%) — 2026-08-14 re-scope basis (100 features incl. 4 done; 3.5.5/3.1.8 deferred P5, 11.11/2.13/8.21/13.20/6.27a added)
+- [ ] GraphRAG Query Engine with Global/Local/Hybrid search (rebased on P5 KG integration when triggered)
 - [ ] Agentic RAG with iterative retrieval
-- [ ] Knowledge Graph API with Cypher queries
 - [ ] Temporal Memory with time-aware retrieval
-- [ ] Lazy GraphRAG with cost-optimized indexing
+- [ ] Lazy GraphRAG with cost-optimized indexing (same trigger)
 - [ ] Peer Selection and Expert Panel operational
 - [ ] Agent Team Templates available
+- [ ] ACP support — external coding agents as worker nodes (2.13)
 - [ ] Distributed Team Orchestration functional
 - [ ] Deterministic Hooks with lifecycle events
 - [ ] Asynchronous Execution API operational
 - [ ] 5-Level Intent Recognition with controller evolution
 - [ ] Simulation Environment for safe verification
-- [ ] Browser/Computer-use for GUI automation
+- [ ] Computer-use (6.27a) for GUI automation — browser half delivered in P3 as 6.27
+- [ ] Voice Agent Pipeline with barge-in (11.11, moved from P5)
 - [ ] DataAgent with NL2SQL capabilities
 - [ ] VibeCoding CLI tool set available
 - [ ] Multi-Stream Modes operational
+- [ ] Projection Registry + Atomic File Locks (8.21, 13.20)
 - [ ] Canvas Intelligence features delivered
 
 ---
@@ -804,10 +829,24 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 11.11 | Voice Input/Output | TTS/STT APIs | M |
 | 11.11a | Vision Input (Multi-Modal) | LLM Vision ✅ | M |
 | 11.12 | Desktop Client | API ✅ | L |
 | 13.16 | Edge/Lite Deployment | SQLite ✅ | M |
+
+### Deferred from P3/P4 (2026-08-14 competitor-analysis re-scope)
+
+> Trigger-based — no scheduled delivery. Rationale and evidence in `docs/research/2026-08-competitor-analysis.md` §Feature decisions.
+
+| # | Feature | Original Priority | Trigger |
+|---|---------|------------------|---------|
+| 3.1.2 / 3.1.3 / 3.1.4 | OCR / Table Extraction / Layout Analysis | P3 | Customer demand; integrate Docling/Unstructured instead of building |
+| 3.4.2 | High-Throughput Retrieval | P3 | Qdrant native sharding + deployment guide covers it |
+| 3.5.1 / 3.5.2 / 3.5.3 | Knowledge Graph Construction / Graph DB / Community Detection | P3 | Integrate GraphRAG/LlamaIndex when KG use case lands |
+| 3.5.5 | Knowledge Graph API | P4 | Same trigger as 3.5.1-3 |
+| 3.1.8 | Extended Document Processing | P4 | Same trigger as 3.1.2-4 |
+| 6.9 / 6.10 / 6.12 / 6.13 | Model Management UI (4 items) | P3 | After 13.1 SaaS launch + real user feedback |
+| 1.1.18 / 1.1.19 / 1.1.20 | Canvas Embedding / Skill Selector / Nested Graph | P3 | User feedback; Loro CRDT collaborative editing is the target direction |
+| 6.21 | Decision Lineage | P3 | Requires Ontology foundation first (Palantir standard: data + function + app version binding per trace) |
 
 ### AIP Advanced Capabilities
 
@@ -835,7 +874,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Milestone M10 (End of Sprint 10)
 
-- [ ] P5 = 46/46 (100%)
+- [ ] P5 = 60/60 (100%) — 2026-08-14 re-scope basis (44 original − 11.11 moved to P4 + 17 deferred from P3/P4)
 - [ ] Asset Marketplace operational
 - [ ] Partner Monetization with Stripe integration
 - [ ] Industry Templates and Knowledge Packs available
@@ -845,7 +884,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [ ] Community translation framework ready
 - [ ] EU AI Act compliance certified
 - [ ] Knowledge Graph Visualization and Ontology tools
-- [ ] Voice and Vision input operational
+- [ ] Vision input operational (Voice moved to P4 as 11.11 Voice Agent Pipeline, 2026-08-14)
 - [ ] Edge/Lite deployment available
 - [ ] Plugin Security & Signing for marketplace
 - [ ] Agentic Resource Discovery (ARD) operational
@@ -878,7 +917,7 @@ EventStore Wiring → Tracing → Monitoring → Alerting ─────┘
 | workspace_id pre-reserved in 5 models; changes concentrated in API/Service layer, no engine impact | ✅ Done — workspace_id added to 14 unscoped models, vector store filtering, migration + backfill, service/API enforcement |
 | Canvas development takes longer than estimated | P2 delivery delayed | React Flow is mature; frontend can develop in parallel with backend. Canvas UI features (1.1.14-1.1.17) are incremental enhancements to existing canvas. |
 | Collaboration pattern UI complexity | Sprint 2 overloaded | Start with 3 core patterns (Sequential, Parallel, Handoff) in Sprint 2, add remaining (Broadcast, Negotiation, Debate) in Sprint 3. |
-| A2A protocol spec instability | Sprint 5 affected | Google A2A v1.2 already stable (March 2026); implement core first (AgentCard + Task lifecycle) |
+| A2A protocol spec instability | Sprint 5 affected | ✅ Resolved — A2A v1.0 GA (Linux Foundation, v1.0.0 2026-03-12 + patch v1.0.1 2026-05-26); core implemented (AgentCard + Task lifecycle). Correction (2026-08-14): earlier note cited a "v1.2 (March 2026)" which does not exist in official releases — v1.0.x is current. |
 | ABC wiring introduces regressions | Sprint 1 delayed | Each ABC wiring uses optional constructor parameters with default behavior; existing tests cover all paths |
 | Evaluation system too broad (40+ evaluators) | Sprint 4 overloaded | Start with 10 core evaluators in Sprint 4, add remaining in Sprint 5 |
 
@@ -898,7 +937,7 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 | A2A Protocol | 12 months to spec GA | Sprint 5 (M9–10) | ✅ Moved to P3 — Google A2A v1.0 GA (Linux Foundation), adopted by IBM/Salesforce/Cisco. Early adoption reduces integration debt. |
 | Visual Canvas | 0–16 months | Sprint 2 (M3–4) | ✅ Reasonable — React Flow mature |
 
-**Key Insight**: Framework-first platforms (AutoGen, CrewAI, Langflow) ship core features in 0 months. Platform-first products (Dify, Coze) take 12–18 months for enterprise features. Hecate is at the inflection point — Graph engine + 11 ABCs + 123 features already built. The roadmap timelines are well within industry benchmarks. Canvas UI enhancement (1.1.14-1.1.23) and collaboration patterns (2.7a-2.7c) are incremental additions that build on the existing React Flow foundation, not greenfield development. MCP/Skill resource management (5.4c, 5.9d, 5.9e) addresses the operational maturity gap identified in competitive analysis. Knowledge Graph (3.5.1-3.5.8) and Ontology Modeling (3.5.9-3.5.12) provide structured knowledge capabilities matching Google ADK, LangGraph, and Microsoft GraphRAG. Memory Retrieval Quality (4.14, 4.15) closes the gap with Mem0's multi-signal fusion approach. MemGPT-Inspired Memory (4.16-4.20) adds LLM self-management, pressure alerts, conversation recall, self-editing, and multi-step retrieval. AgentScope-Inspired Memory (4.21-4.24) adds task memory, tool memory, cross-thread store, and memory versioning. AIP-Inspired Capabilities (6.15-6.43) — from Versatile and Palantir — add Agentic RL, NL2Agent, DSL conversion, ontology actions, decision lineage, OAG, intent recognition, simulation, Browser/Computer-use, DataAgent, VibeCoding, fine-grained permissions, data integration, gVisor sandbox, AI Office, industrial data, asset operations, self-planning, tool auto-creation, Firecracker microVM, cloud doc connector, global branching, and embedded ontology. **Hecate's positioning: an open-source enterprise Agent platform with ontology enhancements — not an AIP (where ontology is the architectural organizing principle), but a Versatile-level platform where ontology is an enabler alongside the Pregel engine, Graph DSL, and 15 extension points.**
+**Key Insight**: Framework-first platforms (AutoGen, CrewAI, Langflow) ship core features in 0 months. Platform-first products (Dify, Coze) take 12–18 months for enterprise features. Hecate is at the inflection point — Graph engine + 11 ABCs + 123 features already built. The roadmap timelines are well within industry benchmarks. Canvas UI enhancement (1.1.14-1.1.23) and collaboration patterns (2.7a-2.7c) are incremental additions that build on the existing React Flow foundation, not greenfield development. MCP/Skill resource management (5.4c, 5.9d, 5.9e) addresses the operational maturity gap identified in competitive analysis. Knowledge Graph (3.5.1-3.5.8) and Ontology Modeling (3.5.9-3.5.12) provide structured knowledge capabilities matching Google ADK, LangGraph, and Microsoft GraphRAG. Memory Retrieval Quality (4.14, 4.15) closes the gap with Mem0's multi-signal fusion approach. MemGPT-Inspired Memory (4.16-4.20) adds LLM self-management, pressure alerts, conversation recall, self-editing, and multi-step retrieval. AgentScope-Inspired Memory (4.21-4.24) adds task memory, tool memory, cross-thread store, and memory versioning. AIP-Inspired Capabilities (6.15-6.43) — from AgentArts (fka Versatile) and Palantir — add Agentic RL, NL2Agent, DSL conversion, ontology actions, decision lineage, OAG, intent recognition, simulation, Browser/Computer-use, DataAgent, VibeCoding, fine-grained permissions, data integration, gVisor sandbox, AI Office, industrial data, asset operations, self-planning, tool auto-creation, Firecracker microVM, cloud doc connector, global branching, and embedded ontology. **Hecate's positioning: an open-source enterprise Agent platform with ontology enhancements — not an AIP (where ontology is the architectural organizing principle), but an AgentArts-level (fka Versatile) platform where ontology is an enabler alongside the Pregel engine, Graph DSL, and 15 extension points.**
 
 ---
 
@@ -912,9 +951,9 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 | **M4: Enterprise Ready** | Month 8 | Resilience infrastructure (exception hierarchy + auto-retry + tool gating) ✅; ContextEngine Phase 1 (LLMWorker context pipeline) ✅; Plugin SPI Core + EvaluatorABC defined ✅; Multi-Tenant RBAC + SSO; full security stack ✅; end-to-end observability ✅ |
 | **M5: P3 Enterprise** | Month 10 | Platform SPI complete: ChannelABC + AuthProviderABC + i18n SPI ✅ (NotifierABC merged into ChannelABC); A2A Protocol with Signed Agent Cards; Model Hub (Catalog + Lifecycle Manager); Enterprise Identity: SSO + SCIM + Vault + Budget Management ✅ |
 | **M6: P3 Security & Ops** | Month 12 | Ops Center (Dashboard + Agent Health + Conversation Analytics + Tool Execution Analytics + CI/CD Gating + Agent Catalog Governance); Security (DLP + Runtime Protection + Red Teaming); Plugin System; Deployment infrastructure (SaaS + Canary + Horizontal Scaling + Backup) |
-| **M7: P3 Complete** | Month 14 | P3 138/138 (100%); Advanced RAG (OCR + Reranking + Knowledge Graph + Graph DB + Community Detection); Multi-Channel (8+ channels via ChannelABC); Evaluation (40+ evaluators + Workflow Eval + Human Annotation + A/B Testing + Testing Center); Canvas (Human Input/Form Node + Trigger Node); Memory Enhancement |
+| **M7: P3 Complete** | Month 14 | P3 re-scoped 125/125 (100%); Event-Sourced State (log-as-truth + DeltaChannel); Dynamic Orchestration; Run Replay Phase 1; Browser Automation Tool; Skill Provider Registry; Advanced RAG (Reranking + Incremental + Quality Eval); Multi-Channel Wave 1 (11.2 simplified + 11.3 ✅ + 11.9 Slack ✅); Evaluation Suite (7.6a/b dropped); Canvas (Human Input/Form + Trigger; 1.1.18-20 deferred); Memory Enhancement |
 | **M8: P4 Intelligence** | Month 16 | Hallucination Detection operational; Self-Learning loop; Agentic RL Framework; Prompt Self-Optimization; Ontology Action System; OAG complete; Sleep-time Memory Consolidation; LLM-Managed Memory; Memory Intelligence features |
-| **M9: P4 Complete** | Month 18 | P4 86/86 (100%); GraphRAG Query Engine; Agentic RAG; Knowledge Graph API; Temporal Memory; Lazy GraphRAG; Peer Selection; Agent Team Templates; Distributed Team Orchestration; Deterministic Hooks; Asynchronous Execution API; 5-Level Intent Recognition; Simulation Environment; Browser/Computer-use; DataAgent; VibeCoding; Multi-Stream Modes; Canvas Intelligence |
+| **M9: P4 Complete** | Month 18 | P4 96/96 remaining (100%); GraphRAG Query Engine (P5-trigger); Agentic RAG; Temporal Memory; Lazy GraphRAG (P5-trigger); Peer Selection; Agent Team Templates; ACP Support (2.13); Distributed Team Orchestration; Deterministic Hooks; Asynchronous Execution API; 5-Level Intent Recognition; Simulation Environment; Computer-use (6.27a); Voice Agent Pipeline (11.11); DataAgent; VibeCoding; Multi-Stream Modes; Projection Registry (8.21) + Atomic File Locks (13.20); Canvas Intelligence |
 | **M10: P5 Complete** | Month 20 | P5 46/46 (100%); Asset Marketplace; Partner Monetization; Industry Templates; PyPI SDK; End-User App; Mobile GUI; EU AI Act Compliance; Knowledge Graph Visualization; Ontology tools; Voice/Vision; Edge/Lite; Plugin Security; Agentic Resource Discovery; All P5 features delivered |
 
 ---
@@ -955,21 +994,26 @@ Authentication → Authorization → Multi-Tenant → Tenant Isolation
 Multi-Agent → A2A Protocol (2.10) → Signed Agent Cards (2.10a) → Conflict Handling → Skill Registry → Mutual Embedding
 MCP Client → MCP Server Mode → MCP Streamable HTTP (5.4b) → MCP Server Registry & Connection Management (5.4c) → MCP Gateway → Plugin System (5.5, via 5.5a) → Tool Permission
 Skill Loading → Skill Versioning (5.9d) → Resource Versioning
-Knowledge Graph Construction (3.5.1) → Graph Database Integration (3.5.2) → Community Detection (3.5.3)
+Knowledge Graph Construction (3.5.1) → Graph Database Integration (3.5.2) → Community Detection (3.5.3) *(P5 deferred 2026-08-14)*
 Memory Isolation (4.6) → Memory Importance Scoring (4.14) → Multi-Signal Fusion Retrieval (4.15)
 LLM-Managed Memory (4.16) → Memory Pressure Alert (4.17) → ContextEngine Integration
 Task Memory (4.21) → Trajectory Learning → Experience Retrieval
 Evaluation → Agentic RL Framework (6.15) → Data Flywheel → Model Optimization
 Canvas + Graph DSL → NL2Agent (6.16) → NL2Flow → Workflow Auto-Generation
-Graph DSL → DSL Conversion Framework (6.17) → Dify/Coze/LangChain Import
 EventStore → Trace Annotation (6.18) → Evaluation Datasets → Agentic RL
 Evaluation → Prompt Self-Optimization (6.19) → ACE/GEPA Algorithm → Auto-Optimized Prompts
-Knowledge Graph (3.5.1) → Ontology Action System (6.20) → Object Actions → Writeback
-EventStore → Decision Lineage (6.21) → Decision Audit → Compliance
-6.20 + RAG → OAG (6.22) → RAG + Logic + Actions Closed Loop
+Knowledge Graph (3.5.1, P5 deferred) → Ontology Action System (6.20) → Object Actions → Writeback
+EventStore → Decision Lineage (6.21, P5 deferred 2026-08-14) → Decision Audit → Compliance
+6.20 + RAG → OAG (6.22) → RAG + Logic + Actions Closed Loop *(blocked by 6.20's P5 KG dependency)*
 Auth Service → Per-Token-Type Auth (11.16) → Two-Tier Identity (11.17) → Fine-Grained Access Control
 Canvas → Human Input/Form Node (1.1.24) → Trigger Node (1.1.25) → Event-Driven Workflows
 CheckpointStore → Distributed Session State Store (13.4a) ✅ (5/5) → Horizontal Scaling (13.4) → Stateless Multi-Replica
+EventStore → Event-Sourced Execution State (1.3.19) → Run Replay (8.20) + Projection Registry (8.21, P4)
+EventStore (1.3.19) → HITL durable audit pairs + middleware waterfall events
+Pregel + Collaboration Patterns (2.7a ✅) → Dynamic Orchestration (1.3.18) → runtime task DAG → 7th pattern
+Built-in Tools (5.1 ✅) → Browser Automation (6.27, P3) → Computer-use (6.27a, P4)
+Skill Loading (5.9 ✅) → Skill Provider Registry (5.9 enhancement) → community skills ecosystem
+A2A (2.10 ✅) → ACP Support (2.13, P4) → external coding agents as worker nodes
 ```
 
 ### P4 (Sprint 6)
@@ -1001,13 +1045,13 @@ Ontology Schema Definition (3.5.9) → Ontology Import/Export (3.5.11) → Ontol
 LLM → 5-Level Intent Recognition (6.23) → Controller Self-Evolution → Intent Caching
 EventStore → Object Log & Decision Log (6.24) → Object History Analysis (6.25) → State Replay
 Ontology Action System (P3) → Decision Simulation (6.33) → Simulation Environment (6.26) → Safe Verification
-LLM → Browser-use (6.27) → Computer-use → GUI Automation
+LLM → Browser Automation (6.27, P3) → Computer-use (6.27a, P4) → GUI Automation
 RAG + LLM → DataAgent (6.28) → NL2SQL + Data Analysis + Chart Generation
 CLI Tools → VibeCoding (6.29) → File IO + Command Execution + Code Execution
 Ontology Actions (P3) → Fine-Grained Permissions (6.30) → Object/Attribute/Row-Level Access Control
 Docker (1.3.15a) → gVisor Enhanced Sandbox (6.32) → Kata Containers (6.32a) → Firecracker microVM (6.40) → WASM Runtime (6.41)
 Pregel Runtime → Multi-Stream Modes (11.18) → values/updates/messages/debug
-Knowledge Graph (3.5.1-3.5.3) → Object CRUD Node (1.1.26) → Ontology-Native Canvas Development
+Knowledge Graph (3.5.1-3.5.3, P5 deferred) → Object CRUD Node (1.1.26) → Ontology-Native Canvas Development
 Execution State Visualization (1.1.23) → Side-by-side Chat+Canvas (1.1.27) → Integrated Dev/Test View
 Streaming → Asynchronous Execution API (1.3.11) → Long-Running Workflow Support
 P3 Observability (8.0-8.8) → Unified Ops Center Dashboard (8.9) → Agent Health Monitoring (8.9a) → Conversation Analytics (8.9b)
@@ -1025,13 +1069,13 @@ Tool Permission (5.6) → Composable Tool Policy Pipeline (TP3) → Multi-Layer 
 Enterprise Integration (5.8) → Per-Tool Auth Scope (TP6) → Per-Execution Credential Scoping (9.15) → Tool Credential Vault
 Deterministic Hooks (1.3.5i) → Session Events + Tool Matchers (TP4) → Per-Tool Hook Config
 Ops Center (8.9) → Agent Health (8.9a) → Conversation Analytics (8.9b) → Tool Execution Analytics (8.9c/TP2)
-Knowledge Graph (3.5.1-3.5.3) → GraphRAG Query Engine (3.5.4) → DRIFT Search (KM4) + Schema-Aware Traversal (KM5) → Lazy GraphRAG (3.5.14/KM2)
+Knowledge Graph (3.5.1-3.5.3, P5 deferred) → GraphRAG Query Engine (3.5.4) → DRIFT Search (KM4) + Schema-Aware Traversal (KM5) → Lazy GraphRAG (3.5.14/KM2)
 Memory Integration (4.5) → Sleep-time Consolidation (KM3) → Overnight Synthesis
 Task Memory (4.21) → Work Context Graph (KM6) → Self-Improving Work Memory
 Agent-Native Graph Memory (3.5.6) → Temporal Memory & Reasoning (3.5.13/KM1) → Time-Aware Retrieval
 PII Masking (9.5) → Outbound DLP Engine (9.10/EF1) → Multi-Point Exfiltration Prevention
 Secret Management → Enterprise Vault Integration (10.8/EF2) → Dynamic Secrets
-Decision Lineage (6.21) → Data Lineage Pipeline (EF3) → RAG Provenance
+Decision Lineage (6.21, P5 deferred) → Data Lineage Pipeline (EF3) → RAG Provenance
 Version Upgrade (13.6) → Multi-Region Data Sovereignty (EF4) → GDPR Compliance
 Multi-Auth (6.8) → Zero Data Retention Policy (EF5) → Provider Retention Control
 Edge/Lite (13.16) → Confidential Computing Mode (EF6) → HYOK + Air-Gapped
@@ -1040,11 +1084,11 @@ Security Testing (7.7) → Automated Continuous Red Teaming (7.10/SS2) → CI/CD
 Output Security (9.2) → System Prompt Leakage Protection (SS4) → OWASP LLM07
 Audit Logs (8.7) → Structured Security Audit Pipeline (9.14) → Security Event SIEM Pipeline (SS5) → SOC Integration
 Signed Agent Cards (2.10a) → Multi-Agent Trust Verification (2.10b) → ASI03/07/09
-Execution Security (9.4) → Environment Security P0 (5.9: 9.12+9.13+9.14+9.15) → External Policy Engine Interface (9.16/Cedar/OPA) → AI Auto-Approval (9.17)
+Execution Security (9.4) → Environment Security P0 (5.14: 9.12+9.13+9.14+9.15) → External Policy Engine Interface (9.16/Cedar/OPA) → AI Auto-Approval (9.17)
 P3 Full-Chain Tracing (8.1) → OTel GenAI Semantic Conventions (OE2) → Multi-Agent Distributed Tracing (8.1d/OE6)
-P3 Evaluators (7.2a) → Evaluation Three-Dimension Structuring (OE8) → Reasoning Efficiency Evaluator (OE9)
+P3 Evaluators (7.2a) → Evaluation Three-Dimension Structuring (OE8) → Reasoning Efficiency Evaluator (OE9, frozen 2026-08-14 → OTel export)
 P3 Online/Offline Eval (7.2c) → Production Online Scoring (OE3) → CI/CD Evaluation Gating (8.10/OE1)
-Decision Lineage (6.21) → Data-to-Decision Traceability (OE4) → Ontology-Level Provenance
+Decision Lineage (6.21, P5 deferred) → Data-to-Decision Traceability (OE4) → Ontology-Level Provenance
 Testing Center (7.9) + Regression Test Set (7.6) → CI/CD Evaluation Gating (8.10/OE1) → Deployment Quality Gate
 Agent Evaluation (7.2) + Agent Benchmarks (7.8a) → Agent Catalog Governance (8.12/OE7) → Quality-Gated Publishing
 Red Teaming (7.10) → Adversarial Test Generation (OE10) → Pre-Publish Robustness Verification
