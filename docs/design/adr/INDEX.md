@@ -1,6 +1,6 @@
 # ADR Index — by Topic
 
-The 28 ADRs in this directory cover every significant architectural decision since Hecate started. They are listed chronologically in the [README](../README.md#architecture-decision-records-adrs). This index provides an alternative **topic-grouped** view to help you find the ADRs relevant to a specific concern.
+The 29 ADRs in this directory cover every significant architectural decision since Hecate started. They are listed chronologically in the [README](../README.md#architecture-decision-records-adrs). This index provides an alternative **topic-grouped** view to help you find the ADRs relevant to a specific concern.
 
 Each ADR row links to the full document. Use this index as a **map**; read the individual ADRs for the "why" behind each decision.
 
@@ -17,6 +17,7 @@ The big-picture design that everything else builds on.
 | [ADR-001](001-graph-first-orchestration.md) | Graph-First Orchestration with Three-Layer Agent as Preset Template | Engine — orchestration model |
 | [ADR-002](002-five-layer-architecture.md) | Five-Layer System Architecture | Top-level layered design |
 | [ADR-016](016-platform-spi-architecture.md) | Platform SPI Architecture with 15 Extension Points | Engine — extensibility model |
+| [ADR-029](029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture | Minimal kernel, four mounting planes, five isolation tiers |
 
 ### ⚙️ Engine runtime
 
@@ -59,6 +60,7 @@ Guardrails, RBAC, zero trust, multi-tenancy.
 | [ADR-018](018-zero-trust-identity-architecture.md) | Zero Trust Identity Architecture for Enterprise Agent Access | Auth / multi-tenant |
 | [ADR-025](025-enterprise-foundation-enhancement.md) | Enterprise Foundation Enhancement Architecture | Multi-tenancy enhancement |
 | [ADR-026](026-security-shield-enhancement.md) | Security Shield Enhancement Architecture | Security deepening |
+| [ADR-029](029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture | (also under Architecture & Ecosystem) Plugin trust model / isolation tiers |
 
 ### 📚 Knowledge, memory, ontology
 
@@ -132,6 +134,7 @@ Marketplace, plugins, distribution.
 | ADR | Title | Topic |
 |---|---|---|
 | [ADR-027](027-ecosystem-enhancement.md) | Ecosystem Enhancement Architecture | Marketplace, community |
+| [ADR-029](029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture | (also under Architecture & Security) Marketplace trust model, isolation tiers, install authority |
 
 ---
 

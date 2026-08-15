@@ -4,7 +4,8 @@
 > **目的**: P3 阶段完成度审计，为 MVP 版本迭代提供决策依据
 > **范围**: P3 Trustworthy 阶段（138 项特性），含源码级实现状态验证
 > **方法**: Feature catalog 分析 + 源码 grep/glob 扫描验证部分实现
-> **最近更新**: 2026-08-12 — 11.x Multi-Channel 重新校准（通用平台 Wave 1/2/3 节奏）；11.6/11.10/11.2 完整版从 P3 挪到 P5 deferred（按需触发）；详见"11.x Wave 节奏"段
+> **最近更新**: 2026-08-13 — 11.x Multi-Channel 重新校准：Wave 1 已交付（11.3 飞书 + 11.9 Slack ✅，11.2 简化版待交付）；**Wave 2（11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram）从 P3 挪到 P5 deferred**（按客户需求触发）；11.6/11.10/11.2 完整版仍 P5 deferred；详见"11.x Wave 节奏"段
+> **2026-08-14 竞品重校准**（docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md）：**Drop 5 项**（7.6a/7.6b/9.2a/6.17/9.8）；**Defer→P5 15 项**（3.1.2-4、3.4.2、3.5.1-3、6.9/6.10/6.12/6.13、1.1.18-20、6.21）；**新增 P3 4 项**（1.3.18 Dynamic Orchestration、1.3.19 Event-Sourced State/Log-as-Truth、8.20 Run Replay、6.27 Browser Automation 自 P4 移入）；**5.9 增强**（Skill Provider Registry，并入而非新建 5.12）。未完成 58 → **42 项**，Sprint 7 重排，详见"2026-08-14 竞品重校准"章节。
 
 ---
 
@@ -12,15 +13,15 @@
 
 | 指标 | 数值 |
 |------|------|
-| P3 总特性数 | 138 |
-| 已完成 ✅ | **80 (58%)** |
-| 未完成 | **58 (42%)** |
+| P3 总特性数（2026-08-14 重校准后） | 122 |
+| 已完成 ✅ | **80 (66%)** |
+| 未完成 | **42 (34%)**（原 58 − Drop 5 − Defer 15 + 新增 4） |
 | 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅ |
 | 部分 Sprint | Sprint 6 (M6) — 约 79% 完成 |
-| 未启动 Sprint | Sprint 7 (M7) — 0% |
+| 未启动 Sprint | Sprint 7 (M7) — 0%（已按 2026-08-14 重校准重排） |
 | 发布阻塞项 | 1 项关键 + 3 项强烈建议 |
 | 有部分代码 | 2 项已有可观代码但标记为未完成 |
-| 零代码 | 57 项完全未启动 |
+| 零代码 + 新增 | 37 项零代码（原 57 − Drop 5 − Defer 15）+ 4 项新增（1.3.18/1.3.19/8.20/6.27） |
 
 ---
 
@@ -52,7 +53,7 @@
 | 9.13 | Sandbox Enforcement Integration | EXECUTE_SANDBOX 路由到 DockerEnvironment |
 | 9.14 | Structured Security Audit Pipeline | ToolDecisionModel、批量写入、REST API |
 | 9.15 | Per-Execution Credential Scoping | 运行时凭证隔离，per-tool 注入 |
-| 5.9 | Environment Security（伞形特性） | P0 阶段完成（9.12-9.15） |
+| 5.14 | Environment Security（伞形特性，2026-08-14 自 5.9 改名避免与 Skill Loading 撞号） | P0 阶段完成（9.12-9.15） |
 | 8.7 | Audit Logs + SIEM Pipeline | Webhook + Syslog + OCSF，SecurityFinding 持久化 |
 | 9.10 | Outbound DLP Engine | 3 点扫描（Pre-LLM / Post-Tool / Pre-Memory）+ Redact/Block 两种模式 + 跨请求熵检测；DLPService 50+ 内置 recognizer（信用卡/SSN/邮箱/电话/JWT/AWS key 等）；MCP egress filter；Guardrail Hooks 集成（PreLLMHook on LLMWorker + PostToolHook on ToolWorker）；per-environment DLPConfigModel + REST API；2026-08-10 完成（PR #58） |
 
@@ -168,7 +169,7 @@
 
 ---
 
-## 第二部分：未完成特性（60 项）
+## 第二部分：未完成特性（42 项，2026-08-14 重校准后）
 
 ### A 类：标记 ✅ 但有遗留增强项（8 项）
 
@@ -202,7 +203,8 @@
 - **文件**: `src/hecate/services/mcp/client.py`
 - **已实现**: MCP Client 使用 `streamablehttp_client` 连接外部 Streamable HTTP MCP Server
 - **缺失**: Server 端实现（Hecate 暴露单一 `/mcp` 端点，POST/GET，SSE upgrade，无状态操作）
-- **完成工作量**: 中（M）— 需 Server 端实现
+- **⚠️ 规范基线更新（2026-08-14b 复核）**: MCP 官方规范已发布 **2026-07-28 大修订**（无状态核心：移除 initialize/session；强制 Mcp-Method/Mcp-Name header 路由；MRTR 取代长连接 elicitation；Tasks 转扩展；Roots/Sampling 弃用，12 个月窗口）。Server 端实现应**直接按 2026-07-28 规范落地**，避免按 2025-03-26 实现后二次迁移——见 roadmap Sprint 6 `5.4b (upg)` 工作项
+- **完成工作量**: 中（M）— 需 Server 端实现（按新规范）
 
 #### ChannelABC Adapters — 🟡 接口已定义，零实现
 
@@ -213,7 +215,7 @@
 
 ### C 类：零代码 — 完全未启动（50 项）
 
-#### Evaluation Suite 扩展（8 项）— Sprint 7
+#### Evaluation Suite 扩展（6 项）— Sprint 7
 
 | # | 特性 | 工作量 | 依赖 |
 |---|------|--------|------|
@@ -223,12 +225,10 @@
 | 7.2e | Evaluation Report Dashboard | M | 7.2a ✅ |
 | 7.3 | Workflow Evaluation | M | 7.1 ✅ |
 | 7.4 | Human Annotation | M | 7.2 ✅ |
-| 7.6a | Prompt Auto-Optimization | M | 7.2a ✅ |
-| 7.6b | Prompt Comparison | S | 7.2a ✅ |
 
-> **说明**：`EvaluationDatasetService` 已存在（`services/evaluation/dataset_service.py`，333 行），但仅提供基础 CRUD — 以上高级功能均未实现。
+> **说明**：`EvaluationDatasetService` 已存在（`services/evaluation/dataset_service.py`，333 行），但仅提供基础 CRUD — 以上高级功能均未实现。**Dropped (2026-08-14)**: 7.6a Prompt Auto-Optimization、7.6b Prompt Comparison — DSPy/IBM AgentOps (GEPA) 已标准化优化，LangSmith/Salesforce A/B API 已标准化对比，自建为负 ROI。
 
-#### Security 增强（7 项）— Sprint 6
+#### Security 增强（6 项）— Sprint 6
 
 | # | 特性 | 工作量 | 依赖 |
 |---|------|--------|------|
@@ -238,7 +238,9 @@
 | 9.1a | Injection Type Detection | S | Guardrails ✅ |
 | 9.2 | System Prompt Leakage Protection | S | Output Security ✅ |
 | 2.10b | Multi-Agent Trust Verification | M | A2A ✅ |
-| 9.6 / 9.8 / 7.7 | Compliance Framework / Full-Chain Network Security / Security Testing | 各 M | Security ✅ |
+| 9.6 / 7.7 | Compliance Framework / Security Testing | 各 M | Security ✅ |
+
+> **Dropped (2026-08-14)**: 9.2a Content Moderation（模型内置安全层 + OpenAI Moderation API 免费够用）、9.8 Full-Chain Network Security（TLS/WAF/API Gateway 属基础设施层职责，归部署指南）。
 
 #### Multi-Channel Access（5 项 in P3）— Sprint 7
 
@@ -248,10 +250,10 @@
 |---|------|--------|------|------|
 | 11.2 | Web Widget (Simplified) | S | API ✅ | Wave 1 |
 | 11.3 | Feishu (Lark) | **M**（原 S）— 首个 ChannelABC 真实实现 | Channel SDK | Wave 1 |
-| 11.4 | WeCom (WeChat Work) | S | 11.3 | Wave 2 |
-| 11.5 | DingTalk | S | 11.3 | Wave 2 |
+| 11.4 | WeCom (WeChat Work) | S | 11.3 ✅ | **P5 deferred** |
+| 11.5 | DingTalk | S | 11.3 ✅ | **P5 deferred** |
 | 11.8 | Intent Recognition & Routing | M | Multi-Agent ✅ | 横切 |
-| 11.9 | Slack/Discord/Telegram | M (Slack) + S (Discord/Telegram) | ChannelABC ✅ | Wave 1 (Slack) + Wave 2 (D/T) |
+| 11.9 | Slack/Discord/Telegram | M (Slack) + S (Discord/Telegram) | ChannelABC ✅ | Wave 1 (Slack ✅) + **P5 deferred (D/T)** |
 
 #### Deployment & Operations（8 项）— Sprint 6
 
@@ -266,35 +268,24 @@
 | 13.17 | Environment Management & ALM Pipeline | L | 13.5 + 13.6 |
 | 13.18 | API Management & Developer Portal | M | API ✅ |
 
-#### Advanced Knowledge Base（7 项）— Sprint 7
+#### Advanced Knowledge Base（3 项）— Sprint 7
 
 | # | 特性 | 工作量 | 依赖 |
 |---|------|--------|------|
-| 3.1.2 | OCR | S | Docling |
-| 3.1.3 | Table Extraction | S | Docling |
-| 3.1.4 | Layout Analysis | S | Docling |
 | 3.3.2 | Incremental Update | M | RAG ✅ |
 | 3.3.3 | Knowledge Quality Evaluation | S | Ragas |
 | 3.4.1 | Batch Document Indexing | M | — |
-| 3.4.2 | High-Throughput Retrieval | M | Qdrant |
 
-#### Knowledge Graph（3 项）— Sprint 7
+> **Deferred to P5 (2026-08-14)**: 3.1.2 OCR / 3.1.3 Table Extraction / 3.1.4 Layout Analysis（Docling/Unstructured/RAGFlow 已工业化，应集成不自建）、3.4.2 High-Throughput Retrieval（Qdrant 原生 sharding，部署指南即可覆盖）。
 
-| # | 特性 | 工作量 | 依赖 |
-|---|------|--------|------|
-| 3.5.1 | Knowledge Graph Construction | L | LLM ✅ |
-| 3.5.2 | Graph Database Integration | M | — |
-| 3.5.3 | Community Detection & Summarization | M | 3.5.1 + 3.5.2 |
-
-#### Canvas UI 增强（5 项）— Sprint 7
+#### Canvas UI 增强（2 项）— Sprint 7
 
 | # | 特性 | 工作量 | 依赖 |
 |---|------|--------|------|
-| 1.1.18 | Agent-Workflow Canvas Embedding | M | 2.9a ✅ |
-| 1.1.19 | Unified Skill Selector | M | 2.9 ✅ |
-| 1.1.20 | Nested Graph Visualization | M | 1.1.18 |
 | 1.1.24 | Human Input / Form Node | M | interrupt() ✅ + Canvas ✅ |
 | 1.1.25 | Trigger Node | M | Scheduled Tasks ✅ + Webhook ✅ |
+
+> **Deferred to P5 (2026-08-14)**: 1.1.18 / 1.1.19 / 1.1.20（Canvas Embedding / Skill Selector / Nested Graph）——无用户反馈的 Canvas 增强是投机；Dify Loro CRDT 协同编辑才是触发后的目标方向。
 
 #### Memory Enhancement（7 项）— Sprint 7
 
@@ -308,23 +299,19 @@
 | 4.25 | Layered Memory System | M | 1.3.15 ✅ |
 | 4.21 | Task Memory | M | Memory System ✅ |
 
-#### AIP Capabilities（4 项）— Sprint 7
+#### AIP Capabilities（2 项）— Sprint 7
 
 | # | 特性 | 工作量 | 依赖 |
 |---|------|--------|------|
 | 6.16 | NL2Agent / NL2Flow | M | Canvas ✅ + Graph DSL ✅ |
-| 6.17 | DSL Conversion Framework | M | Graph DSL ✅ |
 | 6.18 | Trace Annotation | S | EventStore ✅ + Audit ✅ |
-| 6.21 | Decision Lineage | M | EventStore ✅ + Audit ✅ |
 
-#### Model Management UI（4 项）— Sprint 7
+> **Dropped (2026-08-14)**: 6.17 DSL Conversion Framework（MCP/A2A 标准化 + Salesforce Agent Script 开源，行业收敛于标准 agent 定义而非 DSL 兼容层）。
+> **Deferred to P5 (2026-08-14)**: 6.21 Decision Lineage——完整 decision lineage 需先建 Ontology 地基（数据+函数+应用版本绑定，Palantir 标准），原低估工作量。
 
-| # | 特性 | 工作量 | 依赖 |
-|---|------|--------|------|
-| 6.9 | Provider Info Enhancement | S | — |
-| 6.10 | Key Security Enhancement | S | — |
-| 6.12 | Provider Auth State Management | S | — |
-| 6.13 | Model Management UI Redesign | M | — |
+#### Model Management UI — 整组 Deferred to P5 (2026-08-14)
+
+> 6.9 Provider Info Enhancement / 6.10 Key Security Enhancement / 6.12 Provider Auth State Management / 6.13 Model Management UI Redesign — 无用户前做 UI 是投机，等 13.1 SaaS 落地 + 真实用户反馈后再做（Dify 花 $30M 与数年做 UI 的前车之鉴）。
 
 #### 其他（3 项）
 
@@ -333,6 +320,36 @@
 | 3.2.4 | Reranking | M | Vector Search ✅ |
 | 5.4a | MCP Gateway | M | MCP ✅ |
 | 5.8 | Enterprise System Integration Framework | M | MCP ✅ |
+
+---
+
+## 2026-08-14 竞品重校准（Sprint 7 重排）
+
+依据：`docs/research/2026-08-competitor-analysis.md`（18 平台调查，2026-08-14）+ `docs/research/2026-08-deepseek-harness-analysis.md`（dsh v0.1.0-rc.5 源码级分析，中文版）
+
+### 变更摘要
+
+- **Drop 5**: 7.6a / 7.6b / 9.2a / 6.17 / 9.8（行业已标准化或属基础设施层，自建为负 ROI）
+- **Defer→P5 15**: 3.1.2-4、3.4.2、3.5.1-3、6.9/6.10/6.12/6.13、1.1.18-20、6.21（成熟替代方案存在，应集成不自建；或需 Ontology 地基）
+- **新增 P3 4**: 1.3.18 Dynamic Orchestration（P3 highest，第 7 种多 agent 模式）、8.20 Run Replay Phase 1（P3 high）、6.27 Browser Automation（P3 high，自 P4 移入）、1.3.19 Event-Sourced Execution State（Q4=A 决策）
+- **5.9 增强**: Skill Provider Registry（provider 注册表 + rank + model/user 调用策略分离，参考 dsh 源码）——并入 5.9 而非新建 5.12
+- **架构决策 Q4=A**: EventStore-as-truth（1.3.19）作为 Enhance Checkpoint 的一部分在 P3 先行——它是 8.20 Run Replay、HITL 持久审计对、middleware waterfall 事件的共同地基，一次到位避免二次迁移
+- **2026-08-14b 复核修正**: ① 竞品分析中 "deer-flow DeltaChannel 已交付" 表述有误——DeltaChannel 在其 2.1.0 Unreleased milestone（PR #4292），**生产参照改为 OMA v1.15.0 durable-approval checkpoint（schema v4，重放不重执行）**；② 1.3.19 增补需求：内建 dsh-invariants 式运行时关系不变式校验层（openTurn/openStep/pendingCalls、冻结结果快照、dispatch 树一致性）——dsh 源码复核发现的机制；③ dsh 仓库零新提交（47f943859b 即 HEAD），5 大 Lesson 全部成立
+
+### Sprint 7 新顺序（依赖驱动）
+
+| 顺序 | 特性 | 工作量 | 依赖关系 |
+|---|------|--------|---------|
+| 1 | 1.3.19 Event-Sourced Execution State (Log-as-Truth) | **L** | **最先落地**——8.20 / HITL 审计对 / middleware 事件都消费富化后的事件日志 |
+| 2 | 8.20 Run Replay Phase 1 | M | 依赖 1.3.19 |
+| 3 | 1.3.18 Dynamic Orchestration | M | 可与 1 并行（不依赖日志改造） |
+| 4 | 6.27 Browser Automation + 5.9 Skill Provider Registry | M + M | 可并行 |
+| 5 | 保留原 Sprint 7 项 | — | Reranking / Incremental / Memory 组 / 11.2 简化版 / 11.8 / Evaluation 6 项 / 1.1.24-25 / 6.16 / 6.18 |
+
+### 风险
+
+- 1.3.19 是 L 级引擎核心改造（EventStore 上执行主路径 + 投影接口 + checkpoint 重定义 + 恢复路径重写 + 1713 测试适配），与 38 项存量未完成同期推进——若 Sprint 7 容量不足，8.20 顺延为 P3 收尾项（1.3.18 / 6.27 不受影响，它们不依赖日志改造）
+- 兼容路径：旧全量快照保留为物化缓存（非删除），DeltaChannel 增量存储向后兼容
 
 ---
 
@@ -360,7 +377,9 @@
 
 ### 🟢 P2 — 可延后（增强型功能，不阻塞核心发布）
 
-其余 49 项：Knowledge Graph、Canvas UI、Memory Enhancement、AIP capabilities、Model Management UI、高级安全（red teaming、injection detection、prompt leakage）、NL2Agent、DSL Conversion、Reranking、MCP Gateway 等。
+其余 33 项（2026-08-14 重校准后）：Memory Enhancement（7 项）、AIP capabilities（NL2Agent、Trace Annotation）、高级安全（red teaming、injection detection、prompt leakage、trust verification）、Reranking、Incremental Update、Batch Indexing、MCP Gateway、Enterprise Integration、Deployment 若干（Canary、Horizontal Scaling 收尾、ALM、API Portal）、7.4a/7.5 等。
+
+> **新增 4 项（1.3.18/1.3.19/8.20/6.27）不在可延后之列**——竞品分析定位为 P3 highest/high，与 Multi-Channel Wave 1、Evaluation 基础同属强烈建议档，见"2026-08-14 竞品重校准"章节的 Sprint 7 顺序。
 
 **理由**: 这些是竞争差异化能力和增强功能。核心平台（Agent 创建、执行、多租户、安全基础、可观测性）在没有它们的情况下可以工作。
 
@@ -368,8 +387,8 @@
 
 | Wave | Feature | 触发条件 | 时机 |
 |---|---|---|---|
-| Wave 1（P3 主线） | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | 当前 Sprint |
-| Wave 2（P3 后续） | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | Wave 1 ship 后 1-2 Sprint 内补齐中国 IM 全覆盖 | Wave 1 后 |
+| Wave 1（P3 主线） | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | **2026-08-13: 11.3 ✅ + 11.9 Slack ✅ 已交付;11.2 简化版待交付** |
+| Wave 2（P5 deferred 2026-08-13） | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | 按客户需求触发 (企微/钉钉/Discord/Telegram 客户) | 暂停 |
 | Wave 3 / P5 deferred | 11.2 完整版 + 11.6 微信 to-C + 11.10 Custom Channel SDK | 按客户需求 / 社区请求 | 不预定 |
 
 **架构决策记录（2026-08-12）**：
@@ -445,12 +464,16 @@
 **Sprint 6 已完成项（2026-08 期间）**:
 - ✅ Outbound DLP Engine (9.10) — 2026-08-10（PR #58）
 
-### Sprint 7 (M7) — P3 Complete — 0% 启动
-- Advanced RAG: OCR / Table / Layout / Reranking / Incremental / Batch
-- Knowledge Graph: Construction / Graph DB / Community Detection
-- Multi-Channel: Web Widget + Feishu + WeCom + DingTalk + WeChat + Slack + Custom
-- Evaluation Suite: AI-synthesized / Online-Offline / Trace Backflow / Reports / Workflow / Human Annotation / Prompt Optimization
-- Canvas: Agent-Workflow Embedding / Skill Selector / Nested Graph / Human Input / Trigger
+### Sprint 7 (M7) — P3 Complete — 0% 启动（2026-08-14 已重排）
+
+> 原 Sprint 7 计划（Advanced RAG 全家桶 / Knowledge Graph / Canvas 增强 / AIP 全家桶）已按竞品重校准缩减：KG 三项 + OCR/Table/Layout + Canvas 三项 + Model UI 四项 → P5 deferred；7.6a/b、6.17 dropped。替换为引擎架构 + 竞品硬缺口 4 项（1.3.19 → 8.20 → 1.3.18 → 6.27 + 5.9 增强），详见"2026-08-14 竞品重校准"章节。
+
+- Engine Architecture: Event-Sourced State (1.3.19 Log-as-Truth) + Skill Provider Registry (5.9 增强)
+- Competitive Gaps: Dynamic Orchestration (1.3.18) + Run Replay Phase 1 (8.20) + Browser Automation (6.27)
+- Advanced RAG (rescoped): Reranking / Incremental / Knowledge Quality
+- Multi-Channel: 11.2 简化版（Wave 1 收尾）+ 11.8 Intent Routing + 11.16/11.17
+- Evaluation Suite: AI-synthesized / Online-Offline / Trace Backflow / Reports / Workflow / Human Annotation（7.6a/b dropped）
+- Canvas: Human Input / Form Node + Trigger Node（1.1.18-20 deferred）
 - Memory: Engine Enhancement / Importance / Multi-Signal / Pressure Alert / Layered / Task Memory
-- AIP: NL2Agent / DSL Conversion / Trace Annotation / Decision Lineage
+- AIP: NL2Agent / Trace Annotation（6.17 dropped、6.21 deferred）
 - Auth: Per-Token-Type / Two-Tier Identity

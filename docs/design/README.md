@@ -110,3 +110,4 @@ ADRs capture the "why" behind major design choices. Each record documents the co
 | [ADR-026](adr/026-security-shield-enhancement.md) | Security Shield Enhancement Architecture |
 | [ADR-027](adr/027-ecosystem-enhancement.md) | Ecosystem Enhancement Architecture |
 | [ADR-028](adr/028-observability-evaluation-enhancement.md) | Observability & Evaluation Enhancement |
+| [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture |
