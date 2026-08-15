@@ -4,12 +4,22 @@ Provides ``PostgresCheckpointStore`` — a concrete implementation of
 :class:`hecate.engine.checkpoint.CheckpointStore` that persists checkpoints
 to PostgreSQL via SQLAlchemy async sessions. Supports cross-node recovery,
 time-travel debugging, and an LRU memory cache for the hot path.
+
+.. deprecated::
+    Per the 1.3.19 log-as-truth change the checkpoint is demoted to a
+    materialized cache of the event log; production code SHOULD use
+    ``SessionStateMaterializer`` (services/orchestration/) implementing
+    the same ``CheckpointStore`` ABC and writing through the existing
+    SessionStateStore. This class is retained for backward compatibility
+    with persisted data in the ``checkpoints`` table; it will be removed
+    in a follow-up cleanup change (along with the checkpoints table).
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
+import warnings
 from collections import OrderedDict
 from typing import Any
 
@@ -27,6 +37,9 @@ class PostgresCheckpointStore(CheckpointStore):
     Uses an LRU cache for recent checkpoints to accelerate the hot path
     (e.g., resuming an interrupted session).
 
+    .. deprecated::
+        See module docstring. Prefer :class:`SessionStateMaterializer`.
+
     Args:
         session_factory: Async session factory for creating database sessions.
             Each method call creates and disposes its own session.
@@ -38,12 +51,13 @@ class PostgresCheckpointStore(CheckpointStore):
         session_factory: async_sessionmaker[AsyncSession],
         cache_size: int = 128,
     ) -> None:
-        """Initialize with a session factory.
-
-        Args:
-            session_factory: Async session factory for database operations.
-            cache_size: Maximum number of sessions to cache in memory.
-        """
+        warnings.warn(
+            "PostgresCheckpointStore is deprecated since 1.3.19; use "
+            "SessionStateMaterializer instead. Hard removal scheduled for a "
+            "follow-up cleanup change.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._session_factory = session_factory
         self._cache: OrderedDict[uuid.UUID, dict] = OrderedDict()
         self._cache_size = cache_size

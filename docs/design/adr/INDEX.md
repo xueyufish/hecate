@@ -18,6 +18,7 @@ The big-picture design that everything else builds on.
 | [ADR-002](002-five-layer-architecture.md) | Five-Layer System Architecture | Top-level layered design |
 | [ADR-016](016-platform-spi-architecture.md) | Platform SPI Architecture with 15 Extension Points | Engine — extensibility model |
 | [ADR-029](029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture | Minimal kernel, four mounting planes, five isolation tiers |
+| [ADR-030](030-event-sourced-execution-state.md) | Event-Sourced Execution State (Log-as-Truth) | Event log as state source; WAL ordering; projection cache; 1.3.19 |
 
 ### ⚙️ Engine runtime
 

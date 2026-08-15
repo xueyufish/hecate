@@ -336,6 +336,24 @@ class WorkflowExecutionService:
 
         # Execute
         checkpoint_store = InMemoryCheckpointStore()
+        if self._checkpoint_store is not None:
+            from hecate.services.orchestration.session_state_materializer import (
+                SessionStateMaterializer,
+            )
+
+            tenant_uuid = uuid.UUID(str(user_id)) if user_id is not None else None
+            captured_user_id = tenant_uuid
+
+            def _tenant_provider() -> tuple[uuid.UUID, uuid.UUID] | None:
+                if captured_user_id is None:
+                    return None
+                return captured_user_id, captured_user_id
+
+            checkpoint_store = SessionStateMaterializer(
+                session_state_store=self._checkpoint_store,
+                tenant_context_provider=_tenant_provider,
+                event_store=self._event_store,
+            )
 
         context_offloader: ContextOffloader | None = None
         if agent_env is not None and self._environment_manager:

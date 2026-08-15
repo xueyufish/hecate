@@ -365,18 +365,22 @@ services 层 `WorkflowExecutionService`（`src/hecate/services/workflow/executio
 - **THEN** execute() 使用 `self._checkpoint_store` 进行 save/load，代替 per-request in-memory 模式
 
 ### Requirement: WorkflowExecutionService 通过 SessionStateStore 持久化 AgentState
-services 层 `WorkflowExecutionService.execute` 方法 SHALL 通过写入一个 `SessionState`（其 `agent_state` 字段为 `AgentState.model_dump(mode="json")` 的结果）来持久化每会话状态。
+services 层 `WorkflowExecutionService.execute` 方法 SHALL 通过写入一个 `SessionState` 来持久化每会话状态：`agent_state` 字段为 `AgentState.model_dump(mode="json")` 的结果；**`channel_state` 字段 SHALL 填充裁决后通道状态投影**（本 change 起不再为空 dict），存前 SHALL 过有界载荷保留器（超大值 head/tail 截断 + `omitted` 标记）；`event_position` SHALL 作为物化锚点（log_version），供恢复时 tail 重放定位。
 
-保存流程 SHALL 替换既有的对 `self._state_store`（deprecated `AgentStateStore`）的写操作。具体来说，`execution_service.py` line 310-313 和 392-393（流式后和执行后的 `agent_state.save(...)` 调用）的两次写 SHALL 合并为一次 `SessionStateStore.save(...)` 调用，将 `channel_state` + `agent_state` + `event_position` + `metadata` 打包成单个快照。
+保存流程 SHALL 替代既有的对 `self._state_store`（deprecated `AgentStateStore`）的写操作：流式后与执行后的两次写 SHALL 合并为一次 `SessionStateStore.save(...)` 调用。
 
-加载流程（line 215-218 的 `self._state_store.load(...)`）SHALL 替换为 `SessionStateStore.load(...)` 后接 `AgentState.model_validate(state.agent_state)` 以重建类型化 agent state。
+加载流程 SHALL 替换为 `SessionStateStore.load(...)` 后接 `AgentState.model_validate(state.agent_state)` 重建类型化 agent state；恢复执行状态时 SHALL 以 `event_position` 为锚做 tail 重放校验，缓存不完整 SHALL 回退重放（缓存可烂、日志不能烂）。
 
-`PregelRuntime` 内部使用的 engine 层 `CheckpointStore`（line 281: `checkpoint_store = InMemoryCheckpointStore()`）SHALL 保持不变——它服务 `PregelRuntime` 的中间 superstep 回滚需求，与跨请求持久化无关。
+`PregelRuntime` 内部使用的 engine 层 `CheckpointStore` SHALL 作为物化缝经 adapter 与 SessionStateStore 协同（见 ADDED requirements）。
 
-#### Scenario: execute 保存带合并 agent_state 的 SessionState
+#### Scenario: execute 保存带 channel_state 投影的 SessionState
 - **WHEN** execute() 完成且 `self._checkpoint_store` 已提供
-- **THEN** `self._checkpoint_store.save(org_id, user_id, session_id, state)` 被调用恰好一次
-- **THEN** 保存的 `state.agent_state` 是匹配 `AgentState.model_dump(mode="json")` 的 JSON 序列化 dict——所有字段都在（`summary`、`context`、`permission_context`、`tool_context`、`task_context`、`environment_root`、`metadata`）
+- **THEN** `self._checkpoint_store.save(org_id, user_id, session_id, state)` 被调用
+- **THEN** 保存的 `state.channel_state` 为该 turn 结束时的裁决后通道投影（非空 dict），`state.agent_state` 为完整 JSON dict，`state.event_position` 为此刻日志 version
+
+#### Scenario: channel_state 过有界保留器
+- **WHEN** channel_state 中含超大 messages 通道值
+- **THEN** 落库值 SHALL 按预算截断并带 `omitted` 标记
 
 #### Scenario: execute 加载 SessionState 并重建 AgentState
 - **WHEN** execute() 以已知 `(org_id, user_id, session_id)` 三元组开始且 `self._checkpoint_store` 已提供
@@ -384,10 +388,9 @@ services 层 `WorkflowExecutionService.execute` 方法 SHALL 通过写入一个 
 - **THEN** 如果 `state is not None`，`agent_state = AgentState.model_validate(state.agent_state)` 重建类型化模型
 - **THEN** 如果 `state is None` 或 `model_validate` 抛 `ValidationError`，新建 `AgentState(session_id=session_id, agent_id=agent_id)` 并 log warning
 
-#### Scenario: engine 层 CheckpointStore 保持 per-request in-memory
-- **WHEN** execute() 运行（无论 `self._checkpoint_store` 是否提供）
-- **THEN** 构造 `checkpoint_store = InMemoryCheckpointStore()` 给 `PregelRuntime` 的代码行不变
-- **THEN** `runtime_checkpoint_store` 是 engine 层 ABC，`self._checkpoint_store`（如设）是 services 层 ABC——两者在一次 execute() 调用中共存
+#### Scenario: 恢复以日志为准
+- **WHEN** 恢复时缓存 channel_state 与日志 tail 重放结果不一致
+- **THEN** SHALL 以日志重放结果为准，缓存被忽略并重建
 
 ### Requirement: get_session_state_store FastAPI 依赖
 FastAPI 依赖函数 `get_session_state_store` SHALL 定义在 `src/hecate/core/deps_state_store.py`。
@@ -663,25 +666,25 @@ OTel 集成 SHALL 复用现有 `hecate.observability` 模块，SHALL NOT 引入�
 - **THEN** p95 latency < 1ms
 
 ### Requirement: services-layer SessionStateStore SHALL NOT 做 per-superstep checkpoint
-services 层 `SessionStateStore` SHALL 在每个 chat 请求内执行**恰好 1 次** atomic save（流式路径在 stream-end，非流式路径在 execute-end）。
+services 层 `SessionStateStore` 的保存 SHALL 为**有界节奏**而非逐 superstep：turn 正常结束（恰 1 次 atomic save，流式路径在 stream-end，非流式路径在 execute-end）、interrupt 时、以及每 N superstep 一次（默认 N=10，经 engine 物化缝 adapter 触发）。
 
-services-layer SHALL NOT 在 PregelRuntime 的 per-superstep 边界调用 `SessionStateStore.save`——per-superstep 持久化是 engine-layer `CheckpointStore`（`InMemoryCheckpointStore` / `PostgresCheckpointStore`）的职责，用于 PregelRuntime 中间 superstep 回滚。
+SHALL NOT 在**每个** superstep 边界调用 `SessionStateStore.save`——该节奏的存储代价已被本 change 的三项设计约束：载荷过有界保留器、delta 事件承担状态真相（快照仅为缓存）、近线性存储目标。
 
-本 requirement 是经过业界对比的有意决策：
-- LangGraph production 教训显示 per-superstep checkpoint 导致 180KB blob / 11s resume / 10GB 表
-- BSWEN 实战显示减少 78% checkpoint writes 显著降低 DB 压力
-- 我们的 PregelRuntime 内部已有 engine-layer CheckpointStore 处理中间状态
+本 requirement 是经过业界对比的有意决策（延续原决策并按 log-as-truth 模型放宽）：
+- LangGraph production 教训显示 per-superstep 全量 checkpoint 导致 180KB blob / 11s resume / 10GB 表
+- 本 change 的每 N 步物化是有界缓存（覆盖写、可丢弃），与历史上的全量 append 快照有本质区别
 
-#### Scenario: 每请求恰好 1 次 SessionStateStore.save
-- **WHEN** 一个 chat 请求内部 PregelRuntime 跑 N 个 superstep
-- **THEN** `SessionStateStore.save` 被调用恰好 1 次（在请求结束）
-- **THEN** PregelRuntime 内部的 engine-layer `InMemoryCheckpointStore` 在每个 superstep 后写（与 services-layer 无关）
+#### Scenario: 每请求 turn 结束恰好 1 次保存
+- **WHEN** 一个 chat 请求内部 PregelRuntime 跑 N（≤10）个 superstep
+- **THEN** `SessionStateStore.save` 被调用恰好 1 次（turn 结束）
 
-#### Scenario: contributor 试图加 per-superstep 写会被 spec 阻止
-- **WHEN** 未来 contributor 在 design.md 或 code review 中提议 per-superstep services-layer 写
+#### Scenario: 长执行每 N 步物化
+- **WHEN** 一次执行连续运行超过 N=10 个 superstep
+- **THEN** 每 10 步经物化缝发生一次覆盖写保存（非 append）
+
+#### Scenario: contributor 试图加逐 superstep 写会被 spec 阻止
+- **WHEN** 未来 contributor 提议 per-superstep services-layer 写
 - **THEN** 此 requirement 明确禁止，需先修改 spec
-
-## ADDED Requirements
 
 ### Requirement: AgentStateStore ABC is marked deprecated via PEP 562 __deprecated__ module attribute
 
@@ -831,3 +834,16 @@ This change (`13.4a-6`) SHALL implement deprecation only — it SHALL NOT delete
 - **THEN** `openspec/changes/deprecate-agent-state-store/` (this change) exists with full artifacts
 - **THEN** `openspec/changes/remove-agent-state-store/` (the `13.4a-7` follow-up) does NOT exist (it is for the future, not this change)
 - **THEN** `docs/features/roadmap.md` mentions `13.4a-7` in a "Pending cleanups" or equivalent section
+
+### Requirement: SessionStateMaterializer adapter 以 tenant_context_provider 模式落 Store
+
+services 层 SHALL 提供 SessionStateMaterializer：实现 engine 层 `CheckpointStore` ABC（单键 `session_id`），内部经 `tenant_context_provider` 闭包解析 `(org_id, user_id)` 后写入 SessionStateStore。adapter SHALL 对 provider 返回 None 的情况安全跳过（不阻塞引擎执行）。
+
+#### Scenario: 引擎物化经 adapter 落租户键
+- **WHEN** PregelRuntime 以 `session_id` 调用 adapter 的 save
+- **THEN** adapter 解析租户上下文并以 `(org_id, user_id, session_id)` 三元组写入 SessionStateStore
+
+#### Scenario: 无租户上下文安全跳过
+- **WHEN** `tenant_context_provider` 返回 None
+- **THEN** adapter SHALL 跳过本次保存并记录 debug 日志，引擎执行不受影响
+

@@ -174,6 +174,91 @@ class PostgresEventStore(EventStore):
                 raise EventVersionConflictError(event.session_id, next_version)
             return event.id
 
+    async def append_batch(self, events: list[Event]) -> list[uuid.UUID]:
+        """Persist a list of events in a single transaction with batch-internal order preserved.
+
+        Acquires the per-session ``FOR UPDATE`` lock once, assigns sequential
+        versions in input order, and inserts all rows in one INSERT statement
+        (PG-specific multi-row VALUES). Any version collision raises
+        :class:`EventVersionConflictError` after the configured retries.
+
+        Args:
+            events: Ordered list of events to persist.
+
+        Returns:
+            UUIDs of the persisted events in input order.
+        """
+        if not events:
+            return []
+        org_id: uuid.UUID | None = None
+        user_id: uuid.UUID | None = None
+        if self._tenant_context_provider is not None:
+            tenant = self._tenant_context_provider()
+            if tenant is not None:
+                org_id, user_id = tenant
+
+        rows: list[dict[str, Any]] = []
+        for event in events:
+            rows.append(
+                {
+                    "session_id": event.session_id,
+                    "id": event.id,
+                    "superstep": event.superstep,
+                    "event_type": str(event.event_type),
+                    "node_id": event.node_id,
+                    "trace_id": event.trace_id,
+                    "payload": dict(event.payload) if event.payload else {},
+                    "org_id": org_id,
+                    "user_id": user_id,
+                }
+            )
+
+        tracer = _get_tracer()
+        cm = tracer.start_as_current_span("event_store.append_batch") if tracer is not None else _null_span()
+        with cm as span:
+            last_exc: Exception | None = None
+            for _attempt in range(self._max_append_retries + 1):
+                try:
+                    async with self._async_session_factory() as session:
+                        lock_stmt = (
+                            select(func.max(EventModel.version))
+                            .where(EventModel.session_id == events[0].session_id)
+                            .with_for_update()
+                        )
+                        result = await session.execute(lock_stmt)
+                        current_max = result.scalar_one() or 0
+                        for offset, row in enumerate(rows, start=1):
+                            row["version"] = current_max + offset
+
+                        insert_stmt = (
+                            pg_insert(EventModel)
+                            .values(rows)
+                            .on_conflict_do_nothing(index_elements=["session_id", "version"])
+                        )
+                        insert_result = await session.execute(insert_stmt)
+                        await session.commit()
+
+                        if insert_result.rowcount != len(rows):
+                            raise EventVersionConflictError(events[0].session_id, current_max + 1)
+
+                        if span is not None:
+                            span.set_attributes(
+                                {
+                                    "event.session_id": str(events[0].session_id),
+                                    "event.batch_size": len(rows),
+                                    "event.backend": "postgres",
+                                }
+                            )
+                        return [row["id"] for row in rows]
+                except EventVersionConflictError as exc:
+                    last_exc = exc
+                    continue
+            if last_exc is None:
+                raise RuntimeError("unreachable: last_exc must be set after loop")
+            if span is not None:
+                span.record_exception(last_exc)
+            raise last_exc
+
     async def get_events(
         self,
         session_id: uuid.UUID,

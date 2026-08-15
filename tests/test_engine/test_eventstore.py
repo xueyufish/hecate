@@ -297,3 +297,79 @@ def test_event_version_conflict_error_message_includes_session_id(session_id: uu
     assert err.session_id == session_id
     assert err.version == 5
     assert str(session_id) in str(err)
+
+
+# --- 1.3.19 event schema enrichment ---
+
+
+def test_event_type_step_end_value():
+    assert EventType.STEP_END == "STEP_END"
+
+
+def test_event_type_eviction_value():
+    assert EventType.EVICTION == "EVICTION"
+
+
+def test_event_type_subgraph_values():
+    assert EventType.SUBGRAPH_START == "SUBGRAPH_START"
+    assert EventType.SUBGRAPH_END == "SUBGRAPH_END"
+
+
+def test_event_type_channel_write_rejected_value():
+    assert EventType.CHANNEL_WRITE_REJECTED == "CHANNEL_WRITE_REJECTED"
+
+
+def test_current_log_schema_version_is_2():
+    from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
+    assert CURRENT_LOG_SCHEMA_VERSION == 2
+
+
+async def test_append_batch_assigns_sequential_versions(store: InMemoryEventStore, session_id: uuid.UUID):
+    events = [
+        Event(
+            session_id=session_id,
+            superstep=1,
+            event_type=EventType.NODE_START,
+            node_id=f"n{i}",
+        )
+        for i in range(5)
+    ]
+    returned_ids = await store.append_batch(events)
+    assert len(returned_ids) == 5
+    persisted = await store.get_events(session_id)
+    assert [e.version for e in persisted] == [1, 2, 3, 4, 5]
+
+
+async def test_append_batch_empty_returns_empty_list(store: InMemoryEventStore):
+    assert await store.append_batch([]) == []
+
+
+async def test_append_batch_preserves_input_order(store: InMemoryEventStore, session_id: uuid.UUID):
+    types = [EventType.NODE_START, EventType.TOOL_CALL, EventType.TOOL_RESULT, EventType.STEP_END]
+    events = [
+        Event(
+            session_id=session_id,
+            superstep=1,
+            event_type=t,
+            node_id=f"n{i}",
+        )
+        for i, t in enumerate(types)
+    ]
+    await store.append_batch(events)
+    persisted = await store.get_events(session_id)
+    assert [e.event_type for e in persisted] == types
+
+
+async def test_unknown_event_type_falls_back_to_custom(store: InMemoryEventStore, session_id: uuid.UUID):
+    """Future event types read from persisted form MUST fall back to CUSTOM (already-known behavior)."""
+    legacy = Event(
+        session_id=session_id,
+        superstep=1,
+        event_type=EventType.CUSTOM,
+        payload={"legacy_marker": True},
+    )
+    await store.append(legacy)
+    events = await store.get_events(session_id)
+    assert len(events) == 1
+    assert events[0].payload.get("legacy_marker") is True

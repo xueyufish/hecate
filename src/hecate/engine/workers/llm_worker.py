@@ -320,13 +320,23 @@ class LLMWorker(Worker):
         structured_tool_calls: list[dict[str, Any]] | None = None
         has_tools = bool(shaped_tools)
         if self._event_store and execution_context:
+            from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
             await self._event_store.append(
                 Event(
                     session_id=execution_context["session_id"],
                     superstep=execution_context["superstep"],
                     event_type=EventType.LLM_REQUEST,
                     node_id=node_id,
-                    payload={"model": model, "message_count": len(shaped_messages)},
+                    payload={
+                        "model": model,
+                        "messages": shaped_messages,
+                        "tools": shaped_tools,
+                        "message_count": len(shaped_messages),
+                        "prompt_id": str(prompt_id) if prompt_id is not None else None,
+                        "prompt_version": prompt_version,
+                        "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                    },
                 )
             )
         try:

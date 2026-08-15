@@ -160,6 +160,48 @@ Session lifecycle states:
 
 A **Message** is an individual entry in a conversation (system/user/assistant/tool role) with content, optional tool calls, and metadata (token usage, model, latency).
 
+### Persistence-object classification (1.3.19 log-as-truth)
+
+Per [ADR-030](adr/adr/030-event-sourced-execution-state.md) the **event log is the single source of truth** for execution state. Every persistence object below either holds truth or is a discardable projection.
+
+**Tier 1 — Skeleton (always-on for engine-path sessions)**: `Event` (truth), `SessionState` (cache). These two are guaranteed for any session whose execution path goes through `PregelRuntime`.
+
+**Tier 2 — Conditional (feature-gated)**:
+
+| Object | Trigger |
+|---|---|
+| `Session` row | Management API / IM channel creates it; chat API path B does not |
+| `Conversation` + `Message` | IM channel path only (chat API stays stateless, client passes full history each turn) |
+| `Evidence` | `ToolWorker` execution |
+| `Trace` (span) | OTel bridge enabled |
+| `ToolDecision` | Tool goes through the policy gating pipeline |
+| `ApprovalRecord` | HITL on dangerous operations |
+| `PIIMapping` | Mask-and-encrypt mode engaged |
+| `SecurityFinding` | DLP / guardrail rule hit |
+| `ConversationTurnScore` / `Cluster` | Async evaluation scheduler |
+
+**Tier 3 — Orthogonal (not part of session footprint)**: `AuditLog` (management-plane API actions), `Metric` (aggregated telemetry), environment file offload (filesystem).
+
+### Path × Object footprint matrix
+
+For one session's actual persistence footprint, depending on which path it takes:
+
+| | Path C: pure text chat | Path A: agent + tools | Path B: kb / suggestions (engine) | IM session | Required switches |
+|---|---|---|---|---|---|
+| Event | — | — | ✅ | ✅ | Engine path |
+| SessionState | — | — | ✅ | ✅ | wired store |
+| Session row | — | — | — | ✅ | management/IM |
+| Conversation + Message | — | — | — | ✅ | IM path |
+| Trace span | — | 🔶 | 🔶 | 🔶 | OTel enabled |
+| Evidence | — | — | ✅ | ✅ | ToolWorker used |
+| ToolDecision | — | 🔶 | 🔶 | 🔶 | policy layers |
+| ApprovalRecord | — | — | 🔶 | 🔶 | HITL triggered |
+| PIIMapping / SecurityFinding | — | — | 🔶 | 🔶 | mode / DLP |
+
+🔶 = conditional on configuration.
+
+The minimum guaranteed footprint for an engine-path session is **2 objects** (Event + SessionState). Everything else is explicit feature-gated addition. Before 1.3.19 path C stored 0 objects and path A stored 1–2 (zero events) — the new design's "底座恒定，增量显式" invariant.
+
 ---
 
 ## Knowledge Graph (Planned)

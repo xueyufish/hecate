@@ -29,6 +29,7 @@ class EventType(StrEnum):
     TOOL_CALL = "TOOL_CALL"
     TOOL_RESULT = "TOOL_RESULT"
     CHANNEL_WRITE = "CHANNEL_WRITE"
+    CHANNEL_WRITE_REJECTED = "CHANNEL_WRITE_REJECTED"
     LLM_REQUEST = "LLM_REQUEST"
     LLM_RESPONSE = "LLM_RESPONSE"
     INTERRUPT = "INTERRUPT"
@@ -36,6 +37,13 @@ class EventType(StrEnum):
     ERROR = "ERROR"
     PII_DETECTED = "PII_DETECTED"
     CUSTOM = "CUSTOM"
+    STEP_END = "STEP_END"
+    EVICTION = "EVICTION"
+    SUBGRAPH_START = "SUBGRAPH_START"
+    SUBGRAPH_END = "SUBGRAPH_END"
+
+
+CURRENT_LOG_SCHEMA_VERSION: int = 2  # events without this marker are non-replayable (values never recorded)
 
 
 @dataclass(frozen=True)
@@ -99,6 +107,27 @@ class EventStore(ABC):
             The UUID of the persisted event.
         """
         ...
+
+    async def append_batch(self, events: list[Event]) -> list[uuid.UUID]:
+        """Persist multiple events atomically with batch-internal order preserved.
+
+        Default implementation appends each event sequentially via ``append``;
+        production implementations SHOULD override with a single-transaction
+        multi-row INSERT for write-amplification savings. Per-call batch order
+        is preserved in assigned versions. If any event fails to persist the
+        entire batch fails (best-effort: implementations MAY roll back already
+        committed rows in this case).
+
+        Args:
+            events: Ordered list of events to persist.
+
+        Returns:
+            The UUIDs of the persisted events in input order.
+
+        Raises:
+            EventVersionConflictError: If a version collision occurs.
+        """
+        return [await self.append(event) for event in events]
 
     @abstractmethod
     async def get_events(

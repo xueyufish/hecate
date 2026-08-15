@@ -19,7 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
+from hecate.core.deps_event_store import get_event_store
+from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
+from hecate.engine.eventstore import EventStore
+from hecate.engine.session_state import SessionStateStore
 from hecate.models.session import SessionCreateSchema, SessionModel, SessionReadSchema
 
 router = APIRouter()
@@ -137,45 +141,75 @@ async def resume_session(
     data: ResumeRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    event_store: Annotated[EventStore, Depends(get_event_store)],
+    session_state_store: Annotated[SessionStateStore, Depends(get_session_state_store)],
 ) -> dict:
     """Resume an interrupted session.
+
+    Per the 1.3.19 log-as-truth change the resume validation is log-derived:
+    the endpoint reads the session's events and confirms an unclosed INTERRUPT
+    event is present before accepting the resume. The SessionModel row is
+    lazy-created if absent (chat API path B never persists SessionModel).
 
     Args:
         session_id: The UUID of the session to resume.
         data: The resume value (user input for interrupt).
-        db: The async database session.
+        db: The database session.
         ctx: The authenticated context with workspace_id.
+        event_store: Wired EventStore (injected via Depends).
+        session_state_store: Wired SessionStateStore (for cache invalidation).
 
     Returns:
         dict: The session data after resume attempt.
 
     Raises:
-        HTTPException: 404 if session not found, 400 if session is not interruptable.
+        HTTPException: 400 if no unclosed INTERRUPT exists in the event log.
     """
+    from hecate.engine.eventstore import EventType
+
+    events = await event_store.get_events(session_id)
+    has_unclosed_interrupt = any(event.event_type == EventType.INTERRUPT for event in events) and not any(
+        event.event_type == EventType.RESUME
+        for event in events[[i for i, e in enumerate(events) if e.event_type == EventType.INTERRUPT][-1] + 1 :]
+    )
+    if not has_unclosed_interrupt:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error": {
+                    "code": "NOT_INTERRUPTED",
+                    "message": "Session has no unclosed INTERRUPT event in the log",
+                    "details": None,
+                }
+            },
+        )
+
     conditions = [SessionModel.id == session_id]
     if ctx.workspace_id is not None:
         conditions.append(SessionModel.workspace_id == ctx.workspace_id)
     result = await db.execute(select(SessionModel).where(*conditions))
     session = result.scalar_one_or_none()
     if session is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail={"error": {"code": "NOT_FOUND", "message": "Session not found", "details": None}},
+        session = SessionModel(
+            id=session_id,
+            agent_id=uuid.UUID(int=0),
+            status="active",
+            workspace_id=ctx.workspace_id or uuid.UUID(int=0),
         )
-
-    if session.status != "interrupted":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "error": {
-                    "code": "INVALID_STATE",
-                    "message": "Session is not in interrupted state",
-                    "details": None,
-                }
-            },
-        )
-
-    session.status = "active"
+        db.add(session)
+    else:
+        if session.status != "interrupted":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error": {
+                        "code": "INVALID_STATE",
+                        "message": "Session row not in interrupted state; will be reconciled via log",
+                        "details": None,
+                    }
+                },
+            )
+        session.status = "active"
     await db.flush()
     await db.refresh(session)
     return SessionReadSchema.model_validate(session).model_dump()
