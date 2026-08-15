@@ -132,6 +132,14 @@ class PregelRuntime:
                 )
             )
 
+    async def _current_log_version(self, session_id: uuid.UUID) -> int:
+        if self._event_store is None:
+            return 0
+        try:
+            return await self._event_store.get_version(session_id)
+        except Exception:
+            return 0
+
     def _execution_context(self, session_id: uuid.UUID, trace_id: str | None = None) -> dict:
         """Build execution context dict for worker dispatch."""
         ctx: dict[str, Any] = {
@@ -342,6 +350,7 @@ class PregelRuntime:
                     results.append(result)
 
             interrupted = False
+            pending_writes: list[tuple[str, Any, str | None]] = []
             for result in results:
                 await self._emit(
                     session_id,
@@ -382,6 +391,7 @@ class PregelRuntime:
                                     "interrupted": True,
                                     "interrupt_value": self._interrupt_value,
                                     "interrupt_updates": result.channel_updates,
+                                    "log_version": await self._current_log_version(session_id),
                                 },
                             )
                         yield {"type": "interrupt", "value": self._interrupt_value}
@@ -390,18 +400,72 @@ class PregelRuntime:
                     if result.command.update:
                         self._apply_writes(result.command.update, node_id=result.node_id)
                 if not self._interrupted:
-                    self._apply_writes(result.channel_updates, node_id=result.node_id)
-                    if result.channel_updates:
-                        await self._emit(
-                            session_id,
-                            EventType.CHANNEL_WRITE,
-                            node_id=result.node_id,
-                            payload={"channels": list(result.channel_updates.keys())},
-                            trace_id=trace_id,
-                        )
+                    pending_writes.append((result.node_id, result.channel_updates, result.node_id))
 
             if interrupted:
                 return
+
+            # WAL ordering: batch-append channel-write events (with adjudicated values
+            # + log_schema_version marker) BEFORE applying them to channels. On append
+            # failure the entire superstep fails (consistent with today’s
+            # per-superstep checkpoint semantics).
+            if self._event_store is not None and pending_writes:
+                batch_events: list[Event] = []
+                from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
+                from hecate.engine.logpolicy import should_log_channel
+
+                for _node_id, channel_updates, _node_id_repeat in pending_writes:
+                    if not channel_updates:
+                        continue
+                    for ch_name, ch_value in channel_updates.items():
+                        if not should_log_channel(ch_name):
+                            continue
+                        batch_events.append(
+                            Event(
+                                session_id=session_id,
+                                superstep=self._superstep,
+                                event_type=EventType.CHANNEL_WRITE,
+                                node_id=_node_id,
+                                payload={
+                                    "channel": ch_name,
+                                    "value": ch_value,
+                                    "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                                },
+                                trace_id=trace_id,
+                            )
+                        )
+                if batch_events:
+                    batch_events.append(
+                        Event(
+                            session_id=session_id,
+                            superstep=self._superstep,
+                            event_type=EventType.STEP_END,
+                            trace_id=trace_id,
+                        )
+                    )
+                    await self._event_store.append_batch(batch_events)
+
+            for _node_id, channel_updates, _node_id_repeat in pending_writes:
+                self._apply_writes(channel_updates, node_id=_node_id)
+
+            eviction_records = self._channel_manager.consume_pending_evictions()
+            if self._event_store is not None and eviction_records:
+                from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
+                eviction_events = [
+                    Event(
+                        session_id=session_id,
+                        superstep=self._superstep,
+                        event_type=EventType.EVICTION,
+                        payload={
+                            **rec,
+                            "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                        },
+                        trace_id=trace_id,
+                    )
+                    for rec in eviction_records
+                ]
+                await self._event_store.append_batch(eviction_events)
 
             if execution_mode == "conversational":
                 await self._checkpoint_store.save(
@@ -409,6 +473,9 @@ class PregelRuntime:
                     superstep=self._superstep,
                     node_id=current_nodes[0] if len(current_nodes) == 1 else None,
                     channel_state=self._channel_manager.snapshot(),
+                    metadata={
+                        "log_version": await self._current_log_version(session_id),
+                    },
                 )
             await self._emit(
                 session_id,
@@ -426,27 +493,98 @@ class PregelRuntime:
             current_nodes = self._resolve_next_nodes(results)
 
     async def _restore_from_checkpoint(self, session_id: uuid.UUID, resume_value: Any) -> None:
-        """Restore channel state and execution context from the last checkpoint.
+        """Restore channel state via cache + event-log tail replay.
 
-        After restoring, clears the interrupted flag and injects ``resume_value``
-        into the ``_resume_value`` channel so that the resumed worker can access
-        the human-provided input.
+        Recovery precedence:
+          1. If the checkpoint cache exists, hydrate channels from it (warm path).
+          2. If the event store is wired, replay events from after the cache's
+             snapshot point (log-derived tail). The log is authoritative; the
+             cache is a discardable optimization.
+          3. If neither path yields a state, return without modifying the runtime
+             (caller should treat this as a cold start).
 
-        Args:
-            session_id: The session whose latest checkpoint to load.
-            resume_value: Value to write to the ``_resume_value`` channel after restore.
+        After restore, clears the interrupted flag, sets ``superstep`` from the
+        cache (or last replayed event), and injects ``resume_value`` into the
+        ``_resume_value`` channel.
         """
+        from hecate.engine.logfold import NonReplayablePrefix, fold_session
+
         checkpoint = await self._checkpoint_store.load(session_id)
-        if checkpoint is None:
-            return
-        self._channel_manager.restore(checkpoint["channel_state"])
-        self._superstep = checkpoint["superstep"]
-        self._interrupted_node = checkpoint.get("node_id")
+        cache_log_version = 0
+        if checkpoint is not None:
+            self._channel_manager.restore(checkpoint["channel_state"])
+            self._superstep = int(checkpoint.get("superstep", 0))
+            cache_log_version = int(checkpoint.get("metadata", {}).get("log_version", 0))
+            self._interrupted_node = checkpoint.get("node_id")
+            self._interrupt_updates = checkpoint.get("metadata", {}).get("interrupt_updates", {})
+        else:
+            self._superstep = 0
+
+        if self._event_store is not None:
+            try:
+                tail_events = await self._event_store.get_events(session_id, from_version=cache_log_version + 1)
+            except Exception:
+                tail_events = []
+            try:
+                if tail_events:
+                    last_version = fold_session(self._channel_manager, iter(tail_events))
+                    if last_version > self._superstep:
+                        self._superstep = last_version
+            except NonReplayablePrefix:
+                pass
+
         self._interrupted = False
         self._interrupt_value = None
-        self._interrupt_updates = checkpoint.get("metadata", {}).get("interrupt_updates", {})
         if resume_value is not None:
             self._channel_manager.write("_resume_value", resume_value)
+
+        await self._assert_projection_equivalent(session_id)
+
+    async def _assert_projection_equivalent(self, session_id: uuid.UUID) -> None:
+        """Mechanism 3: runtime invariant — projection(log) ≢ snapshot must fail-stop.
+
+        Compares the channels we just restored (cache + tail fold) against a
+        fold of the entire event log. Divergence is treated as a bug signal;
+        recovery is "discard in-memory state and re-fold", not "hot-fix".
+        """
+        if self._event_store is None:
+            return
+        from hecate.engine.logfold import NonReplayablePrefixError, fold_session
+        from hecate.engine.logpolicy import should_log_channel
+
+        try:
+            all_events = await self._event_store.get_events(session_id)
+        except Exception:
+            logger.warning("projection_equivalent_get_events_failed", exc_info=True)
+            return
+        try:
+            projection = ChannelManager()
+            for name, channel in self._channel_manager._channels.items():
+                projection.register(name, channel.defn)
+            fold_session(projection, iter(all_events))
+        except NonReplayablePrefixError:
+            return
+        except Exception:
+            logger.warning("projection_equivalent_fold_failed", exc_info=True)
+            return
+        for name in self._channel_manager._channels:
+            if not should_log_channel(name):
+                continue
+            try:
+                live = self._channel_manager.read(name)
+            except Exception:
+                logger.warning("projection_equivalent_live_read_failed", exc_info=True, extra={"channel": name})
+                continue
+            try:
+                replay = projection.read(name)
+            except Exception:
+                logger.warning("projection_equivalent_replay_read_failed", exc_info=True, extra={"channel": name})
+                continue
+            if live != replay:
+                raise RuntimeError(
+                    f"[PROJECTION.EQUIVALENT] channel '{name}' diverged between "
+                    f"cache and log fold; failing closed per log-as-truth invariant"
+                )
 
     def _build_handoff_targets(self, node_id: str, node_type: NodeType | None) -> list[dict[str, str]]:
         """Build handoff target list for an AGENT node.

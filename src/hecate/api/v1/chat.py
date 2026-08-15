@@ -650,6 +650,10 @@ async def _execute_tool_calls(
 
 
 async def _chat_with_tools(
+    # TODO(event-sourced-state 1.3.19): this direct tool loop bypasses PregelRuntime and
+    # therefore does NOT produce events in the engine log. Known boundary of log-as-truth
+    # coverage. Long-term convergence: model this loop as an engine-internal subgraph
+    # (1.3.18-style coordinator node) and pair with the waterfall middleware (1.3.5i E3).
     messages: list[dict[str, Any]],
     model: str,
     tools: list[dict[str, Any]],

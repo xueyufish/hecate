@@ -17,7 +17,7 @@ The engine SHALL define an immutable `Event` dataclass in `engine/eventstore.py`
 - **THEN** attempting to set any field SHALL raise `FrozenInstanceError`
 
 ### Requirement: EventType enum defines standard event categories
-The engine SHALL define a string enum `EventType` with values: `NODE_START`, `NODE_END`, `TOOL_CALL`, `TOOL_RESULT`, `CHANNEL_WRITE`, `LLM_REQUEST`, `LLM_RESPONSE`, `INTERRUPT`, `RESUME`, `ERROR`, `CUSTOM`.
+The engine SHALL define a string enum `EventType` with values: `NODE_START`, `NODE_END`, `TOOL_CALL`, `TOOL_RESULT`, `CHANNEL_WRITE`, `CHANNEL_WRITE_REJECTED`, `LLM_REQUEST`, `LLM_RESPONSE`, `INTERRUPT`, `RESUME`, `ERROR`, `PII_DETECTED`, `CUSTOM`, `STEP_END`, `EVICTION`, `SUBGRAPH_START`, `SUBGRAPH_END`.
 
 #### Scenario: Use standard event type
 - **WHEN** `EventType.TOOL_CALL` is referenced
@@ -26,6 +26,14 @@ The engine SHALL define a string enum `EventType` with values: `NODE_START`, `NO
 #### Scenario: Custom event type
 - **WHEN** an event is created with `event_type=EventType.CUSTOM` and `payload={"custom_type": "my_event"}`
 - **THEN** the event SHALL be valid and storeable
+
+#### Scenario: New boundary and semantic event types
+- **WHEN** `EventType.STEP_END`, `EventType.EVICTION`, `EventType.SUBGRAPH_START`, `EventType.SUBGRAPH_END`, or `EventType.CHANNEL_WRITE_REJECTED` is referenced
+- **THEN** each SHALL equal its string value and be storeable via the existing append contract
+
+#### Scenario: Unknown historical event types fall back on read
+- **WHEN** `_row_to_event` reads an event_type string not present in the enum
+- **THEN** it SHALL fall back to `EventType.CUSTOM`（既有行为保持）
 
 ### Requirement: EventStore ABC defines append-only event persistence
 The engine SHALL define an `EventStore` ABC with abstract methods: `append`, `get_events`, `replay`, `get_version`.
@@ -407,22 +415,27 @@ async def acquire_event_lock(
 - **WHEN** `PostgresEventStore.acquire_event_lock(session_id)` 被调用
 - **THEN** 行为与 default no-op 一致（不额外加锁，依赖 append 内的 `FOR UPDATE`）
 
-### Requirement: retention 与 TTL 策略 deferred（schema 预留）
+### Requirement: 事件 payload 携带 log_schema_version
 
-本次 Change SHALL NOT 实现 retention / TTL 自动清理。`events` 表的 `created_at` 列 SHALL 预留用于未来 retention 实现，但本次不添加 cron job / 分区 / TTL sweeper。
+本 change 起新写入的事件 payload SHALL 携带 `log_schema_version` 字段（值为 `2`）。缺失该字段的存量事件 SHALL 被消费方视为不可回放前缀。events 表结构 SHALL 零迁移（版本标记仅存于 payload）。
 
-本 requirement 显式标注"deferred"以阻止 contributor 误以为本次会做清理——retention 策略留给独立的 ops change（参考 LangGraph / Dify / DeerFlow 都未实现自动 retention 的现状）。
+#### Scenario: 新事件带版本标记
+- **WHEN** 引擎 append 任意新事件
+- **THEN** payload SHALL 含 `log_schema_version: 2`
 
-未来 retention 实现 SHALL 复用 `created_at` 列与 `(org_id, user_id, created_at)` 索引。
+#### Scenario: 存量事件无标记
+- **WHEN** 读取历史事件（payload 无 `log_schema_version`）
+- **THEN** 消费方 SHALL 将其判定为不可回放前缀
 
-#### Scenario: events 表有 created_at 列但无清理逻辑
+### Requirement: EventStore 批量 append 接口
 
-- **WHEN** `events` 表被创建
-- **THEN** `created_at TIMESTAMPTZ DEFAULT now()` 列存在
-- **THEN** 无 cron job / TTL sweeper / partition drop 逻辑被引入
+`EventStore` ABC SHALL 提供批量 append 方法：单事务写入一组事件、批内按序分配 version、任一失败整批失败。原单事件 `append` SHALL 保持兼容。
 
-#### Scenario: 未来 contributor 加 retention 不需改 schema
+#### Scenario: 批量写入原子性
+- **WHEN** 批量 append 5 个事件且第 3 个触发版本冲突
+- **THEN** 整批 SHALL 失败，无部分写入
 
-- **WHEN** 未来 ops change 引入 retention 策略
-- **THEN** `created_at` 列与 `(org_id, user_id, created_at)` 索引已就位
-- **THEN** 仅需新增 sweeper 逻辑，无需 schema migration
+#### Scenario: 批内 version 单调
+- **WHEN** 批量 append 成功
+- **THEN** 批内事件 version SHALL 严格递增且与顺序一致
+

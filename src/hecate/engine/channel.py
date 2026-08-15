@@ -226,10 +226,22 @@ class ChannelManager:
         self._channels: dict[str, Channel] = {}
         self._eviction_policy: EvictionPolicy = eviction_policy or NoEviction()
         self._channel_access: dict[str, ChannelAccess] = channel_access or {}
+        self._pending_evictions: list[dict[str, Any]] = []
 
     def register(self, name: str, defn: ChannelDef) -> None:
         """Register a new channel with the given definition."""
         self._channels[name] = Channel(name, defn)
+
+    def consume_pending_evictions(self) -> list[dict[str, Any]]:
+        """Drain and return the eviction log accumulated since the last drain.
+
+        The runtime calls this at the end of a superstep to obtain a list of
+        ``{"channel": str, "drop_indices": list[int]}`` records, suitable for
+        emission as ``EVICTION`` events. The accumulator is cleared on drain.
+        """
+        pending = self._pending_evictions
+        self._pending_evictions = []
+        return pending
 
     def write(self, name: str, value: Any, node_id: str | None = None) -> None:
         """Write a value to the named channel.
@@ -240,7 +252,7 @@ class ChannelManager:
 
         Args:
             name: Channel name.
-            value: Value to write.
+            value: Channel value.
             node_id: Optional node ID for channel access validation.
         """
         if node_id is not None and node_id in self._channel_access:
@@ -250,10 +262,17 @@ class ChannelManager:
         if name not in self._channels:
             return
         channel = self._channels[name]
+        before_len = len(channel._value) if hasattr(channel._value, "__len__") else 0
         channel.write(value)
         behavior = get(channel.defn.type)
         if behavior.is_evictable() and self._eviction_policy.should_evict(name, len(channel._value), {}):
-            channel._value = self._eviction_policy.select_victim(channel._value)
+            after = self._eviction_policy.select_victim(channel._value)
+            if isinstance(after, list) and before_len <= len(after):
+                drop_indices = list(range(len(after), before_len))
+            else:
+                drop_indices = []
+            channel._value = after
+            self._pending_evictions.append({"channel": name, "drop_indices": drop_indices})
 
     def read(self, name: str, node_id: str | None = None) -> Any:
         """Read a value from the named channel.

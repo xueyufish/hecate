@@ -3,6 +3,12 @@
 Provides the abstract contract (CheckpointStore) and an in-memory
 implementation (InMemoryCheckpointStore) for testing and single-process use.
 Production implementations live in the services layer.
+
+Per the 1.3.19 log-as-truth change the checkpoint record is demoted to
+a materialized cache: it carries only ``channel_state`` + ``log_version``.
+Other recovery metadata (superstep, interrupted_node, route) is derived
+from the event log. The legacy ``pending_writes`` parameter is accepted
+and ignored for backward compatibility.
 """
 
 from __future__ import annotations
@@ -12,11 +18,11 @@ from abc import ABC, abstractmethod
 
 
 class CheckpointStore(ABC):
-    """Abstract interface for persisting and retrieving execution checkpoints.
+    """Materialized cache seam for execution state.
 
-    A checkpoint captures the full channel state, the current superstep counter,
-    the node that was executing, and optional pending writes. Implementations may
-    store checkpoints in memory, a database, or a distributed store.
+    The cache is intentionally an optimization over the event log:
+    implementations MUST treat it as discardable — recovery falls back to
+    fold-from-log when the cache is missing or stale.
     """
 
     @abstractmethod
@@ -36,8 +42,8 @@ class CheckpointStore(ABC):
             superstep: The superstep counter at the time of checkpoint.
             node_id: The node that was executing (None if multiple nodes ran).
             channel_state: A full snapshot of all channel values.
-            pending_writes: Writes that were queued but not yet applied.
-            metadata: Arbitrary metadata (e.g., interrupt information).
+            pending_writes: Accepted for backward compatibility; ignored.
+            metadata: Optional bookkeeping metadata.
 
         Returns:
             A unique identifier for the saved checkpoint.
@@ -95,6 +101,7 @@ class InMemoryCheckpointStore(CheckpointStore):
         pending_writes: list | None = None,
         metadata: dict | None = None,
     ) -> uuid.UUID:
+        del pending_writes  # legacy parameter; ignored post-1.3.19
         cp_id = uuid.uuid4()
         record = {
             "id": cp_id,
@@ -102,7 +109,6 @@ class InMemoryCheckpointStore(CheckpointStore):
             "superstep": superstep,
             "node_id": node_id,
             "channel_state": channel_state,
-            "pending_writes": pending_writes or [],
             "metadata": metadata or {},
         }
         if session_id not in self._store:

@@ -192,26 +192,34 @@ Superstep 4:
 
 ## Checkpoint Persistence
 
-The Checkpoint system provides durable state persistence for agent execution sessions. After each Pregel superstep completes, the current state is written to PostgreSQL (via `PostgresCheckpointStore`), with the most recent checkpoint cached in memory for fast recovery.
+> **1.3.19 update (log-as-truth)**: Per [ADR-030](adr/030-event-sourced-execution-state.md) the checkpoint is **demoted to a materialized cache** of the event log. The log is authoritative; the cache is discardable. See [Event Store §](#event-store) for the primary mechanism.
 
-**Design principles**:
+The Checkpoint system provides **durable state persistence** for agent execution sessions. As of 1.3.19 it acts as a hot-path cache; the canonical record is the event log (see [Event Store](#event-store)). Materialization cadence: turn normal-end / interrupt / every N supersteps (default N=10). Each materialization carries only `channel_state` (with bounded-retainer projection of oversized values) + `log_version` (the event-store cursor at materialization time).
 
-1. **Persist every step** — Each superstep produces a checkpoint. This enables time-travel debugging.
-2. **Memory cache** — The most recent checkpoint is cached for hot-path recovery.
-3. **Immutable** — Once written, checkpoints cannot be modified.
+**Design principles (revised)**:
 
-### Recovery Flow
+1. **Log is the source of truth** — the event log is rebuilt to recover; the cache is an optimization. Never partial-prune the log (fold-from-origin requires the full prefix).
+2. **Materialization seam** — production code routes through `SessionStateMaterializer` (services/orchestration/), which implements the engine `CheckpointStore` ABC and writes through the existing `SessionStateStore` (Redis / PostgreSQL / Tiered) under the tenant triple `(org_id, user_id, session_id)`. Tenant context injected via `tenant_context_provider` closure (same pattern as `PostgresEventStore`).
+3. **Bounded payload** — `channel_state` values over the budget (default head 32KB / tail 8KB) are replaced with `{"_omitted": True, "_prefix": ..., "_suffix": ..., "_omitted_bytes": N}` markers (dsh TextRetainer pattern). Recovery can fetch the original from the environment / offload via the marker.
+4. **`PostgresCheckpointStore` is soft-deprecated** — kept for backward compatibility with persisted data in `checkpoints`; hard removal (and the `checkpoints` table drop) is deferred to a follow-up cleanup change, per the 13.4a-6/-7 two-stage precedent.
+
+### Recovery Flow (cache + tail replay)
 
 ```
-Session interrupted → User sends resume request
+Session interrupted → Resume request hits /api/sessions/{id}/resume
   │
-  ├── 1. Load latest Checkpoint
-  ├── 2. Rebuild Channel state
-  ├── 3. Continue Pregel loop from interruption point
-  └── 4. Optional: User modifies state then resumes ("time-travel")
+  ├── 1. Validate via event log: tail must have unclosed INTERRUPT event
+  ├── 2. Load materialized cache from SessionStateStore (via materializer)
+  ├── 3. If event_store wired, replay events with version > cache.log_version
+  │        (fold via ChannelBehavior.write — same path as live mutation)
+  ├── 4. Boundary equivalence assertion: fold full log, compare to cache
+  │        → mismatch = RuntimeError("[PROJECTION.EQUIVALENT] ...") — fail-stop
+  ├── 5. Reconstruct runtime with recovered state
+  └── 6. Continue Pregel loop from interrupted node (route derived from
+         last INTERRUPT event's CHANNEL_WRITE delta — log-derived, not metadata)
 ```
 
-A checkpoint captures the session ID, superstep number, current node, all channel values, pending writes, and execution metadata (elapsed time, token usage).
+A checkpoint / cache record carries: session ID, superstep, current node, all channel values, and metadata (log_version anchor). `superstep` / `interrupted_node` / `interrupt_value` / route are **derived from the log** on restore, not stored in metadata.
 
 ---
 
@@ -312,9 +320,45 @@ Clients specify desired stream modes in the `ExecutionRequest`. Multiple modes c
 
 ## Event Store
 
-The `EventStore` extension point provides append-only event logging with replay capability. Twelve event types are defined, covering node execution starts/completions, channel writes, checkpoint saves, interrupts, and error occurrences. Events can be replayed to reconstruct execution state, enabling audit trails and debugging.
+> **1.3.19 update (log-as-truth)**: Per [ADR-030](adr/030-event-sourced-execution-state.md) the EventStore is promoted from observation log to **execution-state source of truth**. The `CHANNEL_WRITE` payload now carries the **post-adjudication** value (not just channel names). New event types (`STEP_END`, `EVICTION`, `CHANNEL_WRITE_REJECTED`, `SUBGRAPH_START`, `SUBGRAPH_END`) anchor commit points and subgraph dispatch.
 
-The default in-memory implementation is suitable for development. A persistent backend can be plugged in for production audit requirements.
+The `EventStore` extension point provides append-only event logging with replay capability. As of 1.3.19 events carry enough information to **fully reconstruct channel state** via the `fold_session` machine (`engine/logfold.py`). This enables:
+
+- **Cross-process recovery** — interrupt state survives process restart because the log is the durable record.
+- **Audit trails** — every LLM request, tool call, and channel mutation is captured with payload.
+- **Run Replay** (8.20) — value-carrying log + OTel spans power a timeline-replay UI.
+- **Projection Registry** (8.21) — `derive_messages()` is the first projection; future projections layer on top of the same fold.
+
+### Event grammar (1.3.19)
+
+Two layers:
+
+* **Channel-delta layer (general)** — `CHANNEL_WRITE {channel, value, log_schema_version=2}`, `CHANNEL_WRITE_REJECTED` (audit only; fold skips).
+* **Session-semantic layer** — `STEP_END` (commit point), `EVICTION` (fact event with `drop_indices`), `INTERRUPT {interrupt_value}`, `RESUME`, `LLM_REQUEST {messages, tools, prompt_id, prompt_version, model}`, `LLM_RESPONSE`, `NODE_START`, `NODE_END`, `TOOL_CALL`, `TOOL_RESULT`, `ERROR`, `PII_DETECTED`, `SUBGRAPH_START {child_session_id}`, `SUBGRAPH_END {child_session_id}`, `CUSTOM`.
+
+Unknown historical types fall back to `CUSTOM` on read (additive schema evolution).
+
+### Write-ahead ordering (WAL)
+
+In each superstep: results collect → conflict adjudication → **single-transaction batched `append_batch`** of channel-delta events + `STEP_END` → channel apply. `STEP_END` and `INTERRUPT` are commit points. A torn tail (`CHANNEL_WRITE` without a commit after it) rolls back to the last complete superstep on restore. This is one DB round-trip per superstep, replacing the old per-superstep full snapshot.
+
+### LogPolicy — default-in with blacklist
+
+Channels are logged by default. A single `engine/logpolicy.py` registry excludes three classes:
+
+1. **Ephemeral structural intermediates** — `_fanout__*`, `_resume_value`
+2. **Re-injectable control channels** — `_`-prefixed and `sys.`-prefixed (services re-inject per request)
+3. **Channels with dedicated persistence** — `_agent_state` (live object stored via `SessionStateStore`)
+
+`_route` is explicitly **included** (conditional-edge routing is part of fold correctness).
+
+### LogInvariants (runtime invariant checker)
+
+`engine/loginvariants.py` registers fold-time checks via decorator (dsh companion-module pattern). Shipped: `STEP.BOUNDARY`, `TOOL.PAIRING` (pending tool calls cannot cross STEP_END), `DISPATCH.TREE` (every `SUBGRAPH_START` has matching `SUBGRAPH_END`). Adding a check = `@loginvariants.register("CODE", "description")` then implementing the closure.
+
+### Boundary equivalence assertion (fail-stop)
+
+On restore / interrupt / materialization: fold full log, compare to `ChannelManager` snapshot (non-LogPolicy channels only). Mismatch = `RuntimeError("[PROJECTION.EQUIVALENT] channel '<name>' diverged between cache and log fold; failing closed per log-as-truth invariant")`. In-process state divergence is a bug; recovery is "discard + re-fold from log", not hot-fix.
 
 ---
 
