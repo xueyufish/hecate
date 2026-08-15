@@ -27,7 +27,7 @@ Pregel execution, state, scheduling, async, optimization.
 | ADR | Title | Topic |
 |---|---|---|
 | [ADR-001](001-graph-first-orchestration.md) | Graph-First Orchestration | (also under Architecture) |
-| [ADR-003](003-checkpoint-persistence.md) | Checkpoint Persistence with Memory Cache | State persistence |
+| [ADR-003](003-checkpoint-persistence.md) | Checkpoint Persistence with Memory Cache *(superseded by [ADR-030](030-event-sourced-execution-state.md))* | State persistence |
 | [ADR-005](005-progressive-worker-pool.md) | Progressive Worker Pool for Distributed Execution | Worker pool scaling |
 | [ADR-016](016-platform-spi-architecture.md) | Platform SPI Architecture | (also under Architecture) |
 | [ADR-020](020-async-execution-distributed-state.md) | Asynchronous Execution and Distributed Session State | Distributed execution |

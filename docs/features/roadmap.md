@@ -498,6 +498,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 ### Pending Cleanups
 
 - [ ] **13.4a-7**: AgentStateStore hard removal (delete `services/state/store.py`, remove `WorkflowExecutionService.state_store` parameter) — scheduled ≥ next minor after 13.4a-6
+- [ ] **C2 (1.3.19 follow-up)**: `checkpoints` 表硬删除（drop `checkpoints` table）——1.3.19 将 checkpoint 降级为物化缓存（`channel_state + log_version`），`PostgresCheckpointStore` 已软废弃（DeprecationWarning），存量物化缓存迁移到 SessionStateStore 后 drop；调度 ≥ 1.3.19 之后一个 minor（ADR-030 Consequences 节）
+- [ ] **A2 (1.3.19 follow-up)**: 双重记账统一 —— Conversation/Message 表与事件日志（execution-state-log）双写收敛；目标为日志单一事实源、Conversation/Message 成为派生投影（或明确双向一致性策略）——挂账项，无固定排期
 
 ---
 
@@ -511,7 +513,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 1.3.19 | Event-Sourced Execution State (Log-as-Truth) — EventStore from observation log to state carrier: "model-visible ⟺ logged" runtime invariant, derive_messages() projection for model context, checkpoint = log-replay fold (snapshots demoted to materialized caches), incremental delta storage (O(N²)→near-linear; note: deer-flow's DeltaChannel is the reference but sits UNRELEASED in its 2.1.0 milestone — corrected 2026-08-14; OMA v1.15.0 durable-approval checkpoint schema v4 is the shipped production reference). Include a dsh-invariants-style runtime relational invariant layer (openTurn/openStep/pendingCalls, frozen result snapshots, dispatch-tree consistency) — gap found in 2026-08-14 re-verification | EventStore ✅ + CheckpointStore ✅ | L |
+| 1.3.19 | Event-Sourced Execution State (Log-as-Truth) ✅ *(shipped 2026-08-15, [ADR-030](../design/adr/030-event-sourced-execution-state.md))* — EventStore from observation log to state carrier: "model-visible ⟺ logged" runtime invariant, derive_messages() projection for model context, checkpoint = log-replay fold (snapshots demoted to materialized caches), incremental delta storage (O(N²)→near-linear; note: deer-flow's DeltaChannel is the reference but sits UNRELEASED in its 2.1.0 milestone — corrected 2026-08-14; OMA v1.15.0 durable-approval checkpoint schema v4 is the shipped production reference). Include a dsh-invariants-style runtime relational invariant layer (openTurn/openStep/pendingCalls, frozen result snapshots, dispatch-tree consistency) — gap found in 2026-08-14 re-verification | EventStore ✅ + CheckpointStore ✅ | L |
 | 5.9 | Skill Provider Registry (enhancement) — provider registry (source origins: project/user/bundled/custom) + rank precedence (lower wins) + kebab-case name grammar + model/user invocation policy separation; replaces plain directory scan | 5.9 Skill Loading ✅ | M |
 
 ### Competitive Gap Features (NEW — 2026-08-14 competitor analysis)
@@ -519,7 +521,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 1.3.18 | Dynamic Orchestration — coordinator node: goal + agent roster → runtime task DAG → dispatch workers → synthesize result. 7th multi-agent pattern alongside 6 static ones; coordinator is a special node type emitting sub-graphs on Pregel at runtime | 2.7a ✅ + Pregel ✅ | M |
-| 8.20 | Run Replay & Debug Dashboard (Phase 1: execution replay) — runId → timeline replay of superstep × channel changes × tool calls × LLM request/response × guardrail results; web UI + DAG visualization on EventStore + OTel. Phase 2 (version binding) deferred to P5 | 1.3.19 (enriched log) | M |
+| 8.20 | Run Replay & Debug Dashboard (Phase 1: execution replay) — runId → timeline replay of superstep × channel changes × tool calls × LLM request/response × guardrail results; web UI + DAG visualization on EventStore + OTel. **回放覆盖范围 = Pregel 路径**（services 层直接写库的旁路不在回放语义内）。 Phase 2 (version binding) deferred to P5 | 1.3.19 (enriched log) | M |
 | 6.27 | Browser Automation Tool (moved from P4) — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ | M |
 
 ### Completed-Feature Upgrades (NEW — 2026-08-14 research)

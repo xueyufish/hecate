@@ -42,7 +42,7 @@ Channels hold state between nodes. Each channel has a **type** that controls wha
 | `topic` | Appends to a list | Message history, event log |
 | `accumulator` | Reduces via a function (`append` / `add`) | Counters, running totals |
 
-Any channel can be marked `persistent: true` to survive across sessions via [checkpoints](engine.md#checkpoints). The deprecated `persistent_topic` type auto-migrates to `topic` + `persistent: true`.
+Any channel can be marked `persistent: true` to survive across sessions via the [event log and checkpoint caches](engine.md#event-log-and-checkpoints-durable-resumable-state). The deprecated `persistent_topic` type auto-migrates to `topic` + `persistent: true`.
 
 ### Nodes — the execution units
 

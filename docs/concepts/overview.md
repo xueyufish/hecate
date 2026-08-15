@@ -52,7 +52,7 @@ Hecate is an **open-source, self-hosted, Python-first agent platform** for engin
 │                                                              │
 │   ┌────────────────────────────────────────────────────────┐ │
 │   │                       engine/                          │ │
-│   │  Pregel runtime · Channels · Checkpoints · Workers    │ │
+│   │  Pregel runtime · Channels · Event log · Workers      │ │
 │   │  11 core + 4 SPI extension points                      │ │
 │   │  (DEPS: only `jsonschema` — zero deps on services)   │ │
 │   └────────────────────────────────────────────────────────┘ │
@@ -69,7 +69,7 @@ Hecate comprises ten modules organized in a layered dependency hierarchy:
 
 1. **Access Channel** — entry point for all external requests (OpenAI-compatible API, Management API, MCP Server, A2A endpoint)
 2. **Agent Studio** — visual canvas (React Flow), agent configurator, prompt management, workflow builder
-3. **Agent Engine** — self-built Pregel runtime with channel system, checkpoint persistence, and worker pool
+3. **Agent Engine** — self-built Pregel runtime with channel system, event-sourced execution state (Log-as-Truth) with checkpoint caches, and worker pool
 4. **Ops Center** — observability, alerting, evaluation, cost governance, compliance
 5. **Model Hub** — LiteLLM-powered LLM integration with routing, circuit breaker, A/B testing
 6. **Tool Platform** — MCP-first tool ecosystem with Docker sandbox execution
@@ -101,7 +101,7 @@ Client → Access Channel (auth, rate limit)
     → Response (streamed or complete)
 ```
 
-At any point during execution, a node may call `interrupt()` to pause for human-in-the-loop approval. The Checkpoint system enables resuming from exactly that point.
+At any point during execution, a node may call `interrupt()` to pause for human-in-the-loop approval. The event log commits up to the interrupt point, enabling resuming from exactly that point.
 
 ### Detailed flow with boundaries
 
@@ -132,8 +132,8 @@ At any point during execution, a node may call `interrupt()` to pause for human-
    │   ├── Built-in tool
    │   ├── Custom tool (in-process)
    │   └── MCP tool (out-of-process)
-   ├── Checkpoint save (after each step)
-   └── Audit log event (every action)
+    ├── Event log commit (after each step)
+    └── Audit log event (every action)
 ```
 
 ---
@@ -232,7 +232,7 @@ Based on your role:
 
 ## Further reading
 
-- [Engine Design](../design/engine-design.md) — Pregel runtime, compiler pipeline, channel system, checkpoints
+- [Engine Design](../design/engine-design.md) — Pregel runtime, compiler pipeline, channel system, event-sourced state + checkpoint caches
 - [Core Concepts](../design/concepts.md) — entity definitions, relationships, data model
 - [Architecture Decision Records](../design/adr/) — 28 decisions with context and rationale
 - [Glossary](../reference/glossary.md) — comprehensive term definitions

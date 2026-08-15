@@ -12,7 +12,7 @@ Hecate stores data across four backends. A backup can cover all of them or any s
 
 | Scope code | Backend | Contents |
 |-----------|---------|----------|
-| `pg` | PostgreSQL | Agents, workflows, sessions, checkpoints, knowledge-base metadata, audit records, budgets, feature flags |
+| `pg` | PostgreSQL | Agents, workflows, sessions, execution event logs, checkpoint caches, knowledge-base metadata, audit records, budgets, feature flags |
 | `qdrant` | Qdrant | Vector embeddings for knowledge bases (RAG retrieval index) |
 | `minio` | MinIO | Uploaded source documents, object attachments |
 | `fs` | Filesystem | AgentEnvironment working files, offloaded context |

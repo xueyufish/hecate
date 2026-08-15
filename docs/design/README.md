@@ -36,7 +36,7 @@ Each use case combines multiple subsystems below into a working end-to-end recip
 
 ## Core Subsystems
 
-- **[Engine Design](engine-design.md)** — the Pregel runtime, compiler, channel system, and checkpoint persistence.
+- **[Engine Design](engine-design.md)** — the Pregel runtime, compiler, channel system, and event-sourced execution state (Log-as-Truth).
 - **[Access Channel Design](access-channel-design.md)** — API surfaces, authentication, gateway control plane, multi-channel adaptation, and zero-trust identity.
 - **[Agent Studio Design](agent-studio-design.md)** — visual development environment: canvas, agent configurator, multi-agent orchestration, NL2X workflow generation, and testing tools.
 - **[Visual Canvas Architecture](visual-canvas-architecture.md)** — the React Flow + Next.js frontend (`web/`): bidirectional DSL sync, custom node types, multi-agent pattern templates, and canvas-to-backend protocol.
@@ -74,7 +74,7 @@ ADRs capture the "why" behind major design choices. Each record documents the co
 |-----|-------|
 | [ADR-001](adr/001-graph-first-orchestration.md) | Graph-First Orchestration with Three-Layer Agent as Preset Template |
 | [ADR-002](adr/002-five-layer-architecture.md) | Five-Layer System Architecture |
-| [ADR-003](adr/003-checkpoint-persistence.md) | Checkpoint Persistence with Memory Cache |
+| [ADR-003](adr/003-checkpoint-persistence.md) | Checkpoint Persistence with Memory Cache *(superseded by [ADR-030](adr/030-event-sourced-execution-state.md))* | State persistence |
 | [ADR-004](adr/004-skill-system.md) | SKILL.md Format for Skill System |
 | [ADR-005](adr/005-progressive-worker-pool.md) | Progressive Worker Pool for Distributed Execution |
 | [ADR-006](adr/006-four-level-memory.md) | Four-Level Memory with Progressive Implementation |

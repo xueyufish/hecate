@@ -149,7 +149,7 @@ Equivalent to the RAG pipeline — structured knowledge from documents stored in
 
 ## Session and Conversation
 
-A **Conversation** represents a chat thread between a user and an Agent. A **Session** is a single execution context within a conversation — it tracks the agent's current position in the workflow, the latest checkpoint, and the execution status.
+A **Conversation** represents a chat thread between a user and an Agent. A **Session** is a single execution context within a conversation — it tracks the agent's current position in the workflow, the execution event log, and the execution status.
 
 Session lifecycle states:
 
@@ -405,7 +405,7 @@ Versionable resources — Agents, Workflows, Prompts, and Skills — share a uni
 | Conversation | `conversations` | id, agent_id, user_id |
 | Message | `messages` | id, conversation_id, role, content, tool_calls (JSONB), metadata (JSONB) |
 | Session | `sessions` | id, conversation_id, agent_id, status, current_node, checkpoint_id |
-| Checkpoint | `checkpoints` | id, session_id, node_id, channel_state (JSONB), metadata (JSONB) |
+| Checkpoint | `checkpoints` | id, session_id, node_id, channel_state (JSONB), log_version — *materialized cache, not truth (see ADR-030)* |
 | Prompt | `prompts` | id, workspace_id, name, template, version, labels (JSONB) |
 | Organization | `organizations` | id, name, settings (JSONB) |
 | User | `users` | id, org_id, email, name, role |

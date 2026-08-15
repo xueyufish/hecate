@@ -49,7 +49,7 @@ Every extension follows the same three steps:
 
 ## Example 1: Custom CheckpointStore
 
-**Goal**: Store checkpoints in Redis instead of PostgreSQL for faster snapshot access.
+**Goal**: Store checkpoint caches in Redis instead of PostgreSQL for faster state access. (Checkpoints are materialized caches of the event log — see [Log-as-Truth, ADR-030](../design/adr/030-event-sourced-execution-state.md) — so a Redis-backed store is a natural fit for the hot path.)
 
 ### Step 1 — Implement
 

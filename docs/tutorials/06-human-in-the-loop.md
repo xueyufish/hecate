@@ -1,6 +1,6 @@
 # Tutorial: Human-in-the-Loop
 
-> **20 minutes** — Add approval checkpoints, content reviews, and human redirection to your workflows using `interrupt()` and `Command`. Resume sessions from exact pause points and inspect state with durable checkpoints.
+> **20 minutes** — Add approval checkpoints, content reviews, and human redirection to your workflows using `interrupt()` and `Command`. Resume sessions from exact pause points and inspect state with the durable event log.
 
 Every long-running agent eventually faces a moment where it should stop and ask: *should I really do this?* Hecate handles this with two cooperating primitives — `interrupt()` to pause execution and `Command` to resume it. Together they make human-in-the-loop (HITL) workflows first-class: not a wrapper around the LLM, but part of the engine itself.
 
@@ -27,12 +27,12 @@ Throughout this tutorial we use `dev-key-change-me` as the API key. Replace it w
 
 ## Why this lives in the engine
 
-Most frameworks implement HITL by wrapping the LLM client or polling an external queue. Hecate takes a different approach: pause points live inside the [Pregel runtime](../concepts/engine.md), so every interruption writes a checkpoint and every resume restores the exact state.
+Most frameworks implement HITL by wrapping the LLM client or polling an external queue. Hecate takes a different approach: pause points live inside the [Pregel runtime](../concepts/engine.md), so every interruption commits the execution event log and every resume replays from the log-derived pause point (cache + tail replay).
 
 The practical consequences:
 
-- A crashed server does not lose the pending approval — the checkpoint is in PostgreSQL.
-- Time-travel debugging works across HITL pauses — you can replay from any point before or after a human decision.
+- A crashed server does not lose the pending approval — the interrupt commit point is in the execution event log.
+- Time-travel debugging works across HITL pauses — you can replay the log from any point before or after a human decision.
 - The same workflow can be reviewed, paused, redirected, and resumed by different operators without changing the agent code.
 
 The two primitives that make this work are:
@@ -42,7 +42,7 @@ The two primitives that make this work are:
 | `interrupt(value)` | Engine runtime | Pause execution and return `value` to the caller as the reason |
 | `Command(goto=, update=, interrupt=, return_value=)` | Engine types | Resume control — jump to a node, inject state, or signal completion |
 
-Both are checkpoint-safe: a `Command` carries the user's decision and is replayable against any historical checkpoint.
+Both are log-safe: a `Command` carries the user's decision and is replayable against the event log at any historical `STEP_END` commit point.
 
 ---
 
@@ -119,7 +119,7 @@ We will build a workflow that drafts a marketing email, asks for human approval,
 }
 ```
 
-The key node is `ask_human`: it invokes the `ask_human_approval` tool, whose worker code calls `interrupt({...})` with a payload describing what the human is being asked to review. The runtime pauses there, writes a checkpoint, and waits for a `Command`.
+The key node is `ask_human`: it invokes the `ask_human_approval` tool, whose worker code calls `interrupt({...})` with a payload describing what the human is being asked to review. The runtime pauses there, commits the event log up to the interrupt point, and waits for a `Command`.
 
 Because the DSL is declarative — it describes *what* runs, not *how* — the `interrupt()` call lives in the tool's Python worker, not in the workflow JSON. Here is what the tool worker looks like:
 
@@ -174,7 +174,7 @@ Note three things:
 
 1. `status` is `interrupted`, not `failed` — execution paused cleanly.
 2. `current_node` shows exactly where the pause happened.
-3. `checkpoint_id` identifies the persisted state — you can return to this point later even if the server restarts.
+3. `checkpoint_id` identifies the materialized cache — the interrupt commit point in the event log is the durable record; the cache just makes resume fast. You can return to this point later even if the server restarts.
 
 The CLI keeps the `session_id` and `checkpoint_id` for the resume step.
 
@@ -226,12 +226,12 @@ hecate sessions show 01HXYZ...
 Output includes:
 
 - **Timeline** — every superstep with timestamps and which node ran
-- **Channel state at each checkpoint** — full state snapshots (this is the time-travel view)
+- **Channel state at each commit point** — the log fold at any `STEP_END` (this is the time-travel view)
 - **All interrupt payloads** — what the human saw at each pause
 - **All `Command` payloads** — what the human decided at each resume
 - **Tool calls and their results** — including the `send_email` invocation if it ran
 
-You can also fetch a specific checkpoint's state:
+You can also fetch a specific checkpoint's cached state:
 
 ```bash
 hecate checkpoints show ckpt_01HX... --pretty
@@ -284,7 +284,7 @@ Each `Command` is recorded with the reviewer's identity, enabling dual-audit tra
 
 ## What you built
 
-A workflow that pauses for human review at a checkpoint, persists state durably, and resumes via a typed `Command`. The same primitives scale to multi-step approvals, tool risk gating, and asynchronous review systems — all without changing the engine or the agent code.
+A workflow that pauses for human review at an interrupt point, commits state durably to the event log, and resumes via a typed `Command`. The same primitives scale to multi-step approvals, tool risk gating, and asynchronous review systems — all without changing the engine or the agent code.
 
 ---
 

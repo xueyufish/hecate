@@ -203,7 +203,7 @@ For each component, what's the impact when it fails?
 | Postgres primary | All writes fail | Promote replica (manual or Patroni) | NO — needs HA |
 | Postgres replica | No impact (replica was read-only) | Provision new replica | YES |
 | Qdrant node | Search latency increases | Cluster rebalances | YES |
-| Redis | Sessions lost (resumable from checkpoint) | Restart Redis (data lost) | TOLERABLE |
+| Redis | Sessions lost (resumable from event log) | Restart Redis (data lost) | TOLERABLE |
 | MinIO | File uploads fail | Restart MinIO (data persistent on disk) | YES |
 | LLM provider | All chat completions fail | Switch provider via fallback config | YES (built-in) |
 

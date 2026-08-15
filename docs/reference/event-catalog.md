@@ -63,6 +63,8 @@ This is an **approximate count** — exact numbers depend on the version.
 | `workflow.created` | New workflow created | `{workflow_id, name, dsl_hash}` |
 | `workflow.versioned` | New workflow version saved | `{workflow_id, version}` |
 
+> **Engine execution events** (the Log-as-Truth event log — `CHANNEL_WRITE`, `STEP_END`, `INTERRUPT`, `EVICTION`, `CHANNEL_WRITE_REJECTED`, `SUBGRAPH_START`/`SUBGRAPH_END`, etc.) are a separate namespace from the business/audit events above. They are the **source of truth for execution state** (replayable, value-carrying) and are documented in [ADR-030](../design/adr/030-event-sourced-execution-state.md) and [Engine Design](../design/engine-design.md#event-store).
+
 ---
 
 ## Chat events

@@ -209,7 +209,7 @@ events:
   - type: a2a_task_completed  task_id: 7c3f...   state: completed
 ```
 
-The Pregel runtime persists each state change to the checkpoint store — failed or canceled tasks are fully reproducible and resumable.
+The Pregel runtime appends every state change to the execution event log (Log-as-Truth) — failed or canceled tasks are fully reproducible and resumable.
 
 ---
 

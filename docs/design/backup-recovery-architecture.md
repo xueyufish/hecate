@@ -13,7 +13,8 @@ Agent platforms have **more state than typical web apps**. A single Hecate deplo
 - **Agent definitions** (configuration, persona, model settings)
 - **Knowledge bases** (uploaded documents, embeddings, citations)
 - **Conversations** (chat history, message turns)
-- **Checkpoints** (intermediate agent execution state for resume)
+- **Execution event logs** (per-session state — the source of truth for resume; see [Log-as-Truth, ADR-030](adr/030-event-sourced-execution-state.md))
+- **Checkpoints** (materialized caches of execution state — rebuildable from the event log, but included for fast recovery)
 - **Tool definitions** (custom tools, MCP servers, plugins)
 - **User / workspace data** (RBAC, quotas, settings)
 - **Audit logs** (compliance evidence)
@@ -29,13 +30,13 @@ Hecate uses a **scope-based** backup model. Each backup specifies one or more sc
 
 | Scope | What it contains | Backing store |
 |---|---|---|
-| **PG** | PostgreSQL — agents, KBs, conversations, checkpoints, audit, observability metadata | PostgreSQL `pg_dump` |
+| **PG** | PostgreSQL — agents, KBs, conversations, execution event logs, checkpoints, audit, observability metadata | PostgreSQL `pg_dump` |
 | **QDRANT** | Vector embeddings, payload indexes | Qdrant snapshot API |
 | **MINIO** | Uploaded documents, generated artifacts | MinIO / S3 bucket copy |
-| **FS** | Filesystem state — checkpoint files, plugin packages, configuration overrides | `tar` or `rsync` |
+| **FS** | Filesystem state — plugin packages, configuration overrides | `tar` or `rsync` |
 | **ALL** | All of the above (default for full backups) | Composite |
 
-Most backups are `ALL` (full). Incremental backups can target a single scope (e.g., only `PG` for hourly checkpoints).
+Most backups are `ALL` (full). Incremental backups can target a single scope (e.g., only `PG` for hourly event-log backups). Note: the event log is the source of truth — a backed-up event log is fully sufficient to rebuild any session's state; checkpoints only speed that rebuild up.
 
 ---
 

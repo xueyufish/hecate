@@ -66,7 +66,7 @@ We **do not** assume:
 
 | Threat | Attack scenario | Current mitigation | Gap? |
 |---|---|---|---|
-| **Checkpoint tampering** | Attacker with DB write access modifies checkpoint state to influence future agent runs | Hecate checkpoints include content hash; tamper detection on read | Partial — detection is post-hoc |
+| **Checkpoint / event log tampering** | Attacker with DB write access modifies execution state (event log or its materialized checkpoint caches) to influence future agent runs | Event log is the source of truth ([ADR-030](adr/030-event-sourced-execution-state.md)); `PostgresEventStore` hash chain; cache divergence fails closed (`PROJECTION.EQUIVALENT` invariant) and rebuilds by re-folding the log | Partial — detection is post-hoc |
 | **Audit log tampering** | Attacker with DB write access deletes audit events | Hash chain in `audit_logs` (each event links to previous hash); SIEM forwarding | Partial — depends on SIEM ingestion latency |
 | **Agent Card payload tampering** | Attacker modifies skill list or endpoint after signing | JWS signature covers full payload | None |
 | **Plugin manifest tampering** | Attacker modifies a plugin package after admin signs it | Plugins run in same Python process; no isolation by default | **GAP** |
@@ -115,7 +115,7 @@ We **do not** assume:
 | **API rate exhaustion** | Attacker floods with requests | Per-workspace rate limits (default 60 req/min); `RATE_LIMIT_REQUESTS_PER_MINUTE` | None |
 | **LLM cost exhaustion** | Agent loops burn through API budget | `Budget Governance` ([ADR-025](adr/025-enterprise-foundation-enhancement.md)); workspace daily cost cap | None |
 | **Agent self-loop DoS** | Misconfigured agent loops infinitely | `max_iterations` in Pregel runtime; circuit breakers | None |
-| **Checkpoint store fill-up** | Attacker or bug fills disk with checkpoints | Retention policy (delete checkpoints older than N days) | Process gap |
+| **Event log / checkpoint fill-up** | Attacker or bug fills disk with event log or caches | Session TTL cleanup (completed 30d / interrupted 7d, cascade delete); retention policy; log truncation/archival is a tracked follow-up ([ADR-030](adr/030-event-sourced-execution-state.md)) | Process gap |
 | **Knowledge base DoS** | Attacker uploads millions of tiny documents | Upload rate limit per workspace | Partial |
 | **Audit log fill-up** | Audit grows unbounded | Archive to cold storage after 30 days | None |
 | **Postgres connection pool exhaustion** | Many concurrent requests | asyncpg pool sized via `POSTGRES_POOL_SIZE` (default 20) | None |

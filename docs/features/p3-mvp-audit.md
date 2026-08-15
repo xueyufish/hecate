@@ -340,7 +340,7 @@
 
 | 顺序 | 特性 | 工作量 | 依赖关系 |
 |---|------|--------|---------|
-| 1 | 1.3.19 Event-Sourced Execution State (Log-as-Truth) | **L** | **最先落地**——8.20 / HITL 审计对 / middleware 事件都消费富化后的事件日志 |
+| 1 | 1.3.19 Event-Sourced Execution State (Log-as-Truth) ✅ *(已完成 2026-08-15，见 [ADR-030](../design/adr/030-event-sourced-execution-state.md))* | **L** | **最先落地**——8.20 / HITL 审计对 / middleware 事件都消费富化后的事件日志 |
 | 2 | 8.20 Run Replay Phase 1 | M | 依赖 1.3.19 |
 | 3 | 1.3.18 Dynamic Orchestration | M | 可与 1 并行（不依赖日志改造） |
 | 4 | 6.27 Browser Automation + 5.9 Skill Provider Registry | M + M | 可并行 |
@@ -348,7 +348,7 @@
 
 ### 风险
 
-- 1.3.19 是 L 级引擎核心改造（EventStore 上执行主路径 + 投影接口 + checkpoint 重定义 + 恢复路径重写 + 1713 测试适配），与 38 项存量未完成同期推进——若 Sprint 7 容量不足，8.20 顺延为 P3 收尾项（1.3.18 / 6.27 不受影响，它们不依赖日志改造）
+- 1.3.19 是 L 级引擎核心改造（EventStore 上执行主路径 + 投影接口 + checkpoint 重定义 + 恢复路径重写 + 1713 测试适配），与 38 项存量未完成同期推进——若 Sprint 7 容量不足，8.20 顺延为 P3 收尾项（1.3.18 / 6.27 不受影响，它们不依赖日志改造）—— **1.3.19 已完成（2026-08-15），此风险已解除**；8.20 现在可按序推进
 - 兼容路径：旧全量快照保留为物化缓存（非删除），DeltaChannel 增量存储向后兼容
 
 ---
