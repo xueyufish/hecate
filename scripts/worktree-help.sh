@@ -5,11 +5,17 @@
 # orchestrate worktrees so concurrent sessions don't pollute each other.
 #
 # Usage:
-#   ./scripts/worktree-help.sh start <name>        # create worktree + start opencode
-#   ./scripts/worktree-help.sh list               # list active worktrees
-#   ./scripts/worktree-help.sh push <name>        # push worktree branch to origin
-#   ./scripts/worktree-help.sh delete <name>      # remove worktree(s) + branch(es), comma-separated
-#   ./scripts/worktree-help.sh remove <name>      # remove worktree(s) only, keep branches
+#   ./scripts/worktree-help.sh start <name> [--tools <list>|--no-tools]
+#                                       # create worktree + openspec init (no auto-launch)
+#   ./scripts/worktree-help.sh launch <name> [--tool <name>] [--background]
+#                                       # bind worktree to an AI tool (opencode by default)
+#   ./scripts/worktree-help.sh list   # list active worktrees
+#   ./scripts/worktree-help.sh push <name>
+#                                       # push worktree branch to origin
+#   ./scripts/worktree-help.sh delete <name>[,<name>...]
+#                                       # remove worktree(s) + branch(es), comma-separated
+#   ./scripts/worktree-help.sh remove <name>[,<name>...]
+#                                       # remove worktree(s) only, keep branches
 #
 # The worktree path is namespaced by OpenSpec change name so multiple
 # sessions (code vs docs) for the SAME change don't collide.
@@ -87,9 +93,100 @@ cleanup_main_openspec_change() {
     return 0
 }
 
+init_openspec_tools() {
+    local wt_path="$1"
+    local tools="$2"
+
+    [[ -n "${tools}" ]] || { echo "Skipping openspec init (no tools specified)"; return 0; }
+    [[ "${tools}" != "none" ]] || { echo "Skipping openspec init (--tools none)"; return 0; }
+
+    if ! command -v openspec >/dev/null 2>&1; then
+        echo "Warning: 'openspec' CLI not found in PATH; skipping init." >&2
+        echo "  Install: https://github.com/Fission-AI/OpenSpec" >&2
+        return 1
+    fi
+
+    echo "Initializing openspec for tools: ${tools}"
+    if (cd "${wt_path}" && openspec init \
+            --tools "${tools}" \
+            --force \
+            --no-animation \
+            --no-copilot-cloud \
+            .); then
+        echo "  openspec initialized — reload your AI tool to pick up /opsx-* commands."
+    else
+        echo "Warning: openspec init failed for some tools; worktree is still usable." >&2
+    fi
+}
+
+launch_ai_tool() {
+    local wt_path="$1"
+    local tool="${2:-opencode}"
+    local background="${3:-false}"
+
+    if ! command -v "${tool}" >/dev/null 2>&1; then
+        echo "Error: AI tool '${tool}' not found in PATH." >&2
+        echo "  Install it, or pick another tool:" >&2
+        echo "    --tool opencode      # default" >&2
+        echo "    --tool zcode         # ZCode CLI" >&2
+        echo "    --tool workbuddy     # WorkBuddy CLI (Tencent)" >&2
+        echo "    --tool codex         # OpenAI Codex CLI" >&2
+        exit 1
+    fi
+
+    if [[ "${background}" == "true" ]]; then
+        (cd "${wt_path}" && nohup "${tool}" >"${wt_path}/.${tool}.log" 2>&1 &)
+        echo "${tool} started in background, logs: ${wt_path}/.${tool}.log"
+    else
+        cd "${wt_path}"
+        exec "${tool}"
+    fi
+}
+
 case "${cmd}" in
     start)
-        name="${2:?Usage: $0 start <change-name>}"
+        shift
+        name=""
+        tools="opencode,zcode,codex"
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --tools)
+                    [[ $# -ge 2 ]] || { echo "Error: --tools requires a value" >&2; exit 1; }
+                    tools="$2"
+                    shift 2
+                    ;;
+                --tools=*)
+                    tools="${1#--tools=}"
+                    shift
+                    ;;
+                --no-tools)
+                    tools=""
+                    shift
+                    ;;
+                -h|--help)
+                    sed -n '/^    help|\*) /,/^            ;;$/p' "$0"
+                    exit 0
+                    ;;
+                --*)
+                    echo "Error: unknown flag: $1" >&2
+                    echo "Usage: $0 start <name> [--tools <list>|--no-tools]" >&2
+                    exit 1
+                    ;;
+                *)
+                    if [[ -z "${name}" ]]; then
+                        name="$1"
+                        shift
+                    else
+                        echo "Error: unexpected positional arg: $1" >&2
+                        exit 1
+                    fi
+                    ;;
+            esac
+        done
+        if [[ -z "${name}" ]]; then
+            echo "Usage: $0 start <name> [--tools <list>|--no-tools]" >&2
+            exit 1
+        fi
         wt_path="${WT_ROOT}/${name}"
         branch="feat/${name}"
 
@@ -111,13 +208,70 @@ case "${cmd}" in
             echo "Created worktree: ${wt_path} (branch: ${branch})"
         fi
 
-        if [[ "${3:-}" == "--background" ]]; then
-            (cd "${wt_path}" && nohup opencode >"${wt_path}/.opencode.log" 2>&1 &)
-            echo "opencode started in background, logs: ${wt_path}/.opencode.log"
-        else
-            cd "${wt_path}"
-            exec opencode
+        init_openspec_tools "${wt_path}" "${tools}"
+
+        echo ""
+        echo "Worktree ready: ${wt_path}"
+        echo "Next steps:"
+        echo "  cd ${wt_path}"
+        echo "  $0 launch ${name}                       # launch default AI tool (opencode)"
+        echo "  $0 launch ${name} --tool zcode          # launch zcode"
+        echo "  $0 launch ${name} --tool workbuddy      # launch workbuddy"
+        echo "  $0 launch ${name} --tool codex          # launch codex"
+        echo "  $0 launch ${name} --background          # launch in background"
+        ;;
+
+    launch)
+        shift
+        name=""
+        tool="opencode"
+        background="false"
+        while [[ $# -gt 0 ]]; do
+            case "$1" in
+                --tool)
+                    [[ $# -ge 2 ]] || { echo "Error: --tool requires a value" >&2; exit 1; }
+                    tool="$2"
+                    shift 2
+                    ;;
+                --tool=*)
+                    tool="${1#--tool=}"
+                    shift
+                    ;;
+                --background)
+                    background="true"
+                    shift
+                    ;;
+                -h|--help)
+                    sed -n '/^    help|\*) /,/^            ;;$/p' "$0"
+                    exit 0
+                    ;;
+                --*)
+                    echo "Error: unknown flag: $1" >&2
+                    echo "Usage: $0 launch <name> [--tool <name>] [--background]" >&2
+                    exit 1
+                    ;;
+                *)
+                    if [[ -z "${name}" ]]; then
+                        name="$1"
+                        shift
+                    else
+                        echo "Error: unexpected positional arg: $1" >&2
+                        exit 1
+                    fi
+                    ;;
+            esac
+        done
+        if [[ -z "${name}" ]]; then
+            echo "Usage: $0 launch <name> [--tool <name>] [--background]" >&2
+            exit 1
         fi
+        wt_path="${WT_ROOT}/${name}"
+        if [[ ! -d "${wt_path}" ]]; then
+            echo "Error: worktree not found: ${wt_path}" >&2
+            echo "Run: $0 start ${name}" >&2
+            exit 1
+        fi
+        launch_ai_tool "${wt_path}" "${tool}" "${background}"
         ;;
 
     list)
@@ -215,18 +369,34 @@ case "${cmd}" in
     help|*)
         cat <<EOF
 Usage:
-  $0 start <name> [--background]  # create worktree + start opencode
-  $0 list                         # list active worktrees
-  $0 push <name>                  # push worktree branch to origin
-  $0 delete <name>[,<name>...]    # remove worktree(s) + branch(es)
-  $0 remove <name>[,<name>...]    # remove worktree(s), keep branches
+  $0 start <name> [--tools <list>|--no-tools]
+                                      # create worktree + init openspec (no auto-launch)
+  $0 launch <name> [--tool <name>] [--background]
+                                      # bind worktree to an AI tool (opencode by default)
+  $0 list                             # list active worktrees
+  $0 push <name>                      # push worktree branch to origin
+  $0 delete <name>[,<name>...]        # remove worktree(s) + branch(es)
+  $0 remove <name>[,<name>...]        # remove worktree(s), keep branches
+
+start --tools flags:
+  --tools <list>   comma-separated list passed to 'openspec init --tools'
+                   (default: opencode,zcode,codex)
+                   use "all" or "none" to forward to openspec verbatim
+  --no-tools       skip 'openspec init' entirely
+
+launch --tool flags:
+  --tool <name>    AI CLI to launch in the worktree (default: opencode)
+                   common values: opencode, zcode, workbuddy, codex
+  --background     launch detached; logs go to <wt>/.<tool>.log
 
 Workflow:
-  $0 start feat-my-change         # creates worktree + branch feat/feat-my-change
+  $0 start feat-my-change               # creates worktree + openspec init, no launch
+  $0 launch feat-my-change              # bind to opencode (foreground)
+  $0 launch feat-my-change --tool codex # bind to codex
   # ... do work in worktree ...
-  $0 push feat-my-change          # pushes feat/feat-my-change to origin
-  $0 delete feat-my-change        # removes worktree + branch after merge
-  $0 remove feat-my-change        # removes worktree, keeps branch
+  $0 push feat-my-change                # pushes feat/feat-my-change to origin
+  $0 delete feat-my-change              # removes worktree + branch after merge
+  $0 remove feat-my-change              # removes worktree, keeps branch
 EOF
         ;;
 esac
