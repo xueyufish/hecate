@@ -34,15 +34,15 @@ Either. The visual canvas (Agent Studio) and the Python SDK both emit the **same
 
 ### What is a superstep?
 
-One iteration of the Pregel execution loop: ready nodes read their input channels, the worker pool dispatches them, the runtime awaits all results, applies writes, persists a checkpoint, and evaluates conditional edges to decide what runs next. Execution ends when no more nodes are ready. See [The Execution Engine](../concepts/engine.md#supersteps-the-execution-loop).
+One iteration of the Pregel execution loop: ready nodes read their input channels, the worker pool dispatches them, the runtime awaits all results, applies writes, appends a `STEP_END` commit event to the event log, and evaluates conditional edges to decide what runs next. Execution ends when no more nodes are ready. See [The Execution Engine](../concepts/engine.md#supersteps-the-execution-loop).
 
 ### What is the difference between a checkpoint and a session?
 
-A **session** is one conversation lifecycle (`active` → `interrupted` → `active` → `completed`/`failed`). A **checkpoint** is an immutable snapshot of all channel state at a single superstep boundary, stored in PostgreSQL. One session produces many checkpoints — one per superstep. See [The Execution Engine](../concepts/engine.md#checkpoints-durable-resumable-state).
+A **session** is one conversation lifecycle (`active` → `interrupted` → `active` → `completed`/`failed`). Execution state is **event-sourced** (Log-as-Truth, [ADR-030](../design/adr/030-event-sourced-execution-state.md)): every superstep appends channel-write events and a `STEP_END` commit to the event log, and a **checkpoint** is a discardable materialized cache of that log (channel state + `log_version` cursor). One session has one event log and many cache materializations. See [The Execution Engine](../concepts/engine.md#event-log-and-checkpoints-durable-resumable-state).
 
 ### What happens when a session is interrupted?
 
-When a node calls `interrupt()`, the runtime writes a checkpoint and stops. The session enters the `interrupted` state and **holds no resources** — it is just a checkpoint waiting to be resumed. When you resume with a `Command`, the runtime loads the checkpoint, injects your input, and continues from exactly where it stopped. See the [Human-in-the-Loop tutorial](../tutorials/06-human-in-the-loop.md).
+When a node calls `interrupt()`, the runtime commits the event log up to the interrupt point and stops. The session enters the `interrupted` state and **holds no resources** — it is a committed log tail waiting to be resumed. When you resume with a `Command`, the runtime derives the pause point from the log (cache + tail replay), injects your input, and continues from exactly where it stopped. See the [Human-in-the-Loop tutorial](../tutorials/06-human-in-the-loop.md).
 
 ### Can nodes run in parallel?
 

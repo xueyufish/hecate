@@ -182,7 +182,7 @@ Awaits each worker directly in the current event loop without parallelism. This 
 
 **File**: `src/hecate/engine/checkpoint.py`
 
-Abstract interface for persisting and retrieving execution checkpoints. A checkpoint captures the full channel state, the current superstep counter, the executing node, and optional pending writes.
+Abstract interface for persisting and retrieving **materialized caches** of execution state. Per [Log-as-Truth (ADR-030)](../design/adr/030-event-sourced-execution-state.md), the execution event log is the source of truth; a checkpoint is a **discardable cache** — a fold of the log (`channel_state` + `log_version` cursor) that makes recovery fast without full replay. A checkpoint captures the full channel state and the `log_version` cursor at materialization time.
 
 ### Abstract methods
 
@@ -210,13 +210,13 @@ class CheckpointStore(ABC):
 
 | Method | Behavior |
 |--------|----------|
-| `save` | Persists a checkpoint. Returns its UUID. |
-| `load` | Loads by checkpoint_id, or returns the latest checkpoint for the session if `checkpoint_id` is `None`. Returns `None` if not found. |
-| `list_checkpoints` | Lists checkpoints ordered by superstep descending (newest first). |
+| `save` | Persists a materialized cache. Returns its UUID. |
+| `load` | Loads by checkpoint_id, or returns the latest cache for the session if `checkpoint_id` is `None`. Returns `None` if not found. |
+| `list_checkpoints` | Lists caches ordered by superstep descending (newest first). |
 
 ### Built-in implementation: `InMemoryCheckpointStore`
 
-Uses dual storage: a full chronological history per session (for `list_checkpoints` and ID-based `load`) and a latest-only cache (for O(1) latest-checkpoint lookup). Production uses `PostgresCheckpointStore` (in `models/`).
+Uses dual storage: a full chronological history per session (for `list_checkpoints` and ID-based `load`) and a latest-only cache (for O(1) latest-checkpoint lookup). Production materializes through `SessionStateMaterializer` (`services/orchestration/`), which implements this ABC and writes through the existing `SessionStateStore` (Redis / PostgreSQL / Tiered); `PostgresCheckpointStore` (in `models/`) is **soft-deprecated** per ADR-030.
 
 ---
 
@@ -224,7 +224,7 @@ Uses dual storage: a full chronological history per session (for `list_checkpoin
 
 **File**: `src/hecate/engine/eventstore.py`
 
-Abstract interface for append-only event persistence. Records granular execution events (node start/end, tool calls, channel writes, interrupts) as a versioned log, complementing CheckpointStore's snapshot model.
+Abstract interface for append-only event persistence — the **execution-state source of truth** (Log-as-Truth, [ADR-030](../design/adr/030-event-sourced-execution-state.md)). Records granular execution events (node start/end, tool calls, channel writes with post-adjudication values, `STEP_END` commit points, interrupts) as a versioned log. Channel state is fully reconstructable by folding the log (`fold_session`, `engine/logfold.py`); checkpoints are just materialized caches of that fold.
 
 ### Abstract methods
 

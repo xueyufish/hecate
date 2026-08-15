@@ -2,7 +2,7 @@
 
 > **25 minutes** — Build agent workflows with Hecate's six collaboration patterns. Use prebuilt templates, generate graphs from pattern parameters, attach workflows to agents, and run them end-to-end.
 
-Multi-agent orchestration is Hecate's flagship differentiator. A workflow is a graph of nodes (agents, conditions, fan-outs, merges) connected by edges (data flow, control flow, handoff triggers). Hecate's Pregel runtime executes these graphs as supersteps, with durable checkpoints, retries, and tracing.
+Multi-agent orchestration is Hecate's flagship differentiator. A workflow is a graph of nodes (agents, conditions, fan-outs, merges) connected by edges (data flow, control flow, handoff triggers). Hecate's Pregel runtime executes these graphs as supersteps, with a durable event log (Log-as-Truth), retries, and tracing.
 
 ---
 

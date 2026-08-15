@@ -9,6 +9,8 @@ Hecate's execution engine currently supports two execution modes: synchronous (b
 
 Additionally, Hecate's checkpoint persistence stores session state in PostgreSQL. While this provides durability, it is too slow for hot-path session state access during multi-replica horizontal scaling (feature 13.4). Competitors like AgentScope 2.0 use Redis-backed state stores (`RedisAgentStateStore`) enabling any replica to pull any session's full state in sub-millisecond, achieving true stateless horizontal scaling.
 
+> **Update (2026-08-15, ADR-030)**: the `SessionStateStore` introduced by this ADR is now also the write-through backend for checkpoint **materialized caches** (`SessionStateMaterializer`). The event log — not checkpoints — is the source of truth; see [ADR-030](030-event-sourced-execution-state.md).
+
 ## Decision
 
 Add **two execution model enhancements**:

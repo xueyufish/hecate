@@ -45,7 +45,7 @@ Sessions go through four states:
 | `completed` | Terminal — task finished successfully |
 | `error` | Terminal — task failed |
 
-The transition `interrupted → resumed → active` is what enables **Human-in-the-Loop** (HITL): the agent pauses at an interrupt node, the human reviews via the UI, and execution continues from the saved checkpoint.
+The transition `interrupted → resumed → active` is what enables **Human-in-the-Loop** (HITL): the agent pauses at an interrupt node, the human reviews via the UI, and execution continues from the interrupt commit point in the event log.
 
 ---
 
@@ -70,26 +70,29 @@ Why split them? A single conversation can span **multiple agent executions** (in
 
 ---
 
-## Sessions and checkpoints
+## Sessions and the event log
 
-Every session is backed by a **checkpoint** — a serialized snapshot of all execution state at a point in time.
+Every session is backed by an **execution event log** (the single source of truth — [Log-as-Truth, ADR-030](../design/adr/030-event-sourced-execution-state.md)) plus a **materialized cache** for fast recovery:
 
-| Event | Checkpoint saved? |
-|---|---|
-| User sends a message | After agent finishes responding |
-| Agent calls a tool | Before the tool call |
-| PreLLM hook fires | Before sending to LLM |
-| PostLLM hook fires | After receiving LLM response |
-| Interrupt fires | Before pausing |
-| Resume | After agent finishes the resumed run |
+- **Event log** — written on every superstep. Channel writes and a `STEP_END` commit event are appended in a single transaction; `STEP_END` and `INTERRUPT` are commit points.
+- **Materialized cache** (the "checkpoint") — a discardable snapshot of channel state plus the `log_version` cursor. Materialized at turn end, on interrupt, and every N supersteps (default N=10). Recovery = load cache + replay log tail newer than `log_version`.
 
-Checkpoints enable:
+| Event | Log commit | Cache materialization |
+|---|---|---|
+| User sends a message | After agent finishes responding | After agent finishes responding |
+| Agent calls a tool | Each superstep (batched) | — (fold derives it) |
+| PreLLM hook fires | Each superstep (batched) | — (fold derives it) |
+| PostLLM hook fires | Each superstep (batched) | — (fold derives it) |
+| Interrupt fires | Before pausing (commit point) | Before pausing |
+| Resume | After agent finishes the resumed run | After agent finishes the resumed run |
 
-- **Time-travel debugging**: inspect state at any past step
-- **Resume after crash**: replay from the last checkpoint
-- **HITL approval**: pause, human reviews, resume from saved state
+The log enables:
 
-For implementation details, see [Engine Design > Checkpoints](../design/engine-design.md).
+- **Time-travel debugging**: inspect state at any `STEP_END` commit point
+- **Resume after crash**: replay the log (cache + tail replay for speed)
+- **HITL approval**: pause, human reviews, resume from the log-derived pause point
+
+For implementation details, see [Engine Design > Event Store and Checkpoint Persistence](../design/engine-design.md).
 
 ---
 
@@ -138,27 +141,27 @@ The second request has memory of the first because both share the `session_id`. 
 
 ## Time-travel debugging
 
-Every checkpoint is queryable. To inspect state at a past step:
+Every materialized cache (checkpoint) is queryable, and the underlying event log is replayable. To inspect state at a past step:
 
 ```bash
-# List all checkpoints for a session
+# List all checkpoints (materialized caches) for a session
 curl "http://localhost:8000/api/sessions/$SESSION_ID/checkpoints" \
   -H "Authorization: Bearer $ADMIN_KEY"
 
-# Get a specific checkpoint's state
+# Get a specific checkpoint's cached state
 curl "http://localhost:8000/api/sessions/$SESSION_ID/checkpoints/$CHECKPOINT_ID" \
   -H "Authorization: Bearer $ADMIN_KEY"
 
-# Roll back to a specific checkpoint (creates new session forked from it)
+# Replay the event log from a checkpoint (creates new session forked from it)
 curl -X POST "http://localhost:8000/api/sessions/$SESSION_ID/replay/$CHECKPOINT_ID" \
   -H "Authorization: Bearer $ADMIN_KEY"
 ```
 
 Use cases:
 
-- **Debug**: "what was the agent thinking at step 7?"
-- **Audit**: "prove what the LLM was told before it made decision X"
-- **Recovery**: "replay from checkpoint 42 if today's deploy broke"
+- **Debug**: "what was the agent thinking at step 7?" — inspect the `STEP_END` commit point
+- **Audit**: "prove what the LLM was told before it made decision X" — the event log is the source of truth
+- **Recovery**: "replay the log from checkpoint 42 if today's deploy broke" — cache + log tail replay
 
 ---
 
@@ -196,7 +199,7 @@ async def risky_node(state):
         return {"action": "edit", "new_amount": decision["new_amount"]}
 ```
 
-The session is **durable** — even if the server restarts, the interrupt state survives. When a human approves, execution resumes from the saved checkpoint.
+The session is **durable** — even if the server restarts, the interrupt state survives in the event log. When a human approves, execution resumes by replaying the log from the interrupt commit point (cache + tail replay).
 
 See [Tutorial: Human-in-the-Loop](../tutorials/06-human-in-the-loop.md) for hands-on.
 
@@ -207,7 +210,7 @@ See [Tutorial: Human-in-the-Loop](../tutorials/06-human-in-the-loop.md) for hand
 | Aspect | Default | Configurable |
 |---|---|---|
 | Retention | 30 days after `completed` / `error` | `SESSION_RETENTION_DAYS` |
-| Checkpoint granularity | Per message turn | (compile-time) |
+| Cache materialization | Turn end / interrupt / every N supersteps (default 10) | (compile-time) |
 | In-flight timeout | None (sessions live indefinitely) | `SESSION_IDLE_TIMEOUT_MINUTES` |
 
 Expired sessions are deleted by a background process. **Audit events are NOT deleted** — they outlive the session for compliance.
@@ -235,7 +238,9 @@ Sessions are the **universal unit of work** across Hecate. If you understand ses
 ## Implementation references
 
 - `src/hecate/models/session.py` — SessionModel + status enum + current_node + checkpoint_id
-- `src/hecate/engine/checkpoint.py` — checkpoint persistence
+- `src/hecate/engine/eventstore.py` — event log (source of truth)
+- `src/hecate/engine/checkpoint.py` — CheckpointStore ABC (materialized cache)
+- `src/hecate/services/orchestration/session_state_materializer.py` — production cache materializer (implements CheckpointStore ABC)
 - `src/hecate/services/session_state/` — session state store abstraction (memory / Postgres / Redis)
 - `src/hecate/services/event_state/` — event sourcing for session transitions
 - `src/hecate/engine/commands.py` — interrupt / Command APIs

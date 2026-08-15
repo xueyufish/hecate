@@ -43,7 +43,7 @@ Context window filling up
 
 Compression activates in stages as the window fills. The goal is to preserve the most important information (key decisions, user instructions, recent context) while discarding redundancy. This is closely related to the [Context Engineering](context-engineering.md) pipeline — compression is what makes L2 manageable, and the prioritizer is what decides what survives.
 
-A session's compressed conversation state is also captured in checkpoints, so an interrupted session resumes with its conversation memory intact.
+A session's compressed conversation state is also captured in the execution event log (with materialized checkpoint caches), so an interrupted session resumes with its conversation memory intact.
 
 **Use it for:** multi-turn conversations that need to run longer than a single context window.
 

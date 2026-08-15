@@ -20,7 +20,7 @@ Every concrete model inherits from `BaseModel` (`models/base.py`), which provide
 
 Queries apply `WHERE deleted = false` — soft-deleted rows stay in the database but are excluded from results. Composite indexes include the `deleted` column for efficient filtering.
 
-> **Exception**: `CheckpointModel` does **not** inherit `BaseModel` — it has its own `id`, `created_at`, and no `updated_at`/`deleted_at` (checkpoints are immutable).
+> **Exception**: `CheckpointModel` does **not** inherit `BaseModel` — it has its own `id`, `created_at`, and no `updated_at`/`deleted_at` (checkpoint rows are immutable). Per [Log-as-Truth (ADR-030)](../design/adr/030-event-sourced-execution-state.md), checkpoints are **materialized caches** of the event log — the `execution-state-log` (EventStore) table is the source of truth, and the `checkpoints` table is scheduled for hard removal once cached state is migrated.
 
 ---
 
@@ -47,7 +47,7 @@ See [Multi-Tenancy](../concepts/multi-tenancy.md) and [Authentication and Identi
 | `sessions` | Conversation sessions (`active`/`interrupted`/`completed`) | `agent_id`, `workspace_id` |
 | `conversations` | Conversation threads within sessions | `session_id` |
 | `messages` | Individual messages (role, content, tool calls) | `session_id`, `conversation_id` |
-| `checkpoints` | Immutable execution state snapshots (per superstep) | `session_id` |
+| `checkpoints` | Materialized caches of execution state (`channel_state` + `log_version` cursor), materialized at turn end / interrupt / every N supersteps; **not** the source of truth — the event log is | `session_id` |
 | `evidences` | Evidence tracking for context engineering | `session_id` |
 | `approval_records` | Human-in-the-loop approval decisions | `session_id` |
 
@@ -187,7 +187,7 @@ Every table in domains 2–9 that holds tenant-scoped business content carries a
 
 ### Soft delete
 
-All `BaseModel` tables use soft delete (`deleted` + `deleted_at`). Composite indexes include `deleted` so the `WHERE deleted = false` filter is efficient. The `CheckpointModel` exception is intentional — checkpoints are append-only and never soft-deleted.
+All `BaseModel` tables use soft delete (`deleted` + `deleted_at`). Composite indexes include `deleted` so the `WHERE deleted = false` filter is efficient. The `CheckpointModel` exception is intentional — checkpoint rows are immutable cache entries and never soft-deleted.
 
 ### Immutable version tables
 

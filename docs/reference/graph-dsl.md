@@ -66,7 +66,7 @@ Channels are the state layer of a graph. Each channel has a **type** that determ
 | `default` | any | All | Initial value set when the channel is first registered. |
 | `initial` | any | `accumulator` | Starting value before the first reduction (e.g., `0` for an additive counter). |
 | `reduce` | string | `topic`, `accumulator` | Reduction function: `"append"` or `"add"`. |
-| `persistent` | boolean | All | Whether the channel survives across sessions via checkpointing. Orthogonal to write semantics — any type can be persistent. Default `false`. |
+| `persistent` | boolean | All | Whether the channel survives across sessions via the event log (folded into materialized caches). Orthogonal to write semantics — any type can be persistent. Default `false`. |
 
 ---
 

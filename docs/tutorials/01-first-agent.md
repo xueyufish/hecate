@@ -289,7 +289,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 The second request references "this" and the agent understands the Flask port conflict — because the session preserved the conversation history.
 
-You can use any UUID as a `session_id`. The Hecate engine loads the conversation state from the checkpoint store when a `session_id` is provided, and persists the new state after each turn.
+You can use any UUID as a `session_id`. The Hecate engine derives the conversation state from the execution event log (with a materialized cache for speed) when a `session_id` is provided, and appends the new state after each turn.
 
 ---
 
@@ -418,7 +418,7 @@ Deletion is soft — the record stays in the database but is hidden from list vi
 │   └─────────┘     └──────────┘     └──────────────┘     │
 │                                                          │
 │   Each iteration = one superstep                         │
-│   Checkpoints saved after each step                      │
+│   Event log commits after each step                      │
 └──────────────────────────────┬───────────────────────────┘
                                ▼
 ┌──────────────────────────────────────────────────────────┐

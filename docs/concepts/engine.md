@@ -55,11 +55,11 @@ There are three channel types in active use, each with different write semantics
 | `accumulator` | New values fold into a running aggregate via a function | Iteration counter, token usage total |
 | `persistent_topic` | *(deprecated)* — auto-migrated to `topic` with `persistent: true` | Legacy graphs only |
 
-Orthogonal to write semantics, every channel may carry a `persistent: true` flag. When set, the channel's value survives across sessions by being included in checkpoints; when unset, it resets between executions. For example, a `topic` channel with `persistent: true` accumulates a permanent audit log; without `persistent`, it resets on each new session.
+Orthogonal to write semantics, every channel may carry a `persistent: true` flag. When set, the channel's value survives across sessions by being included in the materialized cache (and thus in the event log's fold); when unset, it resets between executions. For example, a `topic` channel with `persistent: true` accumulates a permanent audit log; without `persistent`, it resets on each new session.
 
 When a node executes, it receives a read-only snapshot of the channels it declared as inputs, and returns the values it wants to write. The runtime applies those writes according to each channel's semantics. A node never directly mutates another node's state.
 
-This indirection means the runtime — not the nodes — owns all state. That is what makes checkpointing possible: a checkpoint is just a serialized snapshot of all channels at a given superstep.
+This indirection means the runtime — not the nodes — owns all state. That is what makes event sourcing possible: every channel write is appended to the event log, and the materialized cache is just a replay fold of those events at a given point.
 
 ---
 
@@ -85,20 +85,24 @@ The runtime executes a graph as a series of **supersteps**. Within each superste
 
 **Workers** are stateless. They receive a read-only channel snapshot, do their work (call an LLM, run code, invoke a tool), and return a result. The runtime applies the result to the channels. Because workers hold no state, they can run in-process, in separate threads, or (in principle) across processes — the runtime does not care.
 
-The barrier between supersteps is where the runtime consolidates writes, persists a checkpoint, and evaluates conditional edges to decide which nodes are ready next. This is also the only point where execution can be safely paused.
+The barrier between supersteps is where the runtime consolidates writes, appends to the event log (the single source of truth), and evaluates conditional edges to decide which nodes are ready next. This is also the only point where execution can be safely paused.
 
 ---
 
-## Checkpoints: durable, resumable state
+## Event log and checkpoints: durable, resumable state
 
-After every superstep, the runtime writes a **checkpoint** — an immutable snapshot of all channel values, the current node, the superstep number, and execution metadata. Checkpoints are stored in PostgreSQL and the most recent one is cached in memory for fast recovery.
+Hecate is **event-sourced (Log-as-Truth)** — see [ADR-030](../design/adr/030-event-sourced-execution-state.md). The execution **event log** is the single source of truth for session state:
+
+- After every superstep, the runtime appends channel writes and a `STEP_END` commit event in a single transaction. `STEP_END` (and `INTERRUPT`) are commit points; a torn tail (writes without a commit) rolls back on restore.
+- **Checkpoints are a discardable materialized cache** — a snapshot of channel values plus the `log_version` cursor (the log position they were materialized at). They make recovery fast (no full log replay) but are never the source of truth: if a cache is lost, it is rebuilt by replaying the log.
+- **Resume = cache + tail replay.** On resume, the runtime loads the cached channel state and replays only the events newer than the cache's `log_version`, through the same write path as live mutation. If no cache exists, it replays the full log.
 
 This is what makes two features possible:
 
-- **Time-travel debugging.** Because every superstep produces a checkpoint, you can inspect the exact state at any point in the execution. A failed run can be replayed from any checkpoint.
-- **Resumable interruptions.** When a node calls `interrupt()` to pause for human approval, the runtime writes a checkpoint and stops. When the user resumes (with a `Command`), the runtime loads the checkpoint, injects the user's input, and continues the superstep loop from exactly where it stopped.
+- **Time-travel debugging.** Every `STEP_END` commit point in the event log lets you inspect the exact state at any point in the execution. A failed run can be replayed from the log.
+- **Resumable interruptions.** When a node calls `interrupt()` to pause for human approval, the runtime commits the log up to the interrupt and stops. When the user resumes (with a `Command`), the runtime derives the pause point from the log, injects the user's input, and continues the superstep loop from exactly where it stopped.
 
-Sessions therefore have a lifecycle: `active` → `interrupted` → `active` → `completed` (or `failed`). An interrupted session does not hold resources; it is just a checkpoint waiting to be resumed.
+Sessions therefore have a lifecycle: `active` → `interrupted` → `active` → `completed` (or `failed`). An interrupted session does not hold resources; it is just a committed log tail waiting to be resumed.
 
 ---
 
@@ -121,10 +125,10 @@ Unreachable nodes produce a warning, not an error — this lets work-in-progress
 | You want to... | This concept is why... |
 |----------------|-----------------------|
 | Build a workflow on the canvas | The canvas emits the same JSON graph the engine compiles |
-| Pause for human approval | `interrupt()` writes a checkpoint; `Command` resumes from it |
-| Recover a crashed session | The latest checkpoint captures the full state |
+| Pause for human approval | `interrupt()` commits the event log and pauses; `Command` resumes from the log-derived pause point |
+| Recover a crashed session | Replay the event log (cache + tail replay for speed) |
 | Run nodes in parallel | The worker pool dispatches all ready nodes each superstep |
-| Debug a failed run | Every superstep has a checkpoint you can inspect |
+| Debug a failed run | Every `STEP_END` commit point in the event log is inspectable |
 | Add a custom node type | Implement the `Worker` extension point (see [Extension Points](../reference/extension-points.md)) |
 
 ---

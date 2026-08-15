@@ -54,7 +54,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 |---|---|---|---|---|---|---|---|
 | **Deployment** | Self-hosted OSS (MIT) | Cloud + self-host | OSS library | Cloud + enterprise | Cloud SaaS | Cloud (AWS) | Cloud + self-host (Fair-code) |
 | **Primary UX** | Code (Python) + Visual | Visual-first | Code (Python) | Code + Visual | Visual + code | Code (any framework) | Visual + code |
-| **Engine** | Self-developed Pregel/BSP | DAG-based | Pregel (Google) inspired | Custom | Atlas Reasoning Engine | Wraps frameworks | DAG-based |
+| **Engine** | Self-developed Pregel/BSP + event-sourced execution state (Log-as-Truth, 1.3.19) | DAG-based | Pregel (Google) inspired | Custom | Atlas Reasoning Engine | Wraps frameworks | DAG-based |
 | **MCP server + client** | ✅ Bidirectional | ✅ Client only | Partial | ✅ | ✅ | ✅ | ✅ |
 | **A2A protocol** | ✅ (server + client) | ❌ | ❌ | Partial | ✅ | ✅ | ❌ |
 | **OpenAI-compatible API** | ✅ Wire-compatible | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
@@ -234,6 +234,8 @@ Hecate occupies **the engineering platform niche** between:
 - **SaaS platforms** (Dify Cloud, Agentforce, Bedrock) — too high-level; no source code
 
 It is the **Linux of agent platforms**: self-hosted, MIT-licensed, engine-level control, multi-protocol, multi-tenant. The audience is engineering teams building internal agent platforms or shipping agents as a product.
+
+**Engine differentiator (shipped 2026-08-15)**: Hecate's runtime is **event-sourced (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md))** — the event log, not per-step snapshots, is the source of execution state. Execution state is replayable (WAL ordering, `STEP_END` commit points), checkpoints are materialized caches, and interrupt/resume is log-derived. This is the substrate for run replay (8.20), durable HITL audit pairs (1.3.4), and middleware waterfall events (1.3.5i E3) that no competitor's engine ships today.
 
 When Hecate wins an evaluation, it is almost always because of one of these triggers:
 

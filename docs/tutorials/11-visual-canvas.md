@@ -271,8 +271,8 @@ Authenticate canvas requests with the same `HECATE_API_KEYS` you use for the API
 │  ┌──────────────────────────────────────────────────────┐    │
 │  │  Workflow runtime (same engine as code workflows)   │    │
 │  │  → Pregel superstep loop                             │    │
-│  │  → checkpoint store                                  │    │
-│  │  → event log                                         │    │
+│  │  → event log (source of truth)                       │    │
+│  │  → checkpoint caches                                  │    │
 │  └──────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```

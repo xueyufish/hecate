@@ -16,7 +16,7 @@ Hecate enables enterprises to build, orchestrate, and run AI Agent applications 
 >
 > Security Shield (left sidebar) and Ecosystem (right sidebar) are cross-cutting concerns that span all platform modules. Each module in the L1 diagram has a corresponding L2 breakdown — see [Module Architecture](#module-architecture) below.
 
-The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists snapshots via Checkpoints, and dispatches node execution to a Worker Pool.
+The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md)) with checkpoints as materialized caches, and dispatches node execution to a Worker Pool.
 
 **15 pluggable extension points** — 11 Core + 4 SPI:
 
@@ -26,8 +26,8 @@ The execution engine is Hecate's heart — a self-built Pregel runtime with zero
 |-----|---------|
 | `EnginePort` | Service-to-engine adapter (LLM, tools, knowledge, checkpoint) |
 | `Worker` / `WorkerPool` | Node execution dispatch |
-| `CheckpointStore` | State persistence and recovery |
-| `EventStore` | Append-only event logging with replay |
+| `CheckpointStore` | Materialized cache of execution state (log-replay fold); discardable |
+| `EventStore` | Append-only execution event log — the source of truth, with replay |
 | `ContextEngine` | Message selection, compression, token estimation |
 | `SchedulerStrategy` | Node scheduling (FIFO default, pluggable) |
 | `EvictionPolicy` | Channel memory management |
@@ -63,7 +63,7 @@ All external capabilities are integrated via MCP, not hardcoded. The execution e
 
 ### Observable Over Black Box
 
-Every request is traced from gateway through execution to response, with a complete Trace→Span→Generation hierarchy. Checkpoint persistence enables "time-travel" debugging. Cost and token usage are tracked per user, agent, and session.
+Every request is traced from gateway through execution to response, with a complete Trace→Span→Generation hierarchy. The execution event log (Log-as-Truth) enables "time-travel" debugging — every `STEP_END` commit point is inspectable. Cost and token usage are tracked per user, agent, and session.
 
 ### Security Built-in, Not Bolted-on
 
@@ -106,9 +106,9 @@ Human-in-the-Loop is handled via `interrupt()` (pause execution, return control 
 
 ### Agent Engine
 
-The core differentiator — a self-built Pregel runtime with zero external framework dependencies (sole external dependency is `jsonschema` for DSL validation). Compiles Graph DSL definitions (JSON) into `CompiledGraph` objects, manages state through a four-type Channel system, persists snapshots via Checkpoints with EventStore replay, and dispatches node execution to a pluggable Worker Pool. Context Engineering provides a six-component pipeline (assembler, evidence tracker, phase detection, token budget governance, provider shaping, message prioritization).
+The core differentiator — a self-built Pregel runtime with zero external framework dependencies (sole external dependency is `jsonschema` for DSL validation). Compiles Graph DSL definitions (JSON) into `CompiledGraph` objects, manages state through a four-type Channel system, persists execution as an **event-sourced log** (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md)) with checkpoints demoted to materialized caches, and dispatches node execution to a pluggable Worker Pool. Context Engineering provides a six-component pipeline (assembler, evidence tracker, phase detection, token budget governance, provider shaping, message prioritization).
 
-The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → checkpoint state → evaluate conditional edges → repeat until no nodes remain. Workers receive read-only Channel snapshots and return results — they never directly modify Channels. See [Engine Design](engine-design.md) for a deep dive.
+The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → append events to the log with `STEP_END` commit → evaluate conditional edges → repeat until no nodes remain. Workers receive read-only Channel snapshots and return results — they never directly modify Channels. See [Engine Design](engine-design.md) for a deep dive.
 
 ### Ops Center
 
@@ -193,7 +193,8 @@ User sends message
                            │
     ▼
 ┌─ Agent Engine (Pregel Runtime) ──────────────────────────┐
-│  7. Restore state from latest Checkpoint (if resuming)   │
+│  7. Restore state from event log (if resuming):           │
+│     load materialized cache + replay log tail            │
 │  8. Pregel superstep loop:                               │
 │     a. Read Channel values for ready nodes               │
 │     b. Dispatch to Worker Pool                           │
@@ -202,7 +203,9 @@ User sends message
 │        - Tool execute (with permission check)            │
 │        - Knowledge query (RAG retrieval)                 │
 │     d. Collect results, write to Channels                │
-│     e. Persist Checkpoint                                │
+│     e. Append channel-write events + STEP_END to log     │
+│        (single transaction; materialize cache at turn    │
+│        end / interrupt / every N supersteps)             │
 │     f. Evaluate conditional edges → determine next nodes │
 │     g. Stream intermediate results to client             │
 │  9. Loop until no ready nodes remain                     │
@@ -215,7 +218,7 @@ User sends message
 └──────────────────────────────────────────────────────────┘
 ```
 
-At any point during step 8, a node may call `interrupt()` to pause execution and wait for human input. The Checkpoint system ensures the session can be resumed from exactly that point.
+At any point during step 8, a node may call `interrupt()` to pause execution and wait for human input. The event log commits up to the interrupt point (a commit point), so the session can be resumed from exactly that point by log replay.
 
 ---
 
@@ -256,7 +259,7 @@ For production deployments, each infrastructure component can be replaced with m
 
 | Document | Description |
 |----------|-------------|
-| [Engine Design](engine-design.md) | Pregel runtime, compiler pipeline, channel system, checkpoint persistence, streaming modes |
+| [Engine Design](engine-design.md) | Pregel runtime, compiler pipeline, channel system, event-sourced execution state + checkpoint caches, streaming modes |
 | [Agent Studio Design](agent-studio-design.md) | Visual canvas, agent configurator, multi-agent orchestration, NL2X, visual node types, testing tools |
 | [Access Channel Design](access-channel-design.md) | API surfaces, authentication, gateway control plane, multi-channel, zero trust identity |
 | [RAG Pipeline Design](rag-pipeline-design.md) | Document ingestion, chunking, BGE-M3 embedding, hybrid search, RRF fusion, citation system |

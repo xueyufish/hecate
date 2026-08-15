@@ -1,6 +1,8 @@
 # ADR-003: Checkpoint Persistence with Memory Cache
 
-> **Status**: Accepted
+> **Status**: ~~Accepted~~ **Superseded by [ADR-030](030-event-sourced-execution-state.md) (2026-08-15)**
+>
+> Per ADR-030 (Log-as-Truth), the **event log is the single source of truth** for execution state. The PostgreSQL checkpoint described below is **demoted to a discardable materialized cache** (`channel_state + log_version`); execution is recovered by replaying the event log, not by loading a checkpoint snapshot. `PostgresCheckpointStore` is soft-deprecated, pending hard removal (and `checkpoints` table drop) as a follow-up cleanup. This ADR is retained for historical context.
 
 ## Context
 

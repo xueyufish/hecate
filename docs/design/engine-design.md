@@ -1,6 +1,6 @@
 # Hecate Execution Engine Design
 
-> Deep dive into the Pregel runtime, compiler, channel system, and checkpoint persistence. For a system overview, see [Architecture](architecture.md). For entity definitions, see [Core Concepts](concepts.md).
+> Deep dive into the Pregel runtime, compiler, channel system, and event-sourced execution state (Log-as-Truth; checkpoints as materialized caches). For a system overview, see [Architecture](architecture.md). For entity definitions, see [Core Concepts](concepts.md).
 
 ---
 

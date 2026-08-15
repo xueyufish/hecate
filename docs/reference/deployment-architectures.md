@@ -159,7 +159,7 @@ Every Hecate deployment is assembled from the same components. The topology dete
 | Component | Scaling model | Why |
 |-----------|--------------|-----|
 | **Hecate app** | Horizontal (add replicas) | Stateless — all state is in PostgreSQL/Redis |
-| **Redis** | Vertical or primary-replica | Session state cache; loss is tolerable (sessions resume from checkpoints) |
+| **Redis** | Vertical or primary-replica | Session state cache; loss is tolerable (sessions resume from the event log — caches are rebuildable) |
 | **PostgreSQL** | Vertical + read replicas | Primary holds all writes; replicas serve reads |
 | **Qdrant** | Cluster mode (sharding) | Vector indices are partitioned across nodes |
 | **MinIO** | Distributed mode (erasure coding) | S3-compatible; scales by adding nodes |

@@ -27,7 +27,7 @@ For the full history, see [GitHub Releases](https://github.com/xueyufish/hecate/
 
 Hecate alpha delivers the following core capabilities:
 
-- **Pregel/BSP execution engine** with checkpoint persistence
+- **Pregel/BSP execution engine** with event-sourced execution state (Log-as-Truth event log + materialized checkpoint caches; [ADR-030](../design/adr/030-event-sourced-execution-state.md))
 - **11 core + 4 SPI extension points** (EnginePort, Worker, CheckpointStore, ContextEngine, Scheduler, Eviction, Optimizer, ConflictResolver, Retry, Guardrail ×4, Evaluator, Channel, Auth, Notifier)
 - **Multi-agent orchestration** with 6 collaboration patterns (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate)
 - **MCP server + client** (bidirectional, Streamable HTTP)

@@ -205,7 +205,7 @@ For more on streaming, see [OpenAI SDK Compatibility](../tutorials/10-openai-com
 
 ### Step 4 — Make it resumable
 
-Long research sessions can crash mid-flight. Use the `session_id` parameter — Hecate persists state at each step, so you can resume from the last checkpoint:
+Long research sessions can crash mid-flight. Use the `session_id` parameter — Hecate appends state to the event log at each step, so you can resume by replaying from the last commit point:
 
 ```python
 # First attempt — got cut off

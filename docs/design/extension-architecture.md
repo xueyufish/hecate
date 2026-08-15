@@ -137,13 +137,13 @@ class WorkerPool(ABC):
 
 ### 3. `CheckpointStore`
 
-Persists agent state for resume / time-travel. Default: in-memory dict (lost on restart).
+Materializes execution-state caches for fast resume (the event log is the source of truth — [ADR-030](adr/030-event-sourced-execution-state.md)). Default: in-memory dict (lost on restart).
 
-**Default**: `InMemoryCheckpointStore`. **Production**: `PostgresCheckpointStore` (uses `agent_state` table with JSONB).
+**Default**: `InMemoryCheckpointStore`. **Production**: `SessionStateMaterializer` (`services/orchestration/`) — implements this ABC and writes through `SessionStateStore` (Redis / PostgreSQL / Tiered). `PostgresCheckpointStore` is **soft-deprecated** per ADR-030.
 
 ### 4. `EventStore`
 
-Append-only log of all engine events. Used for debugging, replay, observability.
+Append-only log of all engine events — the **execution-state source of truth** (replayable, value-carrying; checkpoints are materialized caches of its fold).
 
 **Default**: `InMemoryEventStore`. **Production**: `PostgresEventStore` (write-once table with hash chain for tamper evidence).
 
