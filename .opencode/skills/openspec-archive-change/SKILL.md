@@ -6,7 +6,7 @@ compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.3.1"
+  generatedBy: "1.4.1"
 ---
 
 Archive a completed change in the experimental workflow.
@@ -24,62 +24,75 @@ Archive a completed change in the experimental workflow.
 
    **IMPORTANT**: Do NOT guess or auto-select a change. Always let the user choose.
 
-2. **Check all status in one call**
+2. **Check artifact completion status**
 
-   Run a SINGLE bash command that collects all status information at once:
+   Run `openspec status --change "<name>" --json` to check artifact completion.
 
-   ```bash
-   echo "=== ARTIFACTS ===" && openspec status --change "<name>" --json 2>&1 && echo "=== TASKS ===" && grep -c '^\- \[ \]' openspec/changes/<name>/tasks.md 2>&1; echo "---"; grep -c '^\- \[x\]' openspec/changes/<name>/tasks.md 2>&1 && echo "=== SPECS ===" && ls openspec/changes/<name>/specs/ 2>&1 && echo "=== MAIN SPECS ===" && ls openspec/specs/ 2>&1 | grep -i "<capability>"
-   ```
+   Parse the JSON to understand:
+   - `schemaName`: The workflow being used
+   - `planningHome`, `changeRoot`, `artifactPaths`, and `actionContext`: path and scope context
+   - `artifacts`: List of artifacts with their status (`done` or other)
 
-   Parse the combined output to understand:
-   - Artifact completion status (all done or which are incomplete)
-   - Task counts (complete vs incomplete)
-   - Delta spec existence and whether main spec already exists
+   If status reports `actionContext.mode: "workspace-planning"`, explain that workspace archive is not supported in this slice and STOP. Do not move workspace changes into repo-local archives or edit linked repos.
 
-   **If any artifacts are not `done` OR incomplete tasks found:**
-   - Display warning listing incomplete artifacts and task count
+   **If any artifacts are not `done`:**
+   - Display warning listing incomplete artifacts
    - Use **AskUserQuestion tool** to confirm user wants to proceed
    - Proceed if user confirms
 
-3. **Sync delta specs if needed**
+3. **Check task completion status**
 
-   If delta specs exist and main spec doesn't exist yet:
-   - Copy delta spec to main spec in ONE bash call
-   - Proceed to archive
+   Read the tasks file (typically `tasks.md`) to check for incomplete tasks.
 
-   If main spec already exists and is identical:
-   - Skip sync, proceed to archive
+   Count tasks marked with `- [ ]` (incomplete) vs `- [x]` (complete).
 
-4. **Update catalog and roadmap + archive — batch reads then edits**
+   **If incomplete tasks found:**
+   - Display warning showing count of incomplete tasks
+   - Use **AskUserQuestion tool** to confirm user wants to proceed
+   - Proceed if user confirms
 
-   Read ALL files needed for catalog/roadmap updates in PARALLEL:
-   - `docs/features/feature-catalog.md` (relevant lines)
-   - `docs/features/roadmap.md` (relevant lines)
-   - `openspec/changes/<name>/proposal.md` (to identify affected features)
+   **If no tasks file exists:** Proceed without task-related warning.
 
-   Then perform ALL edits in sequence (no re-reads between edits):
-   - Edit feature-catalog.md (mark ✅, update descriptions)
-   - Edit roadmap.md (mark ✅, update P3 count, update milestone checkboxes)
+4. **Assess delta spec sync state**
 
-   Then perform the archive:
+   Use `artifactPaths.specs.existingOutputPaths` from status JSON to check for delta specs. If none exist, proceed without sync prompt.
+
+   **If delta specs exist:**
+   - Compare each delta spec with its corresponding main spec at `openspec/specs/<capability>/spec.md`
+   - Determine what changes would be applied (adds, modifications, removals, renames)
+   - Show a combined summary before prompting
+
+   **Prompt options:**
+   - If changes needed: "Sync now (recommended)", "Archive without syncing"
+   - If already synced: "Archive now", "Sync anyway", "Cancel"
+
+   If user chooses sync, use Task tool (subagent_type: "general-purpose", prompt: "Use Skill tool to invoke openspec-sync-specs for change '<name>'. Delta spec analysis: <include the analyzed delta spec summary>"). Proceed to archive regardless of choice.
+
+5. **Perform the archive**
+
+   Create an `archive` directory under `planningHome.changesDir` if it doesn't exist:
    ```bash
-   mkdir -p openspec/changes/archive && mv openspec/changes/<name> openspec/changes/archive/YYYY-MM-DD-<name>
+   mkdir -p "<planningHome.changesDir>/archive"
    ```
+
+   Generate target name using current date: `YYYY-MM-DD-<change-name>`
 
    **Check if target already exists:**
    - If yes: Fail with error, suggest renaming existing archive or using different date
-   - If no: Move the change directory to archive
+   - If no: Move `changeRoot` to the archive directory
 
-5. **Display summary**
+   ```bash
+   mv "<changeRoot>" "<planningHome.changesDir>/archive/YYYY-MM-DD-<name>"
+   ```
 
-    Show archive completion summary including:
-    - Change name
-    - Schema that was used
-    - Archive location
-    - Whether specs were synced (if applicable)
-    - Whether catalog/roadmap were updated (if applicable)
-    - Note about any warnings (incomplete artifacts/tasks)
+6. **Display summary**
+
+   Show archive completion summary including:
+   - Change name
+   - Schema that was used
+   - Archive location
+   - Whether specs were synced (if applicable)
+   - Note about any warnings (incomplete artifacts/tasks)
 
 **Output On Success**
 
@@ -88,9 +101,8 @@ Archive a completed change in the experimental workflow.
 
 **Change:** <change-name>
 **Schema:** <schema-name>
-**Archived to:** openspec/changes/archive/YYYY-MM-DD-<name>/
+**Archived to:** the archive path derived from `planningHome.changesDir`/YYYY-MM-DD-<name>/
 **Specs:** ✓ Synced to main specs (or "No delta specs" or "Sync skipped")
-**Catalog & Roadmap:** ✓ Updated (or "Already up to date")
 
 All artifacts complete. All tasks complete.
 ```
@@ -103,5 +115,3 @@ All artifacts complete. All tasks complete.
 - Show clear summary of what happened
 - If sync is requested, use openspec-sync-specs approach (agent-driven)
 - If delta specs exist, always run the sync assessment and show the combined summary before prompting
-- Always check and update `docs/features/feature-catalog.md` and `docs/features/roadmap.md` before archiving — this is MANDATORY, not optional
-- **Minimize tool calls**: Combine related bash commands into one call; batch parallel reads; avoid re-reading files between edits

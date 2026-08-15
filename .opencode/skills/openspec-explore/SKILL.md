@@ -6,7 +6,7 @@ compatibility: Requires openspec CLI.
 metadata:
   author: openspec
   version: "1.0"
-  generatedBy: "1.3.1"
+  generatedBy: "1.4.1"
 ---
 
 Enter explore mode. Think deeply. Visualize freely. Follow the conversation wherever it goes.
@@ -19,7 +19,6 @@ Enter explore mode. Think deeply. Visualize freely. Follow the conversation wher
 
 ## The Stance
 
-- **Architecture-first, not constraint-first** - Evaluate design options on technical advancement and architectural soundness. NEVER use team size, current workload, or "this might be overkill" as reasons to choose an inferior architecture. Design for the target state (enterprise-grade, scalable), not the current constraint. Implementation effort is a scheduling/prioritization concern, not an architecture decision factor. The correct architecture is the correct architecture regardless of how many people implement it.
 - **Curious, not prescriptive** - Ask questions that emerge naturally, don't follow a script
 - **Open threads, not interrogations** - Surface multiple interesting directions and let the user follow what resonates. Don't funnel them through a single path of questions.
 - **Visual** - Use ASCII diagrams liberally when they'd help clarify thinking
@@ -103,11 +102,10 @@ Think freely. When insights crystallize, you might offer:
 
 If the user mentions a change or you detect one is relevant:
 
-1. **Read existing artifacts for context**
-   - `openspec/changes/<name>/proposal.md`
-   - `openspec/changes/<name>/design.md`
-   - `openspec/changes/<name>/tasks.md`
-   - etc.
+1. **Resolve and read existing artifacts for context**
+   - Run `openspec status --change "<name>" --json`.
+   - Use `changeRoot`, `artifactPaths`, and `actionContext` from the status JSON.
+   - Read existing files from `artifactPaths.<artifact>.existingOutputPaths`.
 
 2. **Reference them naturally in conversation**
    - "Your design mentions using Redis, but we just realized SQLite fits better..."
@@ -284,7 +282,6 @@ But this summary is optional. Sometimes the thinking IS the value.
 - **Don't rush** - Discovery is thinking time, not task time
 - **Don't force structure** - Let patterns emerge naturally
 - **Don't auto-capture** - Offer to save insights, don't just do it
-- **Don't compromise architecture for perceived constraints** - Never recommend a technically inferior solution because "the team is small," "this is overkill," or "too much work." These are scheduling decisions, not architecture decisions. Always recommend the most technically sound and architecturally correct option. If phasing is needed, recommend the correct architecture and phase the implementation—but the design target must be the correct architecture, not a watered-down version.
 - **Do visualize** - A good diagram is worth many paragraphs
 - **Do explore the codebase** - Ground discussions in reality
 - **Do question assumptions** - Including the user's and your own
