@@ -187,3 +187,95 @@ class ApiClient {
 }
 
 export const api = new ApiClient();
+
+// Execution replay (8.20) types and methods.
+
+export interface ReplayEvent {
+  event_type: string;
+  superstep: number;
+  node_id: string | null;
+  timestamp: string;
+  version: number;
+  payload: Record<string, unknown>;
+}
+
+export interface ReplayTraceSegment {
+  trace_id: string;
+  event_count: number;
+  first_version: number;
+  events: ReplayEvent[];
+}
+
+export interface ReplayTraceEnrichment {
+  status?: string;
+  usage?: Record<string, unknown> | null;
+  total_latency_ms?: number | null;
+  ttft_ms?: number | null;
+  span_name?: string;
+}
+
+export interface ReplayGuardrailBlock {
+  version: number;
+  node_id: string | null;
+  superstep: number;
+  reason: string;
+  block_type: string;
+}
+
+export interface ReplayTimelineResponse {
+  traces: ReplayTraceSegment[];
+  unattributed: ReplayEvent[];
+  next_cursor: number | null;
+  payload_truncated: boolean;
+  guardrail_blocks: ReplayGuardrailBlock[];
+  message_bodies: Record<string, unknown[]>;
+  trace_enrichment: Record<string, ReplayTraceEnrichment>;
+  payload_preview_chars: number;
+}
+
+export interface ReplayStateResponse {
+  effective_version: number;
+  requested_version: number;
+  channel_state: Record<string, unknown>;
+  messages: unknown[];
+  commit_points: number[];
+  fell_back: boolean;
+}
+
+export interface SessionDetail {
+  id: string;
+  agent_id: string;
+  status: string;
+  log_version: number;
+  [k: string]: unknown;
+}
+
+export interface ReplayApi {
+  getReplayTimeline(
+    sessionId: string,
+    opts?: { fromVersion?: number; limit?: number; detail?: boolean }
+  ): Promise<ReplayTimelineResponse>;
+  getReplayState(sessionId: string, atVersion: number): Promise<ReplayStateResponse>;
+  getSession(sessionId: string): Promise<SessionDetail>;
+}
+
+export const replayApi: ReplayApi = {
+  async getReplayTimeline(sessionId, opts = {}) {
+    const params = new URLSearchParams();
+    if (opts.fromVersion !== undefined) params.set("from_version", String(opts.fromVersion));
+    if (opts.limit !== undefined) params.set("limit", String(opts.limit));
+    if (opts.detail) params.set("detail", "true");
+    const qs = params.toString();
+    return api.get<ReplayTimelineResponse>(
+      `/api/sessions/${sessionId}/replay${qs ? `?${qs}` : ""}`
+    );
+  },
+  async getReplayState(sessionId, atVersion) {
+    return api.get<ReplayStateResponse>(
+      `/api/sessions/${sessionId}/replay/state?at_version=${atVersion}`
+    );
+  },
+  async getSession(sessionId) {
+    return api.get<SessionDetail>(`/api/sessions/${sessionId}`);
+  },
+};

@@ -340,6 +340,32 @@ curl -H "Authorization: Bearer dev-key-change-me" \
 
 Each trace contains the full span tree with timing, inputs, outputs, and metadata. This is invaluable for debugging "why did this chat return a weird response" — you can see every LLM call and tool invocation.
 
+### OTel ↔ Execution Replay correlation
+
+The traces you see in Tempo/Jaeger and the rows in the Execution Replay tab are the **same execution**, viewed from two different angles:
+
+| What you see | Where it comes from |
+|---|---|
+| Replay timeline segments (`trace_id`) | `Event.trace_id` (correlated via OTel span context when configured, or generated per-invoke otherwise) |
+| Replay `trace_enrichment` block (status, usage, `total_latency_ms`, `ttft_ms`, span name) | `TraceModel.metadata_["otel.trace_id"]` → span tree JOIN |
+| LLM/tool spans with `ttft_ms`, token counts, `gen_ai.request.model`, `gen_ai.tool.name` | OTel semantic-conventions attributes on `llm:` / `tool:` spans (see [Engine Design §Execution Replay](../design/engine-design.md#execution-replay)) |
+
+**Two practical implications:**
+
+1. **OTel disabled = silent enrichment gap.** If `TRACING_ENABLED=False` (or OTel SDK is not configured), the replay timeline still works (the engine log is self-sufficient), but the `trace_enrichment` block will be empty. You will see the trace partition, channel writes, and tool/LLM event bodies — just not the latency and token numbers. This is by design: the replay UI degrades gracefully instead of hiding data when OTel is down.
+
+2. **OTel trace_id = replay trace_id.** If you copy a `trace_id` from Tempo and paste it into the API as a search filter, you'll get the matching replay segment back. They share the same 32-hex correlation key.
+
+To go from a Tempo trace to the replay UI in one click, the path is:
+
+```
+Tempo trace → copy trace_id → open /ops-center/conversations/<session_id>?trace=<hex> → Execution Replay tab
+```
+
+(linking from Tempo to the replay page is a thin client feature; the data model is already in place).
+
+For the full feature walkthrough, see [Debug an agent run with execution replay](replay-debug-guide.md).
+
 ---
 
 ## Recommended Grafana dashboard panels

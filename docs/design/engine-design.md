@@ -326,7 +326,7 @@ The `EventStore` extension point provides append-only event logging with replay 
 
 - **Cross-process recovery** — interrupt state survives process restart because the log is the durable record.
 - **Audit trails** — every LLM request, tool call, and channel mutation is captured with payload.
-- **Run Replay** (8.20) — value-carrying log + OTel spans power a timeline-replay UI.
+- **Execution Replay** (8.20) — value-carrying log + OTel spans power a trace-partitioned timeline UI (vocabulary: `session` → `trace` → `event`; no "runId").
 - **Projection Registry** (8.21) — `derive_messages()` is the first projection; future projections layer on top of the same fold.
 
 ### Event grammar (1.3.19)

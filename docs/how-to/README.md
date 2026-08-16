@@ -41,6 +41,10 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 - **[Manage agent memory](manage-agent-memory.md)** — configure L1 working-memory blocks, inspect and prune L3 user memories, manage L4 knowledge memories, and check L2 compression status.
 - **[Evaluate an agent](../tutorials/08-agent-evaluation.md)** — build a test dataset, run evaluators, and detect regressions (tutorial).
 
+## Observability and debugging
+
+- **[Debug an agent run with execution replay](replay-debug-guide.md)** — open the Execution Replay tab, read trace segments, time-travel to any commit point, and use the replay REST API (8.20).
+
 ## Troubleshooting
 
 - **[Troubleshooting guide](troubleshoot.md)** — common failure modes organized by problem domain: startup, database, LLM providers, tools/MCP, knowledge/RAG, authentication, workflows, and performance. Every error message sourced from the actual codebase.

@@ -108,6 +108,7 @@ async def get_session(
     session_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    event_store: Annotated[EventStore, Depends(get_event_store)],
 ) -> dict:
     """Get a session by ID.
 
@@ -115,9 +116,11 @@ async def get_session(
         session_id: The UUID of the session to retrieve.
         db: The async database session.
         ctx: The authenticated context with workspace_id.
+        event_store: Wired EventStore; used to expose ``log_version`` so the
+            frontend can decide whether to render the execution replay tab.
 
     Returns:
-        dict: The session data.
+        dict: The session data plus ``log_version`` (int; 0 = no event log).
 
     Raises:
         HTTPException: 404 if session not found.
@@ -132,7 +135,9 @@ async def get_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": {"code": "NOT_FOUND", "message": "Session not found", "details": None}},
         )
-    return SessionReadSchema.model_validate(session).model_dump()
+    payload = SessionReadSchema.model_validate(session).model_dump()
+    payload["log_version"] = await event_store.get_version(session_id)
+    return payload
 
 
 @router.post("/sessions/{session_id}/resume")

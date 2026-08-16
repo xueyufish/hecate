@@ -230,6 +230,7 @@ class ToolWorker(Worker):
                     superstep=execution_context["superstep"],
                     event_type=EventType.TOOL_CALL,
                     node_id=None,
+                    trace_id=execution_context.get("trace_id"),
                     payload={"tool_name": name, "arguments": arguments},
                 )
             )
@@ -270,6 +271,7 @@ class ToolWorker(Worker):
                     superstep=execution_context["superstep"],
                     event_type=EventType.TOOL_RESULT,
                     node_id=None,
+                    trace_id=execution_context.get("trace_id"),
                     payload={"tool_name": name, "result_length": len(str(result))},
                 )
             )

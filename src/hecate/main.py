@@ -74,6 +74,7 @@ from hecate.api.management.plugins import router as plugins_router
 from hecate.api.management.preflight import router as preflight_router
 from hecate.api.management.prompts import router as prompts_router
 from hecate.api.management.quotas import quotas_router
+from hecate.api.management.replay import router as replay_router
 from hecate.api.management.sessions import router as sessions_router
 from hecate.api.management.skill_registry import router as skill_registry_router
 from hecate.api.management.skills import router as skills_router
@@ -629,6 +630,7 @@ app.include_router(evaluation_router, prefix="/api", tags=["evaluation"])
 app.include_router(chat_router, prefix="/v1", tags=["chat"])
 app.include_router(models_router, prefix="/v1", tags=["models"])
 app.include_router(agents_router, prefix="/api", tags=["agents"])
+app.include_router(replay_router, prefix="/api", tags=["replay"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(skills_router, prefix="/api", tags=["skills"])

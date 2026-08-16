@@ -328,6 +328,7 @@ class LLMWorker(Worker):
                     superstep=execution_context["superstep"],
                     event_type=EventType.LLM_REQUEST,
                     node_id=node_id,
+                    trace_id=execution_context.get("trace_id"),
                     payload={
                         "model": model,
                         "messages": shaped_messages,
@@ -373,6 +374,7 @@ class LLMWorker(Worker):
                     superstep=execution_context["superstep"],
                     event_type=EventType.LLM_RESPONSE,
                     node_id=node_id,
+                    trace_id=execution_context.get("trace_id"),
                     payload={"model": model, "response_length": len(full_response)},
                 )
             )
