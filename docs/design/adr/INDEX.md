@@ -19,6 +19,7 @@ The big-picture design that everything else builds on.
 | [ADR-016](016-platform-spi-architecture.md) | Platform SPI Architecture with 15 Extension Points | Engine — extensibility model |
 | [ADR-029](029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture | Minimal kernel, four mounting planes, five isolation tiers |
 | [ADR-030](030-event-sourced-execution-state.md) | Event-Sourced Execution State (Log-as-Truth) | Event log as state source; WAL ordering; projection cache; 1.3.19 |
+| [ADR-031](031-web-widget-iframe-architecture.md) | Web Widget Iframe Architecture (Bypassing ChannelABC) | Widget scope boundary; iframe + employee JWT; defer anonymous to-C to P5 |
 
 ### ⚙️ Engine runtime
 
@@ -120,6 +121,15 @@ Public API design.
 |---|---|---|
 | [ADR-009](009-dual-api-design.md) | OpenAI-Compatible API + Management API Dual Track | API surface |
 
+### 🌐 Multi-channel access
+
+How external platforms (IM, web, embedded) reach Hecate.
+
+| ADR | Title | Topic |
+|---|---|---|
+| [ADR-016](016-platform-spi-architecture.md) | Platform SPI Architecture | (also under Architecture) — `ChannelABC` for IM platforms |
+| [ADR-031](031-web-widget-iframe-architecture.md) | Web Widget Iframe Architecture | (also under Architecture) — widget deliberately bypasses `ChannelABC` |
+
 ### 🤖 Self-learning and RL
 
 Future-state capabilities (planned, not yet shipped).
@@ -156,7 +166,7 @@ Multi-agent maturity + observability deepening:
 ### P3+ (Post-1.0)
 Future capabilities:
 
-`ADR-013`, `ADR-014`, `ADR-015`, `ADR-017`, `ADR-020`, `ADR-027`
+`ADR-013`, `ADR-014`, `ADR-015`, `ADR-017`, `ADR-020`, `ADR-027`, `ADR-031`
 
 ---
 

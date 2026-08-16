@@ -111,3 +111,5 @@ ADRs capture the "why" behind major design choices. Each record documents the co
 | [ADR-027](adr/027-ecosystem-enhancement.md) | Ecosystem Enhancement Architecture |
 | [ADR-028](adr/028-observability-evaluation-enhancement.md) | Observability & Evaluation Enhancement |
 | [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture |
+| [ADR-030](adr/030-event-sourced-execution-state.md) | Event-Sourced Execution State (Log-as-Truth) |
+| [ADR-031](adr/031-web-widget-iframe-architecture.md) | Web Widget Iframe Architecture (Bypassing ChannelABC) |

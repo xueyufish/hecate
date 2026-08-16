@@ -148,7 +148,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 11.2 | Web Widget | API ✅ | S |
+| 11.2 | Web Widget (Simplified) ✅ *Wave 1 — iframe-embeddable for any Hecate deployment (Delivered 2026-08-16, see ADR-031)* | API ✅ | S |
 | 11.3 | Feishu (Lark) ✅ | Channel SDK | S |
 
 ### Milestone M2 (End of Sprint 2)
@@ -574,7 +574,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | Wave | Feature | 触发条件 | 时机 |
 |---|---|---|---|
-| Wave 1 | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | **2026-08-13: 11.3 ✅ + 11.9 Slack ✅ 交付;11.2 简化版待交付** |
+| Wave 1 | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | **2026-08-16: 11.2 简化版 ✅ + 11.3 ✅ + 11.9 Slack ✅ 全部交付** |
 | Wave 2 (P5 deferred) | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | 按客户需求触发 (wechat wecom / dingtalk / discord / telegram 客户需求) | 暂停 |
 | Wave 3（按需） | 11.2 完整版 + 11.6 微信 + 11.10 Custom SDK | 不预定时间，等明确客户需求 | 不预定 |
 | 11.16 | Per-Token-Type Auth Pipeline | Auth ✅ | M |
@@ -637,7 +637,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [ ] Skill Provider Registry (rank + invocation policy) operational
 - [ ] Completed-feature upgrades: waterfall middleware chain (1.3.5i E3) + HITL fail-closed (1.3.4) + content-aware tool gating (9.4)
 - [ ] Advanced RAG: Reranking + Incremental Update + Knowledge Quality Evaluation
-- [ ] Multi-Channel Wave 1 complete (11.2 simplified)
+- [x] Multi-Channel Wave 1 complete (11.2 simplified)
 - [ ] Per-Token-Type Auth Pipeline + Two-Tier Identity Model
 - [ ] 40+ Built-in Evaluators + Evaluation Suite (AI-synthesized datasets, online/offline tasks, trace backflow, workflow eval, human annotation, A/B testing — 7.6a/b dropped)
 - [ ] Canvas: Human Input/Form Node + Trigger Node (1.1.18-20 deferred P5)
@@ -971,7 +971,7 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 | **M4: Enterprise Ready** | Month 8 | Resilience infrastructure (exception hierarchy + auto-retry + tool gating) ✅; ContextEngine Phase 1 (LLMWorker context pipeline) ✅; Plugin SPI Core + EvaluatorABC defined ✅; Multi-Tenant RBAC + SSO; full security stack ✅; end-to-end observability ✅ |
 | **M5: P3 Enterprise** | Month 10 | Platform SPI complete: ChannelABC + AuthProviderABC + i18n SPI ✅ (NotifierABC merged into ChannelABC); A2A Protocol with Signed Agent Cards; Model Hub (Catalog + Lifecycle Manager); Enterprise Identity: SSO + SCIM + Vault + Budget Management ✅ |
 | **M6: P3 Security & Ops** | Month 12 | Ops Center (Dashboard + Agent Health + Conversation Analytics + Tool Execution Analytics + CI/CD Gating + Agent Catalog Governance); Security (DLP + Runtime Protection + Red Teaming); Plugin System; Deployment infrastructure (SaaS + Canary + Horizontal Scaling + Backup) |
-| **M7: P3 Complete** | Month 14 | P3 re-scoped 125/125 (100%); Event-Sourced State (log-as-truth + DeltaChannel); Dynamic Orchestration; Run Replay Phase 1; Browser Automation Tool; Skill Provider Registry; Advanced RAG (Reranking + Incremental + Quality Eval); Multi-Channel Wave 1 (11.2 simplified + 11.3 ✅ + 11.9 Slack ✅); Evaluation Suite (7.6a/b dropped); Canvas (Human Input/Form + Trigger; 1.1.18-20 deferred); Memory Enhancement |
+| **M7: P3 Complete** | Month 14 | P3 re-scoped 125/125 (100%); Event-Sourced State (log-as-truth + DeltaChannel); Dynamic Orchestration; Run Replay Phase 1; Browser Automation Tool; Skill Provider Registry; Advanced RAG (Reranking + Incremental + Quality Eval); Multi-Channel Wave 1 (11.2 simplified ✅ + 11.3 ✅ + 11.9 Slack ✅); Evaluation Suite (7.6a/b dropped); Canvas (Human Input/Form + Trigger; 1.1.18-20 deferred); Memory Enhancement |
 | **M8: P4 Intelligence** | Month 16 | Hallucination Detection operational; Self-Learning loop; Agentic RL Framework; Prompt Self-Optimization; Ontology Action System; OAG complete; Sleep-time Memory Consolidation; LLM-Managed Memory; Memory Intelligence features |
 | **M9: P4 Complete** | Month 18 | P4 96/96 remaining (100%); GraphRAG Query Engine (P5-trigger); Agentic RAG; Temporal Memory; Lazy GraphRAG (P5-trigger); Peer Selection; Agent Team Templates; ACP Support (2.13); Distributed Team Orchestration; Deterministic Hooks; Asynchronous Execution API; 5-Level Intent Recognition; Simulation Environment; Computer-use (6.27a); Voice Agent Pipeline (11.11); DataAgent; VibeCoding; Multi-Stream Modes; Projection Registry (8.21) + Atomic File Locks (13.20); Canvas Intelligence |
 | **M10: P5 Complete** | Month 20 | P5 46/46 (100%); Asset Marketplace; Partner Monetization; Industry Templates; PyPI SDK; End-User App; Mobile GUI; EU AI Act Compliance; Knowledge Graph Visualization; Ontology tools; Voice/Vision; Edge/Lite; Plugin Security; Agentic Resource Discovery; All P5 features delivered |
