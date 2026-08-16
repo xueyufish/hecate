@@ -4,7 +4,7 @@
 > **目的**: P3 阶段完成度审计，为 MVP 版本迭代提供决策依据
 > **范围**: P3 Trustworthy 阶段（138 项特性），含源码级实现状态验证
 > **方法**: Feature catalog 分析 + 源码 grep/glob 扫描验证部分实现
-> **最近更新**: 2026-08-16 — Sprint 7 进度：1.3.19 Event-Sourced State ✅ + 8.20 Execution Replay ✅ 已交付；1.3.18 / 6.27 / 5.9 增强 / 1.3.4 / 1.3.5i E3 / 9.4 增量改造按 2026-08-14 重校准顺序推进
+> **最近更新**: 2026-08-16 — Sprint 7 进度：1.3.19 Event-Sourced State ✅ + 8.20 Execution Replay ✅ 已交付；1.3.18 / 6.27 / 5.9 增强 / 1.3.4 / 1.3.5i E3 / 9.4 增量改造按 2026-08-14 重校准顺序推进。**2026-08-16 插件生态调整**（Agent Plugins 1.0 标准 + 18 平台调研）：新增 P3 两项 **5.5c Agent Plugins 1.0 标准摄入** + **5.13a 插件内容扫描**（自 5.13 拆分），5.5 增 T0 收紧增强；`.hecate-plugin` 收窄为 P 层深度集成格式；12.0 市场重定义、EC1-EC5 冻结、6.41 降级——详见"2026-08-16 插件生态调整"章节
 > **2026-08-14 竞品重校准**（docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md）：**Drop 5 项**（7.6a/7.6b/9.2a/6.17/9.8）；**Defer→P5 15 项**（3.1.2-4、3.4.2、3.5.1-3、6.9/6.10/6.12/6.13、1.1.18-20、6.21）；**新增 P3 4 项**（1.3.18 Dynamic Orchestration、1.3.19 Event-Sourced State/Log-as-Truth、8.20 Run Replay ✅ 2026-08-16、6.27 Browser Automation 自 P4 移入）；**5.9 增强**（Skill Provider Registry，并入而非新建 5.12）。未完成 58 → 41 项（8.20 已完成），Sprint 7 重排，详见"2026-08-14 竞品重校准"章节。
 
 ---
@@ -13,15 +13,15 @@
 
 | 指标 | 数值 |
 |------|------|
-| P3 总特性数（2026-08-14 重校准后） | 122 |
-| 已完成 ✅ | **81 (66%)**（+1：8.20 Execution Replay 2026-08-16 交付） |
-| 未完成 | **41 (34%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 1） |
+| P3 总特性数（2026-08-14 重校准 + 2026-08-16 插件生态调整后） | 124 |
+| 已完成 ✅ | **81 (65%)**（+1：8.20 Execution Replay 2026-08-16 交付） |
+| 未完成 | **43 (35%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 1 + 插件生态新增 2（5.5c/5.13a，2026-08-16）） |
 | 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅、Sprint 7 (M7) 启动中（1.3.19 ✅ + 8.20 ✅ 已交付） |
 | 部分 Sprint | Sprint 6 (M6) — 约 79% 完成 |
 | 未启动 Sprint | Sprint 7 (M7) — 1.3.19 + 8.20 已完成；其余按 2026-08-14 重校准顺序推进 |
 | 发布阻塞项 | 1 项关键 + 2 项强烈建议（8.20 已交付，剩 HITL durable audit + monotonic denial gating） |
 | 有部分代码 | 2 项已有可观代码但标记为未完成 |
-| 零代码 + 新增 | 36 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 1）+ 4 项新增（1.3.18/1.3.19/8.20/6.27） |
+| 零代码 + 新增 | 36 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 1）+ 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
 
 ---
 
@@ -169,7 +169,7 @@
 
 ---
 
-## 第二部分：未完成特性（41 项，2026-08-14 重校准 + 2026-08-16 更新）
+## 第二部分：未完成特性（43 项，2026-08-14 重校准 + 2026-08-16 插件生态调整）
 
 ### A 类：标记 ✅ 但有遗留增强项（8 项）
 
@@ -213,7 +213,7 @@
 - **缺失**: 所有实际适配器（Feishu、DingTalk、WeCom、Slack、Discord、Telegram、WeChat、Web Widget）— 零行适配器代码
 - **完成工作量**: 每个适配器小（S），但需要 8+ 个
 
-### C 类：零代码 — 完全未启动（50 项）
+### C 类：零代码 — 完全未启动（52 项）
 
 #### Evaluation Suite 扩展（6 项）— Sprint 7
 
@@ -321,6 +321,13 @@
 | 5.4a | MCP Gateway | M | MCP ✅ |
 | 5.8 | Enterprise System Integration Framework | M | MCP ✅ |
 
+#### Plugin Ecosystem 扩展（2 项）— Sprint 7（2026-08-16 插件生态调整新增）
+
+| # | 特性 | 工作量 | 依赖 |
+|---|------|--------|------|
+| 5.5c | Agent Plugins 1.0 Standard Ingestion — 标准声明式包（plugin.json + skills/ + mcp.json）摄入管道：目录/git URL/zip 安装、封闭清单校验、固定位置发现（skip-and-continue + 路径遏制）、SKILL.md→SkillModel 导入（source/origin + pin-by-hash）、mcp.json→MCPServerRegistry、组件级信任分派（skills→T4 & http-MCP→T2 = workspace admin；stdio = org admin 专属，SaaS 配置开关默认拒绝；自托管 stdio 强制 9.4c 容器沙箱执行——2026-08-16 决策）、裸 SKILL.md 目录兼容 | L | 5.5 ✅ + 5.4c ✅ + 5.9 ✅ |
+| 5.13a | Plugin Content Scanning（自 5.13 拆分，提前至 P3）— T4 内容安装前扫描：prompt 注入检测（含不可见 Unicode）、secret 检测、allowed-tools 审计；fail-closed（block/warn/allow 分级 + org 阈值）、enable 复扫、结果 API + Ops Center 展示。v1 纯规则引擎，LLM 复审 v2 可选（2026-08-16 决策） | M | 5.5c |
+
 ---
 
 ## 2026-08-14 竞品重校准（Sprint 7 重排）
@@ -350,6 +357,30 @@
 
 - 1.3.19 是 L 级引擎核心改造（EventStore 上执行主路径 + 投影接口 + checkpoint 重定义 + 恢复路径重写 + 1713 测试适配），与 38 项存量未完成同期推进——若 Sprint 7 容量不足，8.20 顺延为 P3 收尾项（1.3.18 / 6.27 不受影响，它们不依赖日志改造）—— **1.3.19 已完成（2026-08-15），此风险已解除**；8.20 现在可按序推进
 - 兼容路径：旧全量快照保留为物化缓存（非删除），DeltaChannel 增量存储向后兼容
+
+---
+
+## 2026-08-16 插件生态调整（新增 2 项 P3）
+
+依据：Agent Plugins 1.0 开放标准（2026-08-06 发布，Vercel 发起，OpenAI/Microsoft/Google/Amazon/Cursor/GitHub 背书，Codex/VS Code/Cursor/Copilot/Kiro 发布当日实装）+ 18 平台业界调研（SKILL.md 层已在 Bedrock AgentCore / IBM watsonx / Microsoft Agent Framework / Salesforce sf-skills 落地；MCP 官方 registry 约 9,652 server；ClawHavoc 供应链事件 + Snyk ToxicSkills 36% 注入率实证治理前置必要性）。
+
+### 变更摘要
+
+- **新增 P3 2 项**：5.5c Agent Plugins 1.0 标准摄入（L）、5.13a 插件内容扫描（M，自 5.13 拆分提前）
+- **5.5 增强**：T0 收紧——loader 拒绝运行时安装的非第一方 `python:` entry（SaaS 拒绝；自托管默认拒绝 + 白名单）——将 ADR-029"运行时制品永不 T0"落为代码；当前运行时安装的代码插件存量≈0，是零迁移成本窗口
+- **5.5 / 5.5b / TP5 重定位**：`.hecate-plugin` 收窄为 P 层深度集成格式（8 类 ABC 冻结不扩张）；生态面向的三方格式让位给 5.5c
+- **12.0 市场重定义（P5）**：v1 = 安装器 + git 索引目录 + 扫描结果展示，纯 E 层（永不收代码插件）；完整商店语义推迟到 T4 供给证据出现（GPT Store 衰落教训）
+- **冻结/降级**：12.5（EC2）、14.1（EC1）、13.14-EC4、11.13-EC5 冻结待证据；6.41 WASM 降级排于 5.5c 之后；5.13 保留签名/摘要/评分（P5，绑定 12.0）
+- **P4 新增 5.5d**（双格式收敛 + 导出，非阻塞增强）
+
+### 排序与依赖
+
+5.5c 与 1.3.19 等引擎改造**无依赖、可并行**；5.5c → 5.13a 严格串行（扫描是摄入管道上线闸门）。stdio 组件信任分派为业界无先例决策（调研中唯一超前项）——SaaS 默认拒绝走配置开关，运行半年拿数据再议放开。
+
+### 风险
+
+- Agent Plugins 1.0 发布仅 10 天、格式会演进、Anthropic 未签署 → 对冲：adapter 单模块隔离 + `$schema` 版本拒识 + 裸 SKILL.md 目录旁路（Claude Code 生态兼容）
+- 扫描 fail-closed 误报挡正常插件 → block/warn/allow 分级 + org 阈值可配
 
 ---
 
@@ -469,6 +500,7 @@
 > 原 Sprint 7 计划（Advanced RAG 全家桶 / Knowledge Graph / Canvas 增强 / AIP 全家桶）已按竞品重校准缩减：KG 三项 + OCR/Table/Layout + Canvas 三项 + Model UI 四项 → P5 deferred；7.6a/b、6.17 dropped。替换为引擎架构 + 竞品硬缺口 4 项（1.3.19 → 8.20 → 1.3.18 → 6.27 + 5.9 增强），详见"2026-08-14 竞品重校准"章节。
 
 - Engine Architecture: Event-Sourced State (1.3.19 Log-as-Truth) + Skill Provider Registry (5.9 增强)
+- Plugin Ecosystem: Agent Plugins 1.0 Ingestion (5.5c) + Content Scanning (5.13a) + 5.5 T0 收紧（2026-08-16 新增；与 1.3.19 无依赖可并行；5.5c → 5.13a 串行）
 - Competitive Gaps: Dynamic Orchestration (1.3.18) + Run Replay Phase 1 (8.20) + Browser Automation (6.27)
 - Advanced RAG (rescoped): Reranking / Incremental / Knowledge Quality
 - Multi-Channel: 11.2 简化版（Wave 1 收尾）+ 11.8 Intent Routing + 11.16/11.17
