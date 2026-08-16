@@ -205,16 +205,33 @@ class PregelRuntime:
         if execution_mode == "task" and stream_mode == StreamMode.MESSAGES:
             stream_mode = StreamMode.VALUES
 
-        # Create root OTel trace span for session execution.
-        # Child spans from Workers auto-nest via contextvars.
+        # Establish execution identity (trace_id) for this invocation.
+        # Priority: explicit argument > valid OTel span context > generated.
+        # Guarantees events of different invokes never share a degenerate identity
+        # even when OTel SDK is not configured.
+        _otel_trace_mod = None
         _tracer = None
         try:
-            from opentelemetry import trace as _otel_trace
+            from opentelemetry import trace as _otel_trace_mod
 
-            _tracer = _otel_trace.get_tracer("hecate.engine")
+            _tracer = _otel_trace_mod.get_tracer("hecate.engine")
         except Exception:
             logger.debug("OpenTelemetry not available, running without root span")
 
+        effective_trace_id = trace_id
+        if effective_trace_id is None and _otel_trace_mod is not None:
+            try:
+                span = _otel_trace_mod.get_current_span()
+                span_ctx = span.get_span_context()
+                if span_ctx and span_ctx.is_valid:
+                    effective_trace_id = format(span_ctx.trace_id, "032x")
+            except Exception as exc:
+                logger.debug("Failed to derive trace_id from OTel span context: %s", exc)
+        if effective_trace_id is None:
+            effective_trace_id = uuid.uuid4().hex
+
+        # Create root OTel trace span for session execution.
+        # Child spans from Workers auto-nest via contextvars.
         if _tracer is not None:
             with _tracer.start_as_current_span(
                 f"session:{session_id}",
@@ -225,7 +242,7 @@ class PregelRuntime:
                     initial_input=initial_input,
                     stream_mode=stream_mode,
                     resume_value=resume_value,
-                    trace_id=trace_id,
+                    trace_id=effective_trace_id,
                     execution_mode=execution_mode,
                 ):
                     yield event
@@ -237,7 +254,7 @@ class PregelRuntime:
             initial_input=initial_input,
             stream_mode=stream_mode,
             resume_value=resume_value,
-            trace_id=trace_id,
+            trace_id=effective_trace_id,
             execution_mode=execution_mode,
         ):
             yield event

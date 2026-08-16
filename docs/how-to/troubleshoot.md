@@ -261,6 +261,31 @@ The in-memory `MetricsCollector` and `MetricsStore` buffer metrics in process me
 
 ---
 
+## Debugging agent behavior: start with Execution Replay
+
+For any "the agent did the wrong thing" or "the agent gave a weird response" report — **start at the Execution Replay tab** before reading logs, querying the database, or reproducing locally.
+
+**Path**: `Ops Center → Conversations → <session_id> → 执行回放 tab`.
+
+What you can answer from the replay view alone:
+
+| Symptom | Where to look in the replay | Why |
+|---|---|---|
+| Wrong answer | timeline → `LLM_REQUEST` for that step, then drag the **State Inspector** slider to the prior `STEP_END` | You see the exact messages the model received — no guessing. |
+| Tool was denied | red `guardrail:` badge in the timeline | Reason text comes straight from your hook config. |
+| Unexpected agent choice (multi-agent) | `SUBGRAPH_START` rows in the timeline | Click to walk into the child session's own replay tree. |
+| Slow / stuck | `trace_enrichment` block (per-trace `total_latency_ms`, `ttft_ms`, usage) | OTel timing joined into each replay segment. |
+| Suspect context pollution | `messages` panel of the State Inspector at any commit point | This is the same `fold_session` path live mutation uses — no projection drift. |
+
+**If the tab is hidden** (`log_version = 0` on the session detail API), the session went through path A or path C — those don't emit events by design. You will need to fall back to the legacy paths below:
+
+1. [Log Analysis](../operations/log-analysis.md) — `journalctl` / log aggregator queries filtered by `session_id`.
+2. The Trace inspection API — `GET /api/traces?session_id=<uuid>` (requires OTel to be enabled; see [Monitor with OpenTelemetry and Prometheus](monitor-opentelemetry.md)).
+
+For the full feature walkthrough, see [Debug an agent run with execution replay](replay-debug-guide.md).
+
+---
+
 ## Further reading
 
 - [FAQ](../reference/faq.md) — conceptual questions ("what is X?")
@@ -269,3 +294,4 @@ The in-memory `MetricsCollector` and `MetricsStore` buffer metrics in process me
 - [Backup and Restore](../operations/backup-restore.md) — backup failures and conflict resolution
 - [Rollback Runbook](../operations/rollback.md) — four rollback paths for bad deploys
 - [Environment Variables](../reference/env-vars.md) — every config variable with defaults
+- [Debug an agent run with execution replay](replay-debug-guide.md) — Execution Replay & Debug Dashboard user guide

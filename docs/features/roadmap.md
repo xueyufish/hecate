@@ -1,7 +1,7 @@
 # Hecate Implementation Roadmap
 
-> **Date**: 2026-08-11
-> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 80/125 (64%, 2026-08-14 re-scope), P4 4/100 (4%), P5 0/60
+> **Date**: 2026-08-16
+> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 81/125 (65%, 2026-08-14 re-scope; 8.20 Execution Replay shipped 2026-08-16), P4 4/100 (4%), P5 0/60
 > **Scope**: 12-month implementation plan covering 201 unimplemented features across P3–P5. 2026-08-14 re-scope (per docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md): 5 features dropped, 17 deferred to P5, 7 added (1.3.18/1.3.19/8.20 → P3, 2.13/8.21/13.20/6.27a → P4), 11.11 moved P5→P4.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
@@ -13,10 +13,10 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 125 | 80/125 (64%) | 45 |
+| **P3 Trustworthy** | 125 | 81/125 (65%) | 44 |
 | **P4 Intelligent** | 100 | 4/100 (4%) | 96 |
 | **P5 Ecosystem** | 60 | 0/60 (0%) | 60 |
-| **Total** | **369** | **168/369 (46%)** | **201** |
+| **Total** | **369** | **169/369 (46%)** | **200** |
 
 ---
 
@@ -509,7 +509,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Engine Architecture: Event-Sourced State (NEW — 2026-08-14, Q4=A decision)
 
-> **Ordering**: 1.3.19 must land FIRST — 8.20 Run Replay, HITL durable audit pairs, and middleware waterfall events all consume the enriched event log. 1.3.18 / 6.27 / 5.9-enh are parallelizable.
+> **Ordering**: 1.3.19 must land FIRST — 8.20 Execution Replay, HITL durable audit pairs, and middleware waterfall events all consume the enriched event log. 1.3.18 / 6.27 / 5.9-enh are parallelizable.
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
@@ -521,7 +521,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 1.3.18 | Dynamic Orchestration — coordinator node: goal + agent roster → runtime task DAG → dispatch workers → synthesize result. 7th multi-agent pattern alongside 6 static ones; coordinator is a special node type emitting sub-graphs on Pregel at runtime | 2.7a ✅ + Pregel ✅ | M |
-| 8.20 | Run Replay & Debug Dashboard (Phase 1: execution replay) — runId → timeline replay of superstep × channel changes × tool calls × LLM request/response × guardrail results; web UI + DAG visualization on EventStore + OTel. **回放覆盖范围 = Pregel 路径**（services 层直接写库的旁路不在回放语义内）。 Phase 2 (version binding) deferred to P5 | 1.3.19 (enriched log) | M |
+| 8.20 | Execution Replay & Debug Dashboard (Phase 1: timeline replay) — session → trace-partitioned timeline (superstep × channel changes × tool calls × LLM request/response × guardrail blocks) + DAG step-through + time-travel (fold-to-version + `derive_messages`); web UI on EventStore + OTel. **Vocabulary**: `session`（多轮容器）→ `trace`（一次执行，回放锚点）→ `event`（记录）；不再用 "runId"。**回放覆盖范围 = Pregel 路径**（path A/C 不在日志内，UI 横幅标注；空日志会话不渲染回放 tab）。 Phase 2 (version binding) deferred to P5 | 1.3.19 (enriched log) | M |
 | 6.27 | Browser Automation Tool (moved from P4) — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ | M |
 
 ### Completed-Feature Upgrades (NEW — 2026-08-14 research)
@@ -622,7 +622,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [ ] P3 re-scoped 125/125 (100%) — 2026-08-14 re-scope basis
 - [ ] Event-sourced execution state: log-as-truth invariant + derive_messages projection + DeltaChannel incremental checkpoint
 - [ ] Dynamic Orchestration (7th multi-agent pattern) on Pregel
-- [ ] Run Replay Phase 1 (execution replay) operational
+- [ ] Execution Replay Phase 1 (timeline replay) operational
 - [ ] Browser Automation builtin tool operational
 - [ ] Skill Provider Registry (rank + invocation policy) operational
 - [ ] Completed-feature upgrades: waterfall middleware chain (1.3.5i E3) + HITL fail-closed (1.3.4) + content-aware tool gating (9.4)
