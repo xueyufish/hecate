@@ -248,7 +248,7 @@
 
 | # | 特性 | 工作量 | 依赖 | Wave |
 |---|------|--------|------|------|
-| 11.2 | Web Widget (Simplified) | S | API ✅ | Wave 1 |
+| 11.2 | Web Widget (Simplified) ✅ *(Delivered 2026-08-16, see ADR-031)* | S | API ✅ | Wave 1 |
 | 11.3 | Feishu (Lark) | **M**（原 S）— 首个 ChannelABC 真实实现 | Channel SDK | Wave 1 |
 | 11.4 | WeCom (WeChat Work) | S | 11.3 ✅ | **P5 deferred** |
 | 11.5 | DingTalk | S | 11.3 ✅ | **P5 deferred** |
@@ -418,7 +418,7 @@
 
 | Wave | Feature | 触发条件 | 时机 |
 |---|---|---|---|
-| Wave 1（P3 主线） | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | **2026-08-13: 11.3 ✅ + 11.9 Slack ✅ 已交付;11.2 简化版待交付** |
+| Wave 1（P3 主线） | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | **2026-08-16: 11.2 简化版 ✅ + 11.3 ✅ + 11.9 Slack ✅ 全部交付** |
 | Wave 2（P5 deferred 2026-08-13） | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | 按客户需求触发 (企微/钉钉/Discord/Telegram 客户) | 暂停 |
 | Wave 3 / P5 deferred | 11.2 完整版 + 11.6 微信 to-C + 11.10 Custom Channel SDK | 按客户需求 / 社区请求 | 不预定 |
 
@@ -503,7 +503,7 @@
 - Plugin Ecosystem: Agent Plugins 1.0 Ingestion (5.5c) + Content Scanning (5.13a) + 5.5 T0 收紧（2026-08-16 新增；与 1.3.19 无依赖可并行；5.5c → 5.13a 串行）
 - Competitive Gaps: Dynamic Orchestration (1.3.18) + Run Replay Phase 1 (8.20) + Browser Automation (6.27)
 - Advanced RAG (rescoped): Reranking / Incremental / Knowledge Quality
-- Multi-Channel: 11.2 简化版（Wave 1 收尾）+ 11.8 Intent Routing + 11.16/11.17
+- Multi-Channel: 11.2 简化版 ✅（Wave 1 收尾,2026-08-16）+ 11.8 Intent Routing + 11.16/11.17
 - Evaluation Suite: AI-synthesized / Online-Offline / Trace Backflow / Reports / Workflow / Human Annotation（7.6a/b dropped）
 - Canvas: Human Input / Form Node + Trigger Node（1.1.18-20 deferred）
 - Memory: Engine Enhancement / Importance / Multi-Signal / Pressure Alert / Layered / Task Memory
