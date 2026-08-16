@@ -1,7 +1,7 @@
 # Hecate Implementation Roadmap
 
 > **Date**: 2026-08-16
-> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 81/125 (65%, 2026-08-14 re-scope; 8.20 Execution Replay shipped 2026-08-16), P4 4/100 (4%), P5 0/60
+> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 81/127 (64%, 2026-08-14 re-scope + 2026-08-16 plugin ecosystem adjustment; 8.20 Execution Replay shipped 2026-08-16), P4 4/101 (4%), P5 0/60
 > **Scope**: 12-month implementation plan covering 201 unimplemented features across P3–P5. 2026-08-14 re-scope (per docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md): 5 features dropped, 17 deferred to P5, 7 added (1.3.18/1.3.19/8.20 → P3, 2.13/8.21/13.20/6.27a → P4), 11.11 moved P5→P4.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
@@ -13,10 +13,10 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 125 | 81/125 (65%) | 44 |
-| **P4 Intelligent** | 100 | 4/100 (4%) | 96 |
+| **P3 Trustworthy** | 127 | 81/127 (64%) | 46 |
+| **P4 Intelligent** | 101 | 4/101 (4%) | 97 |
 | **P5 Ecosystem** | 60 | 0/60 (0%) | 60 |
-| **Total** | **369** | **169/369 (46%)** | **200** |
+| **Total** | **372** | **169/372 (45%)** | **203** |
 
 ---
 
@@ -63,7 +63,7 @@ Sprint 3 (M5-6):   P2 Complete — Memory + Channels + Evaluation Foundation
 Sprint 4 (M7-8):   P3 Core — Resilience + Multi-Tenant + Security + Observability + Platform SPI Core
 Sprint 5 (M9-10):  P3 Enterprise — Platform SPI + Multi-Agent Protocol + Model Hub + Enterprise Identity
 Sprint 6 (M11-12): P3 Security & Ops — Ops Center + Security Enhancement + Plugin System + Deployment
-Sprint 7 (M13-14): P3 Complete — Log-as-Truth + Dynamic Orchestration + Run Replay + Browser Tool + Advanced RAG + Multi-Channel + Evaluation + Memory
+Sprint 7 (M13-14): P3 Complete — Log-as-Truth + Dynamic Orchestration + Run Replay + Browser Tool + Plugin Open-Standard Ingestion + Advanced RAG + Multi-Channel + Evaluation + Memory
 Sprint 8 (M15-16): P4 Kickoff — Self-Learning + Agentic AI + Memory Intelligence
 Sprint 9 (M17-18): P4 Complete — Knowledge Intelligence + Multi-Agent Intelligence + Execution Intelligence
 Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compliance
@@ -534,6 +534,16 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 1.3.4 | HITL Fail-Closed Approval — no answerer → deny; only allowed-once grants; ask/never policy state machine; approval/asked + approval/decided durable audit pair (turn-enclosed) | 1.3.4 ✅ + 1.3.19 (audit events) | M |
 | 9.4 | Content-Aware Tool Gating — bash pipeline static analysis beyond risk_level + monotonic denial invariant (guards can only deny, never resurrect) | 9.4 ✅ + 1.3.19 | M |
 
+### Plugin Ecosystem: Open-Standard Ingestion (NEW — 2026-08-16 adjustment)
+
+> **Rationale**: Agent Plugins 1.0 (open standard, 2026-08-06, backed by OpenAI/Microsoft/Google/Amazon/Cursor/GitHub) has converged the industry on "plugin = declarative package of Skills + MCP config"; SKILL.md layer already landed in Bedrock AgentCore/watsonx/Microsoft Agent Framework/Salesforce. Hecate adopts it as the ecosystem-facing third-party format; `.hecate-plugin` narrows to P-tier deep-integration (catalog notes on 5.5/5.5b). **Ordering**: independent of 1.3.19 — parallelizable with any Sprint 7 work item; 5.5c → 5.13a strict serial (scanning gates the ingest pipeline's go-live).
+
+| # | Feature | Dependencies | Effort |
+|---|---------|------|--------|
+| 5.5c | Agent Plugins 1.0 Standard Ingestion — directory/git-URL/zip install, closed-manifest validation, fixed-location discovery (skills/ + mcp.json) with skip-and-continue + path containment, SKILL.md→SkillModel import (source/origin + pin-by-hash), mcp.json→MCPServerRegistry, **component-level trust dispatch** (skills→T4 & http-MCP→T2 = workspace admin; stdio = org admin only, SaaS default-deny via config gate; self-hosted stdio runs in 9.4c container sandbox — decided 2026-08-16), bare-SKILL.md-directory acceptance | 5.5 ✅ + 5.4c ✅ + 5.9 ✅ | L |
+| 5.13a | Plugin Content Scanning (split from 5.13, pulled to P3) — prompt-injection detection (incl. invisible-Unicode), secret detection, allowed-tools audit; fail-closed install (block/warn/allow, org threshold), rescan on enable, results API + Ops Center display. V1 = pure rule engine; LLM second-pass review optional in v2 (decided 2026-08-16) | 5.5c | M |
+| 5.5 (enh) | T0 Tightening — loader rejects runtime-installed non-first-party `python:` entries (SaaS reject; self-hosted default-deny + allowlist) — operationalizes ADR-029 "runtime artifacts never T0"; near-zero cost while installed-code-plugin base is ~empty | 5.5 ✅ | S |
+
 ### Advanced RAG & Knowledge (rescoped 2026-08-14)
 
 | # | Feature | Dependencies | Effort |
@@ -674,6 +684,12 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 4.22 | Tool Memory | Memory System ✅ | M |
 | 4.23 | Cross-Thread Memory Store | Memory System ✅ | M |
 
+### Plugin Ecosystem (NEW — 2026-08-16 adjustment)
+
+| # | Feature | Dependencies | Effort |
+|---|---------|------|--------|
+| 5.5d | Dual-Format Plugin Convergence & Export — Hecate-private plugin content migrates into `io.hecate/` namespace dir inside Agent Plugins packages (one package = conformant for all clients + deep-integration for Hecate); `hecate plugin export` packages workspace skills as Agent Plugins bundles; ZIP demoted to transport-only (directory/git-URL install) | 5.5c (P3) + 5.5b ✅ | M |
+
 ### Milestone M8 (End of Sprint 8)
 
 - [ ] Hallucination detection operational
@@ -785,14 +801,16 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Asset Marketplace
 
+> **Rescoped (2026-08-16)**: 12.0 v1 = Agent Plugins installer (5.5c, P3) + static git-index directory (Claude Code marketplace pattern) + scan-results display (5.13a, P3); **E-tier only** (T4 packages + T2 MCP registrations, never code plugins). 12.5 Partner Monetization + EC1 ARD (14.1) + EC4 (13.14 enhancement) + EC5 (11.13 enhancement) **frozen** until T4 supply/traction evidence exists (GPT Store decline; ClawHavoc governance lesson). Full rationale in feature-catalog 12.0/12.5/14.1 notes.
+
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 12.0 | Asset Marketplace | Plugin System ✅ | L |
+| 12.0 | Asset Marketplace (rescoped 2026-08-16: installer + git index, E-tier only) | Plugin System ✅ + 5.5c (P3) | M (was L) |
 | 12.1 | Industry Templates | 12.0 | M |
 | 12.2 | Industry Knowledge Packs | 12.0 | M |
 | 12.3 | Industry Skill Packs | 12.0 | M |
 | 12.4 | Industry Integration Guide | 12.0 | S |
-| 12.5 | Partner Monetization Infrastructure | 12.0 | L |
+| 12.5 | Partner Monetization Infrastructure (frozen 2026-08-16, pending supply evidence) | 12.0 | L |
 
 ### Community & Distribution
 
@@ -857,14 +875,14 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 6.34 | AI Office | Document APIs | M |
 | 6.35 | Industrial Data Integration | MQTT/OPC UA | L |
 | 6.36 | Asset Marketplace Operations | 12.0 | M |
-| 5.13 | Plugin Security & Signing | Plugin System ✅ | M |
+| 5.13 | Plugin Security & Signing (rescoped 2026-08-16: signing/digest/score only — content scanning split to 5.13a, P3) | Plugin System ✅ | M |
 | 6.37 | Memory Clustering & Conflict Resolution | Memory System ✅ | M |
 | 6.38 | Self-Planning (PDDL + MCTS) | LLM ✅ | L |
 | 6.39 | Tool Auto-Creation | LLM ✅ | M |
 | 6.40 | Firecracker microVM Backend | 1.3.15a ✅ + 6.32a | L |
 | 13.4c | Session-Level microVM Isolation (Paradigm B — Bedrock AgentCore model, requires PregelRuntime RPC refactor) | 6.40 ✅ + 13.4 ✅ + engine refactor | XL |
 | 13.19 | Service Mesh Integration (Istio/Linkerd mTLS + east-west traffic + canary routing) | 13.1 + 13.4 ✅ | M |
-| 6.41 | WASM Runtime Backend | 5.3 ✅ + 6.40 | M |
+| 6.41 | WASM Runtime Backend (deprioritized 2026-08-16: T4/T2 cover third-party scenarios; sequence behind 5.5c) | 5.3 ✅ + 6.40 | M |
 | 6.42 | Global Branching | Ontology ✅ | M |
 | 6.43 | Embedded Ontology | Ontology ✅ | M |
 | 11.19 | Platform-Level Governance | Auth ✅ | M |
