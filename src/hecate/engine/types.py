@@ -69,6 +69,10 @@ class NodeType(StrEnum):
     - SUGGESTION: generates opening remarks or follow-up question suggestions.
     - FAN_OUT: dispatches multiple parallel branches concurrently (no worker invoked).
     - MERGE: collects results from all branches of a preceding FAN_OUT node.
+    - COORDINATOR: dynamic orchestration node (1.3.18) — turns goal +
+      agent roster into a runtime task DAG via the LLM planner,
+      dispatches workers in an isolated child session, and folds their
+      outputs through a synthesis step.
     """
 
     CONVERSATION = "conversation"
@@ -80,6 +84,7 @@ class NodeType(StrEnum):
     SUGGESTION = "suggestion"
     FAN_OUT = "fan-out"
     MERGE = "merge"
+    COORDINATOR = "coordinator"
 
 
 class ChannelType(StrEnum):

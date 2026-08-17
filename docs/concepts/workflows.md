@@ -59,6 +59,7 @@ Nodes do the actual work. Each node has a `type` that determines what runs when 
 | **Sub-agents** | `agent` | Delegates to a sub-agent — supports direct, tool-based, and handoff invocation |
 | **Parallelism** | `fan-out` | Dispatches parallel branches (must have a downstream `merge`) |
 | **Parallelism** | `merge` | Collects results from a preceding `fan-out` |
+| **Dynamic orchestration** | `coordinator` | Turns a goal + agent roster into a runtime task DAG (LLM planner → deterministic executor), runs it in an isolated child session, and synthesizes results. The plan itself is a first-class log citizen. See [ADR-032](../design/adr/032-dynamic-orchestration.md). |
 
 Every node declares which channels it `readable` and `writable` — this is how the engine enforces data flow boundaries between nodes.
 
@@ -124,6 +125,10 @@ For multi-agent scenarios, Hecate ships pre-built graph templates (`engine/templ
 | **Debate** | Structured opposition with a judge agent | Adversarial quality review |
 
 All six are unified as graph templates — they are not separate execution mechanisms. The `engine/patterns.py` module detects which pattern a given graph matches. See the [multi-agent tutorial](../tutorials/04-multi-agent.md) for hands-on examples.
+
+### Seventh pattern: Dynamic Orchestration (`coordinator` node)
+
+The six templates above are **static** — the topology is fixed at design time. The seventh pattern is **dynamic**: you place a single `coordinator` node with a goal and an agent roster, and at runtime an LLM planner emits a suggested task DAG that a deterministic executor materialises into a sub-graph (Magentic double-loop with stall detection, replan-with-carryover, three-axis budgets, and hard parent/child session isolation). Any graph containing a `coordinator` node is classified as the `dynamic` pattern. See [ADR-032](../design/adr/032-dynamic-orchestration.md) and the [`coordinator` node reference](../reference/graph-dsl.md#coordinator--dynamic-orchestration).
 
 ---
 

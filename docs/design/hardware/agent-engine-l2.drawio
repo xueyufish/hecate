@@ -113,7 +113,7 @@
         <mxCell id="r3_simulation" value="📋 Simulation Environment" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
           <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r3_selfplan" value="📋 Self-Planning (PDDL+MCTS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_dynorch" value="✅ Dynamic Orchestration (coordinator node)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r3_c">
           <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_nl2agent" value="📋 NL2Agent / NL2Flow" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">

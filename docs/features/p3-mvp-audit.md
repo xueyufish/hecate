@@ -1,11 +1,11 @@
 # P3 MVP 审计报告
 
-> **日期**: 2026-08-16
+> **日期**: 2026-08-17
 > **目的**: P3 阶段完成度审计，为 MVP 版本迭代提供决策依据
 > **范围**: P3 Trustworthy 阶段（138 项特性），含源码级实现状态验证
 > **方法**: Feature catalog 分析 + 源码 grep/glob 扫描验证部分实现
-> **最近更新**: 2026-08-16 — Sprint 7 进度：1.3.19 Event-Sourced State ✅ + 8.20 Execution Replay ✅ 已交付；1.3.18 / 6.27 / 5.9 增强 / 1.3.4 / 1.3.5i E3 / 9.4 增量改造按 2026-08-14 重校准顺序推进。**2026-08-16 插件生态调整**（Agent Plugins 1.0 标准 + 18 平台调研）：新增 P3 两项 **5.5c Agent Plugins 1.0 标准摄入** + **5.13a 插件内容扫描**（自 5.13 拆分），5.5 增 T0 收紧增强；`.hecate-plugin` 收窄为 P 层深度集成格式；12.0 市场重定义、EC1-EC5 冻结、6.41 降级——详见"2026-08-16 插件生态调整"章节
-> **2026-08-14 竞品重校准**（docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md）：**Drop 5 项**（7.6a/7.6b/9.2a/6.17/9.8）；**Defer→P5 15 项**（3.1.2-4、3.4.2、3.5.1-3、6.9/6.10/6.12/6.13、1.1.18-20、6.21）；**新增 P3 4 项**（1.3.18 Dynamic Orchestration、1.3.19 Event-Sourced State/Log-as-Truth、8.20 Run Replay ✅ 2026-08-16、6.27 Browser Automation 自 P4 移入）；**5.9 增强**（Skill Provider Registry，并入而非新建 5.12）。未完成 58 → 41 项（8.20 已完成），Sprint 7 重排，详见"2026-08-14 竞品重校准"章节。
+> **最近更新**: 2026-08-17 — Sprint 7 进度：1.3.19 Event-Sourced State ✅（2026-08-15, ADR-030）+ 8.20 Execution Replay ✅（2026-08-16）+ **1.3.18 Dynamic Orchestration ✅（2026-08-17, ADR-032）** 三项 Sprint 7 关键引擎改造已交付；6.27 / 5.9 增强 / 1.3.4 / 1.3.5i E3 / 9.4 增量改造按 2026-08-14 重校准顺序推进。**2026-08-16 插件生态调整**（Agent Plugins 1.0 标准 + 18 平台调研）：新增 P3 两项 **5.5c Agent Plugins 1.0 标准摄入** + **5.13a 插件内容扫描**（自 5.13 拆分），5.5 增 T0 收紧增强；`.hecate-plugin` 收窄为 P 层深度集成格式；12.0 市场重定义、EC1-EC5 冻结、6.41 降级——详见"2026-08-16 插件生态调整"章节
+> **2026-08-14 竞品重校准**（docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md）：**Drop 5 项**（7.6a/7.6b/9.2a/6.17/9.8）；**Defer→P5 15 项**（3.1.2-4、3.4.2、3.5.1-3、6.9/6.10/6.12/6.13、1.1.18-20、6.21）；**新增 P3 4 项**（1.3.18 Dynamic Orchestration ✅ 2026-08-17、1.3.19 Event-Sourced State/Log-as-Truth ✅ 2026-08-15、8.20 Run Replay ✅ 2026-08-16、6.27 Browser Automation 自 P4 移入）；**5.9 增强**（Skill Provider Registry，并入而非新建 5.12）。未完成 58 → 40 项（1.3.18+8.20 已完成），Sprint 7 重排，详见"2026-08-14 竞品重校准"章节。
 
 ---
 
@@ -14,18 +14,18 @@
 | 指标 | 数值 |
 |------|------|
 | P3 总特性数（2026-08-14 重校准 + 2026-08-16 插件生态调整后） | 124 |
-| 已完成 ✅ | **81 (65%)**（+1：8.20 Execution Replay 2026-08-16 交付） |
-| 未完成 | **43 (35%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 1 + 插件生态新增 2（5.5c/5.13a，2026-08-16）） |
-| 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅、Sprint 7 (M7) 启动中（1.3.19 ✅ + 8.20 ✅ 已交付） |
+| 已完成 ✅ | **82 (66%)**（+1：1.3.18 Dynamic Orchestration 2026-08-17 交付，ADR-032） |
+| 未完成 | **42 (34%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 2 + 插件生态新增 2（5.5c/5.13a，2026-08-16）） |
+| 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅、Sprint 7 (M7) — 1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ 三项引擎改造已交付 |
 | 部分 Sprint | Sprint 6 (M6) — 约 79% 完成 |
-| 未启动 Sprint | Sprint 7 (M7) — 1.3.19 + 8.20 已完成；其余按 2026-08-14 重校准顺序推进 |
-| 发布阻塞项 | 1 项关键 + 2 项强烈建议（8.20 已交付，剩 HITL durable audit + monotonic denial gating） |
+| 未启动 Sprint | Sprint 7 (M7) — 1.3.19 + 8.20 + 1.3.18 已交付；其余按 2026-08-14 重校准顺序推进 |
+| 发布阻塞项 | 1 项关键 + 2 项强烈建议（1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ 已交付，剩 HITL durable audit + monotonic denial gating） |
 | 有部分代码 | 2 项已有可观代码但标记为未完成 |
-| 零代码 + 新增 | 36 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 1）+ 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
+| 零代码 + 新增 | 35 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 2）+ 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
 
 ---
 
-## 第一部分：已完成特性（81 项）
+## 第一部分：已完成特性（82 项）
 
 ### Enterprise Foundation — 100% ✅
 
@@ -169,7 +169,7 @@
 
 ---
 
-## 第二部分：未完成特性（43 项，2026-08-14 重校准 + 2026-08-16 插件生态调整）
+## 第二部分：未完成特性（42 项，2026-08-14 重校准 + 2026-08-16 插件生态调整 + 2026-08-17 1.3.18 交付）
 
 ### A 类：标记 ✅ 但有遗留增强项（8 项）
 
@@ -349,7 +349,7 @@
 |---|------|--------|---------|
 | 1 | 1.3.19 Event-Sourced Execution State (Log-as-Truth) ✅ *(已完成 2026-08-15，见 [ADR-030](../design/adr/030-event-sourced-execution-state.md))* | **L** | **最先落地**——8.20 / HITL 审计对 / middleware 事件都消费富化后的事件日志 |
 | 2 | 8.20 Execution Replay Phase 1 ✅ *(已完成 2026-08-16，vocabulary `session→trace→event`，回放 API + Web UI + time-travel；纯消费侧，零 schema 变更)* | M | 依赖 1.3.19 ✅ |
-| 3 | 1.3.18 Dynamic Orchestration | M | 可与 1 并行（不依赖日志改造） |
+| 3 | 1.3.18 Dynamic Orchestration ✅ *(已完成 2026-08-17，[ADR-032](../design/adr/032-dynamic-orchestration.md)；Phase 1 引擎侧全家桶：COORDINATOR 节点 / TaskDAG 契约 / Magentic 双循环 / 三轴预算 / benefit-based 委派 rubric / 五重隔离 / 可选 per-task verifier / ORCHESTRATOR_DECISION+EVALUATION 事件 / synthesis transform / planner-evaluator 模型分离；推迟项 1.3.18a P4 + UI companion P3)* | M | 可与 1 并行（不依赖日志改造） |
 | 4 | 6.27 Browser Automation + 5.9 Skill Provider Registry | M + M | 可并行 |
 | 5 | 保留原 Sprint 7 项 | — | Reranking / Incremental / Memory 组 / 11.2 简化版 / 11.8 / Evaluation 6 项 / 1.1.24-25 / 6.16 / 6.18 |
 
