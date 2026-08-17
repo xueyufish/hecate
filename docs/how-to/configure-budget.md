@@ -2,7 +2,7 @@
 
 Set up per-workspace and per-agent budgets, configure degradation behavior, and monitor cost in production.
 
-For the conceptual model, see [Budget & Cost](../concepts/budget.md). For the budget API reference, see [REST API](../reference/rest-api.md#budget).
+For the conceptual model, see [Budget & Cost](../concepts/budget.md). For the budget API reference, see [REST API](../reference/rest-api.md#ops-center-monitoring-and-cost).
 
 ---
 
@@ -397,5 +397,5 @@ hecate budget set --workspace <workspace_id> --monthly-limit-usd 1000
 - [Configure LLM providers](configure-llm-providers.md) — set up model pricing
 - [Multi-Tenancy concept](../concepts/multi-tenancy.md) — workspace hierarchy
 - [Observability concept](../concepts/observability.md) — cost metrics
-- [REST API reference](../reference/rest-api.md#budget) — full budget API
+- [REST API reference](../reference/rest-api.md#ops-center-monitoring-and-cost) — full budget API
 - [Troubleshooting](troubleshoot.md) — common cost issues

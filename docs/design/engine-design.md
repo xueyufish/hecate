@@ -434,7 +434,7 @@ The **Dynamic Orchestration** capability adds the seventh multi-agent pattern: a
 
 **References**: [ADR-032](adr/032-dynamic-orchestration.md), [ADR-030](adr/030-event-sourced-execution-state.md), [ADR-007](adr/007-multi-agent-as-graph-templates.md), [ADR-001](adr/001-graph-first-orchestration.md).
 
-**Deferred follow-ups**: append-only `PlanPatch` repair API (OMA v1.14 semantics); full consensus proposer→judge; async orchestration + mid-flight steering; plan-freeze artifact + exact replay; pattern-selector seventh entry, canvas `COORDINATOR` node, replay coordinator-card expansion. See [feature-catalog.md](features/feature-catalog.md) for the full deferral table.
+**Deferred follow-ups**: append-only `PlanPatch` repair API (OMA v1.14 semantics); full consensus proposer→judge; async orchestration + mid-flight steering; plan-freeze artifact + exact replay; pattern-selector seventh entry, canvas `COORDINATOR` node, replay coordinator-card expansion. See [feature-catalog.md](../features/feature-catalog.md) for the full deferral table.
 
 ---
 

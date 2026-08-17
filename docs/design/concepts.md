@@ -162,7 +162,7 @@ A **Message** is an individual entry in a conversation (system/user/assistant/to
 
 ### Persistence-object classification (1.3.19 log-as-truth)
 
-Per [ADR-030](adr/adr/030-event-sourced-execution-state.md) the **event log is the single source of truth** for execution state. Every persistence object below either holds truth or is a discardable projection.
+Per [ADR-030](adr/030-event-sourced-execution-state.md) the **event log is the single source of truth** for execution state. Every persistence object below either holds truth or is a discardable projection.
 
 **Tier 1 — Skeleton (always-on for engine-path sessions)**: `Event` (truth), `SessionState` (cache). These two are guaranteed for any session whose execution path goes through `PregelRuntime`.
 

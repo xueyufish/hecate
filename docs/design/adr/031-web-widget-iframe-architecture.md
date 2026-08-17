@@ -118,9 +118,9 @@ In short: ADR-023's `channel: "web-widget"` is illustrative and **does not** imp
 
 - [ADR-016](016-platform-spi-architecture.md) — Platform SPI Architecture (15 extension points, including `ChannelABC`). This ADR documents an explicit *non-participation* in that SPI for the Web Widget.
 - [ADR-018](018-zero-trust-identity-architecture.md) — Zero Trust Identity Architecture. The widget inherits the existing JWT trust boundary; the 11.2 full scope will need a separate trust model.
-- [`docs/features/feature-catalog.md`](../features/feature-catalog.md) — 11.2 entry wording adjustment.
-- [`docs/features/roadmap.md`](../features/roadmap.md) — Multi-Channel Wave 1 close-out.
-- [`docs/features/p3-mvp-audit.md`](../features/p3-mvp-audit.md) — 2026-08-12 multi-channel scoping decision.
+- [`docs/features/feature-catalog.md`](../../features/feature-catalog.md) — 11.2 entry wording adjustment.
+- [`docs/features/roadmap.md`](../../features/roadmap.md) — Multi-Channel Wave 1 close-out.
+- [`docs/features/p3-mvp-audit.md`](../../features/p3-mvp-audit.md) — 2026-08-12 multi-channel scoping decision.
 
 ## Embed usage snippet
 
