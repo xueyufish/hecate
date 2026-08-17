@@ -35,6 +35,7 @@ class CollaborationPattern(StrEnum):
     BROADCAST = "broadcast"
     NEGOTIATION = "negotiation"
     DEBATE = "debate"
+    DYNAMIC = "dynamic"
 
 
 def infer_pattern(config: GraphConfig) -> CollaborationPattern | None:
@@ -54,6 +55,15 @@ def infer_pattern(config: GraphConfig) -> CollaborationPattern | None:
 
     has_fan_out = any(t == NodeType.FAN_OUT for t in node_types.values())
     has_merge = any(t == NodeType.MERGE for t in node_types.values())
+
+    # DYNAMIC (1.3.18): a COORDINATOR node emits sub-graphs at runtime.
+    # Any graph containing one is dynamic regardless of other shapes.
+    if any(t == NodeType.COORDINATOR for t in node_types.values()):
+        return CollaborationPattern.DYNAMIC
+
+    # PARALLEL: contains FAN_OUT or MERGE nodes
+    if has_fan_out or has_merge:
+        return CollaborationPattern.PARALLEL
 
     # PARALLEL: contains FAN_OUT or MERGE nodes
     if has_fan_out or has_merge:
@@ -188,6 +198,18 @@ def build_graph_from_pattern(
                 judge_prompt=config.get("judge", {}).get("system_prompt", "You are a judge."),
                 rounds=config.get("rounds", 3),
             )
+
+        case CollaborationPattern.DYNAMIC:
+            # 1.3.18: dynamic graphs are runtime-emitted by a COORDINATOR
+            # node from a TaskDAG. They cannot be statically constructed
+            # here — the caller is expected to wire a COORDINATOR node in
+            # the canvas, which then dispatches the executor template
+            # (templates.build_dynamic_orchestration_executor) at runtime.
+            msg = (
+                "CollaborationPattern.DYNAMIC cannot be built statically; "
+                "use a COORDINATOR node and let the runtime emit the sub-graph."
+            )
+            raise NotImplementedError(msg)
 
         case _:
             msg = f"Unknown collaboration pattern: {pattern}"

@@ -1,6 +1,6 @@
 # ADR Index — by Topic
 
-The 29 ADRs in this directory cover every significant architectural decision since Hecate started. They are listed chronologically in the [README](../README.md#architecture-decision-records-adrs). This index provides an alternative **topic-grouped** view to help you find the ADRs relevant to a specific concern.
+The 30 ADRs in this directory cover every significant architectural decision since Hecate started. They are listed chronologically in the [README](../README.md#architecture-decision-records-adrs). This index provides an alternative **topic-grouped** view to help you find the ADRs relevant to a specific concern.
 
 Each ADR row links to the full document. Use this index as a **map**; read the individual ADRs for the "why" behind each decision.
 
@@ -39,8 +39,9 @@ Patterns and node types for multi-agent flows.
 
 | ADR | Title | Topic |
 |---|---|---|
-| [ADR-007](007-multi-agent-as-graph-templates.md) | All Multi-Agent Patterns Unified as Graph Templates | Collaboration patterns |
+| [ADR-007](007-multi-agent-as-graph-templates.md) | All Multi-Agent Patterns Unified as Graph Templates | Collaboration patterns (6 static templates) |
 | [ADR-019](019-visual-workflow-node-types.md) | Visual Workflow Node Types for Event-Driven HITL and Ontology Operations | Node types for HITL |
+| [ADR-032](032-dynamic-orchestration.md) | Dynamic Orchestration via Runtime-Emitted TaskDAG | 7th pattern (`DYNAMIC`); COORDINATOR node type; Magentic double-loop; data-as-plan over code-as-plan; plan as first-class log citizen |
 
 ### 🔌 Protocols and interop
 
@@ -166,7 +167,7 @@ Multi-agent maturity + observability deepening:
 ### P3+ (Post-1.0)
 Future capabilities:
 
-`ADR-013`, `ADR-014`, `ADR-015`, `ADR-017`, `ADR-020`, `ADR-027`, `ADR-031`
+`ADR-013`, `ADR-014`, `ADR-015`, `ADR-017`, `ADR-020`, `ADR-027`, `ADR-030`, `ADR-031`, `ADR-032`
 
 ---
 

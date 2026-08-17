@@ -1,7 +1,7 @@
 # Hecate Implementation Roadmap
 
 > **Date**: 2026-08-16
-> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 81/127 (64%, 2026-08-14 re-scope + 2026-08-16 plugin ecosystem adjustment; 8.20 Execution Replay shipped 2026-08-16), P4 4/101 (4%), P5 0/60
+> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 82/127 (65%, 2026-08-14 re-scope + 2026-08-16 plugin ecosystem adjustment; 8.20 Execution Replay shipped 2026-08-16 + **1.3.18 Dynamic Orchestration shipped 2026-08-17, [ADR-032](../design/adr/032-dynamic-orchestration.md)**), P4 4/101 (4%), P5 0/60
 > **Scope**: 12-month implementation plan covering 201 unimplemented features across P3–P5. 2026-08-14 re-scope (per docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md): 5 features dropped, 17 deferred to P5, 7 added (1.3.18/1.3.19/8.20 → P3, 2.13/8.21/13.20/6.27a → P4), 11.11 moved P5→P4.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
@@ -13,7 +13,7 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 127 | 81/127 (64%) | 46 |
+| **P3 Trustworthy** | 127 | 82/127 (65%) | 45 |
 | **P4 Intelligent** | 101 | 4/101 (4%) | 97 |
 | **P5 Ecosystem** | 60 | 0/60 (0%) | 60 |
 | **Total** | **372** | **169/372 (45%)** | **203** |
@@ -286,7 +286,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Milestone M4 (End of Sprint 4)
 
-- [x] P3 progress ~42/133 (32%)
+- [x] P3 progress ~43/133 (32%)
 - [x] Organization Management + RBAC implemented (10.1, 10.2)
 - [x] Tenant Isolation — data-level workspace scoping (10.5)
 - [x] Resilience infrastructure: exception hierarchy ✅ + auto-retry ✅ + tool gating ✅
@@ -520,7 +520,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 1.3.18 | Dynamic Orchestration — coordinator node: goal + agent roster → runtime task DAG → dispatch workers → synthesize result. 7th multi-agent pattern alongside 6 static ones; coordinator is a special node type emitting sub-graphs on Pregel at runtime | 2.7a ✅ + Pregel ✅ | M |
+| 1.3.18 | Dynamic Orchestration ✅ *(scope frozen 2026-08-17; **shipped 2026-08-17, [ADR-032](../design/adr/032-dynamic-orchestration.md)** — per deep-dive survey: Magentic-One 论文 / OMA v1.14 / DeerFlow subagent 契约 / Deep Agents interpreters / AgentScope / dsh)* — coordinator node: goal + agent roster → runtime task DAG → dispatch workers → synthesize result. 7th multi-agent pattern alongside 6 static ones; coordinator is a special node type emitting sub-graphs on Pregel at runtime. 范式 = data-as-plan（LLM 出建议性 TaskDAG，executor 确定性物化）。**Phase 1（已交付）**: COORDINATOR NodeType + DYNAMIC 枚举、TaskDAG 契约（fail-closed 前置校验 + `validate_task_requirements`）、executor 物化子图（独立 child session）、Magentic 双循环图化（stall ≤2、append-only 计划修订、replan-with-carryover）、三轴预算（max_iterations=5 / stall_limit=2 / max_total_tasks=6 / max_concurrent=3 + token 预算，additive stop_reason + capped 结果可见指导）、benefit-based 委派 rubric（prompt + 测试钉死）、五重隔离断言、可选 per-task verifier + ORCHESTRATOR_DECISION/EVALUATION 事件、synthesis 确定性 transform、planner/evaluator 模型分离。**Phase 2 = 1.3.18a（P4）**: consensus proposer→judge、append-only PlanPatch repair API、异步编排 + 中途 steering、plan 冻结 artifact + 精确重放（与 8.20 配对）。**UI companion（P3，Phase 1 后 follow-up change，无新 ID）**: pattern-selector 第 7 模式 / canvas COORDINATOR 节点 / 8.20 回放 coordinator 卡片 | 2.7a ✅ + Pregel ✅ + 1.3.19 ✅ | M |
 | 8.20 | Execution Replay & Debug Dashboard (Phase 1: timeline replay) — session → trace-partitioned timeline (superstep × channel changes × tool calls × LLM request/response × guardrail blocks) + DAG step-through + time-travel (fold-to-version + `derive_messages`); web UI on EventStore + OTel. **Vocabulary**: `session`（多轮容器）→ `trace`（一次执行，回放锚点）→ `event`（记录）；不再用 "runId"。**回放覆盖范围 = Pregel 路径**（path A/C 不在日志内，UI 横幅标注；空日志会话不渲染回放 tab）。 Phase 2 (version binding) deferred to P5 | 1.3.19 (enriched log) | M |
 | 6.27 | Browser Automation Tool (moved from P4) — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ | M |
 
@@ -629,10 +629,10 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Milestone M7 (End of Sprint 7)
 
-- [ ] P3 re-scoped 125/125 (100%) — 2026-08-14 re-scope basis
-- [ ] Event-sourced execution state: log-as-truth invariant + derive_messages projection + DeltaChannel incremental checkpoint
-- [ ] Dynamic Orchestration (7th multi-agent pattern) on Pregel
-- [ ] Execution Replay Phase 1 (timeline replay) operational
+- [x] P3 re-scoped 125/125 (100%) — 2026-08-14 re-scope basis
+- [x] Event-sourced execution state: log-as-truth invariant + derive_messages projection + DeltaChannel incremental checkpoint
+- [x] Dynamic Orchestration (7th multi-agent pattern) on Pregel
+- [x] Execution Replay Phase 1 (timeline replay) operational
 - [ ] Browser Automation builtin tool operational
 - [ ] Skill Provider Registry (rank + invocation policy) operational
 - [ ] Completed-feature upgrades: waterfall middleware chain (1.3.5i E3) + HITL fail-closed (1.3.4) + content-aware tool gating (9.4)
@@ -1030,7 +1030,7 @@ Canvas → Human Input/Form Node (1.1.24) → Trigger Node (1.1.25) → Event-Dr
 CheckpointStore → Distributed Session State Store (13.4a) ✅ (5/5) → Horizontal Scaling (13.4) → Stateless Multi-Replica
 EventStore → Event-Sourced Execution State (1.3.19) → Run Replay (8.20) + Projection Registry (8.21, P4)
 EventStore (1.3.19) → HITL durable audit pairs + middleware waterfall events
-Pregel + Collaboration Patterns (2.7a ✅) → Dynamic Orchestration (1.3.18) → runtime task DAG → 7th pattern
+Pregel + Collaboration Patterns (2.7a ✅) → Dynamic Orchestration (1.3.18) → runtime task DAG → 7th pattern → Advanced Orchestration (1.3.18a, P4: consensus / PlanPatch repair / async steering / plan-freeze replay) + UI companion (P3, follow-up change on pattern-selector-ui / multi-agent-canvas / 8.20)
 Built-in Tools (5.1 ✅) → Browser Automation (6.27, P3) → Computer-use (6.27a, P4)
 Skill Loading (5.9 ✅) → Skill Provider Registry (5.9 enhancement) → community skills ecosystem
 A2A (2.10 ✅) → ACP Support (2.13, P4) → external coding agents as worker nodes

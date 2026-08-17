@@ -169,7 +169,7 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 - **Plugin System** — 6 plugin types (Tool / Evaluator / Channel / Auth / Notifier / Extension) with hot-reload, declared permissions, and versioned manifests. Plus Core extension points for engine-internal customization.
 - **IM Channels** — Reach Hecate agents from Feishu (Lark) and Slack via inbound webhooks. Mandatory Bound Identity model ensures every IM user is bound to a Hecate user before any conversation starts. Same Hecate user shares one conversation thread across both channels. See [Configure Feishu and Slack](docs/how-to/configure-feishu-slack.md) and the [IM channel architecture overview](docs/concepts/im-channel-architecture.md).
 - **Engine-Level Guardrails** — Four hook types (Pre/Post LLM/Tool) at every LLM and Tool boundary; the same hooks power PII masking, audit logging, and human-in-the-loop flows.
-- **OpenSpec Workflow** — Every feature shipped through structured proposal → design → specs → implementation → archive (similar to Python PEPs / Kubernetes KEPs / Rust RFCs). 29 ADRs and 100+ archived changes document the architecture.
+- **OpenSpec Workflow** — Every feature shipped through structured proposal → design → specs → implementation → archive (similar to Python PEPs / Kubernetes KEPs / Rust RFCs). 30 ADRs and 100+ archived changes document the architecture.
 
 ---
 
@@ -212,7 +212,7 @@ After `uv pip install -e ".[dev]"`, both commands are available on your `PATH`.
 - **[How-to Guides](docs/how-to/)** — 16 task-oriented recipes (LLM providers, deployment, MCP, A2A, SSO, backups, webhooks, troubleshooting).
 - **[Concepts](docs/concepts/)** — 23 explanatory articles that help you understand Hecate's core ideas before building.
 - **[Reference](docs/reference/)** — REST API, CLI, Graph DSL, plugin manifest, event catalog, extension points, data models.
-- **[Architecture Center](docs/design/)** — 13 architecture deep dives + 29 ADRs + ADR index, plus strategy docs (positioning).
+- **[Architecture Center](docs/design/)** — 13 architecture deep dives + 30 ADRs + ADR index, plus strategy docs (positioning).
 - **[Use Cases](docs/use-cases/)** — end-to-end business scenarios (customer support bot, code review agent, research team).
 - **[Migrations](docs/migrations/)** — schema migration guides (expand-contract pattern, 0.1 → 0.2 upgrade).
 - **[Operations](docs/operations/)** — runbooks for production (health checks, backup, rollback, log analysis, performance).

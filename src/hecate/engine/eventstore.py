@@ -41,6 +41,11 @@ class EventType(StrEnum):
     EVICTION = "EVICTION"
     SUBGRAPH_START = "SUBGRAPH_START"
     SUBGRAPH_END = "SUBGRAPH_END"
+    # 1.3.18 dynamic orchestration — emitted by CoordinatorWorker at the
+    # outer-loop boundaries. Additive, LogPolicy does NOT exclude
+    # these (see ADR-030 §1 for the additive EventType contract).
+    ORCHESTRATOR_DECISION = "ORCHESTRATOR_DECISION"
+    ORCHESTRATOR_EVALUATION = "ORCHESTRATOR_EVALUATION"
 
 
 CURRENT_LOG_SCHEMA_VERSION: int = 2  # events without this marker are non-replayable (values never recorded)

@@ -58,7 +58,7 @@
         "properties": {
           "type": {
             "type": "string",
-            "enum": ["conversation", "tool-call", "condition", "agent", "knowledge-retrieval", "variable-set", "fan-out", "merge", "suggestion"]
+            "enum": ["conversation", "tool-call", "condition", "agent", "knowledge-retrieval", "variable-set", "fan-out", "merge", "suggestion", "coordinator"]
           },
           "config": {
             "type": "object",
@@ -74,6 +74,26 @@
               "top_k": { "type": "integer" },
               "variable_name": { "type": "string" },
               "value": {},
+              "goal": { "type": "string", "description": "High-level goal the coordinator decomposes into a runtime task DAG (coordinator node type)" },
+              "roster": {
+                "type": "array",
+                "description": "Agent roster available for dispatch. Each entry is an object with agent_id plus optional capabilities / model overrides (coordinator node type)",
+                "items": { "type": "object", "required": ["agent_id"], "properties": { "agent_id": { "type": "string" }, "capabilities": { "type": "array", "items": { "type": "string" } }, "model": { "type": "string" } } }
+              },
+              "roster_channel": { "type": "string", "description": "Optional channel name the coordinator reads the roster from at runtime (overrides the static roster when present)" },
+              "planner_model": { "type": "string", "description": "Model used for planner LLM calls (coordinator node type)" },
+              "evaluator_model": { "type": "string", "description": "Model used for evaluator LLM calls; defaults to a small non-thinking model (coordinator node type)" },
+              "budgets": {
+                "type": "object",
+                "description": "Three-axis orchestration budgets (coordinator node type). Values are clamped so the planner-visible limits match enforcement",
+                "properties": {
+                  "max_iterations": { "type": "integer", "minimum": 1, "maximum": 100, "default": 5 },
+                  "max_total_tasks": { "type": "integer", "minimum": 1, "maximum": 50, "default": 6 },
+                  "max_concurrent": { "type": "integer", "minimum": 1, "maximum": 4, "default": 3 },
+                  "stall_limit": { "type": "integer", "minimum": 1, "maximum": 10, "default": 2 },
+                  "token_budget": { "type": "integer", "minimum": 1 }
+                }
+              },
               "agent_id": { "type": "string", "description": "UUID of the agent to invoke (agent node type)" },
               "invocation_mode": { "type": "string", "enum": ["direct", "tool"], "default": "direct", "description": "How the agent is invoked: 'direct' (execute inline via nested graph or port, default) or 'tool' (expose as callable tool via AgentDefinition)" },
               "handoff": {

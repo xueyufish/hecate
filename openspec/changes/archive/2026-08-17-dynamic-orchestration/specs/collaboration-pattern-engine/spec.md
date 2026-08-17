@@ -1,8 +1,5 @@
-# collaboration-pattern-engine Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change p2-collaboration-pattern-selection. Update Purpose after archive.
-## Requirements
 ### Requirement: CollaborationPattern enum
 The engine SHALL define a `CollaborationPattern` StrEnum in `engine/patterns.py` with 7 values: `SEQUENTIAL`, `PARALLEL`, `HANDOFF`, `BROADCAST`, `NEGOTIATION`, `DEBATE`, `DYNAMIC`. Each value maps to a canonical collaboration topology; `DYNAMIC` denotes a runtime-emitted sub-graph produced by a COORDINATOR node.
 
@@ -42,7 +39,7 @@ The system SHALL provide an `infer_pattern(config: GraphConfig) -> Collaboration
 - **THEN** it SHALL return `CollaborationPattern.BROADCAST`
 
 #### Scenario: Negotiation pattern detected
-- **WHEN** `infer_pattern()` receives a GraphConfig with exactly 2 agent nodes, a condition node checking agreement status, a loop edge from the responder back to the proposer, and no COORDINATOR node
+- **WHEN** `infer_pattern()` receives a GraphConfig with exactly 2 agent nodes, a condition node checking agreement status, and a loop edge from the responder back to the proposer and no COORDINATOR node
 - **THEN** it SHALL return `CollaborationPattern.NEGOTIATION`
 
 #### Scenario: Debate pattern detected
@@ -119,5 +116,4 @@ The system SHALL include `negotiation.json` and `debate.json` template files in 
 
 #### Scenario: Debate template in catalog
 - **WHEN** `GET /api/orchestration-templates` is called
-- **THEN** the response SHALL include an entry with `id` "debate"
-
+- **THEN** the response SHALL include an entry with `id` "debate"`

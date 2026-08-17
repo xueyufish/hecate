@@ -100,6 +100,7 @@ Each node has a `type` and a `config` object. The `config` fields vary by type.
 | `suggestion` | Generates opening remarks or follow-up question suggestions. **Forbidden in `task` execution mode.** |
 | `fan-out` | Dispatches multiple parallel branches concurrently (no worker invoked). Must have a reachable `merge` node downstream. |
 | `merge` | Collects results from all branches of a preceding `fan-out` node. Must have an upstream `fan-out` node. |
+| `coordinator` | Dynamic orchestration: turns a goal plus an agent roster into a runtime task DAG via an LLM planner, executes it in an isolated child session (Magentic double-loop with stall detection and replan-with-carryover), and folds outputs through synthesis. See [ADR-032](../design/adr/032-dynamic-orchestration.md). |
 
 ### Common config fields
 
@@ -170,6 +171,40 @@ The `agent` node has two config sections that control how the sub-agent is invok
 | `merge` | `output_channel` | Channel name where aggregated results are written. |
 
 The compiler enforces a structural pairing: every `fan-out` must have at least one reachable `merge` node downstream, and every `merge` must have an upstream `fan-out`.
+
+### `coordinator` — dynamic orchestration
+
+```json
+"orchestrator": {
+  "type": "coordinator",
+  "config": {
+    "goal": "Research three cloud providers and recommend one.",
+    "roster": [
+      { "agent_id": "researcher", "capabilities": ["tool:web_search"] },
+      { "agent_id": "analyst", "model": "gpt-4o-mini" }
+    ],
+    "planner_model": "gpt-4o",
+    "evaluator_model": "gpt-4o-mini",
+    "budgets": { "max_iterations": 5, "stall_limit": 2, "max_total_tasks": 6, "max_concurrent": 3 }
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `goal` | string | The high-level goal the coordinator decomposes into a task DAG. May also be supplied at runtime via the `goal` channel. |
+| `roster` | array | Agents available for dispatch. Each entry: `{agent_id, capabilities?, model?}`. Validated fail-closed before any dispatch (`validate_task_requirements`). |
+| `roster_channel` | string | Optional channel name to read the roster from at runtime (overrides the static `roster`). |
+| `planner_model` | string | Model for planner LLM calls. |
+| `evaluator_model` | string | Model for evaluator LLM calls; defaults to a small non-thinking model. |
+| `budgets` | object | Three-axis budgets, clamped so planner-visible limits match enforcement: `max_iterations` (1-100, default 5), `max_total_tasks` (1-50, default 6), `max_concurrent` (1-4, default 3), `stall_limit` (1-10, default 2), `token_budget` (optional). |
+
+Behavior notes (see [ADR-032](../design/adr/032-dynamic-orchestration.md) for the full contract):
+
+- The planner emits a **suggested** TaskDAG (hint, not contract); a deterministic executor materialises it into a sub-graph. Each iteration appends an `ORCHESTRATOR_DECISION` event to the event log — history is never rewritten.
+- The sub-graph runs in an **isolated child session**: distinct `session_id`, explicit input mapping only, and only declared outputs are written back (the child's `messages` never reach the parent).
+- Budget exhaustion emits an `ORCHESTRATOR_EVALUATION` with an additive `stop_reason` (`token_capped` / `turn_capped` / `loop_capped` / `stall_capped`) plus model-visible guidance, so a capped partial result is never mistaken for a clean completion.
+- `collaboration-pattern` inference classifies any graph containing a `coordinator` node as the `dynamic` pattern; `dynamic` graphs cannot be built statically (`build_graph_from_pattern` raises `NotImplementedError`).
 
 ### `knowledge-retrieval`
 

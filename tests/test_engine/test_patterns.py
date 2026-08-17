@@ -34,11 +34,20 @@ from hecate.engine.types import (
 class TestCollaborationPattern:
     """Tests for the CollaborationPattern enum."""
 
-    def test_has_exactly_six_members(self) -> None:
-        assert len(CollaborationPattern) == 6
+    def test_has_exactly_seven_members(self) -> None:
+        # 1.3.18 — seventh member DYNAMIC joins the six static patterns.
+        assert len(CollaborationPattern) == 7
 
     def test_members_are_expected_values(self) -> None:
-        expected = {"sequential", "parallel", "handoff", "broadcast", "negotiation", "debate"}
+        expected = {
+            "sequential",
+            "parallel",
+            "handoff",
+            "broadcast",
+            "negotiation",
+            "debate",
+            "dynamic",
+        }
         actual = {m.value for m in CollaborationPattern}
         assert actual == expected
 
@@ -54,6 +63,7 @@ class TestCollaborationPattern:
         assert CollaborationPattern.BROADCAST == "broadcast"
         assert CollaborationPattern.NEGOTIATION == "negotiation"
         assert CollaborationPattern.DEBATE == "debate"
+        assert CollaborationPattern.DYNAMIC == "dynamic"
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +142,42 @@ class TestInferPattern:
     def test_empty_graph_returns_none(self) -> None:
         config = GraphConfig(name="empty")
         assert infer_pattern(config) is None
+
+    def test_coordinator_node_classifies_as_dynamic(self) -> None:
+        # 1.3.18 — a COORDINATOR node alone classifies as DYNAMIC, taking
+        # priority over any other structural heuristic.
+        config = GraphConfig(
+            name="dynamic",
+            nodes={
+                "orchestrator": NodeConfig(
+                    id="orchestrator",
+                    type=NodeType.COORDINATOR,
+                    config={"goal": "x", "roster": []},
+                ),
+            },
+            edges=[],
+            state={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+            entry="orchestrator",
+        )
+        assert infer_pattern(config) == CollaborationPattern.DYNAMIC
+
+    def test_coordinator_alongside_other_nodes_still_dynamic(self) -> None:
+        # Even with FAN_OUT present, a COORDINATOR wins.
+        config = GraphConfig(
+            name="mixed",
+            nodes={
+                "orchestrator": NodeConfig(
+                    id="orchestrator",
+                    type=NodeType.COORDINATOR,
+                    config={},
+                ),
+                "fanout": NodeConfig(id="fanout", type=NodeType.FAN_OUT, config={}),
+            },
+            edges=[Edge(source="fanout", target="orchestrator")],
+            state={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+            entry="orchestrator",
+        )
+        assert infer_pattern(config) == CollaborationPattern.DYNAMIC
 
 
 # ---------------------------------------------------------------------------
