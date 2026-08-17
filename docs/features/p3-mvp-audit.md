@@ -1,10 +1,10 @@
 # P3 MVP 审计报告
 
-> **日期**: 2026-08-17
+> **日期**: 2026-08-18
 > **目的**: P3 阶段完成度审计，为 MVP 版本迭代提供决策依据
 > **范围**: P3 Trustworthy 阶段（138 项特性），含源码级实现状态验证
 > **方法**: Feature catalog 分析 + 源码 grep/glob 扫描验证部分实现
-> **最近更新**: 2026-08-17 — Sprint 7 进度：1.3.19 Event-Sourced State ✅（2026-08-15, ADR-030）+ 8.20 Execution Replay ✅（2026-08-16）+ **1.3.18 Dynamic Orchestration ✅（2026-08-17, ADR-032）** 三项 Sprint 7 关键引擎改造已交付；6.27 / 5.9 增强 / 1.3.4 / 1.3.5i E3 / 9.4 增量改造按 2026-08-14 重校准顺序推进。**2026-08-16 插件生态调整**（Agent Plugins 1.0 标准 + 18 平台调研）：新增 P3 两项 **5.5c Agent Plugins 1.0 标准摄入** + **5.13a 插件内容扫描**（自 5.13 拆分），5.5 增 T0 收紧增强；`.hecate-plugin` 收窄为 P 层深度集成格式；12.0 市场重定义、EC1-EC5 冻结、6.41 降级——详见"2026-08-16 插件生态调整"章节
+> **最近更新**: 2026-08-18 — Sprint 7 进度：1.3.19 Event-Sourced State ✅（2026-08-15, ADR-030）+ 8.20 Execution Replay ✅（2026-08-16）+ **1.3.18 Dynamic Orchestration ✅（2026-08-17, ADR-032）** + **5.5c Agent Plugins 1.0 Standard Ingestion ✅（2026-08-18, adapter module + projection + stdio sandbox + skip-and-continue validation, `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`）** 四项 Sprint 7 关键交付。6.27 / 5.9 增强 / 1.3.4 / 1.3.5i E3 / 9.4 增量改造按 2026-08-14 重校准顺序推进。**2026-08-16 插件生态调整**（Agent Plugins 1.0 标准 + 18 平台调研）：新增 P3 两项 **5.5c Agent Plugins 1.0 标准摄入** ✅ **2026-08-18** + **5.13a 插件内容扫描**（自 5.13 拆分；5.5c→5.13a 严格串行，5.13a 仍是摄入管道上线闸门），5.5 增 T0 收紧增强；`.hecate-plugin` 收窄为 P 层深度集成格式；12.0 市场重定义、EC1-EC5 冻结、6.41 降级。**10.2 RBAC 接收 5.5c 推迟项**：`is_platform_admin` 角色 + `plugin:install:platform` 权限串（5.5c v1 用 config allowlist `PLATFORM_PLUGIN_INSTALLERS`）。
 > **2026-08-14 竞品重校准**（docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md）：**Drop 5 项**（7.6a/7.6b/9.2a/6.17/9.8）；**Defer→P5 15 项**（3.1.2-4、3.4.2、3.5.1-3、6.9/6.10/6.12/6.13、1.1.18-20、6.21）；**新增 P3 4 项**（1.3.18 Dynamic Orchestration ✅ 2026-08-17、1.3.19 Event-Sourced State/Log-as-Truth ✅ 2026-08-15、8.20 Run Replay ✅ 2026-08-16、6.27 Browser Automation 自 P4 移入）；**5.9 增强**（Skill Provider Registry，并入而非新建 5.12）。未完成 58 → 40 项（1.3.18+8.20 已完成），Sprint 7 重排，详见"2026-08-14 竞品重校准"章节。
 
 ---
@@ -14,14 +14,14 @@
 | 指标 | 数值 |
 |------|------|
 | P3 总特性数（2026-08-14 重校准 + 2026-08-16 插件生态调整后） | 124 |
-| 已完成 ✅ | **82 (66%)**（+1：1.3.18 Dynamic Orchestration 2026-08-17 交付，ADR-032） |
-| 未完成 | **42 (34%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 2 + 插件生态新增 2（5.5c/5.13a，2026-08-16）） |
-| 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅、Sprint 7 (M7) — 1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ 三项引擎改造已交付 |
+| 已完成 ✅ | **83 (67%)**（+1：5.5c Agent Plugins 1.0 Standard Ingestion 2026-08-18 交付；累计 1.3.18 ✅ 2026-08-17 + 1.3.19 ✅ 2026-08-15 + 8.20 ✅ 2026-08-16 + 5.5c ✅ 2026-08-18） |
+| 未完成 | **41 (33%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 4 + 插件生态新增 2（5.5c ✅ / 5.13a 未完成，2026-08-16）） |
+| 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅、Sprint 7 (M7) — 1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ 四项关键交付 |
 | 部分 Sprint | Sprint 6 (M6) — 约 79% 完成 |
-| 未启动 Sprint | Sprint 7 (M7) — 1.3.19 + 8.20 + 1.3.18 已交付；其余按 2026-08-14 重校准顺序推进 |
-| 发布阻塞项 | 1 项关键 + 2 项强烈建议（1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ 已交付，剩 HITL durable audit + monotonic denial gating） |
+| 未启动 Sprint | Sprint 7 (M7) — 1.3.19 + 8.20 + 1.3.18 + 5.5c 已交付；其余按 2026-08-14 重校准顺序推进 |
+| 发布阻塞项 | 1 项关键 + 2 项强烈建议（1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ 已交付，5.5c 总开关默认关 — 5.13a 是真正上线闸门；剩 HITL durable audit + monotonic denial gating） |
 | 有部分代码 | 2 项已有可观代码但标记为未完成 |
-| 零代码 + 新增 | 35 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 2）+ 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
+| 零代码 + 新增 | 34 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 4）+ 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
 
 ---
 

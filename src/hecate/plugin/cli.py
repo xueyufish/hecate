@@ -232,6 +232,20 @@ def main() -> None:
     uninstall_parser.add_argument("name", help="Plugin name to uninstall")
     uninstall_parser.add_argument("--plugins-dir", default="./plugins", help="Plugins directory")
 
+    agent_install_parser = sub.add_parser("agent-install", help="Install an Agent Plugins 1.0 package (5.5c)")
+    agent_install_parser.add_argument(
+        "--source", required=True, choices=["dir", "git", "zip"], help="Install source type"
+    )
+    agent_install_parser.add_argument("location", help="Source path or git URL")
+    agent_install_parser.add_argument("--ref", help="Git ref (branch/tag) when source=git")
+    agent_install_parser.add_argument("--workspace", help="Target workspace UUID")
+    agent_install_parser.add_argument("--installer", help="Installer identifier (matched against platform allowlist)")
+
+    agent_uninstall_parser = sub.add_parser("agent-uninstall", help="Uninstall an Agent Plugins package by ID (5.5c)")
+    agent_uninstall_parser.add_argument("plugin_id", help="Plugin UUID to uninstall")
+
+    sub.add_parser("agent-list", help="List installed Agent Plugins packages (5.5c)")
+
     args = parser.parse_args()
 
     if args.command == "init":
@@ -274,8 +288,104 @@ def main() -> None:
         else:
             print(f"Plugin not found: {args.name}")  # noqa: T201
             raise SystemExit(1)
+    elif args.command == "agent-install":
+        _run_agent_install(args)
+    elif args.command == "agent-uninstall":
+        _run_agent_uninstall(args)
+    elif args.command == "agent-list":
+        _run_agent_list()
     else:
         parser.print_help()
+
+
+def _run_agent_install(args: object) -> None:
+    """Install an Agent Plugins 1.0 package (feature 5.5c)."""
+    import asyncio
+    import uuid as _uuid
+
+    from hecate.core.config import settings
+    from hecate.core.database import async_session_factory
+    from hecate.services.plugin.service import PluginService
+
+    workspace_id: _uuid.UUID | None = None
+    if getattr(args, "workspace", None):
+        workspace_id = _uuid.UUID(str(args.workspace))
+
+    async def _install() -> object:
+        async with async_session_factory() as session:
+            service = PluginService(session)
+            plugin = await service.install_agent_plugin(
+                source_type=args.source,
+                location=args.location,
+                plugins_dir=settings.PLUGINS_DIR,
+                ref=getattr(args, "ref", None),
+                workspace_id=workspace_id,
+                installer=getattr(args, "installer", None),
+            )
+            await session.commit()
+            return plugin
+
+    try:
+        plugin = asyncio.run(_install())
+    except ValueError as e:
+        print(f"Error: {e}")  # noqa: T201
+        raise SystemExit(1) from e
+
+    skills = plugin.manifest_.get("components", {}).get("skills", [])
+    servers = plugin.manifest_.get("components", {}).get("mcp_servers", [])
+    print(f"Installed Agent Plugins package: {plugin.name} v{plugin.version}")  # noqa: T201
+    print(f"  origin: {plugin.origin}")  # noqa: T201
+    print(f"  skills: {len(skills)}, mcp servers: {len(servers)}")  # noqa: T201
+    for entry in [*skills, *servers]:
+        print(f"  - {entry['name']}: {entry['status']}")  # noqa: T201
+
+
+def _run_agent_uninstall(args: object) -> None:
+    """Uninstall an Agent Plugins package by ID (feature 5.5c)."""
+    import asyncio
+    import uuid as _uuid
+
+    from hecate.core.config import settings
+    from hecate.core.database import async_session_factory
+    from hecate.services.plugin.service import PluginService
+
+    async def _uninstall() -> None:
+        async with async_session_factory() as session:
+            service = PluginService(session)
+            await service.uninstall_agent_plugin(_uuid.UUID(str(args.plugin_id)), settings.PLUGINS_DIR)
+            await session.commit()
+
+    try:
+        asyncio.run(_uninstall())
+    except ValueError as e:
+        print(f"Error: {e}")  # noqa: T201
+        raise SystemExit(1) from e
+    print(f"Uninstalled Agent Plugins package: {args.plugin_id}")  # noqa: T201
+
+
+def _run_agent_list() -> None:
+    """List installed Agent Plugins packages (feature 5.5c)."""
+    import asyncio
+
+    from sqlalchemy import select
+
+    from hecate.core.database import async_session_factory
+    from hecate.models.plugin import PluginModel
+    from hecate.services.plugin.service import AGENT_PLUGIN_TYPE
+
+    async def _list() -> list[object]:
+        async with async_session_factory() as session:
+            result = await session.execute(
+                select(PluginModel).where(
+                    PluginModel.type == AGENT_PLUGIN_TYPE,
+                    PluginModel.deleted_at.is_(None),
+                )
+            )
+            return list(result.scalars().all())
+
+    for plugin in asyncio.run(_list()):
+        scope = str(plugin.workspace_id) if plugin.workspace_id else "platform"
+        print(f"{plugin.id}  {plugin.name} v{plugin.version}  [{plugin.status}]  ({scope})")  # noqa: T201
 
 
 if __name__ == "__main__":

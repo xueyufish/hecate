@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="drawio" version="26.0.0">
   <diagram name="Ecosystem-L2" id="ecosystem-l2">
-    <mxGraphModel dx="3000" dy="2400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="580" math="0" shadow="0">
+    <mxGraphModel dx="3000" dy="2400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="660" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -23,7 +23,7 @@
 
         <!-- ROW 1: INTEGRATION ECOSYSTEM -->
         <mxCell id="r1_c" value="1. Integration Ecosystem" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="55" width="910" height="105" as="geometry" />
+          <mxGeometry x="20" y="55" width="910" height="145" as="geometry" />
         </mxCell>
         <!-- Sub-row 1a -->
         <mxCell id="r1_mcpclient" value="✅ MCP Client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
@@ -52,9 +52,16 @@
           <mxGeometry x="685" y="68" width="225" height="26" as="geometry" />
         </mxCell>
 
+        <mxCell id="r1_plugin155c" value="✅ Agent Plugins 1.0 Ingestion (5.5c, shipped 2026-08-18)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="106" width="455" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="r1_plugin155c_trust" value="✅ Component Trust Dispatch (T4 / T2 / T1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
+          <mxGeometry x="455" y="106" width="455" height="26" as="geometry" />
+        </mxCell>
+
         <!-- ROW 2: PROTOCOL STACK & GROWTH -->
         <mxCell id="r2_c" value="2. Protocol Stack &amp; Growth" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="180" width="910" height="65" as="geometry" />
+          <mxGeometry x="20" y="220" width="910" height="65" as="geometry" />
         </mxCell>
         <!-- 5 × 170 = 850 -->
         <mxCell id="r2_a2a" value="✅ A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">

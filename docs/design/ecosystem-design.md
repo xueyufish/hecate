@@ -1,6 +1,8 @@
 # Ecosystem Design
 
 > Deep dive into Hecate's ecosystem layer: integration protocols, marketplace, partner monetization, agent discovery, community gallery, and cross-surface experience. For a system overview, see [Architecture](architecture.md). For enhancement decisions, see [ADR-027](adr/027-ecosystem-enhancement.md).
+>
+> **2026-08-18 update**: Agent Plugins 1.0 standard ingestion (5.5c) shipped — third-party packages land as atomic units (plugin.json + skills/ + mcp.json) through a single adapter module. Bare-SKILL.md directories (Claude Code ecosystem) install as virtual packages. Component-level trust dispatch (skills → T4, http/sse MCP → T2, stdio MCP → T1 in 9.4c container sandbox) per [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md). 10.2 RBAC enhancement receives the deferred `is_platform_admin` role + `plugin:install:platform` permission string (5.5c v1 uses config allowlist `PLATFORM_PLUGIN_INSTALLERS`). See `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`.
 
 ---
 
@@ -33,7 +35,7 @@ The Ecosystem layer is Hecate's integration and extensibility foundation — con
 | Webhook Notifications | Event-driven HTTP callbacks |
 | Event Dispatcher | Internal event bus |
 | OpenAI-compatible API | REST + WebSocket, `/v1/chat/completions` |
-| Plugin System | 6 plugin types, SPI Core, packaging, signing |
+| Plugin System | **6 plugin types** (5.5 + TP5 developer SDK), SPI Core, packaging, signing; **+ Agent Plugins 1.0 ingestion (5.5c, 2026-08-18)** — third-party packages land as a single atomic manifest, projected into SkillModel + MCPServerRegistry |
 | Asset Marketplace | 6 asset types, semantic discovery, governed catalog |
 
 ---

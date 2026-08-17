@@ -212,6 +212,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.exception("Plugin discovery failed")
 
+    # Agent Plugins 1.0 ingestion (5.5c): replay MCP registrations for
+    # enabled packages and clean orphaned snapshot directories.
+    try:
+        from hecate.services.plugin.service import PluginService
+
+        async with async_session_factory() as plugin_session:
+            plugin_service = PluginService(plugin_session)
+            replayed = await plugin_service.replay_agent_plugin_mcp()
+            orphans = await plugin_service.cleanup_orphan_agent_plugin_dirs(_settings.PLUGINS_DIR)
+            await plugin_session.commit()
+            if replayed or orphans:
+                logger.info(
+                    "Agent Plugins maintenance: %d packages replayed, %d orphan dirs removed",
+                    replayed,
+                    orphans,
+                )
+    except Exception:
+        logger.exception("Agent Plugins maintenance failed")
+
     # Initialize IM channels (Feishu, Slack) — register adapters and
     # spin up the asynchronous MessageBus used by the webhook endpoint to
     # decouple webhook ACK from Agent execution (design.md D5).

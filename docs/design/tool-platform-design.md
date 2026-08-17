@@ -1,6 +1,8 @@
 # Tool Platform Design
 
 > Deep dive into Hecate's tool ecosystem: MCP integration, plugin architecture, tool operations, security, observability, and AI-native tools. For a system overview, see [Architecture](architecture.md). For the architecture decisions behind these enhancements, see [ADR-023](adr/023-tool-platform-enhancement.md).
+>
+> **2026-08-18 update**: SKILL.md-aware ingestion added — `agent-plugins-ingestion` capability (5.5c) ingests Agent Plugins 1.0 packages as a single atomic unit (plugin.json + skills/ + mcp.json), projects `source="plugin"` rows into SkillModel and `<plugin>__<server>` MCP registrations, and enforces component-level trust dispatch (skills → T4, http/sse MCP → T2, stdio MCP → T1 in 9.4c container sandbox). See [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md) and the implementation change at `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`. Bare-SKILL.md directories (Claude Code ecosystem) are accepted as virtual packages.
 
 ---
 
@@ -19,7 +21,7 @@ The Tool Platform follows the same **composition architecture** as the Ops Cente
 ![Tool Platform L2](images/tool-platform-l2.png)
 
 1. **MCP & Tool System** — Runtime layer: MCP Client (consume external tools), MCP Server (expose Hecate), Tool Registry (routing), built-in tools, execution sandbox, tool policy
-2. **Skill & Plugin Ecosystem** — Agent tool system, search tools, skill versioning, plugin packaging, plugin type taxonomy + SDK, plugin security & signing
+2. **Skill & Plugin Ecosystem** — Agent tool system, search tools, skill versioning, plugin packaging, plugin type taxonomy + SDK, plugin security & signing. **2026-08-18**: third-party packages land through the Agent Plugins 1.0 standard (5.5c) — single adapter module `plugin/agent_plugins.py` ingests directory / git URL / zip sources, validates closed manifests offline, and projects skills+MCP entries into the platform. `.hecate-plugin` bundles are now P-tier deep-integration only (catalog notes on 5.5/5.5b).
 3. **AI-Native Tools** — Browser/computer-use, DataAgent (NL2SQL), VibeCoding, AI Office, tool auto-creation
 4. **Tool Operations & Security** — Tool gating, risk authorization, composable policy pipeline, per-tool auth scope, session events + tool matchers, tool caching, tool execution analytics
 5. **Downstream** — Tool execution flows to Agent Engine via EnginePort

@@ -253,6 +253,18 @@ async def update_skill(
             },
         )
 
+    if skill.source == "plugin":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "PLUGIN_MANAGED",
+                    "message": "Plugin-derived skills are managed by the owning plugin's lifecycle",
+                    "details": None,
+                }
+            },
+        )
+
     update_data = data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         if field == "metadata":
@@ -291,6 +303,18 @@ async def delete_skill(
                 "error": {
                     "code": "FORBIDDEN",
                     "message": "Cannot delete system skills",
+                    "details": None,
+                }
+            },
+        )
+
+    if skill.source == "plugin":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "PLUGIN_MANAGED",
+                    "message": "Plugin-derived skills are managed by the owning plugin's lifecycle",
                     "details": None,
                 }
             },
