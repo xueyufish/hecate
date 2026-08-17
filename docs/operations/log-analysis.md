@@ -110,7 +110,7 @@ TRACING_ENABLED=true
 TRACE_DB_EXPORT_ENABLED=true
 ```
 
-With DB export on, the `HecateTraceSpanProcessor` writes spans to PostgreSQL, where you can query them via the `/api/traces` endpoint or directly. See the [Traces](../reference/rest-api.md#traces-and-monitoring) route group.
+With DB export on, the `HecateTraceSpanProcessor` writes spans to PostgreSQL, where you can query them via the `/api/traces` endpoint or directly. See the [Traces](../reference/rest-api.md#ops-center-monitoring-and-cost) route group.
 
 ### Inspecting a trace
 

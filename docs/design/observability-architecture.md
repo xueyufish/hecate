@@ -309,7 +309,7 @@ When a rule matches, the audit event is tagged with a `SecurityFinding` and forw
 
 After 30 days in Postgres, audit logs are moved to MinIO/S3 by `archiver.py`. The on-disk format is gzip-compressed JSONL with a daily partition.
 
-SIEM integration (`siem-security-pipeline`) ships events to Splunk / Datadog / Elastic in real-time over webhook. See [Security Architecture](security-architecture.md#siem-integration).
+SIEM integration (`siem-security-pipeline`) ships events to Splunk / Datadog / Elastic in real-time over webhook. See [Security Architecture](security-architecture.md#siem-export-pipeline-87).
 
 ---
 

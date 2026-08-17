@@ -170,6 +170,6 @@ The empty-tab behavior is intentional — rendering an empty "nothing to show" p
 
 - [Concepts: Sessions](../concepts/sessions.md) — session lifecycle, the materialized cache, log-derived recovery.
 - [Concepts: Engine](../concepts/engine.md) — channel system, supersteps, the `fold_session` path.
-- [Engine Design](../design/engine-design.md#execution-replay) — how the replay view fits into the runtime.
+- [Engine Design](../design/engine-design.md#recovery-flow-cache--tail-replay) — how the replay view fits into the runtime.
 - [Monitor with OpenTelemetry and Prometheus](monitor-opentelemetry.md) — how OTel traces surface in the replay's `trace_enrichment` block (timing, usage).
 - [Troubleshooting guide](troubleshoot.md) — the replay view is the first place to look for any unexpected agent behavior.

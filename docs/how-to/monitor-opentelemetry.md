@@ -348,7 +348,7 @@ The traces you see in Tempo/Jaeger and the rows in the Execution Replay tab are 
 |---|---|
 | Replay timeline segments (`trace_id`) | `Event.trace_id` (correlated via OTel span context when configured, or generated per-invoke otherwise) |
 | Replay `trace_enrichment` block (status, usage, `total_latency_ms`, `ttft_ms`, span name) | `TraceModel.metadata_["otel.trace_id"]` → span tree JOIN |
-| LLM/tool spans with `ttft_ms`, token counts, `gen_ai.request.model`, `gen_ai.tool.name` | OTel semantic-conventions attributes on `llm:` / `tool:` spans (see [Engine Design §Execution Replay](../design/engine-design.md#execution-replay)) |
+| LLM/tool spans with `ttft_ms`, token counts, `gen_ai.request.model`, `gen_ai.tool.name` | OTel semantic-conventions attributes on `llm:` / `tool:` spans (see [Engine Design §Execution Replay](../design/engine-design.md#recovery-flow-cache--tail-replay)) |
 
 **Two practical implications:**
 

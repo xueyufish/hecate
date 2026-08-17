@@ -189,7 +189,7 @@ Summary of security features Hecate ships today:
 | **Egress** | Plugin permission system | [Extension SPI](extension-architecture.md#permissions-model) |
 | **Signing** | AgentCard ES256 + JWS + RFC 8785 | [A2A Architecture](a2a-architecture.md#trust-model) |
 | **Backup** | SHA256 checksum + verification | [Backup & Recovery](backup-recovery-architecture.md#verification) |
-| **Self-hosting** | Default (data never leaves your network) | [Positioning](positioning.md#hsecate-vs-salesforce-agentforce) |
+| **Self-hosting** | Default (data never leaves your network) | [Positioning](positioning.md#hecate-vs-salesforce-agentforce) |
 
 ---
 

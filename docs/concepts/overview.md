@@ -79,16 +79,16 @@ Hecate comprises ten modules organized in a layered dependency hierarchy:
 10. **Ecosystem** — cross-cutting: MCP, A2A, webhooks, OpenAI-compatible API
 
 The 10 modules map to design docs in `docs/design/`:
-- Agent Engine → [Engine Design](engine-design.md)
-- Agent Studio → [Visual Canvas Architecture](visual-canvas-architecture.md)
-- Knowledge & Memory → [Knowledge & Memory Design](knowledge-memory-design.md)
-- Tool Platform → [Tool Platform Design](tool-platform-design.md)
-- Model Hub → [Model Hub Design](model-hub-design.md)
-- Security → [Security Architecture](security-architecture.md) + [Threat Model](threat-model.md)
-- Enterprise Foundation → [Multi-Tenancy Architecture](multi-tenancy-architecture.md) + [Enterprise Foundation Design](enterprise-foundation-design.md)
-- Ops Center → [Observability Architecture](observability-architecture.md) + [Ops Center Design](ops-center-design.md)
-- Access Channel → [Access Channel Design](access-channel-design.md)
-- Ecosystem → [A2A Architecture](a2a-architecture.md) + [Ecosystem Design](ecosystem-design.md)
+- Agent Engine → [Engine Design](../design/engine-design.md)
+- Agent Studio → [Visual Canvas Architecture](../design/visual-canvas-architecture.md)
+- Knowledge & Memory → [Knowledge & Memory Design](../design/knowledge-memory-design.md)
+- Tool Platform → [Tool Platform Design](../design/tool-platform-design.md)
+- Model Hub → [Model Hub Design](../design/model-hub-design.md)
+- Security → [Security Architecture](../design/security-architecture.md) + [Threat Model](../design/threat-model.md)
+- Enterprise Foundation → [Multi-Tenancy Architecture](../design/multi-tenancy-architecture.md) + [Enterprise Foundation Design](../design/enterprise-foundation-design.md)
+- Ops Center → [Observability Architecture](../design/observability-architecture.md) + [Ops Center Design](../design/ops-center-design.md)
+- Access Channel → [Access Channel Design](../design/access-channel-design.md)
+- Ecosystem → [A2A Architecture](../design/a2a-architecture.md) + [Ecosystem Design](../design/ecosystem-design.md)
 
 ---
 
