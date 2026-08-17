@@ -314,7 +314,7 @@ Per-workspace quotas are enforced at the API gateway and at the engine:
 
 Limits hit return HTTP 429 with `Retry-After` and the quota name in the response body.
 
-Organization-level quotas (aggregate across workspaces) are also supported — see the [Budget API](../reference/rest-api.md#budget).
+Organization-level quotas (aggregate across workspaces) are also supported — see the [Budget API](../reference/rest-api.md#ops-center-monitoring-and-cost).
 
 ---
 

@@ -12,7 +12,7 @@ Enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform.
 
 Hecate is an enterprise-grade Agent platform with a self-developed Pregel execution runtime. It speaks MCP and A2A natively, integrates 100+ LLMs, and exposes an OpenAI-compatible API so existing tools integrate without change. Multi-agent orchestration, engine-level guardrails, and Docker-isolated sandbox execution are first-class concerns.
 
-> ⚠️ **Hecate is alpha software.** APIs and config schemas may change before 1.0. Pin your version (`hecate==0.1.x`). Report issues → [GitHub Issues](https://github.com/xueyufish/hecate/issues).
+> ⚠️ **Hecate is alpha software.** APIs and config schemas may change before 1.0. Pin your version (`hecate==0.1.x`).
 
 ## At a glance
 

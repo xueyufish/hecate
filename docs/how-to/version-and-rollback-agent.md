@@ -232,4 +232,4 @@ The same lifecycle applies to **Agents** via `/api/agents/{id}/versions` — age
 - [Core Concepts: ResourceVersion](../design/concepts.md) — the version entity definition
 - [Deploy to Production](deploy-production.md#deploy-a-new-version) — how versioning fits blue-green deployment
 - [Audit trail](../concepts/guardrails.md) — where the version audit events are written
-- [Engine Design: Versioning](../design/concepts.md#versionable-resources) — the unified versioning mechanism
+- [Engine Design](../design/engine-design.md) — the unified versioning mechanism

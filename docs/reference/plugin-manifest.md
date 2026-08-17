@@ -2,7 +2,7 @@
 
 The `PluginManifest` is the **contract** between a plugin and Hecate's `PluginRegistry`. Every plugin must declare its metadata in this format. This document is the canonical reference for plugin authors.
 
-For the conceptual model, see [Plugins concept](../concepts/plugins.md). For implementation details, see [Extension SPI & Plugin Architecture](../design/extension-architecture.md). For the API reference, see [REST API](rest-api.md#plugins).
+For the conceptual model, see [Plugins concept](../concepts/plugins.md). For implementation details, see [Extension SPI & Plugin Architecture](../design/extension-architecture.md). For the API reference, see [REST API](rest-api.md).
 
 ---
 
@@ -407,4 +407,4 @@ hecate plugin hub install company-lookup
 - [Extension Points reference](extension-points.md) — the ABC interface signatures
 - [How-to: Develop custom extensions](../how-to/develop-extensions.md) — practical recipe
 - [Skills concept](../concepts/skills.md) — comparison with skills
-- [REST API reference](rest-api.md#plugins) — plugin management API
+- [REST API reference](rest-api.md) — plugin management API

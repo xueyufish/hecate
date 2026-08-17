@@ -94,7 +94,7 @@ Every Hecate deployment is assembled from the same components. The topology dete
 
 **Key requirement**: Switch `SESSION_STATE_STORE_BACKEND` from `memory` to `redis` so both app instances share session state. Without Redis, a blue-green switch loses in-flight sessions.
 
-**When to use**: Production team that needs zero-downtime deploys but doesn't need Kubernetes-level complexity. See [Deploy to Production — Blue-green](../how-to/deploy-production.md#blue-green-docker-compose).
+**When to use**: Production team that needs zero-downtime deploys but doesn't need Kubernetes-level complexity. See [Deploy to Production — Blue-green](../how-to/deploy-production.md#blue-green-deployment-zero-downtime).
 
 ---
 
@@ -150,7 +150,7 @@ Every Hecate deployment is assembled from the same components. The topology dete
 | **MinIO** | 1 CPU, 1 GB, 50 GB | 2 CPU, 4 GB, 200 GB | 4 CPU, 8 GB, distributed |
 | **Total host** | 4 CPU, 8 GB | 16+ CPU, 40+ GB | 32+ CPU, 80+ GB |
 
-> These are starting points. Actual sizing depends on: conversation length, knowledge base size, concurrent sessions, and LLM call frequency. Monitor [agent health](../how-to/monitor-opentelemetry.md#part-5--agent-health-monitoring) and scale up the bottleneck component first.
+> These are starting points. Actual sizing depends on: conversation length, knowledge base size, concurrent sessions, and LLM call frequency. Monitor [agent health](../how-to/monitor-opentelemetry.md#part-5-agent-health-monitoring) and scale up the bottleneck component first.
 
 ---
 
