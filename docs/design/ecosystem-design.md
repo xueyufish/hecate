@@ -340,4 +340,4 @@ Agents built with any framework (Hecate native, LangGraph, CrewAI, AutoGen, cust
 - [ADR-016: Platform SPI Architecture](adr/016-platform-spi-architecture.md) — Plugin SPI foundation
 - [Access Channel Design](access-channel-design.md) — Multi-channel architecture (EC5 Cross-Surface integration)
 - [Ops Center Design](ops-center-design.md) — Marketplace analytics integration
-- [ARD Specification](https://ard-spec.org/) — Open standard reference
+- [ARD Specification Reference](https://github.com/orgs/agentic-resource-discovery) — Open standard reference (14.1 EC1 implementation target). Note: link-check configuration ignores this URL until the working group publishes the canonical site.

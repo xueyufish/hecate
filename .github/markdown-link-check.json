@@ -5,6 +5,12 @@
     },
     {
       "pattern": "^https?://127\\.0\\.0\\.1"
+    },
+    {
+      "pattern": "^https://github\\.com/orgs/agentic-resource-discovery"
+    },
+    {
+      "pattern": "^https://ard-spec\\.org/"
     }
   ],
   "replacementPatterns": [
