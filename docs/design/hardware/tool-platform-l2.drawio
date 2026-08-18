@@ -102,7 +102,7 @@
         <mxCell id="r2b_stdio" value="✅ Stdio Sandbox (9.4c) + Bare-SKILL.md Virtual Pkg" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
           <mxGeometry x="0" y="56" width="455" height="22" as="geometry" />
         </mxCell>
-        <mxCell id="r2b_scan" value="📋 Content Scanning (5.13a, strict serial after 5.5c)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2b_c">
+        <mxCell id="r2b_scan" value="✅ Content Scanning (5.13a, shipped 2026-08-18)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
           <mxGeometry x="465" y="56" width="445" height="22" as="geometry" />
         </mxCell>
 

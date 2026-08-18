@@ -180,10 +180,10 @@ class Settings(BaseSettings):
     PLUGINS_DIR: str = "./plugins"
     HOT_RELOAD: bool = False
 
-    # Agent Plugins 1.0 ingestion (feature 5.5c) — master switch defaults off
-    # until content scanning (5.13a) ships; it doubles as the emergency
-    # kill-switch afterwards.
-    AGENT_PLUGINS_INGESTION_ENABLED: bool = False
+    # Agent Plugins 1.0 ingestion (feature 5.5c) — go-live gate satisfied by
+    # content scanning (5.13a): defaults on, doubles as the emergency
+    # kill-switch.
+    AGENT_PLUGINS_INGESTION_ENABLED: bool = True
     # Users allowed to install packages containing stdio MCP entries
     # (platform-level installs). Empty list means nobody may install stdio.
     PLATFORM_PLUGIN_INSTALLERS: list[str] = []
@@ -192,6 +192,12 @@ class Settings(BaseSettings):
     # Size caps for materialized package snapshots (MB).
     AGENT_PLUGIN_MAX_PACKAGE_MB: int = 100
     AGENT_PLUGIN_MAX_WORKSPACE_MB: int = 500
+    # Plugin content scanning (feature 5.13a): severity threshold for the
+    # block verdict ("high" | "medium"); findings below it warn.
+    AGENT_PLUGIN_SCAN_BLOCK_AT: str = "high"
+    # Per-file text scan cap (MB) — oversized text produces a finding
+    # instead of being silently skipped.
+    AGENT_PLUGIN_SCAN_FILE_CAP_MB: int = 1
     # Container image for sandboxed stdio MCP execution (needs Node+Python).
     AGENT_PLUGIN_RUNNER_IMAGE: str = "hecate-plugin-runner:latest"
     # SaaS deployment mode: stdio MCP entries are skipped with a warning.

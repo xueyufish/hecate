@@ -137,3 +137,38 @@ class SecurityFindingService:
             return await _do(session)
         async with async_session_factory() as sess:
             return await _do(sess)
+
+    async def acknowledge(
+        self,
+        finding_id: uuid.UUID,
+        ack_user: str,
+        comment: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> SecurityFindingReadSchema | None:
+        """Mark a finding acknowledged (plugin scan warn-tier suppression).
+
+        Plugin content scans key acknowledgments on (content hash, rule id):
+        an acknowledged warn-or-lower finding is suppressed in later rescans
+        of identical content; any content change invalidates it. Findings at
+        or above the blocking threshold are never suppressible.
+
+        Returns ``None`` if no finding with that ID exists.
+        """
+
+        async def _do(session: AsyncSession) -> SecurityFindingReadSchema | None:
+            finding = await session.get(SecurityFindingModel, finding_id)
+            if finding is None or finding.deleted:
+                return None
+            updated_metadata = dict(finding.metadata_)
+            updated_metadata["acknowledged"] = True
+            updated_metadata["ack_user"] = ack_user
+            updated_metadata["ack_comment"] = comment
+            updated_metadata["ack_at"] = datetime.now(UTC).isoformat()
+            finding.metadata_ = updated_metadata
+            await session.flush()
+            return SecurityFindingReadSchema.model_validate(finding)
+
+        if session is not None:
+            return await _do(session)
+        async with async_session_factory() as sess:
+            return await _do(sess)

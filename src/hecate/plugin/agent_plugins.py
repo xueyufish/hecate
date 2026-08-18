@@ -289,6 +289,18 @@ def materialize_from_zip(zip_path: Path, dest: Path) -> SourceDescriptor:
     return SourceDescriptor(type="zip", location=str(zip_path))
 
 
+def _clean_git_env() -> dict[str, str]:
+    """Environment for git subprocesses without inherited GIT_* variables.
+
+    When the platform itself runs inside a git hook context, git exports
+    absolute GIT_DIR/GIT_INDEX_FILE to child processes; a clone inheriting
+    them would operate on the outer repository instead of the destination.
+    """
+    import os
+
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def materialize_from_git(url: str, dest: Path, ref: str | None = None) -> SourceDescriptor:
     """Clone a public git repository (no credentials in v1) and record the
     ref + commit SHA + content digest provenance triple."""
@@ -296,23 +308,26 @@ def materialize_from_git(url: str, dest: Path, ref: str | None = None) -> Source
     if ref:
         cmd += ["--branch", ref]
     cmd += [url, str(dest)]
+    env = _clean_git_env()
     try:
         subprocess.run(  # noqa: S603
             cmd,
             capture_output=True,
             timeout=GIT_TIMEOUT_SECONDS,
             check=True,
+            env=env,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         raise AgentPluginValidationError(f"git clone failed for {url}: {e}") from e
 
-    sha_proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"],  # noqa: S603, S607
+    sha_proc = subprocess.run(  # noqa: S603
+        ["git", "rev-parse", "HEAD"],  # noqa: S607
         cwd=dest,
         capture_output=True,
         text=True,
         timeout=GIT_TIMEOUT_SECONDS,
         check=False,
+        env=env,
     )
     commit_sha = sha_proc.stdout.strip() if sha_proc.returncode == 0 else None
 

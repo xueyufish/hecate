@@ -172,17 +172,23 @@ class TestMaterialization:
             materialize_from_zip(bad, tmp_path / "dest")
 
     def test_git_clone_records_pin_triple(self, tmp_path: Path) -> None:
+        import os
         import subprocess
 
+        # Strip leaked GIT_* env (e.g. when pytest itself runs inside a git
+        # hook: absolute GIT_DIR/GIT_INDEX_FILE would redirect these fixture
+        # git operations into the outer repository's index and hooks).
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "PRE_COMMIT"))}
         repo = tmp_path / "repo"
         repo.mkdir()
         self._make_package(repo)
-        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-        subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
-        subprocess.run(
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=env)  # noqa: S603
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, env=env)  # noqa: S603
+        subprocess.run(  # noqa: S603
             ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "x"],
             cwd=repo,
             check=True,
+            env=env,
         )
         dest = tmp_path / "dest"
         origin = materialize_from_git(f"file://{repo}", dest)

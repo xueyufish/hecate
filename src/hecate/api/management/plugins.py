@@ -14,7 +14,7 @@ from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
 from hecate.core.deps_workspace import get_auth_context
 from hecate.models.plugin import PluginModel
-from hecate.services.plugin.service import PluginService
+from hecate.services.plugin.service import AGENT_PLUGIN_TYPE, PluginService
 
 router = APIRouter(prefix="/api/plugins", tags=["plugins"])
 
@@ -65,6 +65,8 @@ async def install_agent_plugin(
             detail="Agent Plugins ingestion is disabled",
         )
 
+    from hecate.services.plugin.service import ScanBlockedError
+
     service = PluginService(db)
     try:
         plugin = await service.install_agent_plugin(
@@ -77,6 +79,11 @@ async def install_agent_plugin(
         )
     except FeatureDisabledError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except ScanBlockedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": str(e), "findings": e.findings},
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     return PluginReadSchema.model_validate(plugin)
@@ -109,12 +116,48 @@ async def enable_plugin(
     plugin_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> PluginReadSchema:
+    from hecate.services.plugin.service import ScanBlockedError
+
     service = PluginService(db)
     try:
         plugin = await service.enable_plugin(plugin_id)
+    except ScanBlockedError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"message": str(e), "findings": e.findings},
+        ) from e
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     return PluginReadSchema.model_validate(plugin)
+
+
+@router.get("/{plugin_id}/scan")
+async def get_plugin_scan(
+    plugin_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+) -> dict[str, Any]:
+    """Return the package's current content-scan state (5.13a)."""
+    service = PluginService(db)
+    plugin = await service.get_plugin(plugin_id)
+    if plugin is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plugin not found")
+    if plugin.type != AGENT_PLUGIN_TYPE:
+        return {
+            "plugin_id": str(plugin_id),
+            "applicable": False,
+            "reason": "content scanning applies to agent-plugin packages only",
+        }
+    scan_result = plugin.scan_result or {}
+    return {
+        "plugin_id": str(plugin_id),
+        "applicable": True,
+        "verdict": scan_result.get("verdict"),
+        "findings": scan_result.get("findings", []),
+        "scanner_version": scan_result.get("scanner_version"),
+        "scanned_at": scan_result.get("scanned_at"),
+        "acked_suppressed": scan_result.get("acked_suppressed", 0),
+        "note": None if scan_result else "not yet scanned; a rescan runs on next enable",
+    }
 
 
 @router.post("/{plugin_id}/disable")

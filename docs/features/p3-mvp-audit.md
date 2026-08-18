@@ -4,7 +4,7 @@
 > **目的**: P3 阶段完成度审计，为 MVP 版本迭代提供决策依据
 > **范围**: P3 Trustworthy 阶段（138 项特性），含源码级实现状态验证
 > **方法**: Feature catalog 分析 + 源码 grep/glob 扫描验证部分实现
-> **最近更新**: 2026-08-18 — Sprint 7 进度：1.3.19 Event-Sourced State ✅（2026-08-15, ADR-030）+ 8.20 Execution Replay ✅（2026-08-16）+ **1.3.18 Dynamic Orchestration ✅（2026-08-17, ADR-032）** + **5.5c Agent Plugins 1.0 Standard Ingestion ✅（2026-08-18, adapter module + projection + stdio sandbox + skip-and-continue validation, `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`）** 四项 Sprint 7 关键交付。6.27 / 5.9 增强 / 1.3.4 / 1.3.5i E3 / 9.4 增量改造按 2026-08-14 重校准顺序推进。**2026-08-16 插件生态调整**（Agent Plugins 1.0 标准 + 18 平台调研）：新增 P3 两项 **5.5c Agent Plugins 1.0 标准摄入** ✅ **2026-08-18** + **5.13a 插件内容扫描**（自 5.13 拆分；5.5c→5.13a 严格串行，5.13a 仍是摄入管道上线闸门），5.5 增 T0 收紧增强；`.hecate-plugin` 收窄为 P 层深度集成格式；12.0 市场重定义、EC1-EC5 冻结、6.41 降级。**10.2 RBAC 接收 5.5c 推迟项**：`is_platform_admin` 角色 + `plugin:install:platform` 权限串（5.5c v1 用 config allowlist `PLATFORM_PLUGIN_INSTALLERS`）。
+> **最近更新**: 2026-08-18 — Sprint 7 进度：1.3.19 Event-Sourced State ✅（2026-08-15, ADR-030）+ 8.20 Execution Replay ✅（2026-08-16）+ **1.3.18 Dynamic Orchestration ✅（2026-08-17, ADR-032）** + **5.5c Agent Plugins 1.0 Standard Ingestion ✅（2026-08-18, adapter module + projection + stdio sandbox + skip-and-continue validation, `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`）** + **5.13a Plugin Content Scanning ✅（2026-08-18, 规则引擎扫描器 + fail-closed 裁决 + enable 复扫 + ack 抑制 + 扫描 API, `openspec/changes/archive/2026-08-18-plugin-content-scanning/`）** 五项 Sprint 7 关键交付——插件生态 go-live（`AGENT_PLUGINS_INGESTION_ENABLED` 默认开）。6.27 / 5.9 增强 / 1.3.4 / 1.3.5i E3 / 9.4 增量改造按 2026-08-14 重校准顺序推进。**2026-08-16 插件生态调整**（Agent Plugins 1.0 标准 + 18 平台调研）：新增 P3 两项 **5.5c Agent Plugins 1.0 标准摄入** ✅ **2026-08-18** + **5.13a 插件内容扫描** ✅ **2026-08-18**（自 5.13 拆分；原"5.5c→5.13a 严格串行闸门"已于 2026-08-18 满足），5.5 增 T0 收紧增强；`.hecate-plugin` 收窄为 P 层深度集成格式；12.0 市场重定义、EC1-EC5 冻结、6.41 降级。**10.2 RBAC 接收 5.5c 推迟项**：`is_platform_admin` 角色 + `plugin:install:platform` 权限串（5.5c v1 用 config allowlist `PLATFORM_PLUGIN_INSTALLERS`）。
 > **2026-08-14 竞品重校准**（docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md）：**Drop 5 项**（7.6a/7.6b/9.2a/6.17/9.8）；**Defer→P5 15 项**（3.1.2-4、3.4.2、3.5.1-3、6.9/6.10/6.12/6.13、1.1.18-20、6.21）；**新增 P3 4 项**（1.3.18 Dynamic Orchestration ✅ 2026-08-17、1.3.19 Event-Sourced State/Log-as-Truth ✅ 2026-08-15、8.20 Run Replay ✅ 2026-08-16、6.27 Browser Automation 自 P4 移入）；**5.9 增强**（Skill Provider Registry，并入而非新建 5.12）。未完成 58 → 40 项（1.3.18+8.20 已完成），Sprint 7 重排，详见"2026-08-14 竞品重校准"章节。
 
 ---
@@ -14,12 +14,12 @@
 | 指标 | 数值 |
 |------|------|
 | P3 总特性数（2026-08-14 重校准 + 2026-08-16 插件生态调整后） | 124 |
-| 已完成 ✅ | **83 (67%)**（+1：5.5c Agent Plugins 1.0 Standard Ingestion 2026-08-18 交付；累计 1.3.18 ✅ 2026-08-17 + 1.3.19 ✅ 2026-08-15 + 8.20 ✅ 2026-08-16 + 5.5c ✅ 2026-08-18） |
-| 未完成 | **41 (33%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 4 + 插件生态新增 2（5.5c ✅ / 5.13a 未完成，2026-08-16）） |
-| 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅、Sprint 7 (M7) — 1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ 四项关键交付 |
+| 已完成 ✅ | **84 (68%)**（+1：5.13a Plugin Content Scanning 2026-08-18 交付；累计 1.3.18 ✅ 2026-08-17 + 1.3.19 ✅ 2026-08-15 + 8.20 ✅ 2026-08-16 + 5.5c ✅ 2026-08-18 + 5.13a ✅ 2026-08-18） |
+| 未完成 | **40 (32%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 5 + 插件生态新增 2（5.5c ✅ / 5.13a ✅，2026-08-16 新增 / 2026-08-18 双双交付）） |
+| 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅、Sprint 7 (M7) — 1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ + 5.13a ✅ 五项关键交付 |
 | 部分 Sprint | Sprint 6 (M6) — 约 79% 完成 |
-| 未启动 Sprint | Sprint 7 (M7) — 1.3.19 + 8.20 + 1.3.18 + 5.5c 已交付；其余按 2026-08-14 重校准顺序推进 |
-| 发布阻塞项 | 1 项关键 + 2 项强烈建议（1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ 已交付，5.5c 总开关默认关 — 5.13a 是真正上线闸门；剩 HITL durable audit + monotonic denial gating） |
+| 未启动 Sprint | Sprint 7 (M7) — 1.3.19 + 8.20 + 1.3.18 + 5.5c + 5.13a 已交付；其余按 2026-08-14 重校准顺序推进 |
+| 发布阻塞项 | 1 项关键 + 2 项强烈建议（1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ + 5.13a ✅ 已交付，总开关默认开、插件生态已 go-live；剩 HITL durable audit + monotonic denial gating） |
 | 有部分代码 | 2 项已有可观代码但标记为未完成 |
 | 零代码 + 新增 | 34 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 4）+ 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
 
@@ -326,7 +326,7 @@
 | # | 特性 | 工作量 | 依赖 |
 |---|------|--------|------|
 | 5.5c | Agent Plugins 1.0 Standard Ingestion — 标准声明式包（plugin.json + skills/ + mcp.json）摄入管道：目录/git URL/zip 安装、封闭清单校验、固定位置发现（skip-and-continue + 路径遏制）、SKILL.md→SkillModel 导入（source/origin + pin-by-hash）、mcp.json→MCPServerRegistry、组件级信任分派（skills→T4 & http-MCP→T2 = workspace admin；stdio = org admin 专属，SaaS 配置开关默认拒绝；自托管 stdio 强制 9.4c 容器沙箱执行——2026-08-16 决策）、裸 SKILL.md 目录兼容 | L | 5.5 ✅ + 5.4c ✅ + 5.9 ✅ |
-| 5.13a | Plugin Content Scanning（自 5.13 拆分，提前至 P3）— T4 内容安装前扫描：prompt 注入检测（含不可见 Unicode）、secret 检测、allowed-tools 审计；fail-closed（block/warn/allow 分级 + org 阈值）、enable 复扫、结果 API + Ops Center 展示。v1 纯规则引擎，LLM 复审 v2 可选（2026-08-16 决策） | M | 5.5c |
+| 5.13a ✅ | Plugin Content Scanning（自 5.13 拆分，提前至 P3）— T4 内容安装前扫描：prompt 注入检测（含不可见 Unicode）、secret 检测、allowed-tools 审计；fail-closed（block/warn/allow 分级 + org 阈值）、enable 复扫、结果 API + Ops Center 展示。v1 纯规则引擎，LLM 复审 v2 可选（2026-08-16 决策）。✅ **2026-08-18 交付**：`plugin/content_scanner.py`（16 规则 + Unicode 阈值 + NFKC/有界解码层 + 角色×规则矩阵）+ install/enable fail-closed 接线 + SecurityFindingModel 投影/ack + `GET /api/plugins/{id}/scan`；总开关默认翻转开 | M | 5.5c ✅ |
 
 ---
 
@@ -375,7 +375,7 @@
 
 ### 排序与依赖
 
-5.5c 与 1.3.19 等引擎改造**无依赖、可并行**；5.5c → 5.13a 严格串行（扫描是摄入管道上线闸门）。stdio 组件信任分派为业界无先例决策（调研中唯一超前项）——SaaS 默认拒绝走配置开关，运行半年拿数据再议放开。
+5.5c 与 1.3.19 等引擎改造**无依赖、可并行**；5.5c → 5.13a 严格串行（扫描是摄入管道上线闸门——已于 2026-08-18 满足，两项均交付）。stdio 组件信任分派为业界无先例决策（调研中唯一超前项）——SaaS 默认拒绝走配置开关，运行半年拿数据再议放开。
 
 ### 风险
 
@@ -500,7 +500,7 @@
 > 原 Sprint 7 计划（Advanced RAG 全家桶 / Knowledge Graph / Canvas 增强 / AIP 全家桶）已按竞品重校准缩减：KG 三项 + OCR/Table/Layout + Canvas 三项 + Model UI 四项 → P5 deferred；7.6a/b、6.17 dropped。替换为引擎架构 + 竞品硬缺口 4 项（1.3.19 → 8.20 → 1.3.18 → 6.27 + 5.9 增强），详见"2026-08-14 竞品重校准"章节。
 
 - Engine Architecture: Event-Sourced State (1.3.19 Log-as-Truth) + Skill Provider Registry (5.9 增强)
-- Plugin Ecosystem: Agent Plugins 1.0 Ingestion (5.5c) + Content Scanning (5.13a) + 5.5 T0 收紧（2026-08-16 新增；与 1.3.19 无依赖可并行；5.5c → 5.13a 串行）
+- Plugin Ecosystem: Agent Plugins 1.0 Ingestion (5.5c ✅) + Content Scanning (5.13a ✅) + 5.5 T0 收紧（2026-08-16 新增；与 1.3.19 无依赖可并行；5.5c → 5.13a 串行，2026-08-18 双双交付）
 - Competitive Gaps: Dynamic Orchestration (1.3.18) + Run Replay Phase 1 (8.20) + Browser Automation (6.27)
 - Advanced RAG (rescoped): Reranking / Incremental / Knowledge Quality
 - Multi-Channel: 11.2 简化版 ✅（Wave 1 收尾,2026-08-16）+ 11.8 Intent Routing + 11.16/11.17
