@@ -31,6 +31,12 @@ class ServerInfo:
     workspace_id: str | None = None
     """Owning workspace ID for multi-tenant isolation."""
 
+    headers: dict[str, str] | None = None
+    """Optional HTTP headers declared at registration (e.g. from mcp.json)."""
+
+    args: list[str] | None = None
+    """Optional argv for stdio servers (e.g. sandbox wrapper arguments)."""
+
     registered_at: float = field(default_factory=time.monotonic)
     """Monotonic timestamp of registration."""
 
@@ -74,6 +80,8 @@ class MCPServerRegistry:
         endpoint: str,
         transport: str = "http",
         workspace_id: str | None = None,
+        headers: dict[str, str] | None = None,
+        args: list[str] | None = None,
     ) -> ServerInfo:
         """Register an MCP server (no connection created).
 
@@ -82,6 +90,8 @@ class MCPServerRegistry:
             endpoint: Server endpoint URL or command.
             transport: Transport type ('http' or 'stdio').
             workspace_id: Optional workspace ID for multi-tenant isolation.
+            headers: Optional HTTP headers stored alongside the registration.
+            args: Optional argv for stdio servers.
 
         Returns:
             The registered ServerInfo.
@@ -91,6 +101,8 @@ class MCPServerRegistry:
             endpoint=endpoint,
             transport=transport,
             workspace_id=workspace_id,
+            headers=headers,
+            args=args,
         )
         self._servers[name] = info
         logger.info("MCP server '%s' registered (%s)", name, transport)

@@ -85,6 +85,8 @@ class MCPClientManager:
         endpoint: str,
         transport: str = "http",
         workspace_id: str | None = None,
+        headers: dict[str, str] | None = None,
+        args: list[str] | None = None,
     ) -> ServerInfo:
         """Register an MCP server without connecting (lazy connection).
 
@@ -93,11 +95,13 @@ class MCPClientManager:
             endpoint: Server endpoint URL or command.
             transport: Transport type ('http' or 'stdio').
             workspace_id: Optional workspace ID for multi-tenant isolation.
+            headers: Optional HTTP headers stored with the registration.
+            args: Optional argv for stdio servers.
 
         Returns:
             Registered ServerInfo.
         """
-        info = self._registry.register(name, endpoint, transport, workspace_id)
+        info = self._registry.register(name, endpoint, transport, workspace_id, headers, args)
         self._circuit_breakers[name] = CircuitBreaker(
             failure_threshold=self._circuit_breaker_threshold,
             recovery_timeout=self._circuit_breaker_recovery_timeout,
@@ -271,7 +275,7 @@ class MCPClientManager:
             if info.transport == "http":
                 await client.connect_http(info.endpoint)
             elif info.transport == "stdio":
-                await client.connect_stdio(command=info.endpoint, args=[])
+                await client.connect_stdio(command=info.endpoint, args=info.args or [])
             else:
                 raise MCPConnectionError(
                     MCPErrorCode.MCP_CONNECTION_FAILED,

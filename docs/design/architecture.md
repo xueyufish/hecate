@@ -1,6 +1,7 @@
 # Hecate Architecture
 
 > **Version**: v2.0 | **Status**: Active
+> **2026-08-18**: Agent Plugins 1.0 standard ingestion (5.5c) shipped — `agent-plugins-ingestion` capability ingests third-party packages (plugin.json + skills/ + mcp.json) as a single atomic unit, projects into SkillModel + MCPServerRegistry, and enforces component-level trust dispatch (skills → T4, http/sse MCP → T2, stdio MCP → T1 in 9.4c container sandbox) per [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md). Implementation change at `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`.
 
 Hecate is an open-source, self-hosted, model-agnostic, MCP-first enterprise Agent platform. This document describes the system's architecture, design principles, and component relationships. For implementation details, see the [Engine Design](engine-design.md) and [Core Concepts](concepts.md) documents.
 

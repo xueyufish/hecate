@@ -2,6 +2,8 @@
 
 Deep-dive design document for Hecate's two-tier extension system: **11 Core extension points** at the engine layer + **4 SPI extension points** at the platform layer. For the API reference, see [Extension Points](../reference/extension-points.md). For the decision rationale, see [ADR-016](adr/016-platform-spi-architecture.md).
 
+> **2026-08-18**: The 8 plug-in-type ABCs (`ToolPlugin` / `TriggerPlugin` / `ExtensionPlugin` / `ModelPlugin` / channel/evaluator/auth/secret providers) remain the **P-tier deep-integration** extension surface. The ecosystem-facing third-party ingestion path is now **Agent Plugins 1.0** (feature 5.5c, shipped 2026-08-18 via `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`) — single adapter module `plugin/agent_plugins.py` ingests `plugin.json` + `skills/` + `mcp.json` as one atomic unit, projects skills as `SkillModel` rows with `source="plugin"` and MCP servers under `<plugin>__<server>` names. Component-level trust dispatch per [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md): skills (T4) + http/sse MCP (T2) install by workspace admin; stdio MCP (T1) only by platform installer via config allowlist, executed in Docker sandbox via `plugin/stdio_sandbox.py`. Bare-SKILL.md directories (Claude Code ecosystem) install as virtual packages.
+
 This document is for **implementers** — engineers writing custom extensions, third-party plugin authors, or contributors evolving the extension surfaces.
 
 ---

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,28 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.plugin import PluginModel
+from hecate.models.skill import SkillModel
+from hecate.plugin.agent_plugins import (
+    AgentPluginValidationError,
+    ComponentInventory,
+    McpServerSpec,
+    ScanStage,
+    check_size_caps,
+    compute_tree_digest,
+    detect_package_kind,
+    discover_skills,
+    materialize_from_dir,
+    materialize_from_git,
+    materialize_from_zip,
+    parse_skill_candidate,
+    read_manifest,
+    read_mcp_json,
+    relocate_snapshot,
+    staging_dir,
+    tree_size_bytes,
+    validate_mcp_json,
+    validate_plugin_json,
+)
 from hecate.plugin.config import validate_config
 from hecate.plugin.loader import (
     discover_plugins,
@@ -21,6 +44,13 @@ from hecate.plugin.loader import (
 from hecate.plugin.manifest import PluginManifest
 
 logger = logging.getLogger(__name__)
+
+AGENT_PLUGIN_TYPE = "agent-plugin"
+AGENT_PLUGINS_SUBDIR = "agent-plugins"
+
+
+class FeatureDisabledError(ValueError):
+    """Raised when the Agent Plugins ingestion switch is off."""
 
 
 class PluginService:
@@ -75,6 +105,8 @@ class PluginService:
                 transport="http",
                 workspace_id=str(plugin.workspace_id) if plugin.workspace_id else None,
             )
+        elif plugin.type == AGENT_PLUGIN_TYPE:
+            await self._project_agent_plugin_mcp(plugin, register=True)
 
         return plugin
 
@@ -92,6 +124,8 @@ class PluginService:
 
             manager = get_mcp_manager()
             manager.unregister_server(plugin.name)
+        elif plugin.type == AGENT_PLUGIN_TYPE:
+            await self._project_agent_plugin_mcp(plugin, register=False)
 
         return plugin
 
@@ -225,3 +259,459 @@ class PluginService:
         _uninstall(plugin.name, Path(plugins_dir))
         plugin.deleted_at = __import__("datetime").datetime.now(__import__("datetime").UTC)
         await self._db.flush()
+
+    # ------------------------------------------------------------------
+    # Agent Plugins 1.0 ingestion (feature 5.5c)
+    # ------------------------------------------------------------------
+
+    def _agent_plugins_root(self, plugins_dir: str | Path) -> Path:
+        return Path(plugins_dir) / AGENT_PLUGINS_SUBDIR
+
+    async def install_agent_plugin(
+        self,
+        source_type: str,
+        location: str,
+        plugins_dir: str | Path,
+        ref: str | None = None,
+        workspace_id: uuid.UUID | None = None,
+        installer: str | None = None,
+        max_package_mb: int | None = None,
+        max_workspace_mb: int | None = None,
+        ingestion_enabled: bool | None = None,
+        platform_installers: list[str] | None = None,
+        saas_mode: bool | None = None,
+    ) -> PluginModel:
+        """Install an Agent Plugins 1.0 package from dir/git/zip source.
+
+        Runs the full pipeline: master switch → materialize → closed-manifest
+        validation → path containment → size caps → component discovery →
+        trust dispatch → scan slot (no-op) → transactional persistence.
+        Component-level failures skip-and-continue; package-level failures
+        raise and leave no trace (staging directory removed).
+        """
+        from hecate.core.config import settings
+
+        if ingestion_enabled is None:
+            ingestion_enabled = settings.AGENT_PLUGINS_INGESTION_ENABLED
+        if not ingestion_enabled:
+            msg = "Agent Plugins ingestion is disabled (AGENT_PLUGINS_INGESTION_ENABLED)"
+            raise FeatureDisabledError(msg)
+        if platform_installers is None:
+            platform_installers = settings.PLATFORM_PLUGIN_INSTALLERS
+        if saas_mode is None:
+            saas_mode = settings.SAAS_MODE
+        if max_package_mb is None:
+            max_package_mb = settings.AGENT_PLUGIN_MAX_PACKAGE_MB
+        if max_workspace_mb is None:
+            max_workspace_mb = settings.AGENT_PLUGIN_MAX_WORKSPACE_MB
+
+        root = self._agent_plugins_root(plugins_dir)
+        staging = staging_dir(root, "pending")
+
+        try:
+            # --- Materialize (source-specific) ---
+            if source_type == "dir":
+                descriptor = materialize_from_dir(Path(location), staging)
+                package_root = staging
+            elif source_type == "zip":
+                descriptor = materialize_from_zip(Path(location), staging)
+                package_root = staging
+            elif source_type == "git":
+                descriptor = materialize_from_git(location, staging, ref=ref)
+                from hecate.plugin.agent_plugins import _locate_package_root
+
+                package_root = _locate_package_root(staging)
+            else:  # pragma: no cover - guarded by API schema
+                msg = f"Unsupported source type {source_type!r}"
+                raise AgentPluginValidationError(msg)
+
+            # --- Classify + validate manifest ---
+            kind = detect_package_kind(package_root)
+            warnings: list[str] = []
+            if kind == "agent-plugin":
+                result = validate_plugin_json(read_manifest(package_root))
+                warnings = list(result.warnings)
+                name = result.manifest["name"]
+                schema_version = result.schema_version
+                manifest_json = dict(result.manifest)
+            else:
+                # Virtual package: identity synthesized from directory name.
+                name = package_root.name
+                schema_version = "1.0.0"
+                manifest_json = {"name": name, "virtual": True}
+
+            if descriptor.type != "git":
+                # git materialization already computed the digest; dir/zip do it here
+                descriptor.content_digest = compute_tree_digest(package_root)
+
+            # --- Size caps (workspace aggregate) ---
+            workspace_usage = await self._workspace_agent_plugin_usage(plugins_dir, workspace_id)
+            check_size_caps(
+                package_root,
+                max_package_bytes=max_package_mb * 1024 * 1024,
+                workspace_usage_bytes=workspace_usage,
+                max_workspace_bytes=max_workspace_mb * 1024 * 1024,
+            )
+
+            # --- Reinstall / collision policy (design D9) ---
+            existing = await self._find_agent_plugin(name, workspace_id)
+            if existing is not None:
+                existing_origin = existing.origin or ""
+                same_origin = existing_origin.startswith(f"{descriptor.type}:{descriptor.location}")
+                if not same_origin:
+                    msg = (
+                        f"Package name {name!r} already installed from a different "
+                        f"origin ({existing_origin.split(':')[1] if ':' in existing_origin else existing_origin!r})"
+                    )
+                    raise AgentPluginValidationError(msg)
+
+            # --- Component discovery ---
+            inventory = ComponentInventory()
+            discovered = discover_skills(package_root)
+            candidates = []
+            for d in discovered:
+                try:
+                    candidates.append((d, parse_skill_candidate(d)))
+                except ValueError as e:
+                    warnings.append(f"skill {d.dir_name!r}: {e}")
+                    inventory.add_skill(d.dir_name, "skipped", str(e))
+
+            # Cross-origin collision: plugin skill name vs existing non-plugin skill
+            if candidates:
+                names = [c.name for _, c in candidates]
+                collisions = await self._existing_skill_names(
+                    names, workspace_id, exclude_plugin_id=existing.id if existing else None
+                )
+                if collisions:
+                    msg = f"Skill name collision with existing skills: {sorted(collisions)}"
+                    raise AgentPluginValidationError(msg)
+
+            # --- mcp.json translation ---
+            mcp_outcome = None
+            mcp_specs: list[McpServerSpec] = []
+            if kind == "agent-plugin":
+                mcp_data = read_mcp_json(package_root)
+                if mcp_data is not None:
+                    mcp_outcome = validate_mcp_json(mcp_data, schema_version)
+                    mcp_specs = mcp_outcome.servers
+
+            # --- Trust dispatch (design D5) ---
+            stdio_allowed = (
+                workspace_id is None and installer is not None and installer in platform_installers and not saas_mode
+            )
+            for skill_dir, _candidate in candidates:
+                inventory.add_skill(skill_dir.dir_name, "imported")
+            for spec in mcp_specs:
+                if spec.transport == "http":
+                    inventory.add_mcp_server(
+                        spec.server_name,
+                        "registered",
+                    )
+                elif spec.transport == "stdio":
+                    if stdio_allowed:
+                        inventory.add_mcp_server(spec.server_name, "registered")
+                    else:
+                        reason = (
+                            "SaaS mode: stdio entries skipped"
+                            if saas_mode
+                            else "stdio requires platform installer (config allowlist)"
+                        )
+                        inventory.add_mcp_server(spec.server_name, "skipped", reason)
+            if mcp_outcome is not None:
+                warnings.extend(mcp_outcome.warnings)
+                if mcp_outcome.disabled_reason:
+                    warnings.append(mcp_outcome.disabled_reason)
+
+            # --- Scan slot (no-op until 5.13a) ---
+            scan = ScanStage().scan(package_root)
+
+            # --- Persist (single transaction; upsert semantics) ---
+            origin_str = descriptor.to_origin()
+            if existing is not None:
+                plugin = existing
+                await self._delete_plugin_skills(plugin.id)
+                plugin.version = str(manifest_json.get("version", "0.0.0"))
+                plugin.status = "installed"
+                plugin.origin = origin_str
+                plugin.content_hash = descriptor.content_digest
+                plugin.scan_result = None
+            else:
+                plugin = PluginModel(
+                    name=name,
+                    type=AGENT_PLUGIN_TYPE,
+                    version=str(manifest_json.get("version", "0.0.0")),
+                    status="installed",
+                    entry="",
+                    workspace_id=workspace_id,
+                    origin=origin_str,
+                    content_hash=descriptor.content_digest,
+                    scan_result=None,
+                )
+                self._db.add(plugin)
+            await self._db.flush()
+
+            plugin.manifest_ = {
+                **manifest_json,
+                "kind": kind,
+                "components": {
+                    "skills": inventory.skills,
+                    "mcp_servers": self._mcp_inventory_entries(mcp_specs, stdio_allowed, mcp_outcome),
+                },
+                "warnings": warnings,
+                "virtual": kind == "virtual",
+            }
+            if scan is not None:
+                plugin.scan_result = {
+                    "verdict": scan.verdict,
+                    "findings": scan.findings,
+                    "scanner_version": scan.scanner_version,
+                }
+            await self._db.flush()
+
+            # --- Import skills ---
+            skill_workspace = workspace_id or uuid.UUID(int=0)
+            for _skill_dir, candidate in candidates:
+                allowed = candidate.extra.get("allowed-tools") or []
+                metadata = dict(candidate.extra.get("metadata") or {})
+                if "license" in candidate.extra:
+                    metadata["license"] = candidate.extra["license"]
+                if "compatibility" in candidate.extra:
+                    metadata["compatibility"] = candidate.extra["compatibility"]
+                skill = SkillModel(
+                    workspace_id=skill_workspace,
+                    name=candidate.name,
+                    description=candidate.description,
+                    source="plugin",
+                    instructions=candidate.instructions,
+                    allowed_tools=list(allowed) if isinstance(allowed, list) else [allowed],
+                    metadata_=metadata,
+                    origin=origin_str,
+                    plugin_id=plugin.id,
+                )
+                self._db.add(skill)
+            await self._db.flush()
+
+            # --- Commit snapshot to its managed home (dir+row pairing) ---
+            final_dir = root / name
+            if final_dir.exists():
+                shutil.rmtree(final_dir)
+            relocate_snapshot(package_root, final_dir)
+            if staging != package_root and staging.exists():
+                shutil.rmtree(staging, ignore_errors=True)
+
+            logger.info(
+                "Installed Agent Plugins package %r (%d skills, %d mcp servers)",
+                name,
+                len(candidates),
+                len(inventory.mcp_servers),
+            )
+            return plugin
+        except Exception:
+            shutil.rmtree(staging, ignore_errors=True)
+            raise
+
+    def _mcp_inventory_entries(
+        self,
+        specs: list[McpServerSpec],
+        stdio_allowed: bool,  # noqa: FBT001
+        outcome: Any,
+    ) -> list[dict[str, Any]]:
+        """Build MCP component entries carrying the data needed for
+        enable-time projection (registration name, endpoint, transport)."""
+        entries: list[dict[str, Any]] = []
+        for spec in specs:
+            entry: dict[str, Any] = {
+                "name": spec.server_name,
+                "transport": spec.transport,
+                "endpoint": spec.endpoint,
+            }
+            if spec.transport == "http":
+                entry["status"] = "registered"
+                entry["headers"] = spec.headers
+            elif stdio_allowed:
+                entry["status"] = "registered"
+                entry.update({"args": spec.args, "env": spec.env, "cwd": spec.cwd})
+            else:
+                entry["status"] = "skipped"
+                entry["reason"] = "stdio requires platform installer"
+            entries.append(entry)
+        if outcome is not None and getattr(outcome, "disabled_reason", None):
+            entries.append({"name": "*", "status": "disabled", "reason": outcome.disabled_reason})
+        return entries
+
+    async def _find_agent_plugin(self, name: str, workspace_id: uuid.UUID | None) -> PluginModel | None:
+        stmt = select(PluginModel).where(
+            PluginModel.name == name,
+            PluginModel.type == AGENT_PLUGIN_TYPE,
+            PluginModel.deleted_at.is_(None),
+        )
+        if workspace_id is None:
+            stmt = stmt.where(PluginModel.workspace_id.is_(None))
+        else:
+            stmt = stmt.where(PluginModel.workspace_id == workspace_id)
+        result = await self._db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def _existing_skill_names(
+        self,
+        names: list[str],
+        workspace_id: uuid.UUID | None,
+        exclude_plugin_id: uuid.UUID | None,
+    ) -> list[str]:
+        """Non-plugin skills (or other plugins' skills) colliding on name."""
+        stmt = select(SkillModel.name).where(
+            SkillModel.name.in_(names),
+            SkillModel.deleted_at.is_(None),
+        )
+        if workspace_id is None:
+            stmt = stmt.where(SkillModel.workspace_id == uuid.UUID(int=0))
+        else:
+            stmt = stmt.where(SkillModel.workspace_id.in_([workspace_id, uuid.UUID(int=0)]))
+        if exclude_plugin_id is not None:
+            stmt = stmt.where(SkillModel.plugin_id.is_not(exclude_plugin_id))
+        else:
+            stmt = stmt.where(SkillModel.plugin_id.is_(None))
+        result = await self._db.execute(stmt)
+        return [r[0] for r in result.all()]
+
+    async def _delete_plugin_skills(self, plugin_id: uuid.UUID) -> None:
+        stmt = select(SkillModel).where(SkillModel.plugin_id == plugin_id)
+        result = await self._db.execute(stmt)
+        for skill in result.scalars().all():
+            await self._db.delete(skill)
+        await self._db.flush()
+
+    async def _workspace_agent_plugin_usage(self, plugins_dir: str | Path, workspace_id: uuid.UUID | None) -> int:
+        """Aggregate on-disk size of installed agent-plugin packages in scope."""
+        root = self._agent_plugins_root(plugins_dir)
+        stmt = select(PluginModel.name).where(
+            PluginModel.type == AGENT_PLUGIN_TYPE,
+            PluginModel.deleted_at.is_(None),
+        )
+        if workspace_id is None:
+            stmt = stmt.where(PluginModel.workspace_id.is_(None))
+        else:
+            stmt = stmt.where(PluginModel.workspace_id == workspace_id)
+        result = await self._db.execute(stmt)
+        usage = 0
+        for (name,) in result.all():
+            pkg_dir = root / name
+            if pkg_dir.is_dir():
+                usage += tree_size_bytes(pkg_dir)
+        return usage
+
+    async def uninstall_agent_plugin(self, plugin_id: uuid.UUID, plugins_dir: str | Path) -> None:
+        """Uninstall an agent-plugin package: delete skills, unregister MCP,
+        soft-delete the row, remove the directory — one transaction; a failure
+        at any step rolls the database changes back to the savepoint."""
+        plugin = await self.get_plugin(plugin_id)
+        if plugin is None or plugin.type != AGENT_PLUGIN_TYPE:
+            msg = f"Agent plugin {plugin_id} not found"
+            raise ValueError(msg)
+
+        async with self._db.begin_nested():
+            await self._delete_plugin_skills(plugin.id)
+            await self._project_agent_plugin_mcp(plugin, register=False)
+            import datetime as _dt
+
+            plugin.deleted_at = _dt.datetime.now(_dt.UTC)
+            await self._db.flush()
+
+            pkg_dir = self._agent_plugins_root(plugins_dir) / plugin.name
+            if pkg_dir.exists():
+                shutil.rmtree(pkg_dir)  # failure rolls back to the savepoint
+
+    async def _project_agent_plugin_mcp(
+        self,
+        plugin: PluginModel,
+        register: bool,  # noqa: FBT001
+    ) -> None:
+        """Register/unregister manifest-carried MCP servers (design D3).
+
+        http/sse entries register directly; stdio entries register through
+        the sandboxed docker wrapper (fail-closed on policy failure).
+        """
+        components = (plugin.manifest_ or {}).get("components", {})
+        servers = components.get("mcp_servers", [])
+        active = [s for s in servers if s.get("status") == "registered"]
+        if not active:
+            return
+
+        from hecate.api.management.mcp import get_mcp_manager
+
+        manager = get_mcp_manager()
+        ws = str(plugin.workspace_id) if plugin.workspace_id else None
+        for server in active:
+            full_name = f"{plugin.name}__{server['name']}"
+            if not register:
+                manager.unregister_server(full_name)
+                continue
+            if server.get("transport") == "http":
+                manager.register_server(
+                    name=full_name,
+                    endpoint=server["endpoint"],
+                    transport="http",
+                    workspace_id=ws,
+                    headers=server.get("headers") or None,
+                )
+            elif server.get("transport") == "stdio":
+                endpoint, args = self._stdio_sandbox_argv(plugin.name, server)
+                manager.register_server(
+                    name=full_name,
+                    endpoint=endpoint,
+                    transport="stdio",
+                    workspace_id=ws,
+                    args=args,
+                )
+
+    @staticmethod
+    def _stdio_sandbox_argv(plugin_name: str, server: dict[str, Any]) -> tuple[str, list[str]]:
+        """Build the fail-closed sandbox wrapper for a stdio entry."""
+        from hecate.core.config import settings
+        from hecate.plugin.stdio_sandbox import build_sandbox_command
+
+        try:
+            return build_sandbox_command(
+                plugin_name,
+                server,
+                settings.PLUGINS_DIR,
+                settings.AGENT_PLUGIN_RUNNER_IMAGE,
+                settings.AGENT_PLUGIN_STDIO_COMMAND_ALLOWLIST,
+            )
+        except ValueError as e:
+            # fail-closed: policy failure denies execution (Codex 0.147 pattern)
+            logger.error("stdio sandbox denied for %s/%s: %s", plugin_name, server.get("name"), e)
+            raise
+
+    async def replay_agent_plugin_mcp(self) -> int:
+        """Startup replay: re-register MCP servers for enabled packages."""
+        stmt = select(PluginModel).where(
+            PluginModel.type == AGENT_PLUGIN_TYPE,
+            PluginModel.status == "enabled",
+            PluginModel.deleted_at.is_(None),
+        )
+        result = await self._db.execute(stmt)
+        count = 0
+        for plugin in result.scalars().all():
+            await self._project_agent_plugin_mcp(plugin, register=True)
+            count += 1
+        return count
+
+    async def cleanup_orphan_agent_plugin_dirs(self, plugins_dir: str | Path) -> int:
+        """Remove managed package directories without a matching row."""
+        root = self._agent_plugins_root(plugins_dir)
+        if not root.is_dir():
+            return 0
+        stmt = select(PluginModel.name).where(
+            PluginModel.type == AGENT_PLUGIN_TYPE,
+            PluginModel.deleted_at.is_(None),
+        )
+        result = await self._db.execute(stmt)
+        known = {name for (name,) in result.all()}
+        removed = 0
+        for child in root.iterdir():
+            if child.is_dir() and not child.name.startswith(".") and child.name not in known:
+                shutil.rmtree(child)
+                removed += 1
+                logger.info("Removed orphan agent-plugin directory %s", child)
+        return removed

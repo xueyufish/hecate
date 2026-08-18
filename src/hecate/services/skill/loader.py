@@ -11,10 +11,11 @@ import logging
 import uuid
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.agent import AgentModel
+from hecate.models.plugin import PluginModel
 from hecate.models.skill import SkillModel
 
 logger = logging.getLogger(__name__)
@@ -119,28 +120,50 @@ class SkillLoader:
         return result.scalar_one_or_none()
 
     async def _query_auto_load_skills(self, workspace_id: UUID) -> list[SkillModel]:
-        """Query all skills with auto_load=True in workspace."""
+        """Query all skills with auto_load=True in workspace.
+
+        Plugin-derived skills load only while their owning package is
+        enabled (the package enable bit is the single source of truth).
+        """
         result = await self._db.execute(
-            select(SkillModel).where(
+            select(SkillModel)
+            .outerjoin(PluginModel, SkillModel.plugin_id == PluginModel.id)
+            .where(
                 SkillModel.workspace_id == workspace_id,
                 SkillModel.auto_load.is_(True),
                 ~SkillModel.deleted,
+                self._plugin_enabled_condition(),
             )
         )
         return list(result.scalars().all())
+
+    @staticmethod
+    def _plugin_enabled_condition():
+        """Plugin-sourced skills visible only when their package is enabled."""
+        return or_(
+            SkillModel.plugin_id.is_(None),
+            (PluginModel.status == "enabled") & PluginModel.deleted_at.is_(None),
+        )
 
     async def _load_skills_by_names(
         self,
         names: list[str],
         workspace_id: UUID,
     ) -> list[SkillModel]:
-        """Load skills by name within workspace (including system skills)."""
+        """Load skills by name within workspace (including system skills).
+
+        Plugin-derived skills are skipped (like missing skills) when their
+        owning package is disabled or soft-deleted.
+        """
         zero_uuid = uuid.UUID(int=0)
         result = await self._db.execute(
-            select(SkillModel).where(
+            select(SkillModel)
+            .outerjoin(PluginModel, SkillModel.plugin_id == PluginModel.id)
+            .where(
                 SkillModel.name.in_(names),
                 SkillModel.workspace_id.in_([workspace_id, zero_uuid]),
                 ~SkillModel.deleted,
+                self._plugin_enabled_condition(),
             )
         )
         return list(result.scalars().all())

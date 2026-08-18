@@ -44,6 +44,7 @@ from hecate.models.message import (
     MessageModel,
     MessageReadSchema,
 )
+from hecate.models.plugin import PluginModel
 from hecate.models.session import (
     SessionModel,
     SessionReadSchema,
@@ -649,6 +650,73 @@ class TestSkillModel:
                 source="system",
                 instructions="test",
             )
+
+    def test_skill_plugin_source_rejected(self) -> None:
+        """source='plugin' is reserved for the ingestion pipeline."""
+        with pytest.raises(ValidationError, match="reserved for package ingestion"):
+            SkillCreateSchema(
+                name="plugin-skill",
+                description="desc",
+                source="plugin",
+                instructions="test",
+            )
+
+    @pytest.mark.asyncio
+    async def test_skill_provenance_fields(self, db_session: AsyncSession) -> None:
+        """origin and plugin_id default to None and persist when set."""
+        skill = SkillModel(
+            name="plugin-skill",
+            description="desc",
+            source="plugin",
+            instructions="body",
+        )
+        db_session.add(skill)
+        await db_session.flush()
+        assert skill.origin is None
+        assert skill.plugin_id is None
+
+        plugin = PluginModel(name="pkg", type="agent-plugin", version="1.0.0")
+        db_session.add(plugin)
+        await db_session.flush()
+        skill.origin = "dir:/tmp/pkg"
+        skill.plugin_id = plugin.id
+        await db_session.flush()
+        assert skill.origin == "dir:/tmp/pkg"
+        assert skill.plugin_id == plugin.id
+
+
+class TestPluginModelProvenance:
+    """Verify Plugin ORM provenance columns for Agent Plugins ingestion."""
+
+    @pytest.mark.asyncio
+    async def test_plugin_provenance_defaults(self, db_session: AsyncSession) -> None:
+        """origin/content_hash/scan_result default to None on creation."""
+        plugin = PluginModel(name="pkg", type="agent-plugin", version="1.0.0")
+        db_session.add(plugin)
+        await db_session.flush()
+        assert plugin.origin is None
+        assert plugin.content_hash is None
+        assert plugin.scan_result is None
+
+    @pytest.mark.asyncio
+    async def test_plugin_provenance_roundtrip(self, db_session: AsyncSession) -> None:
+        """Provenance values persist and reload through the ReadSchema."""
+        plugin = PluginModel(
+            name="pkg2",
+            type="agent-plugin",
+            version="2.0.0",
+            origin="git:https://example.com/repo@abc123",
+            content_hash="sha256:deadbeef",
+        )
+        db_session.add(plugin)
+        await db_session.flush()
+
+        from hecate.api.management.plugins import PluginReadSchema
+
+        read = PluginReadSchema.model_validate(plugin)
+        assert read.origin == "git:https://example.com/repo@abc123"
+        assert read.content_hash == "sha256:deadbeef"
+        assert read.scan_result is None
 
 
 class TestCheckpointModel:

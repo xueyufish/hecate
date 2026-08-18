@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: Create skill via API
-The system SHALL provide a `POST /api/skills` endpoint that accepts a JSON body with name, description, source, instructions, and optional fields, creates a `SkillModel` record, and returns the created skill.
+The system SHALL provide a `POST /api/skills` endpoint that accepts a JSON body with name, description, source, instructions, and optional fields, creates a `SkillModel` record, and returns the created skill. The `SkillModel` SHALL support the source values `system`, `user`, `project`, and `plugin`, and SHALL carry nullable provenance fields `origin` (string) and `plugin_id` (UUID, set only for `source="plugin"` rows). This endpoint SHALL accept only the user-facing values (`system`, `user`, `project`); `plugin` is reserved for the ingestion pipeline. Responses SHALL include the `origin` and `plugin_id` fields (null for non-plugin skills).
 
 #### Scenario: Create skill with all fields
 - **WHEN** `POST /api/skills` is called with `{"name": "code-review", "description": "...", "source": "user", "instructions": "..."}`
@@ -14,6 +14,10 @@ The system SHALL provide a `POST /api/skills` endpoint that accepts a JSON body 
 #### Scenario: Invalid source value
 - **WHEN** `POST /api/skills` is called with `source="invalid"`
 - **THEN** the API SHALL return 422 Validation Error
+
+#### Scenario: Plugin source rejected on manual create
+- **WHEN** `POST /api/skills` is called with `source="plugin"`
+- **THEN** the API SHALL return 422 Validation Error indicating `plugin` is reserved for package ingestion
 
 ### Requirement: Update skill via API
 The system SHALL provide a `PUT /api/skills/{id}` endpoint that accepts a JSON body with optional fields to update, modifies the `SkillModel` record, and returns the updated skill.
@@ -81,3 +85,20 @@ The existing `GET /api/skills` endpoint SHALL filter results by the authenticate
 #### Scenario: System skills visible to all workspaces
 - **WHEN** `GET /api/skills` is called by any user
 - **THEN** skills with `workspace_id=00000000` (system skills) SHALL also be included in results
+
+## ADDED Requirements
+
+### Requirement: Plugin-derived skills are lifecycle-managed
+Skills with `source="plugin"` SHALL be readable through the skill list and detail endpoints with their provenance fields (`origin`, `plugin_id`) visible. Update and delete operations on a plugin-derived skill via the skill API SHALL be rejected with 409 Conflict directing the caller to the owning plugin's lifecycle (enable/disable/uninstall); these rows are managed exclusively by the ingestion pipeline.
+
+#### Scenario: List includes plugin-derived skills
+- **WHEN** `GET /api/skills` is called in a workspace with an installed agent-plugin package
+- **THEN** the imported skills appear with `source="plugin"` and their `origin` and `plugin_id` populated
+
+#### Scenario: Update plugin-derived skill rejected
+- **WHEN** `PUT /api/skills/{id}` is called for a skill with `source="plugin"`
+- **THEN** the API SHALL return 409 Conflict without modifying the skill
+
+#### Scenario: Delete plugin-derived skill rejected
+- **WHEN** `DELETE /api/skills/{id}` is called for a skill with `source="plugin"`
+- **THEN** the API SHALL return 409 Conflict without deleting the skill

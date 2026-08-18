@@ -11,8 +11,8 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
-from pydantic import ConfigDict, Field
-from sqlalchemy import Boolean, Index, Integer, String
+from pydantic import ConfigDict, Field, field_validator
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -59,6 +59,10 @@ class SkillModel(BaseModel):
     references: Mapped[list] = mapped_column(JSON, default=list)
     max_tokens: Mapped[int] = mapped_column(Integer, default=2000)
     auto_load: Mapped[bool] = mapped_column(Boolean, default=False)
+    origin: Mapped[str | None] = mapped_column(String(1024), nullable=True, default=None)
+    plugin_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("plugins.id", ondelete="CASCADE"), nullable=True, default=None
+    )
 
     __table_args__ = (
         Index(
@@ -79,8 +83,18 @@ class SkillCreateSchema(PydanticBase):
 
     name: str = Field(..., min_length=1, max_length=255, pattern=r"^[a-z][a-z0-9-]*$")
     description: str
-    source: str = Field(..., pattern="^(system|user|project)$")
+    source: str = Field(..., pattern="^(system|user|project|plugin)$")
     instructions: str
+
+    @field_validator("source")
+    @classmethod
+    def _reject_plugin_source(cls, v: str) -> str:
+        """``plugin`` is reserved for the ingestion pipeline, not manual creation."""
+        if v == "plugin":
+            msg = "source 'plugin' is reserved for package ingestion"
+            raise ValueError(msg)
+        return v
+
     allowed_tools: list = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
     scripts: list = Field(default_factory=list)
@@ -122,6 +136,8 @@ class SkillReadSchema(PydanticBase):
     references: list
     max_tokens: int
     auto_load: bool
+    origin: str | None = None
+    plugin_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False

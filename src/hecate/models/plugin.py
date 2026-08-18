@@ -24,3 +24,6 @@ class PluginModel(BaseModel):
     workspace_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True
     )
+    origin: Mapped[str | None] = mapped_column(String(1024), nullable=True, default=None)
+    content_hash: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
+    scan_result: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)

@@ -7,9 +7,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel as PydanticBase
+from pydantic import Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
+from hecate.core.deps_workspace import get_auth_context
 from hecate.models.plugin import PluginModel
 from hecate.services.plugin.service import PluginService
 
@@ -28,10 +31,55 @@ class PluginReadSchema(PydanticBase):
     manifest_: dict[str, Any]
     config: dict[str, Any]
     workspace_id: uuid.UUID | None
+    origin: str | None = None
+    content_hash: str | None = None
+    scan_result: dict[str, Any] | None = None
 
 
 class PluginConfigUpdateSchema(PydanticBase):
     config: dict[str, Any]
+
+
+class AgentPluginInstallSchema(PydanticBase):
+    """Source descriptor for Agent Plugins 1.0 installation (5.5c)."""
+
+    source_type: str = Field(pattern="^(dir|git|zip)$")
+    location: str
+    ref: str | None = None
+    workspace_id: uuid.UUID | None = None
+
+
+@router.post("/agent-plugins/install", status_code=status.HTTP_201_CREATED)
+async def install_agent_plugin(
+    body: AgentPluginInstallSchema,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    ctx: AuthContext = Depends(get_auth_context),  # noqa: B008
+) -> PluginReadSchema:
+    """Install an Agent Plugins 1.0 package from dir/git/zip source."""
+    from hecate.core.config import settings
+    from hecate.services.plugin.service import FeatureDisabledError, PluginService
+
+    if not settings.AGENT_PLUGINS_INGESTION_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Agent Plugins ingestion is disabled",
+        )
+
+    service = PluginService(db)
+    try:
+        plugin = await service.install_agent_plugin(
+            source_type=body.source_type,
+            location=body.location,
+            plugins_dir=settings.PLUGINS_DIR,
+            ref=body.ref,
+            workspace_id=body.workspace_id,
+            installer=str(ctx.user_id),
+        )
+    except FeatureDisabledError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    return PluginReadSchema.model_validate(plugin)
 
 
 @router.get("")
