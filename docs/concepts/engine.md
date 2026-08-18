@@ -137,6 +137,6 @@ Unreachable nodes produce a warning, not an error — this lets work-in-progress
 
 - [Engine Design](../design/engine-design.md) — full deep dive: compiler internals, channel manager, worker pool, streaming modes
 - [Graph DSL Reference](../reference/graph-dsl.md) — node types, channel types, edge forms, and validation rules
-- [Extension Points](../reference/extension-points.md) — the 11 core ABCs you can implement to customize execution
+- [Extension Points](../reference/extension-points.md) — the 26 engine ABCs + 8 plugin SPI types you can implement to customize execution
 - [Agents and Execution Modes](agents.md) — how the `workflow` mode binds a graph to an agent
 - [Guardrails and Hooks](guardrails.md) — where interception fits in the superstep loop

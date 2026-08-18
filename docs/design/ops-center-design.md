@@ -298,7 +298,7 @@ The Alerting Engine monitors metrics and traces in real-time, firing alerts when
 | **Composite** | Multiple condition combination | Error rate > 3% AND user satisfaction < 3.5 |
 | **SLA** | SLA rule breach | Uptime < 99.9% over 5-minute window |
 
-Alerts route through the `NotifierABC` SPI (8.6-abc) — supporting Email, Webhook, Slack, and custom notification channels.
+Alerts route through notification dispatchers implemented as outbound `ChannelABC` adapters (`NotificationChannelAdapter`, formerly the standalone `NotifierABC` SPI, 8.6-abc — merged per 5.5a) — supporting Email, Webhook, Slack, and custom notification channels.
 
 ### Incident & Alert Management Console (O9)
 

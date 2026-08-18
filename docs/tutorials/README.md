@@ -16,7 +16,7 @@ If you are new, start with the [Quickstart](../getting-started/quickstart.md) fi
 
 ### Intermediate — comfortable with Python async + Hecate CLI (~2 hours)
 
-4. **[Multi-Agent Orchestration](04-multi-agent.md)** *(30 min)* — build workflows with six collaboration patterns (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate); the seventh (`dynamic`, coordinator node) is covered in [ADR-032](../design/adr/032-dynamic-orchestration.md).
+4. **[Multi-Agent Orchestration](04-multi-agent.md)** *(30 min)* — build workflows with six collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate); the seventh (`dynamic`, coordinator node) is covered in [ADR-032](../design/adr/032-dynamic-orchestration.md).
 5. **[Guardrails and Hooks](05-guardrails-hooks.md)** *(20 min)* — enable built-in PII masking and injection defense, configure shell hooks, write custom Python guardrails.
 6. **[Human-in-the-Loop](06-human-in-the-loop.md)** *(15 min)* — add approval checkpoints using `interrupt()` and `Command`, resume sessions from durable pause points.
 

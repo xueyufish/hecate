@@ -136,7 +136,7 @@ Hecate is **built using** AI coding assistants and is **compatible with** them:
 
 - **[FastAPI](https://fastapi.tiangolo.com/)** — the Python async web framework. Hecate's API layer follows its conventions: Pydantic v2 schemas, dependency injection, automatic OpenAPI generation, async request handling.
 - **[Pydantic](https://docs.pydantic.dev/)** — data validation and serialization (v2). Powers every schema, model, and API contract in Hecate.
-- **[SQLAlchemy](https://www.sqlalchemy.org/)** — async ORM (2.0). Backs all 67 ORM tables with `workspace_id`-based tenant isolation across 34 tenant-scoped models (see [Multi-Tenancy Architecture](../design/multi-tenancy-architecture.md)).
+- **[SQLAlchemy](https://www.sqlalchemy.org/)** — async ORM (2.0). Backs all 69 ORM tables with `workspace_id`-based tenant isolation across 38 tenant-scoped models (see [Multi-Tenancy Architecture](../design/multi-tenancy-architecture.md)).
 - **[LiteLLM](https://github.com/BerriAI/litellm)** — unified LLM provider interface. Powers Hecate's model-agnostic routing across 100+ providers (OpenAI, Anthropic, DeepSeek, Qwen, GLM, Ollama, etc.).
 - **[TimescaleDB](https://www.timescale.com/)** — time-series database for high-cardinality metrics. Used by the `TimescaleMetricsStore` for production metrics aggregation.
 - **[Qdrant](https://qdrant.tech/)** — vector database for embeddings. Default vector store backend; supports the hybrid dense+sparse search that Hecate's RAG uses.

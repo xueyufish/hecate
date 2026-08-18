@@ -63,7 +63,7 @@ A Workflow is an executable directed graph that defines an Agent's execution flo
 
 A Workflow consists of **Nodes** and **Edges**:
 
-- **Nodes** are typed execution units (LLM inference, code execution, condition evaluation, tool invocation, sub-agent reference, subgraph, input, output)
+- **Nodes** are typed execution units (`conversation`, `tool-call`, `condition`, `agent`, `knowledge-retrieval`, `variable-set`, `fan-out`, `merge`, `suggestion`, `coordinator`)
 - **Edges** connect nodes and may carry conditional expressions for branching
 
 Nodes have a position attribute for canvas rendering. Edges have source and target handles for typed connections.

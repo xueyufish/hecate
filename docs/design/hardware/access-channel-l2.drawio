@@ -42,7 +42,7 @@
         <mxCell id="r1_im" value="📋 IM Bots" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
           <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r1_web" value="📋 Web App" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
+        <mxCell id="r1_web" value="✅ Web App" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
           <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r1_mcp" value="MCP Client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
@@ -76,7 +76,7 @@
         <mxCell id="r2_ws" value="📋 WebSocket Channel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r2_c">
           <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r2_widget" value="📋 Web Widget" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_widget" value="✅ Web Widget (delivered 2026-08-16)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="r2_c">
           <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_im" value="📋 IM Bots (Feishu/Slack/DingTalk/WeCom)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" vertex="1" parent="r2_c">

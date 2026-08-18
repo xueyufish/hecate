@@ -35,19 +35,20 @@ It is **immutable** (frozen) — plugins cannot mutate their metadata after regi
 
 ### `type` (required)
 
-The plugin type. Must be one of:
+The plugin type. Must be one of the eight registered types (`PLUGIN_TYPE_REGISTRY` in `src/hecate/plugin/types/__init__.py`):
 
 | Value | Loads as | ABC |
 |---|---|---|
 | `tool` | Callable tool | `ToolPluginABC` |
-| `evaluator` | Evaluation metric | `EvaluatorABC` |
-| `channel` | External communication channel | `ChannelABC` |
-| `auth_provider` | Authentication method | `AuthProviderABC` |
-| `notifier` | Notification destination | `NotifierABC` |
 | `extension` | Runtime interceptor | `ExtensionPluginABC` |
-| `cli` | CLI subcommand | (Typer app) |
-| `model` | LLM provider | `ModelPluginABC` |
 | `trigger` | Event trigger | `TriggerPluginABC` |
+| `model` | LLM provider | `ModelPluginABC` |
+| `channel` | External communication channel | `ChannelABC` |
+| `evaluator` | Evaluation metric | `EvaluatorABC` |
+| `auth_provider` | Authentication method | `AuthProviderABC` |
+| `secret_provider` | Secret storage backend | `SecretProviderABC` |
+
+> **Note**: the former `notifier` type was merged into `channel` — notification dispatchers are now outbound `NotificationChannelAdapter` implementations extending `ChannelABC` (see `src/hecate/channel/notification.py`).
 
 Examples:
 
@@ -88,7 +89,7 @@ The registry rejects the plugin if the running Hecate is older.
 ### `description` (recommended)
 
 Human-readable description (1-2 sentences). Shown in:
-- `hecate plugin list` output
+- Plugin management API (`GET /api/plugins`) output
 - Canvas plugin manager UI
 - API responses
 
@@ -272,14 +273,13 @@ def register(registry: PluginRegistry):
     registry.register(MANIFEST, MyEvaluator())
 ```
 
-Package the above as a Python wheel with a `MANIFEST.hcate-plugin` file at the root:
+Package the above as a plugin directory with a `plugin.yaml` manifest at the root:
 
 ```
 my_plugin/
-├── MANIFEST.hcate-plugin    # YAML form of the manifest
-├── pyproject.toml
-└── my_plugin/
-    └── __init__.py
+├── plugin.yaml           # YAML form of the manifest
+├── __init__.py           # entry class (python:my_plugin:MyEvaluator)
+└── test_my_plugin.py     # instantiable smoke test
 ```
 
 ### MCP server
@@ -357,25 +357,17 @@ When upgrading Hecate:
 ### Package the plugin
 
 ```bash
-# Python wheel
-pip install build
-python -m build
-
-# Result: dist/my_plugin-1.0.0-py3-none-any.whl
+python -m hecate.plugin.cli package ./my_plugin
+# Result: my_plugin.hecate-plugin (ZIP bundle; plugin.yaml validated)
 ```
 
 ### Install locally
 
 ```bash
-hecate plugin install ./dist/my_plugin-1.0.0-py3-none-any.whl
+python -m hecate.plugin.cli install ./my_plugin.hecate-plugin
 ```
 
-### Publish to a registry
-
-```bash
-pip upload twine
-twine upload dist/*
-```
+Enable/disable and configuration happen through the plugin management REST API (`/api/plugins`) or the canvas plugin manager.
 
 ### (Future) Community plugin hub
 

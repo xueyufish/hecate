@@ -1,6 +1,6 @@
 # ADR Index — by Topic
 
-The 30 ADRs in this directory cover every significant architectural decision since Hecate started. They are listed chronologically in the [README](../README.md#architecture-decision-records-adrs). This index provides an alternative **topic-grouped** view to help you find the ADRs relevant to a specific concern.
+The 32 ADRs in this directory cover every significant architectural decision since Hecate started. They are listed chronologically in the [README](../README.md#architecture-decision-records-adrs). This index provides an alternative **topic-grouped** view to help you find the ADRs relevant to a specific concern.
 
 Each ADR row links to the full document. Use this index as a **map**; read the individual ADRs for the "why" behind each decision.
 

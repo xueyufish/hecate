@@ -35,7 +35,7 @@ The Ecosystem layer is Hecate's integration and extensibility foundation — con
 | Webhook Notifications | Event-driven HTTP callbacks |
 | Event Dispatcher | Internal event bus |
 | OpenAI-compatible API | REST + WebSocket, `/v1/chat/completions` |
-| Plugin System | **6 plugin types** (5.5 + TP5 developer SDK), SPI Core, packaging, signing; **+ Agent Plugins 1.0 ingestion (5.5c, 2026-08-18)** — third-party packages land as a single atomic manifest, projected into SkillModel + MCPServerRegistry |
+| Plugin System | **8 plugin types** (5.5 + TP5 developer SDK), SPI Core, packaging, signing; **+ Agent Plugins 1.0 ingestion (5.5c, 2026-08-18)** — third-party packages land as a single atomic manifest, projected into SkillModel + MCPServerRegistry |
 | Asset Marketplace | 6 asset types, semantic discovery, governed catalog |
 
 ---

@@ -35,7 +35,7 @@
         <mxCell id="r1_circuit" value="✅ Circuit Breaker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
           <mxGeometry x="460" y="30" width="200" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="r1_abtest" value="✅ A/B Testing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
+        <mxCell id="r1_abtest" value="📋 A/B Testing (deferred)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r1_c">
           <mxGeometry x="685" y="30" width="225" height="26" as="geometry" />
         </mxCell>
         <!-- Sub-row 1b -->

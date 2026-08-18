@@ -8,7 +8,7 @@ If you prefer a hands-on introduction, start with the [Quickstart](../getting-st
 
 - **[Overview](overview.md)** — what Hecate is, how it is structured, and how the pieces fit together. Read this first.
 - **[Agents and Execution Modes](agents.md)** — the three execution modes (`chat`, `three_layer`, `workflow`), what runs when a chat request arrives, and how to choose between them.
-- **[Workflows](workflows.md)** — the graph DSL in three building blocks (channels, nodes, edges), the nine node types, the compilation pipeline, and the six multi-agent collaboration templates.
+- **[Workflows](workflows.md)** — the graph DSL in three building blocks (channels, nodes, edges), the ten node types, the compilation pipeline, and the six multi-agent collaboration templates.
 - **[The Execution Engine](engine.md)** — the Pregel/BSP runtime in four core ideas: graphs, channels, supersteps, and checkpoints.
 - **[Sessions](sessions.md)** — the runtime unit that holds conversation state, enables resume after interruption, and powers time-travel debugging.
 - **[Context Engineering](context-engineering.md)** — the pipeline that assembles the right context for every LLM call: token budgets, message prioritization, evidence tracking, and offloading.
@@ -16,7 +16,7 @@ If you prefer a hands-on introduction, start with the [Quickstart](../getting-st
 - **[Knowledge and Retrieval](knowledge-rag.md)** — the RAG pipeline: ingestion (Docling → chunker → BGE-M3 → Qdrant), hybrid retrieval (dense + sparse + RRF), citations, and how it plugs into the engine.
 - **[Tools, MCP, and A2A](tools-and-mcp.md)** — the three tool sources (`builtin`/`custom`/`mcp`), the Tool Registry, MCP client/server, A2A agent-to-agent protocol, and the policy pipeline that gates every call.
 - **[A2A Protocol](a2a-protocol.md)** — the cross-framework agent-to-agent standard: AgentCard, Task lifecycle, signed AgentCards, and how it differs from MCP.
-- **[Plugins](plugins.md)** — the six plugin types (tool / evaluator / channel / auth / notifier / extension), when to use which, and the permissions model.
+- **[Plugins](plugins.md)** — the eight plugin types (tool / extension / trigger / model / channel / evaluator / auth / secret), when to use which, and the permissions model.
 - **[Skills](skills.md)** — the SkillRegistry's unified abstraction over tools, knowledge bases, workflows, and agents; how it differs from tools and plugins.
 - **[Budget & Cost](budget.md)** — token tracking, per-workspace / per-agent budgets, degradation levels, and cost optimization levers.
 - **[Webhooks](webhooks.md)** — async event reception (GitHub, Slack, custom), signature verification, retries, dead-letter queues, and webhook-to-workflow binding.

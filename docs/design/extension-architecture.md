@@ -1,6 +1,6 @@
 # Extension SPI & Plugin Architecture
 
-Deep-dive design document for Hecate's two-tier extension system: **11 Core extension points** at the engine layer + **4 SPI extension points** at the platform layer. For the API reference, see [Extension Points](../reference/extension-points.md). For the decision rationale, see [ADR-016](adr/016-platform-spi-architecture.md).
+Deep-dive design document for Hecate's two-tier extension system: **26 engine extension interfaces** at the engine layer + **8 plugin SPI types** at the platform layer. For the API reference, see [Extension Points](../reference/extension-points.md). For the decision rationale, see [ADR-016](adr/016-platform-spi-architecture.md).
 
 > **2026-08-18**: The 8 plug-in-type ABCs (`ToolPlugin` / `TriggerPlugin` / `ExtensionPlugin` / `ModelPlugin` / channel/evaluator/auth/secret providers) remain the **P-tier deep-integration** extension surface. The ecosystem-facing third-party ingestion path is now **Agent Plugins 1.0** (feature 5.5c, shipped 2026-08-18 via `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`) — single adapter module `plugin/agent_plugins.py` ingests `plugin.json` + `skills/` + `mcp.json` as one atomic unit, projects skills as `SkillModel` rows with `source="plugin"` and MCP servers under `<plugin>__<server>` names. Component-level trust dispatch per [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md): skills (T4) + http/sse MCP (T2) install by workspace admin; stdio MCP (T1) only by platform installer via config allowlist, executed in Docker sandbox via `plugin/stdio_sandbox.py`. Bare-SKILL.md directories (Claude Code ecosystem) install as virtual packages.
 
@@ -33,7 +33,7 @@ Hecate uses a **two-tier** extension architecture. The boundary is **load-time v
 ┌──────────────────────────────────────────────────────────────────────┐
 │                       Engine Layer (load-time)                       │
 │                                                                      │
-│   11 Core Extension Points                                          │
+│   26 Engine Extension Interfaces                                  │
 │   - Abstract base classes in src/hecate/engine/                     │
 │   - Default InMemory implementations                                 │
 │   - Hot-swappable via dependency injection (engine startup)         │
@@ -49,13 +49,14 @@ Hecate uses a **two-tier** extension architecture. The boundary is **load-time v
 ┌──────────────────────┴───────────────────────────────────────────────┐
 │                    Platform Layer (runtime)                          │
 │                                                                      │
-│   4 SPI Extension Points                                            │
-│   - ABCs in src/hecate/plugin/spi/                                   │
-│   - Loaded via PluginRegistry (manifest-driven)                     │
-│   - Custom code runs OUTSIDE the engine                             │
-│   - Affects integration surface                                     │
-│                                                                      │
-│   Examples: Evaluator, AuthProvider, Channel, Notifier              │
+│   8 Plugin SPI Types                                               │
+│   - ABCs in src/hecate/plugin/types/ + spi/                        │
+│   - Loaded via PluginRegistry (manifest-driven)                    │
+│   - Custom code runs OUTSIDE the engine                            │
+│   - Affects integration surface                                    │
+│                                                                    │
+│   Examples: Tool, Extension, Trigger, Model, Evaluator, Channel,   │
+│             AuthProvider, SecretProvider                           │
 │                                                                      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -74,9 +75,9 @@ Hecate uses a **two-tier** extension architecture. The boundary is **load-time v
 
 ---
 
-## The 11 Core Extension Points
+## The 26 Engine Extension Interfaces
 
-All Core extension points follow the **Ports and Adapters pattern** (a.k.a. Hexagonal Architecture):
+All engine extension interfaces follow the **Ports and Adapters pattern** (a.k.a. Hexagonal Architecture):
 
 ```
 src/hecate/engine/
@@ -90,6 +91,15 @@ src/hecate/engine/
 ├── optimization.py     ← OptimizationPass
 ├── guardrail.py        ← GuardrailHooks (×4: PreLLM, PostLLM, PreTool, PostTool)
 ├── retry.py            ← RetryStrategy
+├── channel.py          ← ChannelBehavior
+├── decision_sink.py    ← DecisionSink
+├── eventbus.py         ← EventBus
+├── metrics_store.py    ← MetricsStore
+├── policy_pipeline.py  ← PolicyLayer
+├── session_hooks.py    ← Session Hooks (×4: start, end, prompt-submit, pre-compact)
+├── session_state.py    ← SessionStateStore
+├── task_allocator.py   ← TaskAllocator
+├── tool_access.py      ← ApprovalCallback
 └── temporal/conflict.py ← ConflictResolver
 ```
 
@@ -200,7 +210,7 @@ Retry policies for failed tool calls, LLM calls, and external requests.
 
 ---
 
-## The 4 SPI Extension Points
+## The 8 Plugin SPI Types
 
 All SPI extension points follow the **Plugin pattern** with a manifest, ABC, registry, and lifecycle.
 
@@ -211,7 +221,7 @@ Every SPI plugin must declare a `PluginManifest` (from `src/hecate/plugin/manife
 ```python
 @dataclass(frozen=True)
 class PluginManifest:
-    type: str                          # "evaluator", "channel", "auth", "notifier", etc.
+    type: str                          # "tool", "extension", "trigger", "model", "channel", "evaluator", "auth_provider", "secret_provider"
     name: str                          # Unique within type, e.g., "faithfulness"
     version: str                       # Semantic version, e.g., "1.0.0"
     api_version: str = ""              # API version this plugin targets
@@ -285,21 +295,35 @@ class AuthProviderABC(ABC):
 
 **Built-in**: `JWTAuthProvider`, `APIKeyAuthProvider`. **Planned**: `OAuth2AuthProvider`, `mTLSAuthProvider`, `SAMLAuthProvider`.
 
-### 4. `NotifierABC`
+### 4. Notifications: merged into `ChannelABC`
 
-Notification delivery (audit, alert, etc.).
+Notification delivery (audit, alert, etc.) used to be a standalone `NotifierABC`. It was **merged into `ChannelABC`** as an outbound channel: notification dispatchers are now `NotificationChannelAdapter` implementations extending `ChannelABC` (see `src/hecate/channel/notification.py`).
 
 ```python
-class NotifierABC(ABC):
+class NotificationChannelAdapter(ChannelABC):
     @property
     @abstractmethod
     def channel(self) -> str: ...      # "email", "webhook", "slack", "dingtalk"
-    
+
     @abstractmethod
     async def notify(self, event: NotificationEvent) -> None: ...
 ```
 
-**Built-in**: `EmailNotifier`, `WebhookNotifier`. **Planned**: `SlackNotifier`, `DingTalkNotifier`, `PagerDutyNotifier`.
+**Built-in**: `EmailNotificationAdapter`, `WebhookNotificationAdapter`, `WebSocketNotificationAdapter`. **Planned**: `SlackNotificationAdapter`, `DingTalkNotificationAdapter`, `PagerDutyNotificationAdapter`. There is no `notifier` plugin type anymore — use `channel` (see the [plugin manifest](../reference/plugin-manifest.md)).
+
+### 5. `ToolPluginABC` / `ExtensionPluginABC` / `TriggerPluginABC` / `ModelPluginABC` / `SecretProviderABC`
+
+The remaining five SPI types complete the eight-type taxonomy (registered in `PLUGIN_TYPE_REGISTRY` at `src/hecate/plugin/types/__init__.py`):
+
+| ABC | File | Purpose |
+|-----|------|---------|
+| `ToolPluginABC` | `src/hecate/plugin/types/tool.py` | Callable tool that agents can invoke (built-in, custom, or MCP-backed). |
+| `ExtensionPluginABC` | `src/hecate/plugin/types/extension.py` | Runtime interceptor auto-wired into all four guardrail hook points (Pre/Post LLM/Tool). |
+| `TriggerPluginABC` | `src/hecate/plugin/types/trigger.py` | Event-driven invocation: webhook, schedule, or message-queue triggered entry points. |
+| `ModelPluginABC` | `src/hecate/plugin/types/model.py` | Custom LLM provider built on the existing `InferenceBackendABC` surface. |
+| `SecretProviderABC` | `src/hecate/vault/provider.py` | Custom secret storage backend for the vault abstraction. |
+
+All follow the same Plugin pattern (manifest → ABC → `PluginRegistry` → lifecycle). See the [plugin manifest reference](../reference/plugin-manifest.md) for the manifest contract and [Writing a custom SPI plugin](#example-a-custom-evaluator) for worked examples.
 
 ### The "5th candidate": `i18n`
 
@@ -399,9 +423,9 @@ def register(registry):
 Then deploy:
 
 ```bash
-hecate plugin install ./my_evaluator.py
-hecate plugin enable domain_specific_score
-hecate plugin list --type evaluator
+python -m hecate.plugin.cli package ./my_evaluator
+python -m hecate.plugin.cli install ./my_evaluator.hecate-plugin
+# enable/disable via the plugin management REST API (/api/plugins)
 ```
 
 ### Example: a custom extension (guardrail hook)
@@ -502,8 +526,8 @@ The registry checks compatibility at load time and rejects incompatible plugins 
 
 | | Hecate | LangChain | Dify | n8n |
 |---|---|---|---|---|
-| **Engine extension** | 11 Core points (ABC swap) | Decorators / custom node types | Plugin marketplace (DAG-level) | Custom nodes |
-| **Platform extension** | 4 SPI + Plugin SDK | Tools, retrievers, vector stores | Marketplace plugins (HTTP-based) | Nodes (npm packages) |
+| **Engine extension** | 26 Core interfaces (ABC swap) | Decorators / custom node types | Plugin marketplace (DAG-level) | Custom nodes |
+| **Platform extension** | 8 Plugin SPI types + Plugin SDK | Tools, retrievers, vector stores | Marketplace plugins (HTTP-based) | Nodes (npm packages) |
 | **Load timing** | Engine startup / runtime | Runtime | Runtime (DAG parsing) | Runtime |
 | **Distribution** | In-process Python packages | pip packages | Marketplace HTTP calls | npm packages |
 | **Permission system** | Yes (declared in manifest) | No | No | No |
@@ -534,7 +558,7 @@ I want to customize Hecate. What do I do?
 │   → Implement AuthProviderABC + PluginManifest
 │
 ├── I want to add a new notification channel (Slack, PagerDuty)
-│   → Implement NotifierABC + PluginManifest
+│   → Implement a NotificationChannelAdapter (ChannelABC) + PluginManifest
 │
 ├── I want to add a new external channel (Feishu, Discord, Telegram)
 │   → Implement ChannelABC + PluginManifest
@@ -596,7 +620,7 @@ For specific implementation details:
 - `src/hecate/plugin/types/tool.py` — ToolPluginABC
 - `src/hecate/plugin/types/model.py` — ModelPluginABC
 - `src/hecate/plugin/types/trigger.py` — TriggerPluginABC
-- `src/hecate/plugin/cli.py` — `hecate plugin` CLI commands
+- `src/hecate/plugin/cli.py` — standalone plugin CLI (`python -m hecate.plugin.cli`)
 - `src/hecate/plugin/hot_reload.py` — plugin hot-reload
 - `src/hecate/plugin/permission.py` — permissions enforcement
 - `src/hecate/plugin/loader.py` — plugin loader

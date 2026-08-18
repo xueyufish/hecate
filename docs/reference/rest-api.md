@@ -47,7 +47,7 @@ The management API is organized by functional area. Each group below lists the b
 | `/api/messages` | Individual messages |
 | `/api/workflows` | Workflow graph definitions (JSON DSL), versioning, publish |
 | `/api/orchestration-templates` | Reusable multi-agent orchestration templates |
-| `/api/collaboration-patterns` | The six collaboration patterns (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate) |
+| `/api/collaboration-patterns` | The six static collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate) |
 | `/api/agent-templates` | Preset agent templates |
 | `/api/schedules` | Scheduled / recurring agent runs |
 | `/api/preflight` | Pre-execution validation checks |
