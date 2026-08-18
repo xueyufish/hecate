@@ -35,19 +35,20 @@ It is **immutable** (frozen) — plugins cannot mutate their metadata after regi
 
 ### `type` (required)
 
-The plugin type. Must be one of:
+The plugin type. Must be one of the eight registered types (`PLUGIN_TYPE_REGISTRY` in `src/hecate/plugin/types/__init__.py`):
 
 | Value | Loads as | ABC |
 |---|---|---|
 | `tool` | Callable tool | `ToolPluginABC` |
-| `evaluator` | Evaluation metric | `EvaluatorABC` |
-| `channel` | External communication channel | `ChannelABC` |
-| `auth_provider` | Authentication method | `AuthProviderABC` |
-| `notifier` | Notification destination | `NotifierABC` |
 | `extension` | Runtime interceptor | `ExtensionPluginABC` |
-| `cli` | CLI subcommand | (Typer app) |
-| `model` | LLM provider | `ModelPluginABC` |
 | `trigger` | Event trigger | `TriggerPluginABC` |
+| `model` | LLM provider | `ModelPluginABC` |
+| `channel` | External communication channel | `ChannelABC` |
+| `evaluator` | Evaluation metric | `EvaluatorABC` |
+| `auth_provider` | Authentication method | `AuthProviderABC` |
+| `secret_provider` | Secret storage backend | `SecretProviderABC` |
+
+> **Note**: the former `notifier` type was merged into `channel` — notification dispatchers are now outbound `NotificationChannelAdapter` implementations extending `ChannelABC` (see `src/hecate/channel/notification.py`).
 
 Examples:
 

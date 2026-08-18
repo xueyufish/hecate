@@ -1,6 +1,6 @@
 # Data Model Reference
 
-Every Hecate entity persists to PostgreSQL via SQLAlchemy 2.0 async ORM models. This page is a map of all 67 tables, grouped by domain, with the key relationships that govern how data flows between them.
+Every Hecate entity persists to PostgreSQL via SQLAlchemy 2.0 async ORM models. This page is a map of all 69 tables, grouped by domain, with the key relationships that govern how data flows between them.
 
 > For entity-level definitions (fields, types, constraints), see the [Core Concepts design doc](../design/concepts.md) or the interactive Swagger UI at `/docs`. This page intentionally stays at the table-group level.
 

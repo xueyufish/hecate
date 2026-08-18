@@ -358,68 +358,57 @@ The pipeline is **subtractive**: each layer can only remove tools from the visib
 
 ### Problem
 
-Hecate's Plugin System (5.5) currently describes "provider/hook/extension" — a vague 3-type model. Dify has 6 well-defined plugin types with a Python SDK, Claude Code has 5 clear extension types. Hecate needs a structured taxonomy and developer SDK to build a thriving plugin ecosystem.
+Hecate's Plugin System (5.5) originally described "provider/hook/extension" — a vague 3-type model. Dify has 6 well-defined plugin types with a Python SDK, Claude Code has 5 clear extension types. Hecate needs a structured taxonomy and developer SDK to build a thriving plugin ecosystem. The taxonomy below is the **implemented** registry in `src/hecate/plugin/types/__init__.py` (`PLUGIN_TYPE_REGISTRY`).
 
-### 6 Plugin Types
+### 8 Plugin Types
 
-| Type | Purpose | Base Class | Trigger |
-|------|---------|-----------|---------|
-| **Tool Plugin** | Callable function exposed to agents | `ToolPlugin` | LLM function call |
-| **Trigger Plugin** | Event-driven workflow invocation | `TriggerPlugin` | Webhook/schedule/event |
-| **Extension Plugin** | Hook/middleware injection | `ExtensionPlugin` | Lifecycle event |
-| **Model Plugin** | Custom LLM provider | `ModelPlugin` | LLM invocation |
-| **Datasource Plugin** | External data connector | `DatasourcePlugin` | Knowledge query |
-| **Agent Strategy Plugin** | Custom reasoning loop | `AgentStrategyPlugin` | Agent execution |
+| Type | Purpose | ABC | Trigger |
+|------|---------|-----|---------|
+| **Tool** | Callable function exposed to agents | `ToolPluginABC` | LLM function call |
+| **Extension** | Hook/middleware injection | `ExtensionPluginABC` | Lifecycle event |
+| **Trigger** | Event-driven workflow invocation | `TriggerPluginABC` | Webhook/schedule/event |
+| **Model** | Custom LLM provider | `ModelPluginABC` | LLM invocation |
+| **Channel** | External communication channel (incl. notification adapters) | `ChannelABC` | Outbound message / inbound event |
+| **Evaluator** | Evaluation metrics (40+ built-in) | `EvaluatorABC` | Evaluation run |
+| **AuthProvider** | Authentication methods | `AuthProviderABC` | Authentication |
+| **SecretProvider** | Secret storage backend | `SecretProviderABC` | Secret resolution |
 
 ### Plugin SDK Example
 
 ```python
-from hecate.plugin import ToolPlugin, PluginManifest, ToolResponse
+from hecate.plugin.sdk import ToolPluginABC
 
-class WeatherTool(ToolPlugin):
+class WeatherTool(ToolPluginABC):
     """Fetch weather data from OpenWeatherMap API."""
 
-    @classmethod
-    def manifest(cls) -> PluginManifest:
-        return PluginManifest(
-            type="tool",
-            name="weather",
-            version="1.2.0",
-            api_version="1.0",
-            min_platform_version="0.5.0",
-            description="Get current weather and forecasts",
-            permissions=["network:https"],
-            parameters={
-                "type": "object",
-                "properties": {
-                    "location": {"type": "string"},
-                    "units": {"type": "string", "default": "metric"},
-                },
-                "required": ["location"],
-            },
-        )
+    @property
+    def name(self) -> str:
+        return "weather"
 
-    async def execute(self, location: str, units: str = "metric") -> ToolResponse:
-        # Implementation
-        ...
-        return ToolResponse(content=[{"type": "text", "text": result}])
+    @property
+    def description(self) -> str:
+        return "Get current weather and forecasts"
+
+    async def execute(self, params: dict[str, Any]) -> dict[str, Any]:
+        # params: {"location": "Beijing", "units": "metric"}
+        result = await fetch_weather(params["location"])
+        return {"content": [{"type": "text", "text": result}]}
 ```
 
 ### Plugin Template Generator
 
 ```bash
-$ hecate plugin init --type tool --name my-weather
-Creating plugin scaffold...
-  ✓ my-weather/plugin.yaml
-  ✓ my-weather/main.py
-  ✓ my-weather/pyproject.toml
-  ✓ my-weather/tests/test_plugin.py
-  ✓ my-weather/README.md
+$ python -m hecate.plugin.cli init my-weather --type tool
+Created plugin at: my-weather
 
-$ cd my-weather && hecate plugin dev --hot-reload
-Plugin loaded. Hot-reload enabled.
-Test at: http://localhost:8000/plugin/test/my-weather
+$ tree my-weather
+my-weather/
+  ├── __init__.py        # WeatherTool(ToolPluginABC) scaffold
+  ├── plugin.yaml        # name/version/type/api_version/min_platform_version/entry
+  └── test_my_weather.py # instantiable smoke test
 ```
+
+The standalone plugin CLI (`python -m hecate.plugin.cli`) provides `init`, `package`, `install`, `uninstall`, and the Agent Plugins 1.0 commands (`agent-install`, `agent-uninstall`, `agent-list`).
 
 ### Compatibility Validation
 

@@ -2,7 +2,7 @@
 
 Hecate's engine layer defines a set of abstract interfaces (ABCs) that let you customize every aspect of graph execution — from LLM invocation and tool execution to scheduling, checkpointing, context management, and safety hooks. Each interface ships with a default implementation suitable for testing or single-process use; production deployments provide concrete adapters in the `services/` layer.
 
-The engine has **zero external dependencies** (except `jsonschema` for Graph DSL validation). All abstract interfaces live in `src/hecate/engine/`.
+The engine has **zero external dependencies** (except `jsonschema` for Graph DSL validation). All abstract interfaces live in `src/hecate/engine/`. In addition to the engine ABCs below, the plugin system defines **8 SPI types** (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) — see the [Plugin Manifest Schema](plugin-manifest.md).
 
 ---
 
@@ -21,10 +21,22 @@ The engine has **zero external dependencies** (except `jsonschema` for Graph DSL
 | 9 | [OptimizationPass](#9-optimizationpass) | `optimization.py` | `optimize` | `DeadNodeElimination`, `ParallelBranchDetection` |
 | 10 | [Guardrail Hooks](#10-guardrail-hooks) | `guardrail.py` | `on_pre_llm_call`, `on_post_llm_call`, `on_pre_tool_call`, `on_post_tool_call` | `NoOpPreLLMHook`, `NoOpPostLLMHook`, `NoOpPreToolHook`, `NoOpPostToolHook` |
 | 11 | [RetryStrategy](#11-retrystrategy) | `retry.py` | `should_retry`, `get_backoff` | `NoRetryStrategy` |
+| 12 | [ChannelBehavior](#12-channelbehavior) | `channel.py` | `initial_value`, `write` | `LastValueBehavior`, `TopicBehavior`, `AccumulatorBehavior` |
+| 13 | [DecisionSink](#13-decisionsink) | `decision_sink.py` | `emit` | `NullDecisionSink` |
+| 14 | [EventBus](#14-eventbus) | `eventbus.py` | `publish` | `InMemoryEventBus` |
+| 15 | [MetricsStore](#15-metricsstore) | `metrics_store.py` | `record_counter`, `record_gauge`, `record_histogram`, `query_metrics`, `get_snapshot` | `InMemoryMetricsStore` |
+| 16 | [PolicyLayer](#16-policylayer) | `policy_pipeline.py` | `name`, `evaluate` | Composable layers in `ToolPolicyPipeline` |
+| 17 | [SessionStartHook](#17-session-hooks) | `session_hooks.py` | `on_session_start` | `NoOpSessionStartHook` |
+| 18 | [SessionEndHook](#17-session-hooks) | `session_hooks.py` | `on_session_end` | `NoOpSessionEndHook` |
+| 19 | [UserPromptSubmitHook](#17-session-hooks) | `session_hooks.py` | `on_user_prompt_submit` | `NoOpUserPromptSubmitHook` |
+| 20 | [PreCompactHook](#17-session-hooks) | `session_hooks.py` | `on_pre_compact` | `NoOpPreCompactHook` |
+| 21 | [SessionStateStore](#21-sessionstatestore) | `session_state.py` | `save`, `load`, `list_recent` | `InMemorySessionStateStore`; production Redis / PostgreSQL / Tiered (`services/session_state/`) |
+| 22 | [TaskAllocator](#22-taskallocator) | `task_allocator.py` | `allocate` | `SemanticTaskAllocator`, `RoundRobinTaskAllocator` |
+| 23 | [ApprovalCallback](#23-approvalcallback) | `tool_access.py` | `request_approval` | Default auto-approve path in `ToolAccessPolicy` |
 
 EnginePort also defines **optional SPI methods** with default implementations — see [EnginePort SPI](#engineport-spi-optional-methods).
 
-Additionally, [ConflictResolver](#conflictresolver-temporal) in `temporal/conflict.py` provides concurrent-update resolution for multi-agent scenarios.
+Additionally, [ConflictResolver](#conflictresolver-temporal) in `temporal/conflict.py` provides concurrent-update resolution for multi-agent scenarios (a concrete class, not an ABC).
 
 ---
 
@@ -524,6 +536,295 @@ Default returns `self` (no-op). Subclasses with configurable parameters override
 Never retries — errors propagate immediately. This is the default, preserving the pre-retry behavior. The production implementation is `DefaultRetryStrategy` (in `services/`), which uses `ErrorClassifier` for intelligent retry decisions.
 
 **Integration status**: Integrated into PregelRuntime via `RetryExecutor` (Phase 3). Stream-safe — retry only before the first token is yielded.
+
+---
+
+## 12. ChannelBehavior
+
+**File**: `src/hecate/engine/channel.py`
+
+Abstract interface for channel value semantics. Defines how a channel type initializes its value and how writes are merged into the current value during graph execution.
+
+### Abstract methods
+
+```python
+class ChannelBehavior(ABC):
+    @abstractmethod
+    def initial_value(self, defn: ChannelDef) -> Any
+    @abstractmethod
+    def write(self, current: Any, value: Any, defn: ChannelDef) -> Any
+```
+
+| Method | Behavior |
+|--------|----------|
+| `initial_value` | Produce the channel's initial value from its definition (e.g. empty list for accumulation). |
+| `write` | Merge an incoming write into the current value, returning the new value. |
+
+### Built-in implementations
+
+| Implementation | Behavior |
+|----------------|---------|
+| `LastValueBehavior` | Overwrites the current value — last write wins. Default for scalar channels. |
+| `TopicBehavior` | Appends values to an unbounded list (subject to eviction policy). |
+| `AccumulatorBehavior` | Appends values for partial-result channels used by reducer-style nodes. |
+
+**Integration status**: ChannelManager holds a `ChannelBehavior` per channel type; `ChannelManager.write()` delegates merge semantics to the behavior instance.
+
+---
+
+## 13. DecisionSink
+
+**File**: `src/hecate/engine/decision_sink.py`
+
+Abstract interface for security/audit decision recording. Each tool decision (approve/deny/ask) is emitted as an event for the audit trail.
+
+### Abstract methods
+
+```python
+class DecisionSink(ABC):
+    @abstractmethod
+    def emit(self, event: dict[str, Any]) -> None
+```
+
+| Method | Behavior |
+|--------|----------|
+| `emit` | Accept a security audit event dict (keys include `agent_id`, tool metadata, decision, timestamp). MUST be non-blocking — buffer and return immediately; real DB writes happen in a background flush cycle. |
+
+### Built-in implementations
+
+| Implementation | Behavior |
+|----------------|---------|
+| `NullDecisionSink` | Discards events silently. Default when no service is registered. |
+
+The production adapter (in `services/`) persists events to the audit log tables. `ToolDecisionEmitter` is the non-abstract helper that wraps a `DecisionSink`.
+
+---
+
+## 14. EventBus
+
+**File**: `src/hecate/engine/eventbus.py`
+
+Abstract interface for publish/subscribe collaboration events between agents. Used by broadcast, debate, and other multi-agent patterns to exchange `CollaborationEvent`s on named topics.
+
+### Abstract methods
+
+```python
+class EventBus(ABC):
+    @abstractmethod
+    async def publish(self, topic: str, event: CollaborationEvent) -> None
+    @abstractmethod
+    async def subscribe(self, topic: str) -> AsyncIterator[CollaborationEvent]
+```
+
+| Method | Behavior |
+|--------|----------|
+| `publish` | Deliver an event to all subscribers of the topic. |
+| `subscribe` | Async iterator yielding events published to the topic. |
+
+### Built-in implementations
+
+| Implementation | Behavior |
+|----------------|---------|
+| `InMemoryEventBus` | In-process pub/sub with per-topic subscriber sets. Default for single-process deployments. |
+
+`CollaborationEventType` (StrEnum) enumerates the supported event kinds (e.g. `MESSAGE`, `TASK_ASSIGNED`, `TASK_COMPLETED`, `VOTE`).
+
+---
+
+## 15. MetricsStore
+
+**File**: `src/hecate/engine/metrics_store.py`
+
+Abstract interface for telemetry recording. The engine records counters, gauges, and histograms at every boundary (LLM calls, tool invocations, checkpoint saves) without depending on a specific backend.
+
+### Abstract methods
+
+```python
+class MetricsStore(ABC):
+    @abstractmethod
+    def record_counter(self, name: str, value: float = 1.0, tags: dict[str, str] | None = None) -> None
+    @abstractmethod
+    def record_gauge(self, name: str, value: float, tags: dict[str, str] | None = None) -> None
+    @abstractmethod
+    def record_histogram(self, name: str, value: float, tags: dict[str, str] | None = None) -> None
+    @abstractmethod
+    def query_metrics(self, name: str, tags: dict[str, str] | None = None, window: str = "5m") -> list[MetricEntry]
+    @abstractmethod
+    def get_snapshot(self, windows: list[str] | None = None) -> MetricsSnapshot
+```
+
+| Method | Behavior |
+|--------|----------|
+| `record_counter` | Increment a monotonically increasing counter (optionally by `value`). |
+| `record_gauge` | Set a gauge to `value`. |
+| `record_histogram` | Record a sample into a histogram. |
+| `query_metrics` | Query raw metric entries matching name/tags within a time window. |
+| `get_snapshot` | Return an aggregated `MetricsSnapshot` over the requested windows. |
+
+### Built-in implementations
+
+| Implementation | Behavior |
+|----------------|---------|
+| `InMemoryMetricsStore` | Ring-buffer storage with rolling aggregates. Default; bounded by `max_buffer_size` (100 000 entries). |
+
+---
+
+## 16. PolicyLayer
+
+**File**: `src/hecate/engine/policy_pipeline.py`
+
+Abstract interface for a single policy decision stage. Layers are composed into a `ToolPolicyPipeline` that evaluates tool-call visibility and execution permissions.
+
+### Abstract methods
+
+```python
+class PolicyLayer(ABC):
+    @abstractmethod
+    def name(self) -> str
+    @abstractmethod
+    def evaluate(self, context: PolicyContext, decision: PolicyDecision) -> PolicyDecision
+```
+
+| Method | Behavior |
+|--------|----------|
+| `name` | Stable layer identifier (used in logs and error messages). |
+| `evaluate` | Inspect/mutate the `PolicyDecision` flowing through the pipeline (e.g. deny, require approval, allow). |
+
+### Built-in implementations
+
+Composable layers built into `ToolPolicyPipeline`, including rule-based allow/deny lists, risk-based approval requirements, and sandbox-scope enforcement. The pipeline exposes `evaluate_visibility` and `evaluate_execution` entry points. `PermissionMode` (StrEnum) selects between `STRICT` and permissive modes.
+
+---
+
+## 17. Session Hooks
+
+**File**: `src/hecate/engine/session_hooks.py`
+
+Four abstract hook interfaces that fire at session lifecycle boundaries, letting extensions observe or veto lifecycle transitions. All return a `HookResult` and may emit a `HookAction` (e.g. allow/deny/redirect). This section covers inventory rows 17–20 — the four interfaces below share one section rather than each getting its own.
+
+### Abstract methods
+
+```python
+class SessionStartHook(ABC):
+    @abstractmethod
+    async def on_session_start(self, context: SessionContext) -> HookResult
+
+class SessionEndHook(ABC):
+    @abstractmethod
+    async def on_session_end(self, context: SessionContext) -> HookResult
+
+class UserPromptSubmitHook(ABC):
+    @abstractmethod
+    async def on_user_prompt_submit(self, context: SessionContext) -> HookResult
+
+class PreCompactHook(ABC):
+    @abstractmethod
+    async def on_pre_compact(self, context: SessionContext) -> HookResult
+```
+
+| Hook | Fires |
+|------|-------|
+| `SessionStartHook` | When a session is created / resumed, before the first LLM call. |
+| `SessionEndHook` | When a session ends, before state finalization. |
+| `UserPromptSubmitHook` | When a user prompt enters the session, before context assembly. |
+| `PreCompactHook` | Before context compaction/offloading kicks in. |
+
+### Built-in implementations
+
+| Implementation | Behavior |
+|----------------|---------|
+| `NoOpSessionStartHook` / `NoOpSessionEndHook` / `NoOpUserPromptSubmitHook` / `NoOpPreCompactHook` | Pass-through defaults. |
+
+---
+
+## 21. SessionStateStore
+
+**File**: `src/hecate/engine/session_state.py`
+
+Abstract interface for durable session state (summary, memory, conversation metadata) independent of the checkpoint store. Used by long-running sessions to persist `SessionState` between invocations.
+
+### Abstract methods
+
+```python
+class SessionStateStore(ABC):
+    @abstractmethod
+    async def save(self, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID, state: SessionState) -> None
+    @abstractmethod
+    async def load(self, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID) -> SessionState | None
+    @abstractmethod
+    async def list_recent(self, org_id: uuid.UUID, user_id: uuid.UUID, limit: int = 10) -> list[SessionSummary]
+```
+
+| Method | Behavior |
+|--------|----------|
+| `save` | Persist a session state snapshot. |
+| `load` | Retrieve the latest snapshot, or `None` if absent. |
+| `list_recent` | Return recent session summaries for a user. |
+
+### Built-in implementations
+
+| Implementation | Behavior |
+|----------------|---------|
+| `InMemorySessionStateStore` | Dict-backed store for tests and single-process use. Default. |
+
+Production stores live in `services/session_state/`: Redis, PostgreSQL, and a tiered store combining both. Optimistic concurrency uses `SessionStateConflictError`; sessions that no longer exist raise `SessionNotFoundError`.
+
+---
+
+## 22. TaskAllocator
+
+**File**: `src/hecate/engine/task_allocator.py`
+
+Abstract interface for task-to-agent assignment in dynamic orchestration. Given a task and a set of candidate agents, selects the best-fit agent (creating one if allowed).
+
+### Abstract methods
+
+```python
+class TaskAllocator(ABC):
+    @abstractmethod
+    async def allocate(self, task: str, candidates: list[Any], create_if_not_found: bool = False) -> Any | None
+```
+
+| Method | Behavior |
+|--------|----------|
+| `allocate` | Return the best-fit agent for `task`, or `None` when no candidate matches and creation is disabled. |
+
+### Built-in implementations
+
+| Implementation | Behavior |
+|----------------|---------|
+| `SemanticTaskAllocator` | Selects via semantic similarity between task description and agent capabilities. |
+| `RoundRobinTaskAllocator` | Rotates through candidates deterministically. |
+
+---
+
+## 23. ApprovalCallback
+
+**File**: `src/hecate/engine/tool_access.py`
+
+Abstract interface for human-in-the-loop approval. When a tool call requires approval (per policy/risk level), the engine invokes the callback and blocks until a decision arrives.
+
+### Abstract methods
+
+```python
+class ApprovalCallback(ABC):
+    @abstractmethod
+    async def request_approval(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        risk_level: str,
+        context: dict[str, Any],
+    ) -> ApprovalDecision
+```
+
+| Method | Behavior |
+|--------|----------|
+| `request_approval` | Block until an `ApprovalDecision` (approve/deny) is produced for the pending tool call. |
+
+### Built-in implementations
+
+The default path inside `ToolAccessPolicy` auto-approves when no approval backend is registered. Production deployments wire the callback to the dashboard's human-in-the-loop approval UI. `RiskLevel`, `AccessDecision`, and `ApprovalScope` enums define the policy vocabulary.
 
 ---
 

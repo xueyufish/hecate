@@ -1,6 +1,6 @@
 # Plugins
 
-Hecate's plugin system is how third-party code extends the platform without forking it. A plugin is a self-contained Python package that registers a manifest with Hecate and adds **one capability** — a new evaluation metric, a new auth method, a new notification channel, or custom logic at runtime interception points.
+Hecate's plugin system is how third-party code extends the platform without forking it. A plugin is a self-contained Python package that registers a manifest with Hecate and adds **one capability** — a new evaluation metric, a new auth method, a new chat channel, or custom logic at runtime interception points.
 
 This document explains the **conceptual model**: what plugins are, when to write one, and how to choose the right type. For implementation details, see [Extension SPI & Plugin Architecture](../design/extension-architecture.md). For the API reference, see [Extension Points](../reference/extension-points.md).
 
@@ -28,18 +28,20 @@ When Hecate starts (or the plugin is hot-loaded), it:
 
 ---
 
-## Six plugin types
+## Eight plugin types
 
-Hecate supports six plugin types, each with a specific purpose. Choosing the right one is the most important decision:
+Hecate supports eight plugin types, each with a specific purpose. Choosing the right one is the most important decision:
 
 | Type | ABC | Purpose | When to choose |
 |---|---|---|---|
 | **Tool** | `ToolPluginABC` | Add a callable tool that agents can invoke | "I want my agent to do X" |
-| **Evaluator** | `EvaluatorABC` | Add a custom evaluation metric | "I want to measure Y" |
-| **Channel** | `ChannelABC` | Add an external communication channel (Slack, Teams, etc.) | "I want messages from X" |
-| **Auth Provider** | `AuthProviderABC` | Add a new authentication method | "I want users to log in via X" |
-| **Notifier** | `NotifierABC` | Add a new notification destination | "I want events delivered to X" |
 | **Extension** | `ExtensionPluginABC` | Inject custom logic into the execution flow | "I want to transform Y at runtime" |
+| **Trigger** | `TriggerPluginABC` | Event-driven invocation (webhook / schedule / MQ) | "I want to react to X" |
+| **Model** | `ModelPluginABC` | Add a custom LLM provider | "I want to call provider X" |
+| **Channel** | `ChannelABC` | Add an external communication channel (Slack, Teams, etc.) | "I want messages from X" |
+| **Evaluator** | `EvaluatorABC` | Add a custom evaluation metric | "I want to measure Y" |
+| **Auth Provider** | `AuthProviderABC` | Add a new authentication method | "I want users to log in via X" |
+| **Secret Provider** | `SecretProviderABC` | Add a new secret storage backend | "I want secrets in X" |
 
 **Rule of thumb**: pick the type that matches the **subsystem** you want to extend, not the language or framework you want to use. If you don't see your use case, the answer is usually **Extension** (most flexible).
 
@@ -63,7 +65,7 @@ The most common confusion is between **Tool plugins** and **external MCP servers
 | Use case | Recommendation |
 |---|---|
 | "My agent needs to query our internal customer DB" | Tool plugin (if DB access should be in Hecate process) or MCP server (if it should be isolated) |
-| "Add a Slack notifier" | Plugin if you own the Slack workspace; Notifier plugin |
+| "Add a Slack notifier" | Channel plugin (Slack channel) if you own the Slack workspace |
 | "Connect to GitHub for PR review" | MCP server (GitHub already has an official MCP server) |
 | "Custom PII redaction beyond Presidio" | Extension plugin (auto-wired into PreLLM hook) |
 | "Quality metric for our domain glossary" | Evaluator plugin |
@@ -105,7 +107,7 @@ Every plugin declares its metadata in a `PluginManifest`:
 
 ```python
 manifest = PluginManifest(
-    type="evaluator",                       # One of: tool, evaluator, channel, auth, notifier, extension
+    type="evaluator",                       # One of: tool, extension, trigger, model, channel, evaluator, auth, secret
     name="domain_specific_score",           # Unique within type
     version="1.0.0",                        # Semantic version
     api_version="1.0",                     # Required: SPI version you target
@@ -176,7 +178,7 @@ Write a plugin when you need to extend Hecate with code that's **specific to you
 
 ## Plugin vs extension: the escape hatch
 
-If your use case doesn't fit any of the six plugin types, you probably want an **Extension plugin**. Extensions are special — they're auto-wired into all four guardrail hook points:
+If your use case doesn't fit any of the eight plugin types, you probably want an **Extension plugin**. Extensions are special — they're auto-wired into all four guardrail hook points:
 
 ```
 PreLLMHook → on_pre_llm() → modify messages → continue
@@ -270,7 +272,7 @@ For the current state of plugin distribution, see [post-1.0].
 ## Related documents
 
 - [Extension SPI & Plugin Architecture](../design/extension-architecture.md) — implementation details, ABC signatures, full examples
-- [Extension Points Reference](../reference/extension-points.md) — API reference for all 11 core + 4 SPI extension points
+- [Extension Points Reference](../reference/extension-points.md) — API reference for all 26 engine extension interfaces + 8 plugin SPI types
 - [How-to: Develop Custom Extensions](../how-to/develop-extensions.md) — step-by-step practical recipe
 - [Tools, MCP, and A2A](tools-and-mcp.md) — when to use plugins vs MCP servers vs A2A agents
 -  — plugin marketplace and distribution are post-1.0

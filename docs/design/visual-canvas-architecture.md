@@ -220,12 +220,12 @@ From ADR-007 + ADR-019, six collaboration patterns ship as **pattern templates**
 
 | Pattern | Visual | Behavior |
 |---|---|---|
-| **Hierarchical** | Tree | One planner → many workers |
-| **Handoff** | Chain | One agent passes control to next |
-| **Pipeline** | Linear | Sequential processing |
-| **Broadcast** | Fan-out | One sender → many parallel receivers |
-| **Negotiation** | Loop | Two agents iterate until consensus |
-| **Debate** | Round-robin | Multiple agents argue, arbiter decides |
+| **Sequential Pipeline** | Linear | Stages run one after another |
+| **Parallel Fan-Out** | Fan-out | One node dispatches to many parallel branches |
+| **Handoff Routing** | Chain | One agent passes control to next |
+| **Broadcast Discussion** | Fan-out | One sender → many parallel receivers |
+| **Negotiation Loop** | Loop | Two agents iterate until consensus |
+| **Debate Arena** | Round-robin | Multiple agents argue, arbiter decides |
 
 `pattern-selector.tsx` shows these as droppable templates. `pattern-config-dialog.tsx` lets the user customize before instantiation (e.g., "2 workers or 4?").
 

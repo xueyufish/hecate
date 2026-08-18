@@ -501,7 +501,7 @@ A researcher fans out to multiple analysts, results are merged, then summarized:
 
 ## See also
 
-- **[Extension Points](extension-points.md)** — the 11 core + 4 SPI engine interfaces you can implement to customize execution.
+- **[Extension Points](extension-points.md)** — the 26 engine extension interfaces + 8 plugin SPI types you can implement to customize execution.
 - **[Engine Design](../design/engine-design.md)** — how the Pregel runtime executes a compiled graph superstep by superstep.
 - **[Multi-Agent Orchestration Tutorial](../tutorials/04-multi-agent.md)** — build workflows with the six collaboration patterns using prebuilt templates.
 - **[Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json)** — the authoritative JSON Schema file.

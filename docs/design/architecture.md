@@ -19,9 +19,9 @@ Hecate enables enterprises to build, orchestrate, and run AI Agent applications 
 
 The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md)) with checkpoints as materialized caches, and dispatches node execution to a Worker Pool.
 
-**15 pluggable extension points** — 11 Core + 4 SPI:
+**26 engine extension interfaces + 8 plugin SPI types**:
 
-**Core Extension Points (11)** — engine-level extensibility:
+**Engine Extension Interfaces (26)** — engine-level extensibility:
 
 | Extension Point | Purpose |
 |-----|---------|
@@ -33,20 +33,33 @@ The execution engine is Hecate's heart — a self-built Pregel runtime with zero
 | `SchedulerStrategy` | Node scheduling (FIFO default, pluggable) |
 | `EvictionPolicy` | Channel memory management |
 | `OptimizationPass` | Graph optimization (dead node elimination, parallel detection) |
-| `ConflictResolver` | Concurrent channel update resolution |
+| `ConflictResolver` | Concurrent channel update resolution (Temporal) |
 | `Guardrail Hooks (×4)` | Pre/Post LLM/Tool interception |
 | `RetryStrategy` | Retry policies with configurable backoff and predicates |
+| `ChannelBehavior` | Channel value semantics (last-value / topic / accumulator) |
+| `DecisionSink` | Security/audit decision recording |
+| `EventBus` | Publish/subscribe collaboration events |
+| `MetricsStore` | Telemetry recording (counters, gauges, histograms) |
+| `PolicyLayer` | Policy decision stages composed in `ToolPolicyPipeline` |
+| `Session Hooks (×4)` | Session lifecycle interception (start/end/prompt-submit/pre-compact) |
+| `SessionStateStore` | Durable session state (summary, memory) |
+| `TaskAllocator` | Task-to-agent assignment (dynamic orchestration) |
+| `ApprovalCallback` | Human-in-the-loop tool approval |
 
-**SPI Extension Points (4)** — pluggable extension interfaces (📋 Planned):
+**Plugin SPI Types (8)** — pluggable extension interfaces:
 
-| Extension Point | Purpose |
-|-----|---------|
-| `Evaluator` | Evaluator interface; 40+ built-in evaluators as `BuiltinEvaluator` |
-| `Channel` | Channel adapter; REST/WS/CLI as `BuiltinChannel` |
-| `AuthProvider` | Auth provider; JWT/APIKey as `BuiltinAuthProvider` |
-| `Notifier` | Notifier; Email/Webhook as `BuiltinNotifier` |
+| Type | ABC | Purpose |
+|-----|-----|---------|
+| `Tool` | `ToolPluginABC` | Callable tools agents can invoke |
+| `Extension` | `ExtensionPluginABC` | Runtime interceptors auto-wired into guardrail hooks |
+| `Trigger` | `TriggerPluginABC` | Event-driven invocation (webhook / schedule / MQ) |
+| `Model` | `ModelPluginABC` | Custom LLM providers |
+| `Channel` | `ChannelABC` | External communication channels (incl. notification adapters) |
+| `Evaluator` | `EvaluatorABC` | Evaluation metrics (40+ built-in) |
+| `AuthProvider` | `AuthProviderABC` | Authentication methods (JWT/APIKey built-in) |
+| `SecretProvider` | `SecretProviderABC` | Secret storage backends |
 
-All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginManifest + PluginLifecycle) for registration and lifecycle management.
+All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginManifest + PluginLifecycle) for registration and lifecycle management. See the [Extension Points reference](../reference/extension-points.md) for the full inventory with abstract methods and default implementations.
 
 ---
 
@@ -101,7 +114,7 @@ All requests are uniformly wrapped as `ExecutionRequest` objects containing the 
 
 ### Agent Studio
 
-Visual development environment for building and configuring agents. Features a React Flow-based drag-and-drop canvas, agent configurator, prompt management with analytics, workflow builder with six multi-agent collaboration patterns (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate), reusable templates, and developer tools (CLI). All multi-agent patterns are expressed as Graph topologies, not hardcoded paths — any pattern can be visualized and edited in the canvas.
+Visual development environment for building and configuring agents. Features a React Flow-based drag-and-drop canvas, agent configurator, prompt management with analytics, workflow builder with six multi-agent collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate), reusable templates, and developer tools (CLI). All multi-agent patterns are expressed as Graph topologies, not hardcoded paths — any pattern can be visualized and edited in the canvas. A seventh pattern, Dynamic Orchestration, is emitted at runtime as a TaskDAG by a COORDINATOR node (ADR-032).
 
 Human-in-the-Loop is handled via `interrupt()` (pause execution, return control to user) and `Command` (resume with user input, or redirect execution flow). NL2Agent and code generation are planned.
 
@@ -137,7 +150,7 @@ RAG pipeline and multi-level memory system. The RAG pipeline covers document ing
 
 ### Enterprise Foundation
 
-Infrastructure layer providing multi-tenancy (Organization → Workspace → User with data-level isolation via `workspace_id` on 15 data models), async SQLAlchemy 2.0 database access with Alembic migrations (PostgreSQL, MySQL, SQLite), Pydantic-based configuration, secret management, rate limiting, async task scheduling, Docker Compose deployment, and health checks.
+Infrastructure layer providing multi-tenancy (Organization → Workspace → User with data-level isolation via `workspace_id` on 38 data models), async SQLAlchemy 2.0 database access with Alembic migrations (PostgreSQL, MySQL, SQLite), Pydantic-based configuration, secret management, rate limiting, async task scheduling, Docker Compose deployment, and health checks.
 
 > See [Enterprise Foundation Design](enterprise-foundation-design.md) for L2 architecture, multi-tenancy, security, and deployment infrastructure.
 
@@ -231,7 +244,7 @@ Hecate models tenancy as a three-level hierarchy:
 - **Workspace** — Isolated environment within an organization. Agents, workflows, knowledge bases, and tools belong to a workspace.
 - **User** — Authenticated actor within an organization, with role-based access (admin/editor/viewer).
 
-Tenant isolation is enforced via `workspace_id` foreign keys on 15 data models. This provides data-level isolation without requiring separate database instances per tenant.
+Tenant isolation is enforced via `workspace_id` foreign keys on 38 data models. This provides data-level isolation without requiring separate database instances per tenant.
 
 ---
 
@@ -272,7 +285,7 @@ For production deployments, each infrastructure component can be replaced with m
 | [Enterprise Foundation Design](enterprise-foundation-design.md) | Outbound DLP, vault integration, data lineage, multi-region sovereignty, zero retention, confidential computing |
 | [Ecosystem Design](ecosystem-design.md) | ARD discovery, partner monetization, semantic marketplace, community gallery, cross-surface experience, governed catalog |
 | [Core Concepts](concepts.md) | Entity definitions, relationships, data model, storage design |
-| [ADR Directory](adr/) | Architecture Decision Records (28 decisions with context and rationale) |
-| [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition (4 node types, 4 channel types) |
+| [ADR Directory](adr/) | Architecture Decision Records (32 decisions with context and rationale) |
+| [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition (10 node types, 4 channel types) |
 | [OpenSpec Specs](../../openspec/specs/) | Feature-level specifications with requirements and scenarios |
 | [OpenSpec Archive](../../openspec/changes/archive/) | Completed change proposals with design docs and task tracking |
