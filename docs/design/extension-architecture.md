@@ -423,9 +423,9 @@ def register(registry):
 Then deploy:
 
 ```bash
-hecate plugin install ./my_evaluator.py
-hecate plugin enable domain_specific_score
-hecate plugin list --type evaluator
+python -m hecate.plugin.cli package ./my_evaluator
+python -m hecate.plugin.cli install ./my_evaluator.hecate-plugin
+# enable/disable via the plugin management REST API (/api/plugins)
 ```
 
 ### Example: a custom extension (guardrail hook)
@@ -620,7 +620,7 @@ For specific implementation details:
 - `src/hecate/plugin/types/tool.py` — ToolPluginABC
 - `src/hecate/plugin/types/model.py` — ModelPluginABC
 - `src/hecate/plugin/types/trigger.py` — TriggerPluginABC
-- `src/hecate/plugin/cli.py` — `hecate plugin` CLI commands
+- `src/hecate/plugin/cli.py` — standalone plugin CLI (`python -m hecate.plugin.cli`)
 - `src/hecate/plugin/hot_reload.py` — plugin hot-reload
 - `src/hecate/plugin/permission.py` — permissions enforcement
 - `src/hecate/plugin/loader.py` — plugin loader

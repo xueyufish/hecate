@@ -14,13 +14,13 @@ A plugin is a Python package with three parts:
 my-plugin/
 ├── src/
 │   └── my_plugin.py        # Implementation of an ABC
-├── MANIFEST.hcate-plugin   # Plugin manifest (metadata + entry)
+├── plugin.yaml             # Plugin manifest (metadata + entry)
 └── README.md               # Human-readable description
 ```
 
 When Hecate starts (or the plugin is hot-loaded), it:
 
-1. Reads `MANIFEST.hcate-plugin` for metadata
+1. Reads `plugin.yaml` for metadata
 2. Validates against `PluginManifest` schema
 3. Loads the entry point (Python class or MCP/A2A URL)
 4. Registers with the `PluginRegistry`
@@ -53,7 +53,7 @@ The most common confusion is between **Tool plugins** and **external MCP servers
 
 | Aspect | Tool plugin | MCP server |
 |---|---|---|
-| **Distribution** | Installed via `hecate plugin install` | Connected via MCP endpoint URL |
+| **Distribution** | Installed via the plugin CLI (`python -m hecate.plugin.cli install`) | Connected via MCP endpoint URL |
 | **Code location** | Runs in Hecate process | Runs in separate process (often remote) |
 | **Update cadence** | New Hecate release required | Independent of Hecate |
 | **Trust boundary** | Must trust plugin author | Must trust MCP server operator |
@@ -147,11 +147,9 @@ When a plugin tries to do something outside its declared permissions, the reques
 Plugin development benefits from fast iteration. Hecate supports hot reload:
 
 ```bash
-# Edit a plugin file
+# Edit a plugin file — with HOT_RELOAD=true, the file watcher
+# picks up the change and reloads the plugin automatically
 vim my_plugin.py
-
-# Reload without restarting Hecate
-hecate plugin reload my_plugin
 ```
 
 Hot reload preserves:
@@ -206,10 +204,10 @@ A typical plugin development cycle:
 1. Identify the right plugin type (table above)
 2. Read the corresponding ABC and example
 3. Write the implementation
-4. Test locally with `hecate plugin load ./my-plugin`
+4. Test locally — drop the directory into `plugins/` with `HOT_RELOAD=true`
 5. Validate permissions by trying to do too much
-6. Package as MANIFEST.hcate-plugin
-7. Install in your environment: `hecate plugin install ./my-plugin`
+6. Package: `python -m hecate.plugin.cli package ./my-plugin`
+7. Install in your environment: `python -m hecate.plugin.cli install ./my-plugin.hecate-plugin`
 8. Configure permissions via the Management API
 9. Monitor via audit logs
 10. Distribute (if open source) to plugin hub

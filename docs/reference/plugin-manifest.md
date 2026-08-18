@@ -89,7 +89,7 @@ The registry rejects the plugin if the running Hecate is older.
 ### `description` (recommended)
 
 Human-readable description (1-2 sentences). Shown in:
-- `hecate plugin list` output
+- Plugin management API (`GET /api/plugins`) output
 - Canvas plugin manager UI
 - API responses
 
@@ -273,14 +273,13 @@ def register(registry: PluginRegistry):
     registry.register(MANIFEST, MyEvaluator())
 ```
 
-Package the above as a Python wheel with a `MANIFEST.hcate-plugin` file at the root:
+Package the above as a plugin directory with a `plugin.yaml` manifest at the root:
 
 ```
 my_plugin/
-├── MANIFEST.hcate-plugin    # YAML form of the manifest
-├── pyproject.toml
-└── my_plugin/
-    └── __init__.py
+├── plugin.yaml           # YAML form of the manifest
+├── __init__.py           # entry class (python:my_plugin:MyEvaluator)
+└── test_my_plugin.py     # instantiable smoke test
 ```
 
 ### MCP server
@@ -358,25 +357,17 @@ When upgrading Hecate:
 ### Package the plugin
 
 ```bash
-# Python wheel
-pip install build
-python -m build
-
-# Result: dist/my_plugin-1.0.0-py3-none-any.whl
+python -m hecate.plugin.cli package ./my_plugin
+# Result: my_plugin.hecate-plugin (ZIP bundle; plugin.yaml validated)
 ```
 
 ### Install locally
 
 ```bash
-hecate plugin install ./dist/my_plugin-1.0.0-py3-none-any.whl
+python -m hecate.plugin.cli install ./my_plugin.hecate-plugin
 ```
 
-### Publish to a registry
-
-```bash
-pip upload twine
-twine upload dist/*
-```
+Enable/disable and configuration happen through the plugin management REST API (`/api/plugins`) or the canvas plugin manager.
 
 ### (Future) Community plugin hub
 
