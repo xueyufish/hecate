@@ -10,13 +10,13 @@ The execution engine is Hecate's heart. It receives compiled Graphs, executes th
 
 The core design decision is to build a self-contained engine that borrows five design patterns from LangGraph — Channel, Checkpoint, Pregel superstep loop, interrupt/Command, and subgraph composition — without depending on any LangChain code. The engine layer has zero external dependencies except `jsonschema` for DSL validation. This keeps the engine portable, testable, and free from framework coupling.
 
-The engine defines eleven extension points that provide pluggable behavior for every aspect of execution: how nodes are scheduled, how memory is managed, how conflicts are resolved, how events are logged, and how requests are guarded. Default in-memory implementations are provided for each extension point.
+The engine defines 26 extension interfaces that provide pluggable behavior for every aspect of execution: how nodes are scheduled, how memory is managed, how conflicts are resolved, how events are logged, how requests are guarded, how sessions are stored, and how decisions are audited. Default in-memory implementations are provided for each extension point.
 
 ---
 
 ## Graph DSL
 
-Graphs are defined as JSON documents conforming to a JSON Schema (bundled in the engine package via `importlib.resources`). The DSL supports four node types (`llm`, `code`, `condition`, `tool`, `agent`, `subgraph`, `input`, `output`) and four channel types.
+Graphs are defined as JSON documents conforming to a JSON Schema (bundled in the engine package via `importlib.resources`). The DSL supports ten node types (`conversation`, `tool-call`, `condition`, `agent`, `knowledge-retrieval`, `variable-set`, `fan-out`, `merge`, `suggestion`, `coordinator`) and four channel types.
 
 ### Example: Three-Layer Agent Template
 

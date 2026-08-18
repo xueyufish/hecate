@@ -12,7 +12,7 @@ Hecate is an **open-source, self-hosted, Python-first agent platform** for engin
 2. **Self-hosted OSS (MIT)** — your data never leaves your network
 3. **Multi-protocol by default** — MCP, A2A, and OpenAI-compatible API all first-class
 4. **Multi-tenant by default** — Organization → Workspace → RBAC out of the box
-5. **Engine-level extensibility** — 11 core + 4 SPI extension points, not just a plugin marketplace
+5. **Engine-level extensibility** — 26 engine extension interfaces + 8 plugin SPI types, not just a plugin marketplace
 
 ---
 
@@ -53,13 +53,13 @@ Hecate is an **open-source, self-hosted, Python-first agent platform** for engin
 │   ┌────────────────────────────────────────────────────────┐ │
 │   │                       engine/                          │ │
 │   │  Pregel runtime · Channels · Event log · Workers      │ │
-│   │  11 core + 4 SPI extension points                      │ │
+│   │  26 engine interfaces + 8 SPI types                  │ │
 │   │  (DEPS: only `jsonschema` — zero deps on services)   │ │
 │   └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The engine layer defines 11 core + 4 SPI extension points. Services provide concrete implementations. The API layer orchestrates services. This separation keeps the engine testable with lightweight stubs.
+The engine layer defines 26 extension interfaces + 8 plugin SPI types. Services provide concrete implementations. The API layer orchestrates services. This separation keeps the engine testable with lightweight stubs.
 
 ---
 
@@ -234,5 +234,5 @@ Based on your role:
 
 - [Engine Design](../design/engine-design.md) — Pregel runtime, compiler pipeline, channel system, event-sourced state + checkpoint caches
 - [Core Concepts](../design/concepts.md) — entity definitions, relationships, data model
-- [Architecture Decision Records](../design/adr/) — 28 decisions with context and rationale
+- [Architecture Decision Records](../design/adr/) — 32 decisions with context and rationale
 - [Glossary](../reference/glossary.md) — comprehensive term definitions

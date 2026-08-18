@@ -141,7 +141,7 @@ Beyond calling tools, an agent can invoke another agent as if it were a tool. `A
 - **Model override** — run the sub-agent on a different model.
 - **Limits** — `max_turns` and `timeout_seconds` bound execution.
 
-This is how Hecate implements [multi-agent collaboration patterns](../tutorials/04-multi-agent.md) — Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, and Debate are all expressed as graphs whose nodes are `AgentTool` calls.
+This is how Hecate implements [multi-agent collaboration patterns](../tutorials/04-multi-agent.md) — Sequential, Parallel, Handoff, Broadcast, Negotiation, and Debate are all expressed as graphs whose nodes are `AgentTool` calls.
 
 ---
 

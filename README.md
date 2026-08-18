@@ -25,7 +25,7 @@ Hecate is an enterprise-grade Agent platform with a self-developed Pregel execut
 Hecate is a good fit if you need any of the following:
 
 - **A flexible agent runtime** — code-first Python API for engineers and a visual canvas for non-developers
-- **Engine-level extensibility** — 11 core + 4 SPI extension points let you swap schedulers, checkpointers, guardrails
+- **Engine-level extensibility** — 26 engine extension interfaces + 8 plugin SPI types let you swap schedulers, checkpointers, guardrails, tool/extension/trigger/model plugins, and more
 - **Self-hosted on your own infrastructure** — your prompts never leave your network; LLM traffic uses your API keys
 - **Multi-agent orchestration with persistence** — graph-based state, durable checkpoints, human-in-the-loop
 - **A multi-tenant foundation** — Organization → Workspace → RBAC for an internal agent platform product
@@ -158,18 +158,20 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 
 ## Features
 
-- **Graph-First Engine** — Self-built Pregel/BSP runtime with 11 core + 4 SPI extension points. Zero external framework dependencies for the engine.
+- **Graph-First Engine** — Self-built Pregel/BSP runtime with 26 engine extension interfaces and 8 plugin SPI types. Zero external framework dependencies for the engine.
 - **A2A Protocol Native** — Linux Foundation v1.0 GA — signed AgentCards (`/.well-known/agent-card.json`), JSON-RPC 2.0 task lifecycle, SSE streaming, and JWS+RFC 8785 trust model. Operates as both A2A server and A2A client.
 - **MCP Native** — Bidirectional Model Context Protocol: Hecate consumes external MCP servers (GitHub, Slack, etc.) and exposes its own as a server (Streamable HTTP transport).
 - **OpenAI SDK Drop-in** — Wire-compatible `/v1/chat/completions` endpoint. Any OpenAI client (Python, JS, litellm, langchain-openai, instructor, vllm) works against Hecate by changing `base_url`.
 - **Visual Canvas** — Drag-and-drop workflow editor in `web/` (React Flow + Next.js). Bidirectional sync with the JSON graph DSL — what you build visually is the same code-defined workflow.
-- **Multi-Agent Orchestration** — Six collaboration patterns (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate) unified as Graph templates.
+- **Multi-Agent Orchestration** — Seven collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate, Dynamic Orchestration) unified as Graph templates — six static, plus Dynamic Orchestration emitting a runtime TaskDAG from a COORDINATOR node.
 - **Context Engineering** — An extensible pipeline (assembler, evidence tracker, phase detector, token budget, provider shaping, message prioritization, tool filtering, offloader) that keeps long-running agents on-budget and on-task.
-- **Multi-Tenant** — Organization → Workspace → RBAC with `workspace_id` on 34 data models for tenant isolation. SSO via OIDC/SAML/LDAP, SCIM v2 provisioning.
-- **Plugin System** — 6 plugin types (Tool / Evaluator / Channel / Auth / Notifier / Extension) with hot-reload, declared permissions, and versioned manifests. Plus Core extension points for engine-internal customization.
+- **Multi-Tenant** — Organization → Workspace → RBAC with `workspace_id` on 38 data models for tenant isolation. SSO via OIDC/SAML/LDAP, SCIM v2 provisioning.
+- **Plugin System** — 8 plugin types (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) with hot-reload, declared permissions, and versioned manifests. Plus Core extension points for engine-internal customization.
 - **IM Channels** — Reach Hecate agents from Feishu (Lark) and Slack via inbound webhooks. Mandatory Bound Identity model ensures every IM user is bound to a Hecate user before any conversation starts. Same Hecate user shares one conversation thread across both channels. See [Configure Feishu and Slack](docs/how-to/configure-feishu-slack.md) and the [IM channel architecture overview](docs/concepts/im-channel-architecture.md).
+- **Embeddable Web Widget** — Drop an agent chat into any web page via the `/embed/chat` iframe (ADR-031), reusing the dashboard chat components with existing JWT auth.
+- **Execution Replay** — Trace-partitioned timelines and time-travel state inspection over the event-sourced execution log (Log-as-Truth); debug any session via `GET /api/sessions/{id}/replay`.
 - **Engine-Level Guardrails** — Four hook types (Pre/Post LLM/Tool) at every LLM and Tool boundary; the same hooks power PII masking, audit logging, and human-in-the-loop flows.
-- **OpenSpec Workflow** — Every feature shipped through structured proposal → design → specs → implementation → archive (similar to Python PEPs / Kubernetes KEPs / Rust RFCs). 30 ADRs and 100+ archived changes document the architecture.
+- **OpenSpec Workflow** — Every feature shipped through structured proposal → design → specs → implementation → archive (similar to Python PEPs / Kubernetes KEPs / Rust RFCs). 32 ADRs and 100+ archived changes document the architecture.
 
 ---
 
@@ -177,9 +179,9 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 
 Hecate's design follows three disciplines common to serious agent platforms:
 
-- **Harness engineering** — the runtime is the harness. Every LLM call passes through the Pregel superstep loop, with durable checkpoints, retry policies, and 11 core + 4 SPI extension points providing observability and control at every boundary.
+- **Harness engineering** — the runtime is the harness. Every LLM call passes through the Pregel superstep loop, with durable checkpoints, retry policies, and 26 engine extension interfaces providing observability and control at every boundary.
 - **Loop engineering** — agent control loops are first-class. The superstep iteration is complemented by `interrupt()`/`Command()` for human-in-the-loop, `RetryStrategy` for failure recovery, and multi-agent delegation patterns where each subgraph runs its own execution loop.
-- **Graph engineering** — workflows are graphs. A JSON DSL describes nodes and edges; the compiler validates, optimizes, and emits an executable `CompiledGraph`. Six multi-agent collaboration patterns ship as static graph templates.
+- **Graph engineering** — workflows are graphs. A JSON DSL describes nodes and edges; the compiler validates, optimizes, and emits an executable `CompiledGraph`. Six multi-agent collaboration patterns ship as static graph templates; a seventh — Dynamic Orchestration — is emitted at runtime as a TaskDAG.
 
 ---
 
@@ -209,10 +211,10 @@ After `uv pip install -e ".[dev]"`, both commands are available on your `PATH`.
 
 - **[Getting Started](docs/getting-started/)** — install Hecate locally and send your first chat request in ~5 minutes.
 - **[Tutorials](docs/tutorials/)** — 11 end-to-end tutorials (first agent, knowledge base, MCP, multi-agent, A2A, OpenAI SDK, visual canvas, plus use cases).
-- **[How-to Guides](docs/how-to/)** — 16 task-oriented recipes (LLM providers, deployment, MCP, A2A, SSO, backups, webhooks, troubleshooting).
+- **[How-to Guides](docs/how-to/)** — 19 task-oriented recipes (LLM providers, deployment, MCP, A2A, SSO, backups, webhooks, troubleshooting).
 - **[Concepts](docs/concepts/)** — 23 explanatory articles that help you understand Hecate's core ideas before building.
 - **[Reference](docs/reference/)** — REST API, CLI, Graph DSL, plugin manifest, event catalog, extension points, data models.
-- **[Architecture Center](docs/design/)** — 13 architecture deep dives + 30 ADRs + ADR index, plus strategy docs (positioning).
+- **[Architecture Center](docs/design/)** — 22 architecture deep dives + 32 ADRs + ADR index, plus strategy docs (positioning).
 - **[Use Cases](docs/use-cases/)** — end-to-end business scenarios (customer support bot, code review agent, research team).
 - **[Migrations](docs/migrations/)** — schema migration guides (expand-contract pattern, 0.1 → 0.2 upgrade).
 - **[Operations](docs/operations/)** — runbooks for production (health checks, backup, rollback, log analysis, performance).

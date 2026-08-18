@@ -1,6 +1,6 @@
 # How to Develop Custom Extensions
 
-Hecate's engine defines 11 core + 4 SPI [extension points](../reference/extension-points.md) as abstract interfaces. Every one of them ships with a default implementation — but the whole point of an extension point is that you can replace it with your own. This guide walks through the pattern and shows three concrete examples.
+Hecate's engine defines 26 [extension interfaces](../reference/extension-points.md) as abstract contracts, plus 8 plugin SPI types. Every one of them ships with a default implementation — but the whole point of an extension point is that you can replace it with your own. This guide walks through the pattern and shows three concrete examples.
 
 > For the full interface catalog and method signatures, see [Extension Points Reference](../reference/extension-points.md). This page focuses on *how* to implement and wire custom extensions.
 

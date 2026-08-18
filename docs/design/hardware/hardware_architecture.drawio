@@ -158,7 +158,7 @@
         <mxCell id="e_ctx" value="✅ Context Engineering" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=11;" vertex="1" parent="engine_c">
           <mxGeometry x="250" y="38" width="250" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="e_abcs" value="✅ 15 Extension Points (11 Core + 4 SPI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=11;" vertex="1" parent="engine_c">
+        <mxCell id="e_abcs" value="✅ 26 Engine Interfaces + 8 Plugin SPI Types" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=11;" vertex="1" parent="engine_c">
           <mxGeometry x="510" y="38" width="290" height="30" as="geometry" />
         </mxCell>
         <mxCell id="e_resilience" value="✅ Resilience Infrastructure" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=11;" vertex="1" parent="engine_c">

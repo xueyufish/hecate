@@ -95,7 +95,7 @@ After the Quickstart, continue with:
 - **[Plugins](../concepts/plugins.md)** — extend Hecate with custom code.
 - **[Visual Canvas](../tutorials/11-visual-canvas.md)** — drag-and-drop workflow design.
 - **[A2A Protocol](../concepts/a2a-protocol.md)** — cross-framework agent communication.
-- **[Extension Points](../reference/extension-points.md)** — the 11 core + 4 SPI extension points.
+- **[Extension Points](../reference/extension-points.md)** — the 26 engine extension interfaces + 8 plugin SPI types.
 
 ### For contributors
 

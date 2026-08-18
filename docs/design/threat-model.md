@@ -93,7 +93,7 @@ We **do not** assume:
 
 | Threat | Attack scenario | Current mitigation | Gap? |
 |---|---|---|---|
-| **Cross-tenant data leak** | Workspace A reads workspace B's data | All 34 tenant-scoped models filter by `workspace_id` ([Multi-Tenancy](multi-tenancy-architecture.md#tenant-isolation-count)); 3-layer defense | None |
+| **Cross-tenant data leak** | Workspace A reads workspace B's data | All 38 tenant-scoped models filter by `workspace_id` ([Multi-Tenancy](multi-tenancy-architecture.md#tenant-isolation-count)); 3-layer defense | None |
 | **PII in LLM context** | User sends PII; LLM provider sees it | PreLLM `PIIAnonymizer` hook replaces with tokens; `StreamDeanonymizer` restores for user | None |
 | **PII in audit log** | Audit log contains raw PII | Audit hooks apply same PII anonymization before logging | None |
 | **PII in backup** | Backup contains raw PII | Backups are full DB snapshots; encryption-at-rest via storage backend (S3 SSE / MinIO SSE) | None |

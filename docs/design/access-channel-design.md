@@ -67,7 +67,7 @@ Channel adapters translate external protocols into Hecate's internal `ExecutionR
 
 ### ChannelABC SPI
 
-All channel adapters implement the `ChannelABC` interface — one of four Platform SPI extension points (see [ADR-016](adr/016-platform-spi-architecture.md)):
+All channel adapters implement the `ChannelABC` interface — one of the eight plugin SPI types (see [ADR-016](adr/016-platform-spi-architecture.md) and the [plugin manifest](../reference/plugin-manifest.md)):
 
 ```python
 class ChannelABC(ABC):

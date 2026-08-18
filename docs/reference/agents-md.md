@@ -22,7 +22,7 @@ Hecate's root `AGENTS.md` captures the operational knowledge an agent (or a new 
 - **What the repo is** — one-paragraph context (enterprise multi-tenant agent platform).
 - **Commands** — install, test, lint, typecheck, run. The exact commands an agent should execute, not paraphrases.
 - **Architecture layers** — the `engine → services → api → models → core` dependency rule, plus known legacy violations to avoid replicating.
-- **Engine extension point inventory** — the 11 core + 4 SPI interfaces, so an agent proposing a change knows where the seams are.
+- **Engine extension point inventory** — the 26 engine extension interfaces + 8 plugin SPI types, so an agent proposing a change knows where the seams are.
 - **Key files to read first** — the design docs, the Graph DSL schema, the openspec specs.
 - **Gotchas and non-obvious facts** — the `model_config` alias, `metadata_` alias, the empty `engine/__init__.py`, ChannelManager semantics, deprecated `PERSISTENT_TOPIC`, etc.
 - **Conventions** — naming, workflow (OpenSpec is mandatory for feature changes), coding rules enforced by ruff, testing rules.

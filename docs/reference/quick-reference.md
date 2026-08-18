@@ -87,7 +87,7 @@ See [Agents and Execution Modes](../concepts/agents.md).
 
 ## Graph DSL: node and channel types
 
-**9 node types**: `conversation`, `tool-call`, `condition`, `agent`, `knowledge-retrieval`, `variable-set`, `suggestion`, `fan-out`, `merge`
+**10 node types**: `conversation`, `tool-call`, `condition`, `agent`, `knowledge-retrieval`, `variable-set`, `fan-out`, `merge`, `suggestion`, `coordinator`
 
 **4 channel types**: `last_value` (overwrite), `topic` (append), `accumulator` (reduce), `persistent_topic` (deprecated → use `topic` + `persistent: true`)
 

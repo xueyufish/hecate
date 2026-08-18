@@ -157,7 +157,7 @@ Hecate is an enterprise-grade, multi-tenant Agent platform with a self-developed
 
 ## Architecture
 
-Hecate uses a five-layer architecture: engine, services, api, models, core. The engine layer has zero external dependencies and defines 11 core + 4 SPI extension points.
+Hecate uses a five-layer architecture: engine, services, api, models, core. The engine layer has zero external dependencies and defines 26 extension interfaces + 8 plugin SPI types.
 
 ## Multi-tenancy
 
