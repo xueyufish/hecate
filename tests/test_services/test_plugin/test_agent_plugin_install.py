@@ -123,7 +123,9 @@ class TestInstallOrchestration:
         assert plugin.entry == ""
         assert plugin.origin.startswith("dir:")
         assert plugin.content_hash and plugin.content_hash.startswith("sha256:")
-        assert plugin.scan_result is None
+        assert plugin.scan_result is not None
+        assert plugin.scan_result["verdict"] == "allow"
+        assert plugin.scan_result["findings"] == []
         assert plugin.manifest_["components"]["skills"] == [{"name": "deploy", "status": "imported"}]
         assert plugin.manifest_["components"]["mcp_servers"][0]["name"] == "search"
 

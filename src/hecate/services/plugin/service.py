@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,12 +13,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.plugin import PluginModel
+from hecate.models.security_finding import SecurityFindingModel
 from hecate.models.skill import SkillModel
 from hecate.plugin.agent_plugins import (
     AgentPluginValidationError,
     ComponentInventory,
     McpServerSpec,
-    ScanStage,
+    ScanResult,
     check_size_caps,
     compute_tree_digest,
     detect_package_kind,
@@ -51,6 +53,17 @@ AGENT_PLUGINS_SUBDIR = "agent-plugins"
 
 class FeatureDisabledError(ValueError):
     """Raised when the Agent Plugins ingestion switch is off."""
+
+
+class ScanBlockedError(ValueError):
+    """Raised when content scanning blocks an install or enable (fail-closed).
+
+    Carries the scan findings so API layers can return them to the caller.
+    """
+
+    def __init__(self, message: str, findings: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(message)
+        self.findings = findings or []
 
 
 class PluginService:
@@ -90,6 +103,8 @@ class PluginService:
         if plugin is None:
             msg = f"Plugin {plugin_id} not found"
             raise ValueError(msg)
+        if plugin.type == AGENT_PLUGIN_TYPE:
+            await self._rescan_on_enable(plugin)
         plugin.status = "enabled"
         await self._db.flush()
 
@@ -285,9 +300,9 @@ class PluginService:
 
         Runs the full pipeline: master switch → materialize → closed-manifest
         validation → path containment → size caps → component discovery →
-        trust dispatch → scan slot (no-op) → transactional persistence.
-        Component-level failures skip-and-continue; package-level failures
-        raise and leave no trace (staging directory removed).
+        trust dispatch → content scan (fail-closed verdict) → transactional
+        persistence. Component-level failures skip-and-continue; package-level
+        failures raise and leave no trace (staging directory removed).
         """
         from hecate.core.config import settings
 
@@ -422,8 +437,18 @@ class PluginService:
                 if mcp_outcome.disabled_reason:
                     warnings.append(mcp_outcome.disabled_reason)
 
-            # --- Scan slot (no-op until 5.13a) ---
-            scan = ScanStage().scan(package_root)
+            # --- Content scan (5.13a): fail-closed verdict enforcement ---
+            scan, _suppressed = await self._run_install_scan(package_root, descriptor.content_digest)
+            if scan.verdict == "block":
+                await self._project_blocked_attempt(
+                    name=name,
+                    origin=descriptor.to_origin(),
+                    workspace_id=workspace_id,
+                    content_hash=descriptor.content_digest,
+                    scan=scan,
+                )
+                msg = f"Content scan verdict: block ({len(scan.findings)} findings)"
+                raise ScanBlockedError(msg, scan.findings)
 
             # --- Persist (single transaction; upsert semantics) ---
             origin_str = descriptor.to_origin()
@@ -460,12 +485,7 @@ class PluginService:
                 "warnings": warnings,
                 "virtual": kind == "virtual",
             }
-            if scan is not None:
-                plugin.scan_result = {
-                    "verdict": scan.verdict,
-                    "findings": scan.findings,
-                    "scanner_version": scan.scanner_version,
-                }
+            plugin.scan_result = self._scan_result_dict(scan, _suppressed)
             await self._db.flush()
 
             # --- Import skills ---
@@ -490,6 +510,9 @@ class PluginService:
                 )
                 self._db.add(skill)
             await self._db.flush()
+
+            # --- Ops Center projection (5.13a) ---
+            await self._project_for_plugin(plugin, scan, phase="install")
 
             # --- Commit snapshot to its managed home (dir+row pairing) ---
             final_dir = root / name
@@ -715,3 +738,208 @@ class PluginService:
                 removed += 1
                 logger.info("Removed orphan agent-plugin directory %s", child)
         return removed
+
+    # ------------------------------------------------------------------
+    # Content scanning (feature 5.13a)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _scan_result_dict(scan: ScanResult, suppressed: int) -> dict[str, Any]:
+        return {
+            "verdict": scan.verdict,
+            "findings": scan.findings,
+            "scanner_version": scan.scanner_version,
+            "scanned_at": datetime.now(UTC).isoformat(),
+            "acked_suppressed": suppressed,
+        }
+
+    async def _run_install_scan(self, package_root: Path, content_hash: str | None) -> tuple[ScanResult, int]:
+        """Run the rule-engine scan stage; any scanner failure rejects the install."""
+        from hecate.plugin.content_scanner import RuleEngineScanStage
+
+        try:
+            scan = RuleEngineScanStage().scan(package_root)
+        except Exception as e:
+            msg = f"Content scan failed (fail-closed): {e}"
+            raise ScanBlockedError(msg) from e
+        return await self._suppress_acked(scan, content_hash)
+
+    async def _suppress_acked(self, scan: ScanResult, content_hash: str | None) -> tuple[ScanResult, int]:
+        """Drop acknowledged warn-or-lower findings for identical content.
+
+        Acknowledgments key on (content hash, rule id); findings at or above
+        the blocking threshold are never suppressible.
+        """
+        if not scan.findings or not content_hash:
+            return scan, 0
+        from hecate.core.config import settings
+        from hecate.plugin.content_scanner import SEVERITY_ORDER, compute_verdict
+
+        threshold = SEVERITY_ORDER.get(settings.AGENT_PLUGIN_SCAN_BLOCK_AT, SEVERITY_ORDER["high"])
+        rule_ids = {f["rule_id"] for f in scan.findings}
+        acked = await self._acked_rule_ids(content_hash, rule_ids)
+        if not acked:
+            return scan, 0
+        kept: list[dict[str, Any]] = []
+        suppressed = 0
+        for f in scan.findings:
+            if f["rule_id"] in acked and SEVERITY_ORDER.get(f["severity"], 1) < threshold:
+                suppressed += 1
+            else:
+                kept.append(f)
+        if suppressed:
+            scan.findings = kept
+            scan.verdict = compute_verdict(kept, settings.AGENT_PLUGIN_SCAN_BLOCK_AT)
+        return scan, suppressed
+
+    async def _acked_rule_ids(self, content_hash: str, rule_ids: set[str]) -> set[str]:
+        stmt = select(SecurityFindingModel).where(SecurityFindingModel.rule_name.in_(rule_ids))
+        rows = (await self._db.execute(stmt)).scalars().all()
+        return {
+            r.rule_name
+            for r in rows
+            if (r.source_event or {}).get("content_hash") == content_hash
+            and (r.metadata_ or {}).get("acknowledged") is True
+        }
+
+    def _finding_row(
+        self,
+        *,
+        name: str,
+        origin: str | None,
+        workspace_id: uuid.UUID | None,
+        content_hash: str | None,
+        scan: ScanResult,
+        phase: str,
+        finding: dict[str, Any],
+    ) -> SecurityFindingModel:
+        return SecurityFindingModel(
+            org_id=workspace_id or uuid.UUID(int=0),
+            workspace_id=workspace_id,
+            user_id=None,
+            rule_name=finding["rule_id"][:100],
+            severity=finding["severity"],
+            message=(
+                f"{finding.get('description') or finding['category']} in {finding['file']}"
+                f" [{finding.get('transform', 'none')}]"
+            ),
+            source_event={
+                "phase": phase,
+                "plugin": name,
+                "origin": origin,
+                "content_hash": content_hash,
+                "scanner_version": scan.scanner_version,
+            },
+            metadata_={"finding": finding},
+        )
+
+    async def _project_for_plugin(self, plugin: PluginModel, scan: ScanResult, phase: str) -> int:
+        """Project scan findings for an installed package.
+
+        Idempotent per (plugin name, content hash, scanner version, rule) —
+        rescans with an unchanged dedup key create no duplicate rows.
+        """
+        if not scan.findings:
+            return 0
+        rules = {f["rule_id"] for f in scan.findings}
+        stmt = select(SecurityFindingModel).where(SecurityFindingModel.rule_name.in_(rules))
+        rows = (await self._db.execute(stmt)).scalars().all()
+        existing: set[str] = set()
+        for r in rows:
+            se = r.source_event or {}
+            if (
+                se.get("plugin") == plugin.name
+                and se.get("content_hash") == plugin.content_hash
+                and se.get("scanner_version") == scan.scanner_version
+            ):
+                existing.add(r.rule_name)
+        created = 0
+        for f in scan.findings:
+            if f["rule_id"] in existing:
+                continue
+            self._db.add(
+                self._finding_row(
+                    name=plugin.name,
+                    origin=plugin.origin,
+                    workspace_id=plugin.workspace_id,
+                    content_hash=plugin.content_hash,
+                    scan=scan,
+                    phase=phase,
+                    finding=f,
+                )
+            )
+            created += 1
+        if created:
+            await self._db.flush()
+        return created
+
+    async def _project_blocked_attempt(
+        self,
+        *,
+        name: str,
+        origin: str,
+        workspace_id: uuid.UUID | None,
+        content_hash: str | None,
+        scan: ScanResult,
+    ) -> int:
+        """Record a blocked install attempt; idempotent per (name, origin, rule)."""
+        if not scan.findings:
+            return 0
+        rules = {f["rule_id"] for f in scan.findings}
+        stmt = select(SecurityFindingModel).where(SecurityFindingModel.rule_name.in_(rules))
+        rows = (await self._db.execute(stmt)).scalars().all()
+        existing: set[str] = set()
+        for r in rows:
+            se = r.source_event or {}
+            if se.get("plugin") == name and se.get("origin") == origin and se.get("phase") == "install-blocked":
+                existing.add(r.rule_name)
+        created = 0
+        for f in scan.findings:
+            if f["rule_id"] in existing:
+                continue
+            self._db.add(
+                self._finding_row(
+                    name=name,
+                    origin=origin,
+                    workspace_id=workspace_id,
+                    content_hash=content_hash,
+                    scan=scan,
+                    phase="install-blocked",
+                    finding=f,
+                )
+            )
+            created += 1
+        if created:
+            await self._db.flush()
+        return created
+
+    async def _rescan_on_enable(self, plugin: PluginModel) -> None:
+        """Re-scan on enable when the stored result is stale (5.13a D7).
+
+        Covers rule evolution (scanner version drift) and backfills packages
+        installed during the 5.5c no-op era (null scan result). A block
+        verdict refuses the enable.
+        """
+        from hecate.plugin.content_scanner import SCANNER_VERSION, RuleEngineScanStage
+
+        stored = plugin.scan_result or {}
+        if stored.get("scanner_version") == SCANNER_VERSION:
+            return
+        from hecate.core.config import settings
+
+        pkg_dir = self._agent_plugins_root(settings.PLUGINS_DIR) / plugin.name
+        if not pkg_dir.is_dir():
+            logger.warning("Cannot rescan %s: package directory missing", plugin.name)
+            return
+        try:
+            scan = RuleEngineScanStage().scan(pkg_dir)
+        except Exception as e:
+            msg = f"Content rescan failed (fail-closed): {e}"
+            raise ScanBlockedError(msg) from e
+        scan, suppressed = await self._suppress_acked(scan, plugin.content_hash)
+        if scan.verdict == "block":
+            msg = f"Content rescan verdict: block ({len(scan.findings)} findings)"
+            raise ScanBlockedError(msg, scan.findings)
+        plugin.scan_result = self._scan_result_dict(scan, suppressed)
+        await self._db.flush()
+        await self._project_for_plugin(plugin, scan, phase="enable")

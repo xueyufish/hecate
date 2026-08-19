@@ -8,6 +8,9 @@ the FindingEngine:
   false-positive feedback on a finding (writes ``feedback``,
   ``feedback_user``, ``feedback_comment``, ``feedback_at`` into the
   finding's ``metadata_`` JSON column).
+- ``POST /api/security/findings/{id}/acknowledge`` — Acknowledge a
+  plugin-scan finding (warn-tier suppression on later rescans of
+  identical content; writes ``acknowledged``/``ack_*`` into ``metadata_``).
 """
 
 from __future__ import annotations
@@ -52,6 +55,12 @@ class SecurityFindingFeedbackSchema(PydanticBase):
 
     feedback: str = Field(pattern=r"^(true_positive|false_positive)$")
     feedback_comment: str | None = None
+
+
+class SecurityFindingAckSchema(PydanticBase):
+    """Body schema for ``POST /api/security/findings/{id}/acknowledge``."""
+
+    comment: str | None = None
 
 
 @router.get("/findings")
@@ -112,6 +121,30 @@ async def submit_finding_feedback(
         feedback=body.feedback,
         feedback_user=str(ctx.user_id) if ctx.user_id else "anonymous",
         feedback_comment=body.feedback_comment,
+    )
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Finding not found")
+    return updated.model_dump(mode="json")
+
+
+@router.post("/findings/{finding_id}/acknowledge")
+async def acknowledge_finding(
+    finding_id: uuid.UUID,
+    body: SecurityFindingAckSchema,
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Acknowledge a finding (plugin content scan warn-tier suppression).
+
+    For plugin scan findings keyed on (content hash, rule id): later rescans
+    of identical content suppress acknowledged warn-or-lower findings;
+    content changes invalidate the acknowledgment; findings at or above the
+    blocking threshold are never suppressed.
+    """
+    service = get_security_finding_service()
+    updated = await service.acknowledge(
+        finding_id=finding_id,
+        ack_user=str(ctx.user_id) if ctx.user_id else "anonymous",
+        comment=body.comment,
     )
     if updated is None:
         raise HTTPException(status_code=404, detail="Finding not found")

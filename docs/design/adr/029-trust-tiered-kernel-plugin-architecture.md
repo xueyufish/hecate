@@ -4,6 +4,8 @@
 
 Accepted (2026-08-14; supersedes nothing, extends ADR-002 five-layer architecture, ADR-008 security-via-hooks, ADR-016 Platform SPI, and the 5.5 Plugin System scope)
 
+> **Update (2026-08-18, 5.13a)**: the scanning half of Rule 1's "elevation requires scanning + signing" shipped as feature **5.13a (Plugin Content Scanning, P3, 2026-08-18)** — install-time content scanning with fail-closed verdicts now gates the 5.5c Agent Plugins ingest pipeline (go-live switch defaults on); see `openspec/specs/plugin-content-scanning/`. Signing remains 5.13 (P5, marketplace-bound).
+
 ## Context
 
 Hecate's 2026-08-14 architecture re-scope (per `docs/research/2026-08-competitor-analysis.md` and the dsh source analysis) committed to event-sourced state (1.3.19), waterfall middleware (1.3.5i E3), and fail-closed approval — an architecture whose event log naturally acts as a bus that external capabilities can consume. This raises a structural question already answered differently across the industry:
