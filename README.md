@@ -75,11 +75,11 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactiv
 
 ### Step 3 — Send your first chat request
 
-The API is **OpenAI-compatible** — any existing OpenAI client works by pointing `base_url` at Hecate:
+The API is **OpenAI-compatible** — any existing OpenAI client works by pointing `base_url` at Hecate. Hecate accepts JWT tokens, database-backed API keys, or any value in the `HECATE_API_KEYS` env var (default `dev-key-change-me`):
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer $(grep ^OPENAI_API_KEY .env | cut -d= -f2)" \
+  -H "Authorization: Bearer $(grep ^HECATE_API_KEYS .env | cut -d= -f2 | cut -d, -f1)" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "gpt-4o",
@@ -93,7 +93,7 @@ For streaming responses (SSE), add `"stream": true`:
 
 ```bash
 curl -N -X POST http://localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer $(grep ^OPENAI_API_KEY .env | cut -d= -f2)" \
+  -H "Authorization: Bearer $(grep ^HECATE_API_KEYS .env | cut -d= -f2 | cut -d, -f1)" \
   -H "Content-Type: application/json" \
   -d '{"model": "gpt-4o", "stream": true, "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
@@ -102,15 +102,15 @@ curl -N -X POST http://localhost:8000/v1/chat/completions \
 
 ### Step 4 — Or use any OpenAI client (drop-in)
 
-Hecate's `/v1/chat/completions` is wire-compatible with OpenAI. Any existing OpenAI client works by pointing `base_url` at Hecate — no code rewrite:
+Hecate's `/v1/chat/completions` is wire-compatible with OpenAI. Any existing OpenAI client works by pointing `base_url` at Hecate — no code rewrite. Hecate authenticates the request via the `api_key` you pass to the client; for local development the value from `HECATE_API_KEYS` in your `.env` is the simplest choice:
 
 ```python
 from openai import OpenAI
 
 api_key = next(
-    line.split("=", 1)[1].strip()
+    line.split("=", 1)[1].strip().split(",", 1)[0]
     for line in open(".env")
-    if line.startswith("OPENAI_API_KEY=")
+    if line.startswith("HECATE_API_KEYS=")
 )
 
 client = OpenAI(
@@ -132,7 +132,7 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 | Symptom | First thing to check |
 |---|---|
 | `hecate preflight` reports `database: FAIL` | `docker compose -f docker/docker-compose.yml ps` — is Postgres up? |
-| `curl` returns `401 Unauthorized` | `cat .env` — is `OPENAI_API_KEY=` set (and uncommented)? |
+| `curl` returns `401 Unauthorized` | `cat .env` — is `HECATE_API_KEYS=` set (default `dev-key-change-me`)? The bearer must match `HECATE_API_KEYS`, a JWT, or a DB API key — `OPENAI_API_KEY` is the upstream LLM credential, not the Hecate auth token |
 | `curl` returns `502 Bad Gateway` | `docker compose logs hecate` — the server may still be starting |
 | Port `8000` already in use | `lsof -i :8000` then `kill <pid>`, or run uvicorn on `--port 8080` |
 | Anything else | [Full troubleshooting guide](docs/how-to/troubleshoot.md) |
