@@ -192,3 +192,91 @@ async def test_api_delete_plugin(client, db_session):
 
     resp = await client.delete(f"/api/plugins/{plugin.id}")
     assert resp.status_code == 200
+
+
+# ── T0: SaaS dependency install gate (ADR-029) ─────────────────────────
+
+
+class TestInstallDependenciesSaaSGate:
+    def test_saas_skips_pip_install(self, tmp_path, monkeypatch):
+        from hecate.core.config import settings
+        from hecate.plugin.installer import _install_dependencies
+
+        monkeypatch.setattr(settings, "SAAS_MODE", True, raising=True)
+
+        calls: list[list[str]] = []
+        import subprocess as sp
+
+        def fake_run(*args, **kwargs):  # noqa: ARG001
+            calls.append(args[0])
+
+            class R:
+                returncode = 0
+                stderr = ""
+
+            return R()
+
+        monkeypatch.setattr(sp, "run", fake_run)
+
+        plugin_dir = tmp_path / "p"
+        plugin_dir.mkdir()
+        (plugin_dir / "requirements.txt").write_text("requests\n")
+
+        _install_dependencies(plugin_dir)
+        assert calls == []  # subprocess.run never called
+
+    def test_self_hosted_runs_pip_install(self, tmp_path, monkeypatch):
+        from hecate.core.config import settings
+        from hecate.plugin.installer import _install_dependencies
+
+        monkeypatch.setattr(settings, "SAAS_MODE", False, raising=True)
+
+        calls: list[list[str]] = []
+        import subprocess as sp
+
+        def fake_run(*args, **kwargs):  # noqa: ARG001
+            calls.append(args[0])
+
+            class R:
+                returncode = 0
+                stderr = ""
+
+            return R()
+
+        monkeypatch.setattr(sp, "run", fake_run)
+
+        plugin_dir = tmp_path / "p"
+        plugin_dir.mkdir()
+        (plugin_dir / "requirements.txt").write_text("requests\n")
+
+        _install_dependencies(plugin_dir)
+        assert len(calls) == 1
+        argv = " ".join(calls[0])
+        assert "uv" in argv
+        assert "pip" in argv
+        assert "install" in argv
+
+    def test_no_requirements_file_skipped(self, tmp_path, monkeypatch):
+        from hecate.core.config import settings
+        from hecate.plugin.installer import _install_dependencies
+
+        monkeypatch.setattr(settings, "SAAS_MODE", True, raising=True)
+
+        calls: list[list[str]] = []
+        import subprocess as sp
+
+        def fake_run(*args, **kwargs):  # noqa: ARG001
+            calls.append(args[0])
+
+            class R:
+                returncode = 0
+                stderr = ""
+
+            return R()
+
+        monkeypatch.setattr(sp, "run", fake_run)
+
+        plugin_dir = tmp_path / "p"
+        plugin_dir.mkdir()
+        _install_dependencies(plugin_dir)
+        assert calls == []

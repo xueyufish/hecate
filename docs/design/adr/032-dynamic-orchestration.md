@@ -8,7 +8,7 @@ Accepted (2026-08-17; extends ADR-001 graph-first, ADR-007 multi-agent-as-graph-
 
 Hecate's `CollaborationPattern` enum defines six static multi-agent patterns (sequential, parallel, handoff, broadcast, negotiation, debate), all pre-compiled at design time (`src/hecate/engine/patterns.py:29`). The 2026-08-14 industry survey (`docs/research/2026-08-competitor-analysis.md`) and the subsequent deep-dive against Magentic-One (arXiv 2411.04468), Open Multi-Agent v1.14, DeerFlow subagent contract (`backend/packages/harness/deerflow/subagents/AGENTS.md`), Deep Agents interpreters, AgentScope team/plan tools, and dsh source analysis converged on a clear gap: the industry has moved to **runtime-emitted task DAGs** (LLM plans the workflow at execution time). None of Hecate's six patterns supports this — even the dynamic-handoff edge (one-step dynamic) cannot emit a whole DAG.
 
-The dependency chain (per `docs/features/roadmap.md` Sprint 7 ordering): 1.3.19 Event-Sourced Execution State has shipped (✅ 2026-08-15), exposing the `SUBGRAPH_START/END` reference pair and log-as-truth substrate that this ADR consumes. 1.3.4 fail-closed approval is sequenced in parallel. No new persistence, no new protocol, no new execution primitive is required — only new graph-node semantics on top of the existing Pregel runtime.
+The dependency chain (per `docs/features/roadmap.md` Sprint 7 ordering): 1.3.19 Event-Sourced Execution State has shipped, exposing the `SUBGRAPH_START/END` reference pair and log-as-truth substrate that this ADR consumes. 1.3.4 fail-closed approval is sequenced in parallel. No new persistence, no new protocol, no new execution primitive is required — only new graph-node semantics on top of the existing Pregel runtime.
 
 ## Decision
 

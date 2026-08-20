@@ -114,7 +114,7 @@ This section is the **handoff contract** for the five consumers sequenced after 
 ## References
 
 - Source analysis: `docs/research/2026-08-deepseek-harness-analysis.md` (dsh source code, v0.1.0-rc.5)
-- Competitive analysis: `docs/research/2026-08-competitor-analysis.md` (18 platforms + 6 new entrants, 2026-08-14 re-verification)
+- Competitive analysis: `docs/research/2026-08-competitor-analysis.md` (18 platforms + 6 new entrants, re-verification)
 - Related ADRs: ADR-001 (engine foundation), ADR-013 (distributed session state store), ADR-016 (platform SPI), ADR-029 (trust-tiered kernel/plugin)
 - OpenSpec change: `openspec/changes/event-sourced-state/`
 - Engine implementation: `src/hecate/engine/{eventstore,pregel,channel,checkpoint,logpolicy,logfold,loginvariants,session_state}.py`

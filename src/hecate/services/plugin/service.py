@@ -38,6 +38,8 @@ from hecate.plugin.agent_plugins import (
 )
 from hecate.plugin.config import validate_config
 from hecate.plugin.loader import (
+    PythonEntryPolicy,
+    check_python_entry,
     discover_plugins,
     load_manifest,
     load_plugin,
@@ -162,19 +164,23 @@ class PluginService:
         """Discover and register all plugins in *plugins_dir*.
 
         Returns a summary dict with ``discovered``, ``registered``, and
-        ``errors`` counts.
+        ``errors`` counts. Plugins whose ``python:`` entry is denied by the
+        T0 trust gate are counted as errors and skipped without persisting.
         """
+        from hecate.core.config import settings
+
         plugins_dir = Path(plugins_dir)
         manifest_paths = discover_plugins(plugins_dir)
         discovered = len(manifest_paths)
         registered = 0
         errors = 0
+        policy = PythonEntryPolicy.from_settings(settings)
 
         for manifest_path in manifest_paths:
             try:
                 manifest = load_manifest(manifest_path)
                 validate_compatibility(manifest)
-                plugin_instance = load_plugin(manifest)
+                plugin_instance = load_plugin(manifest, policy)
                 if plugin_instance is None:
                     errors += 1
                     continue
@@ -250,12 +256,27 @@ class PluginService:
         return model
 
     async def install_plugin_from_bundle(self, bundle_path: str, plugins_dir: str) -> PluginModel:
-        """Install a .hecate-plugin bundle."""
+        """Install a .hecate-plugin bundle.
+
+        If the bundle declares a ``python:`` entry that fails the T0 trust
+        gate (ADR-029), the just-extracted plugin directory is removed and a
+        ValueError is raised identifying the gate and the remediation.
+        """
+        from hecate.core.config import settings
         from hecate.plugin.installer import install_plugin as _install
 
-        plugin_name = _install(Path(bundle_path), Path(plugins_dir))
-        manifest_path = Path(plugins_dir) / plugin_name / "plugin.yaml"
+        plugins_root = Path(plugins_dir)
+        bundle = Path(bundle_path)
+        plugin_name = _install(bundle, plugins_root)
+        manifest_path = plugins_root / plugin_name / "plugin.yaml"
         manifest = load_manifest(manifest_path)
+
+        policy = PythonEntryPolicy.from_settings(settings)
+        rejection = check_python_entry(manifest.entry, policy)
+        if rejection is not None:
+            shutil.rmtree(plugins_root / plugin_name, ignore_errors=True)
+            raise ValueError(rejection)
+
         return await self._persist_plugin(manifest, None)
 
     async def uninstall_plugin_by_id(self, plugin_id: uuid.UUID, plugins_dir: str) -> None:

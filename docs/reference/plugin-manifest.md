@@ -247,6 +247,8 @@ permissions:
 
 ### Python in-process
 
+> **T0 trust gate (ADR-029).** A `python:module:Class` entry is loaded in-process only when `module` is first-party (`hecate` / `hecate.*`). On SaaS, non-first-party modules are rejected outright regardless of any allowlist. On self-hosted, non-first-party modules must match a prefix in `PLUGIN_PYTHON_ENTRY_ALLOWLIST` (segment-boundary match: `mycompany.` matches `mycompany.tools.x` but not `mycompanyevil.x`). The gate runs at both startup discovery and install time; an install rejection removes the extracted bundle directory before any DB row is written. SaaS additionally skips runtime `uv pip install` of a plugin's `requirements.txt`. Examples below show non-`hecate` module names — these require the deployer to add the module prefix to `PLUGIN_PYTHON_ENTRY_ALLOWLIST` in self-hosted mode. See [ADR-029](../design/adr/029-trust-tiered-kernel-plugin-architecture.md).
+
 ```python
 # my_plugin/__init__.py
 from hecate.plugin import PluginManifest, PluginContext

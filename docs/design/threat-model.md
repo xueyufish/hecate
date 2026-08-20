@@ -74,7 +74,7 @@ We **do not** assume:
 | **Prompt injection via tool result** | A malicious MCP server returns text designed to override system prompt | Guardrail `PreLLMHook` can sanitize tool output | Partial |
 | **Backup tampering** | Attacker with backup storage access modifies backups | SHA256 checksum verified before restore; immutable storage tier recommended | None |
 
-**Critical gap**: Plugin isolation. A malicious plugin can affect the engine. **Mitigation today**: only install plugins from trusted sources; review `permissions` in manifest. Future fix: sandboxed plugin execution (P5).
+**Critical gap** (partially mitigated by T0 trust gate): Plugin isolation. A malicious in-process `python:` plugin could previously affect the engine. **Mitigation today**: T0 trust gate per [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md) (5.5 (enh) T0 Tightening) rejects `python:module:Class` entries whose module is not first-party (`hecate` / `hecate.*`) — SaaS rejects outright; self-hosted default-denies with `PLUGIN_PYTHON_ENTRY_ALLOWLIST`. Install-time pre-check rolls back the extracted directory on rejection. MCP server plugins (`mcp://`) connect through the MCP client; Agent Plugins 1.0 stdio entries run in the 9.4c container sandbox. Plugin `permissions` are still reviewable in the manifest. **Future fix**: out-of-process sandboxed plugin execution (P5).
 
 ---
 

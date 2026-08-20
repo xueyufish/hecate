@@ -23,7 +23,7 @@
 
         <!-- ROW 1: INTEGRATION ECOSYSTEM -->
         <mxCell id="r1_c" value="1. Integration Ecosystem" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="55" width="910" height="145" as="geometry" />
+          <mxGeometry x="20" y="55" width="910" height="173" as="geometry" />
         </mxCell>
         <!-- Sub-row 1a -->
         <mxCell id="r1_mcpclient" value="✅ MCP Client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
@@ -58,10 +58,13 @@
         <mxCell id="r1_plugin155c_trust" value="✅ Component Trust Dispatch (T4 / T2 / T1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
           <mxGeometry x="455" y="106" width="455" height="26" as="geometry" />
         </mxCell>
+        <mxCell id="r1_t0" value="✅ T0 Trust Gate (5.5 enh) — PythonEntryPolicy + install rollback + SaaS pip skip" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
+          <mxGeometry x="0" y="145" width="910" height="22" as="geometry" />
+        </mxCell>
 
         <!-- ROW 2: PROTOCOL STACK & GROWTH -->
         <mxCell id="r2_c" value="2. Protocol Stack &amp; Growth" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="220" width="910" height="65" as="geometry" />
+          <mxGeometry x="20" y="248" width="910" height="65" as="geometry" />
         </mxCell>
         <!-- 5 × 170 = 850 -->
         <mxCell id="r2_a2a" value="✅ A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
@@ -82,7 +85,7 @@
 
         <!-- ROW 3: DISCOVERY & PARTNERSHIP (NEW) -->
         <mxCell id="r3_c" value="3. Discovery &amp; Partnership" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="265" width="910" height="65" as="geometry" />
+          <mxGeometry x="20" y="328" width="910" height="65" as="geometry" />
         </mxCell>
         <!-- 4 boxes -->
         <mxCell id="r3_ard" value="📋 Agentic Resource Discovery (EC1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
@@ -100,7 +103,7 @@
 
         <!-- ROW 4: DOWNSTREAM -->
         <mxCell id="r4_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="350" width="910" height="50" as="geometry" />
+          <mxGeometry x="20" y="413" width="910" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r4_down" value="⤵  To All Services — Integration via MCP / A2A / ARD / REST / Webhook / Events" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r4_c">
           <mxGeometry x="105" y="5" width="700" height="40" as="geometry" />

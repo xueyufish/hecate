@@ -84,8 +84,8 @@
         </mxCell>
 
         <!-- ROW 2b: Agent Plugins 1.0 Standard Ingestion (5.5c, shipped 2026-08-18) -->
-        <mxCell id="r2b_c" value="2a. Agent Plugins 1.0 Ingestion (5.5c, shipped 2026-08-18)" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="290" width="910" height="80" as="geometry" />
+        <mxCell id="r2b_c" value="2a. Agent Plugins 1.0 Ingestion (5.5c, shipped 2026-08-18) + T0 Tightening (5.5 enh, shipped 2026-08-19)" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+          <mxGeometry x="20" y="290" width="910" height="100" as="geometry" />
         </mxCell>
         <mxCell id="r2b_adapter" value="✅ plugin/agent_plugins.py (Adapter)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
           <mxGeometry x="0" y="30" width="220" height="22" as="geometry" />
@@ -105,10 +105,13 @@
         <mxCell id="r2b_scan" value="✅ Content Scanning (5.13a, shipped 2026-08-18)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
           <mxGeometry x="465" y="56" width="445" height="22" as="geometry" />
         </mxCell>
+        <mxCell id="r2b_t0" value="✅ T0 Trust Gate (5.5 enh) — PythonEntryPolicy + install rollback + SaaS pip skip" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
+          <mxGeometry x="0" y="78" width="910" height="22" as="geometry" />
+        </mxCell>
 
         <!-- ROW 3: AI-NATIVE TOOLS -->
         <mxCell id="r3_c" value="3. AI-Native Tools" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="385" width="910" height="65" as="geometry" />
+          <mxGeometry x="20" y="405" width="910" height="65" as="geometry" />
         </mxCell>
         <!-- 5 × 170 = 850 -->
         <mxCell id="r3_browser" value="📋 Browser / Computer-use" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">

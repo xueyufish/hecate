@@ -2,7 +2,7 @@
 
 > **Status**: Proposed
 > **Date**: 2026-07-02
-> **Update (2026-08-18, 5.13a)**: TP1's content-scanning half was split out as feature **5.13a (Plugin Content Scanning, P3)** and shipped 2026-08-18 — a deterministic rule engine (injection/invisible-Unicode/secrets/allowed-tools rules, fail-closed block/warn/allow verdicts, enable-time rescan) enforced inside the 5.5c ingest pipeline; see `openspec/specs/plugin-content-scanning/`. TP1 (5.13, P5) retains only cryptographic signing, digest verification, and the security score, bound to the 12.0 marketplace.
+> **Update (5.13a)**: TP1's content-scanning half was split out as feature **5.13a (Plugin Content Scanning, P3)** — a deterministic rule engine (injection/invisible-Unicode/secrets/allowed-tools rules, fail-closed block/warn/allow verdicts, enable-time rescan) enforced inside the 5.5c ingest pipeline; see `openspec/specs/plugin-content-scanning/`. TP1 (5.13, P5) retains only cryptographic signing, digest verification, and the security score, bound to the 12.0 marketplace.
 
 ## Context
 

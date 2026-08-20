@@ -179,6 +179,13 @@ class Settings(BaseSettings):
 
     PLUGINS_DIR: str = "./plugins"
     HOT_RELOAD: bool = False
+    # Module-name prefixes permitted for runtime-loaded `python:` plugin entries
+    # under self-hosted deployment. Effective only when SAAS_MODE=false;
+    # ignored in SaaS mode (non-first-party entries are rejected outright).
+    # Segment-boundary matched: `mycompany.` matches `mycompany.tools.x`
+    # but not `mycompanyevil.x`. ADR-029 — runtime-installed artifacts
+    # are never T0; this allowlist is the documented self-hosted exception.
+    PLUGIN_PYTHON_ENTRY_ALLOWLIST: list[str] = []
 
     # Agent Plugins 1.0 ingestion (feature 5.5c) — go-live gate satisfied by
     # content scanning (5.13a): defaults on, doubles as the emergency
