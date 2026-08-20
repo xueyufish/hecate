@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.plugin import PluginModel
 from hecate.plugin.loader import (
+    PythonEntryPolicy,
     _load_python,
+    check_python_entry,
     discover_plugins,
     load_plugin,
     validate_compatibility,
@@ -97,16 +99,19 @@ class TestDiscoverPlugins:
 
 class TestLoadPython:
     def test_load_valid_module(self):
-        instance = _load_python("python:tests.test_plugin.test_loader:DummyPluginForLoad")
+        policy = PythonEntryPolicy(saas_mode=False)
+        instance = _load_python("python:tests.test_plugin.test_loader:DummyPluginForLoad", policy)
         assert type(instance).__name__ == "DummyPluginForLoad"
 
     def test_load_nonexistent_module(self):
+        policy = PythonEntryPolicy(saas_mode=False)
         with pytest.raises((ImportError, ValueError)):
-            _load_python("python:nonexistent.module:Foo")
+            _load_python("python:nonexistent.module:Foo", policy)
 
     def test_load_nonexistent_class(self):
+        policy = PythonEntryPolicy(saas_mode=False)
         with pytest.raises((AttributeError, ValueError)):
-            _load_python("python:tests.test_plugin.test_loader:NoSuchClass")
+            _load_python("python:tests.test_plugin.test_loader:NoSuchClass", policy)
 
     def test_load_mcp_entry(self):
         manifest = PluginManifest(
@@ -115,7 +120,7 @@ class TestLoadPython:
             version="1.0.0",
             entry="mcp://http://localhost:9999",
         )
-        result = load_plugin(manifest)
+        result = load_plugin(manifest, PythonEntryPolicy(saas_mode=False))
         assert result["endpoint"] == "mcp://http://localhost:9999"
 
     def test_load_bad_prefix(self):
@@ -125,12 +130,148 @@ class TestLoadPython:
             version="1.0.0",
             entry="ftp://x",
         )
-        result = load_plugin(manifest)
+        result = load_plugin(manifest, PythonEntryPolicy(saas_mode=False))
         assert result is None
 
 
 class DummyPluginForLoad:
     pass
+
+
+# ── T0 trust gate (ADR-029) ─────────────────────────────────────────────
+
+
+class TestCheckPythonEntry:
+    def test_first_party_module_allowed_in_saas(self):
+        policy = PythonEntryPolicy(saas_mode=True)
+        assert check_python_entry("python:hecate.plugins.foo:Foo", policy) is None
+
+    def test_first_party_root_allowed(self):
+        policy = PythonEntryPolicy(saas_mode=True)
+        assert check_python_entry("python:hecate:Foo", policy) is None
+
+    def test_saas_rejects_non_first_party(self):
+        policy = PythonEntryPolicy(saas_mode=True, allowed_prefixes=("anything.",))
+        reason = check_python_entry("python:my_plugin:Foo", policy)
+        assert reason is not None
+        assert "SaaS mode" in reason
+
+    def test_self_hosted_default_deny(self):
+        policy = PythonEntryPolicy(saas_mode=False, allowed_prefixes=())
+        reason = check_python_entry("python:my_plugin:Foo", policy)
+        assert reason is not None
+        assert "default-deny" in reason
+
+    def test_allowlist_prefix_grants(self):
+        policy = PythonEntryPolicy(saas_mode=False, allowed_prefixes=("mycompany.",))
+        assert check_python_entry("python:mycompany.tools.x:Foo", policy) is None
+
+    def test_allowlist_without_dot_grants(self):
+        policy = PythonEntryPolicy(saas_mode=False, allowed_prefixes=("mycompany",))
+        assert check_python_entry("python:mycompany.tools.x:Foo", policy) is None
+
+    def test_allowlist_does_not_cross_segment(self):
+        policy = PythonEntryPolicy(saas_mode=False, allowed_prefixes=("mycompany.",))
+        reason = check_python_entry("python:mycompanyevil.x:Foo", policy)
+        assert reason is not None
+
+    def test_mcp_entry_not_gated(self):
+        policy = PythonEntryPolicy(saas_mode=True)
+        assert check_python_entry("mcp://host:1234", policy) is None
+
+
+class TestLoadPluginGate:
+    def test_first_party_loads_in_both_modes(self):
+        # Tests module existing under tests.* is irrelevant; the gate allows
+        # any first-party-prefixed module to reach import. We verify by
+        # monkey-patching importlib.import_module and asserting it was called
+        # (i.e. the gate did not short-circuit).
+        import hecate.plugin.loader as loader_mod
+
+        called: list[str] = []
+
+        def fake_import(name, package=None):  # noqa: ARG001
+            called.append(name)
+            import sys as _sys
+
+            return _sys.modules.setdefault(name, type("M", (), {})())
+
+        original = loader_mod.importlib.import_module
+        loader_mod.importlib.import_module = fake_import
+        try:
+            for saas in (False, True):
+                manifest = PluginManifest(
+                    type="tool",
+                    name="fp",
+                    version="1.0.0",
+                    entry="python:hecate.plugins.example:Foo",
+                )
+                load_plugin(manifest, PythonEntryPolicy(saas_mode=saas))
+        finally:
+            loader_mod.importlib.import_module = original
+        assert "hecate.plugins.example" in called
+
+    def test_rejected_entry_returns_none_without_import(self):
+        # subprocess.Popen is a real, importable stdlib class — pre-gate this
+        # would instantiate it (T0 RCE). The gate must short-circuit before
+        # importlib.import_module is reached.
+        manifest = PluginManifest(
+            type="tool",
+            name="evil",
+            version="1.0.0",
+            entry="python:subprocess:Popen",
+        )
+        result = load_plugin(manifest, PythonEntryPolicy(saas_mode=False))
+        assert result is None
+
+    def test_rejected_entry_does_not_invoke_import_module(self, monkeypatch):
+        import hecate.plugin.loader as loader_mod
+
+        called = False
+
+        def boom(name, package=None):  # noqa: ARG001
+            called = True  # noqa: F841
+            raise AssertionError("importlib.import_module must not be called for rejected entries")
+
+        monkeypatch.setattr(loader_mod.importlib, "import_module", boom)
+
+        manifest = PluginManifest(
+            type="tool",
+            name="evil",
+            version="1.0.0",
+            entry="python:subprocess:Popen",
+        )
+        assert load_plugin(manifest, PythonEntryPolicy(saas_mode=True)) is None
+        assert called is False
+
+    def test_rejected_entry_logs_t0_error(self, caplog):
+        manifest = PluginManifest(
+            type="tool",
+            name="evil",
+            version="1.0.0",
+            entry="python:subprocess:Popen",
+        )
+        with caplog.at_level("ERROR", logger="hecate.plugin.loader"):
+            load_plugin(manifest, PythonEntryPolicy(saas_mode=False))
+        assert any("T0 policy" in rec.message for rec in caplog.records)
+
+
+def test_policy_from_settings():
+    class FakeSettings:
+        SAAS_MODE = True
+        PLUGIN_PYTHON_ENTRY_ALLOWLIST = ["mycompany."]
+
+    p = PythonEntryPolicy.from_settings(FakeSettings())
+    assert p.saas_mode is True
+    assert p.allowed_prefixes == ("mycompany.",)
+
+    class DefaultSettings:
+        SAAS_MODE = False
+        PLUGIN_PYTHON_ENTRY_ALLOWLIST = []
+
+    p2 = PythonEntryPolicy.from_settings(DefaultSettings())
+    assert p2.saas_mode is False
+    assert p2.allowed_prefixes == ()
 
 
 # ── 10.3 validate_compatibility ─────────────────────────────────────────

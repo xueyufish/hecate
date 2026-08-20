@@ -166,7 +166,7 @@ the first concrete adapter, we needed structured payloads
 feat(channel): 11.3 feishu - ChannelABC adapter
 
 Update proposal.md scope: drop 11.3.1 token refresh, defer to 11.3.2.
-Per decisions log 2026-08-12.
+Per decisions log.
 ```
 
 ---

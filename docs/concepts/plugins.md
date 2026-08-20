@@ -121,6 +121,8 @@ manifest = PluginManifest(
 
 The manifest is **immutable** (frozen). Plugins cannot grant themselves permissions after registration.
 
+> **T0 trust gate (ADR-029).** For `entry` of the form `python:module:Class`, the loader requires `module` to be first-party (`hecate` / `hecate.*`) in both SaaS and self-hosted modes. Non-first-party modules are rejected outright in SaaS; in self-hosted, they must match a prefix in `PLUGIN_PYTHON_ENTRY_ALLOWLIST` (segment-boundary match: `mycompany.` matches `mycompany.tools.x` but not `mycompanyevil.x`). The same gate runs at install time — a `.hecate-plugin` bundle whose `python:` entry is rejected also has its extracted directory removed before any DB row is written. See [ADR-029](../design/adr/029-trust-tiered-kernel-plugin-architecture.md) and the [plugin manifest reference](../reference/plugin-manifest.md#loading-strategies).
+
 ---
 
 ## Permissions: declared vs granted

@@ -66,9 +66,25 @@ def uninstall_plugin(plugin_name: str, plugins_dir: Path) -> bool:
 
 
 def _install_dependencies(plugin_dir: Path) -> None:
-    """Install Python dependencies from requirements.txt if present."""
+    """Install Python dependencies from requirements.txt if present.
+
+    In SaaS mode the step is skipped: non-first-party ``python:`` entries
+    are rejected by the T0 trust gate, so runtime ``pip install`` would
+    only expand the supply-chain surface for no benefit. Self-hosted
+    deployments still run the install; the loader gate constrains which
+    modules can be imported afterwards.
+    """
     req_file = plugin_dir / "requirements.txt"
     if not req_file.is_file():
+        return
+
+    from hecate.core.config import settings
+
+    if settings.SAAS_MODE:
+        logger.warning(
+            "SaaS mode: skipping runtime dependency install for %s (T0 policy, ADR-029)",
+            req_file,
+        )
         return
 
     logger.info("Installing dependencies from %s", req_file)

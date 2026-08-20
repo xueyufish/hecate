@@ -53,7 +53,7 @@ The ADR explicitly codifies the simplified-vs-full split:
 - **Accepted (Wave 1, P3)**: iframe + employee JWT + reuse OpenAI-compatible endpoints + embed route in the same Next.js project.
 - **Deferred (P5)**: `<script>` loader.js + anonymous to-C + temporary JWT + RS256 + Origin allowlist + WidgetModel + JS bundle. This is a separate ADR (most likely) and a separate implementation.
 
-The 11.2 catalog entry wording — "embeddable for any Hecate deployment" — was misleading and should be read as "iframe-embeddable into Hecate or a customer's intranet, *not* script-embeddable on arbitrary public sites". The full version remains P5 deferred per the 2026-08-12 Multi-Channel scoping decision.
+The 11.2 catalog entry wording — "embeddable for any Hecate deployment" — was misleading and should be read as "iframe-embeddable into Hecate or a customer's intranet, *not* script-embeddable on arbitrary public sites". The full version remains P5 deferred per the Multi-Channel scoping decision.
 
 ## Rationale
 

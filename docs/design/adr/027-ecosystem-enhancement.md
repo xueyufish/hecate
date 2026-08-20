@@ -2,7 +2,7 @@
 
 > **Status**: Proposed
 > **Date**: 2026-07-02
-> **Update (2026-08-18, 5.13a)**: EC6's `security_scan` listing step is now backed by feature **5.13a (Plugin Content Scanning)**, shipped 2026-08-18 — scan verdicts/findings persist per package and project to SecurityFindingModel for catalog display; see `openspec/specs/plugin-content-scanning/`. Signing-based verification remains 5.13 (P5).
+> **Update (5.13a)**: EC6's `security_scan` listing step is now backed by feature **5.13a (Plugin Content Scanning)** — scan verdicts/findings persist per package and project to SecurityFindingModel for catalog display; see `openspec/specs/plugin-content-scanning/`. Signing-based verification remains 5.13 (P5).
 
 ## Context
 

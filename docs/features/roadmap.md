@@ -1,8 +1,7 @@
 # Hecate Implementation Roadmap
 
-> **Date**: 2026-08-18
-> **Status**: Active — P1 19/19 (100%), P2 65/65 (100%), P3 83/127 (65%, 2026-08-14 re-scope + 2026-08-16 plugin ecosystem adjustment; 8.20 Execution Replay shipped 2026-08-16 + **1.3.18 Dynamic Orchestration shipped 2026-08-17, [ADR-032](../design/adr/032-dynamic-orchestration.md)** + **5.5c Agent Plugins 1.0 Standard Ingestion shipped 2026-08-18**, per `openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`), P4 4/101 (4%), P5 0/60
-> **Scope**: 12-month implementation plan covering 201 unimplemented features across P3–P5. 2026-08-14 re-scope (per docs/research/2026-08-competitor-analysis.md + 2026-08-deepseek-harness-analysis.md): 5 features dropped, 17 deferred to P5, 7 added (1.3.18/1.3.19/8.20 → P3, 2.13/8.21/13.20/6.27a → P4), 11.11 moved P5→P4. **2026-08-18 incremental**: 5.5c shipped (Agent Plugins 1.0 ingestion adapter + skill/MCP projection + stdio sandbox + skip-and-continue validation); 5.13a shipped same day (rule-engine content scanner: injection/invisible-Unicode/secrets/allowed-tools/URL rules + NFKC & bounded decode-rescan + role×rule severity matrix + fail-closed verdicts + enable rescan + ack suppression + `GET /api/plugins/{id}/scan`) — 5.5c→5.13a serial gate satisfied, plugin ecosystem go-live (`AGENT_PLUGINS_INGESTION_ENABLED` defaults on). **10.2 RBAC receives** the deferred `is_platform_admin` role + `plugin:install:platform` fine-grained permission string carried over from 5.5c (5.5c v1 uses config allowlist `PLATFORM_PLUGIN_INSTALLERS`).
+> **Status**: Active — P1, P2 complete; P3, P4, P5 in progress.
+> **Scope**: 12-month implementation plan covering unimplemented features across P3–P5.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
 ---
@@ -148,7 +147,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 11.2 | Web Widget (Simplified) ✅ *Wave 1 — iframe-embeddable for any Hecate deployment (Delivered 2026-08-16, see ADR-031)* | API ✅ | S |
+| 11.2 | Web Widget (Simplified) ✅ *Wave 1 — iframe-embeddable for any Hecate deployment (see ADR-031)* | API ✅ | S |
 | 11.3 | Feishu (Lark) ✅ | Channel SDK | S |
 
 ### Milestone M2 (End of Sprint 2)
@@ -245,7 +244,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 10.1 | Organization Management ✅ | workspace_id ✅ | M |
-| 10.2 | RBAC ✅ | 10.1 ✅ | M | 5.5c shipped 2026-08-18 with config allowlist `PLATFORM_PLUGIN_INSTALLERS`; 10.2 enhancement receives `is_platform_admin` role + `plugin:install:platform` fine-grained permission string (recorded in feature-catalog 5.5c "Deferred to 10.2 RBAC" note) |
+| 10.2 | RBAC ✅ | 10.1 ✅ | M | 10.2 enhancement receives `is_platform_admin` role + `plugin:install:platform` fine-grained permission string (recorded in feature-catalog 5.5c "Deferred to 10.2 RBAC" note) |
 | 10.5 | Tenant Isolation ✅ | 10.1 | M |
 | 10.6 | Authentication Service (enhance) | JWT ✅ | S |
 | 10.3 | SSO/LDAP | 10.6 | M |
@@ -404,12 +403,12 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 5.14 | Environment Security (P0: 9.12 + 9.13 + 9.14 + 9.15) ✅ *(renamed from 5.9 on 2026-08-14 — resolves ID collision with 5.9 Skill Loading)* | 5.6 ✅ + 1.3.15 ✅ + 9.4 ✅ | L |
+| 5.14 | Environment Security (P0: 9.12 + 9.13 + 9.14 + 9.15) ✅ *(renamed from 5.9 — resolves ID collision with 5.9 Skill Loading)* | 5.6 ✅ + 1.3.15 ✅ + 9.4 ✅ | L |
 | 9.12 | Environment Network Egress Control ✅ | 1.3.15a ✅ | M |
 | 9.13 | Sandbox Enforcement Integration ✅ | 9.4 ✅ + 9.4c ✅ + 1.3.15a ✅ | S |
 | 9.14 | Structured Security Audit Pipeline ✅ | 9.4 ✅ + 8.7 ✅ | M |
 | 9.15 | Per-Execution Credential Scoping ✅ | 10.8 ✅ | S |
-| 9.10 | Outbound DLP Engine ✅ (2026-08-10) | PII Masking ✅ | L |
+| 9.10 | Outbound DLP Engine ✅ | PII Masking ✅ | L |
 | 9.11 | Agent Runtime Protection | Guardrail Hooks ✅ | L |
 | 7.10 | Automated Continuous Red Teaming | Security Testing ✅ | L |
 | 9.1a | Injection Type Detection | Guardrails ✅ | S |
@@ -439,7 +438,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 5.7 ✅ | Tool Caching | Tool ✅ | S |
 | 5.8 | Enterprise System Integration Framework (Per-Tool Auth Scope) | MCP ✅ | M |
 | 5.4c | MCP Server Registry & Connection Management | MCP ✅ | M |
-| 5.4b (upg) | MCP 2026-07-28 Spec Migration (NEW work item, 2026-08-14 re-verification) — MCP shipped its largest revision 2026-07-28: stateless core (initialize/session removed, `_meta` self-describing requests), mandatory Mcp-Method/Mcp-Name header routing, Multi Round-Trip Requests replacing held-open elicitation streams, cacheable list results (ttlMs), RFC 9207 auth, DCR→CIMD, Roots/Sampling/Logging deprecated (12-month window). Hecate's 5.4b (2025-03-26 spec) client + server must migrate; official registry live (1,000+ servers) | 5.4b client ✅ | M |
+| 5.4b (upg) | MCP 2026-07-28 Spec Migration (NEW work item, re-verification) — MCP shipped its largest revision 2026-07-28: stateless core (initialize/session removed, `_meta` self-describing requests), mandatory Mcp-Method/Mcp-Name header routing, Multi Round-Trip Requests replacing held-open elicitation streams, cacheable list results (ttlMs), RFC 9207 auth, DCR→CIMD, Roots/Sampling/Logging deprecated (12-month window). Hecate's 5.4b (2025-03-26 spec) client + server must migrate; official registry live (1,000+ servers) | 5.4b client ✅ | M |
 | 1.3.5i ✅ | Session Events + Tool Matchers | Settings ✅ | S |
 | 1.3.15 ✅ | Agent Environment | Session ✅ + Context ✅ | M |
 | 1.3.16 ✅ | Agent State Separation | 1.3.15 ✅ | S |
@@ -472,7 +471,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [x] **Ops Center Change 4**: Unified Ops Center Dashboard (8.9) — aggregation layer
 - [ ] CI/CD Evaluation Gating operational
 - [ ] Agent Catalog Governance with quality gateway
-- [x] Outbound DLP Engine with 3-point scanning (2026-08-10, PR #58)
+- [x] Outbound DLP Engine with 3-point scanning (PR #58)
 - [ ] Agent Runtime Protection with 5 detector types
 - [ ] Automated Continuous Red Teaming operational
 - [ ] Injection Type Detection for downstream systems
@@ -505,26 +504,26 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ## Sprint 7: P3 Complete (Month 13–14)
 
-> **Goal**: Complete P3 — engine state architecture (log-as-truth), competitive gap features (dynamic orchestration, run replay, browser tool), rescoped Advanced RAG, Multi-Channel Wave 1, Evaluation suite, Memory improvements. 2026-08-14 re-scope per competitor analysis: 5 dropped, 15 deferred to P5, 4 added.
+> **Goal**: Complete P3 — engine state architecture (log-as-truth), competitive gap features (dynamic orchestration, run replay, browser tool), rescoped Advanced RAG, Multi-Channel Wave 1, Evaluation suite, Memory improvements. Re-scope per competitor analysis: 5 dropped, 15 deferred to P5, 4 added.
 
-### Engine Architecture: Event-Sourced State (NEW — 2026-08-14, Q4=A decision)
+### Engine Architecture: Event-Sourced State (NEW, Q4=A decision)
 
 > **Ordering**: 1.3.19 must land FIRST — 8.20 Execution Replay, HITL durable audit pairs, and middleware waterfall events all consume the enriched event log. 1.3.18 / 6.27 / 5.9-enh are parallelizable.
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 1.3.19 | Event-Sourced Execution State (Log-as-Truth) ✅ *(shipped 2026-08-15, [ADR-030](../design/adr/030-event-sourced-execution-state.md))* — EventStore from observation log to state carrier: "model-visible ⟺ logged" runtime invariant, derive_messages() projection for model context, checkpoint = log-replay fold (snapshots demoted to materialized caches), incremental delta storage (O(N²)→near-linear; note: deer-flow's DeltaChannel is the reference but sits UNRELEASED in its 2.1.0 milestone — corrected 2026-08-14; OMA v1.15.0 durable-approval checkpoint schema v4 is the shipped production reference). Include a dsh-invariants-style runtime relational invariant layer (openTurn/openStep/pendingCalls, frozen result snapshots, dispatch-tree consistency) — gap found in 2026-08-14 re-verification | EventStore ✅ + CheckpointStore ✅ | L |
+| 1.3.19 | Event-Sourced Execution State (Log-as-Truth) ✅ *(see [ADR-030](../design/adr/030-event-sourced-execution-state.md))* — EventStore from observation log to state carrier: "model-visible ⟺ logged" runtime invariant, derive_messages() projection for model context, checkpoint = log-replay fold (snapshots demoted to materialized caches), incremental delta storage (O(N²)→near-linear; note: deer-flow's DeltaChannel is the reference but sits UNRELEASED in its 2.1.0 milestone; OMA v1.15.0 durable-approval checkpoint schema v4 is the shipped production reference). Include a dsh-invariants-style runtime relational invariant layer (openTurn/openStep/pendingCalls, frozen result snapshots, dispatch-tree consistency) | EventStore ✅ + CheckpointStore ✅ | L |
 | 5.9 | Skill Provider Registry (enhancement) — provider registry (source origins: project/user/bundled/custom) + rank precedence (lower wins) + kebab-case name grammar + model/user invocation policy separation; replaces plain directory scan | 5.9 Skill Loading ✅ | M |
 
-### Competitive Gap Features (NEW — 2026-08-14 competitor analysis)
+### Competitive Gap Features (NEW — competitor analysis)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 1.3.18 | Dynamic Orchestration ✅ *(scope frozen 2026-08-17; **shipped 2026-08-17, [ADR-032](../design/adr/032-dynamic-orchestration.md)** — per deep-dive survey: Magentic-One 论文 / OMA v1.14 / DeerFlow subagent 契约 / Deep Agents interpreters / AgentScope / dsh)* — coordinator node: goal + agent roster → runtime task DAG → dispatch workers → synthesize result. 7th multi-agent pattern alongside 6 static ones; coordinator is a special node type emitting sub-graphs on Pregel at runtime. 范式 = data-as-plan（LLM 出建议性 TaskDAG，executor 确定性物化）。**Phase 1（已交付）**: COORDINATOR NodeType + DYNAMIC 枚举、TaskDAG 契约（fail-closed 前置校验 + `validate_task_requirements`）、executor 物化子图（独立 child session）、Magentic 双循环图化（stall ≤2、append-only 计划修订、replan-with-carryover）、三轴预算（max_iterations=5 / stall_limit=2 / max_total_tasks=6 / max_concurrent=3 + token 预算，additive stop_reason + capped 结果可见指导）、benefit-based 委派 rubric（prompt + 测试钉死）、五重隔离断言、可选 per-task verifier + ORCHESTRATOR_DECISION/EVALUATION 事件、synthesis 确定性 transform、planner/evaluator 模型分离。**Phase 2 = 1.3.18a（P4）**: consensus proposer→judge、append-only PlanPatch repair API、异步编排 + 中途 steering、plan 冻结 artifact + 精确重放（与 8.20 配对）。**UI companion（P3，Phase 1 后 follow-up change，无新 ID）**: pattern-selector 第 7 模式 / canvas COORDINATOR 节点 / 8.20 回放 coordinator 卡片 | 2.7a ✅ + Pregel ✅ + 1.3.19 ✅ | M |
+| 1.3.18 | Dynamic Orchestration ✅ *(see [ADR-032](../design/adr/032-dynamic-orchestration.md) — per deep-dive survey: Magentic-One 论文 / OMA v1.14 / DeerFlow subagent 契约 / Deep Agents interpreters / AgentScope / dsh)* — coordinator node: goal + agent roster → runtime task DAG → dispatch workers → synthesize result. 7th multi-agent pattern alongside 6 static ones; coordinator is a special node type emitting sub-graphs on Pregel at runtime. 范式 = data-as-plan（LLM 出建议性 TaskDAG，executor 确定性物化）。**Phase 1（已交付）**: COORDINATOR NodeType + DYNAMIC 枚举、TaskDAG 契约（fail-closed 前置校验 + `validate_task_requirements`）、executor 物化子图（独立 child session）、Magentic 双循环图化（stall ≤2、append-only 计划修订、replan-with-carryover）、三轴预算（max_iterations=5 / stall_limit=2 / max_total_tasks=6 / max_concurrent=3 + token 预算，additive stop_reason + capped 结果可见指导）、benefit-based 委派 rubric（prompt + 测试钉死）、五重隔离断言、可选 per-task verifier + ORCHESTRATOR_DECISION/EVALUATION 事件、synthesis 确定性 transform、planner/evaluator 模型分离。**Phase 2 = 1.3.18a（P4）**: consensus proposer→judge、append-only PlanPatch repair API、异步编排 + 中途 steering、plan 冻结 artifact + 精确重放（与 8.20 配对）。**UI companion（P3，Phase 1 后 follow-up change，无新 ID）**: pattern-selector 第 7 模式 / canvas COORDINATOR 节点 / 8.20 回放 coordinator 卡片 | 2.7a ✅ + Pregel ✅ + 1.3.19 ✅ | M |
 | 8.20 | Execution Replay & Debug Dashboard (Phase 1: timeline replay) — session → trace-partitioned timeline (superstep × channel changes × tool calls × LLM request/response × guardrail blocks) + DAG step-through + time-travel (fold-to-version + `derive_messages`); web UI on EventStore + OTel. **Vocabulary**: `session`（多轮容器）→ `trace`（一次执行，回放锚点）→ `event`（记录）；不再用 "runId"。**回放覆盖范围 = Pregel 路径**（path A/C 不在日志内，UI 横幅标注；空日志会话不渲染回放 tab）。 Phase 2 (version binding) deferred to P5 | 1.3.19 (enriched log) | M |
 | 6.27 | Browser Automation Tool (moved from P4) — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ | M |
 
-### Completed-Feature Upgrades (NEW — 2026-08-14 research)
+### Completed-Feature Upgrades (NEW — research)
 
 > Upgrades to already-shipped features whose architecture the industry has moved past (dsh source analysis + 18-platform competitor survey). All sequence after 1.3.19 (they consume the enriched event log); spill into early Sprint 8 is acceptable if capacity is tight. No new feature IDs — recorded as planned enhancements on 1.3.5i (E3), 1.3.4, 9.4 in the catalog.
 
@@ -534,17 +533,17 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 1.3.4 | HITL Fail-Closed Approval — no answerer → deny; only allowed-once grants; ask/never policy state machine; approval/asked + approval/decided durable audit pair (turn-enclosed) | 1.3.4 ✅ + 1.3.19 (audit events) | M |
 | 9.4 | Content-Aware Tool Gating — bash pipeline static analysis beyond risk_level + monotonic denial invariant (guards can only deny, never resurrect) | 9.4 ✅ + 1.3.19 | M |
 
-### Plugin Ecosystem: Open-Standard Ingestion (NEW — 2026-08-16 adjustment)
+### Plugin Ecosystem: Open-Standard Ingestion (NEW — adjustment)
 
 > **Rationale**: Agent Plugins 1.0 (open standard, 2026-08-06, backed by OpenAI/Microsoft/Google/Amazon/Cursor/GitHub) has converged the industry on "plugin = declarative package of Skills + MCP config"; SKILL.md layer already landed in Bedrock AgentCore/watsonx/Microsoft Agent Framework/Salesforce. Hecate adopts it as the ecosystem-facing third-party format; `.hecate-plugin` narrows to P-tier deep-integration (catalog notes on 5.5/5.5b). **Ordering**: independent of 1.3.19 — parallelizable with any Sprint 7 work item; 5.5c → 5.13a strict serial (scanning gates the ingest pipeline's go-live).
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 5.5c | Agent Plugins 1.0 Standard Ingestion — directory/git-URL/zip install, closed-manifest validation, fixed-location discovery (skills/ + mcp.json) with skip-and-continue + path containment, SKILL.md→SkillModel import (source/origin + pin-by-hash), mcp.json→MCPServerRegistry, **component-level trust dispatch** (skills→T4 & http-MCP→T2 = workspace admin; stdio = org admin only, SaaS default-deny via config gate; self-hosted stdio runs in 9.4c container sandbox — decided 2026-08-16), bare-SKILL-md-directory acceptance ✅ **shipped 2026-08-18** (`openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`): single adapter module `plugin/agent_plugins.py` + `plugin/stdio_sandbox.py`; `PluginModel` rows carry `origin`/`content_hash`/`scan_result`; `SkillModel` rows carry `source="plugin"` + `origin` + `plugin_id` FK; SkillLoader filters by enabling plugin; MCP projection uses `<plugin>__<server>` prefix; stdio via docker wrapper into 9.4c container; `AGENT_PLUGINS_INGESTION_ENABLED` default-off + `PLATFORM_PLUGIN_INSTALLERS` config allowlist (5.10.2 RBAC enhancement receives `is_platform_admin` role + `plugin:install:platform` permission string) | 5.5 ✅ + 5.4c ✅ + 5.9 ✅ | L |
-| 5.13a | Plugin Content Scanning (split from 5.13, pulled to P3) — prompt-injection detection (incl. invisible-Unicode), secret detection, allowed-tools audit; fail-closed install (block/warn/allow, org threshold), rescan on enable, results API + Ops Center display. V1 = pure rule engine; LLM second-pass review optional in v2 (decided 2026-08-16) — **strictly serial after 5.5c; 5.5c ships 2026-08-18 with a no-op scan stage reserving the slot, 5.13a keeps the go-live gate**. Design refined 2026-08-18 (17+-platform research: DeerFlow SkillScan / Hermes-agent / Dify / Google GE Governing Agent Skills / FortiCNAPP SK-* / IBM script deny-list converge on deterministic-first + CRITICAL fail-closed + warn ack + optional LLM second pass; Bedrock AgentCore & AgentArts/openJiuwen (same vendor) & AgentScope & CatPaw substitute sandbox/permissions — refs in feature-catalog 5.13a row): obfuscation layer v1 = NFKC + bounded base64/hex rescan, file-role × rule severity matrix, verdict = line vs `AGENT_PLUGIN_SCAN_BLOCK_AT`, oversize text → finding (22MB-padding lesson), ack suppression keyed (content_hash, rule_id), URL rules = paste-site/IP-literal/punycode ✅ **shipped 2026-08-18** (`openspec/changes/archive/2026-08-18-plugin-content-scanning/`): `plugin/content_scanner.py` + install/enable fail-closed wiring + SecurityFindingModel projection/ack + `GET /api/plugins/{id}/scan`; master switch default flipped on | 5.5c ✅ | M |
-| 5.5 (enh) | T0 Tightening — loader rejects runtime-installed non-first-party `python:` entries (SaaS reject; self-hosted default-deny + allowlist) — operationalizes ADR-029 "runtime artifacts never T0"; near-zero cost while installed-code-plugin base is ~empty | 5.5 ✅ | S |
+| 5.5c | Agent Plugins 1.0 Standard Ingestion — directory/git-URL/zip install, closed-manifest validation, fixed-location discovery (skills/ + mcp.json) with skip-and-continue + path containment, SKILL.md→SkillModel import (source/origin + pin-by-hash), mcp.json→MCPServerRegistry, **component-level trust dispatch** (skills→T4 & http-MCP→T2 = workspace admin; stdio = org admin only, SaaS default-deny via config gate; self-hosted stdio runs in 9.4c container sandbox — decided), bare-SKILL-md-directory acceptance ✅ (`openspec/changes/archive/2026-08-18-agent-plugins-ingestion/`): single adapter module `plugin/agent_plugins.py` + `plugin/stdio_sandbox.py`; `PluginModel` rows carry `origin`/`content_hash`/`scan_result`; `SkillModel` rows carry `source="plugin"` + `origin` + `plugin_id` FK; SkillLoader filters by enabling plugin; MCP projection uses `<plugin>__<server>` prefix; stdio via docker wrapper into 9.4c container; `AGENT_PLUGINS_INGESTION_ENABLED` default-off + `PLATFORM_PLUGIN_INSTALLERS` config allowlist (5.10.2 RBAC enhancement receives `is_platform_admin` role + `plugin:install:platform` permission string) | 5.5 ✅ + 5.4c ✅ + 5.9 ✅ | L |
+| 5.13a | Plugin Content Scanning (split from 5.13, pulled to P3) — prompt-injection detection (incl. invisible-Unicode), secret detection, allowed-tools audit; fail-closed install (block/warn/allow, org threshold), rescan on enable, results API + Ops Center display. V1 = pure rule engine; LLM second-pass review optional in v2 (decided) — **strictly serial after 5.5c; 5.5c ships with a no-op scan stage reserving the slot, 5.13a keeps the go-live gate**. Design refined (17+-platform research: DeerFlow SkillScan / Hermes-agent / Dify / Google GE Governing Agent Skills / FortiCNAPP SK-* / IBM script deny-list converge on deterministic-first + CRITICAL fail-closed + warn ack + optional LLM second pass; Bedrock AgentCore & AgentArts/openJiuwen (same vendor) & AgentScope & CatPaw substitute sandbox/permissions — refs in feature-catalog 5.13a row): obfuscation layer v1 = NFKC + bounded base64/hex rescan, file-role × rule severity matrix, verdict = line vs `AGENT_PLUGIN_SCAN_BLOCK_AT`, oversize text → finding (22MB-padding lesson), ack suppression keyed (content_hash, rule_id), URL rules = paste-site/IP-literal/punycode ✅ (`openspec/changes/archive/2026-08-18-plugin-content-scanning/`): `plugin/content_scanner.py` + install/enable fail-closed wiring + SecurityFindingModel projection/ack + `GET /api/plugins/{id}/scan`; master switch default flipped on | 5.5c ✅ | M |
+| 5.5 (enh) ✅ | T0 Tightening — loader rejects runtime-installed non-first-party `python:` entries (SaaS reject; self-hosted default-deny + `PLUGIN_PYTHON_ENTRY_ALLOWLIST` allowlist, segment-boundary prefix match); install-time pre-check + directory rollback on rejection; SaaS skips runtime `uv pip install` — operationalizes ADR-029 "runtime artifacts never T0"; near-zero cost while installed-code-plugin base is ~empty (`openspec/changes/archive/2026-08-19-t0-runtime-plugin-tightening/`) | 5.5 ✅ | S |
 
-### Advanced RAG & Knowledge (rescoped 2026-08-14)
+### Advanced RAG & Knowledge (rescoped)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
@@ -552,29 +551,29 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 3.3.2 | Incremental Update | RAG ✅ | M |
 | 3.3.3 | Knowledge Quality Evaluation | Ragas | S |
 
-> **Deferred to P5 (2026-08-14)**: 3.1.2-3.1.4 (OCR / Table / Layout — integrate Docling/Unstructured instead of building), 3.1.8 (Extended Document Processing, from P4), 3.5.1-3.5.3 (Knowledge Graph suite — integrate GraphRAG/LlamaIndex), 3.5.5 (Knowledge Graph API, from P4), 3.4.2 (High-Throughput Retrieval — Qdrant deployment guide covers it). See Sprint 10 deferred table for triggers.
+> **Deferred to P5**: 3.1.2-3.1.4 (OCR / Table / Layout — integrate Docling/Unstructured instead of building), 3.1.8 (Extended Document Processing, from P4), 3.5.1-3.5.3 (Knowledge Graph suite — integrate GraphRAG/LlamaIndex), 3.5.5 (Knowledge Graph API, from P4), 3.4.2 (High-Throughput Retrieval — Qdrant deployment guide covers it). See Sprint 10 deferred table for triggers.
 
 ### Multi-Channel Expansion
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 11.2 | Web Widget (Simplified) *Wave 1 — internal Portal / embeddable for any Hecate deployment* | API ✅ | S (simplified) |
-| 11.3 | Feishu (Lark) ✅ *Wave 1 — China market anchor + first ChannelABC reference impl (Delivered 2026-08-13)* | Channel SDK | M |
+| 11.3 | Feishu (Lark) ✅ *Wave 1 — China market anchor + first ChannelABC reference impl* | Channel SDK | M |
 | 11.4 | WeCom (WeChat Work) *P5 deferred — reuse 11.3 pattern when needed* | 11.3 ✅ | S |
 | 11.5 | DingTalk *P5 deferred — reuse 11.3 pattern when needed* | 11.3 ✅ | S |
 | 11.8 | Intent Recognition & Routing | Multi-Agent ✅ | M |
-| 11.9 | Slack ✅ / Discord/Telegram *Slack (Delivered 2026-08-13); Discord/Telegram — P5 deferred, reuse Slack pattern when needed* | ChannelABC ✅ | M (Slack) + S (Discord/Telegram) |
+| 11.9 | Slack ✅ / Discord/Telegram *Discord/Telegram — P5 deferred, reuse Slack pattern when needed* | ChannelABC ✅ | M (Slack) + S (Discord/Telegram) |
 
 **Deferred to P5 (按需触发, 不在当前 P3 主线)**:
 - 11.2 (full) — Web Widget 完整版（匿名 to-C 场景），trigger = 第一个公开网站/营销/客服场景的客户
 - 11.6 — WeChat Official Account / Mini Program（to-C niche），trigger = 第一个 to-C 客户
 - 11.10 — Custom Channel SDK（长尾 niche），trigger = 社区/客户明确请求
 
-### 11.x Wave 节奏（2026-08-12 规划）
+### 11.x Wave 节奏
 
 | Wave | Feature | 触发条件 | 时机 |
 |---|---|---|---|
-| Wave 1 | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | **2026-08-16: 11.2 简化版 ✅ + 11.3 ✅ + 11.9 Slack ✅ 全部交付** |
+| Wave 1 | 11.2 简化版 + 11.3 飞书 + 11.9 Slack | 主动 | 全部交付 |
 | Wave 2 (P5 deferred) | 11.4 企微 + 11.5 钉钉 + 11.9 Discord/Telegram | 按客户需求触发 (wechat wecom / dingtalk / discord / telegram 客户需求) | 暂停 |
 | Wave 3（按需） | 11.2 完整版 + 11.6 微信 + 11.10 Custom SDK | 不预定时间，等明确客户需求 | 不预定 |
 | 11.16 | Per-Token-Type Auth Pipeline | Auth ✅ | M |
@@ -592,9 +591,9 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 7.3 | Workflow Evaluation | 7.1 ✅ | M |
 | 7.4 | Human Annotation | 7.2 ✅ | M |
 | 7.4a | Human Score Calibration | 7.4 | S |
-| 7.5 | A/B Testing (rescoped to Agent-Level 2026-08-14) — agent/version-level controlled experiments; reuses 6.8a traffic-splitting + z-test machinery generalized from model routing; prompt comparison delegated to eval-platform integration (7.6b drop rationale) | 6.8a ✅ | S |
+| 7.5 | A/B Testing (rescoped to Agent-Level) — agent/version-level controlled experiments; reuses 6.8a traffic-splitting + z-test machinery generalized from model routing; prompt comparison delegated to eval-platform integration (7.6b drop rationale) | 6.8a ✅ | S |
 
-> **Dropped (2026-08-14)**: 7.6a Prompt Auto-Optimization, 7.6b Prompt Comparison — specialized frameworks (DSPy, IBM AgentOps GEPA) and evaluation platforms (LangSmith, Salesforce A/B Testing API) have standardized this; self-building is negative ROI.
+> **Dropped**: 7.6a Prompt Auto-Optimization, 7.6b Prompt Comparison — specialized frameworks (DSPy, IBM AgentOps GEPA) and evaluation platforms (LangSmith, Salesforce A/B Testing API) have standardized this; self-building is negative ROI.
 
 > **TBD — Quality Regression Detection (G4 remainder)**: Once the Evaluation Suite produces per-model quality scores, add quality regression monitoring to the Model Monitoring Dashboard (O10+G4). Compare current-period quality scores against historical baseline; trigger alert when degradation exceeds threshold. Originated from `model-hub-completion` change where drift detection was shipped but quality regression was deferred pending evaluation data.
 
@@ -605,7 +604,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 1.1.24 | Human Input / Form Node | interrupt() ✅ + Canvas ✅ | M |
 | 1.1.25 | Trigger Node | Scheduled Tasks ✅ + Webhook ✅ | M |
 
-> **Deferred to P5 (2026-08-14)**: 1.1.18 Agent-Workflow Canvas Embedding, 1.1.19 Unified Skill Selector, 1.1.20 Nested Graph Visualization — Canvas enhancements without user feedback are speculative; Dify's collaborative editing (Loro CRDT) is the direction to aim for when triggered.
+> **Deferred to P5**: 1.1.18 Agent-Workflow Canvas Embedding, 1.1.19 Unified Skill Selector, 1.1.20 Nested Graph Visualization — Canvas enhancements without user feedback are speculative; Dify's collaborative editing (Loro CRDT) is the direction to aim for when triggered.
 
 ### Memory Enhancement
 
@@ -624,12 +623,12 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 6.16 | NL2Agent / NL2Flow | Canvas ✅ + Graph DSL ✅ | M |
 | 6.18 | Trace Annotation | EventStore ✅ + Audit ✅ | S |
 
-> **Dropped (2026-08-14)**: 6.17 DSL Conversion Framework — MCP/A2A protocol standardization plus Salesforce open-sourcing Agent Script indicates the industry is converging on standard agent definitions, not DSL compatibility layers.
-> **Deferred to P5 (2026-08-14)**: 6.21 Decision Lineage — full decision lineage requires an Ontology foundation (data + function + app version binding per trace, Palantir standard); effort was underestimated in the initial analysis.
+> **Dropped**: 6.17 DSL Conversion Framework — MCP/A2A protocol standardization plus Salesforce open-sourcing Agent Script indicates the industry is converging on standard agent definitions, not DSL compatibility layers.
+> **Deferred to P5**: 6.21 Decision Lineage — full decision lineage requires an Ontology foundation (data + function + app version binding per trace, Palantir standard); effort was underestimated in the initial analysis.
 
 ### Milestone M7 (End of Sprint 7)
 
-- [x] P3 re-scoped 125/125 (100%) — 2026-08-14 re-scope basis
+- [x] P3 re-scoped 125/125 (100%) — re-scope basis
 - [x] Event-sourced execution state: log-as-truth invariant + derive_messages projection + DeltaChannel incremental checkpoint
 - [x] Dynamic Orchestration (7th multi-agent pattern) on Pregel
 - [x] Execution Replay Phase 1 (timeline replay) operational
@@ -667,7 +666,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 |---|---------|------|--------|
 | 6.15 | Agentic RL Framework | Evaluation ✅ + LLM ✅ | L |
 | 6.19 | Prompt Self-Optimization | Evaluation ✅ + LLM ✅ | M |
-| 6.20 | Ontology Action System | Knowledge Graph (P5 deferred 2026-08-14 — rebase on GraphRAG/LlamaIndex integration when triggered) | L |
+| 6.20 | Ontology Action System | Knowledge Graph (P5 deferred — rebase on GraphRAG/LlamaIndex integration when triggered) | L |
 | 6.22 | OAG (Ontology-Augmented Generation) | 6.20 + RAG ✅ *(blocked by 6.20's P5 KG dependency)* | L |
 
 ### Memory Intelligence
@@ -675,7 +674,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 4.5 | Sleep-time Memory Consolidation | Memory System ✅ | M |
-| 4.13 | Context Engine Processor Chain (+ LLM-managed compaction via surface replacement — compaction events as checkpoint sources, per 2026-08-14 research) | ContextEngine ✅ + 1.3.19 | M |
+| 4.13 | Context Engine Processor Chain (+ LLM-managed compaction via surface replacement — compaction events as checkpoint sources, per research) | ContextEngine ✅ + 1.3.19 | M |
 | 4.16 | LLM-Managed Memory | ContextEngine ✅ | M |
 | 4.18 | Conversation Recall Storage | Memory System ✅ | M |
 | 4.19 | Self-Editing Memory | Memory System ✅ | M |
@@ -684,7 +683,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 4.22 | Tool Memory | Memory System ✅ | M |
 | 4.23 | Cross-Thread Memory Store | Memory System ✅ | M |
 
-### Plugin Ecosystem (NEW — 2026-08-16 adjustment)
+### Plugin Ecosystem (NEW — adjustment)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
@@ -713,10 +712,10 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 3.2.10 | Agentic RAG | RAG ✅ + ContextEngine | M |
-| 3.5.4 | GraphRAG Query Engine | 3.5.1 + 3.5.2 + 3.5.3 *(P5 deferred 2026-08-14 — rebase on GraphRAG/LlamaIndex integration when triggered)* | L |
-| 3.5.6 | Agent-Native Graph Memory | 3.5.2 + Memory System *(P5 deferred 2026-08-14 — same trigger)* | M |
+| 3.5.4 | GraphRAG Query Engine | 3.5.1 + 3.5.2 + 3.5.3 *(P5 deferred — rebase on GraphRAG/LlamaIndex integration when triggered)* | L |
+| 3.5.6 | Agent-Native Graph Memory | 3.5.2 + Memory System *(P5 deferred — same trigger)* | M |
 | 3.5.13 | Temporal Memory & Reasoning | Memory System ✅ | M |
-| 3.5.14 | Lazy GraphRAG | 3.5.1 + 3.5.2 *(P5 deferred 2026-08-14 — same trigger)* | L |
+| 3.5.14 | Lazy GraphRAG | 3.5.1 + 3.5.2 *(P5 deferred — same trigger)* | L |
 
 ### Multi-Agent Intelligence
 
@@ -727,7 +726,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 2.6 | Inter-Agent Communication | Multi-Agent ✅ | M |
 | 2.6a | Multi-Agent Central Controller | 2.6 | M |
 | 2.11 | Agent Team Templates | Graph template ✅ | M |
-| 2.13 | ACP (Agent Client Protocol) Support (NEW — 2026-08-14) — external coding agents (Claude Code, Codex, Gemini CLI) as worker nodes in Hecate orchestration; subagent provider seam (in-process/fork/ACP); complements A2A (agent-to-agent) — ACP is host-to-coding-agent | A2A ✅ | M |
+| 2.13 | ACP (Agent Client Protocol) Support (NEW) — external coding agents (Claude Code, Codex, Gemini CLI) as worker nodes in Hecate orchestration; subagent provider seam (in-process/fork/ACP); complements A2A (agent-to-agent) — ACP is host-to-coding-agent | A2A ✅ | M |
 | 13.15 | Distributed Team Orchestration | A2A ✅ (P3) | M |
 
 ### Execution Intelligence
@@ -759,10 +758,10 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 1.1.21 | Multi-Agent Controller Canvas | 2.6a | M |
 | 1.1.22 | Orchestration Mode Switching | 1.1.21 | M |
 | 1.1.23 | Execution State Visualization | Canvas ✅ | M |
-| 1.1.26 | Object CRUD Node | KG Construction (P5 deferred 2026-08-14 — rebase on integration when triggered) | M |
+| 1.1.26 | Object CRUD Node | KG Construction (P5 deferred — rebase on integration when triggered) | M |
 | 1.1.27 | Side-by-side Chat + Canvas | 1.1.23 | M |
 
-### 2026-08-14 Re-scope Additions (NEW)
+### Re-scope Additions (NEW)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
@@ -772,7 +771,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Milestone M9 (End of Sprint 9)
 
-- [ ] P4 = 96/96 (100%) — 2026-08-14 re-scope basis (100 features incl. 4 done; 3.5.5/3.1.8 deferred P5, 11.11/2.13/8.21/13.20/6.27a added)
+- [ ] P4 = 96/96 (100%) — re-scope basis (100 features incl. 4 done; 3.5.5/3.1.8 deferred P5, 11.11/2.13/8.21/13.20/6.27a added)
 - [ ] GraphRAG Query Engine with Global/Local/Hybrid search (rebased on P5 KG integration when triggered)
 - [ ] Agentic RAG with iterative retrieval
 - [ ] Temporal Memory with time-aware retrieval
@@ -801,16 +800,16 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Asset Marketplace
 
-> **Rescoped (2026-08-16)**: 12.0 v1 = Agent Plugins installer (5.5c, P3) + static git-index directory (Claude Code marketplace pattern) + scan-results display (5.13a, P3); **E-tier only** (T4 packages + T2 MCP registrations, never code plugins). 12.5 Partner Monetization + EC1 ARD (14.1) + EC4 (13.14 enhancement) + EC5 (11.13 enhancement) **frozen** until T4 supply/traction evidence exists (GPT Store decline; ClawHavoc governance lesson). Full rationale in feature-catalog 12.0/12.5/14.1 notes.
+> **Rescoped**: 12.0 v1 = Agent Plugins installer (5.5c, P3) + static git-index directory (Claude Code marketplace pattern) + scan-results display (5.13a, P3); **E-tier only** (T4 packages + T2 MCP registrations, never code plugins). 12.5 Partner Monetization + EC1 ARD (14.1) + EC4 (13.14 enhancement) + EC5 (11.13 enhancement) **frozen** until T4 supply/traction evidence exists (GPT Store decline; ClawHavoc governance lesson). Full rationale in feature-catalog 12.0/12.5/14.1 notes.
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 12.0 | Asset Marketplace (rescoped 2026-08-16: installer + git index, E-tier only) | Plugin System ✅ + 5.5c (P3) | M (was L) |
+| 12.0 | Asset Marketplace (rescoped: installer + git index, E-tier only) | Plugin System ✅ + 5.5c (P3) | M (was L) |
 | 12.1 | Industry Templates | 12.0 | M |
 | 12.2 | Industry Knowledge Packs | 12.0 | M |
 | 12.3 | Industry Skill Packs | 12.0 | M |
 | 12.4 | Industry Integration Guide | 12.0 | S |
-| 12.5 | Partner Monetization Infrastructure (frozen 2026-08-16, pending supply evidence) | 12.0 | L |
+| 12.5 | Partner Monetization Infrastructure (frozen, pending supply evidence) | 12.0 | L |
 
 ### Community & Distribution
 
@@ -853,7 +852,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 11.12 | Desktop Client | API ✅ | L |
 | 13.16 | Edge/Lite Deployment | SQLite ✅ | M |
 
-### Deferred from P3/P4 (2026-08-14 competitor-analysis re-scope)
+### Deferred from P3/P4 (competitor-analysis re-scope)
 
 > Trigger-based — no scheduled delivery. Rationale and evidence in `docs/research/2026-08-competitor-analysis.md` §Feature decisions.
 
@@ -875,14 +874,14 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 6.34 | AI Office | Document APIs | M |
 | 6.35 | Industrial Data Integration | MQTT/OPC UA | L |
 | 6.36 | Asset Marketplace Operations | 12.0 | M |
-| 5.13 | Plugin Security & Signing (rescoped 2026-08-16: signing/digest/score only — content scanning split to 5.13a, P3) | Plugin System ✅ | M |
+| 5.13 | Plugin Security & Signing (rescoped: signing/digest/score only — content scanning split to 5.13a, P3) | Plugin System ✅ | M |
 | 6.37 | Memory Clustering & Conflict Resolution | Memory System ✅ | M |
 | 6.38 | Self-Planning (PDDL + MCTS) | LLM ✅ | L |
 | 6.39 | Tool Auto-Creation | LLM ✅ | M |
 | 6.40 | Firecracker microVM Backend | 1.3.15a ✅ + 6.32a | L |
 | 13.4c | Session-Level microVM Isolation (Paradigm B — Bedrock AgentCore model, requires PregelRuntime RPC refactor) | 6.40 ✅ + 13.4 ✅ + engine refactor | XL |
 | 13.19 | Service Mesh Integration (Istio/Linkerd mTLS + east-west traffic + canary routing) | 13.1 + 13.4 ✅ | M |
-| 6.41 | WASM Runtime Backend (deprioritized 2026-08-16: T4/T2 cover third-party scenarios; sequence behind 5.5c) | 5.3 ✅ + 6.40 | M |
+| 6.41 | WASM Runtime Backend (deprioritized: T4/T2 cover third-party scenarios; sequence behind 5.5c) | 5.3 ✅ + 6.40 | M |
 | 6.42 | Global Branching | Ontology ✅ | M |
 | 6.43 | Embedded Ontology | Ontology ✅ | M |
 | 11.19 | Platform-Level Governance | Auth ✅ | M |
@@ -894,7 +893,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Milestone M10 (End of Sprint 10)
 
-- [ ] P5 = 60/60 (100%) — 2026-08-14 re-scope basis (44 original − 11.11 moved to P4 + 17 deferred from P3/P4)
+- [ ] P5 = 60/60 (100%) — re-scope basis (44 original − 11.11 moved to P4 + 17 deferred from P3/P4)
 - [ ] Asset Marketplace operational
 - [ ] Partner Monetization with Stripe integration
 - [ ] Industry Templates and Knowledge Packs available
@@ -904,7 +903,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [ ] Community translation framework ready
 - [ ] EU AI Act compliance certified
 - [ ] Knowledge Graph Visualization and Ontology tools
-- [ ] Vision input operational (Voice moved to P4 as 11.11 Voice Agent Pipeline, 2026-08-14)
+- [ ] Vision input operational (Voice moved to P4 as 11.11 Voice Agent Pipeline)
 - [ ] Edge/Lite deployment available
 - [ ] Plugin Security & Signing for marketplace
 - [ ] Agentic Resource Discovery (ARD) operational
@@ -937,7 +936,7 @@ EventStore Wiring → Tracing → Monitoring → Alerting ─────┘
 | workspace_id pre-reserved in 5 models; changes concentrated in API/Service layer, no engine impact | ✅ Done — workspace_id added to 14 unscoped models, vector store filtering, migration + backfill, service/API enforcement |
 | Canvas development takes longer than estimated | P2 delivery delayed | React Flow is mature; frontend can develop in parallel with backend. Canvas UI features (1.1.14-1.1.17) are incremental enhancements to existing canvas. |
 | Collaboration pattern UI complexity | Sprint 2 overloaded | Start with 3 core patterns (Sequential, Parallel, Handoff) in Sprint 2, add remaining (Broadcast, Negotiation, Debate) in Sprint 3. |
-| A2A protocol spec instability | Sprint 5 affected | ✅ Resolved — A2A v1.0 GA (Linux Foundation, v1.0.0 2026-03-12 + patch v1.0.1 2026-05-26); core implemented (AgentCard + Task lifecycle). Correction (2026-08-14): earlier note cited a "v1.2 (March 2026)" which does not exist in official releases — v1.0.x is current. |
+| A2A protocol spec instability | Sprint 5 affected | ✅ Resolved — A2A v1.0 GA (Linux Foundation, v1.0.0 2026-03-12 + patch v1.0.1 2026-05-26); core implemented (AgentCard + Task lifecycle). Correction: earlier note cited a "v1.2 (March 2026)" which does not exist in official releases — v1.0.x is current. |
 | ABC wiring introduces regressions | Sprint 1 delayed | Each ABC wiring uses optional constructor parameters with default behavior; existing tests cover all paths |
 | Evaluation system too broad (40+ evaluators) | Sprint 4 overloaded | Start with 10 core evaluators in Sprint 4, add remaining in Sprint 5 |
 
@@ -1014,7 +1013,7 @@ Authentication → Authorization → Multi-Tenant → Tenant Isolation
 Multi-Agent → A2A Protocol (2.10) → Signed Agent Cards (2.10a) → Conflict Handling → Skill Registry → Mutual Embedding
 MCP Client → MCP Server Mode → MCP Streamable HTTP (5.4b) → MCP Server Registry & Connection Management (5.4c) → MCP Gateway → Plugin System (5.5, via 5.5a) → Tool Permission
 Skill Loading → Skill Versioning (5.9d) → Resource Versioning
-Knowledge Graph Construction (3.5.1) → Graph Database Integration (3.5.2) → Community Detection (3.5.3) *(P5 deferred 2026-08-14)*
+Knowledge Graph Construction (3.5.1) → Graph Database Integration (3.5.2) → Community Detection (3.5.3) *(P5 deferred)*
 Memory Isolation (4.6) → Memory Importance Scoring (4.14) → Multi-Signal Fusion Retrieval (4.15)
 LLM-Managed Memory (4.16) → Memory Pressure Alert (4.17) → ContextEngine Integration
 Task Memory (4.21) → Trajectory Learning → Experience Retrieval
@@ -1023,7 +1022,7 @@ Canvas + Graph DSL → NL2Agent (6.16) → NL2Flow → Workflow Auto-Generation
 EventStore → Trace Annotation (6.18) → Evaluation Datasets → Agentic RL
 Evaluation → Prompt Self-Optimization (6.19) → ACE/GEPA Algorithm → Auto-Optimized Prompts
 Knowledge Graph (3.5.1, P5 deferred) → Ontology Action System (6.20) → Object Actions → Writeback
-EventStore → Decision Lineage (6.21, P5 deferred 2026-08-14) → Decision Audit → Compliance
+EventStore → Decision Lineage (6.21, P5 deferred) → Decision Audit → Compliance
 6.20 + RAG → OAG (6.22) → RAG + Logic + Actions Closed Loop *(blocked by 6.20's P5 KG dependency)*
 Auth Service → Per-Token-Type Auth (11.16) → Two-Tier Identity (11.17) → Fine-Grained Access Control
 Canvas → Human Input/Form Node (1.1.24) → Trigger Node (1.1.25) → Event-Driven Workflows
@@ -1106,7 +1105,7 @@ Audit Logs (8.7) → Structured Security Audit Pipeline (9.14) → Security Even
 Signed Agent Cards (2.10a) → Multi-Agent Trust Verification (2.10b) → ASI03/07/09
 Execution Security (9.4) → Environment Security P0 (5.14: 9.12+9.13+9.14+9.15) → External Policy Engine Interface (9.16/Cedar/OPA) → AI Auto-Approval (9.17)
 P3 Full-Chain Tracing (8.1) → OTel GenAI Semantic Conventions (OE2) → Multi-Agent Distributed Tracing (8.1d/OE6)
-P3 Evaluators (7.2a) → Evaluation Three-Dimension Structuring (OE8) → Reasoning Efficiency Evaluator (OE9, frozen 2026-08-14 → OTel export)
+P3 Evaluators (7.2a) → Evaluation Three-Dimension Structuring (OE8) → Reasoning Efficiency Evaluator (OE9, frozen → OTel export)
 P3 Online/Offline Eval (7.2c) → Production Online Scoring (OE3) → CI/CD Evaluation Gating (8.10/OE1)
 Decision Lineage (6.21, P5 deferred) → Data-to-Decision Traceability (OE4) → Ontology-Level Provenance
 Testing Center (7.9) + Regression Test Set (7.6) → CI/CD Evaluation Gating (8.10/OE1) → Deployment Quality Gate

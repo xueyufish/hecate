@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,72 @@ from hecate.plugin.manifest import PluginManifest
 logger = logging.getLogger(__name__)
 
 _PLATFORM_VERSION = "0.8.0"
+
+FIRST_PARTY_ROOT = "hecate"
+
+
+@dataclass(frozen=True)
+class PythonEntryPolicy:
+    """Trust gate for in-process plugin entries (ADR-029 T0 discipline).
+
+    A ``python:`` entry is loadable only when its module is first-party
+    (``hecate`` exactly or any module under the ``hecate.`` namespace) or,
+    in self-hosted mode, matches a prefix in ``allowed_prefixes``. SaaS mode
+    rejects all non-first-party entries regardless of the allowlist.
+    """
+
+    saas_mode: bool
+    allowed_prefixes: tuple[str, ...] = field(default_factory=tuple)
+
+    @classmethod
+    def from_settings(cls, settings: Any) -> PythonEntryPolicy:
+        return cls(
+            saas_mode=bool(getattr(settings, "SAAS_MODE", False)),
+            allowed_prefixes=tuple(getattr(settings, "PLUGIN_PYTHON_ENTRY_ALLOWLIST", []) or ()),
+        )
+
+
+def _is_first_party(module: str) -> bool:
+    if module == FIRST_PARTY_ROOT:
+        return True
+    return module.startswith(f"{FIRST_PARTY_ROOT}.")
+
+
+def _matches_allowlist(module: str, prefixes: tuple[str, ...]) -> bool:
+    for raw in prefixes:
+        prefix = raw.strip()
+        if not prefix:
+            continue
+        if not prefix.endswith("."):
+            prefix = f"{prefix}."
+        if module == prefix.rstrip(".") or module.startswith(prefix):
+            return True
+    return False
+
+
+def check_python_entry(entry: str, policy: PythonEntryPolicy) -> str | None:
+    """Return None if *entry* passes the T0 trust gate, else a remediation message.
+
+    Operates on the ``python:module:Class`` substring of *entry*. Non-``python:``
+    entries are not subject to this gate.
+    """
+    if not entry.startswith("python:"):
+        return None
+    parts = entry.split(":", 2)
+    if len(parts) != 3 or not parts[1] or not parts[2]:
+        return None
+    module = parts[1]
+    if _is_first_party(module):
+        return None
+    if policy.saas_mode:
+        return f"SaaS mode rejects non-first-party `python:` entry {module!r} (ADR-029 T0 policy). Remove this plugin."
+    if _matches_allowlist(module, policy.allowed_prefixes):
+        return None
+    return (
+        f"Self-hosted default-deny rejected `python:` entry {module!r} "
+        f"(ADR-029 T0 policy). Remove the plugin or add its module prefix to "
+        f"PLUGIN_PYTHON_ENTRY_ALLOWLIST (self-hosted only)."
+    )
 
 
 def discover_plugins(plugins_dir: Path) -> list[Path]:
@@ -83,7 +150,7 @@ def validate_compatibility(manifest: PluginManifest) -> None:
         raise ValueError(msg)
 
 
-def _load_python(entry: str) -> Any:
+def _load_python(entry: str, policy: PythonEntryPolicy) -> Any:
     """Load a Python plugin from an ``entry`` string.
 
     Format: ``python:module:ClassName`` — imports *module*, instantiates
@@ -121,16 +188,28 @@ def _validate_type(manifest: PluginManifest, plugin_instance: Any) -> list[str]:
     return validate_api_surface(manifest.type, plugin_instance)
 
 
-def load_plugin(manifest: PluginManifest) -> Any:
+def load_plugin(manifest: PluginManifest, policy: PythonEntryPolicy) -> Any:
     """Dispatch to the appropriate loader based on ``manifest.entry`` prefix.
 
     Returns the loaded plugin instance (for ``python:``) or connection info
     dict (for ``mcp://``). Returns ``None`` on failure without crashing.
     Also validates the plugin's API surface against its declared type.
+
+    The T0 trust gate (:func:`check_python_entry`) is consulted before any
+    in-process ``python:`` import; rejected entries are skipped with an
+    ERROR log and not registered.
     """
     try:
         if manifest.entry.startswith("python:"):
-            instance = _load_python(manifest.entry)
+            rejection = check_python_entry(manifest.entry, policy)
+            if rejection is not None:
+                logger.error(
+                    "Plugin %s rejected by T0 policy (ADR-029): %s",
+                    manifest.name,
+                    rejection,
+                )
+                return None
+            instance = _load_python(manifest.entry, policy)
             errors = _validate_type(manifest, instance)
             if errors:
                 for err in errors:
