@@ -17,7 +17,7 @@ config.set_main_option(
 )
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
@@ -46,6 +46,9 @@ def process_revision_directives(context_, revision, directives):
 
 
 def _apply_lock_timeout(connection):
+    if connection.dialect.name != "postgresql":
+        return
+
     from sqlalchemy import text
 
     connection.execute(text(f"SET lock_timeout = '{LOCK_TIMEOUT_SECONDS}'"))
@@ -69,6 +72,7 @@ def do_run_migrations(connection):
         connection=connection,
         target_metadata=target_metadata,
         process_revision_directives=process_revision_directives,
+        render_as_batch=connection.dialect.name == "sqlite",
     )
     with context.begin_transaction():
         context.run_migrations()
