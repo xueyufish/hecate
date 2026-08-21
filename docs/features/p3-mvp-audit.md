@@ -368,7 +368,7 @@
 
 | 特性 | 原因 | 市场影响 | 工作量 |
 |------|------|----------|--------|
-| **Completed-Feature Upgrades（1.3.4 HITL fail-closed + 9.4 内容感知门控）** | 概览"发布阻塞项"口径下的剩余两项：HITL durable audit（approval/asked + approval/decided 持久审计对）+ monotonic denial gating（单调拒绝不变式）——均消费 1.3.19 ✅ 富化事件日志 | 生产审批审计链不完整、门控可被复活 | M + M |
+| **Completed-Feature Upgrades（1.3.4 HITL fail-closed + 9.4 内容感知门控）** | 概览"发布阻塞项"口径下的剩余两项：HITL durable audit（approval/asked + approval/decided 持久审计对）+ monotonic denial gating（单调拒绝不变式）——均消费 1.3.19 ✅ 富化事件日志。**实施中**：[openspec/changes/guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/)（T0 接线已完成；T1/T2/T3 待做） | 生产审批审计链不完整、门控可被复活 | M + M |
 | **Multi-Channel (11.x)** | ~~仅有 API 渠道~~ **Wave 1 已交付**（11.2 ✅ + 11.3 ✅ + 11.9 Slack ✅）；剩余 11.8 Intent Routing 为横切项，Wave 2/3 按需触发 | 中国企业 IM 市场基础覆盖（Wave 1）；企微/钉钉等长尾待客户需求 | 11.8 M；Wave 2/3 每渠道 S |
 | **Evaluation Suite 基础 (7.2b/c/e)** | 无法度量 Agent 质量，无法向客户证明效果 | 无法建立企业信任 | M + M + M |
 
@@ -440,7 +440,7 @@
 - Engine Architecture: Event-Sourced State (1.3.19 Log-as-Truth) ✅ + Skill Provider Registry (5.9 增强) ⏳
 - Plugin Ecosystem: Agent Plugins 1.0 Ingestion (5.5c ✅) + Content Scanning (5.13a ✅) + 5.5 (enh) T0 Tightening ✅（`openspec/changes/archive/2026-08-19-t0-runtime-plugin-tightening/`，ADR-029 "runtime artifacts never T0" 落为代码）
 - Competitive Gaps: Dynamic Orchestration (1.3.18) ✅ + Run Replay Phase 1 (8.20) ✅ + Browser Automation (6.27) ⏳
-- Completed-Feature Upgrades: 1.3.5i E3 瀑布中间件 / 1.3.4 HITL fail-closed / 9.4 内容感知门控 ⏳（发布视角优先，见"三"之 P1）
+- Completed-Feature Upgrades: 1.3.5i E3 瀑布中间件 / 1.3.4 HITL fail-closed / 9.4 内容感知门控 ⏳（实施中：[openspec/changes/guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/)；发布视角优先，见"三"之 P1）
 - Advanced RAG (rescoped): Reranking ⏳ / Incremental ⏳ / Knowledge Quality ⏳
 - Multi-Channel: 11.2 简化版 ✅（Wave 1 收尾）+ 11.8 Intent Routing ⏳ + 11.16/11.17 ⏳
 - Evaluation Suite: AI-synthesized / Online-Offline / Trace Backflow / Reports / Workflow / Human Annotation ⏳（7.6a/b dropped）

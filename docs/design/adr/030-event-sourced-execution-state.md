@@ -88,11 +88,13 @@ Session-level TTL counted from terminal state (completed/failed/expired). `inter
 
 This section is the **handoff contract** for the five consumers sequenced after 1.3.19. Each knows what to extend without re-reading the engine.
 
+> **落地状态（guardrail-upgrade-trio, 2026-08）**: 前三行（1.3.4 / 1.3.5i E3 / 9.4）已按本契约实施——`APPROVAL_ASKED`/`APPROVAL_DECIDED`/`TURN_START`/`TURN_END` 枚举已加、审计对 turn-enclosed（`APPROVAL.TURN_CLOSURE` 不变式）、`MONOTONIC.DENIAL` 已注册且 `CHANNEL_WRITE_REJECTED` 已发射、AUDIT 复活路径已删除。实现见 `engine/middleware.py`（链内核）、`engine/loginvariants_t2.py` / `_t3.py`（不变式）、`services/security/approval.py`（审批组件）、`services/security/guardrail_assembly.py`（装配门面）。
+
 | Consumer | Seam | Extension pattern | Constraint |
 |---|---|---|---|
-| **1.3.4 fail-closed approval** | `EventType` enum + `EventType` falls back to `CUSTOM` on unknown read | Add `APPROVAL_ASKED` / `APPROVAL_DECIDED` values (additive; old readers keep working) | Audit pair SHALL be `TURN_START` / `TURN_END` enclosed |
-| **1.3.5i E3 waterfall middleware** | Semantic-layer event schema + `LogInvariants` registration | Incrementally add stage event types; no fold change needed | Chain semantics (ordering, short-circuit, monotonic denial) live in **kernel** — middleware stages are not pluggable chain mechanism (see ADR-029) |
-| **9.4 content-aware gating** | `CHANNEL_WRITE_REJECTED` pattern + `LogInvariants` registry | Register a `MONOTONIC.DENIAL` invariant; emit `CHANNEL_WRITE_REJECTED` for denied writes | Guards SHALL be monotonic (deny only); resurrection is a bug, fail-stop |
+| **1.3.4 fail-closed approval** ✅ (guardrail-upgrade-trio) | `EventType` enum + `EventType` falls back to `CUSTOM` on unknown read | Add `APPROVAL_ASKED` / `APPROVAL_DECIDED` values (additive; old readers keep working) | Audit pair SHALL be `TURN_START` / `TURN_END` enclosed |
+| **1.3.5i E3 waterfall middleware** ✅ (guardrail-upgrade-trio) | Semantic-layer event schema + `LogInvariants` registration | Incrementally add stage event types; no fold change needed | Chain semantics (ordering, short-circuit, monotonic denial) live in **kernel** — middleware stages are not pluggable chain mechanism (see ADR-029) |
+| **9.4 content-aware gating** ✅ (guardrail-upgrade-trio) | `CHANNEL_WRITE_REJECTED` pattern + `LogInvariants` registry | Register a `MONOTONIC.DENIAL` invariant; emit `CHANNEL_WRITE_REJECTED` for denied writes | Guards SHALL be monotonic (deny only); resurrection is a bug, fail-stop |
 | **8.20 Run Replay** | Pure consumer — reads `get_events` + OTel `TraceModel` JOIN | None (zero schema change required) | Coverage = Pregel path; UI MUST label "path A/C calls not in log" |
 | **8.21 Projection Registry** | `derive_messages()` is the first projection function | Build the registry around `fold_session` semantics; no fold change needed | Projections SHALL be pure functions of `(log, config)`; Phase 1 cannot do full reconstruction (config version binding is Phase 2 of 8.20) |
 

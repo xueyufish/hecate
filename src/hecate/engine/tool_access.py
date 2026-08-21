@@ -385,14 +385,37 @@ class ToolAccessPolicy:
         Returns:
             True if a dangerous pattern matched.
         """
+        # T3.2 (guardrail-upgrade-trio): shell-class tools first attempt the
+        # content-aware decomposition. If shell_analysis flags a segment, the
+        # call is denied. Otherwise we fall back to the legacy fnmatch glob
+        # match against the original argument value.
         for pattern in DANGEROUS_PATTERNS:
             if not fnmatch.fnmatch(tool_name, pattern.tool_pattern):
                 continue
             arg_value = arguments.get(pattern.arg_key)
             if arg_value is None:
                 continue
+            # Always run the legacy glob matcher first — preserved behavior.
             if fnmatch.fnmatch(str(arg_value), pattern.arg_pattern):
                 return True
+            # Content-aware check (T3.2): only for shell-class tools.
+            from hecate.engine.shell_analysis import analyze_command
+            from hecate.engine.workers.sandbox_router import is_shell_tool
+
+            if is_shell_tool(tool_name) and isinstance(arg_value, str):
+                # Extract single-token markers from the pattern (e.g. ``rm``
+                # from ``rm -rf /``). The legacy matcher_fn semantics check
+                # the literal arg_value as a single string; the analyzer
+                # tokenizes per segment so each token can be compared
+                # independently.
+                tokens_in_pattern = [tok for tok in pattern.arg_pattern.replace("|", " ").split() if tok]
+
+                def matcher(toks, _tokens=tokens_in_pattern):
+                    return any(t in _tokens for t in toks)
+
+                analysis = analyze_command(arg_value, matcher_fn=matcher)
+                if analysis["matched"]:
+                    return True
         return False
 
     def _match_rules(

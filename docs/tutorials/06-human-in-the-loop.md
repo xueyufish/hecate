@@ -35,6 +35,8 @@ The practical consequences:
 - Time-travel debugging works across HITL pauses — you can replay the log from any point before or after a human decision.
 - The same workflow can be reviewed, paused, redirected, and resumed by different operators without changing the agent code.
 
+> **Tool-approval vs workflow-interrupt.** The `interrupt()` mechanism above pauses a *workflow* and waits. Tool-level approval (a `REQUIRE_APPROVAL` decision from the tool access policy) is **fail-closed** instead of waiting: if no approval backend is configured, the tool call is denied on the spot — and the `APPROVAL_ASKED` / `APPROVAL_DECIDED` audit pair is still written to the event log, enclosed by the turn's `TURN_START` / `TURN_END`. A `once`-scoped grant is consumed on first use, and a denied `tool_call_id` cannot be resurrected later in the session (`MONOTONIC.DENIAL`). See [Guardrails — Middleware chain and tool policy](../concepts/guardrails.md).
+
 The two primitives that make this work are:
 
 | Primitive | Lives in | Purpose |

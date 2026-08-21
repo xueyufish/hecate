@@ -54,6 +54,9 @@ class ToolWorker(Worker):
         approval_callback: ApprovalCallback | None = None,
         event_store: Any = None,
         sandbox_enforcement: SandboxEnforcementRouter | None = None,
+        tool_rules: list[ToolRule] | None = None,
+        middleware_chains: dict | None = None,
+        denial_tracker: Any | None = None,
     ) -> None:
         super().__init__(event_store=event_store)
         self._port = port
@@ -63,6 +66,52 @@ class ToolWorker(Worker):
         self._approval_callback = approval_callback
         self._sandbox_enforcement = sandbox_enforcement or SandboxEnforcementRouter(
             enabled=False,
+        )
+        self._tool_rules = tool_rules or []
+        # T1.3: chains take precedence over the legacy single-hook slots when
+        # supplied. Legacy fields remain so existing callers stay green; the
+        # chains parameter is the path forward.
+        self._middleware_chains = middleware_chains or {}
+        # T3.3: per-session monotonic-denial tracker. When a tool call has
+        # been denied, the same tool_call_id is refused without re-running
+        # the policy pipeline.
+        self._denial_tracker = denial_tracker
+
+    async def _emit_channel_write_rejected(
+        self,
+        *,
+        execution_context: dict | None,
+        tool_call_id: str,
+        tool_name: str,
+        reason: str,
+        source: str,
+    ) -> None:
+        """T3.5 — append a ``CHANNEL_WRITE_REJECTED`` event for audit.
+
+        The event is folded-skipped; it does not affect channel state. It
+        exists so the ``MONOTONIC.DENIAL`` invariant can verify that a
+        later ``TOOL_CALL`` for the same ``tool_call_id`` is a resurrection.
+        """
+        from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType
+
+        if self._event_store is None or not execution_context:
+            return
+        await self._event_store.append(
+            Event(
+                session_id=execution_context["session_id"],
+                superstep=execution_context.get("superstep", 0),
+                event_type=EventType.CHANNEL_WRITE_REJECTED,
+                node_id=None,
+                trace_id=execution_context.get("trace_id"),
+                payload={
+                    "channel": "tool_execution",
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "reason": reason,
+                    "source": source,
+                    "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                },
+            )
         )
 
     async def execute(
@@ -110,6 +159,8 @@ class ToolWorker(Worker):
         tool_name: str,
         arguments: dict,
         context: dict,
+        tc_id: str = "",
+        execution_context: dict | None = None,
     ) -> AccessDecision | None:
         """Evaluate tool access policy if configured.
 
@@ -119,16 +170,31 @@ class ToolWorker(Worker):
         if self._access_policy is None:
             return None
 
+        # T3.3 (guardrail-upgrade-trio): monotonic-denial check. A denied call
+        # stays denied within the session — no re-evaluation, no approval
+        # retry. The tracker is supplied via the constructor.
+        if getattr(self, "_denial_tracker", None) is not None and tc_id and self._denial_tracker.is_denied(tc_id):
+            return AccessDecision.DENY
+
         tool_meta: dict[str, Any] = {
             "risk_level": context.get("risk_level", "low"),
             "approval_required": context.get("approval_required", False),
             "sandbox_enabled": context.get("sandbox_enabled", False),
             "name": tool_name,
         }
-        rules: list[ToolRule] = context.get("tool_rules", [])
+        # T0.2: prefer caller-supplied rules from context; fall back to the
+        # rules bound at construction time by WorkflowExecutionService.
+        rules: list[ToolRule] = context.get("tool_rules") or self._tool_rules
         eval_context: dict[str, Any] = {"tool_name": tool_name}
         if "workspace_root" in context:
             eval_context["workspace_root"] = context["workspace_root"]
+        # T0.2 (T2.4): thread tenant attribution into the decision emitter so
+        # ``ToolDecisionModel`` rows carry workspace / session / agent / user.
+        if self._event_store and execution_context:
+            eval_context.setdefault("session_id", execution_context.get("session_id"))
+            eval_context.setdefault("agent_id", execution_context.get("agent_id"))
+            eval_context.setdefault("workspace_id", execution_context.get("workspace_id"))
+            eval_context.setdefault("on_behalf_of_user", execution_context.get("on_behalf_of_user"))
         return self._access_policy.evaluate(tool_meta, rules, eval_context, arguments=arguments)
 
     async def _execute_single_tool(
@@ -159,9 +225,21 @@ class ToolWorker(Worker):
             except json.JSONDecodeError:
                 arguments = {}
 
-        access_decision = self._check_access(name, arguments, context)
+        access_decision = self._check_access(name, arguments, context, tc_id=tc_id, execution_context=execution_context)
         if access_decision is not None:
             if access_decision == AccessDecision.DENY:
+                # T3.3: record denial so subsequent identical calls are
+                # refused without re-evaluating the policy pipeline.
+                if getattr(self, "_denial_tracker", None) is not None and tc_id:
+                    self._denial_tracker.deny(tc_id)
+                # T3.5: emit CHANNEL_WRITE_REJECTED for audit (fold-skipped).
+                await self._emit_channel_write_rejected(
+                    execution_context=execution_context,
+                    tool_call_id=tc_id,
+                    tool_name=name,
+                    reason="access_policy_deny",
+                    source="tool_access_policy",
+                )
                 return {
                     "role": "tool",
                     "tool_call_id": tc_id,
@@ -170,6 +248,15 @@ class ToolWorker(Worker):
                 }
             if access_decision == AccessDecision.REQUIRE_APPROVAL:
                 if self._approval_callback is None:
+                    if getattr(self, "_denial_tracker", None) is not None and tc_id:
+                        self._denial_tracker.deny(tc_id)
+                    await self._emit_channel_write_rejected(
+                        execution_context=execution_context,
+                        tool_call_id=tc_id,
+                        tool_name=name,
+                        reason="no_answerer",
+                        source="approval_callback",
+                    )
                     return {
                         "role": "tool",
                         "tool_call_id": tc_id,
@@ -202,8 +289,37 @@ class ToolWorker(Worker):
             sandbox_enabled=context.get("sandbox_enabled", False),
         )
 
-        # Pre-tool hook (with matcher filtering)
-        if ToolMatcher.match(name, self._pre_hook.matcher):
+        # Pre-tool hook (chain takes precedence; legacy hook is the fallback).
+        from hecate.engine.middleware import Phase
+
+        pre_chain = self._middleware_chains.get(Phase.TOOL_PRE_EXECUTE)
+        if pre_chain is not None:
+            # Build the chain's terminal handler as the actual execution entry
+            # point — but the chain runs BEFORE execution, so its terminal
+            # handler is a no-op that returns the data untouched. The real
+            # execution happens below.
+            async def _passthrough(data):
+                return data
+
+            pre_chain.set_handler(_passthrough)
+            pre_data = {"name": name, "arguments": arguments, "context": context}
+            pre_decision, pre_result = await pre_chain.run(pre_data)
+            if pre_decision.action == GuardrailAction.BLOCK:
+                logger.info(
+                    "PreTool chain blocked tool '%s': stage=%s reason=%s",
+                    name,
+                    pre_decision.stage_id,
+                    pre_decision.reason,
+                )
+                if getattr(self, "_denial_tracker", None) is not None and tc_id:
+                    self._denial_tracker.deny(tc_id)
+                return {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": f"Tool blocked: {pre_decision.reason}",
+                    "is_error": True,
+                }
+        elif ToolMatcher.match(name, self._pre_hook.matcher):
             pre_result = await self._pre_hook.on_pre_tool_call(
                 name=name,
                 arguments=arguments,
@@ -224,6 +340,8 @@ class ToolWorker(Worker):
             attributes={"tool_name": name, "gen_ai.tool.name": name, "arguments": str(arguments)[:500]},
         )
         if self._event_store and execution_context:
+            from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
             await self._event_store.append(
                 Event(
                     session_id=execution_context["session_id"],
@@ -231,7 +349,12 @@ class ToolWorker(Worker):
                     event_type=EventType.TOOL_CALL,
                     node_id=None,
                     trace_id=execution_context.get("trace_id"),
-                    payload={"tool_name": name, "arguments": arguments},
+                    payload={
+                        "tool_name": name,
+                        "arguments": arguments,
+                        "tool_call_id": tc_id,
+                        "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                    },
                 )
             )
         try:
@@ -265,6 +388,8 @@ class ToolWorker(Worker):
                 "is_error": True,
             }
         if self._event_store and execution_context:
+            from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
             await self._event_store.append(
                 Event(
                     session_id=execution_context["session_id"],
@@ -272,7 +397,12 @@ class ToolWorker(Worker):
                     event_type=EventType.TOOL_RESULT,
                     node_id=None,
                     trace_id=execution_context.get("trace_id"),
-                    payload={"tool_name": name, "result_length": len(str(result))},
+                    payload={
+                        "tool_name": name,
+                        "result_length": len(str(result)),
+                        "tool_call_id": tc_id,
+                        "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                    },
                 )
             )
 
@@ -282,8 +412,37 @@ class ToolWorker(Worker):
                 output_data={"result_length": len(str(result))},
             )
 
-        # Post-tool hook (with matcher filtering)
-        if ToolMatcher.match(name, self._post_hook.matcher):
+        # Post-tool hook (chain takes precedence; legacy hook is the fallback).
+        post_chain = self._middleware_chains.get(Phase.TOOL_RESULT)
+        if post_chain is not None:
+
+            async def _passthrough2(data):
+                return data
+
+            post_chain.set_handler(_passthrough2)
+            post_data = {"name": name, "result": result, "context": context}
+            post_decision, post_result = await post_chain.run(post_data)
+            if post_decision.action == GuardrailAction.BLOCK:
+                logger.info(
+                    "PostTool chain sanitized tool '%s': stage=%s reason=%s",
+                    name,
+                    post_decision.stage_id,
+                    post_decision.reason,
+                )
+                if getattr(self, "_denial_tracker", None) is not None and tc_id:
+                    self._denial_tracker.deny(tc_id)
+                return {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": f"Result sanitized: {post_decision.reason}",
+                }
+            if (
+                post_decision.action == GuardrailAction.SANITIZE
+                and post_decision.modified_data
+                and "result" in post_decision.modified_data
+            ):
+                result = post_decision.modified_data["result"]
+        elif ToolMatcher.match(name, self._post_hook.matcher):
             post_result = await self._post_hook.on_post_tool_call(
                 name=name,
                 result=result,

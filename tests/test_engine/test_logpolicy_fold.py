@@ -181,7 +181,7 @@ def test_invariants_step_boundary_violation():
 def test_invariants_tool_pairing_violation():
     sid = uuid.uuid4()
     events = [
-        _make_event(sid, 1, EventType.TOOL_CALL, tool_calls=[{"id": "t1", "name": "x"}]),
+        _make_event(sid, 1, EventType.TOOL_CALL, tool_call_id="t1", tool_name="x"),
         _make_event(sid, 1, EventType.STEP_END),
     ]
     with pytest.raises(InvariantViolation) as exc:
@@ -192,11 +192,39 @@ def test_invariants_tool_pairing_violation():
 def test_invariants_tool_pairing_balanced():
     sid = uuid.uuid4()
     events = [
-        _make_event(sid, 1, EventType.TOOL_CALL, tool_calls=[{"id": "t1", "name": "x"}]),
+        _make_event(sid, 1, EventType.TOOL_CALL, tool_call_id="t1", tool_name="x"),
         _make_event(sid, 1, EventType.TOOL_RESULT, tool_call_id="t1"),
         _make_event(sid, 1, EventType.STEP_END),
     ]
     run_all(events)
+
+
+def test_invariants_tool_pairing_uses_real_payload_key():
+    """TOOL.PAIRING SHALL key on ``payload['tool_call_id']`` to match the
+    tool_worker emission shape (one TOOL_CALL per call, flat payload).
+
+    Regression guard for guardrail-upgrade-trio T0.3 — the original invariant
+    read nested ``payload['tool_calls'][*]['id']`` and never fired because
+    tool_worker never emitted that key.
+    """
+    sid = uuid.uuid4()
+    # Open call, then close — well-formed under the new contract.
+    good = [
+        _make_event(sid, 1, EventType.TOOL_CALL, tool_call_id="abc", tool_name="bash"),
+        _make_event(sid, 1, EventType.TOOL_RESULT, tool_call_id="abc", tool_name="bash"),
+        _make_event(sid, 1, EventType.STEP_END),
+    ]
+    run_all(good)
+
+    # Open call carried over STEP_END — must fire.
+    bad = [
+        _make_event(sid, 2, EventType.TOOL_CALL, tool_call_id="def", tool_name="bash"),
+        _make_event(sid, 2, EventType.STEP_END),
+    ]
+    with pytest.raises(InvariantViolation) as exc:
+        run_all(bad)
+    assert exc.value.code == "TOOL.PAIRING"
+    assert "def" in str(exc.value)
 
 
 def test_invariants_dispatch_tree_unbalanced():

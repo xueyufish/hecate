@@ -166,6 +166,29 @@ This is an **approximate count** — exact numbers depend on the version.
 
 ---
 
+## Engine event log (event-sourced state)
+
+Since [1.3.19](../design/adr/030-event-sourced-execution-state.md), the engine emits a stream of typed events into the `EventStore`. These are the source of truth for replay, audit, and the guardrail invariants. Surface below lists the event types added or made first-class by [guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/):
+
+| Event type | When | Payload |
+|---|---|---|
+| `APPROVAL_ASKED` | PreToolHook returned `REQUIRE_APPROVAL` and the wired `ApprovalCallback` was consulted | `{tool_name, tool_call_id, risk_level, log_schema_version}` |
+| `APPROVAL_DECIDED` | The `ApprovalCallback` returned a decision (including the no-answerer fail-closed path) | `{tool_call_id, approved, reason, scope, log_schema_version}` |
+| `TURN_START` | First event of a user turn (Pregel `execute()` entry / path-A loop entry) | `{log_schema_version}` |
+| `TURN_END` | Closing event of a user turn (`reason`: `graph_complete` or `interrupt`) | `{log_schema_version, reason}` |
+| `CHANNEL_WRITE_REJECTED` | A guardrail or policy blocked a write that would have happened on a tool call | `{channel, value, reason, source, log_schema_version}` |
+
+**Invariants** (fail-stop during `_assert_projection_equivalent`):
+
+- `TOOL.PAIRING` — every `TOOL_CALL` (keyed by `tool_call_id`) is paired with a `TOOL_RESULT` before `STEP_END`.
+- `MONOTONIC.DENIAL` — a denied tool call is never followed by a `TOOL_CALL` execution for the same `tool_call_id`. Resurrection is a bug.
+- `STEP.BOUNDARY` — every superstep with `CHANNEL_WRITE` closes with `STEP_END` or `INTERRUPT`.
+- `DISPATCH.TREE` — `SUBGRAPH_START` / `SUBGRAPH_END` are balanced.
+
+Approval pairs MUST be enclosed by a `TURN_START` / `TURN_END` window. Cross-turn pairs are reported as violations.
+
+---
+
 ## Common event payload fields
 
 Most events include these metadata fields:

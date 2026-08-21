@@ -373,6 +373,22 @@ Four guardrail hook types provide interception points at the boundaries of LLM a
 
 Each hook type has a `NoOp` default implementation. Custom hooks are registered at the Worker level.
 
+### Ordered waterfall middleware chain (1.3.5i E3, guardrail-upgrade-trio)
+
+Since the guardrail-upgrade-trio change, each of the four hook positions hosts an **ordered middleware chain** (`engine/middleware.py`). Chain semantics — stage order, BLOCK short-circuit (with originating stage identity), SANITIZE pass-through, monotonic tightening (a downstream BLOCK can never be "healed" by an upstream ALLOW) — are fixed in the kernel; stages cannot re-order or skip other stages. The four legacy hook ABCs adapt as single stages via `engine/middleware_adapters.py` (`HookStageAdapter`), preserving `matcher` tool-name filtering.
+
+Phases: `AGENT_PRE_STEP` / `AGENT_REQUEST` / `LLM_RESPONSE` / `TOOL_PRE_EXECUTE` / `TOOL_EXECUTE` / `TOOL_POST_EXECUTE` / `TOOL_RESULT`.
+
+SANITIZE without `modified_data` is a contract violation surfaced as BLOCK with the stage's identity — silent fall-through to ALLOW is forbidden. Every non-ALLOW chain decision triggers the registered `audit_hook` so BLOCK decisions always carry stage attribution.
+
+### Production wiring & fail-closed approval (1.3.4 / 9.4, guardrail-upgrade-trio)
+
+`services/security/guardrail_assembly.py::assemble_guardrails` is the single wire-up point: it loads workspace `ToolPolicyModel` / `ToolPolicyRuleModel` rules, constructs `ToolAccessPolicy` + middleware chains from the agent's `guardrail_config` (assembly-time scope filtering — disabled stages never enter the chain), and returns a `FailingClosedApprovalCallback` that emits the durable `APPROVAL_ASKED` / `APPROVAL_DECIDED` event pair (turn-enclosed; no-answerer → denied with a complete pair). Both execution paths — the Pregel path (ToolWorker/LLMWorker) and the path-A direct tool loop (`api/v1/chat.py::_execute_tool_calls`) — run the same chain and policy components.
+
+**Content-aware gating**: shell-class tools go through `engine/shell_analysis.py` decomposition (operator split → shlex tokens → flag-cluster normalization → recursive `$()`/backtick/`eval`/`sh -c` inspection) before dangerous-pattern matching; parse failures degrade to conservative raw-string matching, never to allow.
+
+**Monotonic denial**: a denied `tool_call_id` is recorded in a per-session `MonotonicDenialTracker` and cannot be resurrected by later re-evaluation (runtime layer); the `MONOTONIC.DENIAL` log invariant (fail-stop on restore) verifies the same property against the event log, fed by `CHANNEL_WRITE_REJECTED` and denied `APPROVAL_DECIDED` events. The AUDIT-mode DENY→ALLOW resurrection path (`ModeLayer.override_decision`) is removed.
+
 ---
 
 ## A2A Protocol Integration (Planned)

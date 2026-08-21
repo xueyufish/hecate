@@ -92,6 +92,12 @@ src/hecate/engine/
 ├── eviction.py         ← EvictionPolicy
 ├── optimization.py     ← OptimizationPass
 ├── guardrail.py        ← GuardrailHooks (×4: PreLLM, PostLLM, PreTool, PostTool)
+├── middleware.py       ← MiddlewareChain (E3: ordered waterfall chain, 7 phases)
+├── middleware_adapters.py ← HookStageAdapter (legacy hooks → chain stages)
+├── middleware_factory.py  ← chain builders from legacy single-hook wiring
+├── monotonic_denials.py   ← MonotonicDenialTracker (per-session denial set)
+├── shell_analysis.py      ← ShellAnalyzer (content-aware command decomposition)
+├── loginvariants_t2.py / _t3.py ← APPROVAL.TURN_CLOSURE / MONOTONIC.DENIAL invariants
 ├── retry.py            ← RetryStrategy
 ├── channel.py          ← ChannelBehavior
 ├── decision_sink.py    ← DecisionSink
@@ -101,7 +107,7 @@ src/hecate/engine/
 ├── session_hooks.py    ← Session Hooks (×4: start, end, prompt-submit, pre-compact)
 ├── session_state.py    ← SessionStateStore
 ├── task_allocator.py   ← TaskAllocator
-├── tool_access.py      ← ApprovalCallback
+├── tool_access.py      ← ApprovalCallback (+ shell-aware dangerous-pattern matching)
 └── temporal/conflict.py ← ConflictResolver
 ```
 
@@ -191,16 +197,18 @@ Resolves concurrent writes to the same channel when multiple nodes write in para
 
 **Default**: `NoOpConflictResolver` (last-write-wins). **Alternatives**: `CRDTConflictResolver`, `VersionedConflictResolver`.
 
-### 10. `Guardrail Hooks (×4)`
+### 10. `Guardrail Hooks (×4)` + Middleware Chain (E3)
 
-Four interception points for security and policy:
+Four interception points for security and policy — each position hosts an **ordered middleware chain** (`middleware.py`) since guardrail-upgrade-trio; the legacy ABCs adapt as single stages via `middleware_adapters.py`:
 
-| Hook | When | Default |
+| Hook (→ chain phase) | When | Default |
 |---|---|---|
-| `PreLLMHook` | Before sending messages to LLM | `NoOpPreLLMHook` |
-| `PostLLMHook` | After LLM response | `NoOpPostLLMHook` |
-| `PreToolHook` | Before tool execution | `NoOpPreToolHook` |
-| `PostToolHook` | After tool result | `NoOpPostToolHook` |
+| `PreLLMHook` → `AGENT_REQUEST` | Before sending messages to LLM | `NoOpPreLLMHook` |
+| `PostLLMHook` → `LLM_RESPONSE` | After LLM response | `NoOpPostLLMHook` |
+| `PreToolHook` → `TOOL_PRE_EXECUTE` | Before tool execution | `NoOpPreToolHook` |
+| `PostToolHook` → `TOOL_RESULT` | After tool result | `NoOpPostToolHook` |
+
+Chain semantics (ordering, BLOCK short-circuit with stage identity, SANITIZE pass-through, monotonic tightening) live in the kernel — stages are pluggable, the chain mechanism is not (ADR-029/030). Production wiring goes through `services/security/guardrail_assembly.py` (assembly-time per-agent scope filtering + fail-closed approval callback + shell-aware tool gating).
 
 **Production hooks**: `PIIAnonymizerHook`, `LLMGuardHook`, `InjectionDetectionHook`. See [Security Architecture](security-architecture.md).
 

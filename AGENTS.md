@@ -68,11 +68,14 @@ The engine layer defines these abstract interfaces (all in `src/hecate/engine/`)
 | OptimizationPass | `optimization.py` | optimize | DeadNodeElimination, ParallelBranchDetection |
 | ConflictResolver | `temporal/conflict.py` | resolve | NoOpConflictResolver |
 | PreLLMHook / PostLLMHook / PreToolHook / PostToolHook | `guardrail.py` | on_pre_llm_call / on_post_llm_call / on_pre_tool_call / on_post_tool_call | NoOp variants for each |
+| MiddlewareChain (E3) | `middleware.py` | Chain.run (ordered stages, BLOCK short-circuit, SANITIZE pass-through) | `middleware_factory.py` builders; legacy hooks adapt via `middleware_adapters.py` |
+| MonotonicDenialTracker | `monotonic_denials.py` | deny, is_denied | per-session tracker wired via `guardrail_assembly.py` |
+| ShellAnalyzer | `shell_analysis.py` | decompose_command, analyze_command | feeds `tool_access.py` content-aware gating |
 | RetryStrategy | `retry.py` | should_retry, get_backoff, with_config | NoRetryStrategy |
 
 EnginePort also has 6 optional methods with defaults: `context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`, `workflow_execute`, `llm_invoke_structured`. `llm_invoke_structured` delegates to `llm_invoke` by default (yields a single `{"content", "tool_calls": None}` chunk); the production adapter overrides it to stream content and accumulate structured `tool_calls` for the chat graph tool loop.
 
-**Integration status**: ContextEngine wired into LLMWorker via PregelRuntime execution_context (Phase 1). GuardrailHooks are Worker-level only, not PregelRuntime-level (P3). RetryStrategy integrated into PregelRuntime via RetryExecutor (P3).
+**Integration status**: ContextEngine wired into LLMWorker via PregelRuntime execution_context (Phase 1). Guardrail hooks + middleware chains wired into BOTH the Pregel path (ToolWorker/LLMWorker) and the path-A direct tool loop (`api/v1/chat.py`) via `services/security/guardrail_assembly.py` (guardrail-upgrade-trio). ApprovalCallback emits durable APPROVAL_ASKED/DECIDED pairs; MONOTONIC.DENIAL + TOOL.PAIRING + APPROVAL.TURN_CLOSURE invariants run fail-stop on restore. RetryStrategy integrated into PregelRuntime via RetryExecutor (P3).
 
 ## Key files (read these first on a new session)
 

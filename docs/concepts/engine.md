@@ -104,6 +104,8 @@ This is what makes two features possible:
 
 Sessions therefore have a lifecycle: `active` → `interrupted` → `active` → `completed` (or `failed`). An interrupted session does not hold resources; it is just a committed log tail waiting to be resumed.
 
+Each user turn is bracketed by `TURN_START` / `TURN_END` events, and every approval request emits an `APPROVAL_ASKED` / `APPROVAL_DECIDED` pair inside that turn window (fail-closed: no answerer → denied, pair still emitted). On restore, the runtime runs the registered log invariants (`TOOL.PAIRING`, `APPROVAL.TURN_CLOSURE`, `MONOTONIC.DENIAL`) fail-stop — a log that violates them is treated as a bug signal, not replayed silently.
+
 ---
 
 ## Compilation: from JSON to executable

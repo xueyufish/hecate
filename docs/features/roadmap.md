@@ -532,6 +532,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 1.3.5i (E3) | GuardrailHooks → Ordered Waterfall Middleware Chain — 4 flat hooks become stages in an ordered `next()`-delegation chain (agent/pre-step, agent/request, tools/pre-execute / execute / post-execute / result), scope-filtered per agent; HITL clarification becomes one stage (deer-flow ClarificationMiddleware pattern) | 1.3.19 + GuardrailHooks ✅ | M |
 | 1.3.4 | HITL Fail-Closed Approval — no answerer → deny; only allowed-once grants; ask/never policy state machine; approval/asked + approval/decided durable audit pair (turn-enclosed) | 1.3.4 ✅ + 1.3.19 (audit events) | M |
 | 9.4 | Content-Aware Tool Gating — bash pipeline static analysis beyond risk_level + monotonic denial invariant (guards can only deny, never resurrect) | 9.4 ✅ + 1.3.19 | M |
+| _All three above_ | **实施中**：[openspec/changes/guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/) — T0 接线已完成（T0.1 事件地基 + T0.2 生产路径门控接入），T1 瀑布链 + T2 审批 + T3 内容门控 + T6 验证收尾待做 | — | — |
 
 ### Plugin Ecosystem: Open-Standard Ingestion (NEW — adjustment)
 

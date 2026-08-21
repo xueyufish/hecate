@@ -696,6 +696,111 @@ class TestEventStoreIntegration:
 
         assert runtime._event_store is None
 
+    @pytest.mark.asyncio
+    async def test_pregel_emits_turn_start_and_end(self):
+        """T0.5 — guardrail-upgrade-trio emits TURN_START on entry and a paired
+        TURN_END on natural graph completion. The pair encloses any
+        APPROVAL_ASKED/APPROVAL_DECIDED events emitted later (1.3.4) and
+        anchors turn-level replay analysis (ADR-030 seam registry).
+        """
+        from hecate.engine.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events = await event_store.get_events(session_id)
+        turn_starts = [e for e in events if e.event_type == EventType.TURN_START]
+        turn_ends = [e for e in events if e.event_type == EventType.TURN_END]
+        assert len(turn_starts) == 1
+        assert len(turn_ends) == 1
+        assert turn_starts[0].version < turn_ends[0].version
+        assert turn_ends[0].payload.get("reason") == "graph_complete"
+
+    @pytest.mark.asyncio
+    async def test_pregel_interrupt_emits_paired_turn_end(self):
+        """T0.5 — interrupt path emits TURN_END with reason='interrupt' before
+        returning, so the audit pair stays closed even when the loop exits via
+        ``break`` rather than while-condition exhaustion.
+        """
+        from hecate.engine.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events = await event_store.get_events(session_id)
+        turn_ends = [e for e in events if e.event_type == EventType.TURN_END]
+        assert len(turn_ends) == 1
+        assert turn_ends[0].payload.get("reason") == "interrupt"
+
+    @pytest.mark.asyncio
+    async def test_restore_runs_invariant_registry_fail_stop(self):
+        """T0.4 — guardrail-upgrade-trio wires ``loginvariants.run_all`` into
+        the restore path. A log that violates a registered invariant must
+        raise ``RuntimeError`` carrying the invariant code, not log a warning
+        and continue. This pins the fail-stop contract for the 9.4
+        MONOTONIC.DENIAL invariant and the corrected TOOL.PAIRING check.
+        """
+        from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType, InMemoryEventStore
+
+        # Plant a violating event stream: TOOL_CALL without matching TOOL_RESULT.
+        session_id = uuid.uuid4()
+        event_store = InMemoryEventStore()
+        bad_event = Event(
+            session_id=session_id,
+            superstep=1,
+            event_type=EventType.TOOL_CALL,
+            payload={
+                "tool_name": "bash",
+                "tool_call_id": "tcx-orphan",
+                "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+            },
+        )
+        await event_store.append(bad_event)
+        await event_store.append(
+            Event(
+                session_id=session_id,
+                superstep=1,
+                event_type=EventType.STEP_END,
+                payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION},
+            )
+        )
+
+        # Build a runtime whose channel manager matches the event stream so the
+        # projection-equivalence path does not also raise; we isolate the
+        # invariant violation.
+        from hecate.engine.channel import ChannelDef, ChannelManager, ChannelType
+        from hecate.engine.types import CompiledGraph, Edge, NodeConfig, NodeType
+
+        cm = ChannelManager()
+        cm.register("messages", ChannelDef(type=ChannelType.TOPIC, default=[]))
+
+        graph = CompiledGraph(
+            nodes={"n": NodeConfig(id="n", type=NodeType.AGENT, config={})},
+            edges=[Edge(source="n", target="n", trigger="passthrough")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+            entry_point="n",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore(), event_store=event_store)
+        runtime._channel_manager = cm
+
+        with pytest.raises(RuntimeError) as exc:
+            await runtime._assert_projection_equivalent(session_id)
+        assert "TOOL.PAIRING" in str(exc.value)
+
 
 class TestHandoffTargets:
     """Tests for PregelRuntime populating handoff_targets in execution_context."""

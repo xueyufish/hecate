@@ -24,6 +24,8 @@ from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
 from hecate.engine.eventstore import EventStore
+from hecate.engine.guardrail import GuardrailAction
+from hecate.engine.middleware import Phase
 from hecate.engine.session_state import SessionStateStore
 from hecate.models.agent import AgentModel
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
@@ -253,6 +255,19 @@ async def _process_chat(
         # feed back into the conversation (mirrors ConversationService).
         tool_registry = _build_tool_registry(db)
         provider_cfg = await _get_provider_config(db, effective_model)
+        # T0.2 (guardrail-upgrade-trio): assemble the guardrail bundle so path-A
+        # direct tool loop is gated the same way the Pregel path is. Reads the
+        # agent's guardrail_config and the workspace's policy rule rows.
+        from hecate.services.security.guardrail_assembly import assemble_guardrails
+
+        bundle = await assemble_guardrails(
+            db,
+            workspace_id=workspace_id,
+            agent_id=parsed_agent_id if isinstance(parsed_agent_id, uuid.UUID) else None,
+            guardrail_config=getattr(agent_row, "guardrail_config", None) if agent_row else None,
+            event_store=event_store,
+            session_id=uuid.UUID(request.session_id) if request.session_id else None,
+        )
         if request.stream:
             return StreamingResponse(
                 _stream_chat_with_tools(
@@ -265,6 +280,11 @@ async def _process_chat(
                     session_id=request.session_id,
                     timeout=provider_cfg.get("timeout"),
                     num_retries=provider_cfg.get("num_retries"),
+                    access_policy=bundle.access_policy,
+                    tool_rules=bundle.rules,
+                    approval_callback=bundle.approval_callback,
+                    middleware_chains=bundle.middleware_chains,
+                    denial_tracker=bundle.denial_tracker,
                 ),
                 media_type="text/event-stream",
             )
@@ -279,6 +299,11 @@ async def _process_chat(
             session_id=request.session_id,
             timeout=provider_cfg.get("timeout"),
             num_retries=provider_cfg.get("num_retries"),
+            access_policy=bundle.access_policy,
+            tool_rules=bundle.rules,
+            approval_callback=bundle.approval_callback,
+            middleware_chains=bundle.middleware_chains,
+            denial_tracker=bundle.denial_tracker,
         )
         if response is None:
             from fastapi import HTTPException
@@ -623,6 +648,13 @@ async def _execute_tool_calls(
     tool_registry: ToolRegistry,
     tool_calls: list[dict[str, Any]],
     session_id: str | None,
+    *,
+    access_policy: Any | None = None,
+    tool_rules: list | None = None,
+    approval_callback: Any | None = None,
+    risk_overrides: dict[str, str] | None = None,
+    middleware_chains: dict | None = None,
+    denial_tracker: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Execute parsed tool calls, returning results for inject_tool_results.
 
@@ -630,16 +662,126 @@ async def _execute_tool_calls(
         tool_registry: The tool registry to execute against.
         tool_calls: Parsed tool calls (id, name, arguments).
         session_id: Optional session id passed as tool context.
+        access_policy: Optional ``ToolAccessPolicy`` evaluated before execution
+            (T0.2 path-A guardrail wiring). When ``None``, behavior matches the
+            pre-change direct tool loop.
+        tool_rules: ``ToolRule`` list used by ``access_policy``.
+        approval_callback: Optional ``ApprovalCallback`` consulted when policy
+            returns ``REQUIRE_APPROVAL``.
+        risk_overrides: Per-tool-name risk level overrides; missing names
+            default to ``"low"``.
 
     Returns:
         List of result dicts with tool_call_id, result, and is_error.
     """
+    from hecate.engine.tool_access import AccessDecision
+
     results: list[dict[str, Any]] = []
+    risk_overrides = risk_overrides or {}
     for tc in tool_calls:
+        # Path-A guardrail evaluation (T0.2): same five-layer policy the
+        # ToolWorker uses, kept consistent with the production chat surface.
+        if access_policy is not None:
+            tc_name = tc.get("name", "")
+            tc_args = tc.get("arguments") or {}
+            if isinstance(tc_args, str):
+                import json
+
+                try:
+                    tc_args = json.loads(tc_args)
+                except json.JSONDecodeError:
+                    tc_args = {}
+            risk_level = risk_overrides.get(tc_name, "low")
+            # T3.3 (guardrail-upgrade-trio): monotonic-denial check. A denied
+            # tool_call_id is refused without re-running the policy pipeline.
+            tc_id = tc.get("id", "")
+            if denial_tracker is not None and tc_id and denial_tracker.is_denied(tc_id):
+                results.append(
+                    {
+                        "tool_call_id": tc_id,
+                        "result": "Tool denied by access policy",
+                        "is_error": True,
+                    }
+                )
+                continue
+            # T1.5: pre-tool chain runs before access policy. When the chain
+            # BLOCKs, the policy is skipped — chain decision is authoritative.
+            pre_chain = (middleware_chains or {}).get(Phase.TOOL_PRE_EXECUTE)
+            if pre_chain is not None:
+
+                async def _pass(data):
+                    return data
+
+                pre_chain.set_handler(_pass)
+                pre_data = {"name": tc_name, "arguments": tc_args, "context": None}
+                pre_decision, _ = await pre_chain.run(pre_data)
+                if pre_decision.action == GuardrailAction.BLOCK:
+                    if denial_tracker is not None and tc_id:
+                        denial_tracker.deny(tc_id)
+                    results.append(
+                        {
+                            "tool_call_id": tc["id"],
+                            "result": f"Tool blocked: {pre_decision.reason}",
+                            "is_error": True,
+                        }
+                    )
+                    continue
+            tool_meta = {
+                "name": tc_name,
+                "risk_level": risk_level,
+                "approval_required": risk_level == "critical",
+                "sandbox_enabled": False,
+            }
+            decision = access_policy.evaluate(
+                tool_meta,
+                tool_rules or [],
+                {"tool_name": tc_name},
+                arguments=tc_args,
+            )
+            if decision == AccessDecision.DENY:
+                if denial_tracker is not None and tc_id:
+                    denial_tracker.deny(tc_id)
+                results.append(
+                    {
+                        "tool_call_id": tc["id"],
+                        "result": "Tool denied by access policy",
+                        "is_error": True,
+                    }
+                )
+                continue
+            if decision == AccessDecision.REQUIRE_APPROVAL:
+                if approval_callback is None:
+                    if denial_tracker is not None and tc_id:
+                        denial_tracker.deny(tc_id)
+                    results.append(
+                        {
+                            "tool_call_id": tc["id"],
+                            "result": "Tool requires approval but no callback configured",
+                            "is_error": True,
+                        }
+                    )
+                    continue
+                approval = await approval_callback.request_approval(
+                    tool_name=tc_name,
+                    arguments=tc_args,
+                    risk_level=risk_level,
+                    context={"session_id": session_id or ""},
+                )
+                if not approval.approved:
+                    if denial_tracker is not None and tc_id:
+                        denial_tracker.deny(tc_id)
+                    results.append(
+                        {
+                            "tool_call_id": tc["id"],
+                            "result": f"Tool call rejected: {approval.reason}",
+                            "is_error": True,
+                        }
+                    )
+                    continue
         try:
             result = await tool_registry.execute(
                 tc["name"],
-                tc["arguments"],
+                tc.get("arguments") or {},
                 context={"session_id": session_id or ""},
             )
             results.append({"tool_call_id": tc["id"], "result": result, "is_error": False})
@@ -664,6 +806,11 @@ async def _chat_with_tools(
     timeout: float | None = None,
     num_retries: int | None = None,
     max_iterations: int = 5,
+    access_policy: Any | None = None,
+    tool_rules: list | None = None,
+    approval_callback: Any | None = None,
+    middleware_chains: dict | None = None,
+    denial_tracker: Any | None = None,
 ) -> LLMResponse | None:
     """Run a non-streaming chat with a tool-calling loop.
 
@@ -688,7 +835,15 @@ async def _chat_with_tools(
         if not response.tool_calls:
             return response
         tool_calls = parse_tool_calls(response.tool_calls)
-        tool_results = await _execute_tool_calls(tool_registry, tool_calls, session_id)
+        tool_results = await _execute_tool_calls(
+            tool_registry,
+            tool_calls,
+            session_id,
+            access_policy=access_policy,
+            tool_rules=tool_rules,
+            approval_callback=approval_callback,
+            middleware_chains=middleware_chains,
+        )
         # Append the assistant tool-call message so the tool results are
         # well-formed (a tool message must follow its assistant tool_calls).
         current_messages.append(
@@ -713,6 +868,11 @@ async def _stream_chat_with_tools(
     timeout: float | None = None,
     num_retries: int | None = None,
     max_iterations: int = 5,
+    access_policy: Any | None = None,
+    tool_rules: list | None = None,
+    approval_callback: Any | None = None,
+    middleware_chains: dict | None = None,
+    denial_tracker: Any | None = None,
 ):
     """Stream a chat with a tool-calling loop.
 
@@ -753,7 +913,15 @@ async def _stream_chat_with_tools(
         if not tool_calls_buffer:
             break
         tool_calls = parse_tool_calls(tool_calls_buffer)
-        tool_results = await _execute_tool_calls(tool_registry, tool_calls, session_id)
+        tool_results = await _execute_tool_calls(
+            tool_registry,
+            tool_calls,
+            session_id,
+            access_policy=access_policy,
+            tool_rules=tool_rules,
+            approval_callback=approval_callback,
+            middleware_chains=middleware_chains,
+        )
         # Append the assistant tool-call message so the tool results are
         # well-formed (a tool message must follow its assistant tool_calls).
         current_messages.append(

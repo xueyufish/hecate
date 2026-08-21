@@ -45,7 +45,7 @@
         <mxCell id="r1_checkpoint" value="✅ Event Store (Log-as-Truth)&#10;+ Checkpoint Cache" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r1_c">
           <mxGeometry x="240" y="60" width="210" height="42" as="geometry" />
         </mxCell>
-        <mxCell id="r1_guardrail" value="✅ Guardrail Hooks (×4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r1_c">
+        <mxCell id="r1_guardrail" value="✅ Guardrail Chains (4 phases; legacy ×4 hooks adapt as stages)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r1_c">
           <mxGeometry x="475" y="68" width="210" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r1_scheduler" value="✅ Scheduler / Eviction / Retry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#E65100;fontSize=10;" vertex="1" parent="r1_c">

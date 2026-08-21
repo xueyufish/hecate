@@ -57,7 +57,7 @@
           <mxGeometry x="20" y="180" width="910" height="105" as="geometry" />
         </mxCell>
         <!-- Sub-row 2a -->
-        <mxCell id="r2_guardhooks" value="✅ Guardrail Hooks (×4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_guardhooks" value="✅ Guardrail Chains (4 phases; legacy ×4 hooks adapt as stages)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r2_inout" value="✅ Input/Output Security" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">

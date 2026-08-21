@@ -286,19 +286,28 @@ def test_mode_restricted_denies_non_allowlisted() -> None:
     assert layer.evaluate(tool_not_in_list, _make_ctx()) == PolicyDecision.DENY
 
 
-def test_mode_audit_overrides_deny() -> None:
+def test_mode_audit_preserves_deny() -> None:
+    """T3.4 — guardrail-upgrade-trio removed the AUDIT-mode DENY→ALLOW
+    override path. AUDIT mode now preserves DENY decisions (audit observes,
+    does not resurrect).
+    """
     layer = ModeLayer(mode=PermissionMode.AUDIT)
-    assert layer.override_decision(PolicyDecision.DENY, "test_tool") == PolicyDecision.ALLOW
+    assert not hasattr(layer, "override_decision"), "ModeLayer.override_decision must be removed (T3.4)"
 
 
-def test_mode_audit_preserves_require_approval() -> None:
-    layer = ModeLayer(mode=PermissionMode.AUDIT)
-    assert layer.override_decision(PolicyDecision.REQUIRE_APPROVAL, "test_tool") == PolicyDecision.REQUIRE_APPROVAL
-
-
-def test_mode_non_audit_no_override() -> None:
+def test_mode_default_no_override() -> None:
+    """The DEFAULT mode layer never overrides any decision."""
     layer = ModeLayer(mode=PermissionMode.DEFAULT)
-    assert layer.override_decision(PolicyDecision.DENY, "test_tool") == PolicyDecision.DENY
+    assert not hasattr(layer, "override_decision")
+
+
+def test_mode_audit_passthrough_unchanged() -> None:
+    """ModeLayer.evaluate is unchanged: AUDIT mode returns PASSTHROUGH for
+    tool-in-list, DENY for tool-not-in-list. The override path was the only
+    behavioral change that the trio removed."""
+    layer = ModeLayer(mode=PermissionMode.AUDIT)
+    tool_in_list = {"name": "tool_in_allowlist"}
+    assert layer.evaluate(tool_in_list, _make_ctx()) == PolicyDecision.PASSTHROUGH
 
 
 # ---------------------------------------------------------------------------
