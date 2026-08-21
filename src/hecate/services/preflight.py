@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import shutil
 from dataclasses import dataclass
 
@@ -68,8 +67,10 @@ async def _check_disk_space() -> CheckResult:
 
 
 async def _check_env_vars() -> CheckResult:
+    from hecate.core.config import settings
+
     required = ["DATABASE_URL"]
-    missing = [v for v in required if not os.getenv(v)]
+    missing = [v for v in required if not getattr(settings, v, None)]
     if missing:
         return CheckResult(name="env_vars", passed=False, level="FAIL", detail=f"missing: {', '.join(missing)}")
     return CheckResult(name="env_vars", passed=True, level="FAIL", detail="all present")
