@@ -21,11 +21,10 @@ import os
 from pathlib import Path
 
 import pytest
-from sqlalchemy.ext.asyncio import create_async_engine
-
-import hecate.main  # noqa: F401  (production import chain registers every model)
 from alembic import command
 from alembic.config import Config
+from sqlalchemy.ext.asyncio import create_async_engine
+
 from hecate.core.database import Base
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,6 +92,12 @@ async def _inspect_migrated_schema() -> dict[str, set[str]]:
 
 @pytest.mark.skipif(not _pg_available(), reason="PostgreSQL not reachable; set DRIFT_ADMIN_URL or start docker compose")
 def test_alembic_upgrade_head_matches_models(monkeypatch):
+    # Import the app so its production import chain registers every model on
+    # Base.metadata before the comparison below. (Function-level on purpose:
+    # top-level placement trips differing isort verdicts between ruff 0.11
+    # and 0.15.)
+    import hecate.main  # noqa: F401
+
     asyncio.run(_recreate_drift_db())
 
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
