@@ -1,38 +1,22 @@
 """Guardrail assembly facade — the single wire-up point for production paths.
 
-T0.2 (guardrail-upgrade-trio): the existing security components
-(``create_security_hooks`` factory, ``ToolAccessPolicy`` evaluation,
-``ApprovalCallback`` contract) were individually shipped but never connected
-to the live execution path. This facade turns that around by providing one
-function the workflow service and chat path call to obtain a fully wired
-guardrail bundle — hooks + policy + (placeholder) callback — from per-agent
-``guardrail_config`` and the workspace's ``ToolPolicyModel`` / ``ToolPolicyRuleModel``
-rows.
-
-The facade is the wire-up seam both before and after the T1 waterfall chain:
-Phase 1 returns the existing four-hook set; Phase 2 (T1.4) will return a
-``MiddlewareChain`` instead without changing the facade's signature.
+The security components (``create_security_hooks`` factory, ``ToolAccessPolicy``
+evaluation, ``ApprovalCallback`` contract) are assembled here into the
+per-Phase middleware chains that the workflow service and chat path consume.
+The facade reads per-agent ``guardrail_config`` and the workspace's
+``ToolPolicyModel`` / ``ToolPolicyRuleModel`` rows and returns a fully wired
+``GuardrailBundle`` — chains + policy + approval callback + denial tracker.
 """
 
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.engine.guardrail import (
-    NoOpPostLLMHook,
-    NoOpPostToolHook,
-    NoOpPreLLMHook,
-    NoOpPreToolHook,
-    PostLLMHook,
-    PostToolHook,
-    PreLLMHook,
-    PreToolHook,
-)
 from hecate.engine.monotonic_denials import MonotonicDenialTracker
 from hecate.engine.tool_access import (
     ApprovalCallback,
@@ -42,14 +26,7 @@ from hecate.engine.tool_access import (
     ToolRule,
 )
 from hecate.models.tool_policy import ToolPolicyModel, ToolPolicyRuleModel
-from hecate.services.security.hooks import (
-    SecurityHookSet,
-    create_security_hooks,
-)
-
-if TYPE_CHECKING:
-    pass
-
+from hecate.services.security.hooks import create_security_hooks
 
 _RULE_ACTION_BY_VALUE: dict[str, RuleAction] = {
     "allow": RuleAction.ALLOW,
@@ -62,14 +39,12 @@ _RULE_ACTION_BY_VALUE: dict[str, RuleAction] = {
 class GuardrailBundle:
     """Bundle produced by :func:`assemble_guardrails` for one execution path.
 
-    Contains the four legacy guardrail hooks (still used by LLMWorker /
-    ToolWorker single-hook construction paths) plus the wired-up access
-    policy and approval callback that ``ToolWorker`` consumes directly. The
-    middleware-chain refactor (T1) replaces the four-hook field with a chain
-    object; the rest of the bundle stays stable.
+    Carries the per-Phase middleware chains (built from the configured
+    security hooks), the wired-up access policy, the approval callback,
+    and the per-session denial tracker that ``ToolWorker`` / ``LLMWorker``
+    / the chat path-A tool loop consume.
     """
 
-    hooks: SecurityHookSet
     access_policy: ToolAccessPolicy
     approval_callback: ApprovalCallback
     rules: list[ToolRule] = field(default_factory=list)
@@ -180,7 +155,6 @@ async def assemble_guardrails(
         approval_callback = NoAnswerApprovalCallback()
 
     return GuardrailBundle(
-        hooks=hooks,
         access_policy=ToolAccessPolicy(),
         approval_callback=approval_callback,
         rules=rules,
@@ -263,19 +237,9 @@ class NoAnswerApprovalCallback(ApprovalCallback):
         return ApprovalDecision(approved=False, reason="no_answerer_placeholder", scope=ApprovalScope.ONCE)
 
 
-# Re-export the existing factory so callers have a single import root.
+# Re-exported for callers that use the assembly as their single import root.
 __all__ = [
     "GuardrailBundle",
     "NoAnswerApprovalCallback",
     "assemble_guardrails",
-    "create_security_hooks",
-    "SecurityHookSet",
-    "NoOpPreLLMHook",
-    "NoOpPostLLMHook",
-    "NoOpPreToolHook",
-    "NoOpPostToolHook",
-    "PreLLMHook",
-    "PostLLMHook",
-    "PreToolHook",
-    "PostToolHook",
 ]

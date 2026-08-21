@@ -172,49 +172,6 @@ async def test_no_answer_approval_callback_always_denies():
     assert "no_answerer" in decision.reason
 
 
-async def test_assemble_respects_guardrail_config(db_session):
-    """Non-None guardrail_config flows into the hooks factory."""
-    bundle = await assemble_guardrails(
-        db_session,
-        workspace_id=uuid.uuid4(),
-        agent_id=None,
-        guardrail_config={
-            "input_security": {"enabled": True, "block_on_injection": False},
-            "output_security": {"enabled": True, "toxicity_threshold": 0.5},
-        },
-    )
-    # Hooks factory returns concrete InputSecurityHook when enabled.
-    from hecate.services.security.hooks.input_security import InputSecurityHook
-    from hecate.services.security.hooks.output_security import OutputSecurityHook
-
-    assert isinstance(bundle.hooks.pre_llm_hook, InputSecurityHook)
-    assert isinstance(bundle.hooks.post_llm_hook, OutputSecurityHook)
-
-
-async def test_assemble_empty_workspace_returns_noop_hooks(db_session):
-    """guardrail_config=None yields the NoOp hook set; the assembly does not
-    bypass even when DB has no rows (T0.2 semantics: policy + callback are
-    mandatory, hooks are optional when not configured).
-    """
-    bundle = await assemble_guardrails(
-        db_session,
-        workspace_id=uuid.uuid4(),
-        agent_id=None,
-        guardrail_config=None,
-    )
-    from hecate.engine.guardrail import (
-        NoOpPostLLMHook,
-        NoOpPostToolHook,
-        NoOpPreLLMHook,
-        NoOpPreToolHook,
-    )
-
-    assert isinstance(bundle.hooks.pre_llm_hook, NoOpPreLLMHook)
-    assert isinstance(bundle.hooks.post_llm_hook, NoOpPostLLMHook)
-    assert isinstance(bundle.hooks.pre_tool_hook, NoOpPreToolHook)
-    assert isinstance(bundle.hooks.post_tool_hook, NoOpPostToolHook)
-
-
 async def test_assemble_builds_middleware_chains_for_each_phase(db_session):
     """T1.4 — the bundle exposes a middleware chain dict covering all four
     Phase values. Stages that are disabled in ``guardrail_config`` are
@@ -244,9 +201,6 @@ async def test_assemble_builds_middleware_chains_for_each_phase(db_session):
 async def test_assemble_filters_disabled_stages_from_chain(db_session):
     """A disabled section (e.g. ``input_security.enabled=False``) collapses
     that pre-LLM chain to a NoOp wrapper — the stage is NOT added to the chain."""
-    from hecate.engine.guardrail import (
-        NoOpPreLLMHook,
-    )
     from hecate.engine.middleware import Phase
 
     bundle = await assemble_guardrails(
@@ -259,11 +213,15 @@ async def test_assemble_filters_disabled_stages_from_chain(db_session):
             "data_security": {"enabled": True},
         },
     )
-    # The pre-LLM hook slot was replaced by a NoOp — but its chain is still
-    # present (NoOp wrappers are valid stages that do nothing).
-    assert isinstance(bundle.hooks.pre_llm_hook, NoOpPreLLMHook)
+    # The pre-LLM stage was replaced by a NoOp wrapper — but its chain is
+    # still present (NoOp wrappers are valid stages that do nothing).
     pre_chain = bundle.middleware_chains[Phase.AGENT_REQUEST]
     assert len(pre_chain.stages) == 1
-    # The single stage wraps a NoOp — invoking it does not consult the
-    # InputSecurityHook's real checks.
     assert pre_chain.stages[0].stage_id == "pre-llm"
+
+    async def _terminal(data):
+        return data
+
+    pre_chain.set_handler(_terminal)
+    decision, _ = await pre_chain.run({"messages": [], "model": "m", "tools": None})
+    assert decision.action.value == "allow"

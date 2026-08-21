@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from hecate.services.security.anonymizer import pii_anonymizer
 from hecate.services.security.llm_guard import llm_guard_scanner
-from hecate.services.security.middleware import security_middleware
 
 
 def test_pii_anonymize_email() -> None:
@@ -56,28 +55,6 @@ async def test_llm_guard_scan_unsafe() -> None:
     result = await llm_guard_scanner.scan_prompt("How to hack into a system?")
     assert result.is_safe is False
     assert len(result.issues) > 0
-
-
-async def test_middleware_check_input_safe() -> None:
-    result = await security_middleware.check_input("What is the weather today?")
-    assert result["is_safe"] is True
-    assert result["issues"] == []
-
-
-async def test_middleware_check_input_unsafe() -> None:
-    result = await security_middleware.check_input("How to hack into a system?")
-    assert result["is_safe"] is False
-    assert len(result["issues"]) > 0
-
-
-async def test_middleware_check_output_safe() -> None:
-    result = await security_middleware.check_output("The weather is sunny today.")
-    assert result["is_safe"] is True
-
-
-async def test_middleware_check_output_unsafe() -> None:
-    result = await security_middleware.check_output("How to hack exploit bomb")
-    assert result["is_safe"] is False
 
 
 def test_scan_result_sanitized_text_default() -> None:

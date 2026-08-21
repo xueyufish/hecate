@@ -33,6 +33,9 @@ The engine has **zero external dependencies** (except `jsonschema` for Graph DSL
 | 21 | [SessionStateStore](#21-sessionstatestore) | `session_state.py` | `save`, `load`, `list_recent` | `InMemorySessionStateStore`; production Redis / PostgreSQL / Tiered (`services/session_state/`) |
 | 22 | [TaskAllocator](#22-taskallocator) | `task_allocator.py` | `allocate` | `SemanticTaskAllocator`, `RoundRobinTaskAllocator` |
 | 23 | [ApprovalCallback](#23-approvalcallback) | `tool_access.py` (emits events via `services/security/approval.py`) | `request_approval` | Fail-closed default (`NoAnswerApprovalCallback` in `guardrail_assembly.py`); real wired implementation emits `APPROVAL_ASKED`/`APPROVAL_DECIDED` event pair |
+| 24 | [MiddlewareChain](#24-middlewarechain) | `middleware.py` | `Chain.run` (ordered stages, BLOCK short-circuit, SANITIZE pass-through) | Chain kernel in `middleware.py`; builders in `middleware_factory.py`; legacy hooks adapt via `middleware_adapters.py` |
+| 25 | [MonotonicDenialTracker](#25-monotonicdenialtracker) | `monotonic_denials.py` | `deny`, `is_denied` | Per-session in-memory tracker wired by `services/security/guardrail_assembly.py` |
+| 26 | [ShellAnalyzer](#26-shellanalyzer) | `shell_analysis.py` | `decompose_command`, `analyze_command` | Module-level pure functions feeding content-aware gating in `tool_access.py` |
 
 EnginePort also defines **optional SPI methods** with default implementations — see [EnginePort SPI](#engineport-spi-optional-methods).
 
@@ -826,13 +829,33 @@ class ApprovalCallback(ABC):
 
 ### Built-in implementations
 
-**Fail-closed by default**. When no `ApprovalCallback` is configured, `ToolWorker` denies the call with `Tool requires approval but no callback configured` rather than auto-approving — see [Concepts: Guardrails](../concepts/guardrails.md#middleware-chain-and-tool-policy) and the [guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/) 1.3.4 spec. Production deployments wire the callback to the dashboard's human-in-the-loop approval UI; the wiring goes through `services/security/guardrail_assembly.py::assemble_guardrails`. `RiskLevel`, `AccessDecision`, and `ApprovalScope` enums define the policy vocabulary.
+**Fail-closed by default**. When no `ApprovalCallback` is configured, `ToolWorker` denies the call with `Tool requires approval but no callback configured` rather than auto-approving — see [Concepts: Guardrails](../concepts/guardrails.md#middleware-chain-and-tool-policy) and the [guardrail-upgrade-trio](../../openspec/changes/archive/2026-08-21-guardrail-upgrade-trio/) 1.3.4 spec. Production deployments wire the callback to the dashboard's human-in-the-loop approval UI; the wiring goes through `services/security/guardrail_assembly.py::assemble_guardrails`. `RiskLevel`, `AccessDecision`, and `ApprovalScope` enums define the policy vocabulary.
 
 The wired callback is responsible for emitting `APPROVAL_ASKED` and `APPROVAL_DECIDED` events to the `EventStore` (enclosed by a `TURN_START` / `TURN_END` window). See [Event Catalog — Engine event log](../reference/event-catalog.md#engine-event-log-event-sourced-state).
 
 ### Once-only consumption
 
 An `ONCE`-scoped approval is consumed on first use: a subsequent call for the same `tool_call_id` does NOT reuse the consumed grant. `SESSION`/`PROJECT`/`GLOBAL` scopes only cache when the grant is backed by a durable `APPROVAL_DECIDED` event — an in-memory-only grant is treated as `ONCE`.
+
+---
+
+## 24. MiddlewareChain
+
+**File**: `src/hecate/engine/middleware.py`
+
+The waterfall chain kernel (1.3.5i E3). Each of the four legacy hook positions (see [10. Guardrail Hooks](#10-guardrail-hooks)) hosts an ordered chain of stages. A stage receives `(ctx, call_next)` and must either call `call_next()` — pass-through, optionally with modified data — or short-circuit with a `StageDecision`. The kernel enforces chain-level semantics that stages cannot bypass: BLOCK short-circuits with the originating stage's identity, a SANITIZE without `modified_data` is a contract violation surfaced as BLOCK, and decisions tighten monotonically downstream (a later stage can never loosen an earlier BLOCK). Builders in `middleware_factory.py` assemble chains per agent with scope filtering; legacy `PreLLMHook`/`PostLLMHook`/`PreToolHook`/`PostToolHook` implementations wrap as single stages via `middleware_adapters.py` without code changes.
+
+## 25. MonotonicDenialTracker
+
+**File**: `src/hecate/engine/monotonic_denials.py`
+
+Per-session tracker enforcing the monotonic denial invariant (9.4 content-aware gating upgrade): once `deny(tool_call_id)` is recorded, `is_denied` reports it for the rest of the session — no guard ordering can resurrect a denied call. The `MONOTONIC.DENIAL` log invariant fail-stops execution if a denied `tool_call_id` executes again.
+
+## 26. ShellAnalyzer
+
+**File**: `src/hecate/engine/shell_analysis.py`
+
+Content-aware shell inspection (9.4 content-aware gating upgrade). `decompose_command` performs a quote-aware operator split of a shell command into pipeline segments; `analyze_command` runs dangerous-pattern analysis per segment (command substitution, redirect targets, chained operators). `ToolAccessPolicy._match_dangerous_patterns` routes shell tool arguments through these functions so gating decisions see command **content**, not just the tool's static `risk_level`.
 
 ---
 
