@@ -38,9 +38,20 @@ uvicorn hecate.main:app --reload
 ## Architecture layers
 
 ```
-engine/     → Zero external deps (no imports from services/, api/, models/); jsonschema is sole exception
+engine/     → Zero external deps (no imports from services/, api/, models/); jsonschema is sole exception.
+              In practice the invariant holds for almost every engine module; documented exceptions:
+                * engine/checkpoint.py: PostgresCheckpointStore lives in services/ (deprecated since 1.3.19)
+                * engine/temporal/run_worker.py: imports Settings from core/
+                * engine/workers/ and engine/ports.py: import services/ sandbox + orchestration helpers
+                  (PostgreSQL-only fast paths) — T3+ work may reverse this.
+              **engine/middleware_factory.py is the one engine module that holds the invariant strict.**
 services/   → Depends on models/, engine/ports (abstract interfaces only), and external libraries
-api/        → Depends on services/ and models/; never imports engine/ directly
+api/        → Depends on services/ and models/. Direct engine imports exist (chat.py: `EventStore`,
+              `GuardrailAction`, `Phase`, `SessionStateStore`, etc.; sessions/replay/management/
+              collaboration_patterns/orchestration_templates) — these are compile-time type imports
+              used at handler-signature boundaries and are tolerated because re-exporting via a
+              services/ facade would couple three layers worse. Do not introduce new ones; if you
+              need an engine type, add it to services/ first.
 models/     → Pure data definitions (ORM + Pydantic); no business logic
 core/       → Infrastructure: config (pydantic-settings), database (async SQLAlchemy), DI, rate limiting
 ```

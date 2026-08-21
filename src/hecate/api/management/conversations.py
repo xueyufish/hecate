@@ -17,13 +17,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
+from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_workspace import get_auth_context
+from hecate.engine.eventstore import EventStore
 from hecate.models.conversation import (
     ConversationCreateSchema,
     ConversationModel,
     ConversationReadSchema,
 )
-from hecate.models.message import MessageModel, MessageReadSchema
 
 router = APIRouter()
 
@@ -100,6 +101,7 @@ async def get_conversation(
     conversation_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    event_store: Annotated[EventStore, Depends(get_event_store)],
 ) -> dict:
     """Get a conversation by ID with its messages.
 
@@ -107,6 +109,9 @@ async def get_conversation(
         conversation_id: The UUID of the conversation to retrieve.
         db: The async database session.
         ctx: The authenticated context with workspace_id.
+        event_store: The process-wide EventStore (A2: messages are
+            projected from the event log rather than read from a stale
+            messages table).
 
     Returns:
         dict: The conversation data with nested messages.
@@ -128,11 +133,21 @@ async def get_conversation(
             detail={"error": {"code": "NOT_FOUND", "message": "Conversation not found", "details": None}},
         )
 
-    messages_result = await db.execute(
-        select(MessageModel).where(MessageModel.conversation_id == conversation_id).order_by(MessageModel.created_at)
+    # A2 closure: messages are projected from the event log. Conversation
+    # is the user-facing label; SessionModel.conversation_id links back to
+    # it. We aggregate derive_session_messages across all sessions
+    # attached to this conversation.
+    from hecate.models.session import SessionModel
+    from hecate.services.replay.assembler import derive_session_messages
+
+    session_rows = (
+        (await db.execute(select(SessionModel).where(SessionModel.conversation_id == conversation_id))).scalars().all()
     )
-    messages = messages_result.scalars().all()
+
+    messages: list[dict] = []
+    for session in session_rows:
+        messages.extend(await derive_session_messages(session.id, event_store))
 
     conv_data = ConversationReadSchema.model_validate(conversation).model_dump()
-    conv_data["messages"] = [MessageReadSchema.model_validate(m).model_dump() for m in messages]
+    conv_data["messages"] = messages
     return conv_data

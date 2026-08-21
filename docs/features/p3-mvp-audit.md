@@ -360,7 +360,7 @@
 
 **剩余工作量估算**: 13.6 已完成，13.4 仅剩 K8s scaling test harness（随 13.1 落地）。
 
-> ✅ **13.4a 全部 5/5 changes 已完成**（archived, PR #46）+ **13.4a-6 AgentStateStore 软废弃**（archived, PR #47）。后续待办：`13.4a-7` 硬删除（≥ next minor）；K8s scaling test harness 归入 13.4。
+> ✅ **13.4a 全部 5/5 changes 已完成**（archived, PR #46）+ **13.4a-6 AgentStateStore 软废弃**（archived, PR #47）+ **13.4a-7 硬删除已完成**（`services/state/store.py` 已删、`WorkflowExecutionService.state_store` 参数已移除、`checkpoints` 表已 drop via migration `c5d6e7f8a9b0`、`PostgresCheckpointStore` 已删）。
 
 > ✅ **13.5 Data Backup & Recovery** 已完成（PR #45）、**13.6 Version Upgrade** 已完成，不再阻塞发布。
 
@@ -419,7 +419,7 @@
 - Tool Platform: ✅ Permission + Caching + MCP Registry
 - Agent Environment: ✅ Docker + Context Offloading + Sandbox Mount
 - Data Backup: ✅ 13.5 full backup + restore + PITR + scheduling + verification (PR #45)
-- Distributed Session State Store: ✅ 13.4a 全部 5/5 changes + 13.4a-6 deprecation（engine 抽象 + Redis/PG/Tiered + 生产接线 + 多副本验证 + EventStore PG wiring + AgentStateStore 软废弃，archived，PR #46 + #47）
+- Distributed Session State Store: ✅ 13.4a 全部 5/5 changes + 13.4a-6 deprecation + 13.4a-7 硬删除 + `checkpoints` 表 drop（engine 抽象 + Redis/PG/Tiered + 生产接线 + 多副本验证 + EventStore PG wiring + AgentStateStore 软废弃，archived，PR #46 + #47；13.4a-7 / C2 硬删除见本分支 chore/release-cleanup）
 - Outbound DLP Engine: ✅ 9.10 — DLPService + 50+ recognizer + MCP egress filter + Guardrail Hooks（PR #58）
 
 **Sprint 6 未完成项**:
@@ -431,7 +431,7 @@
 - ❌ Multi-Agent Trust Verification (2.10b)
 - ❌ Compliance Framework (9.6)
 - ❌ Enterprise Integration Framework (5.8)
-- ❌ Deployment: Canary / Horizontal Scaling 收尾 / ALM / API Portal（Backup ✅ + Redis Session Store ✅ 13.4a 已完成 + AgentStateStore deprecated ✅ 13.4a-6 + Outbound DLP ✅ 9.10 + Version Upgrade ✅ 13.6）
+- ❌ Deployment: Canary / Horizontal Scaling 收尾 / ALM / API Portal（Backup ✅ + Redis Session Store ✅ 13.4a 已完成 + AgentStateStore hard-removed ✅ 13.4a-7 + Outbound DLP ✅ 9.10 + Version Upgrade ✅ 13.6）
 
 ### Sprint 7 (M7) — P3 Complete — 关键项已交付（已重排）
 

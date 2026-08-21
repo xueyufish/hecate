@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from hecate.engine.guardrail import (
     NoOpPostLLMHook,
@@ -28,13 +28,19 @@ class SecurityHookSet(NamedTuple):
     post_tool_hook: PostToolHook
 
 
-def create_security_hooks(guardrail_config: dict | None = None) -> SecurityHookSet:
+def create_security_hooks(
+    guardrail_config: dict | None = None,
+    dlp_scanner: Any = None,
+) -> SecurityHookSet:
     """Construct a SecurityHookSet from per-agent guardrail configuration.
 
     Args:
         guardrail_config: Agent-specific guardrail config dict with optional
             sections: ``input_security``, ``output_security``, ``data_security``.
             When ``None`` or empty, returns NoOp hooks for all four positions.
+        dlp_scanner: Optional DLP scanner wired into the output-security and
+            tool-result hooks (9.10). When ``None`` the hooks skip the DLP
+            leg — the pre-wiring state before this parameter existed.
 
     Returns:
         SecurityHookSet with configured or NoOp hooks.
@@ -66,6 +72,7 @@ def create_security_hooks(guardrail_config: dict | None = None) -> SecurityHookS
             enabled=output_cfg.get("enabled", True),
             toxicity_threshold=output_cfg.get("toxicity_threshold", 0.7),
             deanonymize=output_cfg.get("deanonymize", True),
+            dlp_scanner=dlp_scanner,
         )
         if output_cfg and output_cfg.get("enabled", True)
         else NoOpPostLLMHook()
@@ -76,6 +83,7 @@ def create_security_hooks(guardrail_config: dict | None = None) -> SecurityHookS
     post_tool = (
         ToolResultSecurityHook(
             mask_tool_results=data_cfg.get("mask_tool_results", True),
+            dlp_scanner=dlp_scanner,
         )
         if data_cfg and data_cfg.get("enabled", True)
         else NoOpPostToolHook()

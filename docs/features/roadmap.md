@@ -496,8 +496,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Pending Cleanups
 
-- [ ] **13.4a-7**: AgentStateStore hard removal (delete `services/state/store.py`, remove `WorkflowExecutionService.state_store` parameter) — scheduled ≥ next minor after 13.4a-6
-- [ ] **C2 (1.3.19 follow-up)**: `checkpoints` 表硬删除（drop `checkpoints` table）——1.3.19 将 checkpoint 降级为物化缓存（`channel_state + log_version`），`PostgresCheckpointStore` 已软废弃（DeprecationWarning），存量物化缓存迁移到 SessionStateStore 后 drop；调度 ≥ 1.3.19 之后一个 minor（ADR-030 Consequences 节）
+- [x] **13.4a-7**: AgentStateStore hard removal — `services/state/store.py` deleted; `WorkflowExecutionService.state_store` parameter removed; dual-write deprecation tests retired; `checkpoints` table dropped via migration `c5d6e7f8a9b0`
+- [ ] **C2 (1.3.19 follow-up)**: `checkpoints` 表硬删除 — **closed** by 13.4a-7 migration `c5d6e7f8a9b0`; PostgresCheckpointStore also deleted
 - [ ] **A2 (1.3.19 follow-up)**: 双重记账统一 —— Conversation/Message 表与事件日志（execution-state-log）双写收敛；目标为日志单一事实源、Conversation/Message 成为派生投影（或明确双向一致性策略）——挂账项，无固定排期
 
 ---

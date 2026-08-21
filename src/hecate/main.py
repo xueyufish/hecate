@@ -60,7 +60,6 @@ from hecate.api.management.inference import router as inference_router
 from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.mcp import router as mcp_router
 from hecate.api.management.memory import router as memory_router
-from hecate.api.management.messages import router as messages_router
 from hecate.api.management.model_catalog import router as model_catalog_router
 from hecate.api.management.model_lifecycle import router as model_lifecycle_router
 from hecate.api.management.model_pricing import router as model_pricing_router
@@ -231,6 +230,37 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception:
         logger.exception("Agent Plugins maintenance failed")
 
+    # Meta-agents (13.9a-d): run lifecycle ops agents on an interval.
+    # Default off; enabled deployments get the GC (report-only cleanup
+    # scanning) and the compliance checker (ruff + security config audit).
+    # DriftDetector is NOT registered — it needs an expected-baseline
+    # source that deployment tooling must define first.
+    meta_scheduler = None
+    if _state_settings.META_AGENTS_ENABLED:
+        try:
+            from hecate.core.database import async_session_factory
+            from hecate.services.meta_agents.compliance_checker import ComplianceCheckerAgent
+            from hecate.services.meta_agents.garbage_collector import GarbageCollectorAgent
+            from hecate.services.meta_agents.scheduler import MetaAgentScheduler
+
+            interval = _state_settings.META_AGENTS_INTERVAL_SECONDS
+            gc_agent = GarbageCollectorAgent()
+            compliance_agent = ComplianceCheckerAgent()
+
+            async def _gc_tick() -> None:
+                async with async_session_factory() as session:
+                    await gc_agent.run(session)
+
+            meta_scheduler = MetaAgentScheduler()
+            meta_scheduler.register("garbage_collector", _gc_tick, interval_seconds=interval)
+            meta_scheduler.register("compliance_checker", compliance_agent.run, interval_seconds=interval)
+            await meta_scheduler.start()
+            app.state.meta_scheduler = meta_scheduler
+            logger.info("Meta-agents started (interval=%ds): garbage_collector, compliance_checker", interval)
+        except Exception:
+            logger.exception("Meta-agent startup failed; continuing without meta-agents")
+            meta_scheduler = None
+
     # Initialize IM channels (Feishu, Slack) — register adapters and
     # spin up the asynchronous MessageBus used by the webhook endpoint to
     # decouple webhook ACK from Agent execution (design.md D5).
@@ -359,6 +389,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("SIEM export pipeline started")
 
     yield
+    # Shutdown: stop meta-agent scheduler
+    if meta_scheduler is not None:
+        try:
+            await meta_scheduler.stop()
+        except Exception:
+            logger.exception("Meta-agent shutdown failed")
     # Shutdown: stop sandbox container pool
     if sandbox_pool:
         await sandbox_pool.shutdown()
@@ -655,7 +691,6 @@ app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(skills_router, prefix="/api", tags=["skills"])
 app.include_router(knowledge_router, prefix="/api", tags=["knowledge-bases"])
 app.include_router(conversations_router, prefix="/api", tags=["conversations"])
-app.include_router(messages_router, prefix="/api", tags=["messages"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])
 app.include_router(orchestration_templates_router, prefix="/api", tags=["orchestration-templates"])
 app.include_router(collaboration_patterns_router, prefix="/api", tags=["collaboration-patterns"])

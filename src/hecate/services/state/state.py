@@ -16,7 +16,7 @@ class AgentState(BaseModel):
     """Per-session working state for an agent.
 
     AgentState captures the volatile working memory of a single agent session.
-    It is persisted via AgentStateStore at the end of each execution call,
+    It is persisted via SessionStateStore at the end of each execution call,
     enabling cross-process session resume.
 
     Fields:

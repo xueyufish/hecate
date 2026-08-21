@@ -110,7 +110,6 @@ class EventRetentionService:
 
     async def _delete_session_artifacts(self, session_id: uuid.UUID, *, dry_run: bool) -> int:
         from hecate.models.conversation import ConversationModel
-        from hecate.models.message import MessageModel
         from hecate.services.event_state.models import EventModel
 
         async with self._session_factory() as session:
@@ -120,8 +119,7 @@ class EventRetentionService:
                 return event_count
 
             conv_ids_subquery = select(ConversationModel.id).where(ConversationModel.agent_id == session_id)
-            await session.execute(delete(MessageModel).where(MessageModel.conversation_id.in_(conv_ids_subquery)))
-            await session.execute(delete(ConversationModel).where(ConversationModel.agent_id == session_id))
+            await session.execute(delete(ConversationModel).where(ConversationModel.id.in_(conv_ids_subquery)))
             await session.execute(delete(EventModel).where(EventModel.session_id == session_id))
             await session.commit()
         return event_count

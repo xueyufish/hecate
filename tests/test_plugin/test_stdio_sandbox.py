@@ -90,7 +90,24 @@ class TestBuildSandboxCommand:
 
 
 def _docker_available() -> bool:
-    return shutil.which("docker") is not None
+    """Docker counts as available only when the daemon answers.
+
+    CLI presence alone is not enough: a machine with docker installed
+    but the daemon stopped fails ``docker run`` with exit 125 ("Cannot
+    connect to the Docker daemon"), which surfaces as a test failure
+    instead of the intended skip.
+    """
+    if shutil.which("docker") is None:
+        return False
+    try:
+        proc = subprocess.run(  # noqa: S603
+            ["docker", "info"],  # noqa: S607
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
 
 
 @pytest.mark.skipif(not _docker_available(), reason="docker not available")

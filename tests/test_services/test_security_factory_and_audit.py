@@ -41,6 +41,39 @@ class TestCreateSecurityHooks:
         assert isinstance(hooks.pre_tool_hook, NoOpPreToolHook)
         assert isinstance(hooks.post_llm_hook, OutputSecurityHook)
 
+    def test_dlp_scanner_threads_into_output_and_tool_result_hooks(self) -> None:
+        """9.10 wiring: the DLP scanner passed to the factory reaches the
+        output-security and tool-result hooks, so the documented 3-point
+        scanning actually runs in the middleware chain.
+
+        A regression here silently reverts to the pre-wiring state where
+        the scanner stayed None and the DLP leg never executed.
+        """
+        from unittest.mock import MagicMock
+
+        config = {
+            "output_security": {"enabled": True},
+            "data_security": {"enabled": True},
+        }
+        scanner = MagicMock(name="dlp_scanner")
+        hooks = create_security_hooks(config, dlp_scanner=scanner)
+
+        assert isinstance(hooks.post_llm_hook, OutputSecurityHook)
+        assert isinstance(hooks.post_tool_hook, ToolResultSecurityHook)
+        assert hooks.post_llm_hook._dlp_scanner is scanner  # noqa: SLF001 — wiring assertion
+        assert hooks.post_tool_hook._dlp_scanner is scanner  # noqa: SLF001 — wiring assertion
+
+    def test_no_dlp_scanner_leaves_hooks_none(self) -> None:
+        """Backward-compat: omitting the scanner keeps the hooks' DLP leg
+        disabled (the pre-wiring behavior for callers that don't pass one)."""
+        config = {
+            "output_security": {"enabled": True},
+            "data_security": {"enabled": True},
+        }
+        hooks = create_security_hooks(config)
+        assert hooks.post_llm_hook._dlp_scanner is None  # noqa: SLF001
+        assert hooks.post_tool_hook._dlp_scanner is None  # noqa: SLF001
+
     def test_disabled_section_returns_noop(self) -> None:
         config = {
             "input_security": {"enabled": False},

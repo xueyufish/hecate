@@ -12,7 +12,7 @@ import logging
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -144,6 +144,7 @@ async def create_chat_completion(
     db: Annotated[AsyncSession, Depends(get_db)],
     event_store: Annotated[EventStore, Depends(get_event_store)],
     session_state_store: Annotated[SessionStateStore, Depends(get_session_state_store)],
+    http_request: Request,
 ):
     """Create a chat completion via the unified execution engine.
 
@@ -163,11 +164,15 @@ async def create_chat_completion(
 
     session_id = request.session_id
 
+    # 9.10 wiring: resolve the boot-built DLP scanner (main.py lifespan
+    # when DLP_ENABLED) here — the nested helpers don't carry the request.
+    dlp_scanner = getattr(http_request.app.state, "dlp_scanner", None)
+
     if session_id:
         try:
             async with session_lock_manager.acquire(session_id) as lock_info:
                 result = await _process_chat(
-                    request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store
+                    request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store, dlp_scanner
                 )
                 if isinstance(result, StreamingResponse):
                     result.headers["X-Queue-Position"] = str(lock_info["queue_position"])
@@ -185,7 +190,9 @@ async def create_chat_completion(
                 },
             ) from None
     else:
-        return await _process_chat(request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store)
+        return await _process_chat(
+            request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store, dlp_scanner
+        )
 
 
 async def _process_chat(
@@ -195,6 +202,7 @@ async def _process_chat(
     workspace_id: uuid.UUID | None = None,
     event_store: EventStore | None = None,
     session_state_store: SessionStateStore | None = None,
+    dlp_scanner: Any = None,
 ) -> dict | StreamingResponse:
     """Process a chat completion request via WorkflowExecutionService."""
     msg_dicts = _messages_to_dicts(request.messages)
@@ -267,6 +275,9 @@ async def _process_chat(
             guardrail_config=getattr(agent_row, "guardrail_config", None) if agent_row else None,
             event_store=event_store,
             session_id=uuid.UUID(request.session_id) if request.session_id else None,
+            # 9.10 wiring: the scanner reaches the output/tool-result hooks,
+            # so the documented 3-point scanning actually runs in the chain.
+            dlp_scanner=dlp_scanner,
         )
         if request.stream:
             return StreamingResponse(

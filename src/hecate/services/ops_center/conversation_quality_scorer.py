@@ -17,10 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.config import settings
+from hecate.engine.eventstore import EventStore
 from hecate.models.conversation import ConversationModel
 from hecate.models.conversation_turn_score import ConversationTurnScoreModel
-from hecate.models.message import MessageModel
 from hecate.services.llm.service import llm_service
+from hecate.services.ops_center.conversation_messages import project_conversation_messages
 
 logger = logging.getLogger(__name__)
 
@@ -126,8 +127,9 @@ class ConversationQualityScorer:
         db: Async SQLAlchemy session.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, event_store: EventStore | None = None) -> None:
         self._db = db
+        self._event_store = event_store
 
     async def score_turn(
         self,
@@ -206,18 +208,12 @@ class ConversationQualityScorer:
         Returns:
             List of ConversationTurnScoreModel records created.
         """
-        # Load messages
-        msg_q = (
-            select(MessageModel)
-            .where(
-                MessageModel.conversation_id == conversation_id,
-                MessageModel.role.in_(["user", "assistant"]),
-                ~MessageModel.deleted,
-            )
-            .order_by(MessageModel.created_at)
-        )
-        msg_result = (await self._db.execute(msg_q)).all()
-        messages = [{"role": m.role, "content": m.content, "id": str(m.id)} for (m,) in msg_result]
+        # A2: project messages from the event log.
+        messages = await project_conversation_messages(self._db, conversation_id, self._event_store)
+        messages = [
+            {"role": m.get("role") or "", "content": m.get("content") or "", "id": m.get("created_at") or ""}
+            for m in messages
+        ]
 
         if not messages:
             logger.warning("No messages found for conversation %s", conversation_id)
@@ -227,13 +223,18 @@ class ConversationQualityScorer:
         scored_records = []
         for i, msg in enumerate(messages):
             if msg["role"] == "assistant":
-                # Find the message_id from the original MessageModel
-                original_msg = msg_result[i][0]
+                # A2: messages are projected dicts from the event log;
+                # the original SQL MessageModel row no longer exists.
+                # Derive a deterministic UUID from the conversation and
+                # the turn index — the message_id column still requires
+                # a stable identity, and the event timestamp is the only
+                # signal we have to seed from.
+                derived_id = uuid.uuid5(uuid.NAMESPACE_URL, f"{conversation_id}:{i}")
                 record = await self.score_turn(
                     conversation_id=conversation_id,
                     messages=messages,
                     turn_index=i,
-                    message_id=original_msg.id,
+                    message_id=derived_id,
                 )
                 if record:
                     scored_records.append(record)

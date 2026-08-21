@@ -108,13 +108,11 @@ class StreamMode(StrEnum):
     - VALUES: yields the full channel state snapshot after each superstep.
     - UPDATES: yields per-node channel deltas (only what changed).
     - MESSAGES: yields individual message tokens for SSE streaming (P2).
-    - DEBUG: yields detailed internal events for development (P2).
     """
 
     VALUES = "values"
     UPDATES = "updates"
     MESSAGES = "messages"
-    DEBUG = "debug"
 
 
 class ExecutionMode(StrEnum):

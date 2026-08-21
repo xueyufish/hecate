@@ -1,17 +1,12 @@
-"""Agent State — per-session working state separated from durable Environment."""
+"""Agent State — per-session working state separated from durable Environment.
+
+Post-13.4a-7: persistence moved to SessionStateStore (Redis /
+PostgreSQL / Tiered). Only the in-memory model class remains for
+thread-local scratch state.
+"""
 
 from __future__ import annotations
 
 from hecate.services.state.state import AgentState
-from hecate.services.state.store import (
-    AgentStateStore,
-    InMemoryStateStore,
-    SessionSummary,
-)
 
-__all__ = [
-    "AgentState",
-    "AgentStateStore",
-    "InMemoryStateStore",
-    "SessionSummary",
-]
+__all__ = ["AgentState"]

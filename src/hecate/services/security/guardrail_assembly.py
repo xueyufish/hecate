@@ -73,6 +73,7 @@ async def assemble_guardrails(
     guardrail_config: dict | None,
     event_store: Any | None = None,
     session_id: uuid.UUID | None = None,
+    dlp_scanner: Any = None,
 ) -> GuardrailBundle:
     """Construct the full guardrail bundle for one agent execution.
 
@@ -137,7 +138,7 @@ async def assemble_guardrails(
         if rule is not None:
             rules.append(rule)
 
-    hooks = create_security_hooks(guardrail_config)
+    hooks = create_security_hooks(guardrail_config, dlp_scanner=dlp_scanner)
 
     # T2.6: when the wiring is present, the assembly produces the durable
     # audit-pair-emitting callback; otherwise it falls back to the

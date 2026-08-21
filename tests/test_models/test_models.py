@@ -40,10 +40,6 @@ from hecate.models.knowledge import (
     KnowledgeBaseCreateSchema,
     KnowledgeBaseModel,
 )
-from hecate.models.message import (
-    MessageModel,
-    MessageReadSchema,
-)
 from hecate.models.plugin import PluginModel
 from hecate.models.session import (
     SessionModel,
@@ -331,70 +327,6 @@ class TestSessionModel:
         await db_session.flush()
         assert session.status == "interrupted"
         assert session.current_node == "plan"
-
-
-class TestMessageModel:
-    """Verify Message ORM creation for user, assistant (with tool calls), and
-    tool-result messages."""
-
-    @pytest.mark.asyncio
-    async def test_create_message(self, db_session: AsyncSession) -> None:
-        """A basic user message persists with the correct role and content."""
-        agent = AgentModel(name="msg-agent", model_config_db={})
-        db_session.add(agent)
-        await db_session.flush()
-        conv = ConversationModel(agent_id=agent.id)
-        db_session.add(conv)
-        await db_session.flush()
-        msg = MessageModel(
-            conversation_id=conv.id,
-            role="user",
-            content="Hello",
-        )
-        db_session.add(msg)
-        await db_session.flush()
-        assert msg.id is not None
-        assert msg.role == "user"
-
-    @pytest.mark.asyncio
-    async def test_message_with_tool_calls(self, db_session: AsyncSession) -> None:
-        """An assistant message can store structured tool call data in a JSONB column."""
-        agent = AgentModel(name="tc-agent", model_config_db={})
-        db_session.add(agent)
-        await db_session.flush()
-        conv = ConversationModel(agent_id=agent.id)
-        db_session.add(conv)
-        await db_session.flush()
-        msg = MessageModel(
-            conversation_id=conv.id,
-            role="assistant",
-            content="",
-            tool_calls=[{"id": "call_1", "function": {"name": "search", "arguments": "{}"}}],
-        )
-        db_session.add(msg)
-        await db_session.flush()
-        assert msg.tool_calls is not None
-        assert len(msg.tool_calls) == 1
-
-    @pytest.mark.asyncio
-    async def test_tool_result_message(self, db_session: AsyncSession) -> None:
-        """A tool-result message links back to its originating tool call via tool_call_id."""
-        agent = AgentModel(name="tr-agent", model_config_db={})
-        db_session.add(agent)
-        await db_session.flush()
-        conv = ConversationModel(agent_id=agent.id)
-        db_session.add(conv)
-        await db_session.flush()
-        msg = MessageModel(
-            conversation_id=conv.id,
-            role="tool",
-            content="result data",
-            tool_call_id="call_1",
-        )
-        db_session.add(msg)
-        await db_session.flush()
-        assert msg.role == "tool"
-        assert msg.tool_call_id == "call_1"
 
 
 class TestToolModel:
@@ -802,23 +734,6 @@ class TestReadSchemaFromAttributes:
         schema = SessionReadSchema.model_validate(session)
         assert schema.metadata == {"key": "value"}
         assert schema.status == "active"
-
-    def test_message_read_schema(self) -> None:
-        from hecate.models.message import MessageModel
-
-        attrs = self._make_base_attrs()
-        msg = MessageModel(
-            conversation_id=uuid.uuid4(),
-            role="user",
-            content="hello",
-            tool_calls=[{"id": "1", "name": "test"}],
-            metadata_={"tokens": 5},
-            workspace_id=uuid.UUID(int=0),
-            **attrs,
-        )
-        schema = MessageReadSchema.model_validate(msg)
-        assert schema.metadata == {"tokens": 5}
-        assert schema.tool_calls == [{"id": "1", "name": "test"}]
 
     def test_skill_read_schema(self) -> None:
         from hecate.models.skill import SkillModel

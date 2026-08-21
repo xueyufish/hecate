@@ -46,21 +46,6 @@ def test_constructor_default_is_none():
     assert svc._checkpoint_store is None
 
 
-def test_state_store_parameter_still_accepted():
-    """The deprecated ``state_store`` parameter SHALL remain accepted for back-compat."""
-    svc = WorkflowExecutionService(port=MagicMock(), db=MagicMock(), state_store=AsyncMock())
-    assert svc._state_store is not None
-
-
-def test_constructor_with_both_stores_keeps_both():
-    """Both legacy ``state_store`` and new ``checkpoint_store`` can coexist (transition window)."""
-    legacy = AsyncMock()
-    new_store = AsyncMock(spec=SessionStateStore)
-    svc = WorkflowExecutionService(port=MagicMock(), db=MagicMock(), state_store=legacy, checkpoint_store=new_store)
-    assert svc._state_store is legacy
-    assert svc._checkpoint_store is new_store
-
-
 def test_session_state_dataclass_serialization_via_model_dump():
     """``SessionState.agent_state`` SHAL jest serialize via ``model_dump(mode='json')``."""
     agent_state = AgentState(
@@ -164,64 +149,42 @@ async def test_persist_session_state_calls_wired_store_with_correct_keys():
 
 async def test_persist_session_state_swallows_save_failure_no_legacy_fallback():
     """If ``checkpoint_store.save`` raises a non-lock exception, the
-    implementation SHALL swallow it (best-effort) and SHALL NOT fall back to
-    ``state_store.save``. The legacy fallback was removed in
-    ``horizontal-scaling-validation`` because it split state across two
-    stores on contention."""
+    implementation SHALL swallow it (best-effort). The legacy
+    ``state_store.save`` fallback was removed in 13.4a-7."""
     new_store = AsyncMock(spec=SessionStateStore)
-    # Default lock succeeds; save raises a non-ConflictError.
     new_store.acquire_session_lock = _noop_lock_cm
     new_store.save = AsyncMock(side_effect=ConnectionError("tiered down"))
-    legacy_store = AsyncMock()
 
     svc = WorkflowExecutionService(
         port=MagicMock(),
         db=MagicMock(),
-        state_store=legacy_store,
         checkpoint_store=new_store,
     )
 
-    agent_state = AgentState(summary="fallback")
-    agent_uuid = uuid.uuid4()
-    session_uuid = uuid.uuid4()
-
     # Should NOT raise — best-effort swallow.
     await svc._persist_session_state(
-        agent_state=agent_state,
-        session_id=session_uuid,
-        agent_id=agent_uuid,
+        agent_state=AgentState(summary="swallowed"),
+        session_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
         org_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
     )
-
-    # Legacy state_store.save SHALL NOT be called.
-    legacy_store.save.assert_not_awaited()
+    new_store.save.assert_awaited()
 
 
 async def test_persist_session_state_checkpoint_none_skips_persist():
     """When ``checkpoint_store is None``, ``_persist_session_state`` SHALL
-    return early without calling either store. The legacy ``state_store``
-    branch was removed in ``horizontal-scaling-validation`` — tests that
-    still want legacy behavior must wire it explicitly."""
-    legacy_store = AsyncMock()
+    return early without persisting anywhere."""
     svc = WorkflowExecutionService(
         port=MagicMock(),
         db=MagicMock(),
-        state_store=legacy_store,
         checkpoint_store=None,
     )
 
-    agent_state = AgentState(summary="legacy only")
-    agent_uuid = uuid.uuid4()
-    session_uuid = uuid.uuid4()
-
     await svc._persist_session_state(
-        agent_state=agent_state,
-        session_id=session_uuid,
-        agent_id=agent_uuid,
+        agent_state=AgentState(summary="noop"),
+        session_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
         org_id=uuid.uuid4(),
         user_id=uuid.uuid4(),
     )
-
-    # With checkpoint_store=None, persist is a no-op; legacy NOT called.
-    legacy_store.save.assert_not_awaited()
