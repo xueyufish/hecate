@@ -12,16 +12,16 @@
         </mxCell>
 
         <!-- ========== ROW 1: LLM EXECUTION PATH ========== -->
-        <mxCell id="r1_c" value="LLM Execution Path — Guardrail Hook Interception" style="swimlane;startSize=26;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+        <mxCell id="r1_c" value="LLM Execution Path — Guardrail Chain Interception (AGENT_REQUEST → LLM_RESPONSE)" style="swimlane;startSize=26;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
           <mxGeometry x="20" y="45" width="910" height="95" as="geometry" />
         </mxCell>
-        <mxCell id="r1_pre" value="🛡️ PreLLMHook&#xa;InputSecurityHook&#xa;(injection · secrets · PII)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r1_c">
+        <mxCell id="r1_pre" value="🛡️ AGENT_REQUEST chain&#xa;stage: InputSecurityHook&#xa;(injection · secrets · PII)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r1_c">
           <mxGeometry x="10" y="32" width="170" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r1_llm" value="🧠 LLM API Call&#xa;(via EnginePort.llm_invoke)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBEE;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
           <mxGeometry x="225" y="35" width="190" height="44" as="geometry" />
         </mxCell>
-        <mxCell id="r1_post" value="🛡️ PostLLMHook&#xa;OutputSecurityHook&#xa;(toxicity · PII restore)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r1_c">
+        <mxCell id="r1_post" value="🛡️ LLM_RESPONSE chain&#xa;stage: OutputSecurityHook&#xa;(toxicity · PII restore)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r1_c">
           <mxGeometry x="460" y="32" width="170" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r1_stream" value="📡 StreamDeanonymizer&#xa;(token-level PII restore&#xa;for streaming responses)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;" vertex="1" parent="r1_c">
@@ -37,16 +37,16 @@
         <mxCell id="r1_a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#C62828;strokeWidth=2;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="r1_c" source="r1_stream" target="r1_resp"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- ========== ROW 2: TOOL EXECUTION PATH ========== -->
-        <mxCell id="r2_c" value="Tool Execution Path — Guardrail Hook Interception" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
+        <mxCell id="r2_c" value="Tool Execution Path — Guardrail Chain Interception (TOOL_PRE_EXECUTE → TOOL_RESULT)" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
           <mxGeometry x="20" y="160" width="910" height="95" as="geometry" />
         </mxCell>
-        <mxCell id="r2_pre" value="🛡️ PreToolHook&#xa;Permission check&#xa;Parameter validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_pre" value="🛡️ TOOL_PRE_EXECUTE chain&#xa;ToolAccessPolicy + shell analysis&#xa;+ fail-closed approval" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="10" y="32" width="170" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r2_tool" value="🔧 Tool Execution&#xa;(built-in / custom / MCP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="225" y="35" width="190" height="44" as="geometry" />
         </mxCell>
-        <mxCell id="r2_post" value="🛡️ PostToolHook&#xa;ToolResultSecurityHook&#xa;(PII masking in results)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r2_c">
+        <mxCell id="r2_post" value="🛡️ TOOL_RESULT chain&#xa;stage: ToolResultSecurityHook&#xa;(PII masking in results)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EAF6;strokeColor=#283593;fontSize=9;fontStyle=1;" vertex="1" parent="r2_c">
           <mxGeometry x="460" y="32" width="170" height="50" as="geometry" />
         </mxCell>
         <mxCell id="r2_result" value="✅ Tool Result&#xa;→ Channel" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;" vertex="1" parent="r2_c">
@@ -149,7 +149,7 @@
         <mxCell id="r5_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
           <mxGeometry x="20" y="625" width="910" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="r5_actions" value="GuardrailResult:  ALLOW (proceed)  ·  BLOCK (abort + safety message)  ·  SANITIZE (proceed with modified_data)" style="text;html=1;fontSize=10;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
+        <mxCell id="r5_actions" value="Stage decisions:  ALLOW (proceed)  ·  BLOCK (short-circuit chain, stage identity in audit)  ·  SANITIZE (modified_data flows downstream; missing modified_data = contract violation → BLOCK).  Monotonic: downstream BLOCK can never be healed.  Denied tool_call_id stays denied (MONOTONIC.DENIAL)." style="text;html=1;fontSize=10;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
           <mxGeometry x="100" y="5" width="710" height="40" as="geometry" />
         </mxCell>
 

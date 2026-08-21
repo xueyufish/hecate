@@ -155,6 +155,9 @@ class WorkflowExecutionService:
         state_store: AgentStateStore | None = None,
         checkpoint_store: SessionStateStore | None = None,
         event_store: EventStore | None = None,
+        access_policy: Any = None,
+        approval_callback: Any = None,
+        tool_policy_rules: list | None = None,
     ) -> None:
         self._port = port
         self._db = db
@@ -164,6 +167,21 @@ class WorkflowExecutionService:
         self._pre_tool_hook = pre_tool_hook
         self._post_tool_hook = post_tool_hook
         self._environment_manager = environment_manager
+        # T0.2 (guardrail-upgrade-trio): production wiring for tool gating.
+        # When rules are supplied, build a fresh ToolAccessPolicy so each
+        # WorkflowExecutionService instance carries its agent's resolved
+        # workspace + agent rule set. The chat path (api/v1/chat.py) builds
+        # these via ``assemble_guardrails``.
+        self._tool_policy_rules = tool_policy_rules or []
+        if access_policy is not None:
+            self._access_policy = access_policy
+        elif self._tool_policy_rules:
+            from hecate.engine.tool_access import ToolAccessPolicy
+
+            self._access_policy = ToolAccessPolicy()
+        else:
+            self._access_policy = None
+        self._approval_callback = approval_callback
         if state_store is not None:
             warnings.warn(
                 "WorkflowExecutionService(state_store=...) is deprecated. "
@@ -588,6 +606,9 @@ class WorkflowExecutionService:
             port=self._port,
             pre_tool_hook=self._pre_tool_hook,
             post_tool_hook=self._post_tool_hook,
+            access_policy=self._access_policy,
+            approval_callback=self._approval_callback,
+            tool_rules=self._tool_policy_rules,
         )
         agent_worker = AgentWorker(port=self._port)
         knowledge_worker = KnowledgeWorker(port=self._port)

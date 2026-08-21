@@ -64,11 +64,14 @@ Hecate's four-level memory architecture, inspired by cognitive-science models. E
 ## Security and Guardrails
 
 - **Guardrail / Hook** — an engine-level interception at one of four trust boundaries. Because hooks live in the engine — not in an LLM-client wrapper or HTTP proxy — every execution path passes through them. See [Guardrails and Hooks](../concepts/guardrails.md).
-- **PreLLMHook** — fires before messages are sent to the LLM. Used for PII masking, prompt-injection detection, and token-budget enforcement.
-- **PostLLMHook** — fires after the LLM returns. Used for content filtering, response redaction, and toxic-output blocking.
-- **PreToolHook** — fires before a tool is invoked. Used for permission checks, risk-level gating, and argument validation.
-- **PostToolHook** — fires after a tool returns. Used for result auditing, sensitive-output redaction, and side-effect logging.
-- **SecurityHookSet** — a `namedtuple` bundling the four hooks, assembled by `create_security_hooks(guardrail_config)` from per-agent configuration.
+- **Middleware chain (E3)** — since guardrail-upgrade-trio, each hook position hosts an ordered chain of stages (`AGENT_REQUEST` / `LLM_RESPONSE` / `TOOL_PRE_EXECUTE` / `TOOL_RESULT` phases). `BLOCK` short-circuits with the originating stage's identity; `SANITIZE` flows modified data downstream; downstream blocks are monotonic (cannot be healed). The legacy hook ABCs adapt as single stages.
+- **PreLLMHook** — fires before messages are sent to the LLM (chain phase `AGENT_REQUEST`). Used for PII masking, prompt-injection detection, and token-budget enforcement.
+- **PostLLMHook** — fires after the LLM returns (chain phase `LLM_RESPONSE`). Used for content filtering, response redaction, and toxic-output blocking.
+- **PreToolHook** — fires before a tool is invoked (chain phase `TOOL_PRE_EXECUTE`). Used for permission checks, risk-level gating, and argument validation.
+- **PostToolHook** — fires after a tool returns (chain phase `TOOL_RESULT`). Used for result auditing, sensitive-output redaction, and side-effect logging.
+- **SecurityHookSet** — a `namedtuple` bundling the four hooks, assembled by `create_security_hooks(guardrail_config)` from per-agent configuration; production bundles come from `assemble_guardrails` which adds chains, policy rules, and the approval callback.
+- **Fail-closed approval** — a `REQUIRE_APPROVAL` decision with no configured answerer denies the call and still emits the full `APPROVAL_ASKED`/`APPROVAL_DECIDED` audit pair to the event log (turn-enclosed). ONCE grants are consumed on first use.
+- **Monotonic denial** — a denied `tool_call_id` stays denied for the session (runtime tracker); the `MONOTONIC.DENIAL` log invariant fail-stops if a denied call is later executed. Resurrection is a bug.
 - **Risk level** — a Tool and Agent security attribute: `LOW`, `MEDIUM`, `HIGH`, or `CRITICAL`. Classifies the potential blast radius of an operation.
 - **Approval scope** — how long an approval remains valid: `once`, `session`, `project`, or `global`.
 - **LLM Guard** — Hecate's content-filtering layer: `PreLLMHook` blocks prompt-injection attempts; `PostLLMHook` blocks toxic or policy-violating outputs.

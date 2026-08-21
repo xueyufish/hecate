@@ -471,10 +471,14 @@ class BudgetExceededError(Exception):
 
 
 class BudgetEnforcementHook:
-    """PreLLMHook that enforces cost budget limits before LLM invocations.
+    """Budget check helper (T3.7 cleanup, guardrail-upgrade-trio).
 
-    When a workspace budget has policy='block' and utilization >= 100%,
-    the hook returns BLOCK with a reason string.
+    Previously named ``PreLLMHook`` but did not satisfy the interface — it
+    exposed ``check(workspace_id, agent_id)`` rather than the required
+    ``on_pre_llm_call(messages, model, tools)``. The class is now an internal
+    helper used by the cost budget service to evaluate enforcement; budget
+    enforcement as a guardrail hook is wired via a thin ``on_pre_llm_call``
+    adapter (out of scope for the trio and tracked separately).
     """
 
     def __init__(self, db: AsyncSession) -> None:

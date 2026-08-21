@@ -19,25 +19,27 @@ Security in Hecate is not a single module — it is a cross-cutting concern that
 
 ## Guardrail Hooks System
 
-### Hook Types (`engine/guardrail.py`)
+### Hook Types (`engine/guardrail.py`) and the Middleware Chain (`engine/middleware.py`)
 
-The engine defines four abstract hook interfaces that provide interception at the boundaries of LLM and tool execution:
+The engine defines four abstract hook interfaces that provide interception at the boundaries of LLM and tool execution. Since [guardrail-upgrade-trio](../../openspec/changes/guardrail-upgrade-trio/) (1.3.5i E3), each hook position hosts an **ordered middleware chain** — the four ABCs below adapt as single stages (`engine/middleware_adapters.py`), so existing implementations work unchanged while multiple interceptors compose at the same position:
 
-| Hook | Fires Before/After | Interface | Purpose |
+| Hook (legacy ABC → chain phase) | Fires Before/After | Interface | Purpose |
 |------|-------------------|-----------|---------|
-| `PreLLMHook` | Before LLM call | `on_pre_llm_call(messages, model, tools)` | Modify prompt, reject request, inject context |
-| `PostLLMHook` | After LLM response | `on_post_llm_call(response, messages)` | Filter output, redact PII, trigger re-generation |
-| `PreToolHook` | Before tool execution | `on_pre_tool_call(name, arguments, context)` | Validate parameters, check permissions |
-| `PostToolHook` | After tool returns | `on_post_tool_call(name, result, context)` | Sanitize output, log usage |
+| `PreLLMHook` → `AGENT_REQUEST` | Before LLM call | `on_pre_llm_call(messages, model, tools)` | Modify prompt, reject request, inject context |
+| `PostLLMHook` → `LLM_RESPONSE` | After LLM response | `on_post_llm_call(response, messages)` | Filter output, redact PII, trigger re-generation |
+| `PreToolHook` → `TOOL_PRE_EXECUTE` | Before tool execution | `on_pre_tool_call(name, arguments, context)` | Validate parameters, check permissions |
+| `PostToolHook` → `TOOL_RESULT` | After tool returns | `on_post_tool_call(name, result, context)` | Sanitize output, log usage |
+
+Chain semantics are fixed in the kernel: stages run in declared order; `BLOCK` short-circuits with the originating stage's identity; `SANITIZE` propagates `modified_data` downstream; a downstream `BLOCK` can never be "healed" by an upstream stage (monotonicity). SANITIZE without `modified_data` is surfaced as a BLOCK contract violation. Every non-ALLOW decision triggers the audit hook for stage-attributed logging.
 
 ### Guardrail Actions
 
-Each hook returns a `GuardrailResult` with one of three actions:
+Each stage returns a decision with one of three actions:
 
 | Action | Behavior | Example Use Case |
 |--------|----------|------------------|
 | `ALLOW` | Proceed with original data | Normal flow — no security concerns |
-| `BLOCK` | Abort execution, return safety message | Prompt injection detected, tool permission denied |
+| `BLOCK` | Short-circuit the chain, return safety message with stage identity | Prompt injection detected, tool permission denied |
 | `SANITIZE` | Proceed with modified data from `modified_data` | PII anonymized, output filtered |
 
 ### Invocation Points in the Pregel Loop
@@ -75,7 +77,11 @@ Streaming responses follow the same hook pattern in `execute_stream()`, with `St
 
 ### Hook Registration
 
-Hooks are registered at the Worker level via `create_security_hooks(guardrail_config)`, which reads agent configuration sections (`input_security`, `output_security`, `data_security`) and constructs a `SecurityHookSet`. When security is disabled for an agent, NoOp hooks are used — they always return `ALLOW`.
+Hooks are registered via `services/security/guardrail_assembly.py::assemble_guardrails`, which reads the agent's `guardrail_config` (sections `input_security`, `output_security`, `data_security`), loads workspace policy rule rows, and produces a `GuardrailBundle` (hooks + chains + `ToolAccessPolicy` + approval callback). Assembly-time scope filtering means stages disabled for an agent never enter the chain. When security is disabled for an agent, NoOp hooks are used — they always return `ALLOW`. Both the Pregel path and the path-A direct tool loop (`api/v1/chat.py`) consume the same bundle.
+
+**Fail-closed approval (1.3.4)**: when policy returns `REQUIRE_APPROVAL` and no answerer is configured, the call is denied — and the `FailingClosedApprovalCallback` still emits the full `APPROVAL_ASKED` / `APPROVAL_DECIDED` audit pair (turn-enclosed) to the event log. ONCE-scope grants are consumed on first use; a denied `tool_call_id` stays denied for the session (`MONOTONIC.DENIAL`).
+
+**Content-aware gating (9.4)**: shell-class tools run through `engine/shell_analysis.py` decomposition (pipes / command chains / `$()` substitution / `eval` wrappers / flag-order normalization) before dangerous-pattern matching. The AUDIT-mode DENY→ALLOW resurrection path is removed — audit observes, never resurrects.
 
 ---
 

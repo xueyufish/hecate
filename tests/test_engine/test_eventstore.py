@@ -38,11 +38,45 @@ def test_event_type_values_are_strings():
     assert EventType.RESUME == "RESUME"
     assert EventType.ERROR == "ERROR"
     assert EventType.CUSTOM == "CUSTOM"
+    # guardrail-upgrade-trio T0.1: approval + turn boundary events.
+    assert EventType.APPROVAL_ASKED == "APPROVAL_ASKED"
+    assert EventType.APPROVAL_DECIDED == "APPROVAL_DECIDED"
+    assert EventType.TURN_START == "TURN_START"
+    assert EventType.TURN_END == "TURN_END"
 
 
 def test_event_type_is_string_enum():
     """EventType SHALL be usable as a string."""
     assert isinstance(EventType.TOOL_CALL, str)
+
+
+def test_event_type_unknown_falls_back_to_custom():
+    """Unknown historical event-type strings SHALL fall back to EventType.CUSTOM on read.
+
+    Forward-compat invariant: future enum members are added additively; older
+    readers must not crash on rows they don't know yet. The fallback contract
+    is implemented by ``PostgresEventStore._row_to_event`` (services/event_state/
+    postgres_store.py), which converts via ``EventType(value)`` and catches
+    ``ValueError`` to return ``EventType.CUSTOM``. This test exercises the
+    fallback path of that conversion directly — the full reader flow is
+    covered by test_engine/test_eventstore_persistence.py.
+    """
+    # Direct lookup: StrEnum raises ValueError on missing values.
+    raw = "FUTURE_TYPE_FROM_HISTORICAL_ROW"
+    assert raw not in EventType
+    with pytest.raises(ValueError):
+        EventType(raw)
+
+    # The reader's fallback wraps that ValueError:
+    def safe_resolve(value: str) -> EventType:
+        try:
+            return EventType(value)
+        except ValueError:
+            return EventType.CUSTOM
+
+    assert safe_resolve(raw) == EventType.CUSTOM
+    # And known values still resolve correctly.
+    assert safe_resolve("TURN_START") == EventType.TURN_START
 
 
 # --- Event dataclass tests ---

@@ -223,22 +223,3 @@ class ModeLayer(PolicyLayer):
             return PolicyDecision.DENY
 
         return PolicyDecision.PASSTHROUGH
-
-    def override_decision(
-        self,
-        decision: PolicyDecision,
-        tool_name: str,
-    ) -> PolicyDecision:
-        """Apply AUDIT mode override to a final decision.
-
-        In AUDIT mode, DENY is overridden to ALLOW with a WARNING log.
-        REQUIRE_APPROVAL is preserved (dangerous operations still need approval).
-        """
-        if self._mode != PermissionMode.AUDIT:
-            return decision
-
-        if decision == PolicyDecision.DENY:
-            logger.warning("AUDIT mode: overriding DENY to ALLOW for tool '%s'", tool_name)
-            return PolicyDecision.ALLOW
-
-        return decision

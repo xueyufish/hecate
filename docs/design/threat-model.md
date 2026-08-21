@@ -239,7 +239,12 @@ We follow a **90-day coordinated disclosure** policy. See `SECURITY.md` (when pu
 - `src/hecate/auth/` — auth providers (JWT, OIDC, SAML, LDAP, API key)
 - `src/hecate/services/audit/` — audit pipeline
 - `src/hecate/services/observability/` — traces, metrics, logs
-- `src/hecate/engine/guardrail.py` — Pre/Post LLM/Tool hooks
+- `src/hecate/engine/guardrail.py` — Pre/Post LLM/Tool hooks (adapt as chain stages)
+- `src/hecate/engine/middleware.py` — ordered waterfall chain kernel (E3; BLOCK short-circuit, SANITIZE pass-through, monotonic tightening)
+- `src/hecate/engine/shell_analysis.py` — content-aware shell command decomposition for tool gating
+- `src/hecate/engine/monotonic_denials.py` — per-session denial tracker (resurrection blocked at runtime)
+- `src/hecate/services/security/approval.py` — fail-closed approval with durable APPROVAL_ASKED/DECIDED audit pair
+- `src/hecate/services/security/guardrail_assembly.py` — production wiring for both execution paths
 - `src/hecate/plugin/permission.py` — plugin permission enforcement
 - `src/hecate/a2a/signing.py` — AgentCard JWS signing
 - `src/hecate/services/backup/verification.py` — backup integrity verification

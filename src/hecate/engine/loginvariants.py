@@ -87,10 +87,9 @@ def _check_tool_pairing(events: list[Any]) -> None:
     for event in events:
         etype = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
         if etype == "TOOL_CALL":
-            for call in event.payload.get("tool_calls", []):
-                call_id = call.get("id", "")
-                if call_id:
-                    pending[call_id] = event.superstep
+            call_id = event.payload.get("tool_call_id", "")
+            if call_id:
+                pending[call_id] = event.superstep
         elif etype == "TOOL_RESULT":
             pending.pop(event.payload.get("tool_call_id", ""), None)
         elif etype in {"STEP_END", "INTERRUPT"} and pending:

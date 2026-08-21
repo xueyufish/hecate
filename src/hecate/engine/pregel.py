@@ -28,6 +28,12 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
+# Side-effect import: register companion invariants (T2 turn-closure, T3
+# MONOTONIC.DENIAL). Defer to avoid a circular import via loginvariants.
+from hecate.engine import (
+    loginvariants_t2,  # noqa: F401
+    loginvariants_t3,  # noqa: F401
+)
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
 from hecate.engine.context import ContextEngine
@@ -290,6 +296,20 @@ class PregelRuntime:
                 trace_id=trace_id,
             )
 
+        # T0.5 (guardrail-upgrade-trio): TURN_START marks the first event of a
+        # user turn. The matching TURN_END fires at the natural exit point of
+        # the while loop below (covers normal completion + interrupt break;
+        # exception paths intentionally do not emit TURN_END so the audit pair
+        # stays closed via invariant failure rather than synthetic close).
+        from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
+        await self._emit(
+            session_id,
+            EventType.TURN_START,
+            payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION},
+            trace_id=trace_id,
+        )
+
         while current_nodes and not self._interrupted:
             self._superstep += 1
             if self._superstep > self._max_supersteps:
@@ -420,6 +440,17 @@ class PregelRuntime:
                     pending_writes.append((result.node_id, result.channel_updates, result.node_id))
 
             if interrupted:
+                # T0.5: emit TURN_END before yielding the interrupt event so the
+                # pair is logged adjacent to INTERRUPT. Falls through to the
+                # post-loop TURN_END only when the loop exits via while-condition
+                # exhaustion; here we return early with a paired TURN_END emitted
+                # inline below.
+                await self._emit(
+                    session_id,
+                    EventType.TURN_END,
+                    payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION, "reason": "interrupt"},
+                    trace_id=trace_id,
+                )
                 return
 
             # WAL ordering: batch-append channel-write events (with adjudicated values
@@ -509,6 +540,17 @@ class PregelRuntime:
 
             current_nodes = self._resolve_next_nodes(results)
 
+        # T0.5: TURN_END at natural loop exit (covered by while condition).
+        # Interrupt path emits its own TURN_END before returning; this catch-all
+        # fires only when while exits via ``not current_nodes`` (graph completed).
+        if not self._interrupted:
+            await self._emit(
+                session_id,
+                EventType.TURN_END,
+                payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION, "reason": "graph_complete"},
+                trace_id=trace_id,
+            )
+
     async def _restore_from_checkpoint(self, session_id: uuid.UUID, resume_value: Any) -> None:
         """Restore channel state via cache + event-log tail replay.
 
@@ -563,10 +605,16 @@ class PregelRuntime:
         Compares the channels we just restored (cache + tail fold) against a
         fold of the entire event log. Divergence is treated as a bug signal;
         recovery is "discard in-memory state and re-fold", not "hot-fix".
+
+        Also runs the registered log-invariant checks against the same event
+        stream — guardrail-upgrade-trio T0.4 wires the invariant registry into
+        the restore path so violations (e.g. TOOL.PAIRING, MONOTONIC.DENIAL)
+        fail-stop rather than being silently logged.
         """
         if self._event_store is None:
             return
         from hecate.engine.logfold import NonReplayablePrefixError, fold_session
+        from hecate.engine.loginvariants import InvariantViolationError, run_all
         from hecate.engine.logpolicy import should_log_channel
 
         try:
@@ -602,6 +650,12 @@ class PregelRuntime:
                     f"[PROJECTION.EQUIVALENT] channel '{name}' diverged between "
                     f"cache and log fold; failing closed per log-as-truth invariant"
                 )
+        # Invariant registry: structural checks against the same event stream.
+        # Violations MUST fail-stop (log-as-truth: state has diverged from log).
+        try:
+            run_all(all_events)
+        except InvariantViolationError as exc:
+            raise RuntimeError(f"[{exc.code}] invariant violated during restore: {exc.message}") from exc
 
     def _build_handoff_targets(self, node_id: str, node_type: NodeType | None) -> list[dict[str, str]]:
         """Build handoff target list for an AGENT node.

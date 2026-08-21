@@ -46,6 +46,16 @@ class EventType(StrEnum):
     # these (see ADR-030 §1 for the additive EventType contract).
     ORCHESTRATOR_DECISION = "ORCHESTRATOR_DECISION"
     ORCHESTRATOR_EVALUATION = "ORCHESTRATOR_EVALUATION"
+    # 1.3.4 fail-closed approval — emitted by the approval callback wrapper
+    # (services/security/approval.py). The pair MUST be enclosed by a
+    # TURN_START / TURN_END window (see ADR-030 seam registry, 1.3.4 row).
+    APPROVAL_ASKED = "APPROVAL_ASKED"
+    APPROVAL_DECIDED = "APPROVAL_DECIDED"
+    # Turn boundaries — PregelRuntime emits TURN_START at the first execute()
+    # of a session resumption chain and TURN_END on completion. Path-A
+    # (direct tool loop) emits the same pair via the assembly facade.
+    TURN_START = "TURN_START"
+    TURN_END = "TURN_END"
 
 
 CURRENT_LOG_SCHEMA_VERSION: int = 2  # events without this marker are non-replayable (values never recorded)

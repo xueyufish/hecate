@@ -4,6 +4,8 @@ Every agent runtime has a trust problem: the LLM can produce harmful content, le
 
 Hecate takes a different approach. The execution engine defines **four hook types** at the only four points where trust boundaries are crossed: before and after every LLM call, and before and after every tool execution. Because these hooks live in the engine — not in a wrapper — they cannot be bypassed by a misconfigured agent or a clever prompt. Every execution path passes through them.
 
+> **Chain semantics** — since [guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/) (T1), each of the four positions is an **ordered middleware chain** rather than a single hook slot. Multiple hooks (PII masker, injection detection, DLP, content moderation, HITL clarification, etc.) compose via `next()` delegation; BLOCK short-circuits the chain with the originating stage's identity, SANITIZE flows modified data downstream. The single-hook construction parameters remain as backward-compatible adapters. See [Middleware chain](#middleware-chain-and-tool-policy) below.
+
 > **Outbound detection** — the policy-driven PII/secrets/content scanning engine that powers PII masking and tool-result sanitization today is the [DLP engine](dlp.md). It plugs into these same hooks (plus the MCP egress filter) with configurable per-entity actions (`ALLOW`/`MASK`/`BLOCK`/`AUDIT`). Read [DLP](dlp.md) for the detection-and-policy layer; this page covers the hook interception points themselves.
 
 ---
@@ -123,10 +125,30 @@ The same hook interface powers both built-in features and custom extensions. You
 
 ---
 
+## Middleware chain and tool policy
+
+The hook points above each host an **ordered middleware chain**. Every interceptor that needs to act at the same position (PII detection, prompt-injection screening, DLP, content moderation, HITL clarification, custom checks) registers as a stage. Stages run in declared order; `BLOCK` short-circuits the chain and returns the originating stage's identity and reason; `SANITIZE` propagates `modified_data` to the next stage. SANITIZE without `modified_data` is treated as a contract violation and surfaced as BLOCK with the stage's identity — silent fall-through to ALLOW is forbidden.
+
+Tool policy evaluation runs **inside** the `TOOL_PRE_EXECUTE` chain as the first stage, alongside other stages. The policy uses five-layer evaluation: built-in dangerous-pattern detection (shell-aware after [guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/) T3), user rules with `arg_conditions`, workspace boundary, risk-level fallback, and sandbox routing. A `REQUIRE_APPROVAL` decision consults the wired `ApprovalCallback`. If no callback is configured, the call is denied with a `Tool requires approval but no callback configured` error — **fail-closed**, not fail-open.
+
+---
+
+## Coverage: every execution path
+
+The chain runs on **both** production execution paths:
+
+- **Pregel path** (`ToolWorker` / `LLMWorker` / `AgentExecutionPort`) — the chain is invoked inside the worker, around the real execution.
+- **Direct tool loop** (path A in `api/v1/chat.py`) — the same chain runs around `tool_registry.execute(...)`. Both paths route through `services/security/guardrail_assembly.py::assemble_guardrails`, which reads the agent's `guardrail_config` and the workspace's `ToolPolicyModel` / `ToolPolicyRuleModel` rows.
+
+Approval and turn boundaries are logged as `APPROVAL_ASKED` / `APPROVAL_DECIDED` / `TURN_START` / `TURN_END` events to the event store; rejected writes are logged as `CHANNEL_WRITE_REJECTED` (audit-only, fold-skipped). The `MONOTONIC.DENIAL` log invariant ensures a denial cannot be resurrected by a later stage.
+
+---
+
 ## Further reading
 
-- [Extension Points](../reference/extension-points.md) — the four guardrail hook ABCs (`PreLLMHook`, `PostLLMHook`, `PreToolHook`, `PostToolHook`) and their method signatures
+- [Extension Points](../reference/extension-points.md) — the four guardrail hook ABCs (`PreLLMHook`, `PostLLMHook`, `PreToolHook`, `PostToolHook`) and their method signatures, plus the `ApprovalCallback` interface
 - [Security Architecture](../design/security-architecture.md) — full L2 breakdown: guardrail hooks, PII anonymization, LLM Guard, JWT/API Key auth, audit trail
 - [ADR-008: Security via Hooks](../design/adr/008-security-via-hooks.md) — the decision record explaining why hooks live in the engine
+- [ADR-029 / ADR-030](../design/adr/) — chain semantics and event-log seam registry for the audit invariants
 - [The Execution Engine](engine.md) — where hooks fit in the superstep loop
 - [Configure SSO and SCIM](../how-to/configure-sso-scim.md) — wiring identity providers for production

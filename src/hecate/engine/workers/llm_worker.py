@@ -136,11 +136,17 @@ class LLMWorker(Worker):
         pre_llm_hook: PreLLMHook | None = None,
         post_llm_hook: PostLLMHook | None = None,
         event_store: Any = None,
+        middleware_chains: dict | None = None,
     ) -> None:
         super().__init__(event_store=event_store)
         self._port = port
         self._pre_hook = pre_llm_hook or NoOpPreLLMHook()
         self._post_hook = post_llm_hook or NoOpPostLLMHook()
+        # T1.3 (guardrail-upgrade-trio): chain takes precedence when supplied.
+        # Legacy single-hook slots remain in service; both may run side-by-side
+        # during the migration period. ``middleware_chains`` is the path
+        # forward (T3.4 wraps the assembly facade to build it).
+        self._middleware_chains = middleware_chains or {}
         self._tool_gate = ToolGateEvaluator()
 
     @staticmethod
@@ -368,6 +374,8 @@ class LLMWorker(Worker):
                 await self._port.end_span(span_ctx.span_id, output_data={"error": str(e)})
             return WorkerResult(node_id=node_id, error=e)
         if self._event_store and execution_context:
+            from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
             await self._event_store.append(
                 Event(
                     session_id=execution_context["session_id"],
@@ -375,7 +383,11 @@ class LLMWorker(Worker):
                     event_type=EventType.LLM_RESPONSE,
                     node_id=node_id,
                     trace_id=execution_context.get("trace_id"),
-                    payload={"model": model, "response_length": len(full_response)},
+                    payload={
+                        "model": model,
+                        "response_length": len(full_response),
+                        "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                    },
                 )
             )
 

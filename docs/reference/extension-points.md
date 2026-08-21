@@ -19,7 +19,7 @@ The engine has **zero external dependencies** (except `jsonschema` for Graph DSL
 | 7 | [SchedulerStrategy](#7-schedulerstrategy) | `scheduler.py` | `select_next`, `set_weights` | `FIFOScheduler` |
 | 8 | [EvictionPolicy](#8-evictionpolicy) | `eviction.py` | `should_evict`, `select_victim` | `NoEviction`, `SizeBasedEviction` |
 | 9 | [OptimizationPass](#9-optimizationpass) | `optimization.py` | `optimize` | `DeadNodeElimination`, `ParallelBranchDetection` |
-| 10 | [Guardrail Hooks](#10-guardrail-hooks) | `guardrail.py` | `on_pre_llm_call`, `on_post_llm_call`, `on_pre_tool_call`, `on_post_tool_call` | `NoOpPreLLMHook`, `NoOpPostLLMHook`, `NoOpPreToolHook`, `NoOpPostToolHook` |
+| 10 | [Guardrail Hooks](#10-guardrail-hooks) | `guardrail.py` (chain in `middleware.py`) | `on_pre_llm_call`, `on_post_llm_call`, `on_pre_tool_call`, `on_post_tool_call` (each wraps as a single stage of an ordered chain) | `NoOpPreLLMHook`, `NoOpPostLLMHook`, `NoOpPreToolHook`, `NoOpPostToolHook`; chain assembly in `services/security/guardrail_assembly.py` |
 | 11 | [RetryStrategy](#11-retrystrategy) | `retry.py` | `should_retry`, `get_backoff` | `NoRetryStrategy` |
 | 12 | [ChannelBehavior](#12-channelbehavior) | `channel.py` | `initial_value`, `write` | `LastValueBehavior`, `TopicBehavior`, `AccumulatorBehavior` |
 | 13 | [DecisionSink](#13-decisionsink) | `decision_sink.py` | `emit` | `NullDecisionSink` |
@@ -32,7 +32,7 @@ The engine has **zero external dependencies** (except `jsonschema` for Graph DSL
 | 20 | [PreCompactHook](#17-session-hooks) | `session_hooks.py` | `on_pre_compact` | `NoOpPreCompactHook` |
 | 21 | [SessionStateStore](#21-sessionstatestore) | `session_state.py` | `save`, `load`, `list_recent` | `InMemorySessionStateStore`; production Redis / PostgreSQL / Tiered (`services/session_state/`) |
 | 22 | [TaskAllocator](#22-taskallocator) | `task_allocator.py` | `allocate` | `SemanticTaskAllocator`, `RoundRobinTaskAllocator` |
-| 23 | [ApprovalCallback](#23-approvalcallback) | `tool_access.py` | `request_approval` | Default auto-approve path in `ToolAccessPolicy` |
+| 23 | [ApprovalCallback](#23-approvalcallback) | `tool_access.py` (emits events via `services/security/approval.py`) | `request_approval` | Fail-closed default (`NoAnswerApprovalCallback` in `guardrail_assembly.py`); real wired implementation emits `APPROVAL_ASKED`/`APPROVAL_DECIDED` event pair |
 
 EnginePort also defines **optional SPI methods** with default implementations — see [EnginePort SPI](#engineport-spi-optional-methods).
 
@@ -418,9 +418,9 @@ Passes are configured via `GraphCompiler(passes=[...])`.
 
 ## 10. Guardrail Hooks
 
-**File**: `src/hecate/engine/guardrail.py`
+**File**: `src/hecate/engine/guardrail.py`, `src/hecate/engine/middleware.py`
 
-Four independent hook types, each intercepting a single point in the agent execution lifecycle. Each hook returns a `GuardrailResult` with an `ALLOW`, `BLOCK`, or `SANITIZE` decision.
+Each of the four hook positions is an **ordered middleware chain**. The chain semantics (stage order, BLOCK short-circuit, SANITIZE pass-through, monotonic tightening) are fixed by the engine kernel; stages cannot re-order or skip other stages. The four legacy hook ABCs (`PreLLMHook`, `PostLLMHook`, `PreToolHook`, `PostToolHook`) remain as backward-compatible single-stage adapters wrapped by `HookStageAdapter` so existing implementations slot into a chain without rewrites.
 
 ```python
 class GuardrailAction(StrEnum):
@@ -435,9 +435,11 @@ class GuardrailResult:
     modified_data: dict | None = None
 ```
 
-### PreLLMHook
+A SANITIZE result without `modified_data` is treated as a contract violation by the chain kernel and surfaced as BLOCK with the originating stage's identity — silent fall-through to ALLOW is forbidden (see [Concepts: Guardrails](../concepts/guardrails.md#middleware-chain-and-tool-policy)).
 
-Intercepts **before** sending messages to the LLM. Use cases: prompt injection detection, PII redaction, content policy enforcement.
+### PreLLMHook (legacy single-stage)
+
+Intercepts **before** sending messages to the LLM. Use cases: prompt injection detection, PII redaction, content policy enforcement. Kept as a single-stage adapter for backward compatibility; the production wiring runs it as the first stage of the `AGENT_REQUEST` chain.
 
 ```python
 class PreLLMHook(ABC):
@@ -449,9 +451,9 @@ class PreLLMHook(ABC):
 
 **Default**: `NoOpPreLLMHook` — allows all calls.
 
-### PostLLMHook
+### PostLLMHook (legacy single-stage)
 
-Intercepts **after** receiving the LLM response. Use cases: output toxicity detection, sensitive data masking.
+Intercepts **after** receiving the LLM response. Use cases: output toxicity detection, sensitive data masking. Backward-compatible single-stage adapter for the `LLM_RESPONSE` chain.
 
 ```python
 class PostLLMHook(ABC):
@@ -463,9 +465,9 @@ class PostLLMHook(ABC):
 
 **Default**: `NoOpPostLLMHook` — allows all responses.
 
-### PreToolHook
+### PreToolHook (legacy single-stage)
 
-Intercepts **before** executing a tool. Use cases: tool authorization, argument validation, dangerous operation blocking.
+Intercepts **before** executing a tool. Use cases: tool authorization, argument validation, dangerous operation blocking. Adapter for the `TOOL_PRE_EXECUTE` chain.
 
 ```python
 class PreToolHook(ABC):
@@ -481,9 +483,9 @@ The `matcher` class attribute filters which tools trigger the hook. `None` means
 
 **Default**: `NoOpPreToolHook` — allows all tool calls.
 
-### PostToolHook
+### PostToolHook (legacy single-stage)
 
-Intercepts **after** a tool has executed. Use cases: result validation, evidence tracking, output sanitization.
+Intercepts **after** a tool has executed. Use cases: result validation, evidence tracking, output sanitization. Adapter for the `TOOL_RESULT` chain.
 
 ```python
 class PostToolHook(ABC):
@@ -497,7 +499,7 @@ class PostToolHook(ABC):
 
 **Default**: `NoOpPostToolHook` — allows all tool results.
 
-**Integration status**: GuardrailHooks are Worker-level (configured on individual workers), not PregelRuntime-level (P3).
+**Integration status**: Both the Pregel path (`ToolWorker` / `LLMWorker` / `AgentExecutionPort`) and the path-A direct tool loop (`api/v1/chat.py`) route through the same chain component, assembled by `services/security/guardrail_assembly.py::assemble_guardrails` from the agent's `guardrail_config` and the workspace's policy rule rows. Per-agent scope filtering happens at assembly time; stages that are not enabled for an agent never enter the chain.
 
 ---
 
@@ -824,7 +826,13 @@ class ApprovalCallback(ABC):
 
 ### Built-in implementations
 
-The default path inside `ToolAccessPolicy` auto-approves when no approval backend is registered. Production deployments wire the callback to the dashboard's human-in-the-loop approval UI. `RiskLevel`, `AccessDecision`, and `ApprovalScope` enums define the policy vocabulary.
+**Fail-closed by default**. When no `ApprovalCallback` is configured, `ToolWorker` denies the call with `Tool requires approval but no callback configured` rather than auto-approving — see [Concepts: Guardrails](../concepts/guardrails.md#middleware-chain-and-tool-policy) and the [guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/) 1.3.4 spec. Production deployments wire the callback to the dashboard's human-in-the-loop approval UI; the wiring goes through `services/security/guardrail_assembly.py::assemble_guardrails`. `RiskLevel`, `AccessDecision`, and `ApprovalScope` enums define the policy vocabulary.
+
+The wired callback is responsible for emitting `APPROVAL_ASKED` and `APPROVAL_DECIDED` events to the `EventStore` (enclosed by a `TURN_START` / `TURN_END` window). See [Event Catalog — Engine event log](../reference/event-catalog.md#engine-event-log-event-sourced-state).
+
+### Once-only consumption
+
+An `ONCE`-scoped approval is consumed on first use: a subsequent call for the same `tool_call_id` does NOT reuse the consumed grant. `SESSION`/`PROJECT`/`GLOBAL` scopes only cache when the grant is backed by a durable `APPROVAL_DECIDED` event — an in-memory-only grant is treated as `ONCE`.
 
 ---
 

@@ -4,6 +4,8 @@
 
 Hecate's guardrails are the integration points where every enterprise concern — PII masking, audit logging, prompt-injection defense, human-in-the-loop approval, tool authorization — plugs into the execution loop without touching agent logic. This tutorial covers all three hook systems and shows you exactly where each one fires.
 
+> **Chains, not single slots.** Since the guardrail-upgrade-trio change, each hook position is an **ordered middleware chain** — your custom hook runs as a stage alongside the built-in interceptors, and a `BLOCK` from any stage short-circuits with that stage's identity in the audit trail. Writing a hook (the four ABCs below) is unchanged; the chain composes them. See [Guardrails — Middleware chain and tool policy](../concepts/guardrails.md).
+
 ---
 
 ## What you will learn
