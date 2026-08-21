@@ -46,7 +46,7 @@ Any channel can be marked `persistent: true` to survive across sessions via the 
 
 ### Nodes — the execution units
 
-Nodes do the actual work. Each node has a `type` that determines what runs when the Pregel loop dispatches to it. Nine types ship today, grouped by purpose:
+Nodes do the actual work. Each node has a `type` that determines what runs when the Pregel loop dispatches to it. Ten types ship today, grouped by purpose:
 
 | Group | Node type | What it does |
 |-------|-----------|-------------|

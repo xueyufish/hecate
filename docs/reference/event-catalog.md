@@ -168,7 +168,7 @@ This is an **approximate count** — exact numbers depend on the version.
 
 ## Engine event log (event-sourced state)
 
-Since [1.3.19](../design/adr/030-event-sourced-execution-state.md), the engine emits a stream of typed events into the `EventStore`. These are the source of truth for replay, audit, and the guardrail invariants. Surface below lists the event types added or made first-class by [guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/):
+Since [1.3.19](../design/adr/030-event-sourced-execution-state.md), the engine emits a stream of typed events into the `EventStore`. These are the source of truth for replay, audit, and the guardrail invariants. Surface below lists the event types added or made first-class by [guardrail-upgrade-trio](../../openspec/changes/archive/2026-08-21-guardrail-upgrade-trio/):
 
 | Event type | When | Payload |
 |---|---|---|
@@ -177,6 +177,8 @@ Since [1.3.19](../design/adr/030-event-sourced-execution-state.md), the engine e
 | `TURN_START` | First event of a user turn (Pregel `execute()` entry / path-A loop entry) | `{log_schema_version}` |
 | `TURN_END` | Closing event of a user turn (`reason`: `graph_complete` or `interrupt`) | `{log_schema_version, reason}` |
 | `CHANNEL_WRITE_REJECTED` | A guardrail or policy blocked a write that would have happened on a tool call | `{channel, value, reason, source, log_schema_version}` |
+| `ORCHESTRATOR_DECISION` | A COORDINATOR node emitted (or revised) the runtime task DAG during dynamic orchestration (1.3.18) | `{plan_revision, dag, reasoning, log_schema_version}` — `dag` is the TaskDAG dump, `None` on verification-failure paths |
+| `ORCHESTRATOR_EVALUATION` | The evaluator model judged a completed sub-task (1.3.18) | `{verdict, blocker, stop_reason, guidance_string, log_schema_version}` — `verdict` from the additive `EVAL_VERDICTS` set (`satisfied` / `needs_user_input` / `missing_evidence` / …); legacy readers fall back to `"stalled"` for unknown values |
 
 **Invariants** (fail-stop during `_assert_projection_equivalent`):
 

@@ -143,6 +143,12 @@ line-length = 120
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "S", "SIM"]
 
+[tool.ruff.lint.isort]
+# The repo-root alembic/ directory makes ruff >=0.12 src-detection classify
+# the alembic package as first-party, diverging from older ruff (pre-commit
+# pins 0.11.x, CI installs latest). Pin the classification explicitly.
+known-third-party = ["alembic", "pytest", "sqlalchemy"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S607", "S105"]
 "alembic/versions/**" = ["S608"]

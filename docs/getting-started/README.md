@@ -86,7 +86,7 @@ After the Quickstart, continue with:
 
 - **[Architecture Overview](../concepts/overview.md)** — five-layer architecture, ten modules, key concepts.
 - **[Positioning](../design/positioning.md)** — where Hecate fits among Dify, LangGraph, Agentforce, etc.
-- **** — phases from Alpha to 1.0 GA and beyond.
+- **[Roadmap](../features/roadmap.md)** — phases from Alpha to 1.0 GA and beyond.
 - **[Threat Model](../design/threat-model.md)** — STRIDE analysis of Hecate's security posture.
 - **[Reference Architectures](../design/reference-architectures.md)** — deployment patterns and sizing.
 

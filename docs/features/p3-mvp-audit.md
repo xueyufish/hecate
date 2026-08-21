@@ -15,7 +15,7 @@
 | 未完成 | **40 (32%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 5 + 插件生态新增 2（5.5c ✅ / 5.13a ✅，双双交付）） |
 | 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅ |
 | 部分 Sprint | Sprint 6 (M6) — 约 79% 完成；Sprint 7 (M7) — 关键项已交付（1.3.19 / 8.20 / 1.3.18 / 5.5c / 5.13a + 5.5 T0 收紧 + Wave 1 三渠道 11.2/11.3/11.9），其余按 [roadmap.md](./roadmap.md) 推进 |
-| 发布阻塞项 | 1 项关键 + 2 项强烈建议（1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ + 5.13a ✅ 已交付，总开关默认开、插件生态已 go-live；剩 HITL durable audit + monotonic denial gating） |
+| 发布阻塞项 | 1 项关键 + 2 项强烈建议 — **全部交付**（1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ + 5.13a ✅ + guardrail-upgrade-trio ✅：HITL durable audit + monotonic denial gating 随 PR #86 落地，配置表迁移随 PR #87 补齐；13.4 K8s harness 依决策随 13.1 落地） |
 | 有部分代码 | 2 项已有可观代码但标记为未完成 |
 | 零代码 + 新增 | 34 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 4）+ 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
 
@@ -368,7 +368,7 @@
 
 | 特性 | 原因 | 市场影响 | 工作量 |
 |------|------|----------|--------|
-| **Completed-Feature Upgrades（1.3.4 HITL fail-closed + 9.4 内容感知门控）** | 概览"发布阻塞项"口径下的剩余两项：HITL durable audit（approval/asked + approval/decided 持久审计对）+ monotonic denial gating（单调拒绝不变式）——均消费 1.3.19 ✅ 富化事件日志。**实施中**：[openspec/changes/guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/)（T0 接线已完成；T1/T2/T3 待做） | 生产审批审计链不完整、门控可被复活 | M + M |
+| **Completed-Feature Upgrades（1.3.5i E3 瀑布中间件 + 1.3.4 HITL fail-closed + 9.4 内容感知门控）** | 概览"发布阻塞项"口径下的剩余两项：HITL durable audit（approval/asked + approval/decided 持久审计对）+ monotonic denial gating（单调拒绝不变式）——均消费 1.3.19 ✅ 富化事件日志。**已交付 ✅**：PR #86（T0 事件地基 + 生产接线 + T1 瀑布链 + T2 fail-closed 审批 + T3 内容门控，TOOL.PAIRING / MONOTONIC.DENIAL / APPROVAL.TURN_CLOSURE 三不变式 fail-stop）+ PR #87（hook_configs / tool_policy_rules / agent_policy_configs 表迁移）；OpenSpec 归档 `openspec/changes/archive/2026-08-21-guardrail-upgrade-trio/` | ~~生产审批审计链不完整、门控可被复活~~ 已闭合 | M + M |
 | **Multi-Channel (11.x)** | ~~仅有 API 渠道~~ **Wave 1 已交付**（11.2 ✅ + 11.3 ✅ + 11.9 Slack ✅）；剩余 11.8 Intent Routing 为横切项，Wave 2/3 按需触发 | 中国企业 IM 市场基础覆盖（Wave 1）；企微/钉钉等长尾待客户需求 | 11.8 M；Wave 2/3 每渠道 S |
 | **Evaluation Suite 基础 (7.2b/c/e)** | 无法度量 Agent 质量，无法向客户证明效果 | 无法建立企业信任 | M + M + M |
 
@@ -440,7 +440,7 @@
 - Engine Architecture: Event-Sourced State (1.3.19 Log-as-Truth) ✅ + Skill Provider Registry (5.9 增强) ⏳
 - Plugin Ecosystem: Agent Plugins 1.0 Ingestion (5.5c ✅) + Content Scanning (5.13a ✅) + 5.5 (enh) T0 Tightening ✅（`openspec/changes/archive/2026-08-19-t0-runtime-plugin-tightening/`，ADR-029 "runtime artifacts never T0" 落为代码）
 - Competitive Gaps: Dynamic Orchestration (1.3.18) ✅ + Run Replay Phase 1 (8.20) ✅ + Browser Automation (6.27) ⏳
-- Completed-Feature Upgrades: 1.3.5i E3 瀑布中间件 / 1.3.4 HITL fail-closed / 9.4 内容感知门控 ⏳（实施中：[openspec/changes/guardrail-upgrade-trio](../changes/guardrail-upgrade-trio/)；发布视角优先，见"三"之 P1）
+- Completed-Feature Upgrades: 1.3.5i E3 瀑布中间件 ✅ / 1.3.4 HITL fail-closed ✅ / 9.4 内容感知门控 ✅（PR #86 + #87；`openspec/changes/archive/2026-08-21-guardrail-upgrade-trio/`）
 - Advanced RAG (rescoped): Reranking ⏳ / Incremental ⏳ / Knowledge Quality ⏳
 - Multi-Channel: 11.2 简化版 ✅（Wave 1 收尾）+ 11.8 Intent Routing ⏳ + 11.16/11.17 ⏳
 - Evaluation Suite: AI-synthesized / Online-Offline / Trace Backflow / Reports / Workflow / Human Annotation ⏳（7.6a/b dropped）

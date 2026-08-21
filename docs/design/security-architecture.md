@@ -21,7 +21,7 @@ Security in Hecate is not a single module — it is a cross-cutting concern that
 
 ### Hook Types (`engine/guardrail.py`) and the Middleware Chain (`engine/middleware.py`)
 
-The engine defines four abstract hook interfaces that provide interception at the boundaries of LLM and tool execution. Since [guardrail-upgrade-trio](../../openspec/changes/guardrail-upgrade-trio/) (1.3.5i E3), each hook position hosts an **ordered middleware chain** — the four ABCs below adapt as single stages (`engine/middleware_adapters.py`), so existing implementations work unchanged while multiple interceptors compose at the same position:
+The engine defines four abstract hook interfaces that provide interception at the boundaries of LLM and tool execution. Since [guardrail-upgrade-trio](../../openspec/changes/archive/2026-08-21-guardrail-upgrade-trio/) (1.3.5i E3), each hook position hosts an **ordered middleware chain** — the four ABCs below adapt as single stages (`engine/middleware_adapters.py`), so existing implementations work unchanged while multiple interceptors compose at the same position:
 
 | Hook (legacy ABC → chain phase) | Fires Before/After | Interface | Purpose |
 |------|-------------------|-----------|---------|

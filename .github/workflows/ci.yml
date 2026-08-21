@@ -47,3 +47,32 @@ jobs:
           pip install -e ".[dev,scheduling,redis]"
       - name: Run tests
         run: pytest tests/ -q
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hecate
+          POSTGRES_PASSWORD: hecate
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hecate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -e ".[dev]"
+      - name: Fresh-database migration drift gate
+        env:
+          DRIFT_ADMIN_URL: postgresql://hecate:hecate@localhost:5432/postgres
+        run: pytest tests/test_migrations/test_upgrade_drift.py -v
