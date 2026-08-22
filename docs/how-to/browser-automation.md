@@ -15,7 +15,7 @@ Do **not** enable for purely static scraping; `web_search` is cheaper.
 
 ## Building the image
 
-The browser sandbox image (`hecate-browser-sandbox:latest`) bundles Python 3.12 + Playwright SDK + Chromium + a small HTTP driver that the main process invokes via `docker exec curl`. It is intentionally separate from the generic `hecate-sandbox` image used by `execute_code` so deployments that don't need browser tools don't pay the ~600MB Chromium footprint.
+The browser sandbox image (`hecate-browser-sandbox:latest`, ~554MB) bundles Python 3.12 (Debian bookworm) + Playwright SDK + the chromium-headless-shell binary only (`playwright install chromium --only-shell` — the full Chromium build is never downloaded since v1 is strictly headless) + a small HTTP driver that the main process invokes via `docker exec curl`. System libraries are hand-picked with `--no-install-recommends` to keep out the GL/LLVM/font stacks a headless shell never uses. It is intentionally separate from the generic `hecate-sandbox` image used by `execute_code` so deployments that don't need browser tools don't pay the browser footprint.
 
 ```bash
 # One-off build via Docker Compose profile
@@ -72,7 +72,7 @@ v1 is **headless only**. The `--headless` flag is hard-coded in the Chromium lau
 
 | Concern | `execute_code` | `browser_*` |
 |---|---|---|
-| Sandbox image | `hecate-sandbox` (lightweight) | `hecate-browser-sandbox` (~600MB Chromium) |
+| Sandbox image | `hecate-sandbox` (lightweight) | `hecate-browser-sandbox` (~554MB, headless-shell only) |
 | Default network | `none` (no egress) | `bridge` + per-env allow-list |
 | Session lifetime | One call, fire-and-forget | Per-agent-session, persistent |
 | Output | stdout/stderr/exit_code | Structured JSON (URL/title, click status, screenshot bytes, etc.) |
