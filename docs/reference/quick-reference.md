@@ -128,9 +128,15 @@ See [Guardrails and Hooks](../concepts/guardrails.md).
 | `read_file` | LOW | No |
 | `write_file` | MEDIUM | No |
 | `list_files` | LOW | No |
-| `execute_code` | HIGH | Yes (Docker pool) |
+| `execute_code` | MEDIUM | Yes (Docker pool) |
+| `browser_navigate` | MEDIUM (HIGH off allow-list) | Yes (browser sandbox, 6.27) |
+| `browser_click` | MEDIUM | Yes (6.27) |
+| `browser_type` | MEDIUM | Yes (6.27) |
+| `browser_extract` | MEDIUM | Yes (6.27) |
+| `browser_screenshot` | MEDIUM | Yes (6.27) |
+| `browser_fill_form` | MEDIUM | Yes (6.27) |
 
-See [Tools, MCP, and A2A](../concepts/tools-and-mcp.md).
+See [Tools, MCP, and A2A](../concepts/tools-and-mcp.md) and [Browser Automation](../how-to/browser-automation.md).
 
 ---
 
