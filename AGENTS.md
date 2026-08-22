@@ -95,9 +95,9 @@ EnginePort also has 6 optional methods with defaults: `context_assemble`, `evide
 | `docs/design/architecture.md` | Top-level architecture overview |
 | `docs/design/engine-design.md` | Execution engine deep dive |
 | `docs/design/concepts.md` | Core entity model and data design |
-| `docs/design/adr/` | Architecture Decision Records (29 ADRs; see `docs/design/adr/INDEX.md` for topic index) |
+| `docs/design/adr/` | Architecture Decision Records (32 ADRs; see `docs/design/adr/INDEX.md` for topic index) |
 | `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) — bundled in package |
-| `openspec/specs/` | 139 spec directories — the source of truth for each feature |
+| `openspec/specs/` | 147 spec directories — the source of truth for each feature |
 | `openspec/changes/archive/` | Completed OpenSpec changes |
 
 > **Note**: Hecate's public strategic docs live at `docs/design/positioning.md` (vs competitors). All ADRs are at `docs/design/adr/INDEX.md` (topic-grouped) and `docs/design/adr/001-028*.md` (chronological). For the full docs map, start at `docs/README.md`.

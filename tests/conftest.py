@@ -34,7 +34,6 @@ from hecate.models import (  # noqa: F401
     approval,
     backup,
     budget,
-    checkpoint,
     conversation,
     document,
     evaluation,

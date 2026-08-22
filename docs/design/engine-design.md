@@ -201,7 +201,7 @@ The Checkpoint system provides **durable state persistence** for agent execution
 1. **Log is the source of truth** — the event log is rebuilt to recover; the cache is an optimization. Never partial-prune the log (fold-from-origin requires the full prefix).
 2. **Materialization seam** — production code routes through `SessionStateMaterializer` (services/orchestration/), which implements the engine `CheckpointStore` ABC and writes through the existing `SessionStateStore` (Redis / PostgreSQL / Tiered) under the tenant triple `(org_id, user_id, session_id)`. Tenant context injected via `tenant_context_provider` closure (same pattern as `PostgresEventStore`).
 3. **Bounded payload** — `channel_state` values over the budget (default head 32KB / tail 8KB) are replaced with `{"_omitted": True, "_prefix": ..., "_suffix": ..., "_omitted_bytes": N}` markers (dsh TextRetainer pattern). Recovery can fetch the original from the environment / offload via the marker.
-4. **`PostgresCheckpointStore` is soft-deprecated** — kept for backward compatibility with persisted data in `checkpoints`; hard removal (and the `checkpoints` table drop) is deferred to a follow-up cleanup change, per the 13.4a-6/-7 two-stage precedent.
+4. **`PostgresCheckpointStore` removed** — the class was hard-deleted in 13.4a-7 (along with `checkpoints` table and the deprecated `AgentStateStore`). Production code routes through `SessionStateMaterializer` (item 2 above); no PostgreSQL checkpoint path remains.
 
 ### Recovery Flow (cache + tail replay)
 

@@ -30,8 +30,10 @@ class SessionModel(BaseModel):
     - **current_node** — the graph node identifier where the session is
       currently paused. Used by the interrupt/resume mechanism to restore
       execution at the correct position in the workflow graph.
-    - **checkpoint_id** — references the latest :class:`CheckpointModel` for
-      this session, enabling state recovery and time-travel debugging.
+    - **checkpoint_id** — UUID pointer to the latest checkpoint snapshot
+      for the session (checkpoint persistence is handled in-memory by the
+      engine; ``SessionStateMaterializer`` may persist to backing store
+      but the ORM row was dropped in 13.4a-7).
     - **metadata_** — SQLAlchemy attribute named ``metadata_`` that maps to
       the database column ``metadata``. The trailing underscore avoids a
       conflict with SQLAlchemy's reserved ``metadata`` attribute on

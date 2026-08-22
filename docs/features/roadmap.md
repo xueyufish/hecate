@@ -1,6 +1,7 @@
 # Hecate Implementation Roadmap
 
-> **Status**: Active — P1, P2 complete; P3, P4, P5 in progress.
+> **Status**: Active — P1, P2 complete; **P3 in release close-out (4 items remaining)**; P4, P5 in progress.
+> **2026-08-22 release-scope reclassification**: P3 remaining narrowed to 4 close-out items (5.4b MCP Streamable HTTP Server 端 / 9.1a Injection Type Detection / 9.2 System Prompt Leakage Protection / 6.27 Browser Automation). 48 items moved P3→P4 (see feature-catalog "Deferred from P3"); 11.4/11.5/11.9-Discord/Telegram moved P3→P5 (channel Wave 2/3); 11.8 Intent Recognition & Routing dropped (overlaps existing routing). P4/P5 scope grows accordingly — no feature lost; one dropped.
 > **Scope**: 12-month implementation plan covering unimplemented features across P3–P5.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
@@ -12,10 +13,12 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 127 | 83/127 (65%) | 44 |
-| **P4 Intelligent** | 101 | 4/101 (4%) | 97 |
-| **P5 Ecosystem** | 60 | 0/60 (0%) | 60 |
-| **Total** | **372** | **170/372 (46%)** | **202** |
+| **P3 Trustworthy** | 87 | 83/87 (95%) | **4** (5.4b / 9.1a / 9.2 / 6.27) |
+| **P4 Intelligent** | 148 | 25/148 (17%) | 123 |
+| **P5 Ecosystem** | 71 | 0/71 (0%) | 71 |
+| **Total** | **389** | **191/389 (49%)** | **198** |
+
+> Row counts are physical feature-catalog rows (2026-08-22 basis; verified by grep). Prior figures (127/101/60, total 372) used audit-counting that predated the reclassification — see feature-catalog overview note for the reconciliation.
 
 ---
 
@@ -504,7 +507,16 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ## Sprint 7: P3 Complete (Month 13–14)
 
-> **Goal**: Complete P3 — engine state architecture (log-as-truth), competitive gap features (dynamic orchestration, run replay, browser tool), rescoped Advanced RAG, Multi-Channel Wave 1, Evaluation suite, Memory improvements. Re-scope per competitor analysis: 5 dropped, 15 deferred to P5, 4 added.
+> **Goal (2026-08-22 release-scope reclassification)**: P3 closes with **4 close-out items** — 5.4b MCP Streamable HTTP Server 端 / 9.1a Injection Type Detection / 9.2 System Prompt Leakage Protection / 6.27 Browser Automation. All other remaining Sprint 7 scope moved to P4 (48 items — see feature-catalog "Deferred from P3") or P5 (channel Wave 2/3); 11.8 dropped. Sub-tables below retain delivery history (✅ rows) with → P4/P5 annotations on moved items.
+
+### P3 Close-Out (the only remaining P3 work)
+
+| # | Feature | Dependencies | Effort |
+|---|---------|------|--------|
+| 5.4b | MCP Streamable HTTP Transport — **Server 端**（client 已交付）。按 **2026-07-28 新规范**实现：无状态核心、Mcp-Method/Mcp-Name header 路由、MRTR、cacheable lists | 5.4c ✅ | M |
+| 9.1a | Injection Type Detection — 注入攻击分型（direct/indirect/tool-output/memory-poisoning），typed findings 进 SIEM + DLP | Guardrails ✅ | S |
+| 9.2 | System Prompt Leakage Protection — 输出侧系统提示词/指令外泄检测与阻断（OWASP LLM07） | Output Security ✅ | S |
+| 6.27 | Browser Automation Tool — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ + 9.4 内容门控 ✅ | M |
 
 ### Engine Architecture: Event-Sourced State (NEW, Q4=A decision)
 
@@ -544,13 +556,13 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 5.13a | Plugin Content Scanning (split from 5.13, pulled to P3) — prompt-injection detection (incl. invisible-Unicode), secret detection, allowed-tools audit; fail-closed install (block/warn/allow, org threshold), rescan on enable, results API + Ops Center display. V1 = pure rule engine; LLM second-pass review optional in v2 (decided) — **strictly serial after 5.5c; 5.5c ships with a no-op scan stage reserving the slot, 5.13a keeps the go-live gate**. Design refined (17+-platform research: DeerFlow SkillScan / Hermes-agent / Dify / Google GE Governing Agent Skills / FortiCNAPP SK-* / IBM script deny-list converge on deterministic-first + CRITICAL fail-closed + warn ack + optional LLM second pass; Bedrock AgentCore & AgentArts/openJiuwen (same vendor) & AgentScope & CatPaw substitute sandbox/permissions — refs in feature-catalog 5.13a row): obfuscation layer v1 = NFKC + bounded base64/hex rescan, file-role × rule severity matrix, verdict = line vs `AGENT_PLUGIN_SCAN_BLOCK_AT`, oversize text → finding (22MB-padding lesson), ack suppression keyed (content_hash, rule_id), URL rules = paste-site/IP-literal/punycode ✅ (`openspec/changes/archive/2026-08-18-plugin-content-scanning/`): `plugin/content_scanner.py` + install/enable fail-closed wiring + SecurityFindingModel projection/ack + `GET /api/plugins/{id}/scan`; master switch default flipped on | 5.5c ✅ | M |
 | 5.5 (enh) ✅ | T0 Tightening — loader rejects runtime-installed non-first-party `python:` entries (SaaS reject; self-hosted default-deny + `PLUGIN_PYTHON_ENTRY_ALLOWLIST` allowlist, segment-boundary prefix match); install-time pre-check + directory rollback on rejection; SaaS skips runtime `uv pip install` — operationalizes ADR-029 "runtime artifacts never T0"; near-zero cost while installed-code-plugin base is ~empty (`openspec/changes/archive/2026-08-19-t0-runtime-plugin-tightening/`) | 5.5 ✅ | S |
 
-### Advanced RAG & Knowledge (rescoped)
+### Advanced RAG & Knowledge (rescoped) — → P4 (2026-08-22)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 3.2.4 | Reranking | Vector Search ✅ | M |
-| 3.3.2 | Incremental Update | RAG ✅ | M |
-| 3.3.3 | Knowledge Quality Evaluation | Ragas | S |
+| 3.2.4 | Reranking → P4 | Vector Search ✅ | M |
+| 3.3.2 | Incremental Update → P4 | RAG ✅ | M |
+| 3.3.3 | Knowledge Quality Evaluation → P4 | Ragas | S |
 
 > **Deferred to P5**: 3.1.2-3.1.4 (OCR / Table / Layout — integrate Docling/Unstructured instead of building), 3.1.8 (Extended Document Processing, from P4), 3.5.1-3.5.3 (Knowledge Graph suite — integrate GraphRAG/LlamaIndex), 3.5.5 (Knowledge Graph API, from P4), 3.4.2 (High-Throughput Retrieval — Qdrant deployment guide covers it). See Sprint 10 deferred table for triggers.
 
@@ -558,12 +570,10 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 11.2 | Web Widget (Simplified) *Wave 1 — internal Portal / embeddable for any Hecate deployment* | API ✅ | S (simplified) |
+| 11.2 | Web Widget (Simplified) ✅ *Wave 1 — internal Portal / embeddable for any Hecate deployment* | API ✅ | S (simplified) |
 | 11.3 | Feishu (Lark) ✅ *Wave 1 — China market anchor + first ChannelABC reference impl* | Channel SDK | M |
-| 11.4 | WeCom (WeChat Work) *P5 deferred — reuse 11.3 pattern when needed* | 11.3 ✅ | S |
-| 11.5 | DingTalk *P5 deferred — reuse 11.3 pattern when needed* | 11.3 ✅ | S |
-| 11.8 | Intent Recognition & Routing | Multi-Agent ✅ | M |
-| 11.9 | Slack ✅ / Discord/Telegram *Discord/Telegram — P5 deferred, reuse Slack pattern when needed* | ChannelABC ✅ | M (Slack) + S (Discord/Telegram) |
+| 11.8 | ~~Intent Recognition & Routing~~ **Dropped (2026-08-22)** — overlaps chat routing (`agent/<id>`) + multi-agent handoff + CONDITION intent routing (RoutingMode.INTENT) | — | — |
+| 11.9 | Slack ✅ *Wave 1*；Discord/Telegram → P5 (Wave 2) | ChannelABC ✅ | M (Slack) |
 
 **Deferred to P5 (按需触发, 不在当前 P3 主线)**:
 - 11.2 (full) — Web Widget 完整版（匿名 to-C 场景），trigger = 第一个公开网站/营销/客服场景的客户
@@ -580,69 +590,68 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 11.16 | Per-Token-Type Auth Pipeline | Auth ✅ | M |
 | 11.17 | Two-Tier Identity Model | Auth ✅ + RBAC ✅ | M |
 
-### Evaluation Suite
+### Evaluation Suite — → P4 (2026-08-22)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 7.2a | 40+ Built-in Evaluators | Evaluation ✅ | L |
-| 7.2b | AI-Synthesized Evaluation Dataset | 7.2a | M |
-| 7.2c | Online/Offline Evaluation Tasks | 7.2a | M |
-| 7.2d | Trace Backflow Dataset | 7.2a | S |
-| 7.2e | Evaluation Report Dashboard | 7.2a | M |
-| 7.3 | Workflow Evaluation | 7.1 ✅ | M |
-| 7.4 | Human Annotation | 7.2 ✅ | M |
-| 7.4a | Human Score Calibration | 7.4 | S |
-| 7.5 | A/B Testing (rescoped to Agent-Level) — agent/version-level controlled experiments; reuses 6.8a traffic-splitting + z-test machinery generalized from model routing; prompt comparison delegated to eval-platform integration (7.6b drop rationale) | 6.8a ✅ | S |
+| 7.2a | 40+ Built-in Evaluators ✅（OE8/OE9 增强 → P4） | Evaluation ✅ | L |
+| 7.2b | AI-Synthesized Evaluation Dataset → P4 | 7.2a ✅ | M |
+| 7.2c | Online/Offline Evaluation Tasks → P4 | 7.2a ✅ | M |
+| 7.2d | Trace Backflow Dataset → P4 | 7.2a ✅ | S |
+| 7.2e | Evaluation Report Dashboard → P4 | 7.2a ✅ | M |
+| 7.3 | Workflow Evaluation → P4 | 7.1 ✅ | M |
+| 7.4 | Human Annotation → P4 | 7.2 ✅ | M |
+| 7.4a | Human Score Calibration → P4 | 7.4 → P4 | S |
+| 7.5 | A/B Testing (rescoped to Agent-Level) → P4 — reuses 6.8a traffic-splitting + z-test machinery | 6.8a ✅ | S |
 
 > **Dropped**: 7.6a Prompt Auto-Optimization, 7.6b Prompt Comparison — specialized frameworks (DSPy, IBM AgentOps GEPA) and evaluation platforms (LangSmith, Salesforce A/B Testing API) have standardized this; self-building is negative ROI.
 
 > **TBD — Quality Regression Detection (G4 remainder)**: Once the Evaluation Suite produces per-model quality scores, add quality regression monitoring to the Model Monitoring Dashboard (O10+G4). Compare current-period quality scores against historical baseline; trigger alert when degradation exceeds threshold. Originated from `model-hub-completion` change where drift detection was shipped but quality regression was deferred pending evaluation data.
 
-### Canvas Enhancements
+### Canvas Enhancements — → P4 (2026-08-22)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 1.1.24 | Human Input / Form Node | interrupt() ✅ + Canvas ✅ | M |
-| 1.1.25 | Trigger Node | Scheduled Tasks ✅ + Webhook ✅ | M |
+| 1.1.24 | Human Input / Form Node → P4 | interrupt() ✅ + Canvas ✅ | M |
+| 1.1.25 | Trigger Node → P4 | Scheduled Tasks ✅ + Webhook ✅ | M |
 
 > **Deferred to P5**: 1.1.18 Agent-Workflow Canvas Embedding, 1.1.19 Unified Skill Selector, 1.1.20 Nested Graph Visualization — Canvas enhancements without user feedback are speculative; Dify's collaborative editing (Loro CRDT) is the direction to aim for when triggered.
 
-### Memory Enhancement
+### Memory Enhancement — → P4 (2026-08-22)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 4.3a | Memory Engine Enhancement | Memory System ✅ | L |
-| 4.14 | Memory Importance Scoring | Memory System ✅ | M |
-| 4.15 | Multi-Signal Fusion Retrieval | 4.14 | M |
-| 4.17 | Memory Pressure Alert | Token Budget ✅ | S |
-| 4.25 | Layered Memory System | 1.3.15 Agent Environment | M |
+| 4.3a | Memory Engine Enhancement → P4 | Memory System ✅ | L |
+| 4.14 | Memory Importance Scoring → P4 | Memory System ✅ | M |
+| 4.15 | Multi-Signal Fusion Retrieval → P4 | 4.14 → P4 | M |
+| 4.17 | Memory Pressure Alert → P4 | Token Budget ✅ | S |
+| 4.25 | Layered Memory System → P4 | 1.3.15 ✅ | M |
 
-### AIP Capabilities (P3 Foundation)
+### AIP Capabilities (P3 Foundation) — → P4 (2026-08-22)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 6.16 | NL2Agent / NL2Flow | Canvas ✅ + Graph DSL ✅ | M |
-| 6.18 | Trace Annotation | EventStore ✅ + Audit ✅ | S |
+| 6.16 | NL2Agent / NL2Flow → P4 | Canvas ✅ + Graph DSL ✅ | M |
+| 6.18 | Trace Annotation → P4 | EventStore ✅ + Audit ✅ | S |
 
 > **Dropped**: 6.17 DSL Conversion Framework — MCP/A2A protocol standardization plus Salesforce open-sourcing Agent Script indicates the industry is converging on standard agent definitions, not DSL compatibility layers.
 > **Deferred to P5**: 6.21 Decision Lineage — full decision lineage requires an Ontology foundation (data + function + app version binding per trace, Palantir standard); effort was underestimated in the initial analysis.
 
 ### Milestone M7 (End of Sprint 7)
 
-- [x] P3 re-scoped 125/125 (100%) — re-scope basis
-- [x] Event-sourced execution state: log-as-truth invariant + derive_messages projection + DeltaChannel incremental checkpoint
-- [x] Dynamic Orchestration (7th multi-agent pattern) on Pregel
-- [x] Execution Replay Phase 1 (timeline replay) operational
-- [ ] Browser Automation builtin tool operational
-- [ ] Skill Provider Registry (rank + invocation policy) operational
-- [ ] Completed-feature upgrades: waterfall middleware chain (1.3.5i E3) + HITL fail-closed (1.3.4) + content-aware tool gating (9.4)
-- [ ] Advanced RAG: Reranking + Incremental Update + Knowledge Quality Evaluation
-- [x] Multi-Channel Wave 1 complete (11.2 simplified)
-- [ ] Per-Token-Type Auth Pipeline + Two-Tier Identity Model
-- [ ] 40+ Built-in Evaluators + Evaluation Suite (AI-synthesized datasets, online/offline tasks, trace backflow, workflow eval, human annotation, A/B testing — 7.6a/b dropped)
-- [ ] Canvas: Human Input/Form Node + Trigger Node (1.1.18-20 deferred P5)
-- [ ] Memory Enhancement: importance scoring, multi-signal fusion, pressure alerts, layered memory
-- [ ] NL2Agent/NL2Flow + Trace Annotation (6.17 dropped, 6.21 deferred P5)
+> **2026-08-22 reclassification**: M7 = P3 release close-out. Items marked → P4/P5 above are excluded from M7; see feature-catalog "Deferred from P3" for the go-forward home of each.
+
+- [x] Event-sourced execution state: log-as-truth invariant + derive_messages projection (1.3.19, ADR-030)
+- [x] Dynamic Orchestration — 7th multi-agent pattern (1.3.18, ADR-032)
+- [x] Execution Replay Phase 1 — timeline replay (8.20)
+- [x] Guardrail upgrade trio: waterfall middleware + HITL fail-closed + content-aware gating (PR #86/#87)
+- [x] Plugin ecosystem: Agent Plugins 1.0 ingestion (5.5c) + Content Scanning (5.13a) + T0 Tightening — go-live (master switch on)
+- [x] Multi-Channel Wave 1: 11.2 simplified + 11.3 Feishu + 11.9 Slack
+- [x] Release hardening: migration drift gate + E2E suite (F3/F4/F7/A7) + dead-code sweep + 13.4a-7/C2/A2 closures (PR #88/#89, net −2159 lines)
+- [ ] **5.4b MCP Streamable HTTP Server 端**（按 2026-07-28 规范）
+- [ ] **9.1a Injection Type Detection**
+- [ ] **9.2 System Prompt Leakage Protection**
+- [ ] **6.27 Browser Automation Tool**
 
 ---
 
@@ -651,6 +660,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 ## Sprint 8: P4 Kickoff — Intelligence (Month 15–16)
 
 > **Goal**: P4 intelligence features — Self-Learning, Agentic AI (RL, Prompt Optimization, Ontology Actions, OAG), Memory Intelligence. Make agents genuinely smart.
+>
+> **2026-08-22 reclassification**: Sprint 8 scope also absorbs the 48 items deferred from P3 (see feature-catalog → P4 → "Deferred from P3"): Evaluation Suite (7.2b-e/7.3/7.4/7.4a/7.5 + 8.10/8.12), Security remainder (9.5a/9.11/7.10/2.10b/7.7), Deployment & Ops (13.1/13.1a/13.1b/13.4/13.4b/13.17/13.18), Advanced KB (3.2.4/3.3.2/3.3.3/3.4.1), Canvas nodes (1.1.24/1.1.25), Memory (4.3a/4.14/4.15/4.16/4.17/4.25/4.21), AIP (6.16/6.18), Auth (11.16/11.17), 5.4a/5.8/5.9-enh, and 8 shipped-feature enhancements. Sequencing within Sprint 8 is open — no forced ordering inherited from P3.
 
 ### Self-Learning & Evolution
 

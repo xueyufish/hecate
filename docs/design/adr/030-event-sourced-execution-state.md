@@ -78,7 +78,7 @@ Session-level TTL counted from terminal state (completed/failed/expired). `inter
 
 ### 9. CheckpointStore demoted to materialization seam (C2)
 
-`CheckpointStore` ABC kept (rename churn avoided); production saves go through `SessionStateMaterializer` (services/orchestration/), which writes through the existing `SessionStateStore` (Redis / PostgreSQL / Tiered) under the tenant-scoped `(org_id, user_id, session_id)` triple. Tenant context injected via `tenant_context_provider` closure (same pattern as `PostgresEventStore`). `PostgresCheckpointStore` soft-deprecated (DeprecationWarning + module docstring), hard removal deferred to a follow-up cleanup change (along with `checkpoints` table drop), per the 13.4a-6 / 13.4a-7 two-stage precedent.
+`CheckpointStore` ABC kept (rename churn avoided); production saves go through `SessionStateMaterializer` (services/orchestration/), which writes through the existing `SessionStateStore` (Redis / PostgreSQL / Tiered) under the tenant-scoped `(org_id, user_id, session_id)` triple. Tenant context injected via `tenant_context_provider` closure (same pattern as `PostgresEventStore`). `PostgresCheckpointStore` and the `checkpoints` table were both hard-removed in 13.4a-7.
 
 ### 10. Path A / Path C coverage boundary (non-goal)
 

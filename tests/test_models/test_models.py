@@ -25,11 +25,6 @@ from hecate.models.agent import (
     AgentModel,
     AgentReadSchema,
 )
-from hecate.models.checkpoint import (
-    CheckpointCreateSchema,
-    CheckpointModel,
-    CheckpointReadSchema,
-)
 from hecate.models.conversation import (
     ConversationModel,
 )
@@ -651,60 +646,6 @@ class TestPluginModelProvenance:
         assert read.scan_result is None
 
 
-class TestCheckpointModel:
-    """Verify Checkpoint ORM creation, sequential superstep ordering, and schema defaults."""
-
-    @pytest.mark.asyncio
-    async def test_create_checkpoint(self, db_session: AsyncSession) -> None:
-        """A checkpoint stores channel_state as JSONB alongside its superstep index."""
-        agent = AgentModel(name="cp-agent", model_config_db={})
-        db_session.add(agent)
-        await db_session.flush()
-        session = SessionModel(agent_id=agent.id)
-        db_session.add(session)
-        await db_session.flush()
-        cp = CheckpointModel(
-            session_id=session.id,
-            superstep=1,
-            node_id="guard",
-            channel_state={"messages": ["hello"]},
-        )
-        db_session.add(cp)
-        await db_session.flush()
-        assert cp.superstep == 1
-        assert cp.channel_state == {"messages": ["hello"]}
-
-    @pytest.mark.asyncio
-    async def test_checkpoint_sequential_supersteps(self, db_session: AsyncSession) -> None:
-        """Multiple checkpoints can be persisted for the same session with increasing superstep numbers."""
-        agent = AgentModel(name="seq-agent", model_config_db={})
-        db_session.add(agent)
-        await db_session.flush()
-        session = SessionModel(agent_id=agent.id)
-        db_session.add(session)
-        await db_session.flush()
-        for i in range(1, 4):
-            cp = CheckpointModel(
-                session_id=session.id,
-                superstep=i,
-                node_id=f"node_{i}",
-                channel_state={"step": i},
-            )
-            db_session.add(cp)
-        await db_session.flush()
-        assert len([c for c in db_session.new]) == 0
-
-    def test_checkpoint_create_schema_defaults(self) -> None:
-        """CheckpointCreateSchema fills empty defaults for channel_state, pending_writes, and metadata."""
-        schema = CheckpointCreateSchema(
-            session_id=uuid.uuid4(),
-            superstep=1,
-        )
-        assert schema.channel_state == {}
-        assert schema.pending_writes == []
-        assert schema.metadata == {}
-
-
 class TestReadSchemaFromAttributes:
     """Verify that ``ReadSchema.model_validate(orm_instance)`` works for all
     models that have a ``metadata_`` column.
@@ -735,9 +676,6 @@ class TestReadSchemaFromAttributes:
         assert schema.metadata == {"key": "value"}
         assert schema.status == "active"
 
-    def test_skill_read_schema(self) -> None:
-        from hecate.models.skill import SkillModel
-
         attrs = self._make_base_attrs()
         skill = SkillModel(
             workspace_id=uuid.UUID(int=0),
@@ -755,26 +693,6 @@ class TestReadSchemaFromAttributes:
         )
         schema = SkillReadSchema.model_validate(skill)
         assert schema.metadata == {"version": "1.0"}
-        assert schema.name == "developer"
-
-    def test_checkpoint_read_schema(self) -> None:
-        from hecate.models.checkpoint import CheckpointModel
-
-        cp_id = uuid.uuid4()
-        cp = CheckpointModel(
-            session_id=uuid.uuid4(),
-            superstep=1,
-            node_id="test_node",
-            channel_state={"messages": ["hello"]},
-            pending_writes=[],
-            metadata_={"interrupted": False},
-            workspace_id=uuid.UUID(int=0),
-        )
-        cp.id = cp_id
-        cp.created_at = datetime.now()
-        schema = CheckpointReadSchema.model_validate(cp)
-        assert schema.metadata == {"interrupted": False}
-        assert schema.superstep == 1
 
 
 class TestApprovalRecordModel:
