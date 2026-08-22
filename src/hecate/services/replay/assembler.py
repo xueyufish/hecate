@@ -7,11 +7,13 @@ Public surface:
 - REPLAY_PAYLOAD_PREVIEW_CHARS: payload summary length.
 - assemble_timeline(events, *, detail=False, from_version=0, limit=100)
 - enrich_traces(events, db) -> dict[trace_id, TraceMetadata]
+- derive_session_messages(session_id, event_store) -> list[dict] (A2 closure)
 """
 
 from __future__ import annotations
 
 import json
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from hecate.engine.eventstore import Event, EventType
@@ -294,3 +296,71 @@ async def enrich_traces(
                 "span_name": row.name,
             }
     return result
+
+
+async def derive_session_messages(session_id: uuid.UUID, event_store: Any) -> list[dict[str, Any]]:
+    """Project the conversation message list from the event log (A2 closure).
+
+    Source of truth is the event stream: each ``LLM_REQUEST`` payload
+    carries the full message list passed to the model at that turn,
+    and ``CHANNEL_WRITE`` events on the ``messages`` channel carry
+    incremental additions. Returns the deduplicated, time-ordered
+    message list for the session. Pure read-side projection.
+
+    Args:
+        session_id: Conversation session to project.
+        event_store: An ``EventStore`` implementation (in-memory or PG).
+
+    Returns:
+        List of message dicts in chronological order. Each dict has
+        ``role``, ``content``, and ``created_at`` keys suitable for
+        the ``MessageReadSchema`` shape.
+    """
+    events: list[Event] = []
+    # EventStore.get_events is declared async. InMemoryEventStore
+    # returns a list; PGEventStore returns an async iterator. Resolve
+    # both shapes by inspecting the awaited result.
+    raw = await event_store.get_events(session_id=session_id)
+    events = [ev async for ev in raw] if hasattr(raw, "__aiter__") else list(raw)
+
+    # Sort by (superstep, version) so multi-stream events stay in causal order.
+    events.sort(key=lambda e: (e.superstep, getattr(e, "version", 0)))
+
+    messages: list[dict[str, Any]] = []
+    seen_keys: set[tuple[str, str]] = set()
+    for ev in events:
+        etype = ev.event_type.value if hasattr(ev.event_type, "value") else str(ev.event_type)
+        payload = ev.payload or {}
+        if etype == EventType.LLM_REQUEST.value:
+            for msg in payload.get("messages") or []:
+                if not isinstance(msg, dict):
+                    continue
+                key = (msg.get("role", ""), json.dumps(msg.get("content"), sort_keys=True, default=str))
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                messages.append(
+                    {
+                        "role": msg.get("role", ""),
+                        "content": msg.get("content"),
+                        "created_at": ev.timestamp.isoformat() if ev.timestamp else None,
+                    }
+                )
+        elif etype == EventType.CHANNEL_WRITE.value:
+            if payload.get("channel") != "messages":
+                continue
+            value = payload.get("value")
+            if isinstance(value, dict):
+                key = (value.get("role", ""), json.dumps(value.get("content"), sort_keys=True, default=str))
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                messages.append(
+                    {
+                        "role": value.get("role", ""),
+                        "content": value.get("content"),
+                        "created_at": ev.timestamp.isoformat() if ev.timestamp else None,
+                    }
+                )
+
+    return messages

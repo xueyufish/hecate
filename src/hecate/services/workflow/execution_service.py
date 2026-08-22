@@ -14,7 +14,6 @@ import asyncio
 import logging
 import random
 import uuid
-import warnings
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -45,7 +44,6 @@ from hecate.engine.workers.variable_set_worker import VariableSetWorker
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 from hecate.services.context.offloader import ContextOffloader
 from hecate.services.state.state import AgentState
-from hecate.services.state.store import AgentStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -132,14 +130,9 @@ class _CompositeWorker:
 class WorkflowExecutionService:
     """Unified execution entry point for all agent modes.
 
-    Accepts execution parameters (mode, messages, model, tools, etc.),
+        Accepts execution parameters (mode, messages, model, tools, etc.),
     resolves the appropriate graph template, compiles it, creates production
-    Workers with Guardrail Hooks, and runs PregelRuntime.
-
-    .. note::
-        The ``state_store`` parameter is deprecated as of 13.4a-6. Use
-        ``checkpoint_store: SessionStateStore`` instead. See
-        ``docs/migrations/agent-state-store.md``.
+        Workers with Guardrail Hooks, and runs PregelRuntime.
     """
 
     def __init__(
@@ -152,7 +145,6 @@ class WorkflowExecutionService:
         pre_tool_hook: PreToolHook | None = None,
         post_tool_hook: PostToolHook | None = None,
         environment_manager: Any = None,
-        state_store: AgentStateStore | None = None,
         checkpoint_store: SessionStateStore | None = None,
         event_store: EventStore | None = None,
         access_policy: Any = None,
@@ -182,15 +174,6 @@ class WorkflowExecutionService:
         else:
             self._access_policy = None
         self._approval_callback = approval_callback
-        if state_store is not None:
-            warnings.warn(
-                "WorkflowExecutionService(state_store=...) is deprecated. "
-                "Use checkpoint_store=SessionStateStore instead. "
-                "See docs/migrations/agent-state-store.md for migration.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        self._state_store = state_store
         self._checkpoint_store = checkpoint_store
         self._event_store = event_store
 
@@ -285,16 +268,10 @@ class WorkflowExecutionService:
             agent_env = await self._environment_manager.get_or_create(agent_str)
             environment_root = str(agent_env.root_path)
 
-        # Load or create AgentState
-        agent_state: AgentState | None = None
-        if self._state_store and agent_id:
-            agent_uuid = agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id))
-            agent_state = await self._state_store.load(agent_uuid, session_id)
-        if agent_state is None:
-            agent_uuid = (
-                agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id)) if agent_id else uuid.uuid4()
-            )
-            agent_state = AgentState(session_id=session_id, agent_id=agent_uuid)
+        # Build AgentState (13.4a-7: no longer loaded from the removed
+        # AgentStateStore; SessionStateStore owns cross-call persistence
+        # via the wired checkpoint_store).
+        agent_state = AgentState(session_id=session_id, agent_id=uuid.uuid4())
         if environment_root:
             agent_state.environment_root = environment_root
 
@@ -541,10 +518,10 @@ class WorkflowExecutionService:
         wired ``SessionStateStore`` under the ``(org_id, user_id, session_id)``
         tenant-scoped key.
 
-        When no ``checkpoint_store`` is wired, this is a no-op and never falls
-        back to the deprecated ``AgentStateStore`` (removed in
-        horizontal-scaling-validation). Non-lock save failures are swallowed
-        (best-effort persistence). Lock-acquisition ``SessionStateConflictError``
+        When no ``checkpoint_store`` is wired, this is a no-op (best-effort
+        persistence). The legacy ``AgentStateStore`` fallback was removed in
+        13.4a-7. Non-lock save failures are swallowed. Lock-acquisition
+        ``SessionStateConflictError``
         propagates so the requesting turn fails fast rather than splitting state
         across two stores.
 

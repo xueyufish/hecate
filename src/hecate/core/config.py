@@ -110,6 +110,13 @@ class Settings(BaseSettings):
     AGENT_ENV_CREDENTIAL_SCOPING: bool = False
     AGENT_ENV_SANDBOX_ENFORCEMENT: bool = False
 
+    # Meta-agents (13.9a-d): lifecycle ops agents run by MetaAgentScheduler
+    # in the app lifespan. Default off — opt-in per deployment. The drift
+    # detector is intentionally not registered yet (needs an expected-
+    # baseline source); GC and compliance checker are wired.
+    META_AGENTS_ENABLED: bool = False
+    META_AGENTS_INTERVAL_SECONDS: int = 3600
+
     # SIEM Export Pipeline (8.7): security event export to external SIEM.
     SIEM_ENABLED: bool = False
     SIEM_EXPORTERS: str = ""  # comma-separated: "webhook,syslog,ocsf"
@@ -352,14 +359,3 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
-
-
-class FeatureSettings(BaseSettings):
-    """Boot-time feature flags (Tier 1).
-
-    Flags declared here affect startup-time paths (e.g. backend selection).
-    Changes require a process restart. For runtime flags (can be toggled
-    without restart), use the FeatureFlagModel REST API instead.
-    """
-
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")

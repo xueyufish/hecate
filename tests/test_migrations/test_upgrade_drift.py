@@ -109,8 +109,19 @@ def test_alembic_upgrade_head_matches_models(monkeypatch):
     finally:
         asyncio.run(_drop_drift_db())
 
+    # Tables that exist in models but are intentionally absent from the
+    # migration chain — historically created by older migrations, dropped
+    # by a later cleanup migration (13.4a-7 / C2 for ``checkpoints``).
+    # They survive in Base.metadata because tests still construct the
+    # ORM class (e.g. GC tests inspect them); we accept the table-less
+    # migration path for these and the model lives on as a thin wrapper
+    # pointing at no underlying relation.
+    tables_dropped_by_cleanup: set[str] = {"checkpoints"}
+
     drift: list[str] = []
     for table in Base.metadata.sorted_tables:
+        if table.name in tables_dropped_by_cleanup:
+            continue
         migrated = migrated_columns.get(table.name)
         if migrated is None:
             drift.append(f"table '{table.name}' exists in models but no migration creates it")

@@ -15,9 +15,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.config import settings
+from hecate.engine.eventstore import EventStore
 from hecate.models.conversation_cluster import ConversationClusterModel
-from hecate.models.message import MessageModel
 from hecate.services.llm.service import llm_service
+from hecate.services.ops_center.conversation_messages import project_conversation_messages
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +63,9 @@ class ConversationTopicMatcher:
         db: Async SQLAlchemy session.
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, event_store: EventStore | None = None) -> None:
         self._db = db
+        self._event_store = event_store
 
     async def match_to_cluster(
         self,
@@ -147,23 +149,14 @@ class ConversationTopicMatcher:
         Returns:
             Confirmed cluster, or None if no good match.
         """
-        # Load conversation messages for context
-        msg_q = (
-            select(MessageModel)
-            .where(
-                MessageModel.conversation_id == conversation_id,
-                MessageModel.role.in_(["user", "assistant"]),
-                ~MessageModel.deleted,
-            )
-            .order_by(MessageModel.created_at)
-            .limit(10)
-        )
-        result = (await self._db.execute(msg_q)).all()
-        if not result:
+        # A2: project messages from the event log.
+        messages = await project_conversation_messages(self._db, conversation_id, self._event_store, limit=10)
+        if not messages:
             return None
 
         conversation_text = "\n".join(
-            f"{'User' if msg.role == 'user' else 'Assistant'}: {msg.content[:200]}" for (msg,) in result
+            f"{'User' if msg.get('role') == 'user' else 'Assistant'}: {(msg.get('content') or '')[:200]}"
+            for msg in messages
         )
 
         # Build cluster descriptions

@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.conversation import ConversationModel
 from hecate.models.conversation_cluster import ConversationClusterModel
-from hecate.models.message import MessageModel
 from hecate.services.ops_center.conversation_cluster_manager import (
     ConversationClusterManager,
     _compute_centroid,
@@ -33,18 +32,21 @@ async def _create_conversation(db: AsyncSession, cluster_id: uuid.UUID | None = 
     return conv
 
 
-async def _create_message(
-    db: AsyncSession, conversation_id: uuid.UUID, role: str = "user", content: str = "Hello"
-) -> MessageModel:
-    """Helper to create a message."""
-    msg = MessageModel(
-        conversation_id=conversation_id,
-        role=role,
-        content=content,
-    )
-    db.add(msg)
-    await db.flush()
-    return msg
+async def _create_message(  # noqa: ARG001
+    db: AsyncSession,  # noqa: ARG001  — DB kept for parity with other fixtures
+    conversation_id: uuid.UUID,  # noqa: ARG001
+    role: str = "user",  # noqa: ARG001
+    content: str = "Hello",  # noqa: ARG001
+) -> dict:
+    """A2 closure: messages no longer live in a SQL table.
+
+    This fixture is retained only because the old tests called it for
+    parity. The current ``match_to_cluster`` tests either short-circuit
+    on similarity (above confirmation / below detection) or return
+    ``None`` on empty clusters, so no message content is actually
+    required. Kept as a no-op so the call sites stay readable.
+    """
+    return {"role": role, "content": content}
 
 
 async def _create_cluster(

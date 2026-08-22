@@ -17,7 +17,6 @@ from sqlalchemy import select
 from hecate.core.database import async_session_factory
 from hecate.models.agent import AgentModel
 from hecate.models.knowledge import KnowledgeBaseModel
-from hecate.models.message import MessageModel
 from hecate.models.tool import ToolModel
 from hecate.services.mcp.session_manager import MCPSessionManager
 
@@ -153,29 +152,40 @@ def create_mcp_server() -> FastMCP:
     async def conversation_history(conversation_id: str) -> str:
         """Retrieve conversation message history.
 
+        A2 closure: messages are projected from the EventStore via
+        SessionModel.conversation_id → derive_session_messages.
+
         Args:
             conversation_id: UUID string of the conversation.
 
         Returns:
             JSON array of messages with role, content, and timestamp.
         """
+        from hecate.core.config import settings
+        from hecate.models.session import SessionModel
+        from hecate.services.event_state import create_event_store
+        from hecate.services.replay.assembler import derive_session_messages
+
         async with async_session_factory() as db:
             try:
                 cid = uuid.UUID(conversation_id)
-                result = await db.execute(
-                    select(MessageModel)
-                    .where(MessageModel.conversation_id == cid, ~MessageModel.deleted)
-                    .order_by(MessageModel.created_at.asc())
-                    .limit(100)
+                session_rows = (
+                    (await db.execute(select(SessionModel).where(SessionModel.conversation_id == cid))).scalars().all()
                 )
-                messages = result.scalars().all()
+
+                store = create_event_store(settings)
+                messages: list[dict] = []
+                for session in session_rows:
+                    messages.extend(await derive_session_messages(session.id, store))
+                messages = messages[:100]
+
                 return json.dumps(
                     [
                         {
-                            "id": str(m.id),
-                            "role": m.role,
-                            "content": m.content,
-                            "created_at": m.created_at.isoformat() if m.created_at else None,
+                            "id": m.get("created_at"),
+                            "role": m.get("role"),
+                            "content": m.get("content"),
+                            "created_at": m.get("created_at"),
                         }
                         for m in messages
                     ]

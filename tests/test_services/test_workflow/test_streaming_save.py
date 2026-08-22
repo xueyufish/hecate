@@ -145,13 +145,11 @@ async def test_stream_client_disconnect_best_effort_save():
 async def test_stream_no_legacy_state_store_call():
     """``_stream_execute`` SHALL NOT reference ``self._state_store`` — the
     legacy branch at the old line 473-474 was removed."""
-    legacy_store = AsyncMock()
     checkpoint_store = AsyncMock(spec=SessionStateStore)
     checkpoint_store.acquire_session_lock = _noop_lock_cm
     svc = WorkflowExecutionService(
         port=MagicMock(),
         db=MagicMock(),
-        state_store=legacy_store,
         checkpoint_store=checkpoint_store,
     )
 
@@ -170,8 +168,6 @@ async def test_stream_no_legacy_state_store_call():
         agent_id=agent_state.agent_id,
     ):
         pass
-
-    legacy_store.save.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

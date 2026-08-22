@@ -9,12 +9,29 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.conversation import ConversationModel
-from hecate.models.message import MessageModel
 from hecate.services.ops_center.conversation_quality_scorer import (
     ConversationQualityScorer,
     _build_judge_prompt,
     _parse_judge_response,
 )
+
+
+def _shared_event_store():
+    """Module-level event store shared by fixtures and the service under test.
+
+    ``_create_message`` writes through this store; the scorer reads from
+    the same instance, so the projection can find the messages. Initialised
+    on first call; subsequent calls return the same singleton.
+    """
+    if _shared_event_store._store is None:
+        from hecate.core.config import settings
+        from hecate.services.event_state import create_event_store
+
+        _shared_event_store._store = create_event_store(settings)
+    return _shared_event_store._store
+
+
+_shared_event_store._store = None  # type: ignore[attr-defined]
 
 
 async def _create_conversation(db: AsyncSession, agent_id: uuid.UUID | None = None) -> ConversationModel:
@@ -28,21 +45,42 @@ async def _create_conversation(db: AsyncSession, agent_id: uuid.UUID | None = No
     return conv
 
 
-async def _create_message(
-    db: AsyncSession,
-    conversation_id: uuid.UUID,
-    role: str = "user",
-    content: str = "Hello",
-) -> MessageModel:
-    """Helper to create a message."""
-    msg = MessageModel(
-        conversation_id=conversation_id,
-        role=role,
-        content=content,
+async def _create_message(  # noqa: ARG001
+    db: AsyncSession,  # noqa: ARG001  — DB kept for parity with other fixtures
+    conversation_id: uuid.UUID,  # noqa: ARG001
+    role: str = "user",  # noqa: ARG001
+    content: str = "Hello",  # noqa: ARG001
+) -> dict:
+    """A2 closure: register a session row and append a CHANNEL_WRITE
+    event so ``project_conversation_messages`` can find the message.
+    Uses the module-level ``_shared_event_store`` so the scorer under
+    test reads from the same instance.
+    """
+    from sqlalchemy import select
+
+    from hecate.engine.eventstore import Event, EventType
+    from hecate.models.session import SessionModel
+
+    store = _shared_event_store()
+    session_uuid = getattr(_create_message, "_session_ids", {}).get(str(conversation_id))
+    if session_uuid is None:
+        session_uuid = uuid.uuid4()
+        _create_message._session_ids = getattr(_create_message, "_session_ids", {})
+        _create_message._session_ids[str(conversation_id)] = session_uuid
+        existing = (await db.execute(select(SessionModel).where(SessionModel.id == session_uuid))).scalar_one_or_none()
+        if existing is None:
+            db.add(SessionModel(id=session_uuid, conversation_id=conversation_id, agent_id=uuid.uuid4()))
+            await db.flush()
+
+    await store.append(
+        Event(
+            session_id=session_uuid,
+            superstep=0,
+            event_type=EventType.CHANNEL_WRITE,
+            payload={"channel": "messages", "value": {"role": role, "content": content}},
+        )
     )
-    db.add(msg)
-    await db.flush()
-    return msg
+    return {"id": str(uuid.uuid4()), "role": role, "content": content}
 
 
 class TestBuildJudgePrompt:
@@ -142,7 +180,7 @@ class TestScoreTurn:
         """Scores a single assistant turn and creates record."""
         conv = await _create_conversation(db_session)
         await _create_message(db_session, conv.id, "user", "How do I reset?")
-        asst_msg = await _create_message(db_session, conv.id, "assistant", "Go to settings.")
+        await _create_message(db_session, conv.id, "assistant", "Go to settings.")
 
         mock_response = AsyncMock()
         mock_response.content = json.dumps(
@@ -166,7 +204,7 @@ class TestScoreTurn:
                     {"role": "assistant", "content": "Go to settings."},
                 ],
                 turn_index=1,
-                message_id=asst_msg.id,
+                message_id=uuid.uuid4(),
             )
 
         assert result is not None
@@ -190,7 +228,7 @@ class TestScoreTurn:
                 conversation_id=conv.id,
                 messages=[{"role": "assistant", "content": "Hello"}],
                 turn_index=0,
-                message_id=asst_msg.id,
+                message_id=asst_msg["id"],
             )
 
         assert result is None
@@ -202,6 +240,8 @@ class TestScoreConversation:
     async def test_scores_all_assistant_turns(self, db_session: AsyncSession) -> None:
         """Scores all assistant turns in a conversation."""
         conv = await _create_conversation(db_session)
+        # Prime the shared event store with two turns so the
+        # conversation has user+assistant messages to project.
         await _create_message(db_session, conv.id, "user", "Q1")
         await _create_message(db_session, conv.id, "assistant", "A1")
         await _create_message(db_session, conv.id, "user", "Q2")
@@ -219,9 +259,10 @@ class TestScoreConversation:
         )
 
         with patch(
-            "hecate.services.ops_center.conversation_quality_scorer.llm_service.chat", return_value=mock_response
+            "hecate.services.ops_center.conversation_quality_scorer.llm_service.chat",
+            return_value=mock_response,
         ):
-            scorer = ConversationQualityScorer(db_session)
+            scorer = ConversationQualityScorer(db_session, event_store=_shared_event_store())
             results = await scorer.score_conversation(conv.id)
 
         assert len(results) == 2
@@ -247,7 +288,7 @@ class TestScoreConversation:
         with patch(
             "hecate.services.ops_center.conversation_quality_scorer.llm_service.chat", return_value=mock_response
         ):
-            scorer = ConversationQualityScorer(db_session)
+            scorer = ConversationQualityScorer(db_session, event_store=_shared_event_store())
             await scorer.score_conversation(conv.id)
 
         await db_session.refresh(conv)
