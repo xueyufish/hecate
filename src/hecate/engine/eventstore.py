@@ -56,6 +56,12 @@ class EventType(StrEnum):
     # (direct tool loop) emits the same pair via the assembly facade.
     TURN_START = "TURN_START"
     TURN_END = "TURN_END"
+    # Output-side typed findings (9.1a injection detection, 9.2 prompt
+    # leakage protection) — emitted by OutputSecurityHook after the
+    # SecurityFindingWriter persists a row. Additive, LogPolicy does NOT
+    # exclude these (see ADR-030 §1 for the additive EventType contract).
+    INJECTION_DETECTED = "INJECTION_DETECTED"
+    PROMPT_LEAKAGE_DETECTED = "PROMPT_LEAKAGE_DETECTED"
 
 
 CURRENT_LOG_SCHEMA_VERSION: int = 2  # events without this marker are non-replayable (values never recorded)

@@ -19,24 +19,28 @@ from hecate.services.security.dlp.result import DLPAction, DLPFinding, DLPResult
 
 
 class TestDLPAction:
-    def test_has_four_members(self) -> None:
-        assert len(DLPAction) == 4
+    def test_member_count(self) -> None:
+        # 9.1a/9.2 added SANITIZE (output-guardrail-only action) to the original four.
+        assert len(DLPAction) == 5
 
     def test_string_equality(self) -> None:
         assert DLPAction.ALLOW == "allow"  # type: ignore[comparison-overlap]
         assert DLPAction.BLOCK == "block"  # type: ignore[comparison-overlap]
         assert DLPAction.MASK == "mask"  # type: ignore[comparison-overlap]
         assert DLPAction.AUDIT == "audit"  # type: ignore[comparison-overlap]
+        assert DLPAction.SANITIZE == "sanitize"  # type: ignore[comparison-overlap]
 
     def test_member_values(self) -> None:
         assert DLPAction.ALLOW.value == "allow"
         assert DLPAction.BLOCK.value == "block"
         assert DLPAction.MASK.value == "mask"
         assert DLPAction.AUDIT.value == "audit"
+        assert DLPAction.SANITIZE.value == "sanitize"
 
     def test_severity_ordering(self) -> None:
         assert DLPAction.ALLOW.severity < DLPAction.AUDIT.severity
-        assert DLPAction.AUDIT.severity < DLPAction.MASK.severity
+        assert DLPAction.AUDIT.severity < DLPAction.SANITIZE.severity
+        assert DLPAction.SANITIZE.severity < DLPAction.MASK.severity
         assert DLPAction.MASK.severity < DLPAction.BLOCK.severity
 
     def test_overall_action_returns_most_restrictive(self) -> None:

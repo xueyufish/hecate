@@ -1,7 +1,7 @@
 # ADR-026: Security Shield Enhancement Architecture
 
-> **Status**: Proposed
-> **Date**: 2026-07-02
+> **Status**: Accepted (SS3/SS4 delivered via change `output-side-typed-findings`)
+> **Date**: 2026-07-02 (proposed) / 2026-08-22 (SS3+SS4 accepted)
 
 ## Context
 
@@ -95,13 +95,13 @@ CI/CD Pipeline
 
 ### 3-6. Enhancements (SS3-SS6)
 
-**SS3 (Injection Type Detection)**: YARA rule-based pattern matching on LLM outputs before they reach downstream systems (code interpreter, SQL database, template renderer, HTML page). Rules: Python code injection, SQL injection, Jinja template injection, XSS.
+**SS3 (Injection Type Detection, 9.1a)**: Regex recognizer registry with same shape as `DLPRecognizer`. Four built-in recognizers (Python code, SQL, Jinja template, XSS), each with ≥3 deterministic patterns. Per-type action configuration (`audit | block | mask | sanitize`); default `audit` (findings-only). Custom patterns supported via `guardrail_config["injection_detection"]["custom_patterns"]`. Findings persisted to `SecurityFindingModel` via `SecurityFindingWriter`; `EventType.INJECTION_DETECTED` emitted. Industry correspondence: Bedrock Guardrails Standard tier "code elements" + DeerFlow SkillScan.
 
-**SS4 (System Prompt Leakage)**: Hash-based + semantic similarity comparison of LLM output against system prompt content. Blocks responses reproducing > 20% of system prompt instructions.
+**SS4 (System Prompt Leakage Protection, 9.2)**: Winnowing n-gram fingerprint (n=5, window=4, blake2b 64-bit hash). System prompt baseline extracted from `messages[0]["content"]` (verified across both execution paths). Default threshold 0.20 overlap ratio. Default action `block`; `sanitize` redacts matched windows. Severity tiers: persona LOW / roles HIGH / rules HIGH / secrets CRITICAL. Findings persisted to `SecurityFindingModel`; `EventType.PROMPT_LEAKAGE_DETECTED` emitted. Maps to OWASP LLM07:2025 4 example attack types. Future v2 (deferred): embedding-based semantic similarity.
 
-**SS5 (SIEM Pipeline)**: Converts internal security events to CEF/LEEF format. Real-time streaming via syslog/HTTPS webhook. Event types: DLP_VIOLATION, INJECTION_ATTEMPT, PERMISSION_DENIED, BEHAVIORAL_ANOMALY, TRUST_SCORE_CHANGE.
+**SS5 (SIEM Pipeline, 8.7)**: Converts internal security events to CEF/LEEF format. Real-time streaming via syslog/HTTPS webhook. Event types: DLP_VIOLATION, INJECTION_ATTEMPT, PERMISSION_DENIED, BEHAVIORAL_ANORMALY, TRUST_SCORE_CHANGE.
 
-**SS6 (Multi-Agent Trust)**: Runtime trust score (0-1) per agent interaction: `trust = f(signature_valid, interaction_success_rate, anomaly_score, permission_alignment)`. Scores < 0.3 trigger blocking; 0.3-0.7 trigger privilege degradation.
+**SS6 (Multi-Agent Trust, 2.10a)**: Runtime trust score (0-1) per agent interaction: `trust = f(signature_valid, interaction_success_rate, anomaly_score, permission_alignment)`. Scores < 0.3 trigger blocking; 0.3-0.7 trigger privilege degradation.
 
 ## Consequences
 
