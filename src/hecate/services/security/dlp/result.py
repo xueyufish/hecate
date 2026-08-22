@@ -11,6 +11,10 @@ Severity ordering follows design.md §D6: ``BLOCK > MASK > AUDIT > ALLOW``.
 The aggregator :meth:`DLPAction.overall_action` returns the most
 restrictive action from an iterable, matching spec §dlp-scanner
 "Most restrictive wins".
+
+``SANITIZE`` is an output-guardrail-only action (9.1a / 9.2): it sits
+between AUDIT and MASK in restrictiveness per the injection-detection
+spec ordering ``BLOCK > MASK > SANITIZE > AUDIT > ALLOW``.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ class DLPAction(StrEnum):
 
     ALLOW = "allow"
     AUDIT = "audit"
+    SANITIZE = "sanitize"
     MASK = "mask"
     BLOCK = "block"
 
@@ -37,7 +42,7 @@ class DLPAction(StrEnum):
     def severity(self) -> int:
         """Return a numeric rank where higher means more restrictive.
 
-        ``ALLOW=0 < AUDIT=1 < MASK=2 < BLOCK=3``.
+        ``ALLOW=0 < AUDIT=1 < SANITIZE=2 < MASK=3 < BLOCK=4``.
         """
         return _SEVERITY[self]
 
@@ -46,7 +51,7 @@ class DLPAction(StrEnum):
         """Return the most restrictive action from ``actions``.
 
         Empty input is treated as ``ALLOW`` (fail-open default; see
-        design.md §D5). Ordering: BLOCK > MASK > AUDIT > ALLOW.
+        design.md §D5). Ordering: BLOCK > MASK > SANITIZE > AUDIT > ALLOW.
         """
         materialized = set(actions)
         if not materialized:
@@ -57,8 +62,9 @@ class DLPAction(StrEnum):
 _SEVERITY: dict[DLPAction, int] = {
     DLPAction.ALLOW: 0,
     DLPAction.AUDIT: 1,
-    DLPAction.MASK: 2,
-    DLPAction.BLOCK: 3,
+    DLPAction.SANITIZE: 2,
+    DLPAction.MASK: 3,
+    DLPAction.BLOCK: 4,
 }
 
 

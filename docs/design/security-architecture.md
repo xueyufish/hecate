@@ -487,11 +487,67 @@ YARA rule-based pattern matching on LLM outputs before they reach downstream sys
 | Template (Jinja) | `{{ config }}`, `{% import %}` | Template renderer |
 | XSS | `<script>`, `onerror=`, `javascript:` | HTML page |
 
+**Implementation status**: Delivered as `services/security/output/injection_detection/` (change `output-side-typed-findings`).
+
+- **Algorithm**: Regex recognizer registry (zero new dependencies). Each built-in recognizer (`code_python`, `sql_injection`, `template_jinja`, `xss`) exposes ≥3 deterministic patterns. The architecture mirrors `DLPRecognizer` for operator symmetry.
+- **Action model**: Per-type action configuration (`audit | block | mask | sanitize`); default is `audit` for all built-ins (findings-only, no response modification) — a coding assistant legitimately outputs SQL and `eval` examples, so defaulting to BLOCK would break normal use.
+- **Custom patterns**: Workspace-supplied regex patterns via `guardrail_config["injection_detection"]["custom_patterns"]`. Malformed patterns are logged and skipped (no crash).
+- **Bedrock alignment**: Standard tier "code elements" correspondence is implemented as content-aware regex matchers (Python `compile(...)` with literal arg, SQL `--` line-terminator comments, Jinja `{{ ... __class__ ... }}` SSTI chains, XSS event handlers on `<img>` / `<svg>` / `<iframe>`).
+- **Sink seam**: `Recognizer.detect(content, *, sink=None)` reserves a `sink` parameter for future PreToolHook-side extension. Current logic is sink-agnostic.
+- **Findings persistence**: Each finding emits a `SecurityFindingModel` row with `rule_name = output.injection_detection.<recognizer>`, `severity = high` default, `metadata_["source"] = "injection_detection"`. An `EventType.INJECTION_DETECTED` event is also appended when an event store is configured.
+
+### OWASP LLM01 mapping
+
+LLM01:2025 Prompt Injection Scenario #5 (CVE-2024-5184 email-assistant code injection) and Scenario #2 (indirect injection via DB tool) are the canonical test fixtures for 9.1a. Patterns are drawn directly from those attack vectors.
+
+### Industry reference
+
+- Amazon Bedrock Guardrails Standard tier — content filters extend to "code elements including comments, variables and function names, and string literals".
+- DeerFlow SkillScan — deterministic + LLM-based two-stage scanning.
+- OWASP LLM01:2025 attack scenarios #1–#9.
+
 ---
 
 ## System Prompt Leakage Protection (9.2 Enhancement)
 
 OWASP LLM07:2025. Detects when LLM output reproduces system prompt content. Hash-based + semantic similarity comparison against system prompt fingerprints. Blocks responses reproducing > 20% of confidential instructions, embedded secrets, or security rules.
+
+**Implementation status**: Delivered as `services/security/output/prompt_leakage/` (change `output-side-typed-findings`).
+
+- **Algorithm**: Winnowing n-gram fingerprint with `n=5`, `window=4`, `blake2b` 64-bit hashing (zero new dependencies). Same algorithm family as MOSS / JPlag code-plagiarism detectors.
+- **Baseline extraction**: System prompt is taken from `messages[0]["content"]` when `messages[0]["role"] == "system"` (verified across both execution paths — `agent_execution_port.py:110` and Pregel `LLMWorker`). Cache key is `(session_id, superstep, len(system_prompt), hash(system_prompt))`; one fingerprint per turn.
+- **Threshold**: Default `0.20` overlap ratio (>20% baseline fingerprint hashes appear in response). Configurable per workspace in `[0.05, 0.80]`.
+- **Action**: Default `block` (matches ADR-026). `sanitize` redacts matched windows + 5-token context with `<REDACTED>` markers.
+- **Severity tiers**: `persona` (LOW, default when no rule fires) → `roles` (HIGH) → `rules` (HIGH) → `secrets` (CRITICAL). Heuristic regex classifiers on the matched substring + 10-token context window.
+- **Streaming**: One fingerprint build per turn; cached on the hook instance. Streaming chunks reuse the cached fingerprint — no recompute.
+- **Findings persistence**: `SecurityFindingModel` row with `rule_name = output.prompt_leakage.<category>`, `severity = {low|high|critical}`. `EventType.PROMPT_LEAKAGE_DETECTED` event emitted (additive, ADR-030 §1 contract).
+- **Fail-safe**: Fingerprint compute failure on extreme prompts (≥100KB) emits `EventType.ERROR` and returns ALLOW — best-effort audit, no false-blocking.
+
+### OWASP LLM07 mapping
+
+OWASP LLM07:2025 lists 4 example attack scenarios:
+
+| OWASP LLM07 example | Severity | Recognized by |
+|---|---|---|
+| Exposure of Sensitive Functionality | HIGH (`rules`) | `classify()` rules regex |
+| Exposure of Internal Rules | HIGH (`rules`) | `classify()` rules regex |
+| Revealing of Filtering Criteria | HIGH (`rules`) | `classify()` rules regex |
+| Disclosure of Permissions and User Roles | HIGH (`roles`) | `classify()` roles regex |
+| Embedded API keys / secrets | CRITICAL (`secrets`) | `classify()` secrets regex |
+| Generic persona phrasing | LOW (`persona`) | fallback |
+
+OWASP LLM07 recommends 4 prevention strategies; Hecate's implementation addresses all 4:
+
+1. *Separate Sensitive Data from System Prompts* — operator responsibility (not enforced by detector).
+2. *Avoid Reliance on System Prompts for Strict Behavior Control* — operator responsibility.
+3. *Implement Guardrails outside the LLM* — `PostLLMHook` runs in `engine/`, not in the LLM call.
+4. *Enforce security controls independently from the LLM* — finding writer, event store, and SIEM export are all decoupled from the LLM call.
+
+### Industry reference
+
+- Lakera Red, Promptfoo — managed-risk detection products (Lakera's "AI Data Leaks" risk category maps to our `prompt_leakage.secrets` severity).
+- OpenClaw / Hermes Agent — DM pairing + command approval (complementary; Hermes inherits OpenClaw's approval patterns).
+- Amazon Bedrock Guardrails — Sensitive Info Filters with regex customization.
 
 ---
 

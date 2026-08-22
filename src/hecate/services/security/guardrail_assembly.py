@@ -74,6 +74,8 @@ async def assemble_guardrails(
     event_store: Any | None = None,
     session_id: uuid.UUID | None = None,
     dlp_scanner: Any = None,
+    org_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> GuardrailBundle:
     """Construct the full guardrail bundle for one agent execution.
 
@@ -103,6 +105,9 @@ async def assemble_guardrails(
             emits the durable ``APPROVAL_ASKED`` / ``APPROVAL_DECIDED``
             event pair (T2.6).
         session_id: Session id used to anchor approval event emission.
+        org_id: Organization id; auto-derived from ``WorkspaceModel`` when
+            not supplied. Required for ``SecurityFindingModel`` persistence.
+        user_id: Optional user id; propagated to finding rows when present.
 
     Returns:
         ``GuardrailBundle`` ready to inject into ``ToolWorker``,
@@ -138,7 +143,30 @@ async def assemble_guardrails(
         if rule is not None:
             rules.append(rule)
 
-    hooks = create_security_hooks(guardrail_config, dlp_scanner=dlp_scanner)
+    # Construct the output-side finding writer when context is sufficient.
+    # This closes the historical gap where DLP / injection / prompt-leakage
+    # findings on the LLM output side never reached SecurityFindingModel.
+    finding_writer: Any = None
+    if event_store is not None and session_id is not None:
+        from hecate.models.workspace import WorkspaceModel
+        from hecate.services.security.finding_writer import SecurityFindingWriter
+
+        if org_id is None:
+            ws_row = (
+                await db.execute(select(WorkspaceModel).where(WorkspaceModel.id == workspace_id))
+            ).scalar_one_or_none()
+            org_id = ws_row.org_id if ws_row is not None else None
+
+        finding_writer = SecurityFindingWriter(
+            db=db,
+            org_id=org_id,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            user_id=user_id,
+            event_store=event_store,
+        )
+
+    hooks = create_security_hooks(guardrail_config, dlp_scanner=dlp_scanner, finding_writer=finding_writer)
 
     # T2.6: when the wiring is present, the assembly produces the durable
     # audit-pair-emitting callback; otherwise it falls back to the

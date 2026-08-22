@@ -1,7 +1,7 @@
 # Hecate Implementation Roadmap
 
-> **Status**: Active — P1, P2 complete; **P3 in release close-out (4 items remaining)**; P4, P5 in progress.
-> **2026-08-22 release-scope reclassification**: P3 remaining narrowed to 4 close-out items (5.4b MCP Streamable HTTP Server 端 / 9.1a Injection Type Detection / 9.2 System Prompt Leakage Protection / 6.27 Browser Automation). 48 items moved P3→P4 (see feature-catalog "Deferred from P3"); 11.4/11.5/11.9-Discord/Telegram moved P3→P5 (channel Wave 2/3); 11.8 Intent Recognition & Routing dropped (overlaps existing routing). P4/P5 scope grows accordingly — no feature lost; one dropped.
+> **Status**: Active — P1, P2 complete; **P3 in release close-out (2 items remaining: 5.4b / 6.27)**; P4, P5 in progress.
+> **2026-08-22 release-scope reclassification**: P3 close-out items (5.4b / 9.1a / 9.2 / 6.27) → 9.1a + 9.2 delivered (change `output-side-typed-findings`), leaving **2 remaining** (5.4b MCP Streamable HTTP Server 端 / 6.27 Browser Automation). 48 items moved P3→P4 (see feature-catalog "Deferred from P3"); 11.4/11.5/11.9-Discord/Telegram moved P3→P5 (channel Wave 2/3); 11.8 Intent Recognition & Routing dropped (overlaps existing routing). P4/P5 scope grows accordingly — no feature lost; one dropped.
 > **Scope**: 12-month implementation plan covering unimplemented features across P3–P5.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
@@ -13,10 +13,10 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 87 | 83/87 (95%) | **4** (5.4b / 9.1a / 9.2 / 6.27) |
+| **P3 Trustworthy** | 87 | 85/87 (98%) | **2** (5.4b / 6.27) |
 | **P4 Intelligent** | 148 | 25/148 (17%) | 123 |
 | **P5 Ecosystem** | 71 | 0/71 (0%) | 71 |
-| **Total** | **389** | **191/389 (49%)** | **198** |
+| **Total** | **389** | **193/389 (50%)** | **196** |
 
 > Row counts are physical feature-catalog rows (2026-08-22 basis; verified by grep). Prior figures (127/101/60, total 372) used audit-counting that predated the reclassification — see feature-catalog overview note for the reconciliation.
 
@@ -258,8 +258,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 9.1 | Input Security ✅ | Guardrails ✅ | S |
-| 9.1a | Guardrails ✅ | PreLLMHook ✅ | M |
-| 9.2 | Output Security ✅ | PostLLMHook ✅ | S |
+| 9.1a | Output Injection Type Detection ✅ | Guardrails ✅ | M |
+| 9.2 | System Prompt Leakage Protection ✅ | Output Security ✅ | S |
 | 9.4 | Execution Security ✅ | Sandbox ✅ + ToolAccessPolicy ✅ | M |
 | 9.4a | Granular Operation Approval ✅ | 9.4 + DangerousPattern ✅ | M |
 | 9.4b | Trusted Workspace ✅ | 9.4 + WorkspaceBoundaryPolicy ✅ | S |
@@ -414,8 +414,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 9.10 | Outbound DLP Engine ✅ | PII Masking ✅ | L |
 | 9.11 | Agent Runtime Protection | Guardrail Hooks ✅ | L |
 | 7.10 | Automated Continuous Red Teaming | Security Testing ✅ | L |
-| 9.1a | Injection Type Detection | Guardrails ✅ | S |
-| 9.2 | System Prompt Leakage Protection | Output Security ✅ | S |
+| 9.1a | Output Injection Type Detection ✅ | Guardrails ✅ | S |
+| 9.2 | System Prompt Leakage Protection ✅ | Output Security ✅ | S |
 | 8.7 | Security Event SIEM Pipeline ✅ | Audit Logs ✅ + 9.14 ✅ | M |
 | 2.10b | Multi-Agent Trust Verification | A2A ✅ | M |
 | 9.6 | Compliance Framework | Security ✅ | M |
@@ -477,8 +477,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [x] Outbound DLP Engine with 3-point scanning (PR #58)
 - [ ] Agent Runtime Protection with 5 detector types
 - [ ] Automated Continuous Red Teaming operational
-- [ ] Injection Type Detection for downstream systems
-- [ ] System Prompt Leakage Protection
+- [x] Injection Type Detection for downstream systems *(delivered via change `output-side-typed-findings`)*
+- [x] System Prompt Leakage Protection *(delivered via change `output-side-typed-findings`)*
 - [x] Security Event SIEM Pipeline for SOC teams
 - [x] **Environment Security P0**: Network Egress Control (9.12) + Sandbox Enforcement (9.13) + Structured Audit Pipeline (9.14) + Per-Execution Credential Scoping (9.15)
 - [ ] Multi-Agent Trust Verification
@@ -507,15 +507,15 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ## Sprint 7: P3 Complete (Month 13–14)
 
-> **Goal (2026-08-22 release-scope reclassification)**: P3 closes with **4 close-out items** — 5.4b MCP Streamable HTTP Server 端 / 9.1a Injection Type Detection / 9.2 System Prompt Leakage Protection / 6.27 Browser Automation. All other remaining Sprint 7 scope moved to P4 (48 items — see feature-catalog "Deferred from P3") or P5 (channel Wave 2/3); 11.8 dropped. Sub-tables below retain delivery history (✅ rows) with → P4/P5 annotations on moved items.
+> **Goal (2026-08-22 release-scope reclassification)**: P3 closes with **2 close-out items** — 5.4b MCP Streamable HTTP Server 端 / 6.27 Browser Automation. 9.1a + 9.2 delivered via change `output-side-typed-findings` (regex recognizer registry + winnowing fingerprint; typed findings persist to `SecurityFindingModel` and emit `EventType.INJECTION_DETECTED` / `EventType.PROMPT_LEAKAGE_DETECTED`). All other remaining Sprint 7 scope moved to P4 (48 items — see feature-catalog "Deferred from P3") or P5 (channel Wave 2/3); 11.8 dropped. Sub-tables below retain delivery history (✅ rows) with → P4/P5 annotations on moved items.
 
 ### P3 Close-Out (the only remaining P3 work)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 5.4b | MCP Streamable HTTP Transport — **Server 端**（client 已交付）。按 **2026-07-28 新规范**实现：无状态核心、Mcp-Method/Mcp-Name header 路由、MRTR、cacheable lists | 5.4c ✅ | M |
-| 9.1a | Injection Type Detection — 注入攻击分型（direct/indirect/tool-output/memory-poisoning），typed findings 进 SIEM + DLP | Guardrails ✅ | S |
-| 9.2 | System Prompt Leakage Protection — 输出侧系统提示词/指令外泄检测与阻断（OWASP LLM07） | Output Security ✅ | S |
+| ~~9.1a~~ | ~~Injection Type Detection~~ ✅ delivered 2026-08-22 (change `output-side-typed-findings`) | Guardrails ✅ | — |
+| ~~9.2~~ | ~~System Prompt Leakage Protection~~ ✅ delivered 2026-08-22 (change `output-side-typed-findings`) | Output Security ✅ | — |
 | 6.27 | Browser Automation Tool — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ + 9.4 内容门控 ✅ | M |
 
 ### Engine Architecture: Event-Sourced State (NEW, Q4=A decision)
@@ -649,8 +649,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [x] Multi-Channel Wave 1: 11.2 simplified + 11.3 Feishu + 11.9 Slack
 - [x] Release hardening: migration drift gate + E2E suite (F3/F4/F7/A7) + dead-code sweep + 13.4a-7/C2/A2 closures (PR #88/#89, net −2159 lines)
 - [ ] **5.4b MCP Streamable HTTP Server 端**（按 2026-07-28 规范）
-- [ ] **9.1a Injection Type Detection**
-- [ ] **9.2 System Prompt Leakage Protection**
+- [x] **9.1a Injection Type Detection** *(delivered)*
+- [x] **9.2 System Prompt Leakage Protection** *(delivered)*
 - [ ] **6.27 Browser Automation Tool**
 
 ---

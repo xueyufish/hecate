@@ -31,16 +31,24 @@ class SecurityHookSet(NamedTuple):
 def create_security_hooks(
     guardrail_config: dict | None = None,
     dlp_scanner: Any = None,
+    finding_writer: Any = None,
 ) -> SecurityHookSet:
     """Construct a SecurityHookSet from per-agent guardrail configuration.
 
     Args:
         guardrail_config: Agent-specific guardrail config dict with optional
-            sections: ``input_security``, ``output_security``, ``data_security``.
-            When ``None`` or empty, returns NoOp hooks for all four positions.
+            sections: ``input_security``, ``output_security``, ``data_security``,
+            ``injection_detection`` (9.1a), ``prompt_leakage`` (9.2),
+            ``output_findings`` (L0 substrate). When ``None`` or empty,
+            returns NoOp hooks for all four positions.
         dlp_scanner: Optional DLP scanner wired into the output-security and
             tool-result hooks (9.10). When ``None`` the hooks skip the DLP
             leg — the pre-wiring state before this parameter existed.
+        finding_writer: Optional structured ``SecurityFindingWriter`` (or
+            legacy callable) that persists ``SecurityFindingModel`` rows for
+            every output-side detection (DLP, injection, prompt leakage).
+            When ``None`` the output hook skips finding persistence — the
+            historical pre-wiring state.
 
     Returns:
         SecurityHookSet with configured or NoOp hooks.
@@ -73,6 +81,8 @@ def create_security_hooks(
             toxicity_threshold=output_cfg.get("toxicity_threshold", 0.7),
             deanonymize=output_cfg.get("deanonymize", True),
             dlp_scanner=dlp_scanner,
+            security_finding_writer=finding_writer,
+            guardrail_config=guardrail_config,
         )
         if output_cfg and output_cfg.get("enabled", True)
         else NoOpPostLLMHook()
