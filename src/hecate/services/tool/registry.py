@@ -195,7 +195,7 @@ async def seed_builtin_tools(db: AsyncSession) -> int:
                 description=tool_def["description"],
                 source="builtin",
                 parameters=tool_def["parameters"],
-                risk_level="LOW",
+                risk_level=str(tool_def.get("risk_level", "LOW")).upper(),
                 approval_required=False,
                 sandbox_enabled=(tool_name == "execute_code"),
             )
@@ -203,9 +203,15 @@ async def seed_builtin_tools(db: AsyncSession) -> int:
             count += 1
         else:
             # Update if definition changed
-            if existing.description != tool_def["description"] or existing.parameters != tool_def["parameters"]:
+            new_risk = str(tool_def.get("risk_level", "LOW")).upper()
+            if (
+                existing.description != tool_def["description"]
+                or existing.parameters != tool_def["parameters"]
+                or existing.risk_level != new_risk
+            ):
                 existing.description = tool_def["description"]
                 existing.parameters = tool_def["parameters"]
+                existing.risk_level = new_risk
                 count += 1
 
     await db.flush()
