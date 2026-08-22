@@ -28,7 +28,7 @@ Hecate's engine layer has **zero external dependencies** (the sole exception is 
 │  Concrete implementations:                  │
 │    LLMService → implements llm_invoke       │
 │    ToolRegistry → implements tool_execute   │
-│    PostgresCheckpointStore → save/load      │
+│    SessionStateMaterializer → save/load     │
 │    YourCustomHook → implements PreLLMHook   │
 └─────────────────────────────────────────────┘
 ```

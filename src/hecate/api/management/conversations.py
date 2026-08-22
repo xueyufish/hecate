@@ -25,6 +25,7 @@ from hecate.models.conversation import (
     ConversationModel,
     ConversationReadSchema,
 )
+from hecate.services.ops_center.conversation_messages import project_conversation_messages
 
 router = APIRouter()
 
@@ -133,20 +134,10 @@ async def get_conversation(
             detail={"error": {"code": "NOT_FOUND", "message": "Conversation not found", "details": None}},
         )
 
-    # A2 closure: messages are projected from the event log. Conversation
-    # is the user-facing label; SessionModel.conversation_id links back to
-    # it. We aggregate derive_session_messages across all sessions
-    # attached to this conversation.
-    from hecate.models.session import SessionModel
-    from hecate.services.replay.assembler import derive_session_messages
-
-    session_rows = (
-        (await db.execute(select(SessionModel).where(SessionModel.conversation_id == conversation_id))).scalars().all()
-    )
-
-    messages: list[dict] = []
-    for session in session_rows:
-        messages.extend(await derive_session_messages(session.id, event_store))
+    # A2 closure: messages are projected from the event log via
+    # project_conversation_messages — the single read-side seam that
+    # joins SessionModel.conversation_id → derive_session_messages.
+    messages = await project_conversation_messages(db, conversation_id, event_store)
 
     conv_data = ConversationReadSchema.model_validate(conversation).model_dump()
     conv_data["messages"] = messages

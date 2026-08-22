@@ -159,7 +159,7 @@ class WorkerPool(ABC):
 
 Materializes execution-state caches for fast resume (the event log is the source of truth — [ADR-030](adr/030-event-sourced-execution-state.md)). Default: in-memory dict (lost on restart).
 
-**Default**: `InMemoryCheckpointStore`. **Production**: `SessionStateMaterializer` (`services/orchestration/`) — implements this ABC and writes through `SessionStateStore` (Redis / PostgreSQL / Tiered). `PostgresCheckpointStore` is **soft-deprecated** per ADR-030.
+**Default**: `InMemoryCheckpointStore`. **Production**: `SessionStateMaterializer` (`services/orchestration/`) — implements this ABC and writes through `SessionStateStore` (Redis / PostgreSQL / Tiered). `PostgresCheckpointStore` was hard-removed in 13.4a-7 (along with the `checkpoints` table).
 
 ### 4. `EventStore`
 
