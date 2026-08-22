@@ -118,6 +118,18 @@ services:
     command: >
       sh -c "uvicorn hecate.main:app --host 0.0.0.0 --port 8000"
 
+  # Browser sandbox image — built on demand via `--profile browser`. Sandbox
+  # containers themselves are launched dynamically by SandboxPool (outside
+  # compose), so this service has no command; it exists only as a build target.
+  hecate-browser-sandbox:
+    profiles: ["browser"]
+    build:
+      context: ./sandbox
+      dockerfile: Dockerfile
+    image: hecate-browser-sandbox:latest
+    ports: []
+    restart: "no"
+
 volumes:
   pgdata:
   qdrant_data:

@@ -33,7 +33,7 @@ Hecate tools come from three origins. The `ToolModel.source` field distinguishes
 
 | Source | Origin | Examples |
 |--------|--------|----------|
-| `builtin` | Shipped with Hecate, seeded on startup | `web_search`, `read_file`, `write_file`, `list_files`, `execute_code` |
+| `builtin` | Shipped with Hecate, seeded on startup | `web_search`, `read_file`, `write_file`, `list_files`, `execute_code`, plus six browser tools (6.27) |
 | `custom` | User-defined via API or code | Company-specific functions, business logic wrappers |
 | `mcp` | Discovered from a registered MCP server | GitHub, Slack, databases, internal APIs — anything MCP-compatible |
 

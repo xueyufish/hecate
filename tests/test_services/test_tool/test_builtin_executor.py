@@ -110,8 +110,20 @@ class TestUnknownTool:
 
 
 class TestToolDefinitions:
-    def test_all_5_tools_defined(self) -> None:
-        expected = {"web_search", "read_file", "write_file", "list_files", "execute_code"}
+    def test_all_11_tools_defined(self) -> None:
+        expected = {
+            "web_search",
+            "read_file",
+            "write_file",
+            "list_files",
+            "execute_code",
+            "browser_navigate",
+            "browser_click",
+            "browser_type",
+            "browser_extract",
+            "browser_screenshot",
+            "browser_fill_form",
+        }
         assert set(BUILTIN_TOOL_DEFINITIONS.keys()) == expected
 
     def test_each_definition_has_required_keys(self) -> None:
@@ -119,3 +131,15 @@ class TestToolDefinitions:
             assert "description" in defn, f"{name} missing description"
             assert "parameters" in defn, f"{name} missing parameters"
             assert "type" in defn["parameters"], f"{name} parameters missing type"
+            assert "risk_level" in defn, f"{name} missing risk_level"
+
+    def test_browser_tools_default_to_medium_risk(self) -> None:
+        for name in (
+            "browser_navigate",
+            "browser_click",
+            "browser_type",
+            "browser_extract",
+            "browser_screenshot",
+            "browser_fill_form",
+        ):
+            assert BUILTIN_TOOL_DEFINITIONS[name]["risk_level"] == "MEDIUM"

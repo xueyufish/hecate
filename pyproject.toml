@@ -99,6 +99,7 @@ tools = [
     "aiodocker>=0.23.0",
     "lark-oapi[aiohttp]>=1.4.0",
     "slack-bolt>=1.18.0",
+    "playwright>=1.40,<2.0",
 ]
 redis = [
     "redis>=5.0.0",
@@ -151,6 +152,7 @@ known-third-party = ["alembic", "pytest", "sqlalchemy"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S607", "S105"]
+"tests/test_services/test_browser/test_integration.py" = ["S310"]
 "alembic/versions/**" = ["S608"]
 "src/hecate/models/alert.py" = ["S105"]
 "src/hecate/cli/migrate.py" = ["S603", "S607"]

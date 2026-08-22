@@ -114,7 +114,7 @@
           <mxGeometry x="20" y="405" width="910" height="65" as="geometry" />
         </mxCell>
         <!-- 5 × 170 = 850 -->
-        <mxCell id="r3_browser" value="📋 Browser / Computer-use" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
+        <mxCell id="r3_browser" value="✅ Browser Automation (6.27, shipped 2026-08-22) · 📋 Computer-use → 6.27a (P4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r3_c">
           <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
         </mxCell>
         <mxCell id="r3_dataagent" value="📋 DataAgent (NL2SQL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">

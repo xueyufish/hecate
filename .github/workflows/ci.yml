@@ -76,3 +76,29 @@ jobs:
         env:
           DRIFT_ADMIN_URL: postgresql://hecate:hecate@localhost:5432/postgres
         run: pytest tests/test_migrations/test_upgrade_drift.py -v
+
+  # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
+  # requires Docker-in-Docker and is covered by integration tests locally.
+  docker-sandbox-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build hecate-browser-sandbox image
+        run: docker build -t hecate-browser-sandbox:ci docker/sandbox/
+      - name: Verify image size under 700MB
+        run: |
+          size=$(docker image inspect hecate-browser-sandbox:ci --format '{{.Size}}')
+          size_mb=$((size / 1024 / 1024))
+          echo "Image size: ${size_mb}MB"
+          if [ "$size_mb" -gt 700 ]; then
+            echo "::error::Image size ${size_mb}MB exceeds 700MB budget"
+            exit 1
+          fi
+      - name: Verify entrypoint imports
+        run: |
+          docker run --rm hecate-browser-sandbox:ci python -c "import playwright; print('playwright ok')"
+      - name: Verify entrypoint file present
+        run: |
+          cid=$(docker run -d hecate-browser-sandbox:ci sleep 60)
+          docker exec "$cid" ls /opt/sandbox/entrypoint.py
+          docker rm -f "$cid"

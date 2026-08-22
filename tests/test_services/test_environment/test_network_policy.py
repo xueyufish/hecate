@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
+import socket
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
 from hecate.services.environment.network_policy import (
     NetworkEgressPolicy,
     NetworkPolicyMode,
+    is_url_allowed,
 )
 
 
@@ -66,3 +73,104 @@ class TestNetworkEgressPolicy:
         )
         assert policy.is_domain_allowed("pypi.org") is True
         assert policy.is_domain_allowed("Pypi.Org") is True
+
+
+class TestIsUrlAllowed:
+    def test_empty_allowlist_denies_everything(self):
+        assert is_url_allowed("https://example.com", []) is False
+
+    def test_exact_host_match(self):
+        assert is_url_allowed("https://example.com/path", ["example.com"]) is True
+
+    def test_wildcard_subdomain_match(self):
+        assert is_url_allowed("https://api.example.com/x", ["*.example.com"]) is True
+
+    def test_wildcard_matches_apex(self):
+        assert is_url_allowed("https://example.com", ["*.example.com"]) is True
+
+    def test_wildcard_does_not_match_other_tld(self):
+        assert is_url_allowed("https://example.org", ["*.example.com"]) is False
+
+    def test_case_insensitive(self):
+        assert is_url_allowed("https://Example.COM", ["example.com"]) is True
+
+    def test_subdomain_does_not_match_apex_allowlist(self):
+        assert is_url_allowed("https://api.example.com", ["example.com"]) is False
+
+    def test_malformed_url_denied(self):
+        assert is_url_allowed("not a url", ["example.com"]) is False
+
+    def test_url_without_host_denied(self):
+        assert is_url_allowed("https://", ["example.com"]) is False
+
+
+@pytest.mark.asyncio
+async def test_apply_to_container_allow_all_skips_iptables(monkeypatch):
+    policy = NetworkEgressPolicy(mode=NetworkPolicyMode.ALLOW_ALL)
+    fake_exec = AsyncMock()
+    monkeypatch.setattr("asyncio.create_subprocess_exec", fake_exec)
+    ok = await policy.apply_to_container("cid-abc")
+    assert ok is True
+    fake_exec.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_apply_to_container_emits_iptables_rules(monkeypatch):
+    """Verify the assembled docker exec invocation contains the right iptables commands."""
+    policy = NetworkEgressPolicy(
+        mode=NetworkPolicyMode.DENY_ALL,
+        allowed_domains=["example.com"],
+    )
+
+    fake_proc = MagicMock()
+    fake_proc.communicate = AsyncMock(return_value=(b"", b""))
+    fake_proc.returncode = 0
+
+    captured: dict[str, list[str]] = {}
+
+    async def _fake_exec(*cmd, **_kwargs):
+        captured["cmd"] = [str(c) for c in cmd]
+        return fake_proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", _fake_exec)
+
+    async def _fake_getaddrinfo(_host, _port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "getaddrinfo", _fake_getaddrinfo)
+
+    ok = await policy.apply_to_container("cid-abc")
+    assert ok is True
+    assert "cmd" in captured
+    cmd_str = " ".join(captured["cmd"])
+    assert "docker exec cid-abc" in cmd_str
+    assert "iptables" in cmd_str
+    assert "93.184.216.34" in cmd_str
+    assert "ACCEPT" in cmd_str
+
+
+@pytest.mark.asyncio
+async def test_apply_to_container_returns_false_on_iptables_failure(monkeypatch):
+    policy = NetworkEgressPolicy(
+        mode=NetworkPolicyMode.DENY_ALL,
+        allowed_domains=["example.com"],
+    )
+
+    fake_proc = MagicMock()
+    fake_proc.communicate = AsyncMock(return_value=(b"", b"Permission denied (you must be root)"))
+    fake_proc.returncode = 1
+
+    async def _fake_exec(*cmd, **_kwargs):
+        return fake_proc
+
+    monkeypatch.setattr("asyncio.create_subprocess_exec", _fake_exec)
+
+    async def _fake_getaddrinfo(_host, _port, *args, **kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+    loop = asyncio.get_running_loop()
+    monkeypatch.setattr(loop, "getaddrinfo", _fake_getaddrinfo)
+
+    ok = await policy.apply_to_container("cid-abc")
+    assert ok is False

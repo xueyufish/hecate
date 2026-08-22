@@ -208,7 +208,7 @@ The response follows the standard OpenAI Chat Completions format. Hecate resolve
 
 ## Step 5 — Add a tool and watch tool calling
 
-Agents become useful when they can take action. Hecate seeds five built-in tools on startup:
+Agents become useful when they can take action. Hecate seeds eleven built-in tools on startup:
 
 | Tool | Description |
 |------|-------------|
@@ -217,6 +217,7 @@ Agents become useful when they can take action. Hecate seeds five built-in tools
 | `write_file` | Write content to a file in the workspace |
 | `list_files` | List files and directories in the workspace |
 | `execute_code` | Execute code in a sandboxed environment |
+| `browser_navigate` / `browser_click` / `browser_type` / `browser_extract` / `browser_screenshot` / `browser_fill_form` | Drive a sandboxed headless Chromium (see [Browser Automation](../how-to/browser-automation.md)) |
 
 ### Bind a tool to your agent
 
