@@ -11,13 +11,13 @@
 | 指标 | 数值 |
 |------|------|
 | P3 总特性数（重校准 + 插件生态调整后） | 124 |
-| 已完成 ✅ | **84 (68%)**（含 5.13a Plugin Content Scanning；累计 1.3.18 ✅ + 1.3.19 ✅ + 8.20 ✅ + 5.5c ✅ + 5.13a ✅） |
-| 未完成 | **40 (32%)**（原 58 − Drop 5 − Defer 15 + 新增 4 − 已完成 5 + 插件生态新增 2（5.5c ✅ / 5.13a ✅，双双交付）） |
+| 已完成 ✅ | **85 (69%)**（含 5.13a Plugin Content Scanning + 6.27 Browser Automation Tool；累计 1.3.18 ✅ + 1.3.19 ✅ + 8.20 ✅ + 5.5c ✅ + 5.13a ✅ + 6.27 ✅） |
+| 未完成 | **39 (31%)**（40 − 6.27 完成；仅剩 5.4b MCP Streamable HTTP Server 端） |
 | 已完成 Sprint | Sprint 4 (M4) ✅、Sprint 5 (M5) ✅ |
-| 部分 Sprint | Sprint 6 (M6) — 约 79% 完成；Sprint 7 (M7) — 关键项已交付（1.3.19 / 8.20 / 1.3.18 / 5.5c / 5.13a + 5.5 T0 收紧 + Wave 1 三渠道 11.2/11.3/11.9），其余按 [roadmap.md](./roadmap.md) 推进 |
+| 部分 Sprint | Sprint 6 (M6) — 约 79% 完成；Sprint 7 (M7) — 关键项已交付（1.3.19 / 8.20 / 1.3.18 / 5.5c / 5.13a / 6.27 + 5.5 T0 收紧 + Wave 1 三渠道 11.2/11.3/11.9），其余按 [roadmap.md](./roadmap.md) 推进 |
 | 发布阻塞项 | 1 项关键 + 2 项强烈建议 — **全部交付**（1.3.19 ✅ + 8.20 ✅ + 1.3.18 ✅ + 5.5c ✅ + 5.13a ✅ + guardrail-upgrade-trio ✅：HITL durable audit + monotonic denial gating 随 PR #86 落地，配置表迁移随 PR #87 补齐；13.4 K8s harness 依决策随 13.1 落地） |
-| 有部分代码 | 2 项已有可观代码但标记为未完成 |
-| 零代码 + 新增 | 34 项零代码（原 57 − Drop 5 − Defer 15 − 已完成 4）+ 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
+| 有部分代码 | 1 项已有可观代码但标记为未完成（5.4b） |
+| 零代码 + 新增 | 33 项零代码 + 6 项新增（1.3.18/1.3.19/8.20/6.27 + 5.5c/5.13a 插件生态调整） |
 
 ---
 
@@ -33,6 +33,7 @@
 | 5.5c | Agent Plugins 1.0 Standard Ingestion | 目录/git/zip 安装 + 封闭清单校验 + 固定位置发现 + SKILL.md→SkillModel（source/origin/pin-by-hash）+ 组件级信任分派 + stdio 9.4c 容器沙箱（`plugin/agent_plugins.py` 单 adapter） | PR #81，2026-08-18 |
 | 5.13a | Plugin Content Scanning | 16 规则引擎（注入/secret/URL + Unicode 阈值 + NFKC/有界解码层 + 角色×规则矩阵）+ install/enable fail-closed + SecurityFinding 投影/ack；总开关翻默认开——插件生态 go-live | PR #83，2026-08-18 |
 | 5.5 (enh) | T0 Tightening | ADR-029 "runtime artifacts never T0" 落码：`PythonEntryPolicy` 注入 `load_plugin`/`install_plugin_from_bundle` 双执行点，非第一方 `python:` entry SaaS 拒 / 自托管默认拒 + allowlist；install 前置拒绝 + 目录回滚（`openspec/changes/archive/2026-08-19-t0-runtime-plugin-tightening/`） | PR #84，2026-08-19 |
+| 6.27 ✅ | Browser Automation Tool | 6 个 builtin tool（`browser_navigate/click/type/extract/screenshot/fill_form`）+ per-agent-session `BrowserSessionManager` + 专用 `hecate-browser-sandbox` Docker 镜像（Playwright 1.40 + Chromium ~600MB）+ `NetworkPolicy` 默认 fail-closed + 非白名单域名触发 HIGH risk；DLP 扫 extract 文本和 screenshot；computer-use 部分拆到 6.27a P4 | `openspec/changes/browser-automation/` |
 | 11.2 | Web Widget (Simplified) | iframe embed，浏览器直调 `/v1/chat/completions`（[ADR-031](../design/adr/031-web-widget-iframe-architecture.md)） | PR #78，2026-08-16 |
 | 11.3 | Feishu (Lark) | ChannelABC 首个真实实现 | 2026-08-13 |
 | 11.9 | Slack | ChannelABC 第二个真实实现 | 2026-08-13 |
