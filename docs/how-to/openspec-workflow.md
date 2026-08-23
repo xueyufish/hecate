@@ -225,9 +225,8 @@ Since PR #63 (`docs: add OpenSpec workflow guide and strengthen main branch prot
 | `docs/design/positioning.md` | Canonical competitive positioning + feature highlights. The single file AGENTS.md § "Catalog & Roadmap sync is MANDATORY" calls out by name. Update here for any feature that changes the positioning narrative. |
 | `docs/features/feature-catalog.md` | Full feature inventory: P1→P5 priority list, status counts, dependency notes, status-bar counters at the top. Update here for any feature that shifts the priority counts or lands in a new priority tier. |
 | `docs/features/roadmap.md` | Sprint-level schedule and ownership. Update here if the change moves a sprint boundary, adds a new workstream, or changes ownership. |
-| `docs/features/p3-mvp-audit.md` | P3 audit statistics — completed/in-progress/zero-code counts per sprint. Update here whenever the audit rolls forward. |
 
-Pick the file(s) the change actually affects. A bug fix that lands as P3 likely touches only `feature-catalog.md` and `p3-mvp-audit.md`. A new strategic positioning claim touches `positioning.md`. Large features may touch all four. If nothing in the change belongs in any catalog, skip the commit (the catalog step is no-op).
+Pick the file(s) the change actually affects. A bug fix that lands as P3 likely touches only `feature-catalog.md`. A new strategic positioning claim touches `positioning.md`. Large features may touch all three. If nothing in the change belongs in any catalog, skip the commit (the catalog step is no-op).
 
 ```bash
 # Still in the worktree from Phase 6:

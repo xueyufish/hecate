@@ -1,19 +1,38 @@
 """MCP (Model Context Protocol) client for tool discovery and execution.
 
-Provides real MCP server connections using the official ``mcp`` Python SDK,
-supporting Streamable HTTP and stdio transports. Includes health check
-support and per-request timeout.
+Provides real MCP server connections using the official ``mcp`` Python SDK v2,
+supporting Streamable HTTP and stdio transports. Includes protocol-era
+negotiation (2026-07-28 preferred, with automatic fallback to the 2025
+``initialize`` handshake), health-check support, and per-request timeout.
+
+Public surface (kept stable for downstream callers — 5.4c connection
+manager and the egress-filter test suite depend on these signatures):
+
+- ``connect_http(server_url)`` — open a Streamable HTTP session
+- ``connect_stdio(command, args, env=None)`` — open a stdio subprocess session
+- ``list_tools()`` — list tool descriptors from the connected server
+- ``call_tool(tool_name, arguments)`` — invoke a tool; result text is run
+  through the egress-filter chain before returning
+- ``disconnect()`` — close the underlying session
+- ``health_check()`` — cheap liveness probe
+- ``connected`` property — whether the session is open
+- ``protocol_version`` property — negotiated MCP version, set after connect
+
+The implementation builds on ``mcp.Client`` (the v2 high-level client). The
+SDK performs protocol-era negotiation automatically (``mode='auto'`` probes
+``server/discover`` and falls back to the ``initialize`` handshake when the
+server returns ``-32601``). We eagerly enter the SDK's async context manager
+inside ``connect_http`` / ``connect_stdio`` so that the existing
+``connected`` semantics of HecateMCPClient are preserved.
 """
 
 from __future__ import annotations
 
 import logging
-from contextlib import AsyncExitStack
 from typing import Any
 
-from mcp import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp import Client
+from mcp.client.stdio import StdioServerParameters
 
 from hecate.services.security.egress import EgressFilter, EgressResult
 
@@ -21,13 +40,11 @@ logger = logging.getLogger(__name__)
 
 
 class HecateMCPClient:
-    """Production MCP client wrapping the official ``mcp`` SDK.
-
-    Supports connecting to MCP servers via Streamable HTTP or stdio transport,
-    discovering available tools, executing tool calls, and health checks.
+    """Production MCP client wrapping the official ``mcp`` SDK v2.
 
     Args:
-        timeout: Connection and request timeout in seconds.
+        timeout: Connection and request timeout in seconds (mapped to
+            ``mcp.Client(..., read_timeout_seconds=timeout)``).
         server_url: URL of the MCP server (stored for audit context).
         egress_filters: Optional chain of DLP egress filters applied to
             tool result text before returning. The first filter that
@@ -49,14 +66,25 @@ class HecateMCPClient:
         self._server_url = server_url
         self._egress_filters: list[EgressFilter] = list(egress_filters or [])
         self._audit_sink = audit_sink
-        self._session: ClientSession | None = None
-        self._exit_stack: AsyncExitStack | None = None
+        self._client: Client | None = None
         self._connected = False
 
     @property
     def connected(self) -> bool:
         """Whether the client is currently connected to a server."""
-        return self._connected and self._session is not None
+        return self._connected and self._client is not None
+
+    @property
+    def protocol_version(self) -> str | None:
+        """Negotiated MCP protocol version, set after a successful connection.
+
+        Returns ``None`` if the client is not connected or the SDK has not yet
+        recorded a version (e.g. negotiation still in flight on slow servers).
+        Forwards ``mcp.Client.protocol_version`` directly.
+        """
+        if self._client is None:
+            return None
+        return getattr(self._client, "protocol_version", None)
 
     async def connect_http(self, server_url: str) -> None:
         """Connect to a remote MCP server via Streamable HTTP.
@@ -65,14 +93,22 @@ class HecateMCPClient:
             server_url: Full URL of the MCP endpoint (e.g. ``http://host:port/mcp``).
         """
         logger.info("Connecting to MCP server via HTTP at %s", server_url)
-        self._exit_stack = AsyncExitStack()
-        read_stream, write_stream = await self._exit_stack.enter_async_context(
-            streamablehttp_client(url=server_url, timeout=self._timeout)
+        self._server_url = server_url
+        self._client = Client(
+            server_url,
+            mode="auto",
+            read_timeout_seconds=self._timeout,
         )
-        self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
-        await self._session.initialize()
+        # Eagerly enter the SDK's async context manager so that ``connected``
+        # is True immediately after ``connect_http`` returns, matching the
+        # pre-upgrade semantics relied on by callers and tests.
+        await self._client.__aenter__()
         self._connected = True
-        logger.info("Connected to MCP server at %s", server_url)
+        logger.info(
+            "Connected to MCP server at %s (protocol=%s)",
+            server_url,
+            self.protocol_version,
+        )
 
     async def connect_stdio(
         self,
@@ -87,35 +123,47 @@ class HecateMCPClient:
             args: Command arguments (e.g. ``["server.py"]``).
             env: Optional environment variables for the subprocess.
         """
-        logger.info("Connecting to MCP server via stdio: %s %s", command, " ".join(args))
+        logger.info(
+            "Connecting to MCP server via stdio: %s %s",
+            command,
+            " ".join(args),
+        )
         server_params = StdioServerParameters(command=command, args=args, env=env)
-        self._exit_stack = AsyncExitStack()
-        read_stream, write_stream = await self._exit_stack.enter_async_context(stdio_client(server_params))
-        self._session = await self._exit_stack.enter_async_context(ClientSession(read_stream, write_stream))
-        await self._session.initialize()
+        self._server_url = f"stdio://{command}"
+        self._client = Client(
+            server_params,
+            mode="auto",
+            read_timeout_seconds=self._timeout,
+        )
+        await self._client.__aenter__()
         self._connected = True
-        logger.info("Connected to MCP server via stdio: %s", command)
+        logger.info(
+            "Connected to MCP server via stdio: %s (protocol=%s)",
+            command,
+            self.protocol_version,
+        )
 
     async def list_tools(self) -> list[dict[str, Any]]:
         """List available tools from the connected MCP server.
 
         Returns:
-            List of tool dicts with ``name``, ``description``, and ``inputSchema`` keys.
+            List of tool dicts with ``name``, ``description``, and ``input_schema`` keys
+            (snake_case per MCP 2.0 wire format).
 
         Raises:
             RuntimeError: If not connected to a server.
         """
-        if not self.connected or self._session is None:
+        if not self.connected or self._client is None:
             raise RuntimeError("Not connected to an MCP server")
 
-        result = await self._session.list_tools()
+        result = await self._client.list_tools()
         tools: list[dict[str, Any]] = []
         for tool in result.tools:
             tools.append(
                 {
                     "name": tool.name,
                     "description": tool.description or "",
-                    "inputSchema": tool.inputSchema if hasattr(tool, "inputSchema") else {},
+                    "inputSchema": tool.input_schema or {},
                 }
             )
         return tools
@@ -145,11 +193,11 @@ class HecateMCPClient:
         Raises:
             RuntimeError: If not connected to a server.
         """
-        if not self.connected or self._session is None:
+        if not self.connected or self._client is None:
             raise RuntimeError("Not connected to an MCP server")
 
         logger.info("Calling tool %s", tool_name)
-        result = await self._session.call_tool(tool_name, arguments)
+        result = await self._client.call_tool(tool_name, arguments)
         if not result.content:
             return None
 
@@ -182,9 +230,9 @@ class HecateMCPClient:
             current = text
             blocked = False
             for filt in self._egress_filters:
-                result: EgressResult = await filt.filter(current, context=context)
-                if result.audit_data and self._audit_sink is not None:
-                    for record in result.audit_data:
+                filt_result: EgressResult = await filt.filter(current, context=context)
+                if filt_result.audit_data and self._audit_sink is not None:
+                    for record in filt_result.audit_data:
                         self._audit_sink(
                             entity_type=record.get("entity_type", "UNKNOWN"),
                             value=record.get("value", ""),
@@ -195,11 +243,11 @@ class HecateMCPClient:
                             action=record.get("action", "allow"),
                             context={**context, "filter": filt.__class__.__name__},
                         )
-                if result.action == EgressAction.BLOCK:
+                if filt_result.action == EgressAction.BLOCK:
                     blocked = True
                     break
-                if result.action == EgressAction.MODIFIED and result.content is not None:
-                    current = result.content
+                if filt_result.action == EgressAction.MODIFIED and filt_result.content is not None:
+                    current = filt_result.content
             if blocked:
                 return None
             out.append(current)
@@ -211,10 +259,10 @@ class HecateMCPClient:
         Returns:
             True if the server responds to list_tools, False otherwise.
         """
-        if not self.connected or self._session is None:
+        if not self.connected or self._client is None:
             return False
         try:
-            await self._session.list_tools()
+            await self._client.list_tools()
             return True
         except Exception:
             logger.debug("Health check failed for MCP client", exc_info=True)
@@ -222,13 +270,12 @@ class HecateMCPClient:
 
     async def disconnect(self) -> None:
         """Disconnect from the MCP server and clean up resources."""
-        if self._exit_stack is not None:
+        if self._client is not None:
             try:
-                await self._exit_stack.aclose()
+                await self._client.__aexit__(None, None, None)
             except Exception:
                 logger.debug("Error during MCP client disconnect", exc_info=True)
             finally:
-                self._exit_stack = None
-        self._session = None
+                self._client = None
         self._connected = False
         logger.info("Disconnected from MCP server")

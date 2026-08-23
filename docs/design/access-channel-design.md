@@ -140,12 +140,14 @@ The Management API covers 24+ resource routers: agents, sessions, conversations,
 
 ### MCP Server (`/mcp`)
 
-Streamable HTTP transport per the MCP 2025-03-26 specification (see [ADR-012](adr/012-mcp-streamable-http.md)). Exposes Hecate agents as MCP-compliant tool providers.
+Streamable HTTP transport per the MCP 2026-07-28 specification — stateless core (see [ADR-012](adr/012-mcp-streamable-http.md), updated for the 2026-07-28 revision via change `mcp-streamable-http`). Exposes Hecate agents as MCP-compliant tool providers.
 
-- **Single endpoint** — All MCP communication flows through `/mcp` (no separate SSE endpoint)
-- **POST** for client→server messages, **GET** for SSE stream subscription
-- **Stateless operation** — Standard load balancers (round-robin) work without session affinity
-- **SSE upgrade** — Server responds immediately for fast operations, upgrades to SSE for long-running tasks
+- **Single endpoint** — All MCP communication flows through `/mcp`
+- **Stateless core** — No `initialize` handshake and no `Mcp-Session-Id`; every request is self-describing via `_meta` (protocol version, client info, client capabilities)
+- **Header-based routing** — Requests carry `Mcp-Method` / `Mcp-Name` headers so gateways and load balancers route without inspecting JSON bodies
+- **POST** for client→server messages; any replica behind a round-robin load balancer can serve any request (no session affinity)
+- **Discovery** — `server/discover` advertises identity and capabilities; clients may proceed directly to `tools/list`
+- **Body limit** — POST bodies over 4 MiB rejected with HTTP 413
 - **Toggle** — Enabled via `MCP_SERVER_ENABLED=true`
 
 External platforms (Claude Desktop, Cursor, any MCP client) can discover and invoke Hecate agents as tools.

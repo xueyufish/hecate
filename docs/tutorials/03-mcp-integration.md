@@ -4,6 +4,8 @@
 
 This tutorial covers the **client side** of MCP — Hecate acting as a client that connects to remote MCP servers and uses their tools. The server side (exposing Hecate as an MCP server for Claude Desktop or Cursor to consume) is covered in [Enable MCP Server](../how-to/enable-mcp-server.md).
 
+> **Protocol era (5.4b, 2026-07-28)**: Hecate's MCP client speaks MCP protocol **2026-07-28** and automatically negotiates with servers that advertise a different (older) revision — falling back to the legacy `initialize` handshake when the remote server predates the stateless core. No client-side configuration is required.
+
 ---
 
 ## What you will learn

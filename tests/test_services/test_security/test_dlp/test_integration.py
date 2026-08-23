@@ -149,7 +149,7 @@ class TestIntegrationMCPEgressMask:
 
         client = HecateMCPClient(egress_filters=[egress])
         client._connected = True
-        client._session = _StubSession("Found SSN 123-45-6789 in data")
+        client._client = _StubSession("Found SSN 123-45-6789 in data")
 
         result = await client.call_tool("lookup", {})
         assert result is not None
@@ -162,7 +162,7 @@ class TestIntegrationMCPEgressMask:
 
         client = HecateMCPClient(egress_filters=[egress])
         client._connected = True
-        client._session = _StubSession("The temperature is 72 degrees")
+        client._client = _StubSession("The temperature is 72 degrees")
 
         result = await client.call_tool("weather", {})
         assert result == "The temperature is 72 degrees"
@@ -171,7 +171,7 @@ class TestIntegrationMCPEgressMask:
         """Without egress filters, call_tool returns raw text."""
         client = HecateMCPClient()
         client._connected = True
-        client._session = _StubSession("SSN 123-45-6789 raw response")
+        client._client = _StubSession("SSN 123-45-6789 raw response")
 
         result = await client.call_tool("raw", {})
         assert result == "SSN 123-45-6789 raw response"

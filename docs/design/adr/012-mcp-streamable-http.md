@@ -1,6 +1,6 @@
 # ADR-012: MCP Streamable HTTP Transport Upgrade
 
-> **Status**: Accepted
+> **Status**: Accepted — **updated 2026-08-22**: implementation migrated to the MCP 2026-07-28 specification (stateless core, no `initialize` handshake, header-based routing) via change `mcp-streamable-http` (feature 5.4b close-out). The transport remains Streamable HTTP on a single `/mcp` endpoint; the protocol-era semantics below that reference the 2025-03-26 revision (`Mcp-Session-Id`, initialize handshake, GET SSE subscription stream) are superseded by the 2026-07-28 stateless core.
 > **Date**: 2026-06-29
 
 ## Context

@@ -54,7 +54,7 @@ docker compose -f docker/docker-compose.yml restart hecate
 
 ## Step 2 — Verify the server is reachable
 
-The MCP Server speaks Streamable HTTP. The FastMCP library exposes the standard MCP endpoints under `/mcp`:
+The MCP Server speaks Streamable HTTP on MCP protocol version **2026-07-28** (the latest spec revision; stateless core, no `initialize` handshake, header-based routing). The FastMCP library exposes the standard MCP endpoints under `/mcp`:
 
 ```bash
 # Initialize a session — should return server info
@@ -64,11 +64,13 @@ curl -X POST http://localhost:8000/mcp \
   -d '{
     "jsonrpc": "2.0",
     "id": 1,
-    "method": "initialize",
+    "method": "server/discover",
     "params": {
-      "protocolVersion": "2024-11-05",
-      "capabilities": {},
-      "clientInfo": {"name": "test-client", "version": "1.0"}
+      "_meta": {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientInfo": {"name": "test-client", "version": "1.0"},
+        "io.modelcontextprotocol/clientCapabilities": {}
+      }
     }
   }'
 ```
