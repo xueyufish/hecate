@@ -14,13 +14,13 @@ Every tool registered in Hecate carries a `source` field on `ToolModel` (`models
 
 | Source | Where it lives | How it executes | Example |
 |--------|---------------|-----------------|---------|
-| **`builtin`** | Hardcoded in `services/tool/builtin.py` | In-process Python function | `web_search`, `read_file`, `write_file`, `list_files`, `execute_code` |
+| **`builtin`** | Hardcoded in `services/tool/builtin.py` | In-process Python function; `execute_code` and the `browser_*` tools route into Docker sandboxes | `web_search`, `read_file`, `write_file`, `list_files`, `execute_code`, plus six browser tools (6.27): `browser_navigate`, `browser_click`, `browser_type`, `browser_extract`, `browser_screenshot`, `browser_fill_form` |
 | **`custom`** | `tools` table (DB-persisted) | *Not yet implemented — currently raises `NotImplementedError`* | User-defined Python/HTTP tools |
 | **`mcp`** | `tools` table, with `mcp_server` + `mcp_tool_name` fields | Routed to the originating MCP server via `MCPClientManager.call_tool()` | `tavily_search`, `github_create_issue`, … |
 
 A fourth, special-case source is **`AgentTool`** (`engine/agent_tool.py`): it wraps another Hecate agent as a callable tool for sub-agent delegation. It is registered in the parent agent's tool list at runtime rather than via the `tools` table.
 
-### The five built-in tools
+### The eleven built-in tools
 
 | Tool | What it does | Risk level | Sandbox? |
 |------|--------------|-----------|----------|
@@ -28,9 +28,15 @@ A fourth, special-case source is **`AgentTool`** (`engine/agent_tool.py`): it wr
 | `read_file` | Read a file from the agent's workspace | LOW | No |
 | `write_file` | Write a file to the agent's workspace | MEDIUM | No |
 | `list_files` | List directory contents | LOW | No |
-| `execute_code` | Run Python in a Docker-isolated container | HIGH | **Yes** — uses `SandboxPool` |
+| `execute_code` | Run Python in a Docker-isolated container | MEDIUM | **Yes** — uses `SandboxPool` (`hecate-sandbox`) |
+| `browser_navigate` | Navigate a per-session headless Chromium to a URL; domain allow-list enforced fail-closed | MEDIUM (HIGH off allow-list) | **Yes** — dedicated browser sandbox (6.27) |
+| `browser_click` | Click a page element by CSS selector or visible text | MEDIUM | **Yes** (6.27) |
+| `browser_type` | Type text into an input, optionally pressing Enter | MEDIUM | **Yes** (6.27) |
+| `browser_extract` | Extract page content as accessibility tree / text / HTML | MEDIUM | **Yes** (6.27) |
+| `browser_screenshot` | Capture viewport / full-page / element screenshot as base64 PNG | MEDIUM | **Yes** (6.27) |
+| `browser_fill_form` | Fill multiple form fields atomically | MEDIUM | **Yes** (6.27) |
 
-`execute_code` is the only built-in that runs in the sandbox by default. The `EnginePort.tool_execute_sandbox()` optional method (`engine/ports.py`) routes through `SandboxPool` when sandboxing is enabled, and falls back to in-process execution otherwise.
+`execute_code` and the six `browser_*` tools run in sandboxes by default — `execute_code` uses the lightweight `hecate-sandbox` pool, while browser tools run in a dedicated `hecate-browser-sandbox` image where each agent session gets an isolated headless Chromium (see [Browser Automation](../how-to/browser-automation.md)). The `EnginePort.tool_execute_sandbox()` optional method (`engine/ports.py`) routes through `SandboxPool` when sandboxing is enabled, and falls back to in-process execution otherwise.
 
 ---
 

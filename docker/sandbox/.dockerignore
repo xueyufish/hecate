@@ -1,0 +1,24 @@
+# Exclude everything except the sandbox image build context.
+*
+!entrypoint.py
+!Dockerfile
+!.dockerignore
+
+# Common cruft
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+node_modules/
+.git/
+.gitignore
+.idea/
+.vscode/
+*.log
+.DS_Store

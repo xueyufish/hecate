@@ -77,21 +77,46 @@ class TestRegistryBuiltinRouting:
 class TestSeedBuiltinTools:
     async def test_seed_inserts_all_tools(self, db_session: Any) -> None:
         count = await seed_builtin_tools(db_session)
-        assert count == 5
+        assert count == 11
 
         from sqlalchemy import select
 
         result = await db_session.execute(select(ToolModel).where(ToolModel.source == "builtin"))
         tools = result.scalars().all()
-        assert len(tools) == 5
+        assert len(tools) == 11
         names = {t.name for t in tools}
-        assert names == {"web_search", "read_file", "write_file", "list_files", "execute_code"}
+        assert names == {
+            "web_search",
+            "read_file",
+            "write_file",
+            "list_files",
+            "execute_code",
+            "browser_navigate",
+            "browser_click",
+            "browser_type",
+            "browser_extract",
+            "browser_screenshot",
+            "browser_fill_form",
+        }
 
     async def test_seed_idempotent(self, db_session: Any) -> None:
         count1 = await seed_builtin_tools(db_session)
-        assert count1 == 5
+        assert count1 == 11
         count2 = await seed_builtin_tools(db_session)
         assert count2 == 0
+
+    async def test_seed_persists_risk_level_from_definition(self, db_session: Any) -> None:
+        await seed_builtin_tools(db_session)
+        from sqlalchemy import select
+
+        result = await db_session.execute(
+            select(ToolModel).where(
+                ToolModel.source == "builtin",
+                ToolModel.name == "browser_navigate",
+            )
+        )
+        tool = result.scalar_one()
+        assert tool.risk_level == "MEDIUM"
 
     async def test_seed_updates_changed_definitions(self, db_session: Any) -> None:
         await seed_builtin_tools(db_session)

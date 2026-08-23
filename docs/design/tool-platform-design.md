@@ -79,7 +79,15 @@ Agent (LLM tool call)
 | `read_file` | Read file from workspace | LOW | No |
 | `write_file` | Write file to workspace | MEDIUM | No |
 | `list_files` | List directory contents | LOW | No |
-| `execute_code` | Execute Python in Docker container | HIGH | Yes |
+| `execute_code` | Execute Python in Docker container | MEDIUM | Yes (`hecate-sandbox` pool) |
+| `browser_navigate` | Navigate per-session headless Chromium to a URL; allow-list enforced fail-closed (6.27) | MEDIUM (HIGH off allow-list) | Yes (`hecate-browser-sandbox`) |
+| `browser_click` | Click page element by CSS selector or visible text (6.27) | MEDIUM | Yes |
+| `browser_type` | Type into an input, optional Enter submit (6.27) | MEDIUM | Yes |
+| `browser_extract` | Extract accessibility tree / text / HTML from page (6.27) | MEDIUM | Yes |
+| `browser_screenshot` | Capture viewport / full-page / element PNG as base64 (6.27) | MEDIUM | Yes |
+| `browser_fill_form` | Atomically fill multiple form fields (6.27) | MEDIUM | Yes |
+
+> Browser tools (6.27) run in a dedicated `hecate-browser-sandbox` image — separate from the lightweight `hecate-sandbox` used by `execute_code` — with network egress gated by `NetworkPolicy` and output scanned by the DLP engine. See [Browser Automation how-to](../how-to/browser-automation.md).
 
 ---
 

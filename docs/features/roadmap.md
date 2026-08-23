@@ -1,7 +1,8 @@
 # Hecate Implementation Roadmap
 
-> **Status**: Active — P1, P2 complete; **P3 in release close-out (2 items remaining: 5.4b / 6.27)**; P4, P5 in progress.
+> **Status**: Active — P1, P2 complete; **P3 in release close-out (1 item remaining: 5.4b)**; P4, P5 in progress.
 > **2026-08-22 release-scope reclassification**: P3 close-out items (5.4b / 9.1a / 9.2 / 6.27) → 9.1a + 9.2 delivered (change `output-side-typed-findings`), leaving **2 remaining** (5.4b MCP Streamable HTTP Server 端 / 6.27 Browser Automation). 48 items moved P3→P4 (see feature-catalog "Deferred from P3"); 11.4/11.5/11.9-Discord/Telegram moved P3→P5 (channel Wave 2/3); 11.8 Intent Recognition & Routing dropped (overlaps existing routing). P4/P5 scope grows accordingly — no feature lost; one dropped.
+> **Update (2026-08-22, later)**: 6.27 Browser Automation delivered (change `browser-automation`) — **P3 down to 1 remaining item: 5.4b**.
 > **Scope**: 12-month implementation plan covering unimplemented features across P3–P5.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
@@ -13,10 +14,10 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 87 | 85/87 (98%) | **2** (5.4b / 6.27) |
+| **P3 Trustworthy** | 87 | 86/87 (99%) | **1** (5.4b) |
 | **P4 Intelligent** | 148 | 25/148 (17%) | 123 |
 | **P5 Ecosystem** | 71 | 0/71 (0%) | 71 |
-| **Total** | **389** | **193/389 (50%)** | **196** |
+| **Total** | **389** | **194/389 (50%)** | **195** |
 
 > Row counts are physical feature-catalog rows (2026-08-22 basis; verified by grep). Prior figures (127/101/60, total 372) used audit-counting that predated the reclassification — see feature-catalog overview note for the reconciliation.
 
@@ -516,7 +517,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 5.4b | MCP Streamable HTTP Transport — **Server 端**（client 已交付）。按 **2026-07-28 新规范**实现：无状态核心、Mcp-Method/Mcp-Name header 路由、MRTR、cacheable lists | 5.4c ✅ | M |
 | ~~9.1a~~ | ~~Injection Type Detection~~ ✅ delivered 2026-08-22 (change `output-side-typed-findings`) | Guardrails ✅ | — |
 | ~~9.2~~ | ~~System Prompt Leakage Protection~~ ✅ delivered 2026-08-22 (change `output-side-typed-findings`) | Output Security ✅ | — |
-| 6.27 | Browser Automation Tool — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ + 9.4 内容门控 ✅ | M |
+| ~~6.27~~ | ~~Browser Automation Tool~~ ✅ delivered 2026-08-22 (change `browser-automation`) — 6 builtin tools `browser_navigate/click/type/extract/screenshot/fill_form`; headless v1; dedicated `hecate-browser-sandbox` image; per-agent-session `BrowserSessionManager`; NetworkPolicy fail-closed + HIGH upgrade off allow-list; DLP on extract/screenshot | 5.1 ✅ + 9.4c ✅ + 9.4 内容门控 ✅ | — |
 
 ### Engine Architecture: Event-Sourced State (NEW, Q4=A decision)
 
@@ -533,7 +534,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 |---|---------|------|--------|
 | 1.3.18 | Dynamic Orchestration ✅ *(see [ADR-032](../design/adr/032-dynamic-orchestration.md) — per deep-dive survey: Magentic-One 论文 / OMA v1.14 / DeerFlow subagent 契约 / Deep Agents interpreters / AgentScope / dsh)* — coordinator node: goal + agent roster → runtime task DAG → dispatch workers → synthesize result. 7th multi-agent pattern alongside 6 static ones; coordinator is a special node type emitting sub-graphs on Pregel at runtime. 范式 = data-as-plan（LLM 出建议性 TaskDAG，executor 确定性物化）。**Phase 1（已交付）**: COORDINATOR NodeType + DYNAMIC 枚举、TaskDAG 契约（fail-closed 前置校验 + `validate_task_requirements`）、executor 物化子图（独立 child session）、Magentic 双循环图化（stall ≤2、append-only 计划修订、replan-with-carryover）、三轴预算（max_iterations=5 / stall_limit=2 / max_total_tasks=6 / max_concurrent=3 + token 预算，additive stop_reason + capped 结果可见指导）、benefit-based 委派 rubric（prompt + 测试钉死）、五重隔离断言、可选 per-task verifier + ORCHESTRATOR_DECISION/EVALUATION 事件、synthesis 确定性 transform、planner/evaluator 模型分离。**Phase 2 = 1.3.18a（P4）**: consensus proposer→judge、append-only PlanPatch repair API、异步编排 + 中途 steering、plan 冻结 artifact + 精确重放（与 8.20 配对）。**UI companion（P3，Phase 1 后 follow-up change，无新 ID）**: pattern-selector 第 7 模式 / canvas COORDINATOR 节点 / 8.20 回放 coordinator 卡片 | 2.7a ✅ + Pregel ✅ + 1.3.19 ✅ | M |
 | 8.20 | Execution Replay & Debug Dashboard (Phase 1: timeline replay) — session → trace-partitioned timeline (superstep × channel changes × tool calls × LLM request/response × guardrail blocks) + DAG step-through + time-travel (fold-to-version + `derive_messages`); web UI on EventStore + OTel. **Vocabulary**: `session`（多轮容器）→ `trace`（一次执行，回放锚点）→ `event`（记录）；不再用 "runId"。**回放覆盖范围 = Pregel 路径**（path A/C 不在日志内，UI 横幅标注；空日志会话不渲染回放 tab）。 Phase 2 (version binding) deferred to P5 | 1.3.19 (enriched log) | M |
-| 6.27 | Browser Automation Tool (moved from P4) — Playwright builtin: navigate/click/type/screenshot/extract/fill; headless/headful; sandboxed via DockerEnvironment. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ | M |
+| 6.27 ✅ | Browser Automation Tool *(delivered 2026-08-22, change `browser-automation`)* — Playwright builtin: navigate/click/type/screenshot/extract/fill_form; headless v1; sandboxed via dedicated `hecate-browser-sandbox` image; per-agent-session lifecycle; NetworkPolicy fail-closed egress. Computer-use half split to 6.27a (stays P4) | 5.1 ✅ + 9.4c ✅ | M |
 
 ### Completed-Feature Upgrades (NEW — research)
 
@@ -651,7 +652,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [ ] **5.4b MCP Streamable HTTP Server 端**（按 2026-07-28 规范）
 - [x] **9.1a Injection Type Detection** *(delivered)*
 - [x] **9.2 System Prompt Leakage Protection** *(delivered)*
-- [ ] **6.27 Browser Automation Tool**
+- [x] **6.27 Browser Automation Tool** *(delivered — 6 builtin tools `browser_navigate/click/type/extract/screenshot/fill_form`, headless v1, sandboxed via dedicated `hecate-browser-sandbox` Docker image; per-agent-session lifecycle via `BrowserSessionManager`; NetworkPolicy fail-closed default + HIGH upgrade for non-allow-listed domains; DLP scan on extract text + screenshot; Computer-use split to 6.27a P4)*
 
 ---
 
