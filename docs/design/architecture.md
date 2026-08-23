@@ -1,8 +1,6 @@
 # Hecate Architecture
 
-> **Version**: v2.0 | **Status**: Active
-
-Hecate is an open-source, self-hosted, model-agnostic, MCP-first enterprise Agent platform. This document describes the system's architecture, design principles, and component relationships. For implementation details, see the [Engine Design](engine-design.md) and [Core Concepts](concepts.md) documents.
+This document describes the system's architecture, design principles, and component relationships. Per-module implementation details live in the dedicated design documents listed in [Further Reading](#further-reading) below.
 
 ---
 
@@ -16,9 +14,9 @@ Hecate enables enterprises to build, orchestrate, and run AI Agent applications 
 >
 > Security Shield (left sidebar) and Ecosystem (right sidebar) are cross-cutting concerns that span all platform modules. Each module in the L1 diagram has a corresponding L2 breakdown — see [Module Architecture](#module-architecture) below.
 
-The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md)) with checkpoints as materialized caches, and dispatches node execution to a Worker Pool.
+The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** with checkpoints as materialized caches, supports **Execution Replay** for time-travel debugging, and dispatches node execution to a Worker Pool.
 
-**26 engine extension interfaces + 8 plugin SPI types**:
+**Engine extension interfaces & plugin SPI types**:
 
 **Engine Extension Interfaces (26)** — engine-level extensibility:
 
@@ -45,16 +43,16 @@ The execution engine is Hecate's heart — a self-built Pregel runtime with zero
 | `TaskAllocator` | Task-to-agent assignment (dynamic orchestration) |
 | `ApprovalCallback` | Human-in-the-loop tool approval |
 
-**Plugin SPI Types (8)** — pluggable extension interfaces:
+**Plugin SPI Types (8)** — pluggable extension interfaces (each implemented as a Python Abstract Base Class via `abc.ABC`):
 
-| Type | ABC | Purpose |
+| Type | Python base class | Purpose |
 |-----|-----|---------|
 | `Tool` | `ToolPluginABC` | Callable tools agents can invoke |
 | `Extension` | `ExtensionPluginABC` | Runtime interceptors auto-wired into guardrail hooks |
 | `Trigger` | `TriggerPluginABC` | Event-driven invocation (webhook / schedule / MQ) |
 | `Model` | `ModelPluginABC` | Custom LLM providers |
 | `Channel` | `ChannelABC` | External communication channels (incl. notification adapters) |
-| `Evaluator` | `EvaluatorABC` | Evaluation metrics (40+ built-in) |
+| `Evaluator` | `EvaluatorABC` | Built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment |
 | `AuthProvider` | `AuthProviderABC` | Authentication methods (JWT/APIKey built-in) |
 | `SecretProvider` | `SecretProviderABC` | Secret storage backends |
 
@@ -68,7 +66,7 @@ All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginMan
 
 Hecate supports 100+ LLM providers via LiteLLM, adopts MCP (Model Context Protocol) and A2A (Agent-to-Agent) as first-class integration protocols, and maintains API compatibility with OpenAI's format. No vendor lock-in is the core brand promise.
 
-**Protocol Stack (2026)**: MCP handles agent-to-tool connections (vertical integration, 97M monthly SDK downloads). A2A handles agent-to-agent coordination (horizontal integration, 150+ organizations, Linux Foundation v1.0). Together they form the production baseline for enterprise agent deployments.
+**Protocol Stack (2026)**: MCP handles agent-to-tool connections (vertical integration — see [ADR-012](adr/012-mcp-streamable-http.md) for the Streamable HTTP transport spec Hecate adopts). A2A handles agent-to-agent coordination (horizontal integration, Linux Foundation v1.0 — see [ADR-011](adr/011-a2a-protocol-adoption.md)). Together they form the production baseline for enterprise agent deployments.
 
 ### Composable Over Monolithic
 
@@ -105,7 +103,7 @@ Each module below corresponds to a block in the [L1 architecture diagram](images
 
 ### Access Channel
 
-The entry point for all external requests. Exposes four API surfaces: an OpenAI-compatible interface at `/v1/` (for seamless integration with existing tools), a management API at `/api/` (for Agent/Workflow/Session/Knowledge Base CRUD), an MCP Server endpoint at `/mcp` (Streamable HTTP transport for standard load balancer compatibility), and an A2A endpoint at `/.well-known/agent.json` (Agent Card discovery + task lifecycle for cross-framework agent communication). Handles authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, and multi-channel adaptation.
+The entry point for all external requests. Exposes five API surfaces: an OpenAI-compatible interface at `/v1/` (for seamless integration with existing tools), a management API at `/api/` (for Agent/Workflow/Session/Knowledge Base CRUD), an MCP Server endpoint at `/mcp` (Streamable HTTP transport), an A2A endpoint at `/.well-known/agent.json` (Agent Card discovery + task lifecycle for cross-framework agent communication), and an **embeddable web widget** at `/embed/chat` ([ADR-031](adr/031-web-widget-iframe-architecture.md)) for dropping agent chat into customer apps. Handles authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, multi-channel adaptation (Feishu, Slack inbound webhooks), and inbound IM routing.
 
 > See [Access Channel Design](access-channel-design.md) for L2 architecture, API surfaces, and implementation details.
 
@@ -121,11 +119,13 @@ Human-in-the-Loop is handled via `interrupt()` (pause execution, return control 
 
 The core differentiator — a self-built Pregel runtime with zero external framework dependencies (sole external dependency is `jsonschema` for DSL validation). Compiles Graph DSL definitions (JSON) into `CompiledGraph` objects, manages state through a four-type Channel system, persists execution as an **event-sourced log** (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md)) with checkpoints demoted to materialized caches, and dispatches node execution to a pluggable Worker Pool. Context Engineering provides a six-component pipeline (assembler, evidence tracker, phase detection, token budget governance, provider shaping, message prioritization).
 
+**Execution Replay** — A first-class debugging primitive built on top of Log-as-Truth. The append-only event log lets any past session be reconstructed for inspection: trace-partitioned timelines (`session → trace → event`, aligned with LangFuse/LangSmith vocabulary), DAG step-through, and fold-to-version time-travel state inspection (`GET /sessions/{id}/replay` and `GET /sessions/{id}/replay/state`). No competitor's agent engine currently ships replay over an event-sourced substrate — see [Engine Design](engine-design.md) and [positioning.md](positioning.md) for the full differentiator analysis.
+
 The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → append events to the log with `STEP_END` commit → evaluate conditional edges → repeat until no nodes remain. Workers receive read-only Channel snapshots and return results — they never directly modify Channels. See [Engine Design](engine-design.md) for a deep dive.
 
 ### Ops Center
 
-Unified administrative control plane consolidating observability, alerting, evaluation, deployment management, cost governance, and compliance into a single operator interface. Provides distributed tracing (Trace→Span→Generation hierarchy via OpenTelemetry), structured logging, metrics collection with TimescaleDB store, and audit logging. The evaluation engine includes 41 built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment, with dataset management and regression testing support.
+Unified administrative control plane consolidating observability, alerting, evaluation, deployment management, cost governance, and compliance into a single operator interface. Provides distributed tracing (Trace→Span→Generation hierarchy via OpenTelemetry), structured logging, metrics collection with TimescaleDB store, and audit logging. The evaluation engine includes a catalogue of built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment, with dataset management and regression testing support. See [ADR-028](adr/028-observability-evaluation-enhancement.md) for the enhancement roadmap.
 
 > See [Ops Center Design](ops-center-design.md) for L2 architecture, component breakdown, and API definitions.
 
@@ -137,7 +137,7 @@ LLM integration layer powered by LiteLLM, supporting 100+ providers. Provides in
 
 ### Tool Platform
 
-MCP-first tool ecosystem with bidirectional support: MCP Client consumes external tools, MCP Server exposes Hecate as a tool provider. Includes a tool registry, Docker-based execution sandbox, built-in tools, agent tool system, search tools, and granular tool security policies.
+MCP-first tool ecosystem with bidirectional support: MCP Client consumes external tools, MCP Server exposes Hecate as a tool provider. Includes a tool registry, **Docker-isolated execution sandbox** for code execution, **sandboxed headless Chromium browser automation** with per-environment domain allow-lists (fail-closed) and 11 built-in tools covering file/code operations and browser interaction, agent tool system, search tools, and granular tool security policies (LOW/MEDIUM/HIGH/CRITICAL risk + once/session/project/global approval scopes). See [Tool Platform Design](tool-platform-design.md) and `docs/how-to/browser-automation.md`.
 
 > See [Tool Platform Design](tool-platform-design.md) for L2 architecture, plugin ecosystem, and tool operations.
 
@@ -149,7 +149,7 @@ RAG pipeline and multi-level memory system. The RAG pipeline covers document ing
 
 ### Enterprise Foundation
 
-Infrastructure layer providing multi-tenancy (Organization → Workspace → User with data-level isolation via `workspace_id` on 38 data models), async SQLAlchemy 2.0 database access with Alembic migrations (PostgreSQL, MySQL, SQLite), Pydantic-based configuration, secret management, rate limiting, async task scheduling, Docker Compose deployment, and health checks.
+Infrastructure layer providing multi-tenancy (Organization → Workspace → User with data-level isolation via `workspace_id` foreign keys on all tenant-scoped data models), async SQLAlchemy 2.0 database access with Alembic migrations (PostgreSQL, MySQL, SQLite), Pydantic-based configuration, secret management, rate limiting, async task scheduling, Docker Compose deployment, and health checks.
 
 > See [Enterprise Foundation Design](enterprise-foundation-design.md) for L2 architecture, multi-tenancy, security, and deployment infrastructure.
 
@@ -243,7 +243,7 @@ Hecate models tenancy as a three-level hierarchy:
 - **Workspace** — Isolated environment within an organization. Agents, workflows, knowledge bases, and tools belong to a workspace.
 - **User** — Authenticated actor within an organization, with role-based access (admin/editor/viewer).
 
-Tenant isolation is enforced via `workspace_id` foreign keys on 38 data models. This provides data-level isolation without requiring separate database instances per tenant.
+Tenant isolation is enforced via `workspace_id` foreign keys on all tenant-scoped data models. This provides data-level isolation without requiring separate database instances per tenant.
 
 ---
 
@@ -260,7 +260,7 @@ Hecate runs as a single service in development (via Docker Compose) and can scal
        ▼      ▼      ▼
 ┌──────────┐ ┌──────────┐ ┌──────────┐
 │PostgreSQL│ │ Qdrant   │ │  MinIO   │
-│  (16)    │ │(vectors) │ │(objects) │
+│ (primary)│ │(vectors) │ │(objects) │
 └──────────┘ └──────────┘ └──────────┘
 ```
 

@@ -1,6 +1,6 @@
-# Hardware (L2/L3 Architecture Diagrams)
+# Hardware (Architecture Diagrams)
 
-Level-2 subsystem diagrams and Level-3 detail diagrams. Each `.drawio` file has a PNG export in [`docs/design/images/`](../images/) that is embedded in the docs. These diagrams use a status legend so the reader can see, at a glance, what is implemented today versus planned.
+Top-level system maps (L0/L1) and Level-2 subsystem diagrams plus Level-3 detail diagrams. Each `.drawio` file has a PNG export in [`docs/design/images/`](../images/) that is embedded in the docs. These diagrams use a status legend so the reader can see, at a glance, what is implemented today versus planned.
 
 ## Legend
 
@@ -14,9 +14,17 @@ Green fill = implemented; yellow dashed = planned; red = gap/caveat.
 
 ## Diagram index
 
+### Top-level system maps
+
 | File | PNG | Covers |
 |------|-----|--------|
-| [`hardware_architecture.drawio`](hardware_architecture.drawio) | [`hardware_architecture.png`](../images/hardware_architecture.png) | The platform map: all subsystems (engine, services, API, models, core) and the extension-point surface. |
+| [`hecate_architecture_overview.drawio`](hecate_architecture_overview.drawio) | [`hecate_architecture_overview.png`](../images/hecate_architecture_overview.png) | **Simplified hero view** (recommended for README + overview pages). 8 modules + 2 cross-cutting concerns, no sub-components. **Structure-only (no arrows)** — same convention as the comprehensive L1 diagram. ~280 KB. |
+| [`hecate_l1_architecture.drawio`](hecate_l1_architecture.drawio) | [`hecate_l1_architecture.png`](../images/hecate_l1_architecture.png) | **Comprehensive L1 architecture** (used in [`architecture.md`](../architecture.md)). Ten modules with sub-components, sidebars for Security + Ecosystem. **Structure-only (no arrows)** — request flow is described in the bottom note, not drawn as edges. ~740 KB. |
+
+### Subsystem details
+
+| File | PNG | Covers |
+|------|-----|--------|
 | [`agent-engine-l2.drawio`](agent-engine-l2.drawio) | [`agent-engine-l2.png`](../images/agent-engine-l2.png) | Engine internals: Pregel runtime, channels, workers, checkpoints, event store, guardrail hooks, collaboration patterns. |
 | [`access-channel-l2.drawio`](access-channel-l2.drawio) | [`access-channel-l2.png`](../images/access-channel-l2.png) | Access surfaces: OpenAI-compatible API, management API, dashboard, IM channels (Feishu/Slack), embeddable web widget. |
 | [`agent-studio-l2.drawio`](agent-studio-l2.drawio) | [`agent-studio-l2.png`](../images/agent-studio-l2.png) | Visual development environment: canvas, agent configurator, prompt management, testing tools. |
