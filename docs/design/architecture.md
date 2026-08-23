@@ -16,9 +16,7 @@ Hecate enables enterprises to build, orchestrate, and run AI Agent applications 
 
 The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** with checkpoints as materialized caches, supports **Execution Replay** for time-travel debugging, and dispatches node execution to a Worker Pool.
 
-**Engine extension interfaces & plugin SPI types**:
-
-**Engine Extension Interfaces (26)** — engine-level extensibility:
+**Engine Extension Interfaces** — engine-level extensibility:
 
 | Extension Point | Purpose |
 |-----|---------|
@@ -43,7 +41,7 @@ The execution engine is Hecate's heart — a self-built Pregel runtime with zero
 | `TaskAllocator` | Task-to-agent assignment (dynamic orchestration) |
 | `ApprovalCallback` | Human-in-the-loop tool approval |
 
-**Plugin SPI Types (8)** — pluggable extension interfaces implemented as Python base classes (the `Base` suffix follows the `AgentScope` convention; the `abc.ABC` mechanism enforces the contract):
+**Plugin SPI Types** — pluggable extension interfaces implemented as Python base classes (the `Base` suffix follows the `AgentScope` convention; the `abc.ABC` mechanism enforces the contract):
 
 | Type | Base class | Purpose |
 |-----|-----|---------|
@@ -101,7 +99,12 @@ Each module below corresponds to a block in the [L1 architecture diagram](images
 
 ### Access Channel
 
-The entry point for all external requests. Exposes five API surfaces: an OpenAI-compatible interface at `/v1/` (for seamless integration with existing tools), a management API at `/api/` (for Agent/Workflow/Session/Knowledge Base CRUD), an MCP Server endpoint at `/mcp` (Streamable HTTP transport), an A2A endpoint at `/.well-known/agent.json` (Agent Card discovery + task lifecycle for cross-framework agent communication), and an **embeddable web widget** at `/embed/chat` ([ADR-031](adr/031-web-widget-iframe-architecture.md)) for dropping agent chat into customer apps. Handles authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, multi-channel adaptation (Feishu, Slack inbound webhooks), and inbound IM routing.
+The entry point for all external requests, exposes five API surfaces: 
+  - OpenAI-compatible interface at `/v1/` , for seamless integration with existing tools. 
+  - Management API at `/api/`,  for Agent/Workflow/Session/Knowledge Base CRUD.     
+  - MCP Server endpoint at `/mcp`, for Streamable HTTP transport. 
+  - A2A endpoint at `/.well-known/agent.json`, for Agent Card discovery + task lifecycle for cross-framework agent communication.
+  - Embeddable web widget at `/embed/chat`, for dropping agent chat into customer apps. Handles authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, multi-channel adaptation (Feishu, Slack inbound webhooks), and inbound IM routing.
 
 > See [Access Channel Design](access-channel-design.md) for L2 architecture, API surfaces, and implementation details.
 
@@ -109,7 +112,7 @@ All requests are uniformly wrapped as `ExecutionRequest` objects containing the 
 
 ### Agent Studio
 
-Visual development environment for building and configuring agents. Features a React Flow-based drag-and-drop canvas, agent configurator, prompt management with analytics, workflow builder with six multi-agent collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate), reusable templates, and developer tools (CLI). All multi-agent patterns are expressed as Graph topologies, not hardcoded paths — any pattern can be visualized and edited in the canvas. A seventh pattern, Dynamic Orchestration, is emitted at runtime as a TaskDAG by a COORDINATOR node (ADR-032).
+Visual development environment for building and configuring agents. Features a React Flow-based drag-and-drop canvas, agent configurator, prompt management with analytics, workflow builder with multi-agent collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate), reusable templates, and developer tools (CLI). All multi-agent patterns are expressed as Graph topologies, not hardcoded paths — any pattern can be visualized and edited in the canvas.
 
 Human-in-the-Loop is handled via `interrupt()` (pause execution, return control to user) and `Command` (resume with user input, or redirect execution flow). NL2Agent and code generation are planned.
 
