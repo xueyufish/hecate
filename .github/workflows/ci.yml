@@ -94,11 +94,13 @@ jobs:
             echo "::error::Image size ${size_mb}MB exceeds 700MB budget"
             exit 1
           fi
-      - name: Verify entrypoint imports
+      - name: Verify playwright imports
         run: |
-          docker run --rm hecate-browser-sandbox:ci python -c "import playwright; print('playwright ok')"
-      - name: Verify entrypoint file present
+          docker run --rm --entrypoint python hecate-browser-sandbox:ci -c "import playwright; print('playwright ok')"
+      - name: Verify driver boots and healthz responds
         run: |
-          cid=$(docker run -d hecate-browser-sandbox:ci sleep 60)
-          docker exec "$cid" ls /opt/sandbox/entrypoint.py
+          cid=$(docker run -d --entrypoint sleep hecate-browser-sandbox:ci infinity)
+          docker exec -d "$cid" python /opt/sandbox/entrypoint.py --port 8080
+          sleep 3
+          docker exec "$cid" curl -sf http://127.0.0.1:8080/healthz
           docker rm -f "$cid"
