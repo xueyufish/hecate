@@ -43,18 +43,18 @@ The execution engine is Hecate's heart — a self-built Pregel runtime with zero
 | `TaskAllocator` | Task-to-agent assignment (dynamic orchestration) |
 | `ApprovalCallback` | Human-in-the-loop tool approval |
 
-**Plugin SPI Types (8)** — pluggable extension interfaces (each implemented as a Python Abstract Base Class via `abc.ABC`):
+**Plugin SPI Types (8)** — pluggable extension interfaces implemented as Python base classes (the `Base` suffix follows the `AgentScope` convention; the `abc.ABC` mechanism enforces the contract):
 
-| Type | Python base class | Purpose |
+| Type | Base class | Purpose |
 |-----|-----|---------|
-| `Tool` | `ToolPluginABC` | Callable tools agents can invoke |
-| `Extension` | `ExtensionPluginABC` | Runtime interceptors auto-wired into guardrail hooks |
-| `Trigger` | `TriggerPluginABC` | Event-driven invocation (webhook / schedule / MQ) |
-| `Model` | `ModelPluginABC` | Custom LLM providers |
-| `Channel` | `ChannelABC` | External communication channels (incl. notification adapters) |
-| `Evaluator` | `EvaluatorABC` | Built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment |
-| `AuthProvider` | `AuthProviderABC` | Authentication methods (JWT/APIKey built-in) |
-| `SecretProvider` | `SecretProviderABC` | Secret storage backends |
+| `Tool` | `ToolPluginBase` | Callable tools agents can invoke |
+| `Extension` | `ExtensionPluginBase` | Runtime interceptors auto-wired into guardrail hooks |
+| `Trigger` | `TriggerPluginBase` | Event-driven invocation (webhook / schedule / MQ) |
+| `Model` | `ModelPluginBase` | Custom LLM providers |
+| `Channel` | `ChannelBase` | External communication channels (incl. notification adapters) |
+| `Evaluator` | `EvaluatorBase` | Built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment |
+| `AuthProvider` | `AuthProviderBase` | Authentication methods (JWT/APIKey built-in) |
+| `SecretProvider` | `SecretProviderBase` | Secret storage backends |
 
 All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginManifest + PluginLifecycle) for registration and lifecycle management. See the [Extension Points reference](../reference/extension-points.md) for the full inventory with abstract methods and default implementations.
 
@@ -65,8 +65,6 @@ All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginMan
 ### Open Over Closed
 
 Hecate supports 100+ LLM providers via LiteLLM, adopts MCP (Model Context Protocol) and A2A (Agent-to-Agent) as first-class integration protocols, and maintains API compatibility with OpenAI's format. No vendor lock-in is the core brand promise.
-
-**Protocol Stack (2026)**: MCP handles agent-to-tool connections (vertical integration — see [ADR-012](adr/012-mcp-streamable-http.md) for the Streamable HTTP transport spec Hecate adopts). A2A handles agent-to-agent coordination (horizontal integration, Linux Foundation v1.0 — see [ADR-011](adr/011-a2a-protocol-adoption.md)). Together they form the production baseline for enterprise agent deployments.
 
 ### Composable Over Monolithic
 

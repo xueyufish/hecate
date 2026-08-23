@@ -245,11 +245,11 @@ class PluginManifest:
 
 The manifest is **immutable** (frozen dataclass). Plugins cannot mutate their own metadata after registration.
 
-### 1. `EvaluatorABC`
+### 1. `EvaluatorBase`
 
 ```python
 # src/hecate/plugin/spi/evaluator.py
-class EvaluatorABC(ABC):
+class EvaluatorBase(ABC):
     @property
     @abstractmethod
     def name(self) -> str: ...
@@ -262,14 +262,14 @@ class EvaluatorABC(ABC):
     async def evaluate(self, input: EvalInput) -> EvalOutput: ...
 ```
 
-**Built-in**: 41 evaluators (faithfulness, relevance, hallucination detection, etc.). **Custom**: implement `EvaluatorABC` and register via `PluginManifest(type="evaluator", ...)`.
+**Built-in**: 41 evaluators (faithfulness, relevance, hallucination detection, etc.). **Custom**: implement `EvaluatorBase` and register via `PluginManifest(type="evaluator", ...)`.
 
-### 2. `ChannelABC`
+### 2. `ChannelBase`
 
 External channel adapter (REST / WebSocket / IM / CLI). 
 
 ```python
-class ChannelABC(ABC):
+class ChannelBase(ABC):
     @property
     @abstractmethod
     def protocol(self) -> str: ...     # "rest", "websocket", "cli", "feishu", ...
@@ -286,12 +286,12 @@ class ChannelABC(ABC):
 
 **Built-in**: `RESTChannel`, `CLIChannel`. **Planned**: `WebSocketChannel`, `FeishuChannel`, `SlackChannel`.
 
-### 3. `AuthProviderABC`
+### 3. `AuthProviderBase`
 
 Authentication provider for incoming requests.
 
 ```python
-class AuthProviderABC(ABC):
+class AuthProviderBase(ABC):
     @property
     @abstractmethod
     def scheme(self) -> str: ...       # "bearer", "api_key", "oauth2", "mtls"
@@ -305,12 +305,12 @@ class AuthProviderABC(ABC):
 
 **Built-in**: `JWTAuthProvider`, `APIKeyAuthProvider`. **Planned**: `OAuth2AuthProvider`, `mTLSAuthProvider`, `SAMLAuthProvider`.
 
-### 4. Notifications: merged into `ChannelABC`
+### 4. Notifications: merged into `ChannelBase`
 
-Notification delivery (audit, alert, etc.) used to be a standalone `NotifierABC`. It was **merged into `ChannelABC`** as an outbound channel: notification dispatchers are now `NotificationChannelAdapter` implementations extending `ChannelABC` (see `src/hecate/channel/notification.py`).
+Notification delivery (audit, alert, etc.) used to be a standalone `NotifierABC`. It was **merged into `ChannelBase`** as an outbound channel: notification dispatchers are now `NotificationChannelAdapter` implementations extending `ChannelBase` (see `src/hecate/channel/notification.py`).
 
 ```python
-class NotificationChannelAdapter(ChannelABC):
+class NotificationChannelAdapter(ChannelBase):
     @property
     @abstractmethod
     def channel(self) -> str: ...      # "email", "webhook", "slack", "dingtalk"
@@ -321,17 +321,17 @@ class NotificationChannelAdapter(ChannelABC):
 
 **Built-in**: `EmailNotificationAdapter`, `WebhookNotificationAdapter`, `WebSocketNotificationAdapter`. **Planned**: `SlackNotificationAdapter`, `DingTalkNotificationAdapter`, `PagerDutyNotificationAdapter`. There is no `notifier` plugin type anymore — use `channel` (see the [plugin manifest](../reference/plugin-manifest.md)).
 
-### 5. `ToolPluginABC` / `ExtensionPluginABC` / `TriggerPluginABC` / `ModelPluginABC` / `SecretProviderABC`
+### 5. `ToolPluginBase` / `ExtensionPluginBase` / `TriggerPluginBase` / `ModelPluginBase` / `SecretProviderBase`
 
 The remaining five SPI types complete the eight-type taxonomy (registered in `PLUGIN_TYPE_REGISTRY` at `src/hecate/plugin/types/__init__.py`):
 
 | ABC | File | Purpose |
 |-----|------|---------|
-| `ToolPluginABC` | `src/hecate/plugin/types/tool.py` | Callable tool that agents can invoke (built-in, custom, or MCP-backed). |
-| `ExtensionPluginABC` | `src/hecate/plugin/types/extension.py` | Runtime interceptor auto-wired into all four guardrail hook points (Pre/Post LLM/Tool). |
-| `TriggerPluginABC` | `src/hecate/plugin/types/trigger.py` | Event-driven invocation: webhook, schedule, or message-queue triggered entry points. |
-| `ModelPluginABC` | `src/hecate/plugin/types/model.py` | Custom LLM provider built on the existing `InferenceBackendABC` surface. |
-| `SecretProviderABC` | `src/hecate/vault/provider.py` | Custom secret storage backend for the vault abstraction. |
+| `ToolPluginBase` | `src/hecate/plugin/types/tool.py` | Callable tool that agents can invoke (built-in, custom, or MCP-backed). |
+| `ExtensionPluginBase` | `src/hecate/plugin/types/extension.py` | Runtime interceptor auto-wired into all four guardrail hook points (Pre/Post LLM/Tool). |
+| `TriggerPluginBase` | `src/hecate/plugin/types/trigger.py` | Event-driven invocation: webhook, schedule, or message-queue triggered entry points. |
+| `ModelPluginBase` | `src/hecate/plugin/types/model.py` | Custom LLM provider built on the existing `InferenceBackendABC` surface. |
+| `SecretProviderBase` | `src/hecate/vault/provider.py` | Custom secret storage backend for the vault abstraction. |
 
 All follow the same Plugin pattern (manifest → ABC → `PluginRegistry` → lifecycle). See the [plugin manifest reference](../reference/plugin-manifest.md) for the manifest contract and [Writing a custom SPI plugin](#example-a-custom-evaluator) for worked examples.
 
@@ -387,11 +387,11 @@ Not all hooks are required — implement only what you need.
 ```python
 # my_evaluator.py
 from hecate.plugin import PluginManifest, PluginContext
-from hecate.plugin.spi.evaluator import EvaluatorABC
+from hecate.plugin.spi.evaluator import EvaluatorBase
 from hecate.services.evaluation.types import EvalInput, EvalOutput
 
 
-class DomainSpecificEvaluator(EvaluatorABC):
+class DomainSpecificEvaluator(EvaluatorBase):
     @property
     def name(self) -> str:
         return "domain_specific_score"
@@ -440,15 +440,15 @@ python -m hecate.plugin.cli install ./my_evaluator.hecate-plugin
 
 ### Example: a custom extension (guardrail hook)
 
-The "Extension" plugin type is special — it inherits from `ExtensionPluginABC` and implements any of the four guardrail hooks:
+The "Extension" plugin type is special — it inherits from `ExtensionPluginBase` and implements any of the four guardrail hooks:
 
 ```python
 # my_pii_filter.py
-from hecate.plugin.types.extension import ExtensionPluginABC
+from hecate.plugin.types.extension import ExtensionPluginBase
 from hecate.engine.guardrail import GuardrailResult, GuardrailAction
 
 
-class MyPIIFilter(ExtensionPluginABC):
+class MyPIIFilter(ExtensionPluginBase):
     """Redact custom PII patterns beyond what the built-in Presidio recognizers catch."""
 
     def on_pre_llm(self, messages, config):
@@ -562,28 +562,28 @@ I want to customize Hecate. What do I do?
 │   → Use a Core extension point (rebuild engine)
 │
 ├── I want to add a new evaluation metric
-│   → Implement EvaluatorABC + PluginManifest
+│   → Implement EvaluatorBase + PluginManifest
 │
 ├── I want to add a new auth method (OAuth2, mTLS, SAML)
-│   → Implement AuthProviderABC + PluginManifest
+│   → Implement AuthProviderBase + PluginManifest
 │
 ├── I want to add a new notification channel (Slack, PagerDuty)
-│   → Implement a NotificationChannelAdapter (ChannelABC) + PluginManifest
+│   → Implement a NotificationChannelAdapter (ChannelBase) + PluginManifest
 │
 ├── I want to add a new external channel (Feishu, Discord, Telegram)
-│   → Implement ChannelABC + PluginManifest
+│   → Implement ChannelBase + PluginManifest
 │
 ├── I want to inject custom logic into the agent execution (PII filter, custom validation)
-│   → Implement ExtensionPluginABC + PluginManifest (auto-wired into all 4 hooks)
+│   → Implement ExtensionPluginBase + PluginManifest (auto-wired into all 4 hooks)
 │
 ├── I want to add a new tool that agents can call
-│   → Implement ToolPluginABC + PluginManifest, OR use MCP server (preferred for external tools)
+│   → Implement ToolPluginBase + PluginManifest, OR use MCP server (preferred for external tools)
 │
 ├── I want to add a new LLM provider
-│   → Implement ModelPluginABC + PluginManifest, OR add a LiteLLM adapter (preferred)
+│   → Implement ModelPluginBase + PluginManifest, OR add a LiteLLM adapter (preferred)
 │
 ├── I want to react to events (scheduler triggers, webhooks)
-│   → Implement TriggerPluginABC + PluginManifest
+│   → Implement TriggerPluginBase + PluginManifest
 │
 └── I'm not sure which path
     → Open an issue with the `extension:` tag and we'll help route it
@@ -625,11 +625,11 @@ For specific implementation details:
 - `src/hecate/plugin/registry.py` — PluginRegistry
 - `src/hecate/plugin/lifecycle.py` — PluginLifecycle protocol
 - `src/hecate/plugin/sdk.py` — PluginContext
-- `src/hecate/plugin/spi/evaluator.py` — EvaluatorABC
-- `src/hecate/plugin/types/extension.py` — ExtensionPluginABC (4 hooks)
-- `src/hecate/plugin/types/tool.py` — ToolPluginABC
-- `src/hecate/plugin/types/model.py` — ModelPluginABC
-- `src/hecate/plugin/types/trigger.py` — TriggerPluginABC
+- `src/hecate/plugin/spi/evaluator.py` — EvaluatorBase
+- `src/hecate/plugin/types/extension.py` — ExtensionPluginBase (4 hooks)
+- `src/hecate/plugin/types/tool.py` — ToolPluginBase
+- `src/hecate/plugin/types/model.py` — ModelPluginBase
+- `src/hecate/plugin/types/trigger.py` — TriggerPluginBase
 - `src/hecate/plugin/cli.py` — standalone plugin CLI (`python -m hecate.plugin.cli`)
 - `src/hecate/plugin/hot_reload.py` — plugin hot-reload
 - `src/hecate/plugin/permission.py` — permissions enforcement

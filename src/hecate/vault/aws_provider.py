@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import logging
 
-from hecate.vault.provider import SecretProviderABC
+from hecate.vault.provider import SecretProviderBase
 
 logger = logging.getLogger(__name__)
 
 
-class AWSSecretsManagerProvider(SecretProviderABC):
+class AWSSecretsManagerProvider(SecretProviderBase):
     """Secret provider backed by AWS Secrets Manager.
 
     Supports secret reads and STS AssumeRole for dynamic credentials.

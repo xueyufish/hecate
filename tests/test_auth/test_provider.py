@@ -1,4 +1,4 @@
-"""Tests for AuthProviderABC, JWTAuthProvider, APIKeyAuthProvider."""
+"""Tests for AuthProviderBase, JWTAuthProvider, APIKeyAuthProvider."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import pytest
 
 from hecate.auth.api_key_provider import APIKeyAuthProvider
 from hecate.auth.jwt_provider import JWTAuthProvider
-from hecate.auth.provider import AuthProviderABC
+from hecate.auth.provider import AuthProviderBase
 
 
-class TestAuthProviderABC:
+class TestAuthProviderBase:
     def test_cannot_instantiate(self) -> None:
         with pytest.raises(TypeError):
-            AuthProviderABC()  # type: ignore[abstract]
+            AuthProviderBase()  # type: ignore[abstract]
 
 
 class TestJWTAuthProvider:

@@ -17,15 +17,15 @@ from __future__ import annotations
 import logging
 import os
 
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.plugin.manifest import PluginManifest
 from hecate.plugin.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
 
-def _register(registry: PluginRegistry, instance: ChannelABC) -> None:
-    """Register a single ChannelABC instance under its ``name``."""
+def _register(registry: PluginRegistry, instance: ChannelBase) -> None:
+    """Register a single ChannelBase instance under its ``name``."""
     manifest = PluginManifest(
         type="channel",
         name=instance.name,

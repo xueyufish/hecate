@@ -21,7 +21,7 @@ and the mandatory Bound Identity model.
                │ Signature verification (SDK)
                ▼
   ┌────────────────────────────────────────────┐
-  │  ChannelABC adapter                         │
+  │  ChannelBase adapter                         │
   │  (FeishuChannel / SlackChannel)              │
   │  receive(raw) → CanonicalMessage             │
   └────────────┬───────────────────────────────┘
@@ -53,7 +53,7 @@ and the mandatory Bound Identity model.
                │
                ▼
   ┌────────────────────────────────────────────┐
-  │  ChannelABC.respond() or .stream()           │
+  │  ChannelBase.respond() or .stream()           │
   │  Route reply back to Feishu / Slack          │
   └────────────────────────────────────────────┘
 ```
@@ -65,7 +65,7 @@ The ``IMMessageBus`` is the boundary that hands off to a background
 task: the adapter enqueues the normalized :class:`CanonicalMessage` and
 returns immediately, while a worker picks it up and walks through
 binding resolution, session routing, and the existing workflow
-executor. The last box — ``ChannelABC.respond()`` — runs on the
+executor. The last box — ``ChannelBase.respond()`` — runs on the
 **worker thread** and posts the Agent's reply back to the IM platform.
 The horizontal arrows are message handoffs; the vertical arrows are
 time. Anything outside the boxes is platform glue (signature
@@ -74,9 +74,9 @@ shape.
 
 ## Key Components
 
-### ChannelABC and the Plugin Registry
+### ChannelBase and the Plugin Registry
 
-`hecate/channel/adapter.py` defines `ChannelABC`, an abstract base class
+`hecate/channel/adapter.py` defines `ChannelBase`, an abstract base class
 with three methods: `receive`, `respond`, and `stream`. Concrete
 implementations live in `hecate/channel/im/`:
 

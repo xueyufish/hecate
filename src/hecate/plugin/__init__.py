@@ -30,18 +30,18 @@ from hecate.plugin.lifecycle import PluginLifecycle
 from hecate.plugin.manifest import PluginManifest
 from hecate.plugin.registry import PluginRegistry
 from hecate.plugin.sdk import PluginContext
-from hecate.plugin.types.extension import ExtensionPluginABC
-from hecate.plugin.types.model import ModelPluginABC
-from hecate.plugin.types.tool import ToolPluginABC
-from hecate.plugin.types.trigger import TriggerPluginABC
+from hecate.plugin.types.extension import ExtensionPluginBase
+from hecate.plugin.types.model import ModelPluginBase
+from hecate.plugin.types.tool import ToolPluginBase
+from hecate.plugin.types.trigger import TriggerPluginBase
 
 __all__ = [
-    "ExtensionPluginABC",
-    "ModelPluginABC",
+    "ExtensionPluginBase",
+    "ModelPluginBase",
     "PluginContext",
     "PluginLifecycle",
     "PluginManifest",
     "PluginRegistry",
-    "ToolPluginABC",
-    "TriggerPluginABC",
+    "ToolPluginBase",
+    "TriggerPluginBase",
 ]

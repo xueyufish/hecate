@@ -6,12 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hecate.auth.provider import AuthProviderABC
+from hecate.auth.provider import AuthProviderBase
 from hecate.auth.resolver import get_registered_providers, register_auth_providers, resolve_auth_context
 from hecate.core.auth_context import AuthContext
 
 
-class _MockProvider(AuthProviderABC):
+class _MockProvider(AuthProviderBase):
     def __init__(self, name: str, return_value: AuthContext | None) -> None:
         self._name = name
         self._return_value = return_value

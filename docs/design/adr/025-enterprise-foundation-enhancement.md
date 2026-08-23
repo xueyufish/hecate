@@ -72,10 +72,10 @@ Agent Execution Pipeline
 
 ### 2. Enterprise Vault Integration (EF2/10.8) — Dynamic Secrets
 
-Replace static Fernet encryption with a **SecretProviderABC** abstraction supporting multiple backends:
+Replace static Fernet encryption with a **SecretProviderBase** abstraction supporting multiple backends:
 
 ```python
-class SecretProviderABC(ABC):
+class SecretProviderBase(ABC):
     @abstractmethod
     async def get_secret(self, key: str, agent_id: str) -> str:
         """Retrieve a secret with agent-scoped access."""

@@ -65,12 +65,12 @@ Channel adapters translate external protocols into Hecate's internal `ExecutionR
 | **Enterprise Gateway** | SAML/OIDC | SSO federation |
 | **A2A Server** | A2A v1.0 | HTTP + JSON/gRPC |
 
-### ChannelABC SPI
+### ChannelBase SPI
 
-All channel adapters implement the `ChannelABC` interface — one of the eight plugin SPI types (see [ADR-016](adr/016-platform-spi-architecture.md) and the [plugin manifest](../reference/plugin-manifest.md)):
+All channel adapters implement the `ChannelBase` interface — one of the eight plugin SPI types (see [ADR-016](adr/016-platform-spi-architecture.md) and the [plugin manifest](../reference/plugin-manifest.md)):
 
 ```python
-class ChannelABC(ABC):
+class ChannelBase(ABC):
     @abstractmethod
     async def send(self, message: ChannelMessage) -> None: ...
 
@@ -240,7 +240,7 @@ Enterprise identity federation via standard protocols:
 - **LDAP** — Bind authentication against Active Directory or OpenLDAP
 - **SCIM 2.0** — Automated user/group provisioning and deprovisioning from Azure AD, Okta, OneLogin
 
-SCIM Directory Sync extends the `AuthProviderABC` SPI with `sync_identity` capability — delegated CRUD on the identity provider's user directory.
+SCIM Directory Sync extends the `AuthProviderBase` SPI with `sync_identity` capability — delegated CRUD on the identity provider's user directory.
 
 ### Authorization & Access Control
 
@@ -424,5 +424,5 @@ The `request_context` carries the authenticated identity (App-level + User-level
 | [ADR-009](adr/009-dual-api-design.md) | Four API surfaces decision |
 | [ADR-011](adr/011-a2a-protocol-adoption.md) | A2A protocol adoption |
 | [ADR-012](adr/012-mcp-streamable-http.md) | MCP Streamable HTTP transport |
-| [ADR-016](adr/016-platform-spi-architecture.md) | Platform SPI (ChannelABC, AuthProviderABC) |
+| [ADR-016](adr/016-platform-spi-architecture.md) | Platform SPI (ChannelBase, AuthProviderBase) |
 | [ADR-018](adr/018-zero-trust-identity-architecture.md) | Zero Trust Identity Architecture |

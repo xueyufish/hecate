@@ -1,7 +1,7 @@
 """JWTAuthProvider — authenticates via JWT access tokens.
 
 Wraps the existing ``decode_access_token()`` function as an
-AuthProviderABC implementation.
+AuthProviderBase implementation.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.auth.provider import AuthProviderABC
+from hecate.auth.provider import AuthProviderBase
 from hecate.core.auth_context import AuthContext
 from hecate.models.user import UserModel
 from hecate.models.workspace_member import WorkspaceRole
@@ -22,7 +22,7 @@ from hecate.services.auth.token import decode_access_token
 logger = logging.getLogger(__name__)
 
 
-class JWTAuthProvider(AuthProviderABC):
+class JWTAuthProvider(AuthProviderBase):
     """Authenticates requests via JWT access tokens.
 
     Decodes the token using the existing ``decode_access_token()``

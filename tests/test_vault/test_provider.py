@@ -1,16 +1,16 @@
-"""Tests for SecretProviderABC — abstractness, provider initialization."""
+"""Tests for SecretProviderBase — abstractness, provider initialization."""
 
 from __future__ import annotations
 
 import pytest
 
-from hecate.vault.provider import SecretProviderABC
+from hecate.vault.provider import SecretProviderBase
 
 
-class TestSecretProviderABC:
+class TestSecretProviderBase:
     def test_cannot_instantiate(self) -> None:
         with pytest.raises(TypeError):
-            SecretProviderABC()  # type: ignore[abstract]
+            SecretProviderBase()  # type: ignore[abstract]
 
 
 class TestHashiCorpVaultProvider:

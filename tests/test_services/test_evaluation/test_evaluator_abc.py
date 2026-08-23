@@ -8,7 +8,7 @@ from hecate.services.evaluation.evaluator import Evaluator
 from hecate.services.evaluation.types import EvalInput, EvalOutput, Score
 
 
-class TestEvaluatorABC:
+class TestEvaluatorBase:
     """Test that Evaluator cannot be instantiated directly."""
 
     def test_cannot_instantiate_abstract(self) -> None:

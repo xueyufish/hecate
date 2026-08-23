@@ -1,4 +1,4 @@
-# ADR-031: Web Widget Iframe Architecture (Bypassing ChannelABC)
+# ADR-031: Web Widget Iframe Architecture (Bypassing ChannelBase)
 
 ## Status
 
@@ -6,7 +6,7 @@ Accepted (2026-08-16, Multi-Channel Wave 1 close-out; extends ADR-016 platform S
 
 ## Context
 
-Hecate's Multi-Channel Wave 1 delivers 11.3 Feishu and 11.9 Slack via the `ChannelABC` platform SPI (ADR-016): each channel adapter wraps an IM platform's SDK, normalizes inbound events to `CanonicalMessage`, and routes through `WorkflowExecutionService.execute()`. The same wave had a third item — 11.2 Web Widget — but the original scope of "Web Widget = anything that talks to a chat frontend" landed on the wrong abstraction.
+Hecate's Multi-Channel Wave 1 delivers 11.3 Feishu and 11.9 Slack via the `ChannelBase` platform SPI (ADR-016): each channel adapter wraps an IM platform's SDK, normalizes inbound events to `CanonicalMessage`, and routes through `WorkflowExecutionService.execute()`. The same wave had a third item — 11.2 Web Widget — but the original scope of "Web Widget = anything that talks to a chat frontend" landed on the wrong abstraction.
 
 The catalog's 11.2 entry originally conflated two distinct scenarios:
 
@@ -15,22 +15,22 @@ The catalog's 11.2 entry originally conflated two distinct scenarios:
 
 These two scenarios have different client models, different threat surfaces, and different scope. If we collapse them into one feature, the simplified version either gets the unnecessary burden of RS256 + Origin allowlist + WidgetModel, or the full version gets short-changed by the simplified version's "just use the existing JWT" shortcut.
 
-11.3 Feishu and 11.9 Slack are *platform-mediated* channels: the IM platform owns the conversation thread, webhooks push events to us, and we respond asynchronously through the platform's API. `ChannelABC` is the right abstraction for that pattern. But the Web Widget's client is a browser, not a platform:
+11.3 Feishu and 11.9 Slack are *platform-mediated* channels: the IM platform owns the conversation thread, webhooks push events to us, and we respond asynchronously through the platform's API. `ChannelBase` is the right abstraction for that pattern. But the Web Widget's client is a browser, not a platform:
 
 - The browser can open a direct HTTP connection to our backend.
 - The browser can stream the SSE response.
 - There is no third-party intermediary owning the conversation.
 - The user is already authenticated against Hecate (in the simplified scope).
 
-Treating the Web Widget as a `ChannelABC` adapter would force it through a webhook abstraction it doesn't need, inherit a `CanonicalMessage` model it doesn't fit, and require a fake identity-binding flow (the IM scenario's `IMIdentityBinding` is for "I am this Feishu user, link me to my Hecate account"; the browser scenario already has the JWT). The shape mismatches.
+Treating the Web Widget as a `ChannelBase` adapter would force it through a webhook abstraction it doesn't need, inherit a `CanonicalMessage` model it doesn't fit, and require a fake identity-binding flow (the IM scenario's `IMIdentityBinding` is for "I am this Feishu user, link me to my Hecate account"; the browser scenario already has the JWT). The shape mismatches.
 
 ## Decision
 
-The 11.2 Web Widget (Simplified) implementation bypasses `ChannelABC` and the entire channel / gateway / platform-SPI abstraction. The browser talks directly to the existing OpenAI-compatible endpoints.
+The 11.2 Web Widget (Simplified) implementation bypasses `ChannelBase` and the entire channel / gateway / platform-SPI abstraction. The browser talks directly to the existing OpenAI-compatible endpoints.
 
 ### What this means concretely
 
-- The widget route (`/embed/chat`) does not register a `ChannelABC` adapter under `PluginRegistry`. `POST /v1/channels/web-widget/webhook` returns `404 Not Found`.
+- The widget route (`/embed/chat`) does not register a `ChannelBase` adapter under `PluginRegistry`. `POST /v1/channels/web-widget/webhook` returns `404 Not Found`.
 - The browser issues `POST /v1/chat/completions` with `session_id=conversationId` and consumes the SSE stream, identical to the dashboard chat.
 - The browser issues `POST /api/conversations` to auto-create a conversation on first load, identical to the dashboard chat's "New Chat" flow.
 - Authentication reuses the existing employee JWT pipeline. `AuthGuard` wraps the route. The `api-client` 401 interceptor handles expiry, identical to the dashboard chat.
@@ -57,7 +57,7 @@ The 11.2 catalog entry wording — "embeddable for any Hecate deployment" — wa
 
 ## Rationale
 
-### Why not reuse `ChannelABC` (treating the browser as a pseudo-IM)
+### Why not reuse `ChannelBase` (treating the browser as a pseudo-IM)
 
 - IM channels have a webhook *receiver* and an outbound *sender*. The browser has neither: it issues requests and consumes streamed responses. Forcing it through a webhook-first model requires either (a) a fake "webhook" that is actually a fetch from inside the iframe (which only adds latency and a re-abstraction layer) or (b) inventing a new "synchronous channel" subclass that breaks the existing SPI contract.
 - IM channels have platform-mediated identity. The browser has Hecate's own JWT. Layering an `IMIdentityBinding` flow on top of an existing JWT session duplicates the auth concept with a different shape.
@@ -89,14 +89,14 @@ The dashboard chat (`web/src/app/(dashboard)/chat/[conversationId]/page.tsx`) an
 
 ### Easier
 
-- The simplified version ships as a thin Next.js route with no backend changes, no new dependencies, no Alembic migration, and no changes to `ChannelABC`. Estimated work: S effort, matching the catalog's 11.2 entry.
+- The simplified version ships as a thin Next.js route with no backend changes, no new dependencies, no Alembic migration, and no changes to `ChannelBase`. Estimated work: S effort, matching the catalog's 11.2 entry.
 - The dashboard chat and the embed chat share bugs and features through `ChatSurface`. A single test surface for both.
 - The 11.2 full scope (anonymous to-C) can be designed independently with its own architecture, rather than being constrained by whatever the simplified version chose.
 
 ### Harder
 
-- Anyone proposing to add a `ChannelABC` adapter for the widget in the future will see this ADR and understand why it's intentionally rejected. Future contributors won't waste cycles re-litigating the decision.
-- The widget's auth pipeline is the same as the dashboard chat's auth pipeline. If we want widget-specific auth (e.g., a one-time token in the URL for a customer portal), it has to be added as a special-case layer on top of the JWT — the `ChannelABC` route would have given us a clean place to add it.
+- Anyone proposing to add a `ChannelBase` adapter for the widget in the future will see this ADR and understand why it's intentionally rejected. Future contributors won't waste cycles re-litigating the decision.
+- The widget's auth pipeline is the same as the dashboard chat's auth pipeline. If we want widget-specific auth (e.g., a one-time token in the URL for a customer portal), it has to be added as a special-case layer on top of the JWT — the `ChannelBase` route would have given us a clean place to add it.
 - The embed route and the dashboard chat route share the same `api-client` instance. If we want to differentiate behavior (e.g., rate-limit widget traffic separately), we need a different mechanism (e.g., a custom header) rather than going through a different SPI.
 
 ### Follow-up work
@@ -106,17 +106,17 @@ The dashboard chat (`web/src/app/(dashboard)/chat/[conversationId]/page.tsx`) an
 
 ### Note on `channel: "web-widget"` in other ADRs
 
-ADR-023 ([Tool Platform Enhancement](023-tool-platform-enhancement.md)) describes a `ToolPolicyLayer` DSL with a `channel` field that can match a string identifier (`channel: "web-widget"`) to filter tool availability per channel. This is a **separate dimension** from `ChannelABC`:
+ADR-023 ([Tool Platform Enhancement](023-tool-platform-enhancement.md)) describes a `ToolPolicyLayer` DSL with a `channel` field that can match a string identifier (`channel: "web-widget"`) to filter tool availability per channel. This is a **separate dimension** from `ChannelBase`:
 
-- The `channel` field in `ToolPolicyLayer` is a free-form string that downstream code matches against the request's source identifier. It is **not** a `ChannelABC` adapter name and does not require any adapter to be registered.
+- The `channel` field in `ToolPolicyLayer` is a free-form string that downstream code matches against the request's source identifier. It is **not** a `ChannelBase` adapter name and does not require any adapter to be registered.
 - The 11.2 Web Widget (Simplified) does not currently populate any channel identifier on its requests to `/v1/chat/completions` or `/api/conversations`. A `channel: "web-widget"` rule in `ToolPolicyLayer` would not match widget traffic today.
 - If a future version wants to apply channel-specific tool policies to widget traffic (e.g., deny `admin_*` tools in the embed context), the implementation will need to inject a `channel` field into the request context from the embed route (e.g., a request header or a request body field). This is left as a follow-up enhancement, not part of the 11.2 simplified scope.
 
-In short: ADR-023's `channel: "web-widget"` is illustrative and **does not** imply the widget integrates with `ChannelABC`.
+In short: ADR-023's `channel: "web-widget"` is illustrative and **does not** imply the widget integrates with `ChannelBase`.
 
 ## Cross-references
 
-- [ADR-016](016-platform-spi-architecture.md) — Platform SPI Architecture (15 extension points, including `ChannelABC`). This ADR documents an explicit *non-participation* in that SPI for the Web Widget.
+- [ADR-016](016-platform-spi-architecture.md) — Platform SPI Architecture (15 extension points, including `ChannelBase`). This ADR documents an explicit *non-participation* in that SPI for the Web Widget.
 - [ADR-018](018-zero-trust-identity-architecture.md) — Zero Trust Identity Architecture. The widget inherits the existing JWT trust boundary; the 11.2 full scope will need a separate trust model.
 - [`docs/features/feature-catalog.md`](../../features/feature-catalog.md) — 11.2 entry wording adjustment.
 - [`docs/features/roadmap.md`](../../features/roadmap.md) — Multi-Channel Wave 1 close-out; 2026-08-12 multi-channel scoping decision (Wave 1 = 11.2 simplified + 11.3 + 11.9 Slack).

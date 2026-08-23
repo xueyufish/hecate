@@ -1,4 +1,4 @@
-"""ChannelABC — abstract interface for external platform adapters.
+"""ChannelBase — abstract interface for external platform adapters.
 
 All channel adapters — built-in or third-party — must implement this
 interface to be registered with the PluginRegistry under type="channel".
@@ -13,7 +13,7 @@ from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.types import CanonicalMessage
 
 
-class ChannelABC(ABC):
+class ChannelBase(ABC):
     """Abstract base class for external platform adapters.
 
     Each channel adapter converts a specific platform's messages
@@ -30,7 +30,7 @@ class ChannelABC(ABC):
 
     Example::
 
-        class FeishuChannel(ChannelABC):
+        class FeishuChannel(ChannelBase):
             @property
             def name(self) -> str:
                 return "feishu"

@@ -10,12 +10,12 @@ from hecate.auth.api_key_provider import APIKeyAuthProvider
 from hecate.auth.jwt_provider import JWTAuthProvider
 from hecate.auth.ldap_provider import LDAPAuthProvider
 from hecate.auth.oidc_provider import OIDCAuthProvider
-from hecate.auth.provider import AuthProviderABC
+from hecate.auth.provider import AuthProviderBase
 from hecate.auth.saml_provider import SAMLAuthProvider
 
 __all__ = [
     "APIKeyAuthProvider",
-    "AuthProviderABC",
+    "AuthProviderBase",
     "JWTAuthProvider",
     "LDAPAuthProvider",
     "OIDCAuthProvider",

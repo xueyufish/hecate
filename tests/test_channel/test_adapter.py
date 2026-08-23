@@ -1,4 +1,4 @@
-"""Tests for ChannelABC, CanonicalMessage, and ChannelCapabilities."""
+"""Tests for ChannelBase, CanonicalMessage, and ChannelCapabilities."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.types import Attachment, CanonicalMessage, MessageContent
 
@@ -82,13 +82,13 @@ class TestChannelCapabilities:
         assert caps.max_message_length == 4096
 
 
-class TestChannelABC:
+class TestChannelBase:
     def test_cannot_instantiate(self) -> None:
         with pytest.raises(TypeError):
-            ChannelABC()  # type: ignore[abstract]
+            ChannelBase()  # type: ignore[abstract]
 
     def test_concrete_subclass(self) -> None:
-        class TestChannel(ChannelABC):
+        class TestChannel(ChannelBase):
             @property
             def name(self) -> str:
                 return "test"

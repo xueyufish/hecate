@@ -242,7 +242,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 5.5a | Plugin SPI Core ✅ (PluginRegistry + PluginManifest + PluginLifecycle) | — | L |
-| 7.2-abc | EvaluatorABC ✅ (refactor existing 40+ evaluators as BuiltinEvaluator) | 5.5a | M |
+| 7.2-abc | EvaluatorBase ✅ (refactor existing 40+ evaluators as BuiltinEvaluator) | 5.5a | M |
 
 ### Multi-Tenant & RBAC
 
@@ -299,7 +299,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [x] Full security stack: input/output/execution/data
 - [x] Full-Chain Tracing (8.1) + Real-Time Monitoring (8.2) — done
 - [x] Cost Dashboard (8.3) — done
-- [x] Plugin SPI Core (5.5a) + EvaluatorABC (7.2-abc) defined — pluggable foundation ready
+- [x] Plugin SPI Core (5.5a) + EvaluatorBase (7.2-abc) defined — pluggable foundation ready
 - [ ] 40+ evaluators available for regression testing
 
 ---
@@ -314,9 +314,9 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 11.1-abc | ChannelABC ✅ (REST/WS/CLI as BuiltinChannel) | 5.5a ✅ (Sprint 4) | M |
-| 10.3-abc | AuthProviderABC ✅ (JWT/APIKey as BuiltinAuthProvider) | 5.5a ✅ (Sprint 4) | M |
-| 8.6-abc | NotifierABC 🔀 (merged into ChannelABC — notification dispatchers as outbound Channel adapters) | 5.5a ✅ (Sprint 4) | S |
+| 11.1-abc | ChannelBase ✅ (REST/WS/CLI as BuiltinChannel) | 5.5a ✅ (Sprint 4) | M |
+| 10.3-abc | AuthProviderBase ✅ (JWT/APIKey as BuiltinAuthProvider) | 5.5a ✅ (Sprint 4) | M |
+| 8.6-abc | NotifierABC 🔀 (merged into ChannelBase — notification dispatchers as outbound Channel adapters) | 5.5a ✅ (Sprint 4) | S |
 | 15.1 | i18n SPI ✅ (locale passing + message catalog loading + t() function) | 5.5a ✅ (Sprint 4) | M |
 
 ### A2A Protocol & Multi-Agent
@@ -349,13 +349,13 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 10.3 | SSO/LDAP ✅ | Auth ✅ | M |
-| 10.3b | SCIM Directory Sync ✅ | AuthProviderABC ✅ | M |
+| 10.3b | SCIM Directory Sync ✅ | AuthProviderBase ✅ | M |
 | 10.7 | Budget Management & Cost Governance ✅ | Cost Dashboard ✅ | M |
 | 10.8 | Enterprise Vault Integration ✅ | Auth ✅ | M |
 
 ### Milestone M5 (End of Sprint 5)
 
-- [x] Platform SPI complete: ChannelABC ✅ + AuthProviderABC ✅ + i18n SPI ✅ defined. NotifierABC 🔀 merged into ChannelABC as NotificationChannelAdapter
+- [x] Platform SPI complete: ChannelBase ✅ + AuthProviderBase ✅ + i18n SPI ✅ defined. NotifierABC 🔀 merged into ChannelBase as NotificationChannelAdapter
 - [x] A2A Protocol with Signed Agent Cards operational
 - [x] Collaborative Conflict Handling with session locking
 - [x] Unified Skill Registry with Skill-Workflow mutual embedding
@@ -573,9 +573,9 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 11.2 | Web Widget (Simplified) ✅ *Wave 1 — internal Portal / embeddable for any Hecate deployment* | API ✅ | S (simplified) |
-| 11.3 | Feishu (Lark) ✅ *Wave 1 — China market anchor + first ChannelABC reference impl* | Channel SDK | M |
+| 11.3 | Feishu (Lark) ✅ *Wave 1 — China market anchor + first ChannelBase reference impl* | Channel SDK | M |
 | 11.8 | ~~Intent Recognition & Routing~~ **Dropped (2026-08-22)** — overlaps chat routing (`agent/<id>`) + multi-agent handoff + CONDITION intent routing (RoutingMode.INTENT) | — | — |
-| 11.9 | Slack ✅ *Wave 1*；Discord/Telegram → P5 (Wave 2) | ChannelABC ✅ | M (Slack) |
+| 11.9 | Slack ✅ *Wave 1*；Discord/Telegram → P5 (Wave 2) | ChannelBase ✅ | M (Slack) |
 
 **Deferred to P5 (按需触发, 不在当前 P3 主线)**:
 - 11.2 (full) — Web Widget 完整版（匿名 to-C 场景），trigger = 第一个公开网站/营销/客服场景的客户
@@ -981,8 +981,8 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 | **M1: P1 Complete** | Month 2 | 19/19 features ✅; 4 ABCs wired; 0 layering violations; all tests green |
 | **M2: Platform Ready** | Month 4 | Canvas usable; Multi-Agent orchestrable; Multi-DB + Multi-Vector-DB supported |
 | **M3: Feature Complete** | Month 6 | P2 63/63 (100%); 5+ channels; Evaluation baseline operational |
-| **M4: Enterprise Ready** | Month 8 | Resilience infrastructure (exception hierarchy + auto-retry + tool gating) ✅; ContextEngine Phase 1 (LLMWorker context pipeline) ✅; Plugin SPI Core + EvaluatorABC defined ✅; Multi-Tenant RBAC + SSO; full security stack ✅; end-to-end observability ✅ |
-| **M5: P3 Enterprise** | Month 10 | Platform SPI complete: ChannelABC + AuthProviderABC + i18n SPI ✅ (NotifierABC merged into ChannelABC); A2A Protocol with Signed Agent Cards; Model Hub (Catalog + Lifecycle Manager); Enterprise Identity: SSO + SCIM + Vault + Budget Management ✅ |
+| **M4: Enterprise Ready** | Month 8 | Resilience infrastructure (exception hierarchy + auto-retry + tool gating) ✅; ContextEngine Phase 1 (LLMWorker context pipeline) ✅; Plugin SPI Core + EvaluatorBase defined ✅; Multi-Tenant RBAC + SSO; full security stack ✅; end-to-end observability ✅ |
+| **M5: P3 Enterprise** | Month 10 | Platform SPI complete: ChannelBase + AuthProviderBase + i18n SPI ✅ (NotifierABC merged into ChannelBase); A2A Protocol with Signed Agent Cards; Model Hub (Catalog + Lifecycle Manager); Enterprise Identity: SSO + SCIM + Vault + Budget Management ✅ |
 | **M6: P3 Security & Ops** | Month 12 | Ops Center (Dashboard + Agent Health + Conversation Analytics + Tool Execution Analytics + CI/CD Gating + Agent Catalog Governance); Security (DLP + Runtime Protection + Red Teaming); Plugin System; Deployment infrastructure (SaaS + Canary + Horizontal Scaling + Backup) |
 | **M7: P3 Complete** | Month 14 | P3 re-scoped 125/125 (100%); Event-Sourced State (log-as-truth + DeltaChannel); Dynamic Orchestration; Run Replay Phase 1; Browser Automation Tool; Skill Provider Registry; Advanced RAG (Reranking + Incremental + Quality Eval); Multi-Channel Wave 1 (11.2 simplified ✅ + 11.3 ✅ + 11.9 Slack ✅); Evaluation Suite (7.6a/b dropped); Canvas (Human Input/Form + Trigger; 1.1.18-20 deferred); Memory Enhancement |
 | **M8: P4 Intelligence** | Month 16 | Hallucination Detection operational; Self-Learning loop; Agentic RL Framework; Prompt Self-Optimization; Ontology Action System; OAG complete; Sleep-time Memory Consolidation; LLM-Managed Memory; Memory Intelligence features |
@@ -1019,7 +1019,7 @@ Multi-Database → Multi-Vector-DB → MCP Server Mode
 ```
 Organization Management → RBAC/SSO → Evaluation → Security → Observability → Operations
 Resilience → Exception Hierarchy (1.3.5g) → Auto-Retry (1.3.5h) → Tool Gating (1.3.5f)
-Plugin SPI Core (5.5a) → EvaluatorABC (7.2-abc) + ChannelABC (11.1-abc) + AuthProviderABC (10.3-abc) + NotifierABC (8.6-abc) + i18n SPI (15.1)
+Plugin SPI Core (5.5a) → EvaluatorBase (7.2-abc) + ChannelBase (11.1-abc) + AuthProviderBase (10.3-abc) + NotifierABC (8.6-abc) + i18n SPI (15.1)
 Failure Analysis → Meta-Agent Scheduler → Garbage Collector + Drift Detector + Compliance Checker
 Model Routing → A/B Testing → Gray Release → Circuit Breaker → Key Encryption → Intelligent Router
 Security → Sandbox Executor → Sandbox Pool → Event Store → Tracing → Metrics → NotifierABC
@@ -1069,7 +1069,7 @@ Multi-Step Memory Retrieval (4.20) → Function Chaining → Complex Query Resol
 Tool Memory (4.22) → Tool Usage Learning → Parameter Tuning
 Cross-Thread Memory Store (4.23) → Cross-Session Facts → Shared Knowledge
 A2A Protocol (P3) → Peer Selection → Agent Team Templates → Distributed Team Orchestration
-AuthProviderABC (P3) → SCIM Directory Sync (10.3b)
+AuthProviderBase (P3) → SCIM Directory Sync (10.3b)
 i18n SPI (P3) → Community Translations (15.2)
 Asset Marketplace → Industry Capabilities → Marketplace → Advanced RAG → Distributed → SDK → Compliance
 PyPI Distribution → End-User Application → Mobile GUI

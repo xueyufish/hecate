@@ -153,8 +153,8 @@ For each task:
 ```markdown
 ## Decisions Log
 
-### 2026-08-12: ChannelABC type signature
-Originally `ChannelABC.receive(raw: object)`. While implementing
+### 2026-08-12: ChannelBase type signature
+Originally `ChannelBase.receive(raw: object)`. While implementing
 the first concrete adapter, we needed structured payloads
 (event metadata, tenant tokens), so we narrowed to
 `receive(raw: dict[str, object])`. Tracked in commit aaf5415.
@@ -163,7 +163,7 @@ the first concrete adapter, we needed structured payloads
 **If apply changes the scope**, update `proposal.md` and record the change in the commit message:
 
 ```
-feat(channel): 11.3 feishu - ChannelABC adapter
+feat(channel): 11.3 feishu - ChannelBase adapter
 
 Update proposal.md scope: drop 11.3.1 token refresh, defer to 11.3.2.
 Per decisions log.

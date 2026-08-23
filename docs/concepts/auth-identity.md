@@ -32,7 +32,7 @@ API keys are database-backed, scoped credentials for machine-to-machine access. 
 
 Keys are created via `ApiKeyService` (`services/api_key_service.py`) with the `_KEY_PREFIX = "hcat_"` convention. The returned value looks like `hcat_a1b2c3d4...` — store it immediately, because Hecate cannot recover it later.
 
-The `APIKeyAuthProvider` (`auth/api_key_provider.py`) implements the `AuthProviderABC` interface: hash the incoming key, look up the hash, verify scope and expiry, and attach the key's tenant context to the request.
+The `APIKeyAuthProvider` (`auth/api_key_provider.py`) implements the `AuthProviderBase` interface: hash the incoming key, look up the hash, verify scope and expiry, and attach the key's tenant context to the request.
 
 ---
 
@@ -86,7 +86,7 @@ SCIM is independent of SSO — you can use SCIM for provisioning with any SSO me
 
 ## The auth provider abstraction
 
-Hecate's auth layer is pluggable via `AuthProviderABC`. The built-in providers cover the common cases:
+Hecate's auth layer is pluggable via `AuthProviderBase`. The built-in providers cover the common cases:
 
 | Provider | File | Handles |
 |----------|------|---------|
@@ -95,7 +95,7 @@ Hecate's auth layer is pluggable via `AuthProviderABC`. The built-in providers c
 | SSO handlers | `api/management/sso.py` | OIDC, SAML, LDAP flows |
 | SCIM endpoints | `api/management/scim_*.py` | User and group provisioning |
 
-For custom auth schemes (mTLS, signed request headers, proprietary tokens), implement `AuthProviderABC` and register it — the rest of the system treats the authenticated identity uniformly regardless of how it was established.
+For custom auth schemes (mTLS, signed request headers, proprietary tokens), implement `AuthProviderBase` and register it — the rest of the system treats the authenticated identity uniformly regardless of how it was established.
 
 ---
 
@@ -110,7 +110,7 @@ For custom auth schemes (mTLS, signed request headers, proprietary tokens), impl
 | Integrate with AD FS or legacy IdPs | SAML 2.0 SSO |
 | Authenticate against a directory server | LDAP direct bind |
 | Auto-provision and deprovision users | SCIM v2 alongside any SSO method |
-| Build a custom auth scheme | Implement `AuthProviderABC` |
+| Build a custom auth scheme | Implement `AuthProviderBase` |
 
 ---
 

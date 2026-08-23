@@ -248,7 +248,7 @@ The Ops Center leverages Hecate's 41 built-in evaluators covering three assessme
 | **RAG Retrieval** | Context Precision, Context Recall, Context Relevancy, Faithfulness | Assess retrieval effectiveness |
 | **Agent-Level** | Tool Selection Accuracy, Task Completion, Trajectory Efficiency, Goal Achievement | Assess end-to-end agent performance |
 
-Evaluators are pluggable via the `EvaluatorABC` SPI (7.2-abc) — custom evaluators can be registered without code changes to the engine.
+Evaluators are pluggable via the `EvaluatorBase` SPI (7.2-abc) — custom evaluators can be registered without code changes to the engine.
 
 ### Testing Center / Sandbox (7.9)
 
@@ -298,7 +298,7 @@ The Alerting Engine monitors metrics and traces in real-time, firing alerts when
 | **Composite** | Multiple condition combination | Error rate > 3% AND user satisfaction < 3.5 |
 | **SLA** | SLA rule breach | Uptime < 99.9% over 5-minute window |
 
-Alerts route through notification dispatchers implemented as outbound `ChannelABC` adapters (`NotificationChannelAdapter`, formerly the standalone `NotifierABC` SPI, 8.6-abc — merged per 5.5a) — supporting Email, Webhook, Slack, and custom notification channels.
+Alerts route through notification dispatchers implemented as outbound `ChannelBase` adapters (`NotificationChannelAdapter`, formerly the standalone `NotifierABC` SPI, 8.6-abc — merged per 5.5a) — supporting Email, Webhook, Slack, and custom notification channels.
 
 ### Incident & Alert Management Console (O9)
 

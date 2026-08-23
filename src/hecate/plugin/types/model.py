@@ -1,11 +1,11 @@
-"""ModelPluginABC — base class for model-type plugins (custom LLM provider)."""
+"""ModelPluginBase — base class for model-type plugins (custom LLM provider)."""
 
 from __future__ import annotations
 
 from typing import Any
 
 
-class ModelPluginABC:
+class ModelPluginBase:
     """Base class for plugins that provide custom LLM inference.
 
     Use this when LiteLLM does not cover a provider and you need

@@ -39,16 +39,16 @@ The plugin type. Must be one of the eight registered types (`PLUGIN_TYPE_REGISTR
 
 | Value | Loads as | ABC |
 |---|---|---|
-| `tool` | Callable tool | `ToolPluginABC` |
-| `extension` | Runtime interceptor | `ExtensionPluginABC` |
-| `trigger` | Event trigger | `TriggerPluginABC` |
-| `model` | LLM provider | `ModelPluginABC` |
-| `channel` | External communication channel | `ChannelABC` |
-| `evaluator` | Evaluation metric | `EvaluatorABC` |
-| `auth_provider` | Authentication method | `AuthProviderABC` |
-| `secret_provider` | Secret storage backend | `SecretProviderABC` |
+| `tool` | Callable tool | `ToolPluginBase` |
+| `extension` | Runtime interceptor | `ExtensionPluginBase` |
+| `trigger` | Event trigger | `TriggerPluginBase` |
+| `model` | LLM provider | `ModelPluginBase` |
+| `channel` | External communication channel | `ChannelBase` |
+| `evaluator` | Evaluation metric | `EvaluatorBase` |
+| `auth_provider` | Authentication method | `AuthProviderBase` |
+| `secret_provider` | Secret storage backend | `SecretProviderBase` |
 
-> **Note**: the former `notifier` type was merged into `channel` — notification dispatchers are now outbound `NotificationChannelAdapter` implementations extending `ChannelABC` (see `src/hecate/channel/notification.py`).
+> **Note**: the former `notifier` type was merged into `channel` — notification dispatchers are now outbound `NotificationChannelAdapter` implementations extending `ChannelBase` (see `src/hecate/channel/notification.py`).
 
 Examples:
 
@@ -252,9 +252,9 @@ permissions:
 ```python
 # my_plugin/__init__.py
 from hecate.plugin import PluginManifest, PluginContext
-from hecate.plugin.spi.evaluator import EvaluatorABC
+from hecate.plugin.spi.evaluator import EvaluatorBase
 
-class MyEvaluator(EvaluatorABC):
+class MyEvaluator(EvaluatorBase):
     @property
     def name(self): return "my_metric"
     @property
