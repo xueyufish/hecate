@@ -2,7 +2,7 @@
 
 <div align="center">
 
-**Enterprise-grade, self-hosted Agent platform. Built for engineers who need to ship.**
+**The enterprise-grade agent operating system for enterprise intelligent applications — high-code + low-code, self-hosted, MIT-licensed, secured by default.**
 
 [![CI](https://github.com/xueyufish/hecate/actions/workflows/ci.yml/badge.svg)](https://github.com/xueyufish/hecate/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
@@ -23,27 +23,22 @@
 
 ## Why Hecate?
 
-Hecate is the **engineering platform layer** between thin frameworks and visual SaaS:
+Hecate is the **enterprise-grade agent operating system** for enterprises building intelligent applications — combining high-code with low-code , secured by enterprise-grade capabilities out of the box:
 
-- **Built for engineers who need to ship** — code-first Python API, 26 engine extension interfaces, no framework lock-in.
-- **Self-hosted, no SaaS** — your prompts never leave your network; LLM traffic uses your API keys.
-- **Multi-tenant by default** — Organization → Workspace → RBAC + SSO/SCIM. Built-in audit trail.
-- **Protocol-native** — speaks MCP (server + client, 2026-07-28 spec) and A2A (server + client, Linux Foundation v1.0 GA) natively.
-- **OpenAI-compatible** — wire-compatible `/v1/chat/completions`. Existing OpenAI clients (litellm, langchain-openai, instructor, vllm) work by changing `base_url`.
-- **Engine-level extensibility** — 26 engine extension interfaces + 8 plugin SPI types when you need to go deep (custom scheduler, custom guardrail hooks, custom checkpoint store).
-
-<details>
-<summary><strong>30-second elevator pitch</strong> (click to expand)</summary>
-
-> Hecate is an **open-source, self-hosted, Python-first agent platform** for engineering teams building **production agents** that need to live inside an organization's own infrastructure. It is **not** a no-code SaaS (use Dify for that) and **not** a thin framework (use LangGraph if you only need an orchestration library). It is the **engine-level platform layer in between**: a self-developed Pregel runtime, multi-tenant by default, OpenAI-compatible on the API surface, MCP + A2A on the protocol surface, and 26 engine extension interfaces + 8 plugin SPI types when you need to go deep.
-
-</details>
+- **High-code + low-code, one workflow** — Python API for engineers; drag-and-drop visual canvas for business users. Bidirectional JSON graph DSL sync — what you build visually is the same code-defined workflow.
+- **Event-sourced execution (Log-as-Truth)** — Append-only event log + durable checkpoints + time-travel replay. Debug any session via `GET /api/sessions/{id}/replay`.
+- **Production-grade long-running** — Durable retry, resume, controlled interruption, HITL approval. 11 built-in tools including sandboxed headless Chromium with per-environment domain allow-lists.
+- **Enterprise-grade security by default** — Multi-tenant Org → Workspace → RBAC, SSO (OIDC/SAML/LDAP) + SCIM v2, audit trail, PII redaction, sandboxed execution. Compliance-ready, not bolt-on.
+- **Protocol-native** — MCP (server + client) + A2A (server + client) + OpenAI-compatible API. Wire-compatible with existing OpenAI clients.
+- **Self-hosted, your data stays** — Deploy on your infrastructure. Prompts and completions go directly to your LLM provider (cloud or local); Hecate itself stores nothing by default.
 
 ---
 
 ## At a glance
 
-![Hecate L1 Architecture](docs/design/images/hecate_l1_architecture.png)
+![Hecate Architecture Overview](docs/design/images/hecate_architecture_overview.png)
+
+<sub>For the comprehensive L1 architecture with sub-components, see [architecture.md](docs/design/architecture.md).</sub>
 
 ---
 
