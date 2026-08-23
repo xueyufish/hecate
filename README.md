@@ -1,18 +1,45 @@
 # Hecate
 
+<div align="center">
+
+**Enterprise-grade, self-hosted Agent platform. Built for engineers who need to ship.**
+
 [![CI](https://github.com/xueyufish/hecate/actions/workflows/ci.yml/badge.svg)](https://github.com/xueyufish/hecate/actions/workflows/ci.yml)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)](https://github.com/xueyufish/hecate)
+[![MCP 2026-07-28](https://img.shields.io/badge/MCP-2026--07--28-brightgreen)](https://modelcontextprotocol.io/)
+[![A2A v1.0 GA](https://img.shields.io/badge/A2A-v1.0_GA-blue)](https://a2a-protocol.org/)
+[![OpenAI compatible](https://img.shields.io/badge/OpenAI-compatible-74aa9c)](https://platform.openai.com/docs/api-reference/chat)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/xueyufish/hecate/blob/main/pyproject.toml)
 [![Type checked: mypy strict](https://img.shields.io/badge/mypy-strict-blue)](https://github.com/xueyufish/hecate/blob/main/pyproject.toml)
 [![Pre-commit enabled](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/xueyufish/hecate/blob/main/.pre-commit-config.yaml)
 
-Enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform.
+</div>
 
-Hecate is an enterprise-grade Agent platform with a self-developed Pregel execution runtime. It speaks MCP and A2A natively, integrates 100+ LLMs, and exposes an OpenAI-compatible API so existing tools integrate without change. Multi-agent orchestration, engine-level guardrails, and Docker-isolated sandbox execution are first-class concerns.
+> **Hecate is alpha software.** APIs and config schemas may change before 1.0. Pin your version (`hecate==0.1.x`).
 
-> ⚠️ **Hecate is alpha software.** APIs and config schemas may change before 1.0. Pin your version (`hecate==0.1.x`).
+---
+
+## Why Hecate?
+
+Hecate is the **engineering platform layer** between thin frameworks and visual SaaS:
+
+- **Built for engineers who need to ship** — code-first Python API, 26 engine extension interfaces, no framework lock-in.
+- **Self-hosted, no SaaS** — your prompts never leave your network; LLM traffic uses your API keys.
+- **Multi-tenant by default** — Organization → Workspace → RBAC + SSO/SCIM. Built-in audit trail.
+- **Protocol-native** — speaks MCP (server + client, 2026-07-28 spec) and A2A (server + client, Linux Foundation v1.0 GA) natively.
+- **OpenAI-compatible** — wire-compatible `/v1/chat/completions`. Existing OpenAI clients (litellm, langchain-openai, instructor, vllm) work by changing `base_url`.
+- **Engine-level extensibility** — 26 engine extension interfaces + 8 plugin SPI types when you need to go deep (custom scheduler, custom guardrail hooks, custom checkpoint store).
+
+<details>
+<summary><strong>30-second elevator pitch</strong> (click to expand)</summary>
+
+> Hecate is an **open-source, self-hosted, Python-first agent platform** for engineering teams building **production agents** that need to live inside an organization's own infrastructure. It is **not** a no-code SaaS (use Dify for that) and **not** a thin framework (use LangGraph if you only need an orchestration library). It is the **engine-level platform layer in between**: a self-developed Pregel runtime, multi-tenant by default, OpenAI-compatible on the API surface, MCP + A2A on the protocol surface, and 26 engine extension interfaces + 8 plugin SPI types when you need to go deep.
+
+</details>
+
+---
 
 ## At a glance
 
@@ -20,18 +47,38 @@ Hecate is an enterprise-grade Agent platform with a self-developed Pregel execut
 
 ---
 
-## Who is this for?
+## How does Hecate compare?
 
-Hecate is a good fit if you need any of the following:
+| Dimension | **Hecate** | Dify | LangGraph | n8n | CrewAI |
+|---|---|---|---|---|---|
+| **Deployment** | Self-hosted OSS (MIT) | Cloud + self-host | OSS library | Cloud + self-host (Fair-code) | Cloud + enterprise |
+| **Primary UX** | Code (Python) + Visual | Visual-first | Code (Python) | Visual + code | Code + Visual |
+| **Engine** | Self-developed **Pregel/BSP** + event-sourced execution state | DAG-based | Pregel (Google) inspired | DAG-based | Custom |
+| **MCP server + client** | ✅ Bidirectional (2026-07-28 spec) | ✅ Client only | Partial | ✅ | ✅ |
+| **A2A protocol** | ✅ (server + client) | ❌ | ❌ | ❌ | Partial |
+| **OpenAI-compatible API** | ✅ Wire-compatible | ❌ | ❌ | ❌ | ❌ |
+| **Multi-tenancy native** | ✅ Org → Workspace → RBAC + SSO/SCIM | ✅ | ❌ Add-on | ✅ | ✅ |
+| **Engine-level extensibility** | ✅ **26 interfaces + 8 SPI** | Plugins | Decorators | Nodes | Limited |
+| **License** | MIT | Apache-2.0 + cloud | MIT (LangGraph) + proprietary (LangSmith) | Sustainable Use License | Proprietary |
 
-- **A flexible agent runtime** — code-first Python API for engineers and a visual canvas for non-developers
-- **Engine-level extensibility** — 26 engine extension interfaces + 8 plugin SPI types let you swap schedulers, checkpointers, guardrails, tool/extension/trigger/model plugins, and more
-- **Self-hosted on your own infrastructure** — your prompts never leave your network; LLM traffic uses your API keys
-- **Multi-agent orchestration with persistence** — graph-based state, durable checkpoints, human-in-the-loop
-- **A multi-tenant foundation** — Organization → Workspace → RBAC for an internal agent platform product
-- **To study or extend an agent runtime** — layered architecture with a self-developed Pregel engine and no framework lock-in
+> Full comparison (vs Salesforce Agentforce, AWS Bedrock AgentCore, CrewAI, n8n, Chinese platforms, "Linux of agent platforms" framing): see **[Positioning & Competitive Landscape](docs/design/positioning.md)**.
 
-Hecate is **not** a good fit if you want a managed cloud service — Hecate is OSS, self-hosted, and you run it on your own infrastructure. (Dify or n8n may be better fits if your team is non-developer-first and you want a pure GUI-driven, no-code experience.)
+### Pick Hecate when…
+
+- ✅ **Self-hosted is required** (data residency, compliance, or cost reasons)
+- ✅ **Multi-tenancy is required** (you build a platform for many teams / customers)
+- ✅ **Protocol surface matters** (you need MCP, A2A, and OpenAI-compatible — not just one)
+- ✅ **Engine-level extensibility is required** (you'll write a custom scheduler, guardrail hooks, or checkpoint store)
+- ✅ **MIT-licensed OSS is required** (no per-seat fees, no telemetry)
+
+### Pick something else when…
+
+| If you want… | Choose |
+|---|---|
+| Non-developers building chatbots in days | **Dify** |
+| A library, not a platform | **LangGraph** |
+| General workflow automation (AI is a feature) | **n8n** |
+| Managed cloud with sales motion | **CrewAI / Agentforce** |
 
 ---
 
@@ -156,21 +203,78 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 
 ---
 
+## What you get out of the box
+
+### 11 built-in tools
+
+Every Hecate agent can use these immediately — no extra install required:
+
+| Tool | Risk | Purpose |
+|---|---|---|
+| `web_search` | LOW | Search the web for information |
+| `read_file` | LOW | Read a file from the workspace root |
+| `write_file` | MEDIUM | Write content to a file |
+| `list_files` | LOW | List files and directories |
+| `execute_code` | MEDIUM | Run Python in a sandboxed Docker container |
+| `browser_navigate` | MEDIUM | Drive a headless Chromium to a URL (sandboxed, per-env allow-list) |
+| `browser_click` | MEDIUM | Click an element on the current page |
+| `browser_type` | MEDIUM | Type text into an input element |
+| `browser_extract` | MEDIUM | Extract page content (a11y / text / HTML) |
+| `browser_screenshot` | MEDIUM | Capture the page as PNG |
+| `browser_fill_form` | MEDIUM | Atomically fill multiple form fields |
+
+Browser tools run inside a dedicated Docker sandbox with per-environment domain allow-lists enforced fail-closed. See [Browser automation guide](docs/how-to/browser-automation.md).
+
+### 7 collaboration patterns
+
+Ship multi-agent workflows as graph templates:
+
+| Pattern | When |
+|---|---|
+| **Sequential** | Linear pipeline: each step feeds the next |
+| **Parallel** | Fan-out / fan-in: independent tasks merged at the end |
+| **Handoff** | Agent decides who handles the next turn |
+| **Broadcast** | Multiple agents read/write a shared topic channel |
+| **Negotiation** | 2 agents negotiate until a condition resolves |
+| **Debate** | 2+ agents argue in rounds until a winner emerges |
+| **Dynamic** | A COORDINATOR node emits a TaskDAG at runtime |
+
+### 26 engine extension interfaces + 8 plugin SPI types
+
+The full extension surface — see [Extension Points inventory](docs/reference/extension-points.md) and [Plugin concepts](docs/concepts/plugins.md).
+
+---
+
 ## Features
 
-- **Graph-First Engine** — Self-built Pregel/BSP runtime with 26 engine extension interfaces and 8 plugin SPI types. Zero external framework dependencies for the engine.
+Organized by layer:
+
+### Protocol layer
+
 - **A2A Protocol Native** — Linux Foundation v1.0 GA — signed AgentCards (`/.well-known/agent-card.json`), JSON-RPC 2.0 task lifecycle, SSE streaming, and JWS+RFC 8785 trust model. Operates as both A2A server and A2A client.
 - **MCP Native** — Bidirectional Model Context Protocol: Hecate consumes external MCP servers (GitHub, Slack, etc.) and exposes its own as a server (Streamable HTTP transport, MCP 2026-07-28 spec).
 - **OpenAI SDK Drop-in** — Wire-compatible `/v1/chat/completions` endpoint. Any OpenAI client (Python, JS, litellm, langchain-openai, instructor, vllm) works against Hecate by changing `base_url`.
-- **Visual Canvas** — Drag-and-drop workflow editor in `web/` (React Flow + Next.js). Bidirectional sync with the JSON graph DSL — what you build visually is the same code-defined workflow.
-- **Multi-Agent Orchestration** — Seven collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate, Dynamic Orchestration) unified as Graph templates — six static, plus Dynamic Orchestration emitting a runtime TaskDAG from a COORDINATOR node.
-- **Context Engineering** — An extensible pipeline (assembler, evidence tracker, phase detector, token budget, provider shaping, message prioritization, tool filtering, offloader) that keeps long-running agents on-budget and on-task.
-- **Multi-Tenant** — Organization → Workspace → RBAC with `workspace_id` on 38 data models for tenant isolation. SSO via OIDC/SAML/LDAP, SCIM v2 provisioning.
-- **Plugin System** — 8 plugin types (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) with hot-reload, declared permissions, and versioned manifests. Plus Core extension points for engine-internal customization.
-- **IM Channels** — Reach Hecate agents from Feishu (Lark) and Slack via inbound webhooks. Mandatory Bound Identity model ensures every IM user is bound to a Hecate user before any conversation starts. Same Hecate user shares one conversation thread across both channels. See [Configure Feishu and Slack](docs/how-to/configure-feishu-slack.md) and the [IM channel architecture overview](docs/concepts/im-channel-architecture.md).
-- **Embeddable Web Widget** — Drop an agent chat into any web page via the `/embed/chat` iframe (ADR-031), reusing the dashboard chat components with existing JWT auth.
-- **Execution Replay** — Trace-partitioned timelines and time-travel state inspection over the event-sourced execution log (Log-as-Truth); debug any session via `GET /api/sessions/{id}/replay`.
+
+### Engine layer
+
+- **Graph-First Engine** — Self-built Pregel/BSP runtime with 26 engine extension interfaces and 8 plugin SPI types. Zero external framework dependencies for the engine.
 - **Engine-Level Guardrails** — Four hook types (Pre/Post LLM/Tool) at every LLM and Tool boundary; the same hooks power PII masking, audit logging, and human-in-the-loop flows.
+- **Context Engineering** — An extensible pipeline (assembler, evidence tracker, phase detector, token budget, provider shaping, message prioritization, tool filtering, offloader) that keeps long-running agents on-budget and on-task.
+- **Execution Replay** — Trace-partitioned timelines and time-travel state inspection over the event-sourced execution log (Log-as-Truth, [ADR-030](docs/design/adr/030-event-sourced-execution-state.md)); debug any session via `GET /api/sessions/{id}/replay`.
+- **Sandboxed Tool Execution** — Docker-isolated runtime with explicit permission scopes per agent. Browser tools run in a dedicated Chromium sandbox with per-environment domain allow-lists.
+
+### Platform layer
+
+- **Multi-Tenant** — Organization → Workspace → RBAC with `workspace_id` on **35 data models** for tenant isolation. SSO via OIDC/SAML/LDAP, SCIM v2 provisioning.
+- **Visual Canvas** — Drag-and-drop workflow editor in `web/` (React Flow + Next.js). Bidirectional sync with the JSON graph DSL — what you build visually is the same code-defined workflow.
+- **Multi-Agent Orchestration** — Seven collaboration patterns (see above) unified as Graph templates.
+- **Plugin System** — 8 plugin types (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) with hot-reload, declared permissions, and versioned manifests.
+- **Embeddable Web Widget** — Drop an agent chat into any web page via the `/embed/chat` iframe ([ADR-031](docs/design/adr/031-web-widget-iframe-architecture.md)), reusing the dashboard chat components with existing JWT auth.
+
+### Integration layer
+
+- **IM Channels** — Reach Hecate agents from Feishu (Lark) and Slack via inbound webhooks. Mandatory Bound Identity model ensures every IM user is bound to a Hecate user before any conversation starts. See [Configure Feishu and Slack](docs/how-to/configure-feishu-slack.md).
+- **Webhooks** — Trigger workflows from external systems. See [Set up webhooks](docs/how-to/set-up-webhooks.md).
 - **OpenSpec Workflow** — Every feature shipped through structured proposal → design → specs → implementation → archive (similar to Python PEPs / Kubernetes KEPs / Rust RFCs). 32 ADRs and 100+ archived changes document the architecture.
 
 ---
@@ -198,12 +302,13 @@ Built for on-premises and regulated deployments:
 
 ## CLI Tools
 
-Hecate ships two console-script entry points:
+Hecate ships three console-script entry points:
 
 - **`hecate`** — the main CLI for managing agents, sessions, knowledge bases, workflows, and other resources. See [`docs/reference/cli.md`](docs/reference/cli.md) for the full command list.
 - **`hecate-migrate`** — standalone migration runner. Designed for one-shot use as a Docker Compose init service, a Kubernetes init container, or a Helm pre-install hook — runs Alembic migrations without booting the full web application.
+- **`hecate-flag-audit`** — CI tool that scans the source tree for stale or orphaned `ENABLE_*` feature flags. See [`docs/reference/cli.md#hecate-flag-audit--feature-flag-audits`](docs/reference/cli.md#hecate-flag-audit--feature-flag-audits).
 
-After `uv pip install -e ".[dev]"`, both commands are available on your `PATH`.
+After `uv pip install -e ".[dev]"`, all three commands are available on your `PATH`.
 
 ---
 
@@ -214,7 +319,7 @@ After `uv pip install -e ".[dev]"`, both commands are available on your `PATH`.
 - **[How-to Guides](docs/how-to/)** — 19 task-oriented recipes (LLM providers, deployment, MCP, A2A, SSO, backups, webhooks, troubleshooting).
 - **[Concepts](docs/concepts/)** — 23 explanatory articles that help you understand Hecate's core ideas before building.
 - **[Reference](docs/reference/)** — REST API, CLI, Graph DSL, plugin manifest, event catalog, extension points, data models.
-- **[Architecture Center](docs/design/)** — 22 architecture deep dives + 32 ADRs + ADR index, plus strategy docs (positioning).
+- **[Architecture Center](docs/design/)** — 22 architecture deep dives + 32 ADRs + ADR index, plus [Positioning & Competitive Landscape](docs/design/positioning.md) and [Reference Architectures](docs/design/reference-architectures.md).
 - **[Use Cases](docs/use-cases/)** — end-to-end business scenarios (customer support bot, code review agent, research team).
 - **[Migrations](docs/migrations/)** — schema migration guides (expand-contract pattern, 0.1 → 0.2 upgrade).
 - **[Operations](docs/operations/)** — runbooks for production (health checks, backup, rollback, log analysis, performance).
