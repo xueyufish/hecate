@@ -14,7 +14,6 @@ import logging
 import signal
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from contextlib import asynccontextmanager as _asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -727,22 +726,17 @@ app.include_router(scim_discovery_router, tags=["scim"])
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
+    from fastmcp.utilities.lifespan import combine_lifespans
+
     from hecate.services.mcp.server import create_mcp_server
 
     _mcp = create_mcp_server()
-    _mcp_app = _mcp.http_app(path="/mcp")
-
+    # fastmcp 4 / FastAPI integration: http_app(path="/") avoids the
+    # double-prefix /mcp/mcp bug (PR fastmcp#2962) when mounting at /mcp.
+    _mcp_app = _mcp.http_app(path="/")
     _original_lifespan = app.router.lifespan_context
-
-    @_asynccontextmanager
-    async def _combined_lifespan(app_inner: FastAPI) -> AsyncGenerator[None, None]:
-        async with (
-            _original_lifespan(app_inner),
-            _mcp_app.lifespan(app_inner),
-        ):
-            yield
-
-    app.router.lifespan_context = _combined_lifespan
+    app.router.lifespan_context = combine_lifespans(_original_lifespan, _mcp_app.lifespan)
+    app.mount("/mcp", _mcp_app)
 
 # A2A Server — conditional mount when A2A_SERVER_ENABLED=true
 if _settings.A2A_SERVER_ENABLED:
@@ -780,20 +774,4 @@ app.include_router(im_channels_router)
 app.include_router(im_bindings_router)
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
-if _settings.MCP_SERVER_ENABLED:
-    from hecate.services.mcp.server import create_mcp_server
-
-    _mcp = create_mcp_server()
-    _mcp_app = _mcp.http_app(path="/mcp")
-
-    _original_lifespan = app.router.lifespan_context
-
-    @_asynccontextmanager
-    async def _combined_lifespan(app_inner: FastAPI) -> AsyncGenerator[None, None]:
-        async with (
-            _original_lifespan(app_inner),
-            _mcp_app.lifespan(app_inner),
-        ):
-            yield
-
-    app.router.lifespan_context = _combined_lifespan
+# (mount block is above, near the start of router registration)

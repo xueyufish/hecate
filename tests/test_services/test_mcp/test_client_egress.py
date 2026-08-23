@@ -1,6 +1,6 @@
 """Tests for HecateMCPClient egress filter integration.
 
-Mocks the MCP ``ClientSession`` so we exercise the egress filter
+Mocks the underlying ``mcp.Client`` so we exercise the egress filter
 chain without needing a real MCP server.
 """
 
@@ -102,7 +102,7 @@ def _make_client(
         audit_sink=audit_sink,
     )
     client._connected = True
-    client._session = _StubSession()
+    client._client = _StubSession()
     return client
 
 
@@ -125,19 +125,19 @@ class _StubSession:
 class TestMCPNoFilters:
     async def test_no_filters_returns_text_unchanged(self) -> None:
         client = _make_client()
-        client._session.set_text("raw response")
+        client._client.set_text("raw response")
         result = await client.call_tool("my_tool", {})
         assert result == "raw response"
 
     async def test_no_filters_returns_list_for_multiple_texts(self) -> None:
         client = _make_client()
-        client._session.set_contents([_StubTextContent("first"), _StubTextContent("second")])
+        client._client.set_contents([_StubTextContent("first"), _StubTextContent("second")])
         result = await client.call_tool("my_tool", {})
         assert result == ["first", "second"]
 
     async def test_no_filters_returns_none_for_no_text_content(self) -> None:
         client = _make_client()
-        client._session.set_contents([])
+        client._client.set_contents([])
         result = await client.call_tool("my_tool", {})
         assert result is None
 
@@ -152,7 +152,7 @@ class TestMCPWithMASKFilter:
         scanner = _scanner_with_recognizer(recognizer, "EMAIL", DLPAction.MASK)
         egress = DLPEgressFilter(scanner)
         client = _make_client(egress_filters=[egress])
-        client._session.set_text("see u@e.com here")
+        client._client.set_text("see u@e.com here")
         result = await client.call_tool("my_tool", {})
         assert result is not None
         assert "[EMAIL]" in result
@@ -163,7 +163,7 @@ class TestMCPWithMASKFilter:
         scanner = _scanner_with_recognizer(recognizer, "EMAIL", DLPAction.MASK)
         egress = DLPEgressFilter(scanner)
         client = _make_client(egress_filters=[egress])
-        client._session.set_text("no email here")
+        client._client.set_text("no email here")
         result = await client.call_tool("my_tool", {})
         assert result == "no email here"
 
@@ -178,7 +178,7 @@ class TestMCPWithBLOCKFilter:
         scanner = _scanner_with_recognizer(recognizer, "AWS_KEY", DLPAction.BLOCK)
         egress = DLPEgressFilter(scanner)
         client = _make_client(egress_filters=[egress])
-        client._session.set_text("AKIA secret stuff")
+        client._client.set_text("AKIA secret stuff")
         result = await client.call_tool("my_tool", {})
         assert result is None
 
@@ -197,7 +197,7 @@ class TestMCPWithBLOCKFilter:
             sink_calls.append(kwargs)
 
         client = _make_client(egress_filters=[egress], audit_sink=sink, server_url="mcp://x")
-        client._session.set_text("AKIA here")
+        client._client.set_text("AKIA here")
         result = await client.call_tool("my_tool", {"k": "v"})
         assert result is None
         assert len(sink_calls) >= 1
@@ -222,7 +222,7 @@ class TestMCPWithAUDITFilter:
             sink_calls.append(kwargs)
 
         client = _make_client(egress_filters=[egress], audit_sink=sink)
-        client._session.set_text("see u@e.com here")
+        client._client.set_text("see u@e.com here")
         result = await client.call_tool("my_tool", {})
         assert result == "see u@e.com here"
         assert len(sink_calls) >= 1
@@ -247,7 +247,7 @@ class TestMCPFilterChain:
             DLPEgressFilter(aws_scanner),
         ]
         client = _make_client(egress_filters=egress_chain)
-        client._session.set_text("see u@e.com here")
+        client._client.set_text("see u@e.com here")
         result = await client.call_tool("my_tool", {})
         assert result is not None
         assert "[EMAIL]" in result
@@ -277,7 +277,7 @@ class TestMCPFilterChain:
             _PostBlockFilter(),
         ]
         client = _make_client(egress_filters=egress_chain)
-        client._session.set_text("AKIA secret")
+        client._client.set_text("AKIA secret")
         result = await client.call_tool("my_tool", {})
         assert result is None
         assert not after_block_called

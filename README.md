@@ -160,7 +160,7 @@ Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-inde
 
 - **Graph-First Engine** — Self-built Pregel/BSP runtime with 26 engine extension interfaces and 8 plugin SPI types. Zero external framework dependencies for the engine.
 - **A2A Protocol Native** — Linux Foundation v1.0 GA — signed AgentCards (`/.well-known/agent-card.json`), JSON-RPC 2.0 task lifecycle, SSE streaming, and JWS+RFC 8785 trust model. Operates as both A2A server and A2A client.
-- **MCP Native** — Bidirectional Model Context Protocol: Hecate consumes external MCP servers (GitHub, Slack, etc.) and exposes its own as a server (Streamable HTTP transport).
+- **MCP Native** — Bidirectional Model Context Protocol: Hecate consumes external MCP servers (GitHub, Slack, etc.) and exposes its own as a server (Streamable HTTP transport, MCP 2026-07-28 spec).
 - **OpenAI SDK Drop-in** — Wire-compatible `/v1/chat/completions` endpoint. Any OpenAI client (Python, JS, litellm, langchain-openai, instructor, vllm) works against Hecate by changing `base_url`.
 - **Visual Canvas** — Drag-and-drop workflow editor in `web/` (React Flow + Next.js). Bidirectional sync with the JSON graph DSL — what you build visually is the same code-defined workflow.
 - **Multi-Agent Orchestration** — Seven collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate, Dynamic Orchestration) unified as Graph templates — six static, plus Dynamic Orchestration emitting a runtime TaskDAG from a COORDINATOR node.

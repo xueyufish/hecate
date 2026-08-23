@@ -1,8 +1,9 @@
 # Hecate Implementation Roadmap
 
-> **Status**: Active — P1, P2 complete; **P3 in release close-out (1 item remaining: 5.4b)**; P4, P5 in progress.
-> **2026-08-22 release-scope reclassification**: P3 close-out items (5.4b / 9.1a / 9.2 / 6.27) → 9.1a + 9.2 delivered (change `output-side-typed-findings`), leaving **2 remaining** (5.4b MCP Streamable HTTP Server 端 / 6.27 Browser Automation). 48 items moved P3→P4 (see feature-catalog "Deferred from P3"); 11.4/11.5/11.9-Discord/Telegram moved P3→P5 (channel Wave 2/3); 11.8 Intent Recognition & Routing dropped (overlaps existing routing). P4/P5 scope grows accordingly — no feature lost; one dropped.
+> **Status**: Active — P1, P2 complete; **P3 complete (87/87)** — all four close-out items delivered (9.1a + 9.2 / 6.27 / 5.4b); P4, P5 in progress.
+> **2026-08-22 release-scope reclassification**: P3 close-out items (5.4b / 9.1a / 9.2 / 6.27) → 9.1a + 9.2 delivered (change `output-side-typed-findings`), leaving **2 remaining** (5.4b MCP Streamable HTTP Server 端 / 6.27 Browser Automation). 48 items moved P3→P4 (see feature-catalog "Deferred from P3"); 11.4/11.5/11.9-Discord/Telegram moved P3→P5 (channel Wave 2/3); 11.8 Intent Recognition & Routing dropped (overlaps chat routing + multi-agent handoff + CONDITION intent routing). P4/P5 scope grows accordingly — no feature lost; one dropped.
 > **Update (2026-08-22, later)**: 6.27 Browser Automation delivered (change `browser-automation`) — **P3 down to 1 remaining item: 5.4b**.
+> **Update (2026-08-22, latest)**: **5.4b delivered (change `mcp-streamable-http`)** — MCP 栈升级到 2026-07-28 规范（fastmcp 4.0.0b3 + mcp SDK 2.0 + mcp-types 2.0；stateless `/mcp` 端点 + 客户端自动协议时代协商）。**P3 全部关闭：87/87。**
 > **Scope**: 12-month implementation plan covering unimplemented features across P3–P5.
 > **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
@@ -14,10 +15,10 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 87 | 86/87 (99%) | **1** (5.4b) |
+| **P3 Trustworthy** | 87 | 87/87 (100%) | **0** — closed |
 | **P4 Intelligent** | 148 | 25/148 (17%) | 123 |
 | **P5 Ecosystem** | 71 | 0/71 (0%) | 71 |
-| **Total** | **389** | **194/389 (50%)** | **195** |
+| **Total** | **389** | **195/389 (50%)** | **194** |
 
 > Row counts are physical feature-catalog rows (2026-08-22 basis; verified by grep). Prior figures (127/101/60, total 372) used audit-counting that predated the reclassification — see feature-catalog overview note for the reconciliation.
 
@@ -442,7 +443,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 5.7 ✅ | Tool Caching | Tool ✅ | S |
 | 5.8 | Enterprise System Integration Framework (Per-Tool Auth Scope) | MCP ✅ | M |
 | 5.4c | MCP Server Registry & Connection Management | MCP ✅ | M |
-| 5.4b (upg) | MCP 2026-07-28 Spec Migration (NEW work item, re-verification) — MCP shipped its largest revision 2026-07-28: stateless core (initialize/session removed, `_meta` self-describing requests), mandatory Mcp-Method/Mcp-Name header routing, Multi Round-Trip Requests replacing held-open elicitation streams, cacheable list results (ttlMs), RFC 9207 auth, DCR→CIMD, Roots/Sampling/Logging deprecated (12-month window). Hecate's 5.4b (2025-03-26 spec) client + server must migrate; official registry live (1,000+ servers) | 5.4b client ✅ | M |
+| ~~5.4b (upg)~~ | ~~MCP 2026-07-28 Spec Migration~~ ✅ delivered 2026-08-22 (change `mcp-streamable-http`) — MCP shipped its largest revision 2026-07-28: stateless core (initialize/session removed, `_meta` self-describing requests), mandatory Mcp-Method/Mcp-Name header routing, Multi Round-Trip Requests replacing held-open elicitation streams, cacheable list results (ttlMs), RFC 9207 auth, DCR→CIMD, Roots/Sampling/Logging deprecated (12-month window). fastmcp 4.0.0b3 + mcp SDK 2.0 + mcp-types 2.0；stateless `/mcp` endpoint + client 自动协议时代协商 | ~~5.4b client ✅~~ | — |
 | 1.3.5i ✅ | Session Events + Tool Matchers | Settings ✅ | S |
 | 1.3.15 ✅ | Agent Environment | Session ✅ + Context ✅ | M |
 | 1.3.16 ✅ | Agent State Separation | 1.3.15 ✅ | S |
@@ -514,7 +515,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 5.4b | MCP Streamable HTTP Transport — **Server 端**（client 已交付）。按 **2026-07-28 新规范**实现：无状态核心、Mcp-Method/Mcp-Name header 路由、MRTR、cacheable lists | 5.4c ✅ | M |
+| ~~5.4b~~ | ~~MCP Streamable HTTP Transport — **Server 端**~~ ✅ delivered 2026-08-22 (change `mcp-streamable-http`) — fastmcp 4.0.0b3 + mcp SDK 2.0 + mcp-types 2.0；stateless `/mcp` 端点（POST/GET，无状态核心、header 路由、4 MiB limit）；client 升级 `mcp.Client(mode='auto')` 自动协议时代协商；73 MCP 测试绿；顺手修复 pre-existing `/mcp` mount bug | 5.4c ✅ | — |
 | ~~9.1a~~ | ~~Injection Type Detection~~ ✅ delivered 2026-08-22 (change `output-side-typed-findings`) | Guardrails ✅ | — |
 | ~~9.2~~ | ~~System Prompt Leakage Protection~~ ✅ delivered 2026-08-22 (change `output-side-typed-findings`) | Output Security ✅ | — |
 | ~~6.27~~ | ~~Browser Automation Tool~~ ✅ delivered 2026-08-22 (change `browser-automation`) — 6 builtin tools `browser_navigate/click/type/extract/screenshot/fill_form`; headless v1; dedicated `hecate-browser-sandbox` image; per-agent-session `BrowserSessionManager`; NetworkPolicy fail-closed + HIGH upgrade off allow-list; DLP on extract/screenshot | 5.1 ✅ + 9.4c ✅ + 9.4 内容门控 ✅ | — |
@@ -649,7 +650,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [x] Plugin ecosystem: Agent Plugins 1.0 ingestion (5.5c) + Content Scanning (5.13a) + T0 Tightening — go-live (master switch on)
 - [x] Multi-Channel Wave 1: 11.2 simplified + 11.3 Feishu + 11.9 Slack
 - [x] Release hardening: migration drift gate + E2E suite (F3/F4/F7/A7) + dead-code sweep + 13.4a-7/C2/A2 closures (PR #88/#89, net −2159 lines)
-- [ ] **5.4b MCP Streamable HTTP Server 端**（按 2026-07-28 规范）
+- [x] **5.4b MCP Streamable HTTP Server 端**（按 2026-07-28 规范）— change `mcp-streamable-http`：fastmcp 4.0.0b3 + mcp 2.0.0 + mcp-types 2.0.0；server stateless `/mcp` endpoint；client 升级到 `mcp.Client(mode='auto')`；73 MCP 测试绿；pre-existing `/mcp` mount bug 顺手修了
 - [x] **9.1a Injection Type Detection** *(delivered)*
 - [x] **9.2 System Prompt Leakage Protection** *(delivered)*
 - [x] **6.27 Browser Automation Tool** *(delivered — 6 builtin tools `browser_navigate/click/type/extract/screenshot/fill_form`, headless v1, sandboxed via dedicated `hecate-browser-sandbox` Docker image; per-agent-session lifecycle via `BrowserSessionManager`; NetworkPolicy fail-closed default + HIGH upgrade for non-allow-listed domains; DLP scan on extract text + screenshot; Computer-use split to 6.27a P4)*

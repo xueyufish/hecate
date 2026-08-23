@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: MCP Server exposes Hecate capabilities as MCP tools
-The system SHALL provide an MCP Server using `fastmcp` that exposes agent, knowledge, tool, session, and conversation operations as MCP tools via Streamable HTTP transport, mounted at `/mcp` on the FastAPI application.
+The system SHALL provide an MCP Server that exposes agent, knowledge, tool, session, and conversation operations as MCP tools via Streamable HTTP transport, mounted at `/mcp` on the FastAPI application. The server SHALL speak MCP protocol version `2026-07-28` (stateless core) and SHALL advertise the protocol era via the response body's `_meta` and result envelope (e.g. `resultType`, `cacheScope`) regardless of which server instance handled the request. The server SHALL NOT require session affinity at the transport layer; any request SHALL be serviceable by any server instance behind a round-robin load balancer.
 
 #### Scenario: MCP client discovers available tools
 - **WHEN** an MCP client connects to the server and calls `tools/list`
@@ -9,11 +9,15 @@ The system SHALL provide an MCP Server using `fastmcp` that exposes agent, knowl
 
 #### Scenario: MCP server mounted on FastAPI app
 - **WHEN** the FastAPI application starts with `MCP_SERVER_ENABLED=true`
-- **THEN** the MCP Server ASGI app is mounted at `/mcp` and accepts Streamable HTTP requests
+- **THEN** the MCP Server ASGI app is mounted at `/mcp`, accepts Streamable HTTP POST requests carrying `MCP-Protocol-Version: 2026-07-28` and a self-describing `_meta` envelope, and rejects requests whose envelope is not a 2026-07-28 self-describing request
 
 #### Scenario: MCP server disabled
 - **WHEN** `MCP_SERVER_ENABLED=false` (default)
 - **THEN** no MCP endpoint is mounted and the application behaves as before
+
+#### Scenario: Stateless handling across instances
+- **WHEN** two consecutive requests from the same client land on different server instances behind a load balancer
+- **THEN** both requests succeed independently without any cross-instance coordination (no shared session store required)
 
 ### Requirement: Agent runtime tools
 The system SHALL expose the following agent runtime MCP tools:
@@ -36,8 +40,8 @@ The system SHALL expose the following agent runtime MCP tools:
 ### Requirement: Agent CRUD tools
 The system SHALL expose the following agent management MCP tools:
 - `agent_list(workspace_id: str | None)`: List agents with pagination
-- `agent_create(name: str, persona: str | None, model_config: dict, mode: str, tools: list | None, knowledge_base_ids: list | None)`: Create a new agent
-- `agent_update(agent_id: str, **fields)`: Update agent fields
+- `agent_create(name, persona, model_config, mode, tools, knowledge_base_ids)`: Create a new agent
+- `agent_update(agent_id: str, fields: dict[str, Any])`: Update agent fields via a single fields mapping (fastmcp 4 does not support `**kwargs` tool parameters)
 - `agent_delete(agent_id: str)`: Soft-delete an agent
 
 #### Scenario: Create agent via MCP tool
@@ -48,12 +52,16 @@ The system SHALL expose the following agent management MCP tools:
 - **WHEN** a client calls `agent_list()`
 - **THEN** the server returns a list of all non-deleted agents with id, name, mode, and model_config
 
+#### Scenario: Update agent fields
+- **WHEN** a client calls `agent_update(agent_id="<uuid>", fields={"persona": "You are helpful", "model_config": {"model": "gpt-4o"}})`
+- **THEN** the server updates the listed fields on the matching `AgentModel` and returns the updated metadata
+
 ### Requirement: Knowledge base tools
 The system SHALL expose the following knowledge base MCP tools:
 - `knowledge_list()`: List all knowledge bases
-- `knowledge_search(kb_id: str, query: str, limit: int, mode: str)`: Search a knowledge base using dense/sparse/hybrid search
-- `knowledge_create(name: str, description: str, embedding_model: str, chunk_strategy: str)`: Create a new knowledge base
-- `knowledge_ingest(kb_id: str, content: str, metadata: dict | None)`: Ingest text content into a knowledge base
+- `knowledge_search(kb_id, query, limit, mode)`: Search a knowledge base using dense/sparse/hybrid search
+- `knowledge_create(name, description, embedding_model, chunk_strategy)`: Create a new knowledge base
+- `knowledge_ingest(kb_id, content, metadata)`: Ingest text content into a knowledge base
 
 #### Scenario: Search knowledge base
 - **WHEN** a client calls `knowledge_search(kb_id="<uuid>", query="machine learning", limit=5, mode="hybrid")`
@@ -66,8 +74,8 @@ The system SHALL expose the following knowledge base MCP tools:
 ### Requirement: Tool execution tools
 The system SHALL expose the following tool MCP tools:
 - `tool_list(source: str | None)`: List registered tools, optionally filtered by source
-- `tool_execute(tool_name: str, arguments: dict)`: Execute a registered tool by name
-- `tool_create(name: str, description: str, parameters: dict, source: str)`: Register a new tool
+- `tool_execute(tool_name, arguments)`: Execute a registered tool by name
+- `tool_create(name, description, parameters, source)`: Register a new tool
 
 #### Scenario: Execute a builtin tool
 - **WHEN** a client calls `tool_execute(tool_name="web_search", arguments={"query": "Python async"})`
@@ -117,3 +125,54 @@ The system SHALL provide the following configuration settings in `Settings`:
 #### Scenario: Default configuration disables MCP
 - **WHEN** no MCP-related env vars are set
 - **THEN** `MCP_SERVER_ENABLED=False` and the MCP server does not start
+
+### Requirement: Server discovery and capability advertisement
+The server SHALL respond to `server/discover` requests with its identity (`serverInfo.name`, `serverInfo.version`), advertised protocol version `2026-07-28`, and its capability set (tools / resources / prompts registry). A client that calls `tools/list`, `resources/list`, or `prompts/list` without a prior discovery SHALL receive the same response.
+
+#### Scenario: server/discover returns identity and capabilities
+- **WHEN** a client calls `server/discover`
+- **THEN** the response includes `serverInfo.name="hecate-mcp-server"`, `serverInfo.version="<release version>"`, `protocolVersion="2026-07-28"`, and a `capabilities` object enumerating the registered tools, resources, and prompts
+
+#### Scenario: Client may skip server/discover
+- **WHEN** a client proceeds directly to `tools/list` without calling `server/discover`
+- **THEN** the server returns the same tool list as it would have returned after discovery
+
+### Requirement: Header-based routing surface
+The server SHALL accept Streamable HTTP POST requests carrying `Mcp-Method` and (where applicable) `Mcp-Name` headers that mirror the JSON-RPC `method` and `params.name` / `params.uri` fields (SEP-2243). The server SHALL reject requests where the standard header values disagree with the body envelope, returning HTTP 400 with a JSON-RPC error code `-32020` (`HeaderMismatch`).
+
+#### Scenario: Header/body agreement required
+- **WHEN** a client sends `Mcp-Method: tools/call` but the JSON-RPC body has `"method": "resources/read"`
+- **THEN** the server responds with HTTP 400 and a JSON-RPC error with code `-32020`
+
+#### Scenario: Mcp-Name validated for tools/call
+- **WHEN** a client sends a `tools/call` with `Mcp-Name` header that does not match `params.name` in the body
+- **THEN** the server responds with HTTP 400 and a JSON-RPC error with code `-32020`
+
+#### Scenario: Missing Mcp-Method header rejected
+- **WHEN** a client sends a 2026-07-28 Streamable HTTP POST without an `Mcp-Method` header
+- **THEN** the server responds with HTTP 400 and a JSON-RPC error with code `-32020`
+
+### Requirement: Cache hints on list results
+The server MAY stamp `ttlMs` and `cacheScope` hints in the `_meta` of `tools/list`, `resources/list`, and `prompts/list` responses. When a hint is present, the hint SHALL describe the minimum freshness interval and the cache scope class (per-server / per-tenant / global).
+
+#### Scenario: tools/list declares cache hint
+- **WHEN** a client calls `tools/list`
+- **THEN** the response MAY include `result._meta["io.modelcontextprotocol/cacheHint"].ttlMs` (number) and `result._meta["io.modelcontextprotocol/cacheHint"].cacheScope` (one of `per-server`, `per-tenant`, `global`); Hecate defaults to no hint (consumers fall back to their own TTL)
+
+### Requirement: Stateless request handling
+The server SHALL NOT depend on `Mcp-Session-Id` headers or transport-level session state. All stateful semantics (`session_id`, conversation history, agent context) live in Hecate application-layer models keyed by explicit identifiers passed in tool arguments.
+
+#### Scenario: Mcp-Session-Id header is ignored
+- **WHEN** a client sends a request with an arbitrary `Mcp-Session-Id` header
+- **THEN** the server does not validate, store, or correlate the value; the request is processed on its own `_meta` contents and tool arguments alone
+
+#### Scenario: No session store required for horizontal scaling
+- **WHEN** Hecate is deployed as multiple MCP server replicas behind a round-robin load balancer
+- **THEN** any replica can serve any request independently; replicas do not share a session store
+
+### Requirement: Body size limit on Streamable HTTP
+The server SHALL reject Streamable HTTP POST bodies larger than 4 MiB with HTTP 413. Tool handlers (`agent_chat`, `knowledge_ingest`, etc.) that need to ingest larger payloads SHALL accept a multi-part identifier and use a separate upload pathway rather than overloading the MCP tool call body.
+
+#### Scenario: Oversize body rejected
+- **WHEN** a client sends a `POST /mcp` request with a body larger than 4 MiB
+- **THEN** the server responds with HTTP 413 and does not invoke any tool handler

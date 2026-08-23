@@ -55,7 +55,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 | **Deployment** | Self-hosted OSS (MIT) | Cloud + self-host | OSS library | Cloud + enterprise | Cloud SaaS | Cloud (AWS) | Cloud + self-host (Fair-code) |
 | **Primary UX** | Code (Python) + Visual | Visual-first | Code (Python) | Code + Visual | Visual + code | Code (any framework) | Visual + code |
 | **Engine** | Self-developed Pregel/BSP + event-sourced execution state (Log-as-Truth, 1.3.19) | DAG-based | Pregel (Google) inspired | Custom | Atlas Reasoning Engine | Wraps frameworks | DAG-based |
-| **MCP server + client** | ✅ Bidirectional | ✅ Client only | Partial | ✅ | ✅ | ✅ | ✅ |
+| **MCP server + client** | ✅ Bidirectional (2026-07-28 spec) | ✅ Client only | Partial | ✅ | ✅ | ✅ | ✅ |
 | **A2A protocol** | ✅ (server + client) | ❌ | ❌ | Partial | ✅ | ✅ | ❌ |
 | **OpenAI-compatible API** | ✅ Wire-compatible | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
 | **Multi-tenancy native** | ✅ Org → Workspace → RBAC | ✅ | ❌ Add-on | ✅ | ✅ | ✅ (AWS accounts) | ✅ |
@@ -93,7 +93,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 |---|---|---|
 | **Mental model** | Python library — you bring the runtime | Platform — runtime included |
 | **Production deployment** | Pair with LangSmith Deployment (paid) | Self-hosted, production-ready out of the box |
-| **MCP** | Partial (client) | Bidirectional (server + client) |
+| **MCP** | Partial (client) | Bidirectional (server + client, 2026-07-28 spec) |
 | **A2A** | ❌ | ✅ (server + client) |
 | **Multi-tenancy** | Add-on (you build it) | Native (Org → Workspace → RBAC) |
 | **When to choose LangGraph** | You only need a Python library and want to deploy on LangChain's infrastructure | |

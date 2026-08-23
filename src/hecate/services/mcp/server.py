@@ -278,12 +278,17 @@ def create_mcp_server() -> FastMCP:
                 return json.dumps({"error": str(e)})
 
     @mcp.tool
-    async def agent_update(agent_id: str, **fields: Any) -> str:
+    async def agent_update(agent_id: str, fields: dict[str, Any]) -> str:
         """Update agent fields. Pass only the fields to change.
+
+        fastmcp 4 does not support ``**kwargs`` tool parameters; callers pass a
+        single ``fields`` dict containing only the keys they want to update.
 
         Args:
             agent_id: UUID string of the agent to update.
-            **fields: Fields to update (name, persona, mode, model_config, tools, knowledge_base_ids).
+            fields: Mapping of field name to new value. Allowed keys: ``name``,
+                ``persona``, ``mode``, ``model_config``, ``tools``,
+                ``knowledge_base_ids``, ``risk_level``.
 
         Returns:
             JSON with updated agent metadata.

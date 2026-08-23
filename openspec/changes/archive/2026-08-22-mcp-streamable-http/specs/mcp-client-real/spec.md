@@ -1,9 +1,5 @@
-# mcp-client-real Specification
+## MODIFIED Requirements
 
-## Purpose
-
-Define the production MCP client using the official modelcontextprotocol Python SDK (version ≥ 2.0), supporting Streamable HTTP and stdio transports for connecting to external MCP servers with automatic protocol-era negotiation against the 2026-07-28 spec.
-## Requirements
 ### Requirement: Real MCP Client using official SDK
 The system SHALL provide a production MCP Client using the official `mcp` Python SDK (version ≥ 2.0) that supports Streamable HTTP and stdio transports for connecting to external MCP servers. The client SHALL negotiate the protocol era with the remote server automatically: probing `server/discover` first and falling back to the `initialize` handshake when the server does not advertise a modern revision. The client SHALL speak MCP `2026-07-28` as its preferred protocol version when the server supports it.
 
@@ -28,21 +24,6 @@ The public surface SHALL be `HecateMCPClient.connect_http(server_url)`, `connect
 #### Scenario: Disconnect from server
 - **WHEN** `client.disconnect()` is called
 - **THEN** the client exits the underlying `mcp.Client` async context manager and cleans up resources
-
-### Requirement: MCP Client manager for multiple servers
-The system SHALL provide `MCPClientManager` that manages connections to multiple MCP servers simultaneously, supporting tool discovery and execution across all connected servers.
-
-#### Scenario: Add and connect to a server
-- **WHEN** `manager.add_server("my-server", server_url="http://localhost:8000/mcp")` is called
-- **THEN** the manager creates a `HecateMCPClient`, connects, and stores it under the `"my-server"` key
-
-#### Scenario: Discover tools from all servers
-- **WHEN** `manager.discover_tools()` is called
-- **THEN** the manager aggregates tools from all connected servers, tagging each with its source server name
-
-#### Scenario: Call tool on specific server
-- **WHEN** `manager.call_tool(server_name="my-server", tool_name="search", arguments={"q": "test"})` is called
-- **THEN** the manager routes the call to the specified server and returns the result
 
 ### Requirement: MCP Client connection configuration
 The system SHALL provide `MCP_CLIENT_TIMEOUT: int` (default: `30`) setting for client connection and tool call timeouts.
@@ -69,6 +50,8 @@ The `HecateMCPClient` SHALL pass MCP tool responses through a configurable egres
 #### Scenario: Audit data written to SecurityFindingModel
 - **WHEN** any filter returns `audit_data`
 - **THEN** each entry SHALL be written to SecurityFindingModel with `rule_name` prefixed by the filter's name (e.g., `dlp:email_audit`)
+
+## ADDED Requirements
 
 ### Requirement: Protocol era negotiation
 The client SHALL automatically select the protocol era when connecting to a remote MCP server. The default mode SHALL be `auto`: probe `server/discover` and fall back to the legacy `initialize` handshake when the server returns `-32601` (method not found) or times out on the probe.
