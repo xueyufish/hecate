@@ -19,7 +19,7 @@ Green fill = implemented; yellow dashed = planned; red = gap/caveat.
 | File | PNG | Covers |
 |------|-----|--------|
 | [`hecate_architecture_overview.drawio`](hecate_architecture_overview.drawio) | [`hecate_architecture_overview.png`](../images/hecate_architecture_overview.png) | **Simplified hero view** (recommended for README + overview pages). 8 modules + 2 cross-cutting concerns, no sub-components. **Structure-only (no arrows)** — same convention as the comprehensive L1 diagram. ~280 KB. |
-| [`hecate_l1_architecture.drawio`](hecate_l1_architecture.drawio) | [`hecate_l1_architecture.png`](../images/hecate_l1_architecture.png) | **Comprehensive L1 architecture** (used in [`architecture.md`](../architecture.md)). Ten modules with sub-components, sidebars for Security + Ecosystem. **Structure-only (no arrows)** — request flow is described in the bottom note, not drawn as edges. ~740 KB. |
+| [`hecate_architecture_l1.drawio`](hecate_architecture_l1.drawio) | [`hecate_architecture_l1.png`](../images/hecate_architecture_l1.png) | **Comprehensive L1 architecture** (used in [`architecture.md`](../architecture.md)). Ten modules with sub-components, sidebars for Security + Ecosystem. **Structure-only (no arrows)** — request flow is described in the bottom note, not drawn as edges. ~740 KB. |
 
 ### Subsystem details
 
