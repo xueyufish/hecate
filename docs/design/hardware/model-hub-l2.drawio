@@ -1,131 +1,107 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="drawio" version="26.0.0">
+<mxfile host="Electron">
   <diagram name="Model-Hub-L2" id="model-hub-l2">
-    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="620" math="0" shadow="0">
+    <mxGraphModel dx="1091" dy="628" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="620" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-
-        <!-- LEGEND -->
-        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" vertex="1" parent="1">
-          <mxGeometry x="590" y="12" width="175" height="36" as="geometry" />
+        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" value="" vertex="1">
+          <mxGeometry height="36" width="175" x="755" y="20" as="geometry" />
         </mxCell>
-        <mxCell id="legend_done" value="✅ Impl." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="600" y="17" width="70" height="26" as="geometry" />
+        <mxCell id="legend_done" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" value="Impl." vertex="1">
+          <mxGeometry height="26" width="70" x="765" y="25" as="geometry" />
         </mxCell>
-        <mxCell id="legend_plan" value="📋 Planned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="680" y="17" width="78" height="26" as="geometry" />
+        <mxCell id="legend_plan" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Planned" vertex="1">
+          <mxGeometry height="26" width="78" x="845" y="25" as="geometry" />
         </mxCell>
-        <!-- TITLE -->
-        <mxCell id="title" value="&lt;b&gt;Model Hub — L2 Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
-          <mxGeometry x="20" y="15" width="500" height="30" as="geometry" />
+        <mxCell id="title" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" value="&lt;b&gt;Model Hub — L2 Architecture&lt;/b&gt;" vertex="1">
+          <mxGeometry height="30" width="500" x="20" y="23" as="geometry" />
         </mxCell>
-
-        <!-- ROW 1: LLM INTEGRATION -->
-        <mxCell id="r1_c" value="1. LLM Integration" style="swimlane;startSize=26;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="55" width="910" height="105" as="geometry" />
+        <mxCell id="r1_c" parent="1" style="swimlane;startSize=26;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="1. LLM Integration" vertex="1">
+          <mxGeometry height="105" width="910" x="20" y="66" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1a -->
-        <mxCell id="r1_llm" value="✅ LLM Service (100+)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r1_llm" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;fontStyle=1;" value="LLM Service" vertex="1">
+          <mxGeometry height="26" width="200" x="10" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_routing" value="✅ Smart Routing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r1_routing" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;fontStyle=1;" value="Smart Routing" vertex="1">
+          <mxGeometry height="26" width="210" x="225" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_circuit" value="✅ Circuit Breaker" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="460" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r1_circuit" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;fontStyle=1;" value="Circuit Breaker" vertex="1">
+          <mxGeometry height="26" width="200" x="460" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_abtest" value="📋 A/B Testing (deferred)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="685" y="30" width="225" height="26" as="geometry" />
+        <mxCell id="r1_abtest" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="A/B Testing" vertex="1">
+          <mxGeometry height="26" width="225" x="685" y="30" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1b -->
-        <mxCell id="r1_provider" value="✅ Provider Management" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r1_provider" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;" value="Provider Management" vertex="1">
+          <mxGeometry height="26" width="200" x="10" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_toolcall" value="✅ Tool Calling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="68" width="210" height="26" as="geometry" />
+        <mxCell id="r1_toolcall" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FCE4EC;strokeColor=#C62828;fontSize=10;" value="Tool Calling" vertex="1">
+          <mxGeometry height="26" width="210" x="225" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_intelrouter" value="📋 Intelligent Router" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="460" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r1_intelrouter" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Intelligent Router" vertex="1">
+          <mxGeometry height="26" width="200" x="460" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_grayrelease" value="📋 Gray Release" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="685" y="68" width="225" height="26" as="geometry" />
+        <mxCell id="r1_grayrelease" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Gray Release" vertex="1">
+          <mxGeometry height="26" width="225" x="685" y="68" as="geometry" />
         </mxCell>
-
-        <!-- ROW 2: PROVIDER & COST MANAGEMENT -->
-        <mxCell id="r2_c" value="2. Provider &amp; Cost Management" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="180" width="910" height="95" as="geometry" />
+        <mxCell id="r2_c" parent="1" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="2. Provider &amp; Cost Management" vertex="1">
+          <mxGeometry height="110" width="910" x="20" y="186" as="geometry" />
         </mxCell>
-        <!-- 5 × 170 = 850 -->
-        <mxCell id="r2_providercfg" value="✅ Provider Config / Keys" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_providercfg" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" value="Provider Config / Keys" vertex="1">
+          <mxGeometry height="26" width="170" x="10" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2_cost" value="📋 Cost Track &amp; Budget (G8)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_cost" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Cost Tracking &amp;amp; Budget" vertex="1">
+          <mxGeometry height="26" width="170" x="191" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2_pricing" value="📋 Model Pricing" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_pricing" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Model Pricing&amp;nbsp;" vertex="1">
+          <mxGeometry height="26" width="170" x="372" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2_shaping" value="✅ Provider Shaping" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
-          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_shaping" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Provider Shaping" vertex="1">
+          <mxGeometry height="26" width="170" x="553" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2_anomaly" value="✅ Cost Anomaly Detect (G8)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
-          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_anomaly" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Cost Anomaly Detect" vertex="1">
+          <mxGeometry height="26" width="157" x="740" y="36" as="geometry" />
         </mxCell>
-
-        <!-- ROW 3: MODEL CATALOG & LIFECYCLE -->
-        <mxCell id="r3_c" value="3. Model Catalog &amp; Lifecycle" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="295" width="910" height="95" as="geometry" />
+        <mxCell id="r2_encrypt" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="API Key Encryption" vertex="1">
+          <mxGeometry height="26" width="267" x="10" y="73" as="geometry" />
         </mxCell>
-        <!-- 3 × 280 = 840 -->
-        <mxCell id="r3_catalog" value="📋 Model Catalog (6.44)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="0" y="30" width="280" height="26" as="geometry" />
+        <mxCell id="r2_multiauth" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Multi-Auth" vertex="1">
+          <mxGeometry height="26" width="294" x="300" y="73" as="geometry" />
         </mxCell>
-        <mxCell id="r3_lifecycle" value="📋 Model Lifecycle Manager (6.45)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="305" y="30" width="280" height="26" as="geometry" />
+        <mxCell id="r2_keyvault" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="BYOK · Key Vault" vertex="1">
+          <mxGeometry height="26" width="294" x="603" y="73" as="geometry" />
         </mxCell>
-        <mxCell id="r3_governance" value="📋 Model Governance (6.46)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="610" y="30" width="280" height="26" as="geometry" />
+        <mxCell id="r3_c" parent="1" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="3. Model Catalog &amp; Lifecycle" vertex="1">
+          <mxGeometry height="75" width="910" x="20" y="311" as="geometry" />
         </mxCell>
-
-        <!-- ROW 4: MODEL OPERATIONS -->
-        <mxCell id="r4_c" value="4. Model Operations &amp; Monitoring" style="swimlane;startSize=26;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="410" width="910" height="95" as="geometry" />
+        <mxCell id="r3_catalog" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Model Catalog" vertex="1">
+          <mxGeometry height="26" width="280" x="7" y="39" as="geometry" />
         </mxCell>
-        <!-- 4 × 210 = 840 -->
-        <mxCell id="r4_monitor" value="📋 Model Monitoring (G4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="0" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r3_lifecycle" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Model Lifecycle Manager" vertex="1">
+          <mxGeometry height="26" width="280" x="312" y="39" as="geometry" />
         </mxCell>
-        <mxCell id="r4_deploy" value="📋 Managed Deployment (G5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="225" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r3_governance" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Model Governance" vertex="1">
+          <mxGeometry height="26" width="280" x="617" y="39" as="geometry" />
         </mxCell>
-        <mxCell id="r4_multimodal" value="📋 Multi-Modal Class. (G6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="460" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r4_c" parent="1" style="swimlane;startSize=26;fillColor=#FFF3E0;strokeColor=#E65100;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="4. Model Operations &amp; Monitoring" vertex="1">
+          <mxGeometry height="75" width="910" x="20" y="406" as="geometry" />
         </mxCell>
-        <mxCell id="r4_tuning" value="📋 Fine-Tuning Pipeline (G7)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="685" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r4_monitor" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Model Monitoring (G4)" vertex="1">
+          <mxGeometry height="26" width="210" x="8" y="38" as="geometry" />
         </mxCell>
-
-        <!-- ROW 5: DOWNSTREAM -->
-        <mxCell id="r5_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="525" width="910" height="50" as="geometry" />
+        <mxCell id="r4_deploy" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Managed Deployment (G5)" vertex="1">
+          <mxGeometry height="26" width="210" x="233" y="38" as="geometry" />
         </mxCell>
-        <mxCell id="r5_down" value="⤵  To Agent Engine — LLM Invocation via EnginePort" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
-          <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />
+        <mxCell id="r4_multimodal" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Multi-Modal Class" vertex="1">
+          <mxGeometry height="26" width="210" x="468" y="38" as="geometry" />
         </mxCell>
-
-        <!-- EDGES -->
-        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#C62828;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r1_c" target="r2_c">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="r4_tuning" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Fine-Tuning Pipeline" vertex="1">
+          <mxGeometry height="26" width="210" x="693" y="38" as="geometry" />
         </mxCell>
-        <mxCell id="e2" value="LLM" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6A1B9A;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="r5_c" parent="1" style="swimlane;startSize=25;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" value="" vertex="1">
+          <mxGeometry height="55" width="910" x="20" y="501" as="geometry" />
         </mxCell>
-        <mxCell id="e3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#2E7D32;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r3_c" target="r4_c">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#E65100;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r4_c" target="r5_c">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="r5_down" parent="r5_c" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" value="To Agent Engine — LLM Invocation via EnginePort" vertex="1">
+          <mxGeometry height="40" width="600" x="155" y="20" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

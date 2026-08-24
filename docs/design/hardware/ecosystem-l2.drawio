@@ -1,123 +1,113 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="drawio" version="26.0.0">
+<mxfile host="Electron">
   <diagram name="Ecosystem-L2" id="ecosystem-l2">
-    <mxGraphModel dx="3000" dy="2400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="660" math="0" shadow="0">
+    <mxGraphModel dx="1091" dy="628" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="760" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-
-        <!-- LEGEND -->
-        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" vertex="1" parent="1">
-          <mxGeometry x="590" y="12" width="175" height="36" as="geometry" />
+        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" value="" vertex="1">
+          <mxGeometry height="36" width="270" x="660" y="12" as="geometry" />
         </mxCell>
-        <mxCell id="legend_done" value="✅ Impl." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=9;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="600" y="17" width="70" height="26" as="geometry" />
+        <mxCell id="legend_done" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=9;fontStyle=1;" value="Impl." vertex="1">
+          <mxGeometry height="26" width="70" x="670" y="17" as="geometry" />
         </mxCell>
-        <mxCell id="legend_plan" value="📋 Planned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="680" y="17" width="78" height="26" as="geometry" />
+        <mxCell id="legend_shipped" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" value="Shipped" vertex="1">
+          <mxGeometry height="26" width="70" x="745" y="17" as="geometry" />
         </mxCell>
-        <!-- TITLE -->
-        <mxCell id="title" value="&lt;b&gt;Ecosystem — L2 Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
-          <mxGeometry x="20" y="15" width="500" height="30" as="geometry" />
+        <mxCell id="legend_plan" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Planned" vertex="1">
+          <mxGeometry height="26" width="78" x="820" y="17" as="geometry" />
         </mxCell>
-
-        <!-- ROW 1: INTEGRATION ECOSYSTEM -->
-        <mxCell id="r1_c" value="1. Integration Ecosystem" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="55" width="910" height="173" as="geometry" />
+        <mxCell id="title" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" value="&lt;b&gt;Ecosystem — L2 Architecture&lt;/b&gt;" vertex="1">
+          <mxGeometry height="30" width="500" x="20" y="15" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1a -->
-        <mxCell id="r1_mcpclient" value="✅ MCP Client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r1_c" parent="1" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="1. Integration Ecosystem" vertex="1">
+          <mxGeometry height="215" width="910" x="20" y="55" as="geometry" />
         </mxCell>
-        <mxCell id="r1_mcpserver" value="✅ MCP Server (Streamable HTTP)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r1_mcpclient" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" value="MCP Client" vertex="1">
+          <mxGeometry height="26" width="190" x="10" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_webhook" value="✅ Webhook Notifications" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="450" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r1_mcpserver" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=9;fontStyle=1;" value="MCP Server" vertex="1">
+          <mxGeometry height="26" width="200" x="234" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_event" value="✅ Event Dispatcher" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="685" y="30" width="225" height="26" as="geometry" />
+        <mxCell id="r1_webhook" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" value="Webhook Notifications" vertex="1">
+          <mxGeometry height="26" width="210" x="459" y="30" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1b -->
-        <mxCell id="r1_openapi" value="✅ OpenAPI Compatible" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r1_event" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Event Dispatcher" vertex="1">
+          <mxGeometry height="26" width="210" x="688" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_plugin" value="✅ Plugin System + SPI Core" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r1_openapi" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;" value="OpenAI-Compatible API" vertex="1">
+          <mxGeometry height="26" width="190" x="10" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_marketplace" value="📋 Marketplace (EC3/EC6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="450" y="68" width="210" height="26" as="geometry" />
+        <mxCell id="r1_plugin" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1" value="Plugin SPI" vertex="1">
+          <mxGeometry height="26" width="200" x="234" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_agentspace" value="📋 AgentSpace SDK (EC5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="685" y="68" width="225" height="26" as="geometry" />
+        <mxCell id="r1_marketplace" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Plugin Marketplace full" vertex="1">
+          <mxGeometry height="26" width="210" x="459" y="68" as="geometry" />
         </mxCell>
-
-        <mxCell id="r1_plugin155c" value="✅ Agent Plugins 1.0 Ingestion (5.5c, shipped 2026-08-18)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="106" width="455" height="26" as="geometry" />
+        <mxCell id="r1_agentspace" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="AgentSpace SDK" vertex="1">
+          <mxGeometry height="26" width="210" x="688" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_plugin155c_trust" value="✅ Component Trust Dispatch (T4 / T2 / T1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
-          <mxGeometry x="455" y="106" width="455" height="26" as="geometry" />
+        <mxCell id="r1_plugin155c" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Agent Plugins 1.0 Ingestion" vertex="1">
+          <mxGeometry height="26" width="424" x="10" y="106" as="geometry" />
         </mxCell>
-        <mxCell id="r1_t0" value="✅ T0 Trust Gate (5.5 enh) — PythonEntryPolicy + install rollback + SaaS pip skip" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="145" width="910" height="22" as="geometry" />
+        <mxCell id="r1_plugin155c_trust" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Component Trust Dispatch" vertex="1">
+          <mxGeometry height="26" width="440" x="460" y="106" as="geometry" />
         </mxCell>
-
-        <!-- ROW 2: PROTOCOL STACK & GROWTH -->
-        <mxCell id="r2_c" value="2. Protocol Stack &amp; Growth" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="248" width="910" height="65" as="geometry" />
+        <mxCell id="r1_t0" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="T0 Trust Gate — PythonEntryPolicy + install rollback + SaaS pip skip" vertex="1">
+          <mxGeometry height="22" width="890" x="10" y="142" as="geometry" />
         </mxCell>
-        <!-- 5 × 170 = 850 -->
-        <mxCell id="r2_a2a" value="✅ A2A Protocol (v1.0)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
-          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r1_engineext" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=10;fontStyle=1;" value="Engine Extension Interfaces" vertex="1">
+          <mxGeometry height="26" width="890" x="10" y="175" as="geometry" />
         </mxCell>
-        <mxCell id="r2_cards" value="✅ Signed Cards + Trust (SS6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
-          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_c" parent="1" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="2. Protocol Stack &amp; Growth" vertex="1">
+          <mxGeometry height="145" width="910" x="20" y="279" as="geometry" />
         </mxCell>
-        <mxCell id="r2_ap2" value="📋 AP2 Payments" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_a2a" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="A2A Protocol (v1.0)" vertex="1">
+          <mxGeometry height="26" width="160" x="10" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2_i18n" value="📋 i18n / L10n" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_cards" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Signed Cards + Trust" vertex="1">
+          <mxGeometry height="26" width="170" x="185" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2_sdk" value="📋 SDK + PyPI (EC4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_ap2" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="AP2 Payments" vertex="1">
+          <mxGeometry height="26" width="170" x="370" y="36" as="geometry" />
         </mxCell>
-
-        <!-- ROW 3: DISCOVERY & PARTNERSHIP (NEW) -->
-        <mxCell id="r3_c" value="3. Discovery &amp; Partnership" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="328" width="910" height="65" as="geometry" />
+        <mxCell id="r2_i18n" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="i18n SPI" vertex="1">
+          <mxGeometry height="26" width="170" x="555" y="36" as="geometry" />
         </mxCell>
-        <!-- 4 boxes -->
-        <mxCell id="r3_ard" value="📋 Agentic Resource Discovery (EC1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="0" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r2_sdk" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="SDK + PyPI" vertex="1">
+          <mxGeometry height="26" width="160" x="740" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r3_partner" value="📋 Partner Monetization (EC2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="225" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r2_im_wave1" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1" value="IM Channels Wave" vertex="1">
+          <mxGeometry height="26" width="430" x="10" y="71" as="geometry" />
         </mxCell>
-        <mxCell id="r3_community" value="📋 Community Agent Gallery (EC4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="450" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r2_widget_w1" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1" value="Web Widget" vertex="1">
+          <mxGeometry height="26" width="430" x="470" y="71" as="geometry" />
         </mxCell>
-        <mxCell id="r3_xsurface" value="📋 Cross-Surface Experience (EC5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="685" y="30" width="225" height="26" as="geometry" />
+        <mxCell id="r2_acp" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="ACP — Agent Client Protocol" vertex="1">
+          <mxGeometry height="26" width="430" x="10" y="106" as="geometry" />
         </mxCell>
-
-        <!-- ROW 4: DOWNSTREAM -->
-        <mxCell id="r4_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="413" width="910" height="50" as="geometry" />
+        <mxCell id="r2_translations" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Community Translations" vertex="1">
+          <mxGeometry height="26" width="430" x="470" y="106" as="geometry" />
         </mxCell>
-        <mxCell id="r4_down" value="⤵  To All Services — Integration via MCP / A2A / ARD / REST / Webhook / Events" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r4_c">
-          <mxGeometry x="105" y="5" width="700" height="40" as="geometry" />
+        <mxCell id="r3_c" parent="1" style="swimlane;startSize=26;fillColor=#F3E5F5;strokeColor=#6A1B9A;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="3. Discovery &amp; Partnership" vertex="1">
+          <mxGeometry height="80" width="910" x="20" y="440" as="geometry" />
         </mxCell>
-
-        <!-- EDGES -->
-        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6A1B9A;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r1_c" target="r2_c">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="r3_ard" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Agentic Resource Discovery" vertex="1">
+          <mxGeometry height="26" width="200" x="10" y="38" as="geometry" />
         </mxCell>
-        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6A1B9A;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="r3_partner" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Partner Monetization" vertex="1">
+          <mxGeometry height="26" width="200" x="240" y="38" as="geometry" />
         </mxCell>
-        <mxCell id="e3" value="Integration" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#6A1B9A;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r3_c" target="r4_c">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="r3_community" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Community Agent Gallery" vertex="1">
+          <mxGeometry height="26" width="210" x="460" y="38" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_xsurface" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Cross-Surface Experience" vertex="1">
+          <mxGeometry height="26" width="210" x="685" y="38" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_c" parent="1" style="swimlane;startSize=25;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" value="" vertex="1">
+          <mxGeometry height="50" width="910" x="20" y="537" as="geometry" />
+        </mxCell>
+        <mxCell id="r4_down" parent="r4_c" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" value="To All Services — Integration via MCP / A2A / ARD / REST / Webhook / Events" vertex="1">
+          <mxGeometry height="26" width="700" x="105" y="24" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
