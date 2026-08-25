@@ -62,16 +62,16 @@ These are the abstract node types defined in the Graph DSL schema (`graph-dsl.sc
 | `input` | Workflow input node | Receives external input |
 | `output` | Workflow output node | Outputs final result |
 
-#### High-Level Visual Node Types (4 types)
+#### High-Level Visual Node Types (4 types · all P4 per 2026-08-22 reclassification)
 
-These are canvas-level abstractions that compile to engine primitives (see [ADR-019](adr/019-visual-workflow-node-types.md)). They do not exist in the Graph DSL — the canvas-to-DSL compilation step translates them before the engine processes them:
+These are canvas-level abstractions that compile to engine primitives (see [ADR-019](adr/019-visual-workflow-node-types.md)). They do not exist in the Graph DSL — the canvas-to-DSL compilation step translates them before the engine processes them. **None of these four shipped in P3**; they were moved to P4 on 2026-08-22 along with the broader Canvas Enhancement reclassification (see [feature-catalog.md](../../features/feature-catalog.md) "Deferred from P3" section). The shipped Canvas today implements 8 basic node types only — see [agent-studio-l2.drawio](hardware/agent-studio-l2.drawio) Row 1.
 
-| Visual Node | Compiles To | Purpose |
-|-------------|-------------|---------|
-| **Human Input / Form Node** (1.1.24) | `interrupt()` + `Command(resume)` | Structured HITL: form fields, dropdowns, approval routing |
-| **Trigger Node** (1.1.25) | `__start__` + external trigger mapping | Event-driven entry: webhook, schedule, event, MCP |
-| **Object CRUD Node** (1.1.26) | `tool` node + GraphStore binding | Ontology-aware entity operations: create, update, delete, query |
-| **Side-by-side Chat + Canvas** (1.1.27) | UX layer (split-pane layout) | Integrated dev/test: canvas left, live chat right |
+| Visual Node | Compiles To | Purpose | Phase |
+|-------------|-------------|---------|-------|
+| **Human Input / Form Node** (1.1.24) | `interrupt()` + `Command(resume)` | Structured HITL: form fields, dropdowns, approval routing | **P4** (was P3 → P4, 2026-08-22) |
+| **Trigger Node** (1.1.25) | `__start__` + external trigger mapping | Event-driven entry: webhook, schedule, event, MCP | **P4** (was P3 → P4, 2026-08-22) |
+| **Object CRUD Node** (1.1.26) | `tool` node + GraphStore binding | Ontology-aware entity operations: create, update, delete, query | P4 |
+| **Side-by-side Chat + Canvas** (1.1.27) | UX layer (split-pane layout) | Integrated dev/test: canvas left, live chat right | P4 |
 
 ### Edge Types and Visual Differentiation
 
@@ -143,7 +143,7 @@ Configured agents can be packaged into reusable scenario solutions — bundling 
 
 ## Multi-Agent Orchestration
 
-### Six Collaboration Patterns as Graph Templates
+### Six Static Collaboration Patterns + Seventh DYNAMIC (per ADR-032, 2026-08-17)
 
 All multi-agent patterns are pre-compiled Graph templates — none are hardcoded in the engine (see [ADR-007](adr/007-multi-agent-as-graph-templates.md)):
 
@@ -470,6 +470,6 @@ The Unified Skill Selector (1.1.19) provides a single picker component for confi
 | [Engine Design](engine-design.md) | Graph DSL, compiler pipeline, Pregel runtime, interrupt/Command, streaming modes |
 | [Core Concepts](concepts.md) | Agent entity, Workflow, node types, edge types, execution modes |
 | [Access Channel Design](access-channel-design.md) | API surfaces, authentication, gateway control plane |
-| [ADR-007](adr/007-multi-agent-as-graph-templates.md) | All 6 collaboration patterns unified as graph templates |
+| [ADR-007](adr/007-multi-agent-as-graph-templates.md) | All 6 static collaboration patterns unified as graph templates (7th `DYNAMIC` pattern + `COORDINATOR` node type added by [ADR-032](adr/032-dynamic-orchestration.md), 2026-08-17) |
 | [ADR-010](adr/010-react-flow-canvas.md) | React Flow canvas with JSON DSL bidirectional sync |
 | [ADR-019](adr/019-visual-workflow-node-types.md) | High-level visual node types (HITL, Trigger, Object CRUD, Side-by-side) |

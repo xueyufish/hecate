@@ -18,7 +18,7 @@ The Ecosystem layer is Hecate's integration and extensibility foundation — con
 
 ![Ecosystem L2](images/ecosystem-l2.png)
 
-1. **Integration Ecosystem** — MCP Client/Server, webhooks, events, OpenAI-compatible API, plugin system, marketplace, AgentSpace SDK
+1. **Integration Ecosystem** — MCP Client/Server (2026-07-28 spec · stateless core), webhooks (14.2 outbound), events, OpenAI-compatible API, plugin system (8 SPI types), marketplace (12.0 v1 shipped w/ 5.5c), **AgentSpace SDK (11.13 · P5)**
 2. **Protocol Stack & Growth** — A2A Protocol, Signed Agent Cards + Trust Verification, AP2 Payments, i18n/L10n, SDK + PyPI
 3. **Discovery & Partnership** — Agentic Resource Discovery (ARD), Partner Monetization, Community Agent Gallery, Cross-Surface Experience Layer
 
@@ -31,7 +31,7 @@ The Ecosystem layer is Hecate's integration and extensibility foundation — con
 | Component | Description |
 |-----------|-------------|
 | MCP Client | Connect to external MCP servers |
-| MCP Server | Expose Hecate as MCP tool provider (Streamable HTTP) |
+| MCP Server | Expose Hecate as MCP tool provider (Streamable HTTP, **MCP 2026-07-28 spec · stateless core**, shipped 2026-08-22) |
 | Webhook Notifications | Event-driven HTTP callbacks |
 | Event Dispatcher | Internal event bus |
 | OpenAI-compatible API | REST + WebSocket, `/v1/chat/completions` |

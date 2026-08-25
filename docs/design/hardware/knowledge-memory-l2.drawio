@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram name="Knowledge-Memory-L2" id="knowledge-memory-l2">
-    <mxGraphModel dx="1091" dy="628" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="740" math="0" shadow="0">
+    <mxGraphModel dx="1108" dy="523" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="740" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -77,7 +77,7 @@
           <mxGeometry height="26" width="120" x="600" y="37" as="geometry" />
         </mxCell>
         <mxCell id="r2_temporal" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Temporal Memory" vertex="1">
-          <mxGeometry height="26" width="170" x="726" y="37" as="geometry" />
+          <mxGeometry height="26" width="175" x="726" y="37" as="geometry" />
         </mxCell>
         <mxCell id="r3_c" parent="1" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#2E7D32;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="3. Advanced Memory &amp; Knowledge Management" vertex="1">
           <mxGeometry height="150" width="910" x="20" y="317" as="geometry" />

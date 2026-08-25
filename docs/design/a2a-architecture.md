@@ -198,7 +198,7 @@ The stream closes automatically when the task reaches a terminal state (`complet
 
 ### Push notifications (not yet implemented)
 
-`capabilities.pushNotifications = false` in the current AgentCard. Hecate has the `push.py` module scaffolded for the future, but doesn't actively push task updates to client webhooks. Use SSE (`tasks/sendSubscribe`) instead. Push notifications are..
+`capabilities.pushNotifications = false` in the current AgentCard. Hecate has the `push.py` module scaffolded for the future, but doesn't actively push task updates to client webhooks. Use SSE (`tasks/sendSubscribe`) instead. Push notifications are a **deferred item** — not in the 2026-08-22 P3 close-out (which shipped A2A v1.0 GA, Signed Agent Cards, and SSE streaming for long-running tasks); they remain **on-roadmap** for a future P-cycle without a confirmed phase assignment (not in catalog "Deferred from P3" nor in P4 roadmap table).
 
 ---
 
@@ -339,7 +339,7 @@ Hecate implements both A2A and MCP as first-class protocols. They serve differen
 |---|---|---|
 | **Direction** | Agent ↔ Tool (vertical) | Agent ↔ Agent (horizontal) |
 | **Wire format** | JSON-RPC 2.0 over HTTPS / stdio | JSON-RPC 2.0 over HTTPS |
-| **Discovery** | `/.well-known/mcp.json` or runtime introspection | `/.well-known/agent-card.json` |
+| **Discovery** | `/.well-known/mcp.json` or runtime introspection (per **MCP 2026-07-28 spec**, stateless core, shipped 2026-08-22) | `/.well-known/agent-card.json` |
 | **Trust** | Connection-level auth (bearer, API key) | Signed AgentCards (JWS) |
 | **Use case** | "I want my agent to call a tool" | "I want my agent to talk to another agent" |
 
@@ -537,7 +537,6 @@ For specific implementation details, see:
 - [ADR-011: A2A Protocol Adoption](adr/011-a2a-protocol-adoption.md) — why we adopted A2A
 - [Tutorial: A2A Protocol](../tutorials/09-a2a-protocol.md) — user-level usage
 - [How-to: Enable A2A Server](../how-to/enable-a2a-server.md) — operational recipe
-- Positioning — where A2A fits in the agent landscape
 - [Positioning](positioning.md) — where A2A fits in the agent landscape
 - [Engine Design](engine-design.md) — how the Pregel runtime underpins A2A task execution
 - [Security Architecture](security-architecture.md) — A2A trust model in context

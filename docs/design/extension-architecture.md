@@ -1,6 +1,6 @@
 # Extension SPI & Plugin Architecture
 
-Deep-dive design document for Hecate's two-tier extension system: **26 engine extension interfaces** at the engine layer + **8 plugin SPI types** at the platform layer. For the API reference, see [Extension Points](../reference/extension-points.md). For the decision rationale, see [ADR-016](adr/016-platform-spi-architecture.md).
+Deep-dive design document for Hecate's two-tier extension system: **15 engine extension interfaces (11 Core + 4 SPI)** at the engine layer per [ADR-016](adr/016-platform-spi-architecture.md) + **8 plugin SPI types** at the platform layer. For the API reference, see [Extension Points](../reference/extension-points.md). For the decision rationale, see [ADR-016](adr/016-platform-spi-architecture.md).
 
 > The 8 plug-in-type ABCs (`ToolPlugin` / `TriggerPlugin` / `ExtensionPlugin` / `ModelPlugin` / channel/evaluator/auth/secret providers) are the **P-tier deep-integration** extension surface. The ecosystem-facing third-party ingestion path is **Agent Plugins 1.0** (feature 5.5c) — single adapter module `plugin/agent_plugins.py` ingests `plugin.json` + `skills/` + `mcp.json` as one atomic unit, projects skills as `SkillModel` rows with `source="plugin"` and MCP servers under `<plugin>__<server>` names. Component-level trust dispatch per [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md): skills (T4) + http/sse MCP (T2) install by workspace admin; stdio MCP (T1) only by platform installer via config allowlist, executed in Docker sandbox via `plugin/stdio_sandbox.py`. Bare-SKILL-md directories (Claude Code ecosystem) install as virtual packages.
 >
@@ -284,7 +284,7 @@ class ChannelBase(ABC):
     async def stream(self, message: AgentMessage) -> AsyncIterator[Token]: ...
 ```
 
-**Built-in**: `RESTChannel`, `CLIChannel`. **Planned**: `WebSocketChannel`, `FeishuChannel`, `SlackChannel`.
+**Built-in**: `RESTChannel`, `CLIChannel`, `FeishuChannel` (11.3), `SlackChannel` (11.9). **Planned**: `WebSocketChannel` (P4).
 
 ### 3. `AuthProviderBase`
 
@@ -536,7 +536,7 @@ The registry checks compatibility at load time and rejects incompatible plugins 
 
 | | Hecate | LangChain | Dify | n8n |
 |---|---|---|---|---|
-| **Engine extension** | 26 Core interfaces (ABC swap) | Decorators / custom node types | Plugin marketplace (DAG-level) | Custom nodes |
+| **Engine extension** | 11 Core + 4 SPI = 15 ([ADR-016](adr/016-platform-spi-architecture.md)) | Decorators / custom node types | Plugin marketplace (DAG-level) | Custom nodes |
 | **Platform extension** | 8 Plugin SPI types + Plugin SDK | Tools, retrievers, vector stores | Marketplace plugins (HTTP-based) | Nodes (npm packages) |
 | **Load timing** | Engine startup / runtime | Runtime | Runtime (DAG parsing) | Runtime |
 | **Distribution** | In-process Python packages | pip packages | Marketplace HTTP calls | npm packages |

@@ -8,7 +8,7 @@ Hecate is currently in **alpha**. The positioning is provisional — it will sha
 
 ## 30-second summary
 
-> Hecate is an **open-source, self-hosted, Python-first agent platform** for engineering teams building **production agents** that need to live inside an organization's own infrastructure. It is **not** a no-code SaaS (use Dify for that) and **not** a thin framework (use LangGraph if you only need an orchestration library). It is the **engine-level platform layer in between**: a self-developed Pregel runtime, multi-tenant by default, OpenAI-compatible on the API surface, MCP + A2A on the protocol surface, and 26 engine extension interfaces + 8 plugin SPI types when you need to go deep.
+> Hecate is an **open-source, self-hosted, Python-first agent platform** for engineering teams building **production agents** that need to live inside an organization's own infrastructure. It is **not** a no-code SaaS (use Dify for that) and **not** a thin framework (use LangGraph if you only need an orchestration library). It is the **engine-level platform layer in between**: a self-developed Pregel runtime, multi-tenant by default, OpenAI-compatible on the API surface, MCP + A2A on the protocol surface, and **15 engine extension interfaces (11 Core + 4 SPI)** per [ADR-016](adr/016-platform-spi-architecture.md) when you need to go deep.
 
 ---
 
@@ -60,7 +60,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 | **OpenAI-compatible API** | ✅ Wire-compatible | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
 | **Multi-tenancy native** | ✅ Org → Workspace → RBAC | ✅ | ❌ Add-on | ✅ | ✅ | ✅ (AWS accounts) | ✅ |
 | **Visual canvas** | ✅ (`web/`) | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ (primary UX) |
-| **Engine-level extensibility** | ✅ 26 interfaces + 8 SPI | Plugins | Decorators | Limited | Limited | Bring your framework | Nodes |
+| **Engine-level extensibility** | ✅ 15 (11 Core + 4 SPI) | Plugins | Decorators | Limited | Limited | Bring your framework | Nodes |
 | **Target user** | Engineers building internal agent platforms | Business / non-developers | Engineers prototyping | Mixed business + engineers | Enterprise admins | AWS-native engineers | Ops + IT |
 | **Pricing** | Free (self-host) | Free tier + cloud | Free (OSS) + paid platform | Enterprise | Per-conversation | Pay-per-use AWS | Free self-host + cloud |
 | **License** | MIT | Apache-2.0 + cloud | MIT (LangGraph) + proprietary (LangSmith) | Proprietary | Proprietary | Proprietary | Sustainable Use License |
@@ -81,7 +81,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 | **When to choose Dify** | You want a team of non-developers shipping chatbots in a week | |
 | **When to choose Hecate** | | You need engine-level control (custom scheduler, custom guardrail hooks, custom checkpoint store) — Dify's DAG abstraction hides too much |
 
-**Hecate's advantage**: Full source code, 26 engine extension interfaces + 8 plugin SPI types at the engine layer. Dify's extension model is via Marketplace plugins, not engine-level SPI.
+**Hecate's advantage**: Full source code, **15 engine extension interfaces (11 Core + 4 SPI)** per [ADR-016](adr/016-platform-spi-architecture.md) at the engine layer. Dify's extension model is via Marketplace plugins, not engine-level SPI.
 
 **Dify's advantage**: Faster time-to-first-chatbot for non-developers. Larger community (~110k stars vs Hecate's alpha-stage visibility).
 
@@ -181,7 +181,7 @@ n8n's own marketing says: *"Tools like ChatGPT and Claude are great, but n8n is 
 
 Hecate's positioning line:
 
-> *"Tools like LangGraph and Dify are great at prototyping agents, but Hecate is the platform that lets you **ship** them — self-hosted, multi-tenant, OpenAI-compatible, with the protocols (MCP, A2A) wired in and the engine (26 interfaces + 8 SPI) open for extension."*
+> *"Tools like LangGraph and Dify are great at prototyping agents, but Hecate is the platform that lets you **ship** them — self-hosted, multi-tenant, OpenAI-compatible, with the protocols (MCP, A2A) wired in and the engine (**15 interfaces: 11 Core + 4 SPI**) open for extension."*
 
 ---
 
@@ -192,7 +192,7 @@ Hecate's positioning line:
 | **Origin** | Huawei (open-sourced) | Huawei Cloud (commercial) | Alibaba (DAMO) | Independent |
 | **Deployment** | OSS + cloud | Cloud only | OSS library | OSS |
 | **Visual canvas** | ✅ | ✅ | ❌ | ✅ |
-| **Engine-level SPI** | Limited | Limited | Limited | ✅ 26 interfaces + 8 SPI |
+| **Engine-level SPI** | Limited | Limited | Limited | ✅ 15 (11 Core + 4 SPI) |
 | **Multi-tenancy** | Single-tenant | Multi-tenant | Single-tenant | ✅ Native |
 | **When to choose** | You want Huawei ecosystem + Chinese community | You want cloud-managed + Chinese compliance | You want Alibaba-aligned research | You want full control + open protocol surface |
 

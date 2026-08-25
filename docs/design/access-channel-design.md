@@ -6,18 +6,18 @@
 
 ## Overview
 
-The Access Channel is the entry point for all external requests. It exposes four API surfaces, enforces authentication and authorization through a gateway control plane, and adapts to diverse consumer types — from developers and end users to MCP clients and A2A remote agents.
+The Access Channel is the entry point for all external requests. It exposes **eight API surfaces** (six inbound + two outbound), enforces authentication and authorization through a gateway control plane, and adapts to diverse consumer types — from developers and end users to MCP clients and A2A remote agents.
 
 ![Access Channel L2](images/access-channel-l2.png)
 
 The access channel has four layers:
 
 1. **Consumers** — Who calls the platform (developers, end users, ops admins, external agents)
-2. **Channel Adapters** — How requests arrive (REST, CLI, MCP, A2A, IM bots, WebSocket)
+2. **Channel Adapters** — How requests arrive inbound (REST, CLI, MCP, A2A, IM bots, WebSocket, Web Widget) and how outbound notifications dispatch (Email, Webhook → NotifierABC → Channel SPI)
 3. **Gateway Control Plane** — What gates every request (auth, RBAC, rate limit, quota, governance)
-4. **API Surface** — Where requests land (/v1/, /api/, /mcp, /.well-known/)
+4. **API Surface** — Where requests land inbound (`/v1/`, `/api/`, `/mcp`, `/.well-known/`, `/health`, `/metrics`) and where outbound notifications fire (Webhooks per [14.2](../../features/feature-catalog.md))
 
-All requests are uniformly wrapped as `ExecutionRequest` objects and flow down to the Agent Engine.
+All inbound requests are uniformly wrapped as `ExecutionRequest` objects and flow down to the Agent Engine. Outbound notifications flow back through the gateway's audit + governance layers before reaching the dispatcher.
 
 ---
 
@@ -57,17 +57,18 @@ Channel adapters translate external protocols into Hecate's internal `ExecutionR
 |---------|----------|-----------|
 | **REST API Gateway** | HTTP/HTTPS | Sync + SSE |
 | **CLI (hecate)** | Terminal | Sync |
-| **MCP Server** | JSON-RPC | Streamable HTTP (single /mcp endpoint) |
+| **MCP Server** | JSON-RPC | Streamable HTTP (single /mcp endpoint; MCP 2026-07-28 spec — stateless core) |
 | **SSE Streaming** | HTTP SSE | Server-Sent Events |
-| **WebSocket Channel** | WebSocket | Bidirectional persistent |
-| **Web Widget** | HTTP + iframe | Embedded chat component |
-| **IM Bots** | Platform-specific webhooks | Feishu/Slack/DingTalk/WeCom/WeChat |
-| **Enterprise Gateway** | SAML/OIDC | SSO federation |
-| **A2A Server** | A2A v1.0 | HTTP + JSON/gRPC |
+| **WebSocket Channel** | WebSocket | Bidirectional persistent (P4+) |
+| **Web Widget** | HTTP + iframe | Embedded chat component (Wave 1 simplified; anonymous to-C scope = P5 deferred per ADR-031) |
+| **IM Bots** | Platform-specific webhooks | Feishu 11.3 + Slack 11.9 (Wave 1 ✅); WeCom 11.4 + DingTalk 11.5 + Discord + Telegram (Wave 2/3, P5) |
+| **Enterprise Gateway** | SAML/OIDC/LDAP/SCIM | SSO federation |
+| **A2A Server** | A2A v1.0 | HTTP + JSON + SSE streaming (long-running task push) |
+| **Outbound Notification** | Email · Webhook | `NotifierABC` merged into `ChannelBase` (ADR-016 / ADR-029); outbound notifications register as `NotificationChannelAdapter` built-ins or as Channel plugins |
 
 ### ChannelBase SPI
 
-All channel adapters implement the `ChannelBase` interface — one of the eight plugin SPI types (see [ADR-016](adr/016-platform-spi-architecture.md) and the [plugin manifest](../reference/plugin-manifest.md)):
+All channel adapters implement the `ChannelBase` interface — one of the plugin SPI types (see [ADR-016](adr/016-platform-spi-architecture.md) and the [plugin manifest](../reference/plugin-manifest.md)):
 
 ```python
 class ChannelBase(ABC):
@@ -81,22 +82,24 @@ class ChannelBase(ABC):
     def parse_event(self, raw: dict) -> ChannelEvent: ...
 ```
 
-Built-in adapters (REST, CLI, MCP) ship as `BuiltinChannel` implementations. Third-party adapters (Feishu, Slack, DingTalk, custom SDKs) register as plugins through `PluginRegistry`. This enables the channel ecosystem to grow without modifying core gateway code.
+Built-in adapters (REST, CLI, MCP, IM-Wave-1) ship as `BuiltinChannel` implementations. Third-party adapters (Feishu, Slack, DingTalk, custom SDKs) register as plugins through `PluginRegistry`. This enables the channel ecosystem to grow without modifying core gateway code.
+
+> **Note (per ADR-016 / ADR-029):** `NotifierABC` is **not** a separate SPI — it has been merged into `ChannelBase`. Outbound notification dispatchers (Email, Webhook) are now outbound `NotificationChannelAdapter` built-ins, or register as Channel plugins. The original `8.6-abc` Notifier row in the plugin SPI table is the deprecation marker; do not add new code under a separate `NotifierABC` SPI.
 
 ### A2A Server Adapter
 
 The A2A Server adapter handles cross-framework agent communication (see [ADR-011](adr/011-a2a-protocol-adoption.md)):
 
-1. **Agent Card serving** — Responds to `GET /.well-known/agent.json` with the agent's capabilities, skills, and security schemes
-2. **Task lifecycle** — Receives task submissions (submitted → working → completed/failed/cancelled), routes them to the Agent Engine, and returns artifacts
-3. **Streaming updates** — For long-running tasks, pushes intermediate updates via SSE
+1. **Agent Card serving** — Responds to `GET /.well-known/agent.json` with the agent's capabilities, skills, and security schemes; **Signed Agent Cards** (cryptographic signatures per A2A spec) verify the card was issued by the domain owner, preventing impersonation
+2. **Task lifecycle** — Receives task submissions (`submitted → working → completed | failed | cancelled`), routes them to the Agent Engine, and returns artifacts
+3. **Streaming updates** — For **long-running tasks**, the A2A server pushes intermediate updates via **SSE** (`text/event-stream`) so the caller does not need to poll; the same SSE channel also serves as the `A2A Push Notifications` transport
 4. **Authentication** — Supports APIKey, OAuth2, and MutualTLS schemes declared in the Agent Card
 
 ---
 
 ## API Surfaces
 
-Hecate exposes four API surfaces, each with distinct protocol semantics (see [ADR-009](adr/009-dual-api-design.md)):
+Hecate exposes **eight API surfaces** (six inbound + two outbound), each with distinct protocol semantics (see [ADR-009](adr/009-dual-api-design.md)):
 
 ### OpenAI-Compatible API (`/v1/`)
 
@@ -126,7 +129,7 @@ POST   /api/knowledge-bases/{id}/documents — Upload document
 
 The Management API covers 24+ resource routers: agents, sessions, conversations, messages, workflows, tools, skills, knowledge bases, documents, chunks, prompts, memories, memory blocks, organizations, workspaces, users, api keys, model providers, evaluations, traces, audit events, and more.
 
-**Unified error format** (applies to both REST surfaces):
+**Unified error format** (applies to all REST surfaces — `/v1/`, `/api/`, `/health`, `/metrics`):
 
 ```json
 {
@@ -140,12 +143,14 @@ The Management API covers 24+ resource routers: agents, sessions, conversations,
 
 ### MCP Server (`/mcp`)
 
-Streamable HTTP transport per the MCP 2026-07-28 specification — stateless core (see [ADR-012](adr/012-mcp-streamable-http.md), updated for the 2026-07-28 revision via change `mcp-streamable-http`). Exposes Hecate agents as MCP-compliant tool providers.
+Streamable HTTP transport per the **MCP 2026-07-28 specification — stateless core** (see [ADR-012](adr/012-mcp-streamable-http.md), updated for the 2026-07-28 revision via change `mcp-streamable-http`). Exposes Hecate agents as MCP-compliant tool providers.
+
+**Statelessness is the key differentiator vs the 2025 spec.** No `initialize` handshake, no `Mcp-Session-Id`, no session affinity — any replica behind a round-robin load balancer can serve any request.
 
 - **Single endpoint** — All MCP communication flows through `/mcp`
-- **Stateless core** — No `initialize` handshake and no `Mcp-Session-Id`; every request is self-describing via `_meta` (protocol version, client info, client capabilities)
+- **Stateless core** — Every request is self-describing via `_meta` (protocol version, client info, client capabilities); clients negotiate protocol-era on first call (the Hecate `MCP Client` automatically falls back from 2026-07-28 to the legacy 2025 spec)
 - **Header-based routing** — Requests carry `Mcp-Method` / `Mcp-Name` headers so gateways and load balancers route without inspecting JSON bodies
-- **POST** for client→server messages; any replica behind a round-robin load balancer can serve any request (no session affinity)
+- **POST** for client→server messages
 - **Discovery** — `server/discover` advertises identity and capabilities; clients may proceed directly to `tools/list`
 - **Body limit** — POST bodies over 4 MiB rejected with HTTP 413
 - **Toggle** — Enabled via `MCP_SERVER_ENABLED=true`
@@ -336,7 +341,7 @@ Audit events capture: org_id, user_id, action, success/failure, workspace_id, re
 
 ---
 
-## Multi-Stream Modes
+## Multi-Stream Modes (`P4 · 11.18`)
 
 Clients can subscribe to multiple stream modes simultaneously, receiving different levels of execution detail through a single connection:
 
