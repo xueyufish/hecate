@@ -32,7 +32,7 @@ import asyncio
 import logging
 from typing import Any
 
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.types import CanonicalMessage
 
@@ -103,7 +103,7 @@ class IMMessageBus:
     async def enqueue(
         self,
         canonical_message: CanonicalMessage,
-        adapter: ChannelABC,
+        adapter: ChannelBase,
         workspace_id: Any,
         chat_id: str,
         channel_capabilities: ChannelCapabilities,
@@ -282,7 +282,7 @@ class _Envelope:
     def __init__(
         self,
         message: CanonicalMessage,
-        adapter: ChannelABC,
+        adapter: ChannelBase,
         workspace_id: Any,
         chat_id: str,
         capabilities: ChannelCapabilities,

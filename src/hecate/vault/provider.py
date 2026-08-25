@@ -1,6 +1,6 @@
-"""SecretProviderABC — abstract interface for secret management providers.
+"""SecretProviderBase — abstract interface for secret management providers.
 
-Follows the same ABC pattern as AuthProviderABC and ChannelABC.
+Follows the same ABC pattern as AuthProviderBase and ChannelBase.
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import abc
 
 
-class SecretProviderABC(abc.ABC):
+class SecretProviderBase(abc.ABC):
     """Abstract base class for secret management providers.
 
     Subclasses must implement name, description, get_secret,

@@ -383,5 +383,5 @@ Things to avoid:
 - [Backup & Recovery Architecture](backup-recovery-architecture.md) — backup topology
 - [Observability Architecture](observability-architecture.md) — what to monitor in each topology
 - [Health Checks](../operations/health-checks.md) — probe configuration
-- Multi-region is post-1.0 (not yet planned)
+- Multi-region active-active is **P5** (per [ADR-025 EF4](../adr/025-enterprise-foundation-enhancement.md) Multi-Region Data Sovereignty, roadmap 13.6 enhancement direction); region-pinned multi-region deployment with explicit data-residency controls ships as the 13.6 *enhancement* of EF4 (post-1.0 RC, before P5 freeze). Active-active cross-region replication is P5
 - [ADR-018: Zero Trust Identity](adr/018-zero-trust-identity-architecture.md) — auth architecture

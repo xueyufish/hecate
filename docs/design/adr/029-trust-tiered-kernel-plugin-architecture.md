@@ -37,10 +37,10 @@ Module classifications (K = kernel, never pluggable; K-C = contract in kernel, i
 | Tool-gating decision point, approval state machine (fail-closed), monotonic denial | **K** | Enforcement is never pluggable |
 | Policy *engines* (Cedar / OPA / Dogwood adapters, 9.16) | **P** | Decision points in kernel, decision logic external |
 | Sandbox executor routing | **K**; sandbox backends (gVisor/Kata/Firecracker/WASM 6.41) **P** | |
-| Model access | **P** (ModelPluginABC) for non-standard protocols; LiteLLM-compatible endpoints remain **configuration, not plugins** | Avoid pluginizing what is data |
-| Channels (ChannelABC) | **P** | |
+| Model access | **P** (ModelPluginBase) for non-standard protocols; LiteLLM-compatible endpoints remain **configuration, not plugins** | Avoid pluginizing what is data |
+| Channels (ChannelBase) | **P** | |
 | Tools | **P** (MCP default / container sandbox) | |
-| Evaluation executors | **P/E** (EvaluatorABC; external via LangSmith/Braintrust per OE9 freeze) | |
+| Evaluation executors | **P/E** (EvaluatorBase; external via LangSmith/Braintrust per OE9 freeze) | |
 | Observability | Kernel **emits only**; exporters/panels **P/E** | |
 | Canvas/Studio authoring surface | **K, permanently** | No successful third-party-replaceable canvas exists industry-wide; the canvas is a permission-input surface (phishing risk) and owns the DSL round-trip guarantees |
 | Node packs (declarative: schema.json + palette.json + binding.yaml; bind to existing node types / MCP tools / subgraph templates only) | **E / T4** | The open extension seam for the canvas; 1.1.24/1.1.25 are the first templates. No new execution semantics |
@@ -90,7 +90,7 @@ Canvas authoring = K, permanently. Node packs = the open seam (E/T4). Third-part
 
 This ADR lands as implementation discipline over existing items, not new catalog entries:
 
-- **Phase A (P3)**: dogfood — Ops Center consumes public APIs only; internal evaluators all register via EvaluatorABC; models all via ModelPluginABC/configuration. Event-plane schema is semver'd from 1.3.19 day one.
+- **Phase A (P3)**: dogfood — Ops Center consumes public APIs only; internal evaluators all register via EvaluatorBase; models all via ModelPluginBase/configuration. Event-plane schema is semver'd from 1.3.19 day one.
 - **Phase B (P4)**: isolation inversion (isolated-by-default, in-process as exception) + WASM (6.41) promotion + panel/node-pack plugin types + installation trust marks (recorded as 5.5 enhancement note).
 - **Phase C (P5)**: market (12.0) + scanning/signing (5.13) + pin-by-hash (5.9 hardening already recorded).
 

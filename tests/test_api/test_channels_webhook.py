@@ -23,7 +23,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from hecate.api.v1.channels import router as im_channels_router
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.im.message_bus import IMMessageBus
 from hecate.channel.types import CanonicalMessage, MessageContent
@@ -31,7 +31,7 @@ from hecate.plugin.manifest import PluginManifest
 from hecate.plugin.registry import PluginRegistry
 
 
-class _StubAdapter(ChannelABC):
+class _StubAdapter(ChannelBase):
     """Adapter stub that records receive/respond/stream invocations."""
 
     def __init__(self, name: str = "stub") -> None:

@@ -16,7 +16,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.types import Attachment, CanonicalMessage, MessageContent
 
@@ -33,8 +33,8 @@ except ImportError:  # pragma: no cover - guarded by extras
     _SLACK_AVAILABLE = False
 
 
-class SlackChannel(ChannelABC):
-    """Slack IM adapter implementing :class:`ChannelABC`.
+class SlackChannel(ChannelBase):
+    """Slack IM adapter implementing :class:`ChannelBase`.
 
     Wraps ``slack_bolt.App`` and exposes Hecate's ``receive/respond/stream``
     contract.

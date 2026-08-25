@@ -1,186 +1,149 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="drawio" version="26.0.0">
+<mxfile host="Electron">
   <diagram name="Tool-Platform-L2" id="tool-platform-l2">
-    <mxGraphModel dx="3000" dy="2400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="760" math="0" shadow="0">
+    <mxGraphModel dx="1212" dy="698" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="760" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-
-        <!-- LEGEND -->
-        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" vertex="1" parent="1">
-          <mxGeometry x="590" y="12" width="175" height="36" as="geometry" />
+        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" value="" vertex="1">
+          <mxGeometry height="36" width="175" x="785" y="12" as="geometry" />
         </mxCell>
-        <mxCell id="legend_done" value="✅ Impl." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="600" y="17" width="70" height="26" as="geometry" />
+        <mxCell id="legend_done" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" value="Implemented" vertex="1">
+          <mxGeometry height="26" width="70" x="795" y="17" as="geometry" />
         </mxCell>
-        <mxCell id="legend_plan" value="📋 Planned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="680" y="17" width="78" height="26" as="geometry" />
+        <mxCell id="legend_plan" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Planned" vertex="1">
+          <mxGeometry height="26" width="78" x="875" y="17" as="geometry" />
         </mxCell>
-        <!-- TITLE -->
-        <mxCell id="title" value="&lt;b&gt;Tool Platform — L2 Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
-          <mxGeometry x="20" y="15" width="500" height="30" as="geometry" />
+        <mxCell id="title" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" value="&lt;b&gt;Tool Platform — L2 Architecture&lt;/b&gt;" vertex="1">
+          <mxGeometry height="30" width="500" x="50" y="15" as="geometry" />
         </mxCell>
-
-        <!-- ROW 1: MCP & TOOL SYSTEM -->
-        <mxCell id="r1_c" value="1. MCP &amp; Tool System" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="55" width="910" height="105" as="geometry" />
+        <mxCell id="r1_c" parent="1" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="1. MCP &amp; Tool System" vertex="1">
+          <mxGeometry height="105" width="910" x="50" y="55" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1a -->
-        <mxCell id="r1_mcpclient" value="✅ MCP Client" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r1_mcpclient" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=9;fontStyle=1;" value="MCP Client" vertex="1">
+          <mxGeometry height="26" width="190" x="10" y="33" as="geometry" />
         </mxCell>
-        <mxCell id="r1_mcpserver" value="✅ MCP Server" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="30" width="205" height="26" as="geometry" />
+        <mxCell id="r1_mcpserver" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=9;fontStyle=1;" value="MCP Server" vertex="1">
+          <mxGeometry height="26" width="205" x="233" y="33" as="geometry" />
         </mxCell>
-        <mxCell id="r1_toolregistry" value="✅ Tool Registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="455" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r1_toolregistry" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" value="Tool Registry" vertex="1">
+          <mxGeometry height="26" width="210" x="460" y="33" as="geometry" />
         </mxCell>
-        <mxCell id="r1_builtin" value="✅ Built-in Tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="690" y="30" width="220" height="26" as="geometry" />
+        <mxCell id="r1_builtin" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" value="Built-in Tools" vertex="1">
+          <mxGeometry height="26" width="210" x="690" y="33" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1b -->
-        <mxCell id="r1_sandbox" value="✅ Execution Sandbox" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r1_sandbox" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=9;" value="Execution Sandbox (Docker)" vertex="1">
+          <mxGeometry height="26" width="190" x="10" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_toolpolicy" value="✅ Tool Policy / Security" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="68" width="205" height="26" as="geometry" />
+        <mxCell id="r1_toolpolicy" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;" value="Tool Policy / Security" vertex="1">
+          <mxGeometry height="26" width="205" x="233" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_mcpregistry" value="📋 MCP Server Registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="455" y="68" width="210" height="26" as="geometry" />
+        <mxCell id="r1_mcpregistry" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="MCP Server Registry" vertex="1">
+          <mxGeometry height="26" width="210" x="460" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_enterprise" value="📋 Enterprise Integration (TP6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="690" y="68" width="220" height="26" as="geometry" />
+        <mxCell id="r1_enterprise" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Enterprise Integration" vertex="1">
+          <mxGeometry height="26" width="210" x="690" y="68" as="geometry" />
         </mxCell>
-
-        <!-- ROW 2: SKILL & PLUGIN ECOSYSTEM -->
-        <mxCell id="r2_c" value="2. Skill &amp; Plugin Ecosystem" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="180" width="910" height="105" as="geometry" />
+        <mxCell id="r2_c" parent="1" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="2. Skill &amp; Plugin Ecosystem" vertex="1">
+          <mxGeometry height="105" width="910" x="50" y="180" as="geometry" />
         </mxCell>
-        <!-- Sub-row 2a -->
-        <mxCell id="r2_agenttool" value="✅ Agent Tool System" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="0" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r2_agenttool" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" value="Agent Tool System" vertex="1">
+          <mxGeometry height="26" width="190" x="10" y="34" as="geometry" />
         </mxCell>
-        <mxCell id="r2_search" value="✅ Search Tools" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="225" y="30" width="205" height="26" as="geometry" />
+        <mxCell id="r2_search" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" value="Search Tools" vertex="1">
+          <mxGeometry height="26" width="205" x="225" y="34" as="geometry" />
         </mxCell>
-        <mxCell id="r2_skillversion" value="✅ Skill Versioning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
-          <mxGeometry x="455" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r2_skillversion" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Skill Versioning" vertex="1">
+          <mxGeometry height="26" width="210" x="455" y="34" as="geometry" />
         </mxCell>
-        <mxCell id="r2_pluginpkg" value="✅ Plugin Packaging" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
-          <mxGeometry x="690" y="30" width="220" height="26" as="geometry" />
+        <mxCell id="r2_pluginpkg" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Plugin Packaging" vertex="1">
+          <mxGeometry height="26" width="210" x="690" y="34" as="geometry" />
         </mxCell>
-        <!-- Sub-row 2b -->
-        <mxCell id="r2_deepresearch" value="📋 Deep Research" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r2_deepresearch" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Deep Research" vertex="1">
+          <mxGeometry height="26" width="190" x="10" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r2_skilldetect" value="📋 Skill Auto-Detection" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="225" y="68" width="205" height="26" as="geometry" />
+        <mxCell id="r2_skilldetect" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Skill Auto-Detection" vertex="1">
+          <mxGeometry height="26" width="205" x="225" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r2_plugintypes" value="✅ Plugin Type Taxonomy + SDK (TP5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2_c">
-          <mxGeometry x="455" y="68" width="210" height="26" as="geometry" />
+        <mxCell id="r2_plugintypes" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Plugin Type Taxonomy + SDK" vertex="1">
+          <mxGeometry height="26" width="210" x="455" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r2_pluginsec" value="📋 Plugin Security &amp; Signing (TP1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="690" y="68" width="220" height="26" as="geometry" />
+        <mxCell id="r2_pluginsec" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Plugin Security &amp;amp; Signing" vertex="1">
+          <mxGeometry height="26" width="210" x="690" y="68" as="geometry" />
         </mxCell>
-
-        <!-- ROW 2b: Agent Plugins 1.0 Standard Ingestion (5.5c, shipped 2026-08-18) -->
-        <mxCell id="r2b_c" value="2a. Agent Plugins 1.0 Ingestion (5.5c, shipped 2026-08-18) + T0 Tightening (5.5 enh, shipped 2026-08-19)" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="290" width="910" height="100" as="geometry" />
+        <mxCell id="r2b_c" parent="1" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="2a. Agent Plugins 1.0 Ingestion" vertex="1">
+          <mxGeometry height="134" width="910" x="50" y="300" as="geometry" />
         </mxCell>
-        <mxCell id="r2b_adapter" value="✅ plugin/agent_plugins.py (Adapter)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
-          <mxGeometry x="0" y="30" width="220" height="22" as="geometry" />
+        <mxCell id="r2b_adapter" parent="r2b_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Agent Plugins Adapter" vertex="1">
+          <mxGeometry height="22" width="210" x="10" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2b_validate" value="✅ Closed-Manifest Validation (offline)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
-          <mxGeometry x="230" y="30" width="220" height="22" as="geometry" />
+        <mxCell id="r2b_validate" parent="r2b_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Closed-Manifest Validation (offline)" vertex="1">
+          <mxGeometry height="22" width="210" x="237" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2b_source" value="✅ Install Sources (dir / git / zip)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
-          <mxGeometry x="460" y="30" width="220" height="22" as="geometry" />
+        <mxCell id="r2b_source" parent="r2b_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Install Sources (dir / git / zip)" vertex="1">
+          <mxGeometry height="22" width="210" x="463" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2b_trust" value="✅ Component Trust Dispatch (T4 / T2 / T1)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
-          <mxGeometry x="690" y="30" width="220" height="22" as="geometry" />
+        <mxCell id="r2b_trust" parent="r2b_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Component Trust Dispatch" vertex="1">
+          <mxGeometry height="22" width="210" x="690" y="36" as="geometry" />
         </mxCell>
-        <mxCell id="r2b_stdio" value="✅ Stdio Sandbox (9.4c) + Bare-SKILL.md Virtual Pkg" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
-          <mxGeometry x="0" y="56" width="455" height="22" as="geometry" />
+        <mxCell id="r2b_stdio" parent="r2b_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Stdio Sandbox + Bare-SKILL.md Virtual Pkg" vertex="1">
+          <mxGeometry height="22" width="437" x="10" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r2b_scan" value="✅ Content Scanning (5.13a, shipped 2026-08-18)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
-          <mxGeometry x="465" y="56" width="445" height="22" as="geometry" />
+        <mxCell id="r2b_scan" parent="r2b_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Content Scanning" vertex="1">
+          <mxGeometry height="22" width="437" x="465" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r2b_t0" value="✅ T0 Trust Gate (5.5 enh) — PythonEntryPolicy + install rollback + SaaS pip skip" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" vertex="1" parent="r2b_c">
-          <mxGeometry x="0" y="78" width="910" height="22" as="geometry" />
+        <mxCell id="r2b_t0" parent="r2b_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="T0 Trust Gate — PythonEntryPolicy + install rollback + SaaS pip skip" vertex="1">
+          <mxGeometry height="22" width="890" x="10" y="101" as="geometry" />
         </mxCell>
-
-        <!-- ROW 3: AI-NATIVE TOOLS -->
-        <mxCell id="r3_c" value="3. AI-Native Tools" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="405" width="910" height="65" as="geometry" />
+        <mxCell id="r3_c" parent="1" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="3. AI-Native Tools" vertex="1">
+          <mxGeometry height="81" width="910" x="50" y="449" as="geometry" />
         </mxCell>
-        <!-- 5 × 170 = 850 -->
-        <mxCell id="r3_browser" value="✅ Browser Automation (6.27, shipped 2026-08-22) · 📋 Computer-use → 6.27a (P4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r3_browser" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" value="Browser Automation ·&amp;nbsp;&lt;div&gt;Computer-use&amp;nbsp;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="26" width="160" x="8" y="43" as="geometry" />
         </mxCell>
-        <mxCell id="r3_dataagent" value="📋 DataAgent (NL2SQL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r3_dataagent" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="DataAgent (NL2SQL)" vertex="1">
+          <mxGeometry height="26" width="170" x="186" y="43" as="geometry" />
         </mxCell>
-        <mxCell id="r3_vibe" value="📋 VibeCoding" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r3_vibe" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="VibeCoding" vertex="1">
+          <mxGeometry height="26" width="160" x="374" y="43" as="geometry" />
         </mxCell>
-        <mxCell id="r3_aioffice" value="📋 AI Office" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r3_aioffice" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="AI Office" vertex="1">
+          <mxGeometry height="26" width="160" x="557" y="43" as="geometry" />
         </mxCell>
-        <mxCell id="r3_autocreate" value="📋 Tool Auto-Creation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r3_c">
-          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r3_autocreate" parent="r3_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Tool Auto-Creation" vertex="1">
+          <mxGeometry height="26" width="160" x="740" y="43" as="geometry" />
         </mxCell>
-
-        <!-- ROW 4: TOOL OPERATIONS & SECURITY (NEW) -->
-        <mxCell id="r4_c" value="4. Tool Operations &amp; Security" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="470" width="910" height="105" as="geometry" />
+        <mxCell id="r4_c" parent="1" style="swimlane;startSize=26;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="4. Tool Operations &amp; Security" vertex="1">
+          <mxGeometry height="111" width="910" x="50" y="543" as="geometry" />
         </mxCell>
-        <!-- Sub-row 4a -->
-        <mxCell id="r4_toolgating" value="✅ Tool Gating (available_when)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="0" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r4_toolgating" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" value="Tool Gating (available_when)" vertex="1">
+          <mxGeometry height="26" width="190" x="10" y="35" as="geometry" />
         </mxCell>
-        <mxCell id="r4_risk" value="✅ Risk Authorization (4-Level)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="225" y="30" width="205" height="26" as="geometry" />
+        <mxCell id="r4_risk" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;fontStyle=1;" value="Risk Authorization (4-Level)" vertex="1">
+          <mxGeometry height="26" width="205" x="225" y="35" as="geometry" />
         </mxCell>
-        <mxCell id="r4_policypipe" value="📋 Composable Policy Pipeline (TP3)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="455" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r4_policypipe" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=9;fontStyle=1;" value="Tool Permission Control · Composable Pipeline" vertex="1">
+          <mxGeometry height="26" width="210" x="455" y="35" as="geometry" />
         </mxCell>
-        <mxCell id="r4_toolauth" value="📋 Per-Tool Auth Scope (TP6)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="690" y="30" width="220" height="26" as="geometry" />
+        <mxCell id="r4_toolauth" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Per-Tool Auth Scope" vertex="1">
+          <mxGeometry height="26" width="210" x="690" y="35" as="geometry" />
         </mxCell>
-        <!-- Sub-row 4b -->
-        <mxCell id="r4_resultval" value="✅ Tool Result Validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;" vertex="1" parent="r4_c">
-          <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r4_resultval" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E0F2F1;strokeColor=#00695C;fontSize=10;" value="Tool Result Validation" vertex="1">
+          <mxGeometry height="26" width="190" x="10" y="73" as="geometry" />
         </mxCell>
-        <mxCell id="r4_hooks" value="📋 Session Events + Matchers (TP4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="225" y="68" width="205" height="26" as="geometry" />
+        <mxCell id="r4_hooks" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Session Events + Matchers (TP4)" vertex="1">
+          <mxGeometry height="26" width="205" x="225" y="73" as="geometry" />
         </mxCell>
-        <mxCell id="r4_toolcache" value="📋 Tool Caching" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="455" y="68" width="210" height="26" as="geometry" />
+        <mxCell id="r4_toolcache" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Tool Caching" vertex="1">
+          <mxGeometry height="26" width="210" x="455" y="73" as="geometry" />
         </mxCell>
-        <mxCell id="r4_analytics" value="📋 Tool Execution Analytics (TP2)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r4_c">
-          <mxGeometry x="690" y="68" width="220" height="26" as="geometry" />
+        <mxCell id="r4_analytics" parent="r4_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Tool Execution Analytics" vertex="1">
+          <mxGeometry height="26" width="210" x="690" y="73" as="geometry" />
         </mxCell>
-
-        <!-- ROW 5: DOWNSTREAM -->
-        <mxCell id="r5_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="595" width="910" height="50" as="geometry" />
+        <mxCell id="r5_c" parent="1" style="swimlane;startSize=19;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" value="" vertex="1">
+          <mxGeometry height="50" width="910" x="50" y="671" as="geometry" />
         </mxCell>
-        <mxCell id="r5_down" value="⤵  To Agent Engine — Tool Execution via EnginePort" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r5_c">
-          <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />
-        </mxCell>
-
-        <!-- EDGES -->
-        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00695C;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r1_c" target="r2_c">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00695C;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e3" value="Tools" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00695C;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r3_c" target="r4_c">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="e4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#00695C;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r4_c" target="r5_c">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="r5_down" parent="r5_c" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" value="To Agent Engine — Tool Execution via EnginePort" vertex="1">
+          <mxGeometry height="40" width="600" x="155" y="15" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

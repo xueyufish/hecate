@@ -7,14 +7,14 @@ Telegram, Email, etc.) to the Hecate agent runtime via the Gateway.
 
 from __future__ import annotations
 
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.types import Attachment, CanonicalMessage, MessageContent
 
 __all__ = [
     "Attachment",
     "CanonicalMessage",
-    "ChannelABC",
+    "ChannelBase",
     "ChannelCapabilities",
     "MessageContent",
 ]

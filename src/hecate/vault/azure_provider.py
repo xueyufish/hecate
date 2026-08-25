@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import logging
 
-from hecate.vault.provider import SecretProviderABC
+from hecate.vault.provider import SecretProviderBase
 
 logger = logging.getLogger(__name__)
 
 
-class AzureKeyVaultProvider(SecretProviderABC):
+class AzureKeyVaultProvider(SecretProviderBase):
     """Secret provider backed by Azure Key Vault.
 
     Uses DefaultAzureCredential for authentication which supports

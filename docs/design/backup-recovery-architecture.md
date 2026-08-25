@@ -4,6 +4,8 @@ Deep-dive design document for Hecate's backup and disaster recovery system. For 
 
 This document is for **SREs and compliance officers** designing backup policies, RPO/RTO targets, and disaster recovery procedures for Hecate deployments.
 
+> **Implementation status (2026-08-22)**: Backup & Recovery is delivered as feature **13.5 Data Backup & Recovery (P3 ✅)** in [feature-catalog.md](../../features/feature-catalog.md). The `hecate-migrate` CLI binary and the preflight / health-check three-endpoint pattern (`/health/live`, `/health/ready`, `/health/startup`) are part of **13.6 Version Upgrade (P3 ✅, shipped 2026-08)** — see ADR-016 for the Platform SPI that hosts the migrate command, and the 13.6 catalog entry for the graceful-shutdown + feature-flag two-tier system + `hecate flag-audit --check` tool that this document presupposes.
+
 ---
 
 ## Why backups matter for an agent platform
@@ -275,7 +277,7 @@ hecate-migrate restore \
 # 3. Run migrations (if version mismatch)
 hecate-migrate upgrade head
 
-# 4. Start services
+# 4. Start services (13.6 — `hecate-migrate` is an independent binary that runs *before* container startup; see ADR-016 Platform SPI + 13.6 Version Upgrade entry in feature-catalog)
 docker compose up -d
 
 # 5. Verify

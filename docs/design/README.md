@@ -4,6 +4,8 @@ The authoritative source for *why* Hecate is built the way it is: top-level arch
 
 For conceptual explanations aimed at users, see the [concepts](../concepts/) section. For task-oriented guides, see [how-to](../how-to/). For end-to-end business scenarios built on Hecate, see [use cases](../use-cases/README.md).
 
+**Index last reconciled 2026-08-25**: all 16 L2 design documents listed below are present in this directory; status attribution reflects the 2026-08-22 release-scope reclassification (P3 closed 87/87, 48 items deferred to P4, 11.4 / 11.5 / 11.9-Discord/Telegram moved to P5 per [roadmap.md](../features/roadmap.md)). Engine-extension count is **15 (11 Core + 4 SPI)** per [ADR-016](adr/016-platform-spi-architecture.md).
+
 ---
 
 ## Strategy & Planning
@@ -112,5 +114,5 @@ ADRs capture the "why" behind major design choices. Each record documents the co
 | [ADR-028](adr/028-observability-evaluation-enhancement.md) | Observability & Evaluation Enhancement |
 | [ADR-029](adr/029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture |
 | [ADR-030](adr/030-event-sourced-execution-state.md) | Event-Sourced Execution State (Log-as-Truth) |
-| [ADR-031](adr/031-web-widget-iframe-architecture.md) | Web Widget Iframe Architecture (Bypassing ChannelABC) |
+| [ADR-031](adr/031-web-widget-iframe-architecture.md) | Web Widget Iframe Architecture (Bypassing ChannelBase) |
 | [ADR-032](adr/032-dynamic-orchestration.md) | Dynamic Orchestration via Runtime-Emitted TaskDAG |

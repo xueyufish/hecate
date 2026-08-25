@@ -1,120 +1,118 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="drawio" version="26.0.0">
+<mxfile host="Electron">
   <diagram name="Agent-Studio-L2" id="agent-studio-l2">
-    <mxGraphModel dx="3000" dy="2200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="460" math="0" shadow="0">
+    <mxGraphModel dx="1091" dy="628" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="950" pageHeight="580" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-
-        <!-- ========== LEGEND ========== -->
-        <mxCell id="legend" value="" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" vertex="1" parent="1">
-          <mxGeometry x="590" y="12" width="175" height="36" as="geometry" />
+        <mxCell id="legend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FAFAFA;strokeColor=#BDBDBD;strokeWidth=1;" value="" vertex="1">
+          <mxGeometry height="36" width="175" x="755" y="12" as="geometry" />
         </mxCell>
-        <mxCell id="legend_done" value="✅ Impl." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="600" y="17" width="70" height="26" as="geometry" />
+        <mxCell id="legend_done" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=9;fontStyle=1;" value="Impl." vertex="1">
+          <mxGeometry height="26" width="70" x="765" y="17" as="geometry" />
         </mxCell>
-        <mxCell id="legend_plan" value="📋 Planned" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="680" y="17" width="78" height="26" as="geometry" />
+        <mxCell id="legend_plan" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Planned" vertex="1">
+          <mxGeometry height="26" width="78" x="845" y="17" as="geometry" />
         </mxCell>
-        <!-- ========== TITLE ========== -->
-        <mxCell id="title" value="&lt;b&gt;Agent Studio — L2 Architecture&lt;/b&gt;" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="1">
-          <mxGeometry x="20" y="15" width="500" height="30" as="geometry" />
+        <mxCell id="title" parent="1" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;fillColor=none;strokeColor=none;" value="&lt;b&gt;Agent Studio — L2 Architecture&lt;/b&gt;" vertex="1">
+          <mxGeometry height="30" width="500" x="20" y="15" as="geometry" />
         </mxCell>
-
-        <!-- ========== ROW 1: DEVELOPMENT TOOLS (h=105, gap=25) ========== -->
-        <mxCell id="r1_c" value="1. Development Tools" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="55" width="910" height="145" as="geometry" />
+        <mxCell id="r1_c" parent="1" style="swimlane;startSize=26;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="1. Development Tools" vertex="1">
+          <mxGeometry height="185" width="910" x="20" y="54" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1a: 200+225+210+200 = 835, + 3×25 gaps = 910 -->
-        <mxCell id="r1_canvas" value="✅ Visual Canvas (React Flow)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r1_canvas" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Visual Canvas&lt;div&gt;&amp;nbsp;(React Flow)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="26" width="200" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_config" value="✅ Agent Configurator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="30" width="225" height="26" as="geometry" />
+        <mxCell id="r1_config" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Agent Configurator" vertex="1">
+          <mxGeometry height="26" width="225" x="225" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_prompt" value="✅ Prompt Management" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="475" y="30" width="210" height="26" as="geometry" />
+        <mxCell id="r1_prompt" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Prompt Management" vertex="1">
+          <mxGeometry height="26" width="210" x="475" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r1_devtools" value="✅ Developer Tools (CLI)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="710" y="30" width="200" height="26" as="geometry" />
+        <mxCell id="r1_devtools" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Developer Tools (CLI)" vertex="1">
+          <mxGeometry height="26" width="200" x="710" y="30" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1b: 200+225+210+200 = 835 -->
-        <mxCell id="r1_advcanvas" value="✅ Advanced Canvas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r1_advcanvas" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Advanced Canvas&amp;nbsp;&lt;div&gt;(basic node types · 8 shipped)&lt;/div&gt;" vertex="1">
+          <mxGeometry height="26" width="200" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_patterns" value="✅ Collaboration Patterns" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="68" width="225" height="26" as="geometry" />
+        <mxCell id="r1_patterns" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Collaboration Patterns" vertex="1">
+          <mxGeometry height="26" width="225" x="225" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_templates" value="✅ Templates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="475" y="68" width="210" height="26" as="geometry" />
+        <mxCell id="r1_templates" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1;" value="Templates" vertex="1">
+          <mxGeometry height="26" width="210" x="475" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r1_nl2agent" value="📋 NL2Agent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="710" y="68" width="200" height="26" as="geometry" />
+        <mxCell id="r1_nl2agent" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="NL2Agent / NL2Workflow" vertex="1">
+          <mxGeometry height="26" width="200" x="710" y="68" as="geometry" />
         </mxCell>
-        <!-- Sub-row 1c: New node types (4 × 200 + 3×25 = 875 ≈ 910) -->
-        <mxCell id="r1_formnode" value="📋 Human Input / Form Node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="0" y="106" width="200" height="26" as="geometry" />
+        <mxCell id="r1_formnode" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Human Input / Form Node" vertex="1">
+          <mxGeometry height="26" width="200" y="106" as="geometry" />
         </mxCell>
-        <mxCell id="r1_trigger" value="📋 Trigger Node (Webhook/Schedule/Event)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="225" y="106" width="225" height="26" as="geometry" />
+        <mxCell id="r1_trigger" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Trigger Node" vertex="1">
+          <mxGeometry height="26" width="225" x="225" y="106" as="geometry" />
         </mxCell>
-        <mxCell id="r1_objectcr" value="📋 Object CRUD Node" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="475" y="106" width="210" height="26" as="geometry" />
+        <mxCell id="r1_objectcr" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Object CRUD Node" vertex="1">
+          <mxGeometry height="26" width="210" x="475" y="106" as="geometry" />
         </mxCell>
-        <mxCell id="r1_chatcanvas" value="📋 Side-by-side Chat+Canvas" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" vertex="1" parent="r1_c">
-          <mxGeometry x="710" y="106" width="200" height="26" as="geometry" />
+        <mxCell id="r1_chatcanvas" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;fontStyle=1;dashed=1;" value="Side-by-side Chat+Canvas" vertex="1">
+          <mxGeometry height="26" width="200" x="710" y="106" as="geometry" />
         </mxCell>
-
-        <!-- ========== ROW 2: API & SERVICES (h=105, gap=15 for 5 items) ========== -->
-        <mxCell id="r2_c" value="2. API &amp; Services" style="swimlane;startSize=26;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" vertex="1" parent="1">
-          <mxGeometry x="20" y="220" width="910" height="105" as="geometry" />
+        <mxCell id="r1_canvasembed" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Canvas Embedding" vertex="1">
+          <mxGeometry height="26" width="200" y="144" as="geometry" />
         </mxCell>
-        <!-- Sub-row 2a: 5 × 170 = 850, + 4×15 gaps = 910 -->
-        <mxCell id="r2_agentapi" value="✅ Agent CRUD API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="0" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r1_skillsel" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Skill Selector" vertex="1">
+          <mxGeometry height="26" width="225" x="225" y="144" as="geometry" />
         </mxCell>
-        <mxCell id="r2_promptapi" value="✅ Prompt CRUD API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="185" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r1_nested" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="Nested Graph" vertex="1">
+          <mxGeometry height="26" width="210" x="475" y="144" as="geometry" />
         </mxCell>
-        <mxCell id="r2_workflowapi" value="✅ Workflow CRUD API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="370" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r1_coordnode" parent="r1_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;fontStyle=1;dashed=1;" value="COORDINATOR node UI" vertex="1">
+          <mxGeometry height="26" width="200" x="710" y="144" as="geometry" />
         </mxCell>
-        <mxCell id="r2_templateapi" value="✅ Template API" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="555" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_c" parent="1" style="swimlane;startSize=26;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=11;fontStyle=1;swimlaneFillColor=#FAFAFA;" value="2. API &amp; Services" vertex="1">
+          <mxGeometry height="135" width="910" x="20" y="269" as="geometry" />
         </mxCell>
-        <mxCell id="r2_dslbridge" value="✅ DSL Bridge" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="740" y="30" width="170" height="26" as="geometry" />
+        <mxCell id="r2_agentapi" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" value="Agent CRUD API" vertex="1">
+          <mxGeometry height="26" width="170" y="30" as="geometry" />
         </mxCell>
-        <!-- Sub-row 2b: 5 × 170 = 850 -->
-        <mxCell id="r2_validator" value="✅ Workflow Validator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
-          <mxGeometry x="0" y="68" width="170" height="26" as="geometry" />
+        <mxCell id="r2_promptapi" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" value="Prompt CRUD API" vertex="1">
+          <mxGeometry height="26" width="170" x="185" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r2_testrunner" value="✅ Test Runner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
-          <mxGeometry x="185" y="68" width="170" height="26" as="geometry" />
+        <mxCell id="r2_workflowapi" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" value="Workflow CRUD API" vertex="1">
+          <mxGeometry height="26" width="170" x="370" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r2_analytics" value="✅ Prompt Analytics" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
-          <mxGeometry x="370" y="68" width="170" height="26" as="geometry" />
+        <mxCell id="r2_templateapi" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" value="Template API" vertex="1">
+          <mxGeometry height="26" width="170" x="555" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r2_execution" value="✅ Execution Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" vertex="1" parent="r2_c">
-          <mxGeometry x="555" y="68" width="170" height="26" as="geometry" />
+        <mxCell id="r2_dslbridge" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;fontStyle=1;" value="DSL Bridge" vertex="1">
+          <mxGeometry height="26" width="170" x="740" y="30" as="geometry" />
         </mxCell>
-        <mxCell id="r2_sdk" value="📋 Code Generator / SDK" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" vertex="1" parent="r2_c">
-          <mxGeometry x="740" y="68" width="170" height="26" as="geometry" />
+        <mxCell id="r2_validator" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" value="Workflow Validator" vertex="1">
+          <mxGeometry height="26" width="170" y="68" as="geometry" />
         </mxCell>
-
-        <!-- ========== ROW 3: DOWNSTREAM ========== -->
-        <mxCell id="r3_c" value="" style="swimlane;startSize=26;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" vertex="1" parent="1">
-          <mxGeometry x="20" y="345" width="910" height="50" as="geometry" />
+        <mxCell id="r2_testrunner" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" value="Test Runner" vertex="1">
+          <mxGeometry height="26" width="170" x="185" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="r3_down" value="⤵  To Agent Engine — Graph DSL (Compiler / Pregel Runtime / Channels)" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" vertex="1" parent="r3_c">
-          <mxGeometry x="155" y="5" width="600" height="40" as="geometry" />
+        <mxCell id="r2_analytics" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" value="Prompt Analytics" vertex="1">
+          <mxGeometry height="26" width="170" x="370" y="68" as="geometry" />
         </mxCell>
-
-        <!-- ========== EDGES: Data Flow ========== -->
-        <mxCell id="e1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#388E3C;strokeWidth=2;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r1_c" target="r2_c">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="r2_execution" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1565C0;fontSize=10;" value="&amp;nbsp;Execution Service" vertex="1">
+          <mxGeometry height="26" width="170" x="555" y="68" as="geometry" />
         </mxCell>
-        <mxCell id="e2" value="Graph DSL" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#1565C0;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="r2_c" target="r3_c">
+        <mxCell id="r2_sdk" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=10;dashed=1;" value="Code Generator / SDK" vertex="1">
+          <mxGeometry height="26" width="170" x="740" y="68" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_evaluators" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#388E3C;fontSize=10;fontStyle=1" value="Built-in Evaluators" vertex="1">
+          <mxGeometry height="26" width="555" y="106" as="geometry" />
+        </mxCell>
+        <mxCell id="r2_evalsuite" parent="r2_c" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#FFA000;fontSize=9;dashed=1;" value="Evaluation Suite" vertex="1">
+          <mxGeometry height="26" width="355" x="555" y="106" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_c" parent="1" style="swimlane;startSize=20;fillColor=#F5F5F5;strokeColor=#9E9E9E;fontSize=11;fontStyle=1;swimlaneFillColor=#F5F5F5;" value="" vertex="1">
+          <mxGeometry height="50" width="910" x="20" y="439" as="geometry" />
+        </mxCell>
+        <mxCell id="r3_down" parent="r3_c" style="text;html=1;fontSize=11;fontStyle=1;align=center;verticalAlign=middle;fillColor=none;strokeColor=none;" value="⤵  To Agent Engine — Graph DSL (Compiler / Pregel Runtime / Channels)" vertex="1">
+          <mxGeometry height="40" width="600" x="155" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="r2_c" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#1565C0;strokeWidth=2;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="r3_c" value="Graph DSL">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
       </root>

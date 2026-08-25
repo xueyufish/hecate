@@ -1,4 +1,4 @@
-"""ExtensionPluginABC — base class for extension-type plugins (Google ADK BasePlugin pattern).
+"""ExtensionPluginBase — base class for extension-type plugins (Google ADK BasePlugin pattern).
 
 All callback methods are optional. Override only the ones you need.
 The loader detects implemented callbacks via hasattr().
@@ -11,7 +11,7 @@ from typing import Any
 from hecate.engine.guardrail import GuardrailResult
 
 
-class ExtensionPluginABC:
+class ExtensionPluginBase:
     """Base class for plugins that inject logic into the agent execution flow.
 
     All methods are optional — implement only the callbacks you need.

@@ -11,12 +11,12 @@ from typing import Any
 
 import pytest
 
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.channel.im.feishu import FeishuChannel
 from hecate.channel.im.slack import SlackChannel
 
 
-def _stub_underlying(adapter: ChannelABC, send_calls: list, update_calls: list) -> None:
+def _stub_underlying(adapter: ChannelBase, send_calls: list, update_calls: list) -> None:
     """Replace the underlying SDK with a stub recording ``send`` calls."""
 
     class _FeishuStub:

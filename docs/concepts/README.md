@@ -24,7 +24,7 @@ If you prefer a hands-on introduction, start with the [Quickstart](../getting-st
 - **[Guardrails and Hooks](guardrails.md)** — the four engine-level hook types (Pre/Post LLM/Tool) that enforce PII masking, injection defense, and audit logging at every trust boundary.
 - **[Observability](observability.md)** — the four signals (traces, metrics, logs, audit), what each captures, where it goes, and how to consume them in production.
 - **[Multi-Tenancy](multi-tenancy.md)** — the Organization → Workspace → User hierarchy, data isolation via `workspace_id`, and what it means for agent configuration and user management.
-- **[Authentication and Identity](auth-identity.md)** — the two credential types (API Keys for machines, JWTs for humans), SSO (OIDC/SAML/LDAP), SCIM v2 provisioning, and the `AuthProviderABC` extension point.
+- **[Authentication and Identity](auth-identity.md)** — the two credential types (API Keys for machines, JWTs for humans), SSO (OIDC/SAML/LDAP), SCIM v2 provisioning, and the `AuthProviderBase` extension point.
 - **[Agent Evaluation](evaluation.md)** — the built-in evaluation system: datasets of test cases, nine evaluators (agent + RAG), runs, and scores — the loop that catches regressions before release.
 - **[Data Loss Prevention (DLP)](dlp.md)** — the outbound detection engine: recognizers, three-level policy override, four actions, and the five trust boundaries (including MCP responses) it scans.
 - **[Command-Line Interface](cli.md)** — the three entry points (`hecate`, `hecate-migrate`, `hecate-flag-audit`), how they differ, and when to use the CLI vs API vs canvas.

@@ -92,7 +92,7 @@ class WorkspaceModel(BaseModel):
 
 ### Tenant isolation count
 
-Hecate's tenant isolation works because **34 models carry `workspace_id`**. Every query against a tenant-scoped resource filters by `workspace_id`. Examples:
+Hecate's tenant isolation works because **36 models carry `workspace_id`** (verified via `grep -rl workspace_id src/hecate/models/*.py` as of 2026-08-25; the count grows as new tenant-scoped entities land). Every query against a tenant-scoped resource filters by `workspace_id`. Examples:
 
 ```
 src/hecate/models/agent.py:                 workspace_id
@@ -162,7 +162,7 @@ Hecate ships five authentication providers in `src/hecate/auth/`:
 
 ```python
 # src/hecate/auth/provider.py
-class AuthProviderABC(ABC):
+class AuthProviderBase(ABC):
     @property
     @abstractmethod
     def name(self) -> str: ...  # "jwt", "api_key", "oidc", "saml", "ldap"
@@ -187,7 +187,7 @@ Returns `AuthContext` (user_id, org_id, workspace_ids[], scopes[]) or `None` if 
    - SAML: SAMLResponse POST         (SSO)
    - LDAP: simple bind over TLS      (direct)
 
-2. AuthProviderABC.authenticate(token) → AuthContext | None
+2. AuthProviderBase.authenticate(token) → AuthContext | None
 
 3. AuthContext attaches to request state (FastAPI Depends)
 
@@ -445,7 +445,7 @@ For high-sensitivity tenants (healthcare, finance, government), consider:
 - `src/hecate/models/organization.py` — OrganizationModel
 - `src/hecate/models/workspace.py` — WorkspaceModel
 - `src/hecate/models/workspace_member.py` — WorkspaceMemberModel + WorkspaceRole enum
-- `src/hecate/auth/provider.py` — AuthProviderABC
+- `src/hecate/auth/provider.py` — AuthProviderBase
 - `src/hecate/auth/jwt_provider.py` — JWT auth
 - `src/hecate/auth/api_key_provider.py` — API key auth
 - `src/hecate/auth/oidc_provider.py` — OIDC SSO

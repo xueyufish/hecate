@@ -1,8 +1,6 @@
 # Hecate Architecture
 
-> **Version**: v2.0 | **Status**: Active
-
-Hecate is an open-source, self-hosted, model-agnostic, MCP-first enterprise Agent platform. This document describes the system's architecture, design principles, and component relationships. For implementation details, see the [Engine Design](engine-design.md) and [Core Concepts](concepts.md) documents.
+This document describes the system's architecture, design principles, and component relationships. Per-module implementation details live in the dedicated design documents listed in [Further Reading](#further-reading) below.
 
 ---
 
@@ -10,17 +8,15 @@ Hecate is an open-source, self-hosted, model-agnostic, MCP-first enterprise Agen
 
 Hecate enables enterprises to build, orchestrate, and run AI Agent applications on their own infrastructure. The system comprises ten modules organized in a layered dependency hierarchy, with Security and Ecosystem as cross-cutting concerns that span all modules.
 
-![Hecate L1 Architecture](images/hecate_l1_architecture.png)
+![Hecate L1 Architecture](images/hecate_architecture_l1.png)
 
 > **Legend**: ✅ Green = Implemented | 📋 Yellow dashed = Planned
 >
 > Security Shield (left sidebar) and Ecosystem (right sidebar) are cross-cutting concerns that span all platform modules. Each module in the L1 diagram has a corresponding L2 breakdown — see [Module Architecture](#module-architecture) below.
 
-The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md)) with checkpoints as materialized caches, and dispatches node execution to a Worker Pool.
+The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** with checkpoints as materialized caches, supports **Execution Replay** for time-travel debugging, and dispatches node execution to a Worker Pool.
 
-**26 engine extension interfaces + 8 plugin SPI types**:
-
-**Engine Extension Interfaces (26)** — engine-level extensibility:
+**Engine Extension Interfaces** — engine-level extensibility:
 
 | Extension Point | Purpose |
 |-----|---------|
@@ -45,20 +41,100 @@ The execution engine is Hecate's heart — a self-built Pregel runtime with zero
 | `TaskAllocator` | Task-to-agent assignment (dynamic orchestration) |
 | `ApprovalCallback` | Human-in-the-loop tool approval |
 
-**Plugin SPI Types (8)** — pluggable extension interfaces:
+**Plugin SPI Types** — pluggable extension interfaces implemented as Python base classes (the `Base` suffix follows the `AgentScope` convention; the `abc.ABC` mechanism enforces the contract):
 
-| Type | ABC | Purpose |
+| Type | Base class | Purpose |
 |-----|-----|---------|
-| `Tool` | `ToolPluginABC` | Callable tools agents can invoke |
-| `Extension` | `ExtensionPluginABC` | Runtime interceptors auto-wired into guardrail hooks |
-| `Trigger` | `TriggerPluginABC` | Event-driven invocation (webhook / schedule / MQ) |
-| `Model` | `ModelPluginABC` | Custom LLM providers |
-| `Channel` | `ChannelABC` | External communication channels (incl. notification adapters) |
-| `Evaluator` | `EvaluatorABC` | Evaluation metrics (40+ built-in) |
-| `AuthProvider` | `AuthProviderABC` | Authentication methods (JWT/APIKey built-in) |
-| `SecretProvider` | `SecretProviderABC` | Secret storage backends |
+| `Tool` | `ToolPluginBase` | Callable tools agents can invoke |
+| `Extension` | `ExtensionPluginBase` | Runtime interceptors auto-wired into guardrail hooks |
+| `Trigger` | `TriggerPluginBase` | Event-driven invocation (webhook / schedule / MQ) |
+| `Model` | `ModelPluginBase` | Custom LLM providers |
+| `Channel` | `ChannelBase` | External communication channels (incl. notification adapters) |
+| `Evaluator` | `EvaluatorBase` | Built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment |
+| `AuthProvider` | `AuthProviderBase` | Authentication methods (JWT/APIKey built-in) |
+| `SecretProvider` | `SecretProviderBase` | Secret storage backends |
 
 All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginManifest + PluginLifecycle) for registration and lifecycle management. See the [Extension Points reference](../reference/extension-points.md) for the full inventory with abstract methods and default implementations.
+
+---
+
+## Module Architecture
+
+Each module below corresponds to a block in the [L1 architecture diagram](images/hecate_architecture_l1.png). Detailed L2 architecture diagrams, component breakdowns, and API definitions are in the respective design documents linked below.
+
+### Access Channel
+
+The entry point for all external requests, exposes four API surfaces: 
+  - OpenAI-compatible interface at `/v1/` , for seamless integration with existing tools. 
+  - Management API at `/api/`,  for Agent/Workflow/Session/Knowledge Base CRUD.     
+  - MCP Server endpoint at `/mcp`, for Streamable HTTP transport per the **MCP 2026-07-28 specification** (stateless core; shipped 2026-08-22 in change `mcp-streamable-http`). 
+  - A2A endpoint at `/.well-known/agent.json`, for Agent Card discovery + task lifecycle for cross-framework agent communication.
+
+Beyond the HTTP APIs, external entry points include the embeddable web widget at `/embed/chat`, IM inbound webhooks (Feishu, Slack), and the `hecate` CLI. All entry points handle authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, multi-channel adaptation, and inbound IM routing.
+
+All requests are uniformly wrapped as `ExecutionRequest` objects containing the agent ID, messages, execution configuration, and request context (user info, session ID, permissions). This object flows down to the Agent Engine.
+
+> See [Access Channel Design](access-channel-design.md) for L2 architecture, API surfaces, and implementation details.
+
+### Agent Studio
+
+Visual development environment for building and configuring agents. Features a React Flow-based drag-and-drop canvas, agent configurator, prompt management with analytics, workflow builder with multi-agent collaboration patterns, reusable templates, and developer tools (CLI). All multi-agent patterns are expressed as Graph topologies, not hardcoded paths — any pattern can be visualized and edited in the canvas.
+
+Human-in-the-Loop is handled via `interrupt()` (pause execution, return control to user) and `Command` (resume with user input, or redirect execution flow). NL2Agent and code generation are planned.
+
+> See [Agent Studio Design](agent-studio-design.md) for a deep dive.
+
+### Agent Engine
+
+The core differentiator — a self-built Pregel runtime with zero external framework dependencies. Compiles Graph DSL definitions into `CompiledGraph` objects, manages state through a four-type Channel system, persists execution as an **event-sourced log** with checkpoints demoted to materialized caches, and dispatches node execution to a pluggable Worker Pool. 
+
+**Execution Replay** — A first-class debugging primitive built on top of Log-as-Truth. The append-only event log lets any past session be reconstructed for inspection: trace-partitioned timelines, DAG step-through, and fold-to-version time-travel state inspection (`GET /sessions/{id}/replay` and `GET /sessions/{id}/replay/state`). 
+
+The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → append events to the log with `STEP_END` commit → evaluate conditional edges → repeat until no nodes remain. Workers receive read-only Channel snapshots and return results — they never directly modify Channels. 
+
+> See [Engine Design](engine-design.md) for a deep dive.
+
+### Ops Center
+
+Unified administrative control plane consolidating observability, alerting, evaluation, deployment management, cost governance, and compliance into a single operator interface. Provides distributed tracing (Trace→Span→Generation hierarchy via OpenTelemetry), structured logging, metrics collection with TimescaleDB store, and audit logging. The evaluation engine includes a catalogue of built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment, with dataset management and regression testing support. See [ADR-028](adr/028-observability-evaluation-enhancement.md) for the enhancement roadmap.
+
+> See [Ops Center Design](ops-center-design.md) for L2 architecture, component breakdown, and API definitions.
+
+### Model Hub
+
+LLM integration layer powered by LiteLLM, supporting 100+ providers. Provides intelligent routing (4 strategies), circuit breaker pattern for fault tolerance, A/B testing and gray release for model comparison, unified tool calling across providers, and provider configuration management.
+
+> See [Model Hub Design](model-hub-design.md) for L2 architecture, model catalog, lifecycle management, and governance.
+
+### Tool Platform
+
+MCP-first tool ecosystem with bidirectional support (**MCP 2026-07-28 spec**, stateless core, shipped 2026-08-22 in change `mcp-streamable-http`): MCP Client consumes external tools, MCP Server exposes Hecate as a tool provider. Includes a tool registry, **Docker-isolated execution sandbox** for code execution, **sandboxed headless Chromium browser automation** with per-environment domain allow-lists (fail-closed) and built-in tools covering file/code operations and browser interaction, agent tool system, search tools, and granular tool security policies. See [Tool Platform Design](tool-platform-design.md) and `docs/how-to/browser-automation.md`.
+
+> See [Tool Platform Design](tool-platform-design.md) for L2 architecture, plugin ecosystem, and tool operations.
+
+### Knowledge & Memory
+
+RAG pipeline and multi-level memory system. The RAG pipeline covers document ingestion, chunking, BGE-M3 embedding (dense + sparse), vector storage, and hybrid search. The memory system provides four levels: L1 working memory (named blocks in context window), L2 conversation memory (auto-compression pipeline), L3 user memory (cross-session persistent facts), and L4 knowledge memory (RAG-backed).
+
+> See [Knowledge & Memory Design](knowledge-memory-design.md) for L2 architecture, RAG pipeline, knowledge graph, and memory system.
+
+### Enterprise Foundation
+
+Infrastructure layer providing multi-tenancy (Organization → Workspace → User with data-level isolation via `workspace_id` foreign keys on all tenant-scoped data models), async SQLAlchemy 2.0 database access with Alembic migrations (PostgreSQL, MySQL, SQLite), Pydantic Settings v2, secret management, rate limiting, async task scheduling, Docker Compose deployment, and health checks.
+
+> See [Enterprise Foundation Design](enterprise-foundation-design.md) for L2 architecture, multi-tenancy, security, and deployment infrastructure.
+
+### Security
+
+Cross-cutting security shield spanning all platform layers. Engine-level guardrail hooks (Pre/Post LLM/Tool) provide interception at the four critical points in the execution loop. PII anonymization with encryption protects sensitive data in prompts and responses. LLM Guard scans inputs and outputs for harmful content. RBAC enforces role-based access at the workspace level. A structured audit trail records all security-relevant events.
+
+> See [Security Architecture](security-architecture.md) for L2 architecture, guardrail hooks, and security controls.
+
+### Ecosystem
+
+Integration and extensibility layer. Native MCP support (Client + Server with Streamable HTTP transport, **MCP 2026-07-28 spec · stateless core**, shipped 2026-08-22), webhook notifications, event dispatcher, and OpenAI-compatible API ensure broad interoperability. A2A Protocol enables cross-framework agent communication — Hecate agents can be discovered and invoked by external platforms, and external agents can be used as sub-agents in Hecate workflows.
+
+> See [Ecosystem Design](ecosystem-design.md) for L2 architecture, marketplace, and protocol integrations.
 
 ---
 
@@ -66,9 +142,7 @@ All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginMan
 
 ### Open Over Closed
 
-Hecate supports 100+ LLM providers via LiteLLM, adopts MCP (Model Context Protocol) and A2A (Agent-to-Agent) as first-class integration protocols, and maintains API compatibility with OpenAI's format. No vendor lock-in is the core brand promise.
-
-**Protocol Stack (2026)**: MCP handles agent-to-tool connections (vertical integration, 97M monthly SDK downloads). A2A handles agent-to-agent coordination (horizontal integration, 150+ organizations, Linux Foundation v1.0). Together they form the production baseline for enterprise agent deployments.
+Hecate supports 100+ LLM providers via LiteLLM, adopts MCP  and A2A as first-class integration protocols, and maintains API compatibility with OpenAI's format. No vendor lock-in is the core brand promise.
 
 ### Composable Over Monolithic
 
@@ -76,7 +150,7 @@ All external capabilities are integrated via MCP, not hardcoded. The execution e
 
 ### Observable Over Black Box
 
-Every request is traced from gateway through execution to response, with a complete Trace→Span→Generation hierarchy. The execution event log (Log-as-Truth) enables "time-travel" debugging — every `STEP_END` commit point is inspectable. Cost and token usage are tracked per user, agent, and session.
+Every request is traced from gateway through execution to response, with a complete Trace→Span→Generation hierarchy. The execution event log enables "time-travel" debugging — every `STEP_END` commit point is inspectable. Cost and token usage are tracked per user, agent, and session.
 
 ### Security Built-in, Not Bolted-on
 
@@ -96,74 +170,6 @@ Each level is backward compatible.
 ### Developer Experience First
 
 Canvas and SDK are two interfaces to the same system, not separate products. Agent configurations and workflow modifications take effect in real-time. The underlying execution engine is identical regardless of interface.
-
----
-
-## Module Architecture
-
-Each module below corresponds to a block in the [L1 architecture diagram](images/hecate_l1_architecture.png). Detailed L2 architecture diagrams, component breakdowns, and API definitions are in the respective design documents linked below.
-
-### Access Channel
-
-The entry point for all external requests. Exposes four API surfaces: an OpenAI-compatible interface at `/v1/` (for seamless integration with existing tools), a management API at `/api/` (for Agent/Workflow/Session/Knowledge Base CRUD), an MCP Server endpoint at `/mcp` (Streamable HTTP transport for standard load balancer compatibility), and an A2A endpoint at `/.well-known/agent.json` (Agent Card discovery + task lifecycle for cross-framework agent communication). Handles authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, and multi-channel adaptation.
-
-> See [Access Channel Design](access-channel-design.md) for L2 architecture, API surfaces, and implementation details.
-
-All requests are uniformly wrapped as `ExecutionRequest` objects containing the agent ID, messages, execution configuration, and request context (user info, session ID, permissions). This object flows down to the Agent Engine.
-
-### Agent Studio
-
-Visual development environment for building and configuring agents. Features a React Flow-based drag-and-drop canvas, agent configurator, prompt management with analytics, workflow builder with six multi-agent collaboration patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate), reusable templates, and developer tools (CLI). All multi-agent patterns are expressed as Graph topologies, not hardcoded paths — any pattern can be visualized and edited in the canvas. A seventh pattern, Dynamic Orchestration, is emitted at runtime as a TaskDAG by a COORDINATOR node (ADR-032).
-
-Human-in-the-Loop is handled via `interrupt()` (pause execution, return control to user) and `Command` (resume with user input, or redirect execution flow). NL2Agent and code generation are planned.
-
-### Agent Engine
-
-The core differentiator — a self-built Pregel runtime with zero external framework dependencies (sole external dependency is `jsonschema` for DSL validation). Compiles Graph DSL definitions (JSON) into `CompiledGraph` objects, manages state through a four-type Channel system, persists execution as an **event-sourced log** (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md)) with checkpoints demoted to materialized caches, and dispatches node execution to a pluggable Worker Pool. Context Engineering provides a six-component pipeline (assembler, evidence tracker, phase detection, token budget governance, provider shaping, message prioritization).
-
-The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → append events to the log with `STEP_END` commit → evaluate conditional edges → repeat until no nodes remain. Workers receive read-only Channel snapshots and return results — they never directly modify Channels. See [Engine Design](engine-design.md) for a deep dive.
-
-### Ops Center
-
-Unified administrative control plane consolidating observability, alerting, evaluation, deployment management, cost governance, and compliance into a single operator interface. Provides distributed tracing (Trace→Span→Generation hierarchy via OpenTelemetry), structured logging, metrics collection with TimescaleDB store, and audit logging. The evaluation engine includes 41 built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment, with dataset management and regression testing support.
-
-> See [Ops Center Design](ops-center-design.md) for L2 architecture, component breakdown, and API definitions.
-
-### Model Hub
-
-LLM integration layer powered by LiteLLM, supporting 100+ providers. Provides intelligent routing (4 strategies), circuit breaker pattern for fault tolerance, A/B testing and gray release for model comparison, unified tool calling across providers, and provider configuration management.
-
-> See [Model Hub Design](model-hub-design.md) for L2 architecture, model catalog, lifecycle management, and governance.
-
-### Tool Platform
-
-MCP-first tool ecosystem with bidirectional support: MCP Client consumes external tools, MCP Server exposes Hecate as a tool provider. Includes a tool registry, Docker-based execution sandbox, built-in tools, agent tool system, search tools, and granular tool security policies.
-
-> See [Tool Platform Design](tool-platform-design.md) for L2 architecture, plugin ecosystem, and tool operations.
-
-### Knowledge & Memory
-
-RAG pipeline and multi-level memory system. The RAG pipeline covers document ingestion (Docling parser, web crawler), chunking, BGE-M3 embedding (dense + sparse), vector storage (Qdrant or Chroma), and hybrid search. The memory system provides four levels: L1 working memory (named blocks in context window), L2 conversation memory (auto-compression pipeline), L3 user memory (cross-session persistent facts), and L4 knowledge memory (RAG-backed).
-
-> See [Knowledge & Memory Design](knowledge-memory-design.md) for L2 architecture, RAG pipeline, knowledge graph, and memory system.
-
-### Enterprise Foundation
-
-Infrastructure layer providing multi-tenancy (Organization → Workspace → User with data-level isolation via `workspace_id` on 38 data models), async SQLAlchemy 2.0 database access with Alembic migrations (PostgreSQL, MySQL, SQLite), Pydantic-based configuration, secret management, rate limiting, async task scheduling, Docker Compose deployment, and health checks.
-
-> See [Enterprise Foundation Design](enterprise-foundation-design.md) for L2 architecture, multi-tenancy, security, and deployment infrastructure.
-
-### Security
-
-Cross-cutting security shield spanning all platform layers. Engine-level guardrail hooks (Pre/Post LLM/Tool) provide interception at the four critical points in the execution loop. PII anonymization with encryption protects sensitive data in prompts and responses. LLM Guard scans inputs and outputs for harmful content. RBAC enforces role-based access at the workspace level. A structured audit trail records all security-relevant events.
-
-> See [Security Architecture](security-architecture.md) for L2 architecture, guardrail hooks, and security controls.
-
-### Ecosystem
-
-Integration and extensibility layer. Native MCP support (Client + Server with Streamable HTTP transport), webhook notifications, event dispatcher, and OpenAI-compatible API ensure broad interoperability. A2A Protocol (v1.0 GA) enables cross-framework agent communication — Hecate agents can be discovered and invoked by external platforms, and external agents can be used as sub-agents in Hecate workflows.
-
-> See [Ecosystem Design](ecosystem-design.md) for L2 architecture, marketplace, and protocol integrations.
 
 ---
 
@@ -243,48 +249,43 @@ Hecate models tenancy as a three-level hierarchy:
 - **Workspace** — Isolated environment within an organization. Agents, workflows, knowledge bases, and tools belong to a workspace.
 - **User** — Authenticated actor within an organization, with role-based access (admin/editor/viewer).
 
-Tenant isolation is enforced via `workspace_id` foreign keys on 38 data models. This provides data-level isolation without requiring separate database instances per tenant.
-
----
-
-## Deployment
-
-Hecate runs as a single service in development (via Docker Compose) and can scale horizontally in production. The canonical Docker Compose setup includes:
-
-```
-┌─────────────────────────────────┐
-│         Hecate Service           │
-│  (FastAPI + Uvicorn)            │
-└──────┬──────┬──────┬────────────┘
-       │      │      │
-       ▼      ▼      ▼
-┌──────────┐ ┌──────────┐ ┌──────────┐
-│PostgreSQL│ │ Qdrant   │ │  MinIO   │
-│  (16)    │ │(vectors) │ │(objects) │
-└──────────┘ └──────────┘ └──────────┘
-```
-
-For production deployments, each infrastructure component can be replaced with managed equivalents (e.g., Amazon RDS, Qdrant Cloud, S3).
+Tenant isolation is enforced via `workspace_id` foreign keys on all tenant-scoped data models. This provides data-level isolation without requiring separate database instances per tenant.
 
 ---
 
 ## Further Reading
 
-| Document | Description |
-|----------|-------------|
-| [Engine Design](engine-design.md) | Pregel runtime, compiler pipeline, channel system, event-sourced execution state + checkpoint caches, streaming modes |
-| [Agent Studio Design](agent-studio-design.md) | Visual canvas, agent configurator, multi-agent orchestration, NL2X, visual node types, testing tools |
-| [Access Channel Design](access-channel-design.md) | API surfaces, authentication, gateway control plane, multi-channel, zero trust identity |
-| [RAG Pipeline Design](rag-pipeline-design.md) | Document ingestion, chunking, BGE-M3 embedding, hybrid search, RRF fusion, citation system |
-| [Security Architecture](security-architecture.md) | Guardrail hooks, PII anonymization, LLM Guard, JWT/API Key auth, audit trail with policy engine |
-| [Knowledge & Memory Design](knowledge-memory-design.md) | RAG pipeline, knowledge graph, ontology system, temporal memory, lazy GraphRAG, sleep-time consolidation, DRIFT search, schema-aware traversal, work context graph |
-| [Ops Center Design](ops-center-design.md) | Unified ops console, observability, agent health, testing center, budget governance, environment management, compliance |
-| [Model Hub Design](model-hub-design.md) | LLM integration, model catalog, lifecycle management, governance, monitoring, deployment, fine-tuning, cost management |
-| [Tool Platform Design](tool-platform-design.md) | MCP integration, plugin ecosystem, tool operations, security, observability, AI-native tools |
-| [Enterprise Foundation Design](enterprise-foundation-design.md) | Outbound DLP, vault integration, data lineage, multi-region sovereignty, zero retention, confidential computing |
-| [Ecosystem Design](ecosystem-design.md) | ARD discovery, partner monetization, semantic marketplace, community gallery, cross-surface experience, governed catalog |
-| [Core Concepts](concepts.md) | Entity definitions, relationships, data model, storage design |
-| [ADR Directory](adr/) | Architecture Decision Records (32 decisions with context and rationale) |
-| [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition (10 node types, 4 channel types) |
-| [OpenSpec Specs](../../openspec/specs/) | Feature-level specifications with requirements and scenarios |
-| [OpenSpec Archive](../../openspec/changes/archive/) | Completed change proposals with design docs and task tracking |
+### Module Design Documents
+
+Ordered to match the [Module Architecture](#module-architecture) walkthrough above.
+
+- [Access Channel Design](access-channel-design.md) — API surfaces, authentication, gateway control plane, multi-channel adaptation, zero-trust identity
+- [Agent Studio Design](agent-studio-design.md) — Visual canvas, agent configurator, workflow builder, multi-agent collaboration patterns, human-in-the-loop
+- [Engine Design](engine-design.md) — Pregel runtime, compiler pipeline, channel system, event-sourced execution state + checkpoint caches, Execution Replay
+- [Ops Center Design](ops-center-design.md) — Unified ops console, observability, evaluation engine, budget governance, audit logging
+- [Model Hub Design](model-hub-design.md) — LLM integration via LiteLLM (100+ providers), intelligent routing, circuit breaker, A/B testing, gray release
+- [Tool Platform Design](tool-platform-design.md) — MCP Client + Server, plugin ecosystem, sandboxed execution, browser automation, tool security policies
+- [Knowledge & Memory Design](knowledge-memory-design.md) — RAG pipeline, hybrid search, knowledge graph, four-level memory system
+- [Enterprise Foundation Design](enterprise-foundation-design.md) — Multi-tenancy, database access and migrations, configuration, secret management, rate limiting, task scheduling
+- [Security Architecture](security-architecture.md) — Guardrail hooks, PII anonymization, LLM Guard, RBAC, structured audit trail
+- [Ecosystem Design](ecosystem-design.md) — Native MCP (Client + Server), webhooks, event dispatcher, A2A protocol, marketplace design
+
+### Deep Dives
+
+Sub-domain deep-dives beyond the module-level documents.
+
+- [RAG Pipeline Design](rag-pipeline-design.md) — Document ingestion, chunking, BGE-M3 embedding, hybrid search, RRF fusion, citation system
+- [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) — JSON Schema for graph definition (10 node types, 4 channel types)
+
+### Cross-Cutting References
+
+- [Core Concepts](concepts.md) — Entity definitions, relationships, data model, storage design
+
+### Architecture Decision Records
+
+- [ADR Directory](adr/) — 32 decisions with context and rationale; topic-grouped index at `adr/INDEX.md`
+
+### Project Process
+
+- [OpenSpec Specs](../../openspec/specs/) — Feature-level specifications with requirements and scenarios
+- [OpenSpec Archive](../../openspec/changes/archive/) — Completed change proposals with design docs and task tracking

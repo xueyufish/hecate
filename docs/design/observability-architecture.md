@@ -1,5 +1,16 @@
 # Observability Architecture
 
+> **P3 close-out note (2026-08-22)**: The Ops Center console shipped its first wave on 2026-08-22. Specifically:
+> - **8.9 Unified Dashboard** ✅ Shipped P3 (per [feature-catalog.md](../../features/feature-catalog.md) § Ops Center)
+> - **8.9a Health Monitoring** ✅ Shipped P3
+> - **8.9b Conversation Analytics** ✅ Shipped P3
+> - **8.9c Tool Execution Analytics** ✅ Shipped P3 (this P3 close-out item was not in some prior roadmap drafts; confirm against catalog line 477)
+> - **8.20 Execution Replay** ✅ Phase 1 Shipped P3 ([ADR-030](adr/030-event-sourced-execution-state.md) Log-as-Truth substrate)
+>
+> All Wave-1 items above are documented inline below. **Defer to P4**: 7.2b-e / 7.3 / 7.4 / 7.4a / 7.5 Evaluation Suite (full), 8.10 CI/CD Eval Gating, 8.12 Agent Catalog Governance.
+
+---
+
 Deep-dive design document for Hecate's observability stack: traces, metrics, logs, and audit. For the operational recipe, see [Configure OpenTelemetry and Prometheus](../how-to/monitor-opentelemetry.md). For the broader Ops Center context, see [Ops Center Design](ops-center-design.md).
 
 This document is for **operators** and **SREs** deploying Hecate in production — what to monitor, how to integrate with your stack, and what the four signals (trace / metric / log / audit) actually mean in Hecate.

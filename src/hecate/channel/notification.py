@@ -14,14 +14,14 @@ from typing import Any
 
 import httpx
 
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.types import CanonicalMessage
 
 logger = logging.getLogger(__name__)
 
 
-class NotificationChannelAdapter(ChannelABC):
+class NotificationChannelAdapter(ChannelBase):
     """Base class for outbound notification channel adapters.
 
     Subclasses implement :pymeth:`respond` with platform-specific

@@ -1,4 +1,4 @@
-"""Tests for EvaluatorABC and BuiltinEvaluator."""
+"""Tests for EvaluatorBase and BuiltinEvaluator."""
 
 from __future__ import annotations
 
@@ -6,23 +6,23 @@ import pytest
 
 from hecate.plugin.manifest import PluginManifest
 from hecate.plugin.registry import PluginRegistry
-from hecate.plugin.spi.evaluator import EvaluatorABC
+from hecate.plugin.spi.evaluator import EvaluatorBase
 from hecate.services.evaluation.evaluator import BuiltinEvaluator, Evaluator
 from hecate.services.evaluation.types import EvalInput, EvalOutput
 
 
-class TestEvaluatorABC:
-    """Tests for EvaluatorABC abstract interface."""
+class TestEvaluatorBase:
+    """Tests for EvaluatorBase abstract interface."""
 
     def test_cannot_instantiate_directly(self) -> None:
-        """EvaluatorABC cannot be instantiated directly."""
+        """EvaluatorBase cannot be instantiated directly."""
         with pytest.raises(TypeError):
-            EvaluatorABC()  # type: ignore[abstract]
+            EvaluatorBase()  # type: ignore[abstract]
 
     def test_subclass_must_implement_name(self) -> None:
         """Subclass without name property cannot be instantiated."""
 
-        class IncompleteEvaluator(EvaluatorABC):
+        class IncompleteEvaluator(EvaluatorBase):
             @property
             def description(self) -> str:
                 return "test"
@@ -36,7 +36,7 @@ class TestEvaluatorABC:
     def test_subclass_must_implement_description(self) -> None:
         """Subclass without description property cannot be instantiated."""
 
-        class IncompleteEvaluator(EvaluatorABC):
+        class IncompleteEvaluator(EvaluatorBase):
             @property
             def name(self) -> str:
                 return "test"
@@ -50,7 +50,7 @@ class TestEvaluatorABC:
     def test_subclass_must_implement_evaluate(self) -> None:
         """Subclass without evaluate method cannot be instantiated."""
 
-        class IncompleteEvaluator(EvaluatorABC):
+        class IncompleteEvaluator(EvaluatorBase):
             @property
             def name(self) -> str:
                 return "test"
@@ -65,7 +65,7 @@ class TestEvaluatorABC:
     def test_complete_subclass_can_be_instantiated(self) -> None:
         """Complete subclass with all abstract members can be instantiated."""
 
-        class CompleteEvaluator(EvaluatorABC):
+        class CompleteEvaluator(EvaluatorBase):
             @property
             def name(self) -> str:
                 return "test"
@@ -90,8 +90,8 @@ class TestBuiltinEvaluator:
         assert Evaluator is BuiltinEvaluator
 
     def test_builtin_evaluator_inherits_from_evaluator_abc(self) -> None:
-        """BuiltinEvaluator inherits from EvaluatorABC."""
-        assert issubclass(BuiltinEvaluator, EvaluatorABC)
+        """BuiltinEvaluator inherits from EvaluatorBase."""
+        assert issubclass(BuiltinEvaluator, EvaluatorBase)
 
     def test_builtin_evaluator_accepts_llm_config(self) -> None:
         """BuiltinEvaluator accepts optional llm_config parameter."""
@@ -118,7 +118,7 @@ class TestEvaluatorRegistration:
     def test_register_evaluator(self) -> None:
         """Evaluator can be registered with PluginRegistry."""
 
-        class TestEvaluator(EvaluatorABC):
+        class TestEvaluator(EvaluatorBase):
             @property
             def name(self) -> str:
                 return "test_metric"
@@ -147,8 +147,8 @@ class TestEvaluatorRegistration:
         """Multiple evaluators can be listed by type."""
         registry = PluginRegistry()
 
-        def _make_evaluator(eval_name: str) -> type[EvaluatorABC]:
-            class TestEval(EvaluatorABC):
+        def _make_evaluator(eval_name: str) -> type[EvaluatorBase]:
+            class TestEval(EvaluatorBase):
                 @property
                 def name(self) -> str:
                     return eval_name

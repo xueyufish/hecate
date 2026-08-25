@@ -5,13 +5,13 @@ from __future__ import annotations
 import pytest
 
 from hecate.auth.oidc_provider import OIDCAuthProvider
-from hecate.auth.provider import AuthProviderABC
+from hecate.auth.provider import AuthProviderBase
 
 
 class TestOIDCAuthProvider:
     def test_cannot_instantiate_abstract(self) -> None:
         with pytest.raises(TypeError):
-            AuthProviderABC()  # type: ignore[abstract]
+            AuthProviderBase()  # type: ignore[abstract]
 
     def test_name(self) -> None:
         provider = OIDCAuthProvider(

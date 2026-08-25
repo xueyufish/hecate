@@ -1,4 +1,4 @@
-"""ToolPluginABC — abstract base class for tool-type plugins."""
+"""ToolPluginBase — abstract base class for tool-type plugins."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
-class ToolPluginABC(ABC):
+class ToolPluginBase(ABC):
     """Base class for plugins that add callable tools to Agents.
 
     Subclasses must define name, description, and an async execute method.

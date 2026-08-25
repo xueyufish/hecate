@@ -1,11 +1,11 @@
-"""TriggerPluginABC — base class for trigger-type plugins (event-driven invocation)."""
+"""TriggerPluginBase — base class for trigger-type plugins (event-driven invocation)."""
 
 from __future__ import annotations
 
 from typing import Any
 
 
-class TriggerPluginABC:
+class TriggerPluginBase:
     """Base class for plugins that respond to external events.
 
     Set ``trigger_type`` to one of: ``webhook``, ``schedule``, ``event``.

@@ -1,4 +1,4 @@
-"""EvaluatorABC — abstract interface for evaluation plugins.
+"""EvaluatorBase — abstract interface for evaluation plugins.
 
 All evaluators — built-in or third-party — must implement this interface
 to be registered with the PluginRegistry under type="evaluator".
@@ -11,7 +11,7 @@ from abc import ABC, abstractmethod
 from hecate.services.evaluation.types import EvalInput, EvalOutput
 
 
-class EvaluatorABC(ABC):
+class EvaluatorBase(ABC):
     """Abstract base class for evaluation plugins.
 
     Subclasses must define:
@@ -22,7 +22,7 @@ class EvaluatorABC(ABC):
 
     Example::
 
-        class MyEvaluator(EvaluatorABC):
+        class MyEvaluator(EvaluatorBase):
             @property
             def name(self) -> str:
                 return "my_metric"

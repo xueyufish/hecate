@@ -372,21 +372,21 @@ Hecate's Plugin System (5.5) originally described "provider/hook/extension" — 
 
 | Type | Purpose | ABC | Trigger |
 |------|---------|-----|---------|
-| **Tool** | Callable function exposed to agents | `ToolPluginABC` | LLM function call |
-| **Extension** | Hook/middleware injection | `ExtensionPluginABC` | Lifecycle event |
-| **Trigger** | Event-driven workflow invocation | `TriggerPluginABC` | Webhook/schedule/event |
-| **Model** | Custom LLM provider | `ModelPluginABC` | LLM invocation |
-| **Channel** | External communication channel (incl. notification adapters) | `ChannelABC` | Outbound message / inbound event |
-| **Evaluator** | Evaluation metrics (40+ built-in) | `EvaluatorABC` | Evaluation run |
-| **AuthProvider** | Authentication methods | `AuthProviderABC` | Authentication |
-| **SecretProvider** | Secret storage backend | `SecretProviderABC` | Secret resolution |
+| **Tool** | Callable function exposed to agents | `ToolPluginBase` | LLM function call |
+| **Extension** | Hook/middleware injection | `ExtensionPluginBase` | Lifecycle event |
+| **Trigger** | Event-driven workflow invocation | `TriggerPluginBase` | Webhook/schedule/event |
+| **Model** | Custom LLM provider | `ModelPluginBase` | LLM invocation |
+| **Channel** | External communication channel (incl. notification adapters) | `ChannelBase` | Outbound message / inbound event |
+| **Evaluator** | Evaluation metrics (40+ built-in) | `EvaluatorBase` | Evaluation run |
+| **AuthProvider** | Authentication methods | `AuthProviderBase` | Authentication |
+| **SecretProvider** | Secret storage backend | `SecretProviderBase` | Secret resolution |
 
 ### Plugin SDK Example
 
 ```python
-from hecate.plugin.sdk import ToolPluginABC
+from hecate.plugin.sdk import ToolPluginBase
 
-class WeatherTool(ToolPluginABC):
+class WeatherTool(ToolPluginBase):
     """Fetch weather data from OpenWeatherMap API."""
 
     @property
@@ -411,7 +411,7 @@ Created plugin at: my-weather
 
 $ tree my-weather
 my-weather/
-  ├── __init__.py        # WeatherTool(ToolPluginABC) scaffold
+  ├── __init__.py        # WeatherTool(ToolPluginBase) scaffold
   ├── plugin.yaml        # name/version/type/api_version/min_platform_version/entry
   └── test_my_weather.py # instantiable smoke test
 ```

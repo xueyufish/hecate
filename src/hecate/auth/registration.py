@@ -6,7 +6,7 @@ import logging
 
 from hecate.auth.api_key_provider import APIKeyAuthProvider
 from hecate.auth.jwt_provider import JWTAuthProvider
-from hecate.auth.provider import AuthProviderABC
+from hecate.auth.provider import AuthProviderBase
 from hecate.core.config import settings
 from hecate.plugin.manifest import PluginManifest
 from hecate.plugin.registry import PluginRegistry
@@ -23,7 +23,7 @@ def register_auth_providers(registry: PluginRegistry) -> int:
     Returns:
         Number of providers registered.
     """
-    provider_instances: list[AuthProviderABC] = [
+    provider_instances: list[AuthProviderBase] = [
         JWTAuthProvider(),
         APIKeyAuthProvider(),
     ]

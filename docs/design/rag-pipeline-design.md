@@ -184,7 +184,7 @@ The RAG pipeline will evolve beyond single-shot vector retrieval to support stru
 
 A **Knowledge Graph** with `GraphStore` ABC (Neo4j + in-memory backends) will complement vector-based retrieval. LLM-powered entity/relation extraction populates typed entities and relationships. Community detection (Leiden) clusters related entities, enabling **GraphRAG** — community-level retrieval that provides broader context for "big picture" questions. See [ADR-017](adr/017-knowledge-graph-architecture.md).
 
-**GraphRAG Query Engine (3.5.4)** will support four search modes:
+**GraphRAG Query Engine (3.5.4 · P4)** will support four search modes:
 
 | Mode | Strategy | Use Case |
 |------|----------|----------|
@@ -195,7 +195,7 @@ A **Knowledge Graph** with `GraphStore` ABC (Neo4j + in-memory backends) will co
 
 DRIFT search (KM4) extracts topic entities from the query, fans out to entity neighbors (like Local Search), and at each hop checks if neighbors belong to a community — including community summaries when available. Community-aware pruning prevents uncontrolled expansion in dense graphs.
 
-### Lazy GraphRAG (3.5.14)
+### Lazy GraphRAG (3.5.14 · P4)
 
 Full GraphRAG requires upfront entity extraction, relationship inference, community detection, and community summary generation for the entire corpus. For large enterprise deployments (>100K pages), this is cost-prohibitive.
 
@@ -218,7 +218,7 @@ Stage 2 (Progressive — background):
 
 Cost is proportional to usage. Cold corpora stay cheap; hot subgraphs converge to full GraphRAG quality. Enrichment is idempotent and incremental.
 
-### Schema-Aware Graph Traversal (3.5.10 Enhancement)
+### Schema-Aware Graph Traversal (3.5.10 Enhancement · P4)
 
 Standard GraphRAG traversal uses semantic similarity to guide search. In dense enterprise KGs, high-degree attribute nodes ("semantic supernodes" like `Status: Active` connected to 10,000 entities) cause uncontrolled search expansion.
 

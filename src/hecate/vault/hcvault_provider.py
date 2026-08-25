@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import logging
 
-from hecate.vault.provider import SecretProviderABC
+from hecate.vault.provider import SecretProviderBase
 
 logger = logging.getLogger(__name__)
 
 
-class HashiCorpVaultProvider(SecretProviderABC):
+class HashiCorpVaultProvider(SecretProviderBase):
     """Secret provider backed by HashiCorp Vault.
 
     Supports KV v2 secret reads and database engine dynamic credentials.

@@ -7,14 +7,14 @@ must implement.
 
 from __future__ import annotations
 
-from hecate.auth.provider import AuthProviderABC
-from hecate.channel.adapter import ChannelABC
-from hecate.plugin.spi.evaluator import EvaluatorABC
-from hecate.vault.provider import SecretProviderABC
+from hecate.auth.provider import AuthProviderBase
+from hecate.channel.adapter import ChannelBase
+from hecate.plugin.spi.evaluator import EvaluatorBase
+from hecate.vault.provider import SecretProviderBase
 
 __all__ = [
-    "AuthProviderABC",
-    "ChannelABC",
-    "EvaluatorABC",
-    "SecretProviderABC",
+    "AuthProviderBase",
+    "ChannelBase",
+    "EvaluatorBase",
+    "SecretProviderBase",
 ]

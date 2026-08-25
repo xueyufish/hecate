@@ -23,7 +23,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 
-from hecate.channel.adapter import ChannelABC
+from hecate.channel.adapter import ChannelBase
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.types import Attachment, CanonicalMessage, MessageContent
 
@@ -47,8 +47,8 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-class FeishuChannel(ChannelABC):
-    """Feishu (Lark) IM adapter implementing :class:`ChannelABC`.
+class FeishuChannel(ChannelBase):
+    """Feishu (Lark) IM adapter implementing :class:`ChannelBase`.
 
     The adapter wraps ``lark_oapi.channel.FeishuChannel`` and adds:
 

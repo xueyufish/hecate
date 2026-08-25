@@ -128,10 +128,10 @@ Maintains a sliding window (default: 100 requests, 5 minutes) of outbound payloa
 
 Hecate uses Fernet symmetric encryption for secrets — adequate for development but insufficient for enterprise. HashiCorp Vault now has native AI agent support (Agent Registry, OAuth resource server, dynamic secrets). Enterprise deployments require vault integration for audit compliance, dynamic credential rotation, and least-privilege access.
 
-### SecretProviderABC
+### SecretProviderBase
 
 ```python
-class SecretProviderABC(ABC):
+class SecretProviderBase(ABC):
     """Abstract base for secret management backends."""
 
     @abstractmethod

@@ -7,22 +7,22 @@ from typing import Any
 import pytest
 
 from hecate.plugin.types import PLUGIN_TYPE_REGISTRY
-from hecate.plugin.types.extension import ExtensionPluginABC
-from hecate.plugin.types.model import ModelPluginABC
-from hecate.plugin.types.tool import ToolPluginABC
-from hecate.plugin.types.trigger import TriggerPluginABC
+from hecate.plugin.types.extension import ExtensionPluginBase
+from hecate.plugin.types.model import ModelPluginBase
+from hecate.plugin.types.tool import ToolPluginBase
+from hecate.plugin.types.trigger import TriggerPluginBase
 from hecate.plugin.validation import validate_api_surface
 
-# ── 8.1 ToolPluginABC ──────────────────────────────────────────────────
+# ── 8.1 ToolPluginBase ──────────────────────────────────────────────────
 
 
-class TestToolPluginABC:
+class TestToolPluginBase:
     def test_abstract_methods_enforced(self):
         with pytest.raises(TypeError):
-            ToolPluginABC()  # type: ignore[abstract]
+            ToolPluginBase()  # type: ignore[abstract]
 
     def test_valid_subclass(self):
-        class MyTool(ToolPluginABC):
+        class MyTool(ToolPluginBase):
             @property
             def name(self) -> str:
                 return "my-tool"
@@ -38,12 +38,12 @@ class TestToolPluginABC:
         assert tool.name == "my-tool"
 
 
-# ── 8.2 ExtensionPluginABC ────────────────────────────────────────────
+# ── 8.2 ExtensionPluginBase ────────────────────────────────────────────
 
 
-class TestExtensionPluginABC:
+class TestExtensionPluginBase:
     def test_partial_callbacks_skipped(self):
-        class PartialExt(ExtensionPluginABC):
+        class PartialExt(ExtensionPluginBase):
             def on_pre_tool(self, tool_name: str, args: dict[str, Any]) -> None:
                 pass
 
@@ -54,36 +54,36 @@ class TestExtensionPluginABC:
         assert ext.on_post_llm({}, {}) is None
 
     def test_all_callbacks_optional(self):
-        ext = ExtensionPluginABC()
+        ext = ExtensionPluginBase()
         assert ext.on_pre_llm([], {}) is None
 
 
-# ── 8.4 TriggerPluginABC ──────────────────────────────────────────────
+# ── 8.4 TriggerPluginBase ──────────────────────────────────────────────
 
 
-class TestTriggerPluginABC:
+class TestTriggerPluginBase:
     def test_default_trigger_type(self):
-        trigger = TriggerPluginABC()
+        trigger = TriggerPluginBase()
         assert trigger.trigger_type == "webhook"
 
     def test_custom_trigger_type(self):
-        class SchedTrigger(TriggerPluginABC):
+        class SchedTrigger(TriggerPluginBase):
             trigger_type = "schedule"
 
         assert SchedTrigger().trigger_type == "schedule"
 
 
-# ── 8.5 ModelPluginABC ────────────────────────────────────────────────
+# ── 8.5 ModelPluginBase ────────────────────────────────────────────────
 
 
-class TestModelPluginABC:
+class TestModelPluginBase:
     async def test_methods_raise_not_implemented(self):
-        model = ModelPluginABC()
+        model = ModelPluginBase()
         with pytest.raises(NotImplementedError):
             await model.invoke([], {})
 
     def test_subclass_works(self):
-        class MyModel(ModelPluginABC):
+        class MyModel(ModelPluginBase):
             async def invoke(self, messages, config):
                 return {"content": "hi"}
 
@@ -112,7 +112,7 @@ class TestTypeAwareLoader:
         assert set(PLUGIN_TYPE_REGISTRY.keys()) == expected
 
     def test_validate_correct_type(self):
-        class GoodTool(ToolPluginABC):
+        class GoodTool(ToolPluginBase):
             @property
             def name(self) -> str:
                 return "good"
@@ -147,7 +147,7 @@ class TestTypeAwareLoader:
 
 class TestValidateApiSurface:
     def test_extension_no_required_methods(self):
-        ext = ExtensionPluginABC()
+        ext = ExtensionPluginBase()
         errors = validate_api_surface("extension", ext)
         assert errors == []
 
@@ -201,39 +201,39 @@ class TestPluginInitCLI:
 
 class TestSDKImports:
     def test_import_tool_plugin(self):
-        from hecate.plugin.sdk import ToolPluginABC as T
+        from hecate.plugin.sdk import ToolPluginBase as T
 
-        assert T is ToolPluginABC
+        assert T is ToolPluginBase
 
     def test_import_extension_plugin(self):
-        from hecate.plugin.sdk import ExtensionPluginABC as E
+        from hecate.plugin.sdk import ExtensionPluginBase as E
 
-        assert E is ExtensionPluginABC
+        assert E is ExtensionPluginBase
 
     def test_import_all_types(self):
         from hecate.plugin.sdk import (
-            AuthProviderABC,
-            ChannelABC,
-            EvaluatorABC,
-            ExtensionPluginABC,
-            ModelPluginABC,
+            AuthProviderBase,
+            ChannelBase,
+            EvaluatorBase,
+            ExtensionPluginBase,
+            ModelPluginBase,
             PluginContext,
-            SecretProviderABC,
-            ToolPluginABC,
-            TriggerPluginABC,
+            SecretProviderBase,
+            ToolPluginBase,
+            TriggerPluginBase,
         )
 
         assert all(
             [
-                AuthProviderABC,
-                ChannelABC,
-                EvaluatorABC,
-                ExtensionPluginABC,
-                ModelPluginABC,
+                AuthProviderBase,
+                ChannelBase,
+                EvaluatorBase,
+                ExtensionPluginBase,
+                ModelPluginBase,
                 PluginContext,
-                SecretProviderABC,
-                ToolPluginABC,
-                TriggerPluginABC,
+                SecretProviderBase,
+                ToolPluginBase,
+                TriggerPluginBase,
             ]
         )
 

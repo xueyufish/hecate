@@ -19,10 +19,10 @@ VALID_TYPES = [
 
 _TEMPLATES: dict[str, dict[str, str]] = {
     "tool": {
-        "base_class": "ToolPluginABC",
-        "import_line": "from hecate.plugin.sdk import ToolPluginABC",
+        "base_class": "ToolPluginBase",
+        "import_line": "from hecate.plugin.sdk import ToolPluginBase",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(ToolPluginABC):
+            class {{CLASS_NAME}}(ToolPluginBase):
                 @property
                 def name(self) -> str:
                     return "{{PLUGIN_NAME}}"
@@ -36,19 +36,19 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             """),
     },
     "extension": {
-        "base_class": "ExtensionPluginABC",
-        "import_line": "from hecate.plugin.sdk import ExtensionPluginABC",
+        "base_class": "ExtensionPluginBase",
+        "import_line": "from hecate.plugin.sdk import ExtensionPluginBase",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(ExtensionPluginABC):
+            class {{CLASS_NAME}}(ExtensionPluginBase):
                 def on_pre_tool(self, tool_name: str, args: dict[str, Any]) -> None:
                     pass
             """),
     },
     "trigger": {
-        "base_class": "TriggerPluginABC",
-        "import_line": "from hecate.plugin.sdk import TriggerPluginABC",
+        "base_class": "TriggerPluginBase",
+        "import_line": "from hecate.plugin.sdk import TriggerPluginBase",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(TriggerPluginABC):
+            class {{CLASS_NAME}}(TriggerPluginBase):
                 trigger_type = "webhook"
 
                 async def on_webhook(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -56,10 +56,10 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             """),
     },
     "model": {
-        "base_class": "ModelPluginABC",
-        "import_line": "from hecate.plugin.sdk import ModelPluginABC",
+        "base_class": "ModelPluginBase",
+        "import_line": "from hecate.plugin.sdk import ModelPluginBase",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(ModelPluginABC):
+            class {{CLASS_NAME}}(ModelPluginBase):
                 async def invoke(self, messages: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
                     return {"content": "TODO: Implement"}
 
@@ -68,10 +68,10 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             """),
     },
     "channel": {
-        "base_class": "ChannelABC",
-        "import_line": "from hecate.plugin.sdk import ChannelABC",
+        "base_class": "ChannelBase",
+        "import_line": "from hecate.plugin.sdk import ChannelBase",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(ChannelABC):
+            class {{CLASS_NAME}}(ChannelBase):
                 @property
                 def name(self) -> str:
                     return "{{PLUGIN_NAME}}"
@@ -96,10 +96,10 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             """),
     },
     "evaluator": {
-        "base_class": "EvaluatorABC",
-        "import_line": "from hecate.plugin.sdk import EvaluatorABC",
+        "base_class": "EvaluatorBase",
+        "import_line": "from hecate.plugin.sdk import EvaluatorBase",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(EvaluatorABC):
+            class {{CLASS_NAME}}(EvaluatorBase):
                 @property
                 def name(self) -> str:
                     return "{{PLUGIN_NAME}}"
@@ -113,10 +113,10 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             """),
     },
     "auth_provider": {
-        "base_class": "AuthProviderABC",
-        "import_line": "from hecate.plugin.sdk import AuthProviderABC",
+        "base_class": "AuthProviderBase",
+        "import_line": "from hecate.plugin.sdk import AuthProviderBase",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(AuthProviderABC):
+            class {{CLASS_NAME}}(AuthProviderBase):
                 @property
                 def name(self) -> str:
                     return "{{PLUGIN_NAME}}"
@@ -130,10 +130,10 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             """),
     },
     "secret_provider": {
-        "base_class": "SecretProviderABC",
-        "import_line": "from hecate.plugin.sdk import SecretProviderABC",
+        "base_class": "SecretProviderBase",
+        "import_line": "from hecate.plugin.sdk import SecretProviderBase",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(SecretProviderABC):
+            class {{CLASS_NAME}}(SecretProviderBase):
                 async def get_secret(self, key: str) -> str | None:
                     return None
 
