@@ -10,7 +10,7 @@ The execution engine is Hecate's heart. It receives compiled Graphs, executes th
 
 The core design decision is to build a self-contained engine that borrows five design patterns from LangGraph — Channel, Checkpoint, Pregel superstep loop, interrupt/Command, and subgraph composition — without depending on any LangChain code. The engine layer has zero external dependencies except `jsonschema` for DSL validation. This keeps the engine portable, testable, and free from framework coupling.
 
-The engine defines **15 extension interfaces** per [ADR-016](../design/adr/016-platform-spi-architecture.md): **11 Core SPI** (EnginePort, Worker + WorkerPool, CheckpointStore, EventStore, ContextEngine, SchedulerStrategy, EvictionPolicy, OptimizationPass, ConflictResolver, RetryStrategy, MiddlewareChain, MonotonicDenialTracker, ShellAnalyzer — plus the 4 Guardrail Hooks Pre/Post LLM/Tool stages) + **4 Platform SPI** (Evaluator, Channel, AuthProvider, Notifier). Default InMemory implementations are provided for each Core extension point; the engine has zero external dependencies except `jsonschema` for DSL validation.
+The engine defines **15 extension interfaces** per [ADR-016](../design/adr/016-platform-spi-architecture.md): **multiple Core SPI** (EnginePort, Worker + WorkerPool, CheckpointStore, EventStore, ContextEngine, SchedulerStrategy, EvictionPolicy, OptimizationPass, ConflictResolver, RetryStrategy, MiddlewareChain, MonotonicDenialTracker, ShellAnalyzer — plus the 4 Guardrail Hooks Pre/Post LLM/Tool stages) + **multiple Platform SPI** (Evaluator, Channel, AuthProvider, Notifier). Default InMemory implementations are provided for each Core extension point; the engine has zero external dependencies except `jsonschema` for DSL validation.
 
 ---
 
@@ -22,8 +22,8 @@ The Hecate execution engine is a self-developed Pregel/BSP runtime that sits at 
 
 The engine has four layers:
 
-1. **Core Runtime** — Pregel/BSP loop, Graph Compiler, Channel System, Worker Pool + Worker ABC, Context Engine, Event Store (Log-as-Truth) + Checkpoint Cache, Guardrail Chains (4 phases; legacy ×4 hooks adapt as stages), Scheduler · Eviction · Retry (3 SPI)
-2. **Extension Points & SPI** — 15 interfaces per ADR-016: 11 Core (EnginePort, OptimizationPass, ConflictResolver, Subgraph/Patterns, CheckpointStore, EventStore, ContextEngine, MiddlewareChain E3, MonotonicDenialTracker, ShellAnalyzer — plus the Worker / Scheduler / Eviction / Retry ABCs grouped in Core Runtime) + 4 Platform SPI (Evaluator, Channel, AuthProvider, Notifier)
+1. **Core Runtime** — Pregel/BSP loop, Graph Compiler, Channel System, Worker Pool + Worker ABC, Context Engine, Event Store (Log-as-Truth) + Checkpoint Cache, Guardrail Chains (4 phases; legacy ×4 hooks adapt as stages), Scheduler · Eviction · Retry (multiple SPI)
+2. **Extension Points & SPI** — many interfaces per ADR-016: multiple Core (EnginePort, OptimizationPass, ConflictResolver, Subgraph/Patterns, CheckpointStore, EventStore, ContextEngine, MiddlewareChain E3, MonotonicDenialTracker, ShellAnalyzer — plus the Worker / Scheduler / Eviction / Retry ABCs grouped in Core Runtime) + multiple Platform SPI (Evaluator, Channel, AuthProvider, Notifier)
 3. **Advanced Features** — A2A Protocol (v1.0 GA), Signed Agent Cards, Distributed Session State (Redis), Dynamic Orchestration (Coordinator node · 7th pattern per [ADR-032](../design/adr/032-dynamic-orchestration.md)), plus deferred P4/P5 items (5-Level Intent, Context Processor Chain, NL2Agent, Agentic RL, Prompt Self-Optimization, Async Execution API, Distributed Execution, Saga/Compensation, ReAct Loop Middleware, Branching log-fork), plus P3-shipped engine-side extensions (Execution Replay 8.20, ApprovalCallback durable HITL pairs, ShellAnalyzer content-aware gating)
 4. **Downstream** — Workers hand off via `EnginePort` to the Services layer (LLM / Tools / Knowledge / Checkpoint Cache via ProductionEnginePort)
 

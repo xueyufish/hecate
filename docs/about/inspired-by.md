@@ -35,7 +35,7 @@ Streamable HTTP transport. Bidirectional — Hecate is both client and server. S
 
 ### Agent-to-Agent (A2A) Protocol
 
-**[Linux Foundation A2A v1.0 GA](https://a2a-protocol.org/)** is the open standard for cross-framework agent communication. Hecate implements:
+**[Linux Foundation A2A](https://a2a-protocol.org/)** is the open standard for cross-framework agent communication. Hecate implements:
 
 - **AgentCard** at `/.well-known/agent-card.json` for discovery
 - **JSON-RPC 2.0** task lifecycle at `/a2a/`

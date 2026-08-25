@@ -28,12 +28,12 @@ For the full history, see [GitHub Releases](https://github.com/xueyufish/hecate/
 Hecate alpha delivers the following core capabilities:
 
 - **Pregel/BSP execution engine** with event-sourced execution state (Log-as-Truth event log + materialized checkpoint caches; [ADR-030](../design/adr/030-event-sourced-execution-state.md))
-- **11 core + 4 SPI extension points** (EnginePort, Worker, CheckpointStore, ContextEngine, Scheduler, Eviction, Optimizer, ConflictResolver, Retry, Guardrail ×4, Evaluator, Channel, Auth, Notifier)
-- **Multi-agent orchestration** with 7 collaboration patterns — 6 static (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate) + Dynamic Orchestration via the `coordinator` node ([ADR-032](../design/adr/032-dynamic-orchestration.md))
+- **11 core + multiple SPI extension points** (EnginePort, Worker, CheckpointStore, ContextEngine, Scheduler, Eviction, Optimizer, ConflictResolver, Retry, Guardrail ×4, Evaluator, Channel, Auth, Notifier)
+- **Multi-agent orchestration** with multiple collaboration patterns — 6 static (Hierarchical, Handoff, Pipeline, Broadcast, Negotiation, Debate) + Dynamic Orchestration via the `coordinator` node ([ADR-032](../design/adr/032-dynamic-orchestration.md))
 - **MCP server + client** (bidirectional, Streamable HTTP)
-- **A2A Protocol server + client** (Linux Foundation v1.0 GA)
+- **A2A Protocol server + client** (Linux Foundation standard)
 - **OpenAI-compatible API** at `/v1/chat/completions` (drop-in replacement)
-- **Multi-tenancy** with Organization → Workspace → RBAC (34 models with `workspace_id`)
+- **Multi-tenancy** with Organization → Workspace → RBAC (many models with `workspace_id`)
 - **4-level memory** (L1 working / L2 compressed / L3 user / L4 knowledge)
 - **RAG pipeline** with hybrid dense+sparse retrieval (BGE-M3)
 - **Visual canvas** at `web/` (React Flow + JSON DSL bidirectional sync)
@@ -44,21 +44,21 @@ Hecate alpha delivers the following core capabilities:
 
 ### Recent highlights (last 30 days)
 
-- **2026-08-17** — Dynamic Orchestration shipped — 7th multi-agent pattern (`coordinator` node: goal + roster → runtime TaskDAG; Magentic double-loop; [ADR-032](../design/adr/032-dynamic-orchestration.md))
-- **2026-08-16** — Execution Replay & Debug Dashboard Phase 1 shipped (timeline replay + time-travel)
-- **2026-08-15** — Event-Sourced Execution State shipped (Log-as-Truth; [ADR-030](../design/adr/030-event-sourced-execution-state.md))
-- **2026-08-10** — Outbound DLP engine shipped (Content Security)
-- **2026-08-09** — Version upgrade workflow
-- **2026-08-07** — State store deprecation (AgentStateStore → SessionStateStore)
-- **2026-08-05** — EventStore Postgres wiring
-- **2026-08-04** — Horizontal scaling validation (3-replica cluster)
-- **2026-08-03** — Session state store wired end-to-end
-- **2026-08-02** — Redis + Postgres session state backends
-- **2026-07-31** — Data backup & recovery (full system)
-- **2026-07-29** — Sandbox container pool
-- **2026-07-26** — SIEM security pipeline
-- **2026-07-22** — Context offloading
-- **2026-07-19** — Wire agent handoff
+- Dynamic Orchestration shipped — 7th multi-agent pattern (`coordinator` node: goal + roster → runtime TaskDAG; Magentic double-loop; [ADR-032](../design/adr/032-dynamic-orchestration.md))
+- Execution Replay & Debug Dashboard Phase 1 shipped (timeline replay + time-travel)
+- Event-Sourced Execution State shipped (Log-as-Truth; [ADR-030](../design/adr/030-event-sourced-execution-state.md))
+- Outbound DLP engine shipped (Content Security)
+- Version upgrade workflow
+- State store deprecation (AgentStateStore → SessionStateStore)
+- EventStore Postgres wiring
+- Horizontal scaling validation (3-replica cluster)
+- Session state store wired end-to-end
+- Redis + Postgres session state backends
+- Data backup & recovery (full system)
+- Sandbox container pool
+- SIEM security pipeline
+- Context offloading
+- Wire agent handoff
 
 See [GitHub Releases](https://github.com/xueyufish/hecate/releases) for the full list.
 
@@ -118,7 +118,7 @@ The 1.0 release is the **GA** — first version Hecate guarantees LTS support fo
 
 ### Expected in 1.0
 
-- Multi-agent orchestration full maturity (all 6 patterns GA)
+- Multi-agent orchestration full maturity (all multiple patterns GA)
 - GraphRAG + knowledge graph (if P2 ships)
 - Plugin marketplace (if P2 ships)
 - Per-tenant encryption keys (if P3 ships)

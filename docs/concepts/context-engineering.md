@@ -155,7 +155,7 @@ The reference stub contains a short topic summary plus the file path, so the LLM
 | Situation | What the pipeline does |
 |-----------|-----------------------|
 | A long support conversation | Message Prioritizer + compression keep the session within budget |
-| An agent with 30 tools | Tool Filter exposes only the 4 relevant to the current phase |
+| An agent with many tools | Tool Filter exposes only the the relevant few to the current phase |
 | A tool returns a 5,000-line log | Evidence Tracker condenses it to a citation |
 | Switching from GPT-4o to a local model | Provider Shaping adapts the prompt format |
 | A workflow that runs 50 supersteps | Budget Manager prevents cumulative context bloat |

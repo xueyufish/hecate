@@ -67,7 +67,7 @@ Each module below corresponds to a block in the [L1 architecture diagram](images
 The entry point for all external requests, exposes four API surfaces: 
   - OpenAI-compatible interface at `/v1/` , for seamless integration with existing tools. 
   - Management API at `/api/`,  for Agent/Workflow/Session/Knowledge Base CRUD.     
-  - MCP Server endpoint at `/mcp`, for Streamable HTTP transport per the **MCP 2026-07-28 specification** (stateless core; shipped 2026-08-22 in change `mcp-streamable-http`). 
+  - MCP Server endpoint at `/mcp`, for Streamable HTTP transport per the **latest MCP specification** (stateless core; shipped recently in change `mcp-streamable-http`). 
   - A2A endpoint at `/.well-known/agent.json`, for Agent Card discovery + task lifecycle for cross-framework agent communication.
 
 Beyond the HTTP APIs, external entry points include the embeddable web widget at `/embed/chat`, IM inbound webhooks (Feishu, Slack), and the `hecate` CLI. All entry points handle authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, multi-channel adaptation, and inbound IM routing.
@@ -108,7 +108,7 @@ LLM integration layer powered by LiteLLM, supporting 100+ providers. Provides in
 
 ### Tool Platform
 
-MCP-first tool ecosystem with bidirectional support (**MCP 2026-07-28 spec**, stateless core, shipped 2026-08-22 in change `mcp-streamable-http`): MCP Client consumes external tools, MCP Server exposes Hecate as a tool provider. Includes a tool registry, **Docker-isolated execution sandbox** for code execution, **sandboxed headless Chromium browser automation** with per-environment domain allow-lists (fail-closed) and built-in tools covering file/code operations and browser interaction, agent tool system, search tools, and granular tool security policies. See [Tool Platform Design](tool-platform-design.md) and `docs/how-to/browser-automation.md`.
+MCP-first tool ecosystem with bidirectional support (**latest MCP spec**, stateless core, shipped recently in change `mcp-streamable-http`): MCP Client consumes external tools, MCP Server exposes Hecate as a tool provider. Includes a tool registry, **Docker-isolated execution sandbox** for code execution, **sandboxed headless Chromium browser automation** with per-environment domain allow-lists (fail-closed) and built-in tools covering file/code operations and browser interaction, agent tool system, search tools, and granular tool security policies. See [Tool Platform Design](tool-platform-design.md) and `docs/how-to/browser-automation.md`.
 
 > See [Tool Platform Design](tool-platform-design.md) for L2 architecture, plugin ecosystem, and tool operations.
 
@@ -132,7 +132,7 @@ Cross-cutting security shield spanning all platform layers. Engine-level guardra
 
 ### Ecosystem
 
-Integration and extensibility layer. Native MCP support (Client + Server with Streamable HTTP transport, **MCP 2026-07-28 spec · stateless core**, shipped 2026-08-22), webhook notifications, event dispatcher, and OpenAI-compatible API ensure broad interoperability. A2A Protocol enables cross-framework agent communication — Hecate agents can be discovered and invoked by external platforms, and external agents can be used as sub-agents in Hecate workflows.
+Integration and extensibility layer. Native MCP support (Client + Server with Streamable HTTP transport, **latest MCP spec · stateless core**, shipped recently), webhook notifications, event dispatcher, and OpenAI-compatible API ensure broad interoperability. A2A Protocol enables cross-framework agent communication — Hecate agents can be discovered and invoked by external platforms, and external agents can be used as sub-agents in Hecate workflows.
 
 > See [Ecosystem Design](ecosystem-design.md) for L2 architecture, marketplace, and protocol integrations.
 

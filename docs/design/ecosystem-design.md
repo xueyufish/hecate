@@ -18,7 +18,7 @@ The Ecosystem layer is Hecate's integration and extensibility foundation — con
 
 ![Ecosystem L2](images/ecosystem-l2.png)
 
-1. **Integration Ecosystem** — MCP Client/Server (2026-07-28 spec · stateless core), webhooks (14.2 outbound), events, OpenAI-compatible API, plugin system (8 SPI types), marketplace (12.0 v1 shipped w/ 5.5c), **AgentSpace SDK (11.13 · P5)**
+1. **Integration Ecosystem** — MCP Client/Server (latest spec · stateless core), webhooks (14.2 outbound), events, OpenAI-compatible API, plugin system (multiple SPIs types), marketplace (12.0 v1 shipped w/ 5.5c), **AgentSpace SDK (11.13 · P5)**
 2. **Protocol Stack & Growth** — A2A Protocol, Signed Agent Cards + Trust Verification, AP2 Payments, i18n/L10n, SDK + PyPI
 3. **Discovery & Partnership** — Agentic Resource Discovery (ARD), Partner Monetization, Community Agent Gallery, Cross-Surface Experience Layer
 
@@ -31,11 +31,11 @@ The Ecosystem layer is Hecate's integration and extensibility foundation — con
 | Component | Description |
 |-----------|-------------|
 | MCP Client | Connect to external MCP servers |
-| MCP Server | Expose Hecate as MCP tool provider (Streamable HTTP, **MCP 2026-07-28 spec · stateless core**, shipped 2026-08-22) |
+| MCP Server | Expose Hecate as MCP tool provider (Streamable HTTP, **latest MCP spec · stateless core**, shipped recently) |
 | Webhook Notifications | Event-driven HTTP callbacks |
 | Event Dispatcher | Internal event bus |
 | OpenAI-compatible API | REST + WebSocket, `/v1/chat/completions` |
-| Plugin System | **8 plugin types** (5.5 + TP5 developer SDK), SPI Core, packaging, signing; **+ Agent Plugins 1.0 ingestion (5.5c, 2026-08-18)** — third-party packages land as a single atomic manifest, projected into SkillModel + MCPServerRegistry |
+| Plugin System | **multiple plugin types** (5.5 + TP5 developer SDK), SPI Core, packaging, signing; **+ Agent Plugins 1.0 ingestion (5.5c, recently)** — third-party packages land as a single atomic manifest, projected into SkillModel + MCPServerRegistry |
 | Asset Marketplace | 6 asset types, semantic discovery, governed catalog |
 
 ---

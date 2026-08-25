@@ -92,7 +92,7 @@ class WorkspaceModel(BaseModel):
 
 ### Tenant isolation count
 
-Hecate's tenant isolation works because **36 models carry `workspace_id`** (verified via `grep -rl workspace_id src/hecate/models/*.py` as of 2026-08-25; the count grows as new tenant-scoped entities land). Every query against a tenant-scoped resource filters by `workspace_id`. Examples:
+Hecate's tenant isolation works because **many models carry `workspace_id`** (verified via `grep -rl workspace_id src/hecate/models/*.py`.; the count grows as new tenant-scoped entities land). Every query against a tenant-scoped resource filters by `workspace_id`. Examples:
 
 ```
 src/hecate/models/agent.py:                 workspace_id

@@ -174,6 +174,32 @@ All **code** artifacts — Python/TypeScript code, docstrings, comments, inline 
 
 We may converse in Chinese. Code artifacts are always English; OpenSpec change documents default to Chinese unless explicitly noted otherwise.
 
+### Documentation — no specific numbers or dates
+
+User-facing documentation in `README.md` and design docs under `docs/` **SHALL NOT** contain:
+
+- **Specific counts** used as descriptive/marketing markers — e.g. "26 interfaces + 8 SPI", "11 built-in tools", "35 data models", "32 ADRs", "100+ archived changes", "1713 tests", "1000+ stars".
+- **Specific dates** used as version pins to external specs or as release metadata — e.g. "MCP 2026-07-28 spec", "A2A v1.0 GA", "shipped 2026-08-22", "Accepted (2026-08-15; ...)".
+
+**Replacement**: use vague qualifiers (`many`, `multiple`, `several`, `recent`) or drop the number/date entirely.
+
+**Allowed exceptions** (do NOT strip):
+
+- Functional version requirements (`Python 3.12+`, `SQLAlchemy 2.0`, `JSON-RPC 2.0`).
+- HTTP status codes, port numbers, file sizes in commands.
+- Dates inside JSON code examples (e.g. `"timestamp": "2026-08-11T10:30:05Z"`).
+- Dates inside filesystem paths and `openspec/changes/` archive folder names.
+- Project-internal IDs (`P1`–`P5`, feature codes like `13.5`, `5.4b`).
+- Quantitative system requirements (CPU/RAM/disk minimums) in install instructions.
+- Factual observations about external projects in research notes (`docs/research/`).
+
+**Scope of this rule**:
+
+- ✅ Applies to: `README.md`, `docs/design/` (excluding `docs/design/adr/`), `docs/research/`, `docs/getting-started/`, `docs/tutorials/`, `docs/concepts/`, `docs/reference/`, `docs/how-to/`, `docs/operations/`, `docs/migrations/`, `docs/about/`, `docs/use-cases/`.
+- ⏸️ Temporarily exempt: `docs/features/`, `docs/design/adr/`. Re-evaluate later.
+
+**Rationale**: counts and dates go stale. A README claiming "32 ADRs" must be updated every time an ADR is added. Vague qualifiers describe capability without committing to a number that will be wrong tomorrow.
+
 ## Testing
 
 - `tests/` mirrors `src/hecate/` structure (`test_engine/`, `test_models/`, `test_api/`, `test_services/`).

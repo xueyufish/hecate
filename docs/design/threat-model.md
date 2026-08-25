@@ -50,7 +50,7 @@ We **do not** assume:
 
 Hecate's threat model combines **STRIDE** (Microsoft's classic six-category framework) with the **OWASP Top 10 for Agentic Applications (ASI01–ASI10, 2026)**. The two frameworks are complementary:
 
-| STRIDE category | Hecate mitigation (L1 layer) | OWASP ASI cross-ref | Status (2026-08-22) |
+| STRIDE category | Hecate mitigation (L1 layer) | OWASP ASI cross-ref | Status (recent) |
 |-----------------|-------------------------------|---------------------|---------------------|
 | **S** Spoofing | JWT + API Key (3.7) + SSO/SCIM/OIDC/SAML/LDAP (10.2) + Signed Agent Cards (SS6) | **ASI01 Agent Identity & AuthN** | Mitigated P3 |
 | **T** Tampering | Guardrail Chains (1.3.5i E3) + Content Scanning (5.13a) + PII Masking (9.1) | **ASI02 Tool Misuse / Tampering** | Mitigated P3 (5.13a + E3) |
@@ -64,7 +64,7 @@ Hecate's threat model combines **STRIDE** (Microsoft's classic six-category fram
 - **ASI07 Goal Drift Detection** — SS1 Agent Runtime Protection (P4)
 - **ASI08 Rogue Agent Containment** — SS2 Automated Red Teaming (P4)
 - **ASI09 Multi-Agent Trust Compromise** — SS6 Multi-Agent Trust (P5 per catalog; partially shipped via Signed Cards P3)
-- **ASI10 Supply Chain / Tool Poisoning** — T0 Trust Gate (5.5 enh, shipped 2026-08-19) + Content Scanning (5.13a, shipped 2026-08-18) — **Mitigated P3**
+- **ASI10 Supply Chain / Tool Poisoning** — T0 Trust Gate (5.5 enh, shipped recently) + Content Scanning (5.13a, shipped recently) — **Mitigated P3**
 
 See the L1 architecture diagram (`docs/design/hardware/hecate_architecture_l1.drawio` Security Shield swimlane) for the implementation view.
 
@@ -74,7 +74,7 @@ See the L1 architecture diagram (`docs/design/hardware/hecate_architecture_l1.dr
 
 Hecate's threat model combines **STRIDE** (Microsoft's classic six-category framework) with the **OWASP Top 10 for Agentic Applications (ASI01–ASI10, 2026)**. The two frameworks are complementary:
 
-| STRIDE category | Hecate mitigation (L1 layer) | OWASP ASI cross-ref | Status (2026-08-22) |
+| STRIDE category | Hecate mitigation (L1 layer) | OWASP ASI cross-ref | Status (recent) |
 |-----------------|-------------------------------|---------------------|---------------------|
 | **S** Spoofing | JWT + API Key (3.7) + SSO/SCIM/OIDC/SAML/LDAP (10.2) + Signed Agent Cards (SS6) | **ASI01 Agent Identity & AuthN** | Mitigated P3 |
 | **T** Tampering | Guardrail Chains (1.3.5i E3) + Content Scanning (5.13a) + PII Masking (9.1) | **ASI02 Tool Misuse / Tampering** | Mitigated P3 (5.13a + E3) |
@@ -88,7 +88,7 @@ Hecate's threat model combines **STRIDE** (Microsoft's classic six-category fram
 - **ASI07 Goal Drift Detection** — SS1 Agent Runtime Protection (P4)
 - **ASI08 Rogue Agent Containment** — SS2 Automated Red Teaming (P4)
 - **ASI09 Multi-Agent Trust Compromise** — SS6 Multi-Agent Trust (P5 per catalog; partially shipped via Signed Cards P3)
-- **ASI10 Supply Chain / Tool Poisoning** — T0 Trust Gate (5.5 enh, shipped 2026-08-19) + Content Scanning (5.13a, shipped 2026-08-18) — **Mitigated P3**
+- **ASI10 Supply Chain / Tool Poisoning** — T0 Trust Gate (5.5 enh, shipped recently) + Content Scanning (5.13a, shipped recently) — **Mitigated P3**
 
 See the L1 architecture diagram (`docs/design/hardware/hecate_architecture_l1.drawio` Security Shield swimlane) for the implementation view.
 

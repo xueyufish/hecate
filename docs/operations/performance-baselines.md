@@ -48,7 +48,7 @@ A "standard request" consists of:
 
 ```
 1. Chat completion with a single agent
-2. Agent has the 11 built-in tools (web_search, read_file, write_file, list_files, execute_code + 6 browser_* tools)
+2. Agent has the multiple built-in tools (web_search, read_file, write_file, list_files, execute_code + 6 browser_* tools)
 3. Agent makes exactly 2 LLM calls (initial + tool execution)
 4. Average conversation: 10 messages total
 5. No knowledge base (RAG disabled)

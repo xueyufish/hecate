@@ -12,7 +12,7 @@ Hecate is an **open-source, self-hosted, Python-first agent platform** for engin
 2. **Self-hosted OSS (MIT)** — your data never leaves your network
 3. **Multi-protocol by default** — MCP, A2A, and OpenAI-compatible API all first-class
 4. **Multi-tenant by default** — Organization → Workspace → RBAC out of the box
-5. **Engine-level extensibility** — 26 engine extension interfaces + 8 plugin SPI types, not just a plugin marketplace
+5. **Engine-level extensibility** — many engine extension interfaces + multiple plugin SPI types, not just a plugin marketplace
 
 ---
 
@@ -53,13 +53,13 @@ Hecate is an **open-source, self-hosted, Python-first agent platform** for engin
 │   ┌────────────────────────────────────────────────────────┐ │
 │   │                       engine/                          │ │
 │   │  Pregel runtime · Channels · Event log · Workers      │ │
-│   │  26 engine interfaces + 8 SPI types                  │ │
+│   │  26 engine interfaces + multiple SPIs types                  │ │
 │   │  (DEPS: only `jsonschema` — zero deps on services)   │ │
 │   └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-The engine layer defines 26 extension interfaces + 8 plugin SPI types. Services provide concrete implementations. The API layer orchestrates services. This separation keeps the engine testable with lightweight stubs.
+The engine layer defines 26 extension interfaces + multiple plugin SPI types. Services provide concrete implementations. The API layer orchestrates services. This separation keeps the engine testable with lightweight stubs.
 
 ---
 
@@ -158,7 +158,7 @@ At any point during execution, a node may call `interrupt()` to pause for human-
 | [Tools](tools-and-mcp.md) | Callable functions (built-in / custom / MCP) |
 | [Guardrails](guardrails.md) | 4 hook types (Pre/Post LLM/Tool) that gate every action |
 | [Model Hub](model-hub.md) | LLM provider layer (100+ providers via LiteLLM) |
-| [Multi-Tenancy](multi-tenancy.md) | Org → Workspace → RBAC, 34 models with `workspace_id` |
+| [Multi-Tenancy](multi-tenancy.md) | Org → Workspace → RBAC, many models with `workspace_id` |
 | [Auth](auth-identity.md) | API keys, JWT, OIDC, SAML, LDAP, SCIM |
 | [Observability](observability.md) | 4 signals: traces, metrics, logs, audit |
 | [DLP](dlp.md) | Outbound content scanning (PII, secrets, leakage) |
