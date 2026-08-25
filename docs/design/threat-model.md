@@ -46,7 +46,51 @@ We **do not** assume:
 
 ---
 
+## STRIDE + OWASP ASI mapping
+
+Hecate's threat model combines **STRIDE** (Microsoft's classic six-category framework) with the **OWASP Top 10 for Agentic Applications (ASI01–ASI10, 2026)**. The two frameworks are complementary:
+
+| STRIDE category | Hecate mitigation (L1 layer) | OWASP ASI cross-ref | Status (2026-08-22) |
+|-----------------|-------------------------------|---------------------|---------------------|
+| **S** Spoofing | JWT + API Key (3.7) + SSO/SCIM/OIDC/SAML/LDAP (10.2) + Signed Agent Cards (SS6) | **ASI01 Agent Identity & AuthN** | Mitigated P3 |
+| **T** Tampering | Guardrail Chains (1.3.5i E3) + Content Scanning (5.13a) + PII Masking (9.1) | **ASI02 Tool Misuse / Tampering** | Mitigated P3 (5.13a + E3) |
+| **R** Repudiation | Audit Trail + SIEM Pipeline (SS5) + ApprovalCallback durable HITL pairs (1.3.4) | **ASI03 Repudiation & Audit** | Mitigated P3 |
+| **I** Information Disclosure | PII Anonymizer (Presidio + Regex, 9.1) + Outbound DLP EF1 (9.10) + Encryption Service | **ASI04 Info Disclosure** | DLP Engine P4 (per ADR-025); Presidio ✅ |
+| **D** Denial of Service | Rate Limiter + Quota Enforcement + Circuit Breaker + Async Task Queue | **ASI05 Resource Exhaustion** | Mitigated P3 |
+| **E** Elevation of Privilege | RBAC + Two-Tier Identity (11.17, P4) + Per-Token-Type Auth Pipeline (11.16, P4) + ApprovalCallback (1.3.4) | **ASI06 Privilege Escalation** | Partial P3; 11.16/11.17 deferred P4 |
+
+**OWASP ASI-only threats** (no direct STRIDE equivalent) tracked under [ADR-026](../adr/026-security-shield-enhancement.md):
+
+- **ASI07 Goal Drift Detection** — SS1 Agent Runtime Protection (P4)
+- **ASI08 Rogue Agent Containment** — SS2 Automated Red Teaming (P4)
+- **ASI09 Multi-Agent Trust Compromise** — SS6 Multi-Agent Trust (P5 per catalog; partially shipped via Signed Cards P3)
+- **ASI10 Supply Chain / Tool Poisoning** — T0 Trust Gate (5.5 enh, shipped 2026-08-19) + Content Scanning (5.13a, shipped 2026-08-18) — **Mitigated P3**
+
+See the L1 architecture diagram (`docs/design/hardware/hecate_architecture_l1.drawio` Security Shield swimlane) for the implementation view.
+
+---
+
 ## STRIDE analysis
+
+Hecate's threat model combines **STRIDE** (Microsoft's classic six-category framework) with the **OWASP Top 10 for Agentic Applications (ASI01–ASI10, 2026)**. The two frameworks are complementary:
+
+| STRIDE category | Hecate mitigation (L1 layer) | OWASP ASI cross-ref | Status (2026-08-22) |
+|-----------------|-------------------------------|---------------------|---------------------|
+| **S** Spoofing | JWT + API Key (3.7) + SSO/SCIM/OIDC/SAML/LDAP (10.2) + Signed Agent Cards (SS6) | **ASI01 Agent Identity & AuthN** | Mitigated P3 |
+| **T** Tampering | Guardrail Chains (1.3.5i E3) + Content Scanning (5.13a) + PII Masking (9.1) | **ASI02 Tool Misuse / Tampering** | Mitigated P3 (5.13a + E3) |
+| **R** Repudiation | Audit Trail + SIEM Pipeline (SS5) + ApprovalCallback durable HITL pairs (1.3.4) | **ASI03 Repudiation & Audit** | Mitigated P3 |
+| **I** Information Disclosure | PII Anonymizer (Presidio + Regex, 9.1) + Outbound DLP EF1 (9.10) + Encryption Service | **ASI04 Info Disclosure** | DLP Engine P4 (per ADR-025); Presidio ✅ |
+| **D** Denial of Service | Rate Limiter + Quota Enforcement + Circuit Breaker + Async Task Queue | **ASI05 Resource Exhaustion** | Mitigated P3 |
+| **E** Elevation of Privilege | RBAC + Two-Tier Identity (11.17, P4) + Per-Token-Type Auth Pipeline (11.16, P4) + ApprovalCallback (1.3.4) | **ASI06 Privilege Escalation** | Partial P3; 11.16/11.17 deferred P4 |
+
+**OWASP ASI-only threats** (no direct STRIDE equivalent) tracked under [ADR-026](../adr/026-security-shield-enhancement.md):
+
+- **ASI07 Goal Drift Detection** — SS1 Agent Runtime Protection (P4)
+- **ASI08 Rogue Agent Containment** — SS2 Automated Red Teaming (P4)
+- **ASI09 Multi-Agent Trust Compromise** — SS6 Multi-Agent Trust (P5 per catalog; partially shipped via Signed Cards P3)
+- **ASI10 Supply Chain / Tool Poisoning** — T0 Trust Gate (5.5 enh, shipped 2026-08-19) + Content Scanning (5.13a, shipped 2026-08-18) — **Mitigated P3**
+
+See the L1 architecture diagram (`docs/design/hardware/hecate_architecture_l1.drawio` Security Shield swimlane) for the implementation view.
 
 ### S — Spoofing
 

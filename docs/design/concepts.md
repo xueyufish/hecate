@@ -19,7 +19,7 @@ Organization ─┬── Workspace ─┬── Agent ─┬── has Tools
               │              │             └── has Edges
               │              │
               │              ├── KnowledgeBase ─┬── Document ─── Chunk
-              │              │                   └── GraphEntity ─── GraphRelation *(planned)*
+              │              │                   └── GraphEntity ─── GraphRelation *(P5)*
               │              │
               │              ├── Prompt (versioned)
               │              │
@@ -204,7 +204,7 @@ The minimum guaranteed footprint for an engine-path session is **2 objects** (Ev
 
 ---
 
-## Knowledge Graph (Planned)
+## Knowledge Graph (P5 deferred)
 
 The **Knowledge Graph** provides structured, entity-centric knowledge representation that complements the vector-based RAG pipeline. While RAG retrieves text chunks by semantic similarity, the Knowledge Graph captures typed entities and their relationships, enabling multi-hop reasoning and structured retrieval.
 
@@ -411,7 +411,7 @@ Versionable resources — Agents, Workflows, Prompts, and Skills — share a uni
 | User | `users` | id, org_id, email, name, role |
 | Workspace | `workspaces` | id, org_id, name, settings (JSONB) |
 | ResourceVersion | `resource_versions` | resource_type, resource_id, version, snapshot (JSONB), change_summary |
-| GraphEntity | `graph_entities` *(planned)* | id, kb_id, type, name, properties (JSONB), embedding (vector) |
+| GraphEntity | `graph_entities` *(P5 deferred)* | id, kb_id, type, name, properties (JSONB), embedding (vector) |
 | GraphRelation | `graph_relations` *(planned)* | id, kb_id, source_id, target_id, type, properties (JSONB), weight |
 | Community | `graph_communities` *(planned)* | id, kb_id, entity_ids (JSONB), summary (TEXT), algorithm |
 
