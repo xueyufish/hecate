@@ -74,7 +74,7 @@ User message → [Compile graph] → Pregel superstep loop → Response
 
 Workflows are versioned, support durable checkpoints, and can implement any topology — sequential pipelines, parallel fan-out, handoff routing, broadcast discussions, negotiation, debate, and dynamic orchestration, where a `coordinator` node emits a runtime task DAG from a goal plus an agent roster. See [The Execution Engine](engine.md) for how the runtime executes these graphs.
 
-**Use it when:** you need multi-agent coordination, structured decision flows, or any topology the preset three-layer pipeline does not cover. The [multi-agent tutorial](../tutorials/04-multi-agent.md) walks through the six static collaboration patterns; the seventh (`dynamic`) is covered in [ADR-032](../design/adr/032-dynamic-orchestration.md).
+**Use it when:** you need multi-agent coordination, structured decision flows, or any topology the preset three-layer pipeline does not cover. The [multi-agent tutorial](../tutorials/04-multi-agent.md) walks through the multiple static collaboration patterns; the seventh (`dynamic`) is covered in [ADR-032](../design/adr/032-dynamic-orchestration.md).
 
 ---
 

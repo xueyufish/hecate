@@ -1,6 +1,6 @@
 # How to Develop Custom Extensions
 
-Hecate's engine defines 26 [extension interfaces](../reference/extension-points.md) as abstract contracts, plus 8 plugin SPI types. Every one of them ships with a default implementation — but the whole point of an extension point is that you can replace it with your own. This guide walks through the pattern and shows three concrete examples.
+Hecate's engine defines 26 [extension interfaces](../reference/extension-points.md) as abstract contracts, plus multiple plugin SPI types. Every one of them ships with a default implementation — but the whole point of an extension point is that you can replace it with your own. This guide walks through the pattern and shows three concrete examples.
 
 > For the full interface catalog and method signatures, see [Extension Points Reference](../reference/extension-points.md). This page focuses on *how* to implement and wire custom extensions.
 
@@ -239,7 +239,7 @@ with pytest.raises(TypeError):
 
 ## Further reading
 
-- [Extension Points Reference](../reference/extension-points.md) — all 11+4 interfaces with full method signatures
+- [Extension Points Reference](../reference/extension-points.md) — all many interfaces with full method signatures
 - [Guardrails and Hooks](../concepts/guardrails.md) — the four hook types and how they fit in the superstep loop
 - [The Execution Engine](../concepts/engine.md) — where extensions plug into the Pregel runtime
 - [ADR-016: Platform SPI Architecture](../design/adr/016-platform-spi-architecture.md) — why Hecate chose the SPI pattern

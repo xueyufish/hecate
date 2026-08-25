@@ -384,7 +384,7 @@ hecate plugin hub install company-lookup
 
 | Error | Cause | Fix |
 |---|---|---|
-| `unknown plugin type` | `type` not in known list | Use one of the 9 types above |
+| `unknown plugin type` | `type` not in known list | Use one of the multiple types above |
 | `invalid name` | `name` doesn't match regex | Match `^[a-z][a-z0-9_-]{1,63}$` |
 | `invalid version` | `version` not semver | Use `MAJOR.MINOR.PATCH` |
 | `unsupported version` | Hecate too old | Upgrade Hecate or lower `min_platform_version` |

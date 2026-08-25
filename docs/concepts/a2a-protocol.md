@@ -263,7 +263,7 @@ This duality is unique among the platforms researched. Most A2A implementations 
 
 ## Compatibility
 
-Hecate implements **A2A v1.0 GA** (Linux Foundation). Interop with:
+Hecate implements **A2A** (Linux Foundation). Interop with:
 
 - Official `a2a-sdk` (Python) — see [a2a-protocol.org](https://a2a-protocol.org/) for SDK packages
 - `a2a-js` (TypeScript) — see [a2a-protocol.org](https://a2a-protocol.org/) for SDK packages

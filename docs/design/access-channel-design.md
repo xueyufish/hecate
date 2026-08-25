@@ -57,7 +57,7 @@ Channel adapters translate external protocols into Hecate's internal `ExecutionR
 |---------|----------|-----------|
 | **REST API Gateway** | HTTP/HTTPS | Sync + SSE |
 | **CLI (hecate)** | Terminal | Sync |
-| **MCP Server** | JSON-RPC | Streamable HTTP (single /mcp endpoint; MCP 2026-07-28 spec — stateless core) |
+| **MCP Server** | JSON-RPC | Streamable HTTP (single /mcp endpoint; latest MCP spec — stateless core) |
 | **SSE Streaming** | HTTP SSE | Server-Sent Events |
 | **WebSocket Channel** | WebSocket | Bidirectional persistent (P4+) |
 | **Web Widget** | HTTP + iframe | Embedded chat component (Wave 1 simplified; anonymous to-C scope = P5 deferred per ADR-031) |
@@ -143,7 +143,7 @@ The Management API covers 24+ resource routers: agents, sessions, conversations,
 
 ### MCP Server (`/mcp`)
 
-Streamable HTTP transport per the **MCP 2026-07-28 specification — stateless core** (see [ADR-012](adr/012-mcp-streamable-http.md), updated for the 2026-07-28 revision via change `mcp-streamable-http`). Exposes Hecate agents as MCP-compliant tool providers.
+Streamable HTTP transport per the **latest MCP specification — stateless core** (see [ADR-012](adr/012-mcp-streamable-http.md), updated for the latest revision via change `mcp-streamable-http`). Exposes Hecate agents as MCP-compliant tool providers.
 
 **Statelessness is the key differentiator vs the 2025 spec.** No `initialize` handshake, no `Mcp-Session-Id`, no session affinity — any replica behind a round-robin load balancer can serve any request.
 

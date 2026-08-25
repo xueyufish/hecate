@@ -198,7 +198,7 @@ The stream closes automatically when the task reaches a terminal state (`complet
 
 ### Push notifications (not yet implemented)
 
-`capabilities.pushNotifications = false` in the current AgentCard. Hecate has the `push.py` module scaffolded for the future, but doesn't actively push task updates to client webhooks. Use SSE (`tasks/sendSubscribe`) instead. Push notifications are a **deferred item** — not in the 2026-08-22 P3 close-out (which shipped A2A v1.0 GA, Signed Agent Cards, and SSE streaming for long-running tasks); they remain **on-roadmap** for a future P-cycle without a confirmed phase assignment (not in catalog "Deferred from P3" nor in P4 roadmap table).
+`capabilities.pushNotifications = false` in the current AgentCard. Hecate has the `push.py` module scaffolded for the future, but doesn't actively push task updates to client webhooks. Use SSE (`tasks/sendSubscribe`) instead. Push notifications are a **deferred item** — not in the P3 close-out (which shipped A2A, Signed Agent Cards, and SSE streaming for long-running tasks); they remain **on-roadmap** for a future P-cycle without a confirmed phase assignment (not in catalog "Deferred from P3" nor in P4 roadmap table).
 
 ---
 
@@ -339,7 +339,7 @@ Hecate implements both A2A and MCP as first-class protocols. They serve differen
 |---|---|---|
 | **Direction** | Agent ↔ Tool (vertical) | Agent ↔ Agent (horizontal) |
 | **Wire format** | JSON-RPC 2.0 over HTTPS / stdio | JSON-RPC 2.0 over HTTPS |
-| **Discovery** | `/.well-known/mcp.json` or runtime introspection (per **MCP 2026-07-28 spec**, stateless core, shipped 2026-08-22) | `/.well-known/agent-card.json` |
+| **Discovery** | `/.well-known/mcp.json` or runtime introspection (per **latest MCP spec**, stateless core, shipped recently) | `/.well-known/agent-card.json` |
 | **Trust** | Connection-level auth (bearer, API key) | Signed AgentCards (JWS) |
 | **Use case** | "I want my agent to call a tool" | "I want my agent to talk to another agent" |
 
@@ -362,7 +362,7 @@ A single Hecate agent can simultaneously use MCP tools (local/SSE) and A2A agent
 
 ### A2A Protocol version
 
-Hecate implements **A2A v1.0 GA** as specified by the Linux Foundation. Specific protocol-level support:
+Hecate implements **A2A** as specified by the Linux Foundation. Specific protocol-level support:
 
 | A2A feature | Hecate status |
 |---|---|
@@ -511,7 +511,7 @@ These are deliberately deferred:
 | **Multi-modal artifact streaming** (audio, video) | LLM providers don't support streaming these yet | Post-1.0 |
 | **Cross-workspace A2A API keys** | Currently single `HECATE_API_KEYS` | v1.1 (multi-tenancy extension) |
 | **Agent Card verification policy enforcement** | Trust anchor choice is yours | Configurable per-deployment |
-| **A2A protocol v1.1+ features** | Will track upstream | When v1.1 GA ships |
+| **A2A protocol v1.1+ features** | Will track upstream | When future GA ships |
 
 ---
 

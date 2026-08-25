@@ -196,8 +196,8 @@ From ADR-019, each node type has:
 | `parallel` | 🔱 Branch icon | Parallel execution |
 | `loop` | 🔄 Loop icon | Iterate over collection |
 | `subgraph` | 📦 Box icon | Nested graph |
-| `human_input` | 👤 Human icon | HITL pause (per ADR-019) · **P4** (1.1.24, was P3 → P4, 2026-08-22) |
-| `trigger` | ⚡ Trigger icon | Webhook / schedule / event · **P4** (1.1.25, was P3 → P4, 2026-08-22) |
+| `human_input` | 👤 Human icon | HITL pause (per ADR-019) · **P4** (1.1.24, was P3 → P4, recently) |
+| `trigger` | ⚡ Trigger icon | Webhook / schedule / event · **P4** (1.1.25, was P3 → P4, recently) |
 | `channel_input` | 💬 Chat icon | Input from a channel (REST/CLI/WebSocket) · **P4** |
 | `channel_output` | 📤 Output icon | Output to a channel · **P4** |
 | `ontology_action` | 🏛️ Ontology icon | Ontology CRUD (per ADR-014) · **P5** |
@@ -216,7 +216,7 @@ Adding a new node type requires:
 
 ## Workflow patterns
 
-From ADR-007 + ADR-019, **six static collaboration patterns + the seventh DYNAMIC pattern** (per [ADR-032](../adr/032-dynamic-orchestration.md), 2026-08-17) ship as **pattern templates** the user can drop into the canvas:
+From ADR-007 + ADR-019, **multiple static collaboration patterns + the seventh DYNAMIC pattern** (per [ADR-032](../adr/032-dynamic-orchestration.md), recently) ship as **pattern templates** the user can drop into the canvas:
 
 | Pattern | Visual | Behavior |
 |---|---|---|

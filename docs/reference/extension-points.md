@@ -2,7 +2,7 @@
 
 Hecate's engine layer defines a set of abstract interfaces (ABCs) that let you customize every aspect of graph execution — from LLM invocation and tool execution to scheduling, checkpointing, context management, and safety hooks. Each interface ships with a default implementation suitable for testing or single-process use; production deployments provide concrete adapters in the `services/` layer.
 
-The engine has **zero external dependencies** (except `jsonschema` for Graph DSL validation). All abstract interfaces live in `src/hecate/engine/`. In addition to the engine ABCs below, the plugin system defines **8 SPI types** (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) — see the [Plugin Manifest Schema](plugin-manifest.md).
+The engine has **zero external dependencies** (except `jsonschema` for Graph DSL validation). All abstract interfaces live in `src/hecate/engine/`. In addition to the engine ABCs below, the plugin system defines **multiple SPIs types** (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) — see the [Plugin Manifest Schema](plugin-manifest.md).
 
 ---
 

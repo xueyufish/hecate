@@ -89,7 +89,7 @@ Manage MCP servers at runtime via `GET/POST /api/mcp/...` (see `api/management/m
 
 ### MCP Server (Hecate exposes its own capabilities)
 
-When `MCP_SERVER_ENABLED=true`, Hecate mounts a FastMCP server at `/mcp` (see `services/mcp/server.py` and `main.py`). The server registers **16 tools**, **3 resources**, and **1 prompt** covering the core surface:
+When `MCP_SERVER_ENABLED=true`, Hecate mounts a FastMCP server at `/mcp` (see `services/mcp/server.py` and `main.py`). The server registers **many tools**, **multiple resources**, and **a prompt** covering the core surface:
 
 - **Tools** — `session_create`, `agent_chat`, knowledge base queries, tool invocation, and more.
 - **Resources** — `agent://list`, `knowledge://list`, `tool://list` for catalog discovery.

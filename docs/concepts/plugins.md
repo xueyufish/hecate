@@ -272,7 +272,7 @@ For the current state of plugin distribution, see [post-1.0].
 ## Related documents
 
 - [Extension SPI & Plugin Architecture](../design/extension-architecture.md) — implementation details, ABC signatures, full examples
-- [Extension Points Reference](../reference/extension-points.md) — API reference for all 26 engine extension interfaces + 8 plugin SPI types
+- [Extension Points Reference](../reference/extension-points.md) — API reference for all many engine extension interfaces + multiple plugin SPI types
 - [How-to: Develop Custom Extensions](../how-to/develop-extensions.md) — step-by-step practical recipe
 - [Tools, MCP, and A2A](tools-and-mcp.md) — when to use plugins vs MCP servers vs A2A agents
 -  — plugin marketplace and distribution are post-1.0

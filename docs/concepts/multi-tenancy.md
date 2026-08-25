@@ -64,7 +64,7 @@ This approach is called **data-level isolation**. It has two practical advantage
 
 Hecate uses data-level isolation because it scales to hundreds of Workspaces without operational overhead, while still providing the guarantees that matter: no cross-tenant data leakage through the application layer.
 
-The `workspace_id` column is currently present on 35 data models — including agents, workflows, knowledge bases, documents, tools, sessions, checkpoints, audit logs, budgets, alerts, and every other resource that holds tenant-scoped business content. The count grows as new workspace-scoped resources are added; queries are constructed from `workspace_id` joins on the authenticated request, so the database itself filters rows by tenant.
+The `workspace_id` column is currently present on many data models — including agents, workflows, knowledge bases, documents, tools, sessions, checkpoints, audit logs, budgets, alerts, and every other resource that holds tenant-scoped business content. The count grows as new workspace-scoped resources are added; queries are constructed from `workspace_id` joins on the authenticated request, so the database itself filters rows by tenant.
 
 ---
 
