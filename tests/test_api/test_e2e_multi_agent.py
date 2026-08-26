@@ -77,7 +77,7 @@ def test_multi_agent_linear_execution():
             events.append(event)
         return events
 
-    events = asyncio.get_event_loop().run_until_complete(_run())
+    events = asyncio.run(_run())
 
     assert len(events) >= 2
     executed_nodes = [e.get("node") for e in events if e.get("type") == "update"]
@@ -173,7 +173,7 @@ def test_multi_agent_mixed_node_types():
             events.append(event)
         return events
 
-    events = asyncio.get_event_loop().run_until_complete(_run())
+    events = asyncio.run(_run())
 
     executed_nodes = [e.get("node") for e in events if e.get("type") == "update"]
     assert "start" in executed_nodes

@@ -102,7 +102,7 @@ class TestSyslogMessage:
             return MockTransport(), None
 
         monkeypatch.setattr(
-            asyncio.get_event_loop(),
+            asyncio.get_running_loop(),
             "create_datagram_endpoint",
             mock_create_datagram,
         )

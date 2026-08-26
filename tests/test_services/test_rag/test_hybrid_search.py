@@ -89,8 +89,7 @@ def store() -> _InMemoryVectorStore:
     s = _InMemoryVectorStore()
     import asyncio
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(
+    asyncio.run(
         s.upsert(
             collection_name="test_collection",
             ids=["doc_1", "doc_2", "doc_3"],

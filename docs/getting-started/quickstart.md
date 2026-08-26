@@ -31,32 +31,37 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
-## Step 1 — Clone and install
+## Step 1 — Start infrastructure and install
+
+From the repo root, copy the environment template first — Docker Compose requires the `.env` file to exist (you will fill in the API keys in [Step 2](#step-2--configure-environment)):
 
 ```bash
-git clone https://github.com/xueyufish/hecate.git
-cd hecate
+git clone https://github.com/xueyufish/hecate.git && cd hecate
 
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-```
-
-This installs Hecate in editable mode with the dev dependencies (pytest, ruff, mypy). After this step, two console scripts are on your `PATH`:
-
-- `hecate` — the main CLI (agent / session / KB / tool management)
-- `hecate-migrate` — the standalone migration runner
-
----
-
-## Step 2 — Start infrastructure
-
-From the repo root, copy the environment template first — Docker Compose requires the `.env` file to exist (you will fill in the API keys in [Step 3](#step-3--configure-environment)):
-
-```bash
+# Create the .env file from the template (Docker Compose requires it; add your LLM API key here)
 cp .env.example .env
 
+# Start the infrastructure services (PostgreSQL, Qdrant, MinIO, Temporal)
 docker compose -f docker/docker-compose.yml up -d postgres qdrant minio temporal
+
+# Create the virtual environment only if missing (keeps re-runs non-interactive)
+[ -d .venv ] || uv venv
+# Activate the virtual environment
+source .venv/bin/activate
+# Install Hecate in editable mode with dev dependencies
+# (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
+uv pip install --prerelease=allow -e ".[dev]"
+
+# Apply database migrations
+alembic upgrade head
+
+# Sanity-check the setup before starting the server:
+hecate preflight
+# → [PASS] database: OK
+# → [PASS] alembic_head: ...
+# → [PASS] env_vars: all present
+# → [PASS] llm_credentials: found: ZAI_API_KEY
+# → Preflight PASSED.
 ```
 
 This starts the four infrastructure services with healthchecks:
@@ -78,20 +83,20 @@ All four should show `(healthy)` in the status column.
 
 ---
 
-## Step 3 — Configure environment
+## Step 2 — Configure environment
 
-You copied the template in Step 2. Open `.env` and fill in two values:
-
-Open `.env` and set:
+You copied the template in Step 1. Open `.env` and set the LLM provider key for the model you plan to call — Hecate routes chat through LiteLLM:
 
 ```dotenv
 # At minimum, set a Hecate API key (any string you choose — clients will send this)
 HECATE_API_KEYS=dev-key-change-me
 
-# Set at least one LLM provider key
-OPENAI_API_KEY=sk-...your-key...
+# Set the provider key for the model you want to use
+ZAI_API_KEY=...your-key...                  # for zai/glm-4.7-flash
 # or
-ANTHROPIC_API_KEY=sk-ant-...your-key...
+OPENAI_API_KEY=sk-...your-key...            # for gpt-4o
+# or
+ANTHROPIC_API_KEY=sk-ant-...your-key...     # for anthropic/claude-3-5-sonnet-20241022
 ```
 
 The defaults for `DATABASE_URL`, `QDRANT_URL`, `MINIO_URL`, and `POSTGRES_PASSWORD` already match the Docker Compose services — leave them unchanged.
@@ -115,7 +120,7 @@ HECATE_API_KEYS=dev-key-change-me
 DEEPSEEK_API_KEY=sk-your-deepseek-key
 ```
 
-Then in Step 6, pass the LiteLLM model prefix:
+Then in Step 4, pass the LiteLLM model prefix:
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
@@ -140,23 +145,7 @@ For providers not listed here, check the [LiteLLM provider documentation](https:
 
 ---
 
-## Step 4 — Run database migrations
-
-```bash
-alembic upgrade head
-```
-
-Or, equivalently, using the standalone migration runner (the same command Docker Compose uses internally):
-
-```bash
-hecate-migrate
-```
-
-You should see a sequence of `Running upgrade ... -> ...` lines ending at the current head.
-
----
-
-## Step 5 — Start the Hecate server
+## Step 3 — Start the Hecate server
 
 ```bash
 uvicorn hecate.main:app --reload
@@ -175,7 +164,7 @@ Open `http://localhost:8000/docs` in a browser for the interactive Swagger UI, o
 
 ---
 
-## Step 6 — Send your first chat request
+## Step 4 — Send your first chat request
 
 Hecate exposes an OpenAI-compatible `/v1/chat/completions` endpoint. With the API key you set in `.env`, send a one-shot chat:
 
@@ -184,7 +173,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "zai/glm-4.7-flash",
     "messages": [
       {"role": "user", "content": "Say hello in one sentence."}
     ]
@@ -193,11 +182,40 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 You should receive a JSON response shaped exactly like the OpenAI Chat Completions response — Hecate is a drop-in replacement at this endpoint.
 
-If you set `ANTHROPIC_API_KEY` instead, use a Claude model name with the `anthropic/` prefix in the `model` field (`anthropic/claude-3-5-sonnet-20241022`, etc.). Hecate routes the request to the right provider via LiteLLM. For other providers (DeepSeek, Qwen, GLM, Ollama, etc.), see [Using other LLM providers](#using-other-llm-providers) above.
+The `model` field must match a provider key in your `.env`: `zai/glm-4.7-flash` uses `ZAI_API_KEY`, `gpt-4o` uses `OPENAI_API_KEY`, and Anthropic models take the `anthropic/` prefix (`anthropic/claude-3-5-sonnet-20241022`, etc.). Hecate routes the request to the right provider via LiteLLM. For other providers (DeepSeek, Qwen, GLM, Ollama, etc.), see [Using other LLM providers](#using-other-llm-providers) above.
 
 ---
 
-## Step 7 — Create your first agent
+## Step 5 — Or use any OpenAI client (drop-in)
+
+Hecate's `/v1/chat/completions` is wire-compatible with OpenAI. Any existing OpenAI client works by pointing `base_url` at Hecate — no code rewrite. Hecate authenticates the request via the `api_key` you pass to the client; for local development the value from `HECATE_API_KEYS` in your `.env` is the simplest choice:
+
+```python
+from openai import OpenAI
+
+api_key = next(
+    line.split("=", 1)[1].strip().split(",", 1)[0]
+    for line in open(".env")
+    if line.startswith("HECATE_API_KEYS=")
+)
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",
+    api_key=api_key,
+)
+
+resp = client.chat.completions.create(
+    model="zai/glm-4.7-flash",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(resp.choices[0].message.content)
+```
+
+Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-index` — any client that speaks OpenAI's wire protocol.
+
+---
+
+## Step 6 — Create your first agent
 
 The `/api/agents` endpoint creates a managed agent. The simplest possible agent is a chat-mode agent with a persona and a model:
 
@@ -208,7 +226,7 @@ curl -X POST http://localhost:8000/api/agents \
   -d '{
     "name": "Quickstart Agent",
     "persona": "You are a concise, friendly assistant.",
-    "model_config": {"model": "gpt-4o-mini"},
+    "model_config": {"model": "zai/glm-4.7-flash"},
     "mode": "chat"
   }'
 ```
@@ -217,7 +235,7 @@ The response includes the new agent's `id` (a UUID). Copy it for the next step.
 
 ---
 
-## Step 8 — Chat with your agent
+## Step 7 — Chat with your agent
 
 Send a message to the agent you just created by passing its `id` as the `model` field. Hecate resolves the agent, loads its persona, tools, and knowledge bases, and runs the conversation through the Pregel runtime:
 
@@ -233,11 +251,11 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-Replace `<AGENT_ID>` with the UUID from Step 7. The response is the same OpenAI-compatible shape, but now produced by your configured agent — with its persona, tools, and any knowledge bases you attach.
+Replace `<AGENT_ID>` with the UUID from Step 6. The response is the same OpenAI-compatible shape, but now produced by your configured agent — with its persona, tools, and any knowledge bases you attach.
 
 ---
 
-## Step 9 — Stop and clean up
+## Step 8 — Stop and clean up
 
 Stop the Hecate server with `Ctrl+C` in the `uvicorn` terminal.
 

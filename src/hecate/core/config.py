@@ -3,11 +3,48 @@
 Loads settings from environment variables and an optional ``.env`` file,
 providing typed access to database, vector store, object storage, LLM, and
 security configuration across the entire application.
+
+This module also bridges ``.env`` values into ``os.environ`` so that
+third-party SDKs (LiteLLM and the providers it wraps) can read credentials
+the same way they do under Docker Compose's ``env_file:`` injection.
 """
 
 from __future__ import annotations
 
+import os
+from collections.abc import MutableMapping
+
+from dotenv import dotenv_values
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_FILE = ".env"
+
+
+def bridge_dotenv_to_environ(
+    env_file: str = _ENV_FILE,
+    environ: MutableMapping[str, str] | None = None,
+) -> int:
+    """Export ``.env`` values into the process environment.
+
+    pydantic-settings loads ``.env`` only into the ``Settings`` object, while
+    third-party SDKs (LiteLLM) read provider credentials from ``os.environ``
+    directly — without this bridge, keys placed in ``.env`` never reach them
+    when running on the host (Docker Compose performs the equivalent injection
+    via ``env_file:``).
+
+    Real environment variables always win; empty values are skipped so an
+    unset credential stays unset rather than becoming a blank string.
+
+    Returns:
+        Number of variables exported.
+    """
+    env = os.environ if environ is None else environ
+    exported = 0
+    for key, value in dotenv_values(env_file).items():
+        if value and key not in env:
+            env[key] = value
+            exported += 1
+    return exported
 
 
 class Settings(BaseSettings):
@@ -22,8 +59,10 @@ class Settings(BaseSettings):
     - **Object Storage**: ``MINIO_URL``, ``MINIO_ACCESS_KEY``,
       ``MINIO_SECRET_KEY``, ``MINIO_BUCKET`` — MinIO/S3-compatible storage
       for uploaded files and parsed documents.
-    - **LLM**: ``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY`` — API keys for LLM
-      providers.
+    - **LLM**: provider API keys (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``,
+      ``ZAI_API_KEY``, ...) are not Settings fields — they are consumed by
+      LiteLLM via ``os.environ`` and reach it through the module-level
+      ``.env`` bridge (see :func:`bridge_dotenv_to_environ`).
     - **Security**: ``HECATE_API_KEYS`` — comma-separated API keys for
       authenticating requests; ``LLM_GUARD_ENABLED`` — toggle input/output
       guardrails; ``RATE_LIMIT_RPM`` — per-key rate limit (requests per
@@ -31,7 +70,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -357,5 +396,9 @@ class Settings(BaseSettings):
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""
         return [k.strip() for k in self.HECATE_API_KEYS.split(",") if k.strip()]
 
+
+# Bridge .env into os.environ before Settings instantiation so the Settings
+# object and third-party SDKs (LiteLLM) observe the same credential values.
+bridge_dotenv_to_environ()
 
 settings = Settings()

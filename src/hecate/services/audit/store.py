@@ -15,6 +15,7 @@ import json
 import logging
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -151,7 +152,7 @@ class DatabaseAuditStore(AuditStore):
             offset = (filters.page - 1) * filters.page_size
             stmt = stmt.order_by(AuditLogModel.created_at.desc()).offset(offset).limit(filters.page_size)
             result = await session.execute(stmt)
-            rows = result.scalars().all()
+            rows: Sequence[AuditLogModel] = result.scalars().all()
 
             items = [AuditLogReadSchema.model_validate(row) for row in rows]
             return items, total
@@ -161,7 +162,7 @@ class DatabaseAuditStore(AuditStore):
         async with async_session_factory() as session:
             stmt = _build_query_with_filters(filters).order_by(AuditLogModel.created_at.desc())
             result = await session.execute(stmt)
-            rows = result.scalars().all()
+            rows: Sequence[AuditLogModel] = result.scalars().all()
 
             if fmt == "json":
                 items = [AuditLogReadSchema.model_validate(row).model_dump(mode="json") for row in rows]

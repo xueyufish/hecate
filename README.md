@@ -94,9 +94,18 @@ Get Hecate running in **~5 minutes**. **Prerequisites**: Docker, Python 3.12+, [
 
 ```bash
 git clone https://github.com/xueyufish/hecate.git && cd hecate
-cp .env.example .env       # required by Docker Compose; add your LLM API key here
+# Create the .env file from the template (Docker Compose requires it; add your LLM API key here)
+cp .env.example .env
+# Start the infrastructure services (PostgreSQL, Qdrant, MinIO, Temporal)
 docker compose -f docker/docker-compose.yml up -d postgres qdrant minio temporal
-uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
+# Create the virtual environment only if missing (keeps re-runs non-interactive)
+[ -d .venv ] || uv venv
+# Activate the virtual environment
+source .venv/bin/activate
+# Install Hecate in editable mode with dev dependencies
+# (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
+uv pip install --prerelease=allow -e ".[dev]"
+# Apply database migrations
 alembic upgrade head
 
 # Sanity-check the setup before starting the server:
@@ -124,12 +133,14 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer $(grep ^HECATE_API_KEYS .env | cut -d= -f2 | cut -d, -f1)" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o",
+    "model": "zai/glm-4.7-flash",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
 **Expected response**: a JSON object with `choices[0].message.content` containing a greeting. If you see that, Hecate is running.
+
+The `model` must match a provider key in your `.env` — Hecate routes via LiteLLM: `zai/glm-4.7-flash` uses `ZAI_API_KEY`, `gpt-4o` uses `OPENAI_API_KEY`, `anthropic/claude-3-5-sonnet-20241022` uses `ANTHROPIC_API_KEY`.
 
 For streaming responses (SSE), add `"stream": true`:
 
@@ -137,7 +148,7 @@ For streaming responses (SSE), add `"stream": true`:
 curl -N -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer $(grep ^HECATE_API_KEYS .env | cut -d= -f2 | cut -d, -f1)" \
   -H "Content-Type: application/json" \
-  -d '{"model": "gpt-4o", "stream": true, "messages": [{"role": "user", "content": "Hello!"}]}'
+  -d '{"model": "zai/glm-4.7-flash", "stream": true, "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
 `-N` disables curl buffering; tokens stream as they are generated.
@@ -161,7 +172,7 @@ client = OpenAI(
 )
 
 resp = client.chat.completions.create(
-    model="gpt-4o",
+    model="zai/glm-4.7-flash",
     messages=[{"role": "user", "content": "Hello!"}],
 )
 print(resp.choices[0].message.content)
