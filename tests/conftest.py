@@ -4,8 +4,9 @@ Provides a self-contained test infrastructure that keeps each test isolated:
 
 - **In-memory SQLite** via ``sqlite+aiosqlite://`` so no external database is
   required and tests run fast with zero side-effects.
-- **Session-scoped event loop** so ``pytest-asyncio`` shares one loop across
-  all async tests in a session, matching the library's recommended setup.
+- **Session-scoped event loop** — ``asyncio_default_*_loop_scope = "session"``
+  in ``pyproject.toml`` keeps every async test and fixture on one loop per
+  worker, matching the session-scoped engine and session factory below.
 - **Per-test database lifecycle** — ``setup_database`` creates all tables
   before each test and drops them afterwards, guaranteeing a clean schema.
 - **Rollback-after-yield session** so database mutations never leak between
@@ -16,11 +17,9 @@ Provides a self-contained test infrastructure that keeps each test isolated:
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -72,18 +71,6 @@ test_session_factory = async_sessionmaker(
 
 # Default workspace UUID for tests
 DEFAULT_WORKSPACE_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
-
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create a session-scoped event loop for all async tests.
-
-    Without this fixture pytest-asyncio would create a new loop per test,
-    which conflicts with the session-scoped engine and session factory above.
-    """
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
 
 
 @pytest_asyncio.fixture(autouse=True)

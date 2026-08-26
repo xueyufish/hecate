@@ -8,7 +8,8 @@ Hecate is an **enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent p
 
 ```bash
 # Install (uses uv + venv at .venv/)
-source .venv/bin/activate && uv pip install -e ".[dev]"
+# (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
+source .venv/bin/activate && uv pip install --prerelease=allow -e ".[dev]"
 
 # Run all tests (1713 tests, takes ~6 min)
 python -m pytest tests/ -q

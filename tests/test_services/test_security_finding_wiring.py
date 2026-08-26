@@ -38,7 +38,7 @@ class TestFindingWriterAdapter:
         # .write is async in adapter
         import asyncio
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             adapter.write(entity_type="X", value="v", start=0, end=1, score=1.0, recognizer="r", action="audit")
         )
         assert result == "ok"

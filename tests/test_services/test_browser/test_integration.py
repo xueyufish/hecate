@@ -10,10 +10,10 @@ Run locally with: ``pytest tests/test_services/test_browser/test_integration.py 
 
 from __future__ import annotations
 
-import asyncio
 import json
 import socket
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -58,7 +58,7 @@ def driver_url() -> str:
 
     server = ThreadingHTTPServer(("127.0.0.1", port), _DriverHandler)
     server.daemon_threads = True
-    asyncio.get_event_loop().run_in_executor(None, server.serve_forever)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{port}"
     server.shutdown()
     server.server_close()

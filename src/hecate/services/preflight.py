@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from dataclasses import dataclass
+
+# Credentials LiteLLM reads from os.environ; importing core.config bridges
+# .env values into os.environ, so this check sees both sources.
+LLM_CREDENTIAL_ENV_VARS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ZAI_API_KEY")
 
 
 @dataclass
@@ -76,6 +81,25 @@ async def _check_env_vars() -> CheckResult:
     return CheckResult(name="env_vars", passed=True, level="FAIL", detail="all present")
 
 
+async def _check_llm_credentials() -> CheckResult:
+    """Warn when no LLM provider credential is visible to the process.
+
+    WARN level: a deployment node may legitimately serve no LLM traffic, but
+    a quickstart host without any key will fail every chat request.
+    """
+    from hecate.core.config import settings  # noqa: F401  # import bridges .env into os.environ
+
+    detected = [v for v in LLM_CREDENTIAL_ENV_VARS if os.environ.get(v)]
+    if detected:
+        return CheckResult(name="llm_credentials", passed=True, level="WARN", detail=f"found: {', '.join(detected)}")
+    return CheckResult(
+        name="llm_credentials",
+        passed=False,
+        level="WARN",
+        detail=f"none of {', '.join(LLM_CREDENTIAL_ENV_VARS)} set — chat requests will fail",
+    )
+
+
 async def run_checks() -> list[CheckResult]:
     """Run all preflight checks and return results."""
     checks = await asyncio.gather(
@@ -84,6 +108,7 @@ async def run_checks() -> list[CheckResult]:
         _check_redis(),
         _check_disk_space(),
         _check_env_vars(),
+        _check_llm_credentials(),
     )
     return list(checks)
 

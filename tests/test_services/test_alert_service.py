@@ -276,5 +276,5 @@ class TestNotificationTemplates:
         dispatcher = NotificationDispatcher()
         import asyncio
 
-        results = asyncio.get_event_loop().run_until_complete(dispatcher.dispatch(event, rule, [channel]))
+        results = asyncio.run(dispatcher.dispatch(event, rule, [channel]))
         assert len(results) == 0

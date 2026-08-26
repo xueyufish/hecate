@@ -34,15 +34,20 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## Step 1 — Clone and install
 
 ```bash
+# Clone the repository and enter the project directory
 git clone https://github.com/xueyufish/hecate.git
 cd hecate
 
-uv venv
+# Create the virtual environment only if missing (keeps re-runs non-interactive)
+[ -d .venv ] || uv venv
+# Activate the virtual environment
 source .venv/bin/activate
-uv pip install -e ".[dev]"
+# Install Hecate in editable mode with dev dependencies
+# (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
+uv pip install --prerelease=allow -e ".[dev]"
 ```
 
-This installs Hecate in editable mode with the dev dependencies (pytest, ruff, mypy). After this step, two console scripts are on your `PATH`:
+This installs Hecate in editable mode with the dev dependencies (pytest, ruff, mypy). `--prerelease=allow` is needed while the pinned `fastmcp` is only available as a beta release — without it, uv refuses to resolve transitive pre-release dependencies. After this step, two console scripts are on your `PATH`:
 
 - `hecate` — the main CLI (agent / session / KB / tool management)
 - `hecate-migrate` — the standalone migration runner
@@ -184,7 +189,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gpt-4o-mini",
+    "model": "zai/glm-4.7-flash",
     "messages": [
       {"role": "user", "content": "Say hello in one sentence."}
     ]
@@ -193,7 +198,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 You should receive a JSON response shaped exactly like the OpenAI Chat Completions response — Hecate is a drop-in replacement at this endpoint.
 
-If you set `ANTHROPIC_API_KEY` instead, use a Claude model name with the `anthropic/` prefix in the `model` field (`anthropic/claude-3-5-sonnet-20241022`, etc.). Hecate routes the request to the right provider via LiteLLM. For other providers (DeepSeek, Qwen, GLM, Ollama, etc.), see [Using other LLM providers](#using-other-llm-providers) above.
+The `model` field must match a provider key in your `.env`: `zai/glm-4.7-flash` uses `ZAI_API_KEY`, `gpt-4o` uses `OPENAI_API_KEY`, and Anthropic models take the `anthropic/` prefix (`anthropic/claude-3-5-sonnet-20241022`, etc.). Hecate routes the request to the right provider via LiteLLM. For other providers (DeepSeek, Qwen, GLM, Ollama, etc.), see [Using other LLM providers](#using-other-llm-providers) above.
 
 ---
 
@@ -208,7 +213,7 @@ curl -X POST http://localhost:8000/api/agents \
   -d '{
     "name": "Quickstart Agent",
     "persona": "You are a concise, friendly assistant.",
-    "model_config": {"model": "gpt-4o-mini"},
+    "model_config": {"model": "zai/glm-4.7-flash"},
     "mode": "chat"
   }'
 ```

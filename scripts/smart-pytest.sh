@@ -41,6 +41,10 @@ while IFS= read -r f; do
         src/hecate/api/*)
             test_dirs="$test_dirs tests/test_api"
             ;;
+        tests/conftest.py)
+            echo "pytest: full suite (shared fixture change: $f)"
+            exec .venv/bin/python -m pytest tests/ -q --tb=short -x -n auto
+            ;;
         tests/*)
             dir=$(echo "$f" | cut -d/ -f1-2)
             test_dirs="$test_dirs $dir"
