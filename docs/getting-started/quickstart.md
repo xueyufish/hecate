@@ -34,15 +34,20 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ## Step 1 — Clone and install
 
 ```bash
+# Clone the repository and enter the project directory
 git clone https://github.com/xueyufish/hecate.git
 cd hecate
 
-uv venv
+# Create the virtual environment only if missing (keeps re-runs non-interactive)
+[ -d .venv ] || uv venv
+# Activate the virtual environment
 source .venv/bin/activate
-uv pip install -e ".[dev]"
+# Install Hecate in editable mode with dev dependencies
+# (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
+uv pip install --prerelease=allow -e ".[dev]"
 ```
 
-This installs Hecate in editable mode with the dev dependencies (pytest, ruff, mypy). After this step, two console scripts are on your `PATH`:
+This installs Hecate in editable mode with the dev dependencies (pytest, ruff, mypy). `--prerelease=allow` is needed while the pinned `fastmcp` is only available as a beta release — without it, uv refuses to resolve transitive pre-release dependencies. After this step, two console scripts are on your `PATH`:
 
 - `hecate` — the main CLI (agent / session / KB / tool management)
 - `hecate-migrate` — the standalone migration runner

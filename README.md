@@ -94,9 +94,18 @@ Get Hecate running in **~5 minutes**. **Prerequisites**: Docker, Python 3.12+, [
 
 ```bash
 git clone https://github.com/xueyufish/hecate.git && cd hecate
-cp .env.example .env       # required by Docker Compose; add your LLM API key here
+# Create the .env file from the template (Docker Compose requires it; add your LLM API key here)
+cp .env.example .env
+# Start the infrastructure services (PostgreSQL, Qdrant, MinIO, Temporal)
 docker compose -f docker/docker-compose.yml up -d postgres qdrant minio temporal
-uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
+# Create the virtual environment only if missing (keeps re-runs non-interactive)
+[ -d .venv ] || uv venv
+# Activate the virtual environment
+source .venv/bin/activate
+# Install Hecate in editable mode with dev dependencies
+# (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
+uv pip install --prerelease=allow -e ".[dev]"
+# Apply database migrations
 alembic upgrade head
 
 # Sanity-check the setup before starting the server:
