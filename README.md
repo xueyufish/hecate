@@ -83,14 +83,34 @@ Hecate is the **enterprise-grade agent operating system** for enterprises buildi
 
 | Goal | Where to start |
 |---|---|
-| 🧑‍💻 Build an agent runtime (Python API) | [Step 1 → 3](#step-1--start-infrastructure-and-install) below |
+| 🧑‍💻 Build an agent runtime (Python API) | [One-command install](#one-command-install-recommended) below |
 | 🎨 Compose agents visually (no code) | After install, open [web/](web/) (the visual canvas) |
 | 🔌 Add MCP / A2A integration | [Enable MCP Server](docs/how-to/enable-mcp-server.md) · [Enable A2A Server](docs/how-to/enable-a2a-server.md) |
 | 🏢 Deploy to production (K8s / multi-tenant) | [Deploy to production](docs/how-to/deploy-production.md) |
 
 Get Hecate running in **~5 minutes**. **Prerequisites**: Docker, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and an LLM API key (OpenAI, Anthropic, DeepSeek, Qwen, GLM, Ollama, or any [LiteLLM-supported provider](https://docs.litellm.ai/docs/providers)). **System requirements**: 2 CPU cores, 4 GB RAM (8 GB recommended), 10 GB disk. macOS, Linux, and WSL2 supported; native Windows is experimental. Full guide: [Quickstart](docs/getting-started/quickstart.md).
 
-### Step 1 — Start infrastructure and install
+### One-command install (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xueyufish/hecate/main/install.sh | bash
+```
+
+This bootstraps the repo, ensures `uv`, copies `.env.example`, **interactively asks for an LLM provider key**, starts Docker Compose infra, runs Alembic migrations, and ends with `hecate preflight`. Then start the server yourself with `uv run uvicorn hecate.main:app --reload`.
+
+> **By default the installer stops after validating the environment** — it does not auto-start the API server, so you can review `.env` first. Pass `--start-server` to additionally launch the `hecate` container and get Swagger live at `http://localhost:8000/docs`:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/xueyufish/hecate/main/install.sh | bash -s -- --start-server
+> ```
+
+Windows: use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and run the same command, or follow the manual steps below. See [`scripts/install.ps1`](scripts/install.ps1) for the (currently stub) native PowerShell installer.
+
+### Manual install (step-by-step)
+
+If you'd rather drive each step yourself, here is the long form.
+
+#### Step 1 — Start infrastructure and install
 
 ```bash
 git clone https://github.com/xueyufish/hecate.git && cd hecate
@@ -113,10 +133,11 @@ hecate preflight
 # → [PASS] database: OK
 # → [PASS] alembic_head: ...
 # → [PASS] env_vars: all present
+# → [PASS] llm_credentials: found: <your-provider-key>
 # → Preflight PASSED.
 ```
 
-### Step 2 — Start the server
+#### Step 2 — Start the server
 
 ```bash
 uvicorn hecate.main:app --reload
@@ -124,7 +145,7 @@ uvicorn hecate.main:app --reload
 
 Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactive API explorer (Swagger UI) and `/redoc`.
 
-### Step 3 — Send your first chat request
+#### Step 3 — Send your first chat request
 
 The API is **OpenAI-compatible** — any existing OpenAI client works by pointing `base_url` at Hecate. Hecate accepts JWT tokens, database-backed API keys, or any value in the `HECATE_API_KEYS` env var (default `dev-key-change-me`):
 
@@ -151,9 +172,9 @@ curl -N -X POST http://localhost:8000/v1/chat/completions \
   -d '{"model": "zai/glm-4.7-flash", "stream": true, "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-`-N` disables curl buffering; tokens stream as they are generated.
+`-N `disables curl buffering; tokens stream as they are generated.
 
-### Step 4 — Or use any OpenAI client (drop-in)
+#### Step 4 — Or use any OpenAI client (drop-in)
 
 Hecate's `/v1/chat/completions` is wire-compatible with OpenAI. Any existing OpenAI client works by pointing `base_url` at Hecate — no code rewrite. Hecate authenticates the request via the `api_key` you pass to the client; for local development the value from `HECATE_API_KEYS` in your `.env` is the simplest choice:
 

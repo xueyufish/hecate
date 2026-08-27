@@ -6,6 +6,15 @@ This guide starts Hecate on `http://localhost:8000` with PostgreSQL, Qdrant, and
 
 ---
 
+## Choose your path
+
+| If you want to... | Start here |
+|---|---|
+| **Get running in one command** | [One-command install](#one-command-install-recommended) below |
+| **Walk every step manually (and create your first agent)** | [Manual install (step-by-step)](#manual-install-step-by-step) below |
+
+---
+
 ## Prerequisites
 
 | Tool | Version | Why |
@@ -31,9 +40,29 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ---
 
-## Step 1 — Start infrastructure and install
+## One-command install (recommended)
 
-From the repo root, copy the environment template first — Docker Compose requires the `.env` file to exist (you will fill in the API keys in [Step 2](#step-2--configure-environment)):
+```bash
+curl -fsSL https://raw.githubusercontent.com/xueyufish/hecate/main/install.sh | bash
+```
+
+The installer bootstraps the repo, ensures `uv`, copies `.env.example`, **interactively asks for an LLM provider key**, starts Docker Compose infra, runs Alembic migrations, and ends with `hecate preflight`. Then start the server yourself with `uv run uvicorn hecate.main:app --reload`.
+
+> **By default the installer stops after validating the environment** — it does not auto-start the API server, so you can review `.env` first. Pass `--start-server` to additionally launch the `hecate` container and get Swagger live at `http://localhost:8000/docs`:
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/xueyufish/hecate/main/install.sh | bash -s -- --start-server
+> ```
+
+Windows: use [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and run the same command. A native PowerShell installer is tracked separately in [`scripts/install.ps1`](../../scripts/install.ps1) (currently a stub).
+
+---
+
+## Manual install (step-by-step)
+
+If you'd rather drive each step yourself, here is the long form. From the repo root, copy the environment template first — Docker Compose requires the `.env` file to exist (you will fill in the API keys in [Step 2](#step-2--configure-environment)).
+
+### Step 1 — Start infrastructure and install
 
 ```bash
 git clone https://github.com/xueyufish/hecate.git && cd hecate
@@ -81,9 +110,7 @@ docker compose -f docker/docker-compose.yml ps
 
 All four should show `(healthy)` in the status column.
 
----
-
-## Step 2 — Configure environment
+### Step 2 — Configure environment
 
 You copied the template in Step 1. Open `.env` and set the LLM provider key for the model you plan to call — Hecate routes chat through LiteLLM:
 
@@ -101,7 +128,7 @@ ANTHROPIC_API_KEY=sk-ant-...your-key...     # for anthropic/claude-3-5-sonnet-20
 
 The defaults for `DATABASE_URL`, `QDRANT_URL`, `MINIO_URL`, and `POSTGRES_PASSWORD` already match the Docker Compose services — leave them unchanged.
 
-### Using other LLM providers
+#### Using other LLM providers
 
 Hecate routes all LLM traffic through [LiteLLM](https://github.com/BerriAI/litellm), so you can use 100+ providers — including open-source models hosted on cloud APIs or running locally. Set the provider's API key in `.env`, then use the corresponding model prefix in your API requests.
 
@@ -143,9 +170,7 @@ No API key is needed — Hecate detects the `ollama/` prefix and routes to `http
 
 For providers not listed here, check the [LiteLLM provider documentation](https://docs.litellm.ai/docs/providers) for the correct env var and model prefix.
 
----
-
-## Step 3 — Start the Hecate server
+### Step 3 — Start the Hecate server
 
 ```bash
 uvicorn hecate.main:app --reload
@@ -162,9 +187,7 @@ INFO:     Application startup complete.
 
 Open `http://localhost:8000/docs` in a browser for the interactive Swagger UI, or `http://localhost:8000/redoc` for the ReDoc view.
 
----
-
-## Step 4 — Send your first chat request
+### Step 4 — Send your first chat request
 
 Hecate exposes an OpenAI-compatible `/v1/chat/completions` endpoint. With the API key you set in `.env`, send a one-shot chat:
 
@@ -184,9 +207,7 @@ You should receive a JSON response shaped exactly like the OpenAI Chat Completio
 
 The `model` field must match a provider key in your `.env`: `zai/glm-4.7-flash` uses `ZAI_API_KEY`, `gpt-4o` uses `OPENAI_API_KEY`, and Anthropic models take the `anthropic/` prefix (`anthropic/claude-3-5-sonnet-20241022`, etc.). Hecate routes the request to the right provider via LiteLLM. For other providers (DeepSeek, Qwen, GLM, Ollama, etc.), see [Using other LLM providers](#using-other-llm-providers) above.
 
----
-
-## Step 5 — Or use any OpenAI client (drop-in)
+### Step 5 — Or use any OpenAI client (drop-in)
 
 Hecate's `/v1/chat/completions` is wire-compatible with OpenAI. Any existing OpenAI client works by pointing `base_url` at Hecate — no code rewrite. Hecate authenticates the request via the `api_key` you pass to the client; for local development the value from `HECATE_API_KEYS` in your `.env` is the simplest choice:
 
@@ -213,9 +234,7 @@ print(resp.choices[0].message.content)
 
 Also works with `litellm`, `langchain-openai`, `instructor`, `vllm`, `llama-index` — any client that speaks OpenAI's wire protocol.
 
----
-
-## Step 6 — Create your first agent
+### Step 6 — Create your first agent
 
 The `/api/agents` endpoint creates a managed agent. The simplest possible agent is a chat-mode agent with a persona and a model:
 
@@ -233,9 +252,7 @@ curl -X POST http://localhost:8000/api/agents \
 
 The response includes the new agent's `id` (a UUID). Copy it for the next step.
 
----
-
-## Step 7 — Chat with your agent
+### Step 7 — Chat with your agent
 
 Send a message to the agent you just created by passing its `id` as the `model` field. Hecate resolves the agent, loads its persona, tools, and knowledge bases, and runs the conversation through the Pregel runtime:
 
@@ -253,9 +270,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 Replace `<AGENT_ID>` with the UUID from Step 6. The response is the same OpenAI-compatible shape, but now produced by your configured agent — with its persona, tools, and any knowledge bases you attach.
 
----
-
-## Step 8 — Stop and clean up
+### Step 8 — Stop and clean up
 
 Stop the Hecate server with `Ctrl+C` in the `uvicorn` terminal.
 

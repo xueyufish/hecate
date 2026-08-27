@@ -84,6 +84,11 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ../.env
+    # .env points DATABASE_URL at localhost, which inside the container
+    # is the container itself rather than the postgres service. Override
+    # with the docker-compose service name so migrations can connect.
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://hecate:hecate@postgres:5432/hecate
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,6 +109,8 @@ services:
       - "8000:8000"
     env_file:
       - ../.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://hecate:hecate@postgres:5432/hecate
     depends_on:
       postgres:
         condition: service_healthy
