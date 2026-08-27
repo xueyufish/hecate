@@ -88,6 +88,7 @@ from hecate.api.middleware import AuditMiddleware
 from hecate.api.schedules import router as schedules_router
 from hecate.api.security_findings import router as security_findings_router
 from hecate.api.tool_decisions import router as tool_decisions_router
+from hecate.api.v1.agents import router as agent_chat_router
 from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
 from hecate.auth.sso_routes import router as sso_router
@@ -683,6 +684,7 @@ app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(evaluation_router, prefix="/api", tags=["evaluation"])
 app.include_router(chat_router, prefix="/v1", tags=["chat"])
 app.include_router(models_router, prefix="/v1", tags=["models"])
+app.include_router(agent_chat_router, prefix="/v1", tags=["agents"])
 app.include_router(agents_router, prefix="/api", tags=["agents"])
 app.include_router(replay_router, prefix="/api", tags=["replay"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])

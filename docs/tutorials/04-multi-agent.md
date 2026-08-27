@@ -280,16 +280,15 @@ Save the agent's `id`. Chat requests addressed to this agent now flow through th
 
 ## Step 9 — Run the workflow via chat
 
-Same `/v1/chat/completions` endpoint you've used in earlier tutorials — just point at the workflow agent:
+Same `/v1/agents/<WORKFLOW_AGENT_ID>/chat/completions` endpoint you've used in earlier tutorials — just point at the workflow agent:
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/<WORKFLOW_AGENT_ID>",
     "messages": [
-      {"role": "user", "content": "I cannot log in to my account since this morning."}
+      {"role": "user", "content": "I cannot log in to my account since this morning."
     ]
   }'
 ```
@@ -299,13 +298,12 @@ The router classifies this as "account" and hands off to the account specialist.
 For a different intent:
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/<WORKFLOW_AGENT_ID>/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/<WORKFLOW_AGENT_ID>",
     "messages": [
-      {"role": "user", "content": "Your API is throwing 500 errors intermittently."}
+      {"role": "user", "content": "Your API is throwing 500 errors intermittently."
     ]
   }'
 ```

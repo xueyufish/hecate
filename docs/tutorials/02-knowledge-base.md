@@ -321,16 +321,15 @@ curl -X POST http://localhost:8000/api/agents \
   }'
 ```
 
-Copy the new agent's `id` and chat with it via the standard `/v1/chat/completions` endpoint (same as Tutorial 01):
+Copy the new agent's `id` and chat with it via the standard `/v1/agents/<AGENT_ID>/chat/completions` endpoint (same as Tutorial 01):
 
 ```bash
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/<AGENT_ID>",
     "messages": [
-      {"role": "user", "content": "How does Hecate achieve zero-downtime deployment?"}
+      {"role": "user", "content": "How does Hecate achieve zero-downtime deployment?"
     ]
   }'
 ```
@@ -366,12 +365,11 @@ The `KnowledgeWorker` runs in parallel with other engine workers — RAG latency
 Sometimes an agent should answer from a different KB depending on the conversation. Pass `kb_ids` directly in the chat request to override:
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/<AGENT_ID>/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/<AGENT_ID>",
-    "messages": [{"role": "user", "content": "What does the engine ADR-005 say about worker pools?"}],
+    "messages": [{"role": "user", "content": "What does the engine ADR-005 say about worker pools?"],
     "kb_ids": ["<some-other-kb-id>"]
   }'
 ```

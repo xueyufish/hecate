@@ -25,7 +25,8 @@ A drop-in replacement for the OpenAI Chat Completions and Models APIs. Point any
 
 | Route | Method | Purpose |
 |-------|--------|---------|
-| `/v1/chat/completions` | POST | Chat completion — resolves an OpenAI model name **or** `agent/<AGENT_ID>` to a configured agent and runs it through the Pregel runtime |
+| `/v1/chat/completions` | POST | Chat completion — resolves an OpenAI model name (e.g., `zai/glm-4-flash`, `gpt-4o`) and routes through the configured LLM provider. Use `/v1/agents/{id}/chat/completions` to invoke a Hecate agent. |
+| `/v1/agents/{agent_id}/chat/completions` | POST | Invoke a Hecate agent by ID. Body is OpenAI Chat Completions shape (the `model` field is accepted but ignored — the URL `agent_id` is authoritative). Streams and non-streams both supported. |
 | `/v1/models` | GET | List available models (provider models + registered agents) |
 
 See [Quickstart Step 6–8](../getting-started/quickstart.md#step-6--send-your-first-chat-request) for worked examples.

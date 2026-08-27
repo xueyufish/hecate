@@ -167,19 +167,20 @@ hecate agent get a1b2c3d4-e5f6-7890-abcd-ef1234567890
 
 ## Step 4 — Chat with your agent
 
-Hecate exposes an OpenAI-compatible endpoint at `POST /v1/chat/completions`. To address a specific agent, use `agent/<AGENT_ID>` as the `model` field:
+Hecate exposes an OpenAI-compatible endpoint at `POST /v1/agents/{agent_id}/chat/completions`. The agent ID in the URL path is authoritative — Hecate loads its persona, tools, and knowledge bases, then forwards to the LLM configured in `model_config.model`:
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/a1b2c3d4-e5f6-7890-abcd-ef1234567890/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "messages": [
       {"role": "user", "content": "My Docker container keeps exiting with code 137. What does that mean?"}
     ]
   }'
 ```
+
+The body's `model` field, if present, is accepted (so the OpenAI Python SDK can be pointed at this endpoint unchanged) but ignored — the agent ID in the URL wins.
 
 The response follows the standard OpenAI Chat Completions format. Hecate resolved the agent, injected its `persona` as the system prompt, and forwarded the request to the LLM specified in `model_config`:
 
@@ -241,13 +242,12 @@ hecate agent update a1b2c3d4-e5f6-7890-abcd-ef1234567890 --tools web_search
 ### Ask a question that triggers a search
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/a1b2c3d4-e5f6-7890-abcd-ef1234567890/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "messages": [
-      {"role": "user", "content": "What is the latest stable version of Python? Search the web if you're not sure."}
+      {"role": "user", "content": "What is the latest stable version of Python? Search the web if you're not sure."
     ]
   }'
 ```
@@ -264,25 +264,23 @@ Without a session, every request is independent — the agent has no memory of p
 
 ```bash
 # First message — establishes the session
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/a1b2c3d4-e5f6-7890-abcd-ef1234567890/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "messages": [
-      {"role": "user", "content": "I have a Python Flask app that won't start. The error says 'Address already in use'."}
+      {"role": "user", "content": "I have a Python Flask app that won't start. The error says 'Address already in use'."
     ],
     "session_id": "550e8400-e29b-41d4-a716-446655440000"
   }'
 
 # Follow-up — the agent remembers the context
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/a1b2c3d4-e5f6-7890-abcd-ef1234567890/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "messages": [
-      {"role": "user", "content": "I tried killing the process. How do I prevent this from happening again?"}
+      {"role": "user", "content": "I tried killing the process. How do I prevent this from happening again?"
     ],
     "session_id": "550e8400-e29b-41d4-a716-446655440000"
   }'
@@ -397,8 +395,8 @@ Deletion is soft — the record stays in the database but is hidden from list vi
 ┌──────────────────────────────────────────────────────────┐
 │  Client (curl / hecate CLI / OpenAI SDK)                 │
 └──────────────────────┬───────────────────────────────────┘
-                       │  POST /v1/chat/completions
-                       │  model: "agent/<AGENT_ID>"
+                       │  POST /v1/agents/<AGENT_ID>/chat/completions
+                       │  body: { messages: [...] }
                        ▼
 ┌──────────────────────────────────────────────────────────┐
 │  Hecate API Layer                                        │
@@ -432,9 +430,13 @@ Deletion is soft — the record stays in the database but is hidden from list vi
 
 ## Troubleshooting
 
-### Chat returns 404 for `agent/<AGENT_ID>`
+### Chat returns 404 for `/v1/agents/{id}/chat/completions`
 
 The agent ID is wrong, or the agent was deleted. Run `hecate agent list` to verify the ID. Agent IDs are UUIDs — make sure there are no typos or truncation.
+
+### Chat returns 400 `DEPRECATED_ROUTING` 
+
+You're using the legacy `model: "agent/<UUID>"` form on `POST /v1/chat/completions`. Replace with `POST /v1/agents/<UUID>/chat/completions` (agent ID in the URL path, no `model` field needed). The response body includes the new endpoint under `error.details.new_endpoint`.
 
 ### Tool calls never happen
 
@@ -446,7 +448,7 @@ The `web_search` tool requires a search provider backend. Set `SEARCH_PROVIDER` 
 
 ### Agent responses don't reflect the persona
 
-Make sure you're using `model: "agent/<AGENT_ID>"` — not a bare model name. A bare model name like `"gpt-4o-mini"` bypasses agent configuration entirely and calls the LLM directly.
+Make sure you're calling `POST /v1/agents/<AGENT_ID>/chat/completions` (agent ID in the URL path) — not `POST /v1/chat/completions` with a bare model name. The bare model name (e.g. `"gpt-4o-mini"`) bypasses agent configuration entirely and calls the LLM directly without persona, tools, or knowledge bases.
 
 ---
 

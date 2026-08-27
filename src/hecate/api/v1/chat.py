@@ -195,6 +195,36 @@ async def create_chat_completion(
         )
 
 
+async def _resolve_agent(
+    agent_uuid: uuid.UUID,
+    msg_dicts: list[dict[str, Any]],
+    db: AsyncSession,
+) -> tuple[str, list[dict[str, Any]], AgentModel]:
+    """Load an agent by UUID and prepare the messages-with-persona context.
+
+    Returns:
+        Tuple of ``(effective_model, msg_dicts_with_persona, agent)``.
+        ``effective_model`` comes from the agent's ``model_config.model``;
+        ``msg_dicts_with_persona`` is a copy of the input with the agent's
+        persona injected as the first system message when the caller did
+        not supply one.
+    """
+    from fastapi import HTTPException
+
+    agent_row = await db.execute(select(AgentModel).where(AgentModel.id == agent_uuid, ~AgentModel.deleted))
+    agent = agent_row.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {agent_uuid}")
+    agent_cfg = agent.model_config_db or {}
+    resolved_model = agent_cfg.get("model") if isinstance(agent_cfg, dict) else getattr(agent_cfg, "model", None)
+    if not resolved_model:
+        raise HTTPException(status_code=500, detail="Agent has no model_config.model configured")
+    out_msgs = list(msg_dicts)
+    if agent.persona and not any(m.get("role") == "system" for m in out_msgs):
+        out_msgs.insert(0, {"role": "system", "content": agent.persona})
+    return resolved_model, out_msgs, agent
+
+
 async def _process_chat(
     request: ChatCompletionRequest,
     db: AsyncSession,
@@ -203,31 +233,56 @@ async def _process_chat(
     event_store: EventStore | None = None,
     session_state_store: SessionStateStore | None = None,
     dlp_scanner: Any = None,
+    *,
+    preloaded_agent: AgentModel | None = None,
 ) -> dict | StreamingResponse:
-    """Process a chat completion request via WorkflowExecutionService."""
+    """Process a chat completion request via WorkflowExecutionService.
+
+    Agent resolution is split across two entry points:
+
+    - ``POST /v1/chat/completions`` — raw LLM call. ``request.model`` is the
+      upstream model id; passing the legacy ``agent/<UUID>`` string here is
+      rejected with a 400 redirecting to the agent endpoint.
+    - ``POST /v1/agents/{agent_id}/chat/completions`` — the caller loads the
+      agent from the URL and passes it via ``preloaded_agent``. ``request.model``
+      is ignored; the agent's ``model_config.model`` is authoritative.
+    """
     msg_dicts = _messages_to_dicts(request.messages)
 
-    # Resolve "agent/<id>": load the agent, use its model_config.model, inject persona.
-    effective_model = request.model
-    agent_uuid: uuid.UUID | None = None
-    agent: AgentModel | None = None
-    if request.model.startswith("agent/"):
+    # Reject the legacy model-string agent routing. Use /v1/agents/{id}/chat/completions.
+    # Only enforce on the raw /v1/chat/completions path; the agent endpoint
+    # already passes preloaded_agent, and the placeholder model string it
+    # forwards must not trip this check.
+    if request.model.startswith("agent/") and preloaded_agent is None:
         from fastapi import HTTPException
 
-        agent_id_str = request.model.removeprefix("agent/").strip()
-        try:
-            agent_uuid = uuid.UUID(agent_id_str)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail=f"Invalid agent id in model field: {agent_id_str}") from exc
-        agent_row = await db.execute(select(AgentModel).where(AgentModel.id == agent_uuid, ~AgentModel.deleted))
-        agent = agent_row.scalar_one_or_none()
-        if agent is None:
-            raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id_str}")
+        legacy_agent_id = request.model.removeprefix("agent/").strip()
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "DEPRECATED_ROUTING",
+                    "message": (
+                        "The 'agent/<UUID>' model-string routing is no longer supported. "
+                        "Use POST /v1/agents/{agent_id}/chat/completions instead — the "
+                        "agent_id now goes in the URL path."
+                    ),
+                    "details": {
+                        "agent_id": legacy_agent_id,
+                        "new_endpoint": f"/v1/agents/{legacy_agent_id}/chat/completions",
+                    },
+                }
+            },
+        )
+
+    effective_model = request.model
+    agent: AgentModel | None = preloaded_agent
+    agent_uuid: uuid.UUID | None = agent.id if agent is not None else None
+    if agent is not None:
         agent_cfg = agent.model_config_db or {}
         resolved_model = agent_cfg.get("model") if isinstance(agent_cfg, dict) else getattr(agent_cfg, "model", None)
-        if not resolved_model:
-            raise HTTPException(status_code=500, detail="Agent has no model_config.model configured")
-        effective_model = resolved_model
+        if resolved_model:
+            effective_model = resolved_model
         if agent.persona and not any(m.get("role") == "system" for m in msg_dicts):
             msg_dicts.insert(0, {"role": "system", "content": agent.persona})
 
@@ -272,7 +327,7 @@ async def _process_chat(
             db,
             workspace_id=workspace_id,
             agent_id=parsed_agent_id if isinstance(parsed_agent_id, uuid.UUID) else None,
-            guardrail_config=getattr(agent_row, "guardrail_config", None) if agent_row else None,
+            guardrail_config=getattr(agent, "guardrail_config", None) if agent else None,
             event_store=event_store,
             session_id=uuid.UUID(request.session_id) if request.session_id else None,
             # 9.10 wiring: the scanner reaches the output/tool-result hooks,
