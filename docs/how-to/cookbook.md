@@ -42,12 +42,11 @@ curl -X POST http://localhost:8000/api/agents \
 ### Step 3 — Chat with it
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/<agent-id-from-step-2>/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/<agent-id-from-step-2>",
-    "messages": [{"role": "user", "content": "What are the latest developments in fusion energy?"}]
+    "messages": [{"role": "user", "content": "What are the latest developments in fusion energy?"]
   }'
 ```
 
@@ -132,12 +131,11 @@ If `gpt-4o` fails (rate limit, timeout, outage), the [Model Hub](../concepts/mod
 For real-time token-by-token output (chat UIs, voice assistants):
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/<agent-id>/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/<agent-id>",
-    "messages": [{"role": "user", "content": "Explain Pregel in three sentences."}],
+    "messages": [{"role": "user", "content": "Explain Pregel in three sentences."],
     "stream": true
   }'
 ```

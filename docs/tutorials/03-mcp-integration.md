@@ -208,13 +208,12 @@ You can mix sources freely — reference builtin, custom, and MCP tools in the s
 Send a chat request that requires GitHub access:
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/<AGENT_ID>/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/<AGENT_ID>",
     "messages": [
-      {"role": "user", "content": "Find the top 3 most-starred Python repositories for MCP servers."}
+      {"role": "user", "content": "Find the top 3 most-starred Python repositories for MCP servers."
     ]
   }'
 ```

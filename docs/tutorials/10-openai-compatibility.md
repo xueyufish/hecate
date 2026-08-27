@@ -19,7 +19,7 @@ This tutorial covers the five common OpenAI-API patterns: chat, streaming, funct
 - How to use **streaming** (`stream=True`) and consume SSE
 - How **function calling / tool use** works through Hecate's MCP and custom tools
 - How to request **structured outputs** (`response_format`)
-- How Hecate's model routing extends OpenAI's `model` field with `agent/<id>` and `provider/<id>`
+- How Hecate's URL-path agent endpoint (`/v1/agents/{agent_id}/chat/completions`) extends OpenAI's drop-in compatibility to invoke configured agents
 - What Hecate exposes at `/v1/models` and what it does not (no `/v1/embeddings` — embeddings are KB-internal)
 
 ## Prerequisites
@@ -156,15 +156,21 @@ If your agent already has tools bound (`web_search`, MCP servers, custom tools),
 
 ```python
 # Assumes agent has web_search bound (see Tutorial 01 Step 5)
-resp = client.chat.completions.create(
-    model="agent/<AGENT_ID>",   # routes to a specific Hecate agent
+# The agent_id goes in `base_url`; the OpenAI SDK then POSTs to
+# /v1/agents/{agent_id}/chat/completions automatically.
+agent_client = OpenAI(
+    base_url=f"http://localhost:8000/v1/agents/{AGENT_ID}",
+    api_key="dev-key-change-me",
+)
+resp = agent_client.chat.completions.create(
+    model="ignored",  # any value — agent_id in base_url is authoritative
     messages=[{"role": "user", "content": "What's the latest Python release?"}],
     # No `tools=` arg needed — Hecate injects them automatically
 )
 print(resp.choices[0].message.content)
 ```
 
-The `agent/<id>` model name is a Hecate extension to the OpenAI protocol. See [Step 7 — Hecate extensions](#step-7--hecate-extensions-to-the-openai-protocol) below.
+The Hecate URL-path agent endpoint extends OpenAI's drop-in compat: `POST /v1/agents/{agent_id}/chat/completions` accepts the standard Chat Completions body. See [Step 7 — Hecate extensions](#step-7--hecate-extensions-to-the-openai-protocol) below.
 
 ---
 
@@ -202,38 +208,36 @@ Hecate passes `response_format` through to the upstream provider. **Supported by
 
 ## Step 7 — Hecate extensions to the OpenAI protocol
 
-Hecate supports two extra "model" values beyond standard LLM names. These are extensions to the OpenAI protocol and work with **any** OpenAI-compatible client:
+Hecate exposes one extra endpoint on top of OpenAI's `/v1/chat/completions`: a URL-path agent endpoint at `/v1/agents/{agent_id}/chat/completions`. This is an extension to the OpenAI protocol and works with **any** OpenAI-compatible client — the SDK just needs to point `base_url` at the agent-specific path.
 
-### `agent/<AGENT_ID>` — route to a configured agent
+### `/v1/agents/{agent_id}/chat/completions` — invoke a configured agent
 
 ```python
-resp = client.chat.completions.create(
-    model="agent/a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+# Per-agent client (use a separate OpenAI instance, or just swap base_url)
+agent_client = OpenAI(
+    base_url=f"http://localhost:8000/v1/agents/{agent_id}",
+    api_key="dev-key-change-me",
+)
+resp = agent_client.chat.completions.create(
+    model="ignored",  # any value — agent_id in the URL is authoritative
     messages=[{"role": "user", "content": "Explain this codebase."}],
 )
 ```
 
 Hecate loads the agent's `persona`, `model_config`, `tools`, `skills`, and `knowledge_base_ids`, then dispatches. The response carries the upstream LLM's actual model name in `model` (e.g. `"gpt-4o-mini"`) so client-side billing/logging stays accurate.
 
-### `provider/<PROVIDER_ID>` — bypass agents, use a specific provider config
+The body's `model` field is accepted (for OpenAI SDK compatibility) but ignored — `agent_id` in the URL path is the source of truth. Streaming, function calling, and structured outputs all work the same as on the LLM endpoint.
 
-```python
-# Use a pre-configured provider with non-default settings
-resp = client.chat.completions.create(
-    model="provider/team-gpt4-cheap",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-```
-
-Configure providers via:
+`curl` works too:
 
 ```bash
-hecate model provider list
-hecate model provider get team-gpt4-cheap
-hecate model provider update team-gpt4-cheap --temperature 0.7 --max-tokens 4096
+curl -X POST http://localhost:8000/v1/agents/<AGENT_ID>/chat/completions \
+  -H "Authorization: Bearer dev-key-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "Hello"}]}'
 ```
 
-Provider configs are managed by admins; useful for routing different requests to different models/cost tiers.
+For the Hecate CLI (`hecate chat send <AGENT_ID> ...`), see [Tutorial 01](01-first-agent.md).
 
 ---
 
@@ -256,33 +260,41 @@ The same `base_url` trick works for every library that supports a custom base UR
 ## How it fits together
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Any OpenAI-compatible client                                │
-│  (openai-python / litellm / langchain-openai / ...)          │
-│                                                              │
-│  base_url = http://localhost:8000/v1                          │
-│  api_key  = dev-key-change-me (Hecate API key)                │
-└──────────────────────┬───────────────────────────────────────┘
-                       │  POST /v1/chat/completions
-                       │  model: "gpt-4o-mini" | "agent/<id>" | ...
-                       ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Hecate API Layer                                            │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  Resolve model spec                                  │  │
-│  │   • "gpt-4o-mini"            → upstream provider       │  │
-│  │   • "agent/<id>"             → load Agent config       │  │
-│  │   • "provider/<id>"          → load Provider config    │  │
-│  └─────────────────────┬──────────────────────────────────┘  │
-│                        ▼                                     │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │  LiteLLM proxy                                        │  │
-│  │  Routes to: OpenAI / Anthropic / DeepSeek / Qwen /  │  │
-│  │              Ollama / vLLM / 100+ providers           │  │
-│  └─────────────────────┬──────────────────────────────────┘  │
-│                        ▼                                     │
-│  OpenAI-format response (unchanged shape — drop-in)           │
-└──────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Any OpenAI-compatible client                                          │
+│  (openai-python / litellm / langchain-openai / ...)                    │
+│                                                                       │
+│  LLM calls:    base_url = http://localhost:8000/v1                     │
+│  Agent calls:  base_url = http://localhost:8000/v1/agents/<AGENT_ID>  │
+│  api_key      = dev-key-change-me (Hecate API key)                     │
+└────────────────────────────────┬────────────────────────────────────┘
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Hecate API Layer                                                      │
+│                                                                       │
+│  /v1/chat/completions                  /v1/agents/{id}/chat/completions  │
+│  ┌──────────────────────┐             ┌──────────────────────────┐    │
+│  │ model field selects   │             │ URL path identifies the   │    │
+│  │ upstream provider     │             │ agent                      │    │
+│  │ (e.g. gpt-4o-mini)    │             │ body model field ignored   │    │
+│  └──────────┬───────────┘             └─────────────┬────────────┘    │
+│             ▼                                      ▼                  │
+│             └──────────────┬───────────────────────┘                  │
+│                            ▼                                          │
+│  ┌──────────────────────────────────────────────────────────┐         │
+│  │  Hecate loads agent (persona, tools, skills, KBs)         │         │
+│  │  and dispatches to the LLM configured in the agent.       │         │
+│  └─────────────────────────┬────────────────────────────────┘         │
+│                            ▼                                          │
+│  ┌──────────────────────────────────────────────────────────┐         │
+│  │  LiteLLM proxy                                          │         │
+│  │  Routes to: OpenAI / Anthropic / DeepSeek / Qwen /      │         │
+│  │              Ollama / vLLM / 100+ providers               │         │
+│  └─────────────────────────┬────────────────────────────────┘         │
+│                            ▼                                          │
+│  OpenAI-format response (unchanged shape — drop-in)                    │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -293,9 +305,13 @@ The same `base_url` trick works for every library that supports a custom base UR
 
 Wrong `api_key`. Confirm it's the **Hecate** API key (`HECATE_API_KEYS=...`), not your OpenAI key. Hecate doesn't validate upstream provider keys against the client request.
 
-### `openai.NotFoundError` (404) on `model: "agent/<id>"`
+### `openai.NotFoundError` (404) on `/v1/agents/{id}/chat/completions`
 
-The agent ID is wrong, soft-deleted, or belongs to a different workspace. Run `hecate agent list` to verify.
+The agent ID in the URL is wrong, soft-deleted, or belongs to a different workspace. Run `hecate agent list` to verify the ID is correct and the agent is not deleted.
+
+### `openai.BadRequestError` (400) on `model: "agent/<id>"`
+
+The legacy `model: "agent/<UUID>"` form is no longer supported. Replace the call with `POST /v1/agents/<UUID>/chat/completions` (agent ID in the URL path, no `model` field needed). See [Step 7](#step-7--hecate-extensions-to-the-openai-protocol).
 
 ### Streaming returns nothing
 
@@ -317,8 +333,7 @@ You now know how to:
 
 - **Point any OpenAI client at Hecate** by setting `base_url` to `http://localhost:8000/v1`
 - **Use multi-turn chat, streaming, function calling, structured outputs** — all via OpenAI's wire protocol
-- **Route to a specific Hecate agent** via the `agent/<id>` extension
-- **Use a configured provider** via the `provider/<id>` extension
+- **Invoke a Hecate agent** by pointing `base_url` at `/v1/agents/{agent_id}` (the OpenAI SDK then POSTs to `/v1/agents/{agent_id}/chat/completions` automatically)
 - **Plug into litellm / langchain-openai / instructor / vllm / llama-index** with the same one-line change
 
 > **Note on embeddings** — Hecate does not expose `/v1/embeddings` as a public endpoint. Embeddings are computed internally when you upload documents to a knowledge base (default model: BGE-M3, 1024-dim). For RAG, see [Knowledge Base and RAG](02-knowledge-base.md). To call an OpenAI embedding model directly, route through your upstream provider (e.g., openai.com) using your existing OpenAI key.

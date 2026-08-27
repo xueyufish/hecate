@@ -32,14 +32,13 @@ def send(
     client = HecateClient(get_profile_name())
 
     body: dict = {
-        "model": f"agent/{agent_id}",
         "messages": [{"role": "user", "content": message}],
         "stream": False,
     }
     if session_id:
         body["session_id"] = session_id
 
-    result = client.post("/v1/chat/completions", json=body)
+    result = client.post(f"/v1/agents/{agent_id}/chat/completions", json=body)
     if result and "choices" in result:
         content = result["choices"][0].get("message", {}).get("content", "")
         console.print(Panel(content, title="Agent Response"))
@@ -95,7 +94,6 @@ def interactive_chat(
         # Build messages
         history.append({"role": "user", "content": user_input})
         body: dict = {
-            "model": f"agent/{agent_id}",
             "messages": list(history),
             "stream": True,
         }
@@ -107,7 +105,7 @@ def interactive_chat(
         full_content = ""
         last_data: dict = {}
         try:
-            for data_str in client.stream_request("POST", "/v1/chat/completions", json=body):
+            for data_str in client.stream_request("POST", f"/v1/agents/{agent_id}/chat/completions", json=body):
                 try:
                     last_data = json.loads(data_str)
                     delta = last_data.get("choices", [{}])[0].get("delta", {})

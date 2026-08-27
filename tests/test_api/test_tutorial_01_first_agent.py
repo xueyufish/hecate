@@ -148,10 +148,11 @@ class TestStep3ListAndGet:
 
 
 # --------------------------------------------------------------------------- #
-# Step 4 — Chat with an agent (model: "agent/<id>")
+# Step 4 — Chat with an agent (POST /v1/agents/{id}/chat/completions)
 # --------------------------------------------------------------------------- #
 class TestStep4ChatWithAgent:
-    async def test_agent_prefix_resolves_and_injects_persona(self, client):
+    async def test_url_path_agent_id_resolves_and_injects_persona(self, client):
+        """The URL-path agent_id is authoritative; agent's persona is injected."""
         create = await client.post(
             "/api/agents",
             json={
@@ -166,9 +167,8 @@ class TestStep4ChatWithAgent:
         with patch("hecate.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=_mock_llm("Exit code 137 means SIGKILL..."))
             response = await client.post(
-                "/v1/chat/completions",
+                f"/v1/agents/{agent_id}/chat/completions",
                 json={
-                    "model": f"agent/{agent_id}",
                     "messages": [{"role": "user", "content": "Container exits with 137?"}],
                 },
             )
@@ -184,11 +184,40 @@ class TestStep4ChatWithAgent:
         # The effective model must come from the agent config, not the request.
         assert mock_llm.chat.call_args.kwargs["model"] == "gpt-4o-mini"
 
-    async def test_bare_uuid_model_is_not_resolved_as_agent(self, client):
-        """A bare UUID (no ``agent/`` prefix) is treated as a raw model name.
+    async def test_body_model_field_is_ignored(self, client):
+        """The body's `model` field is accepted (OpenAI SDK compat) but ignored.
 
-        This documents why ``hecate chat`` (which sends a bare agent id) fails.
+        The agent_id in the URL path is authoritative.
         """
+        create = await client.post(
+            "/api/agents",
+            json={
+                "name": "X",
+                "persona": "persona text",
+                "model_config": {"model": "gpt-4o-mini"},
+                "mode": "chat",
+            },
+        )
+        agent_id = create.json()["id"]
+
+        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+            mock_llm.chat = AsyncMock(return_value=_mock_llm())
+            await client.post(
+                f"/v1/agents/{agent_id}/chat/completions",
+                json={
+                    "model": "ignored-by-server",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+        called_messages = mock_llm.chat.call_args.kwargs["messages"]
+        # Persona IS injected because the URL-path agent_id resolved the agent.
+        assert called_messages[0]["role"] == "system"
+        # The effective model is the agent's configured model, NOT the body's model.
+        assert mock_llm.chat.call_args.kwargs["model"] == "gpt-4o-mini"
+
+    async def test_bare_uuid_model_on_raw_chat_endpoint_is_not_resolved(self, client):
+        """On /v1/chat/completions, a bare UUID without ``agent/`` prefix is
+        treated as a raw model name — no agent lookup happens."""
         create = await client.post(
             "/api/agents",
             json={
@@ -215,15 +244,53 @@ class TestStep4ChatWithAgent:
         # The bare UUID is passed straight through as the model name.
         assert mock_llm.chat.call_args.kwargs["model"] == agent_id
 
-    async def test_unknown_agent_returns_404(self, client):
+    async def test_unknown_agent_id_returns_404(self, client):
+        random_agent_id = uuid.uuid4()
+        response = await client.post(
+            f"/v1/agents/{random_agent_id}/chat/completions",
+            json={"messages": [{"role": "user", "content": "hi"}]},
+        )
+        assert response.status_code == 404
+        assert str(random_agent_id) in response.text
+
+    async def test_legacy_agent_slash_uuid_prefix_is_rejected_with_deprecation_error(self, client):
+        """The legacy ``model: "agent/<UUID>"`` form is rejected with a 400
+        pointing the caller at the new URL-path endpoint."""
+        create = await client.post(
+            "/api/agents",
+            json={
+                "name": "X",
+                "model_config": {"model": "gpt-4o-mini"},
+                "mode": "chat",
+            },
+        )
+        agent_id = create.json()["id"]
+
         response = await client.post(
             "/v1/chat/completions",
             json={
-                "model": f"agent/{uuid.uuid4()}",
+                "model": f"agent/{agent_id}",
                 "messages": [{"role": "user", "content": "hi"}],
             },
         )
-        assert response.status_code == 404
+        assert response.status_code == 400
+        body = response.json()
+        assert body["detail"]["error"]["code"] == "DEPRECATED_ROUTING"
+        assert body["detail"]["error"]["details"]["agent_id"] == agent_id
+        assert body["detail"]["error"]["details"]["new_endpoint"] == f"/v1/agents/{agent_id}/chat/completions"
+
+    async def test_invalid_agent_uuid_in_legacy_prefix_is_still_rejected(self, client):
+        """Even a malformed UUID in the ``agent/`` prefix is rejected with the
+        deprecation error rather than reaching the legacy 404 path."""
+        response = await client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "agent/not-a-uuid",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+        assert response.status_code == 400
+        assert response.json()["detail"]["error"]["code"] == "DEPRECATED_ROUTING"
 
 
 # --------------------------------------------------------------------------- #
@@ -276,9 +343,8 @@ class TestStep5AgentTools:
             mock_registry_builder.return_value = MagicMock()
             mock_llm.chat = AsyncMock(return_value=_mock_llm("answer"))
             response = await client.post(
-                "/v1/chat/completions",
+                f"/v1/agents/{agent_id}/chat/completions",
                 json={
-                    "model": f"agent/{agent_id}",
                     "messages": [
                         {
                             "role": "user",
@@ -327,9 +393,8 @@ class TestStep5AgentTools:
                 ]
             )
             response = await client.post(
-                "/v1/chat/completions",
+                f"/v1/agents/{agent_id}/chat/completions",
                 json={
-                    "model": f"agent/{agent_id}",
                     "messages": [
                         {
                             "role": "user",
@@ -401,9 +466,8 @@ class TestStep5AgentTools:
         ):
             mock_llm.chat_stream = fake_chat_stream
             response = await client.post(
-                "/v1/chat/completions",
+                f"/v1/agents/{agent_id}/chat/completions",
                 json={
-                    "model": f"agent/{agent_id}",
                     "messages": [
                         {
                             "role": "user",
@@ -441,9 +505,8 @@ class TestStep6Sessions:
         with patch("hecate.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=_mock_llm("reply"))
             response = await client.post(
-                "/v1/chat/completions",
+                f"/v1/agents/{agent_id}/chat/completions",
                 json={
-                    "model": f"agent/{agent_id}",
                     "messages": [{"role": "user", "content": "first"}],
                     "session_id": sid,
                 },
@@ -511,23 +574,26 @@ class TestStep8ManageAgents:
 
 
 # --------------------------------------------------------------------------- #
-# Step 7 — Interactive CLI chat: model-string contract
+# Step 7 — Interactive CLI chat: URL-path contract
 # --------------------------------------------------------------------------- #
 class TestStep7CliChatContract:
     """The CLI ``chat send``/``chat interactive`` commands build the request
-    body in ``hecate.cli.commands.chat``. The tutorial promises agent-aware
-    chat; verify the ``model`` field the CLI emits is agent-addressable.
+    in ``hecate.cli.commands.chat``. They must call the URL-path agent
+    endpoint (``/v1/agents/{id}/chat/completions``), not the legacy
+    ``/v1/chat/completions`` with ``model: "agent/<id>"``.
     """
 
-    def test_cli_chat_uses_agent_prefix(self):
+    def test_cli_chat_uses_url_path_agent_endpoint(self):
         import inspect
 
         from hecate.cli.commands import chat as chat_cmd
 
         source = inspect.getsource(chat_cmd)
-        # The server resolves an agent only when model starts with "agent/".
-        # Both ``send`` and ``interactive`` must therefore emit "agent/<id>";
-        # a bare agent UUID would be treated as a raw model name and fail.
-        assert '"agent/"' in source or "'agent/'" in source or 'f"agent/' in source, (
-            "hecate chat send/interactive sets model to the bare agent_id; server will not resolve it as an agent"
+        # Both ``send`` and ``interactive`` POST/stream to /v1/agents/{id}/chat/completions.
+        assert "/v1/agents/" in source and "/chat/completions" in source, (
+            "hecate chat send/interactive must target /v1/agents/{id}/chat/completions"
+        )
+        # Neither command should emit the deprecated 'agent/<UUID>' model-string.
+        assert '"agent/"' not in source and "'agent/'" not in source and 'f"agent/' not in source, (
+            "hecate chat send/interactive still uses the deprecated 'agent/<UUID>' model-string"
         )

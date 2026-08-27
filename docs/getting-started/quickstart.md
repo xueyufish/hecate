@@ -254,14 +254,13 @@ The response includes the new agent's `id` (a UUID). Copy it for the next step.
 
 ### Step 7 — Chat with your agent
 
-Send a message to the agent you just created by passing its `id` as the `model` field. Hecate resolves the agent, loads its persona, tools, and knowledge bases, and runs the conversation through the Pregel runtime:
+Send a message to the agent you just created by `POST`-ing to `/v1/agents/{id}/chat/completions`. The agent_id in the URL path is authoritative; Hecate loads its persona, tools, and knowledge bases, and runs the conversation through the Pregel runtime:
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/<AGENT_ID>/chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "agent/<AGENT_ID>",
     "messages": [
       {"role": "user", "content": "What can you help me with?"}
     ]
@@ -269,6 +268,8 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 ```
 
 Replace `<AGENT_ID>` with the UUID from Step 6. The response is the same OpenAI-compatible shape, but now produced by your configured agent — with its persona, tools, and any knowledge bases you attach.
+
+The body's `model` field, if present, is accepted (so the OpenAI Python SDK can be pointed at this endpoint unchanged) but ignored — the agent_id in the URL is authoritative.
 
 ### Step 8 — Stop and clean up
 

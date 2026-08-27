@@ -118,19 +118,17 @@ The OpenAI-compatible endpoint supports `session_id` for multi-turn:
 
 ```bash
 # First message — creates session
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/abc-123/chat/completions \
   -H "Authorization: Bearer $HECATE_API_KEYS" \
   -d '{
-    "model": "agent/abc-123",
-    "messages": [{"role": "user", "content": "I have a Python app that crashes on startup"}],
+    "messages": [{"role": "user", "content": "I have a Python app that crashes on startup"],
     "session_id": "550e8400-e29b-41d4-a716-446655440000"
   }'
 
 # Follow-up — same session, agent has memory
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/abc-123/chat/completions \
   -d '{
-    "model": "agent/abc-123",
-    "messages": [{"role": "user", "content": "How do I check the logs?"}],
+    "messages": [{"role": "user", "content": "How do I check the logs?"],
     "session_id": "550e8400-e29b-41d4-a716-446655440000"
   }'
 ```

@@ -97,12 +97,12 @@ Hecate's `_OTelAttributeMiddleware` enriches every HTTP request span with:
 Set these headers in API calls to make traces filterable in your backend:
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/a1b2c3d4-.../chat/completions \
   -H "Authorization: Bearer dev-key-change-me" \
   -H "X-Agent-ID: a1b2c3d4-..." \
   -H "X-Session-ID: 550e8400-..." \
   -H "Content-Type: application/json" \
-  -d '{"model": "agent/a1b2c3d4-...", "messages": [{"role": "user", "content": "Hi"}]}'
+  -d '{"messages": [{"role": "user", "content": "Hi"}]}'
 ```
 
 ---

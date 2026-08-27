@@ -149,11 +149,10 @@ curl http://localhost:8000/version        # confirm new version
 Send a test chat request:
 
 ```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
+curl -X POST http://localhost:8000/v1/agents/<test-agent-id>/chat/completions \
   -H "Authorization: Bearer $TOKEN" \
   -d '{
-    "model": "agent/<test-agent-id>",
-    "messages": [{"role": "user", "content": "Hello, are you working?"}]
+    "messages": [{"role": "user", "content": "Hello, are you working?"]
   }'
 ```
 

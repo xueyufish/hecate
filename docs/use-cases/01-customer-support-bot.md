@@ -75,8 +75,8 @@ hecate guardrail set --pre-llm pii-anonymizer --post-llm pii-anonymizer
 hecate agent update <AGENT_ID> --confidence-threshold 0.7 --hitl-tool mcp_zendesk_create_ticket
 
 # 5. Customers talk to it via the OpenAI-compatible API
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -d '{"model": "agent/<AGENT_ID>", "messages": [{"role": "user", "content": "How do I reset my API key?"}]}'
+curl -X POST http://localhost:8000/v1/agents/<AGENT_ID>/chat/completions \
+  -d '{"messages": [{"role": "user", "content": "How do I reset my API key?"]}'
 ```
 
 ---
@@ -190,14 +190,13 @@ Expose Hecate to your web chat widget. The simplest setup:
 
 ```javascript
 // In your web widget
-const resp = await fetch("http://hecate.internal:8000/v1/chat/completions", {
+const resp = await fetch("http://hecate.internal:8000/v1/agents/<AGENT_ID>/chat/completions", {
   method: "POST",
   headers: {
     "Authorization": "Bearer <CUSTOMER_FACING_KEY>",
     "Content-Type": "application/json"
   },
   body: JSON.stringify({
-    model: "agent/<AGENT_ID>",
     messages: [{role: "user", content: userInput}],
     stream: true  // for token-by-token typing effect
   })
