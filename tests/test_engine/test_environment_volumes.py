@@ -1,7 +1,9 @@
-"""Tests for environment-to-sandbox volume bridge.
+"""Tests for engine-side environment-to-sandbox volume resolution.
 
-Covers resolve_environment_volumes() for DockerEnvironment,
-LocalEnvironment, and None cases.
+Covers ``resolve_environment_volumes()`` (duck-typed via ``hasattr``) for
+DockerEnvironment, LocalEnvironment, None, and unknown-environment cases.
+Moved from ``tests/test_services/test_sandbox/test_environment_bridge.py``
+as part of PR0.2 (engine internal decoupling).
 """
 
 from __future__ import annotations
@@ -9,7 +11,7 @@ from __future__ import annotations
 from typing import Any
 from unittest.mock import MagicMock
 
-from hecate.services.sandbox.environment_bridge import (
+from hecate.engine.environment_volumes import (
     _SANDBOX_MOUNT_POINT,
     resolve_environment_volumes,
 )
@@ -36,7 +38,8 @@ class TestResolveEnvironmentVolumes:
         assert result == {str(env.root_path): _SANDBOX_MOUNT_POINT}
 
     def test_unknown_environment_returns_empty(self) -> None:
-        env = MagicMock()
+        # Plain object — neither DockerEnvironment nor LocalEnvironment shape.
+        env = object()
         result = resolve_environment_volumes(env)
         assert result == {}
 

@@ -6,12 +6,14 @@ import pytest
 
 from hecate.engine.compiler import GraphCompiler
 from hecate.engine.graph_dsl import GraphValidationError, parse_graph
+from hecate.engine.handoff import (
+    build_handoff_channel_updates,
+    filter_messages_for_handoff,
+)
 from hecate.engine.types import ChannelDef, ChannelType, CompiledGraph, Edge, NodeConfig, NodeType
 from hecate.services.orchestration.handoff import (
-    build_handoff_channel_updates,
     build_handoff_tool_schema,
     create_handoff_worker_result,
-    filter_messages_for_handoff,
     get_handoff_targets_for_node,
     inject_handoff_tools,
     inject_handoff_tools_from_targets,

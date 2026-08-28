@@ -176,7 +176,7 @@ class AgentWorker(Worker):
 
         handoff_to: str | None = result.get("handoff_to")
         if handoff_to:
-            from hecate.services.orchestration.handoff import build_handoff_channel_updates
+            from hecate.engine.handoff import build_handoff_channel_updates
 
             handoff_config = node_config.get("handoff") or {}
             context_mode = handoff_config.get("context_mode", "inherited")

@@ -359,7 +359,7 @@ class ToolWorker(Worker):
             )
         try:
             if use_sandbox:
-                from hecate.services.sandbox.environment_bridge import resolve_environment_volumes
+                from hecate.engine.environment_volumes import resolve_environment_volumes
 
                 sandbox_context = dict(context) if context else {}
                 env = execution_context.get("environment") if execution_context else None
