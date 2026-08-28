@@ -64,7 +64,7 @@ class NodeType(StrEnum):
     - CONDITION: evaluates an expression against channel state to determine which
       outgoing edge to follow (branching node).
     - AGENT: delegates execution to a sub-graph representing another agent.
-    - KNOWLEDGE_RETRIEVAL: queries knowledge bases via EnginePort.knowledge_query().
+    - KNOWLEDGE_RETRIEVAL: queries knowledge bases via RuntimePort.knowledge_query().
     - VARIABLE_SET: sets/updates channel variables based on expressions.
     - SUGGESTION: generates opening remarks or follow-up question suggestions.
     - FAN_OUT: dispatches multiple parallel branches concurrently (no worker invoked).

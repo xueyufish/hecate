@@ -121,7 +121,7 @@ class AgentTool:
 
         Args:
             args: Tool arguments (expects "task" or "input" key).
-            port: EnginePort-like object with agent_execute().
+            port: RuntimePort-like object with agent_execute().
             channel_snapshot: Current channel state (for inherited context).
 
         Returns:
@@ -221,7 +221,7 @@ class AgentTool:
 
         Args:
             args: Tool arguments (workflow input data).
-            port: EnginePort-like object with workflow_execute().
+            port: RuntimePort-like object with workflow_execute().
             workflow_id: UUID of the workflow to execute.
 
         Returns:

@@ -22,7 +22,7 @@ from hecate.engine.guardrail import (
     PostLLMHook,
     PreLLMHook,
 )
-from hecate.engine.ports import EnginePort
+from hecate.engine.ports import RuntimePort
 from hecate.engine.tool_gate import ToolGateEvaluator
 from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
@@ -120,7 +120,7 @@ class LLMWorker(Worker):
 
     Internally orchestrates:
     1. PreLLMHook — security check before LLM invocation
-    2. Context assembly (via EnginePort.context_assemble)
+    2. Context assembly (via RuntimePort.context_assemble)
     3. Provider-specific shaping
     4. LLM invocation (streaming or non-streaming)
     5. PostLLMHook — output safety check
@@ -132,7 +132,7 @@ class LLMWorker(Worker):
 
     def __init__(
         self,
-        port: EnginePort,
+        port: RuntimePort,
         pre_llm_hook: PreLLMHook | None = None,
         post_llm_hook: PostLLMHook | None = None,
         event_store: Any = None,

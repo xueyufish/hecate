@@ -116,7 +116,7 @@ class PlannerResponseError(RuntimeError):
 class LLMInvoker:  # protocol shape; not a true Protocol — see coordinator_worker.py
     """Minimal protocol for the model invocations CoordinatorWorker needs.
 
-    In production, ``EnginePort.llm_invoke`` is the implementation; tests
+    In production, ``RuntimePort.llm_invoke`` is the implementation; tests
     inject a stub that returns pre-baked TaskDAG JSON or evaluator text.
     """
 

@@ -59,7 +59,7 @@ class SemanticTaskAllocator(TaskAllocator):
     """
 
     def __init__(self, port: Any) -> None:
-        """Initialize with an EnginePort-like object for LLM access.
+        """Initialize with a RuntimePort-like object for LLM access.
 
         Args:
             port: An object with an llm_invoke() method returning

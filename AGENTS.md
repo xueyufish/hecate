@@ -4,6 +4,25 @@
 
 Hecate is an **enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform** — supporting cloud SaaS deployment and self-hosted private deployment. Built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async.
 
+## Local development setup
+
+Hecate uses [uv](https://docs.astral.sh/uv/) for dependency management. The repo ships an [`.envrc`](.envrc) that auto-creates and bootstraps `.venv` whenever you `cd` into the repo (or any worktree created via `git worktree add`).
+
+**One-time per machine:**
+
+```bash
+brew install direnv                                       # macOS
+echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc              # zsh (default on macOS)
+# or for bash:
+echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
+
+direnv allow                                              # run once per clone, inside the repo
+```
+
+After that, every `cd` into the repo (or a worktree) auto-activates `.venv`. New worktrees created via `./scripts/worktree-help.sh start <name>` also bootstrap `.venv` automatically; for raw `git worktree add`, direnv picks up the new directory on first `cd`.
+
+If you do not use direnv, follow the manual install in `## Commands` below instead.
+
 ## Commands
 
 ```bash
@@ -164,8 +183,14 @@ EnginePort also has 6 optional methods with defaults: `context_assemble`, `evide
 |----------|-----------|---------|
 | SQLAlchemy models | `XxxModel` | `AgentModel` |
 | Pydantic schemas | `XxxCreateSchema` / `XxxUpdateSchema` / `XxxReadSchema` | `AgentCreateSchema` |
+| **Extension port（抽象接口）** | `XxxPort`（无 `ABC` / `Abstract` / `Base` 前缀；`abc.ABC` 已在继承列表里声明抽象性） | `RuntimePort`、`OpsPort`、`KnowledgeQueryPort` |
+| **测试替身** | `StubXxx` | `StubRuntimePort` |
+| **默认实现** | `HecateXxxAdapter` | `HecateMemoryAdapter`、`HecateLLMAdapter` |
+| **第三方实现** | `<Vendor>XxxAdapter` | `Mem0Adapter`、`OpenAIAdapter` |
 
 Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCase` for classes, `UPPER_SNAKE` for constants.
+
+**Why no `Abstract` / `Base` / `I` prefix**：Python 之禅"简单胜于复杂"——`abc.ABC` 已显式标记抽象，`Port` / `Adapter` 后缀已暗示协议与实现，多余前缀不增加信息。对齐 LangChain（`Runnable`、`BaseTool`）、Dify（`Tool`、`Provider`）、Python 标准库（`collections.abc.Mapping`、`pathlib.Path`）。
 
 ### Language
 

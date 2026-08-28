@@ -169,7 +169,7 @@ class SkillRegistry:
         Args:
             ref: The skill reference to invoke.
             context: Execution context (arguments, messages, etc.).
-            port: EnginePort instance for delegation.
+            port: RuntimePort instance for delegation.
 
         Returns:
             The skill's execution result.
@@ -181,21 +181,21 @@ class SkillRegistry:
         match ref.ref_type:
             case SkillRefType.TOOL:
                 if port is None:
-                    raise ValueError("EnginePort required for tool invocation")
+                    raise ValueError("RuntimePort required for tool invocation")
                 return await port.tool_execute(str(ref.ref_id), context.get("args", {}), context)
             case SkillRefType.KNOWLEDGE:
                 if port is None:
-                    raise ValueError("EnginePort required for knowledge query")
+                    raise ValueError("RuntimePort required for knowledge query")
                 kb_id = ref.ref_id if isinstance(ref.ref_id, UUID) else UUID(str(ref.ref_id))
                 return await port.knowledge_query(context.get("query", ""), [kb_id])
             case SkillRefType.WORKFLOW:
                 if port is None:
-                    raise ValueError("EnginePort required for workflow execution")
+                    raise ValueError("RuntimePort required for workflow execution")
                 wf_id = ref.ref_id if isinstance(ref.ref_id, UUID) else UUID(str(ref.ref_id))
                 return await port.workflow_execute(wf_id, context.get("input", {}), context)
             case SkillRefType.AGENT:
                 if port is None:
-                    raise ValueError("EnginePort required for agent execution")
+                    raise ValueError("RuntimePort required for agent execution")
                 agent_id = ref.ref_id if isinstance(ref.ref_id, UUID) else UUID(str(ref.ref_id))
                 messages = context.get("messages", [{"role": "user", "content": context.get("task", "")}])
                 return await port.agent_execute(agent_id, messages, context.get("channel_snapshot", {}), context)

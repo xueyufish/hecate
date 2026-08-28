@@ -5,7 +5,7 @@ structured tool policy decision events from the engine layer without depending
 on ``models/`` or ``services/``.
 
 Design (see openspec/changes/siem-security-pipeline/design.md D1):
-- ``DecisionSink`` is the engine-layer interface (like ``EnginePort``).
+- ``DecisionSink`` is the engine-layer interface (like ``RuntimePort``).
 - ``ToolDecisionEmitter`` buffers events in memory; a services-layer
   ``ToolDecisionService`` implements ``DecisionSink`` and flushes to the
   database via async batch writing.

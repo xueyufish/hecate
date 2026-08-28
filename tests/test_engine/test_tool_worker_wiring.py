@@ -12,6 +12,7 @@ import uuid
 
 import pytest
 
+from hecate.engine.ports import RuntimePort
 from hecate.engine.tool_access import (
     AccessDecision,
     ApprovalDecision,
@@ -22,10 +23,9 @@ from hecate.engine.tool_access import (
 )
 from hecate.engine.worker import WorkerResult
 from hecate.engine.workers.tool_worker import ToolWorker
-from hecate.services.orchestration.engine_port_adapter import EnginePort
 
 
-class _AllowPort(EnginePort):
+class _AllowPort(RuntimePort):
     """Test port that always reports the call as executable."""
 
     async def llm_invoke(self, *args, **kwargs):  # pragma: no cover - not used

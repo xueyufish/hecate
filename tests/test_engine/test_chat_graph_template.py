@@ -145,9 +145,9 @@ class TestChatGraphToolLoopE2E:
     def _scripted_llm_port(self, scripts):
         from collections.abc import AsyncGenerator
 
-        from hecate.engine.ports import EnginePort
+        from hecate.engine.ports import RuntimePort
 
-        class _ScriptedPort(EnginePort):
+        class _ScriptedPort(RuntimePort):
             def __init__(self, scripts: list[list[dict]]) -> None:
                 self._scripts = list(scripts)
                 self._idx = 0

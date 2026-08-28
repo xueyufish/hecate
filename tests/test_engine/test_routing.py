@@ -8,7 +8,7 @@ from hecate.engine.routing import evaluate_routing
 
 
 class MockEnginePort:
-    """Stub EnginePort for LLM-dependent routing tests."""
+    """Stub RuntimePort for LLM-dependent routing tests."""
 
     def __init__(self, response: str = "") -> None:
         self._response = response

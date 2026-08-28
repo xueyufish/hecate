@@ -17,7 +17,7 @@ from hecate.engine.guardrail import (
     PostToolHook,
     PreLLMHook,
 )
-from hecate.engine.ports import EnginePort
+from hecate.engine.ports import RuntimePort
 from hecate.engine.types import WorkerResult
 from hecate.engine.workers.llm_worker import LLMWorker
 from hecate.engine.workers.tool_worker import ToolWorker
@@ -73,10 +73,10 @@ class SanitizeNoDataHook(PreLLMHook):
         return GuardrailResult(action=GuardrailAction.SANITIZE)
 
 
-# -- Stub EnginePort for testing --
+# -- Stub RuntimePort for testing --
 
 
-class StubPort(EnginePort):
+class StubPort(RuntimePort):
     async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
         yield "test response"
 
