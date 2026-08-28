@@ -164,8 +164,14 @@ EnginePort also has 6 optional methods with defaults: `context_assemble`, `evide
 |----------|-----------|---------|
 | SQLAlchemy models | `XxxModel` | `AgentModel` |
 | Pydantic schemas | `XxxCreateSchema` / `XxxUpdateSchema` / `XxxReadSchema` | `AgentCreateSchema` |
+| **Extension port（抽象接口）** | `XxxPort`（无 `ABC` / `Abstract` / `Base` 前缀；`abc.ABC` 已在继承列表里声明抽象性） | `RuntimePort`、`OpsPort`、`KnowledgeQueryPort` |
+| **测试替身** | `StubXxx` | `StubRuntimePort` |
+| **默认实现** | `HecateXxxAdapter` | `HecateMemoryAdapter`、`HecateLLMAdapter` |
+| **第三方实现** | `<Vendor>XxxAdapter` | `Mem0Adapter`、`OpenAIAdapter` |
 
 Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCase` for classes, `UPPER_SNAKE` for constants.
+
+**Why no `Abstract` / `Base` / `I` prefix**：Python 之禅"简单胜于复杂"——`abc.ABC` 已显式标记抽象，`Port` / `Adapter` 后缀已暗示协议与实现，多余前缀不增加信息。对齐 LangChain（`Runnable`、`BaseTool`）、Dify（`Tool`、`Provider`）、Python 标准库（`collections.abc.Mapping`、`pathlib.Path`）。
 
 ### Language
 
