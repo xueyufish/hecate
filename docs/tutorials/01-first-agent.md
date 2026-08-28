@@ -20,9 +20,11 @@ This tutorial goes beyond the [Quickstart](../getting-started/quickstart.md). Yo
 - At least one LLM provider configured in `.env` (e.g. `OPENAI_API_KEY`)
 - The `hecate` CLI on your `PATH` (installed via `uv pip install -e ".[dev]"`)
 
+> **Tip** — After finishing the Quickstart, run `hecate preflight` once to verify the database, Alembic migrations, environment variables, and LLM credentials are wired up correctly. The tutorial assumes all checks pass.
+
 Throughout this tutorial we use `dev-key-change-me` as the API key. Replace it with whatever you set in `HECATE_API_KEYS`.
 
-> **Using a non-OpenAI provider?** This tutorial uses `gpt-4o-mini` (OpenAI) throughout. Hecate routes all LLM traffic through [LiteLLM](https://github.com/BerriAI/litellm), so **100+ providers** work by changing the `model` string. Non-OpenAI providers need a LiteLLM prefix — e.g. Anthropic uses `anthropic/claude-3-5-sonnet-20241022`, DeepSeek uses `deepseek/deepseek-chat`, GLM (Zhipu) uses `zai/glm-4.7-flash`, Ollama uses `ollama/llama3.1`. Replace every `gpt-4o-mini` in this tutorial (in `model_config.model` and in chat `model` fields) with your provider's model string, and set the matching env var in `.env`. See [Configure LLM Providers](../how-to/configure-llm-providers.md) for the full prefix table and the DB-backed provider registry.
+> **Using a non-OpenAI provider?** This tutorial uses `gpt-4o-mini` (OpenAI) throughout. Hecate routes all LLM traffic through [LiteLLM](https://github.com/BerriAI/litellm), so **many providers** work by changing the `model` string. Non-OpenAI providers need a LiteLLM prefix — e.g. Anthropic uses `anthropic/claude-3-5-sonnet-20241022`, DeepSeek uses `deepseek/deepseek-chat`, GLM (Zhipu) uses `zai/glm-4.7-flash`, Ollama uses `ollama/llama3.1`. Replace every `gpt-4o-mini` in this tutorial (in `model_config.model` and in chat `model` fields) with your provider's model string, and set the matching env var in `.env`. See [Configure LLM Providers](../how-to/configure-llm-providers.md) for the full prefix table and the DB-backed provider registry.
 
 ---
 
@@ -35,11 +37,11 @@ An agent is a configuration record that tells Hecate *how* to behave when it rec
 | `name` | string | Yes | Human-readable identifier (1–255 chars) |
 | `persona` | string | No | System prompt — defines the agent's character and instructions |
 | `model_config` | object | Yes | LLM settings: `{"model": "gpt-4o-mini", "temperature": 0.7}` |
-| `mode` | string | No | Execution mode: `chat` (default), `three_layer`, or `workflow` |
+| `mode` | string | No (defaults to `chat`) | Execution mode: `chat`, `three_layer`, or `workflow` |
 | `tools` | list | No | Tool names to bind (e.g. `["web_search"]`) |
 | `skills` | list | No | Skill names to attach |
 | `knowledge_base_ids` | list | No | Knowledge base UUIDs for RAG |
-| `risk_level` | string | No | Risk classification for the guard layer: `LOW` (default), `MEDIUM`, `HIGH` |
+| `risk_level` | string | No | Risk classification for the guard layer; defaults to `LOW`. Common values are `LOW`, `MEDIUM`, `HIGH` — the schema accepts any string (no enum enforced). |
 
 ### Execution modes
 
@@ -96,7 +98,7 @@ The response is the full agent object. Copy the `id` field — you'll use it in 
 }
 ```
 
-> **New agent fields**: `workspace_id` is the tenant the agent belongs to (defaults to your workspace); `workflow_id` is set only for `workflow` mode agents; `opening_remarks` is an optional greeting the agent sends on first message; `guardrail_config` holds per-agent guardrail overrides; `model_available` reports whether the configured model is reachable. You can ignore most of these until later tutorials.
+> **New agent fields**: `workspace_id` is the tenant the agent belongs to (defaults to your workspace); `workflow_id` is set only for `workflow` mode agents; `opening_remarks` is an optional greeting the agent sends on first message; `guardrail_config` holds per-agent guardrail overrides; `model_available` is computed at read time from the live provider registry — `true` only when both the model entry is enabled and its upstream provider is active. You can ignore most of these until later tutorials.
 
 > **`temperature: 0.3`** — tech-support answers should be consistent and factual, so we use a low temperature. For creative tasks like brainstorming, use 0.7 or higher.
 
@@ -163,6 +165,8 @@ Get full details for a specific agent:
 hecate agent get a1b2c3d4-e5f6-7890-abcd-ef1234567890
 ```
 
+> **Pagination** — `hecate agent list` returns up to 20 agents per page. Use `--page` and `--page-size` (max 100) to walk through larger workspaces: `hecate agent list --page 2 --page-size 50`.
+
 ---
 
 ## Step 4 — Chat with your agent
@@ -203,13 +207,29 @@ The response follows the standard OpenAI Chat Completions format. Hecate resolve
 }
 ```
 
+### Streaming
+
+To receive tokens as they are produced, set `"stream": true`. The response switches to Server-Sent Events in the OpenAI Chat Completions chunk format:
+
+```bash
+curl -N -X POST http://localhost:8000/v1/agents/a1b2c3d4-e5f6-7890-abcd-ef1234567890/chat/completions \
+  -H "Authorization: Bearer dev-key-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "Stream me a haiku about Docker."}],
+    "stream": true
+  }'
+```
+
+`-N` disables curl buffering so each event arrives as the upstream LLM emits it. Stream events are JSON objects you can pipe into a JSON parser (`jq`, `python -c '...'`) for incremental processing.
+
 > **Direct model access** — You can also call `/v1/chat/completions` with a raw model name (e.g. `"model": "gpt-4o-mini"`) without referencing an agent. This bypasses agent configuration entirely and calls the LLM directly. Useful for quick tests.
 
 ---
 
 ## Step 5 — Add a tool and watch tool calling
 
-Agents become useful when they can take action. Hecate seeds eleven built-in tools on startup:
+Agents become useful when they can take action. Hecate seeds multiple built-in tools on startup:
 
 | Tool | Description |
 |------|-------------|
@@ -219,6 +239,8 @@ Agents become useful when they can take action. Hecate seeds eleven built-in too
 | `list_files` | List files and directories in the workspace |
 | `execute_code` | Execute code in a sandboxed environment |
 | `browser_navigate` / `browser_click` / `browser_type` / `browser_extract` / `browser_screenshot` / `browser_fill_form` | Drive a sandboxed headless Chromium (see [Browser Automation](../how-to/browser-automation.md)) |
+
+> **Tool execution environment** — Browser tools require a non-local agent environment (they refuse to run when `AGENT_ENV_BACKEND=local`) and enforce per-environment domain allow-lists. The `execute_code` tool runs in a Docker-isolated sandbox. The `web_search` tool defaults to DuckDuckGo (no API key needed); only switch to Tavily/Serper by setting `SEARCH_PROVIDER` and `SEARCH_API_KEY` in `.env`.
 
 ### Bind a tool to your agent
 
@@ -290,6 +312,8 @@ The second request references "this" and the agent understands the Flask port co
 
 You can use any UUID as a `session_id`. The Hecate engine derives the conversation state from the execution event log (with a materialized cache for speed) when a `session_id` is provided, and appends the new state after each turn.
 
+> **Concurrent requests on the same session are serialized** — Hecate acquires a per-session lock so the second request waits for the first to finish (streaming responses carry `X-Queue-Position` and `X-Queue-Wait-Ms` headers). If the lock cannot be acquired in time, the request returns HTTP 408 with error code `QUEUE_TIMEOUT`. Use distinct `session_id` values for concurrent flows to avoid queueing.
+
 ---
 
 ## Step 7 — Interactive CLI chat
@@ -355,6 +379,33 @@ hecate agent update a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
 hecate agent update a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
   --tools web_search,read_file,list_files
 ```
+
+> **CLI update scope** — `hecate agent update` only accepts `--name`, `--persona`, `--tools`, and `--kb-ids`. To change `mode`, `model_config`, `enable_suggestions`, `opening_remarks`, or `guardrail_config`, use the REST API:
+> 
+> ```bash
+> curl -X PUT http://localhost:8000/api/agents/a1b2c3d4-e5f6-7890-abcd-ef1234567890 \
+>   -H "Authorization: Bearer dev-key-change-me" \
+>   -H "Content-Type: application/json" \
+>   -d '{"mode": "workflow", "model_config": {"model": "gpt-4o-mini", "temperature": 0.2}}'
+> ```
+
+### Bind and unbind skills
+
+Skills attach to an agent by name. In addition to setting `skills` on create or via `PUT`, you can attach or detach a single skill with dedicated endpoints (useful when skills are added/removed dynamically):
+
+```bash
+# Attach a skill (idempotent — re-running is a no-op)
+curl -X POST http://localhost:8000/api/agents/a1b2c3d4-e5f6-7890-abcd-ef1234567890/skills \
+  -H "Authorization: Bearer dev-key-change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"skill_name": "code-review"}'
+
+# Detach a skill (idempotent)
+curl -X DELETE http://localhost:8000/api/agents/a1b2c3d4-e5f6-7890-abcd-ef1234567890/skills/code-review \
+  -H "Authorization: Bearer dev-key-change-me"
+```
+
+Both endpoints return `{"skills": ["..."]}` with the updated list. The skill must already be registered in the agent's workspace (or the shared zero-UUID workspace); otherwise the attach endpoint returns 404 with error code `SKILL_NOT_FOUND`. There is no CLI equivalent — use the REST endpoints above. See [Skills concept](../concepts/skills.md) for the workspace skill registry.
 
 ### Export and import
 
