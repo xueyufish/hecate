@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from hecate.services.sandbox.environment_bridge import resolve_environment_volumes
-
 if TYPE_CHECKING:
     from hecate.services.sandbox.pool import SandboxPool
 
@@ -70,4 +68,4 @@ def _reset_pool_for_testing() -> None:
     _pool_initialized = False
 
 
-__all__ = ["resolve_environment_volumes", "get_sandbox_pool", "_reset_pool_for_testing"]
+__all__ = ["get_sandbox_pool", "_reset_pool_for_testing"]
