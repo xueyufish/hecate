@@ -6,8 +6,8 @@ for both the basic and suggestion-enabled variants.
 
 from __future__ import annotations
 
-from hecate.engine.templates import build_chat_graph
 from hecate.engine.types import ChannelType, NodeType
+from hecate.services.workflow.templates import build_chat_graph
 
 
 class TestBuildChatGraphBasic:

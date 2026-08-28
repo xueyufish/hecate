@@ -6,7 +6,7 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from hecate.engine.metrics_store import InMemoryMetricsStore
+from hecate.services.observability.metrics_storage import InMemoryMetricsStore
 from hecate.services.observability.monitoring import (
     ConnectionManager,
     MonitoringService,

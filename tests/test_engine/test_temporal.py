@@ -6,11 +6,11 @@ import uuid
 from unittest.mock import AsyncMock
 
 from hecate.engine.channel import LastValueBehavior
-from hecate.engine.temporal.conflict import (
+from hecate.services.temporal.conflict import (
     ConflictResolver,
     ConflictStrategy,
 )
-from hecate.engine.temporal.workflow import DistributedPregelWorkflow
+from hecate.services.temporal.workflow import DistributedPregelWorkflow
 
 
 class TestDistributedPregelWorkflow:

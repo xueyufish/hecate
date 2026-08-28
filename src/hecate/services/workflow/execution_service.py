@@ -24,7 +24,6 @@ from hecate.engine.checkpoint import InMemoryCheckpointStore
 from hecate.engine.compiler import GraphCompiler
 from hecate.engine.context import InMemoryContextEngine
 from hecate.engine.eventstore import EventStore
-from hecate.engine.graph_dsl import parse_graph
 from hecate.engine.guardrail import (
     PostLLMHook,
     PostToolHook,
@@ -44,6 +43,7 @@ from hecate.engine.workers.variable_set_worker import VariableSetWorker
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 from hecate.services.context.offloader import ContextOffloader
 from hecate.services.state.state import AgentState
+from hecate.services.workflow.graph_dsl import parse_graph
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +229,7 @@ class WorkflowExecutionService:
         Returns:
             Response dict (non-streaming) or AsyncGenerator (streaming).
         """
-        from hecate.engine.templates import build_chat_graph, build_three_layer_graph
+        from hecate.services.workflow.templates import build_chat_graph, build_three_layer_graph
 
         if messages is None:
             messages = []

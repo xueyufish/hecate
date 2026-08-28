@@ -26,12 +26,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
 from hecate.core.deps_workspace import get_auth_context
-from hecate.engine.graph_dsl import GraphValidationError
 from hecate.models.workflow import (
     WorkflowCreateSchema,
     WorkflowRunReadSchema,
     WorkflowUpdateSchema,
 )
+from hecate.services.workflow.graph_dsl import GraphValidationError
 from hecate.services.workflow.test_runner import WorkflowTestRunner
 from hecate.services.workflow_service import WorkflowService
 

@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -58,15 +58,16 @@ from hecate.engine.eventstore import (
     Event,
     EventType,
 )
-from hecate.engine.orchestrator_validator import (
-    RosterEntry,
-    validate_budgets,
-    validate_task_requirements,
-)
 from hecate.engine.pregel import PregelRuntime
-from hecate.engine.templates import build_dynamic_orchestration_executor
 from hecate.engine.types import StreamMode, WorkerResult
 from hecate.engine.worker import Worker
+
+if TYPE_CHECKING:
+    # Lazy-imported at runtime inside the methods that use them so engine
+    # remains independent of services/ (Phase 0 拆包入场费 plan, PR0.3).
+    from hecate.services.observability.orchestrator_validator import (
+        RosterEntry,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,11 @@ class CoordinatorWorker(Worker):
         (the final TaskDAG used). ``_ledger`` accumulates per-task
         outputs across iterations for replan-with-carryover.
         """
+        from hecate.services.observability.orchestrator_validator import (
+            validate_budgets,
+            validate_task_requirements,
+        )
+
         ctx = execution_context or {}
         goal = node_config.get("goal") or channel_snapshot.get("goal") or node_id
         roster = self._resolve_roster(node_config, channel_snapshot)
@@ -398,6 +404,8 @@ class CoordinatorWorker(Worker):
         channel_snapshot: dict,
     ) -> list[RosterEntry]:
         """Resolve the agent roster from node_config or a roster channel."""
+        from hecate.services.observability.orchestrator_validator import RosterEntry
+
         raw = node_config.get("roster")
         if raw is None:
             raw = channel_snapshot.get("agent_roster", [])
@@ -476,6 +484,8 @@ class CoordinatorWorker(Worker):
         ctx: dict,
     ) -> dict[str, Any]:
         """Execute the materialised sub-graph in an isolated child session."""
+        from hecate.services.workflow.templates import build_dynamic_orchestration_executor
+
         sub_graph = build_dynamic_orchestration_executor(
             dag=dag,
             roster=roster,

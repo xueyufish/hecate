@@ -9,12 +9,12 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.engine.compiler import GraphCompiler
-from hecate.engine.graph_dsl import GraphValidationError, parse_graph
 from hecate.engine.types import ExecutionMode
 from hecate.models.workflow import (
     WorkflowCreateSchema,
     WorkflowUpdateSchema,
 )
+from hecate.services.workflow.graph_dsl import GraphValidationError, parse_graph
 
 CONVERSATIONAL_DSL = {
     "version": "1.0",

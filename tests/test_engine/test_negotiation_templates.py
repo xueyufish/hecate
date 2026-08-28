@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from hecate.engine.compiler import GraphCompiler
-from hecate.engine.templates import build_debate_graph, build_negotiation_graph
 from hecate.engine.types import NodeType
+from hecate.services.workflow.templates import build_debate_graph, build_negotiation_graph
 
 
 class TestNegotiationGraph:
@@ -105,11 +105,11 @@ class TestTemplateImports:
     """Tests that template functions are importable."""
 
     def test_import_negotiation(self) -> None:
-        from hecate.engine.templates import build_negotiation_graph
+        from hecate.services.workflow.templates import build_negotiation_graph
 
         assert callable(build_negotiation_graph)
 
     def test_import_debate(self) -> None:
-        from hecate.engine.templates import build_debate_graph
+        from hecate.services.workflow.templates import build_debate_graph
 
         assert callable(build_debate_graph)

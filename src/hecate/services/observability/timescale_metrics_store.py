@@ -13,13 +13,13 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.engine.metrics_store import (
+from hecate.models.metric import MetricModel
+from hecate.services.observability.metrics_storage import (
     MetricAggregate,
     MetricsSnapshot,
     MetricsStore,
     _parse_window,
 )
-from hecate.models.metric import MetricModel
 
 
 class TimescaleMetricsStore(MetricsStore):

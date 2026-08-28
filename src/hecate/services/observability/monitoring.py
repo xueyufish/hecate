@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from hecate.core.config import settings
-from hecate.engine.metrics_store import (
+from hecate.services.observability.metrics_storage import (
     InMemoryMetricsStore,
     MetricsStore,
 )

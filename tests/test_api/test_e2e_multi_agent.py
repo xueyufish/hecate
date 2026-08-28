@@ -11,9 +11,9 @@ import uuid
 
 from hecate.engine.checkpoint import InMemoryCheckpointStore
 from hecate.engine.compiler import GraphCompiler
-from hecate.engine.graph_dsl import parse_graph
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.types import StreamMode
+from hecate.services.workflow.graph_dsl import parse_graph
 from hecate.services.workflow.test_runner import _TestWorker
 
 

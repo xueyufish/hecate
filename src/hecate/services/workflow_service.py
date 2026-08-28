@@ -16,7 +16,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.engine.compiler import GraphCompiler
-from hecate.engine.graph_dsl import GraphValidationError, parse_graph
 from hecate.models.workflow import (
     WorkflowCreateSchema,
     WorkflowDetailSchema,
@@ -26,6 +25,7 @@ from hecate.models.workflow import (
     WorkflowVersionModel,
     WorkflowVersionReadSchema,
 )
+from hecate.services.workflow.graph_dsl import GraphValidationError, parse_graph
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ tool_access layer relies on for content-aware gating (9.4 enhancement).
 
 from __future__ import annotations
 
-from hecate.engine.shell_analysis import analyze_command, decompose_command
+from hecate.services.tool.shell_analysis import analyze_command, decompose_command
 
 
 def _matcher_factory(deny_tokens: list[str]):

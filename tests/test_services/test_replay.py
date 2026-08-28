@@ -344,7 +344,7 @@ async def test_state_inspector_empty_when_before_first_commit() -> None:
 
 @pytest.mark.asyncio
 async def test_state_inspector_nonreplayable_prefix_raises() -> None:
-    from hecate.engine.logfold import NonReplayablePrefix
+    from hecate.services.observability.logfold import NonReplayablePrefix
 
     sid = uuid.uuid4()
     events = [

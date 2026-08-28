@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from hecate.engine.guardrail import GuardrailAction
 from hecate.engine.session_hooks import HookAction
-from hecate.engine.shell_hook import ShellCommandHook
+from hecate.services.tool.shell_hook import ShellCommandHook
 
 
 async def test_shell_hook_exit_0_allows() -> None:

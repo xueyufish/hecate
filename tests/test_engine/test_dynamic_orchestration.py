@@ -34,14 +34,14 @@ from hecate.engine.eventstore import (
     EventType,
     InMemoryEventStore,
 )
-from hecate.engine.orchestrator_validator import (
+from hecate.engine.types import WorkerResult
+from hecate.engine.worker import Worker
+from hecate.engine.workers import CoordinatorWorker
+from hecate.services.observability.orchestrator_validator import (
     RosterEntry,
     validate_budgets,
     validate_task_requirements,
 )
-from hecate.engine.types import WorkerResult
-from hecate.engine.worker import Worker
-from hecate.engine.workers import CoordinatorWorker
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -272,7 +272,7 @@ async def test_fail_closed_validation_emits_verification_failed() -> None:
     """9.5 — invalid DAG (cycle) is rejected without dispatching the sub-graph."""
     # Construct a DAG with a self-cycle via the validator's topology helper.
     from hecate.engine.dynamic_types import TaskDAGValidationError
-    from hecate.engine.orchestrator_validator import _topological_levels
+    from hecate.services.observability.orchestrator_validator import _topological_levels
 
     cyclic = TaskDAG(
         goal="cycle",

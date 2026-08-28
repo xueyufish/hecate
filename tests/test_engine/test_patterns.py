@@ -4,19 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.engine.patterns import (
-    PATTERN_DEFINITIONS,
-    CollaborationPattern,
-    build_graph_from_pattern,
-    infer_pattern,
-)
-from hecate.engine.templates import (
-    build_broadcast_pipeline,
-    build_debate_graph,
-    build_fan_out_pipeline,
-    build_negotiation_graph,
-    build_sequential_pipeline,
-)
 from hecate.engine.types import (
     ChannelDef,
     ChannelType,
@@ -24,6 +11,19 @@ from hecate.engine.types import (
     GraphConfig,
     NodeConfig,
     NodeType,
+)
+from hecate.services.workflow.patterns import (
+    PATTERN_DEFINITIONS,
+    CollaborationPattern,
+    build_graph_from_pattern,
+    infer_pattern,
+)
+from hecate.services.workflow.templates import (
+    build_broadcast_pipeline,
+    build_debate_graph,
+    build_fan_out_pipeline,
+    build_negotiation_graph,
+    build_sequential_pipeline,
 )
 
 # ---------------------------------------------------------------------------

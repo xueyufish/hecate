@@ -7,7 +7,7 @@ from hecate.engine.channel import (
     LastValueBehavior,
     TopicBehavior,
 )
-from hecate.engine.temporal.conflict import ConflictResolver, ConflictStrategy
+from hecate.services.temporal.conflict import ConflictResolver, ConflictStrategy
 
 
 class TestConflictResolver:

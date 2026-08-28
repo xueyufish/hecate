@@ -15,7 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from hecate.core.deps import verify_api_key
-from hecate.engine.patterns import infer_pattern
+from hecate.services.workflow.patterns import infer_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ async def list_templates(
 
         pattern_type: str | None = None
         try:
-            from hecate.engine.graph_dsl import parse_graph
+            from hecate.services.workflow.graph_dsl import parse_graph
 
             # Strip non-DSL fields before parsing to avoid schema validation errors
             dsl_data = {

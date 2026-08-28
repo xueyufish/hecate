@@ -14,15 +14,15 @@ import fnmatch
 import logging
 from typing import Any
 
-from hecate.engine.policy_pipeline import (
+from hecate.engine.tool_access import AccessDecision, ToolAccessPolicy
+from hecate.engine.tool_gate import ToolGateEvaluator
+from hecate.services.observability.policy_pipeline import (
     PermissionMode,
     PolicyContext,
     PolicyDecision,
     PolicyLayer,
     ToolInfo,
 )
-from hecate.engine.tool_access import AccessDecision, ToolAccessPolicy
-from hecate.engine.tool_gate import ToolGateEvaluator
 
 logger = logging.getLogger(__name__)
 

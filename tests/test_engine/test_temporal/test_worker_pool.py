@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.engine.temporal.worker_pool import TemporalWorkerPool
 from hecate.engine.worker import Worker, WorkerResult
+from hecate.services.temporal.worker_pool import TemporalWorkerPool
 
 
 class SimpleWorker(Worker):

@@ -6,12 +6,12 @@ import uuid
 
 import pytest
 
-from hecate.engine import (
+from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType
+from hecate.services.observability import (
     loginvariants_t2,  # noqa: F401  side-effect
     loginvariants_t3,  # noqa: F401  side-effect
 )
-from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType
-from hecate.engine.loginvariants import InvariantViolationError, run_all
+from hecate.services.observability.loginvariants import InvariantViolationError, run_all
 
 
 def _ev(sid, ss, etype, **payload):
@@ -24,7 +24,7 @@ def test_channel_write_rejected_emitted_and_fold_skipped():
     fold path does NOT apply it to channel state.
     """
     from hecate.engine.channel import ChannelDef, ChannelManager, ChannelType
-    from hecate.engine.logfold import fold_session
+    from hecate.services.observability.logfold import fold_session
 
     cm = ChannelManager()
     cm.register("messages", ChannelDef(type=ChannelType.TOPIC, default=[]))

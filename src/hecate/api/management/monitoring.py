@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from hecate.core.database import get_db
-from hecate.engine.metrics_store import MetricsStore
+from hecate.services.observability.metrics_storage import MetricsStore
 from hecate.services.observability.monitoring import ConnectionManager, MonitoringService
 
 router = APIRouter()

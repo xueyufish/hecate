@@ -1056,7 +1056,7 @@ def build_dynamic_orchestration_executor(
                 )
 
     # Track dependency level → list of (task_id, agent_id) for FAN_OUT batching.
-    from hecate.engine.orchestrator_validator import budget_topological_levels
+    from hecate.services.observability.orchestrator_validator import budget_topological_levels
 
     levels = budget_topological_levels(dag)
 

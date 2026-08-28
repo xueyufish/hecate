@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from hecate.engine.policy_layers import (
+from hecate.engine.tool_access import ToolAccessPolicy
+from hecate.services.observability.policy_layers import (
     ModeLayer,
     PluginAvailabilityLayer,
     ProfileLayer,
     SecurityLayer,
     VisibilityLayer,
 )
-from hecate.engine.policy_pipeline import (
+from hecate.services.observability.policy_pipeline import (
     PermissionMode,
     PolicyContext,
     PolicyDecision,
     ToolInfo,
     ToolPolicyPipeline,
 )
-from hecate.engine.tool_access import ToolAccessPolicy
 
 
 def _make_tool(
