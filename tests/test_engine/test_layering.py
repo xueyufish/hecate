@@ -28,7 +28,7 @@ SKIP_MODULES: frozenset[str] = frozenset(
     {
         # Entry-point scripts that legitimately read core.config (documented
         # legacy exception in AGENTS.md).
-        "hecate.engine.temporal.run_worker",
+        "hecate.services.temporal.run_worker",
     }
 )
 

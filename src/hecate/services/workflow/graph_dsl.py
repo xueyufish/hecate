@@ -21,7 +21,7 @@ from importlib.resources import files
 
 import jsonschema
 
-from hecate.engine.errors import EngineError
+from hecate.engine.errors import GraphValidationError
 from hecate.engine.types import (
     ChannelDef,
     ChannelType,
@@ -33,21 +33,6 @@ from hecate.engine.types import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-class GraphValidationError(EngineError):
-    """Raised when a graph definition fails schema or structural validation.
-
-    Attributes:
-        field: Dotted JSON path pointing to the invalid element (e.g.
-            ``"nodes.guard.config.model"``). Carried from jsonschema's
-            ``absolute_path`` for error localization in user-facing messages. None when
-            the error applies to the entire document.
-    """
-
-    def __init__(self, message: str, field: str | None = None):
-        self.field = field
-        super().__init__(message)
 
 
 @functools.lru_cache(maxsize=1)

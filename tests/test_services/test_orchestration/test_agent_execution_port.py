@@ -319,8 +319,8 @@ async def test_agent_worker_missing_agent_id():
 async def test_compiler_validates_invocation_mode():
     """GraphCompiler rejects invalid invocation_mode values."""
     from hecate.engine.compiler import GraphCompiler
-    from hecate.engine.graph_dsl import GraphValidationError
     from hecate.engine.types import GraphConfig, NodeConfig, NodeType
+    from hecate.services.workflow.graph_dsl import GraphValidationError
 
     config = GraphConfig(
         entry="agent_1",

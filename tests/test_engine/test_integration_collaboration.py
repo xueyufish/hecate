@@ -15,11 +15,11 @@ from hecate.engine.compiler import GraphCompiler
 from hecate.engine.eventbus import CollaborationEvent, CollaborationEventType, InMemoryEventBus
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.task_allocator import RoundRobinTaskAllocator, SemanticTaskAllocator
-from hecate.engine.templates import build_debate_graph, build_negotiation_graph
 from hecate.engine.types import (
     WorkerResult,
 )
 from hecate.engine.worker import Worker
+from hecate.services.workflow.templates import build_debate_graph, build_negotiation_graph
 
 # ---------------------------------------------------------------------------
 # Stub workers for integration tests

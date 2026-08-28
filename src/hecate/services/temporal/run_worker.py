@@ -1,7 +1,7 @@
 """Temporal worker startup script.
 
 Starts a Temporal worker that polls the configured task queue and
-executes graph node Activities. Run with: python -m hecate.engine.temporal.run_worker
+executes graph node Activities. Run with: python -m hecate.services.temporal.run_worker
 """
 
 from __future__ import annotations

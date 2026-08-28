@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from hecate.engine.metrics_store import InMemoryMetricsStore
+from hecate.services.observability.metrics_storage import InMemoryMetricsStore
 
 
 async def test_query_metrics_by_name(client: object) -> None:

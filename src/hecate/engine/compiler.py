@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from hecate.engine.graph_dsl import GraphValidationError
+from hecate.engine.errors import GraphValidationError
 from hecate.engine.optimization import OptimizationPass
 from hecate.engine.types import (
     ChannelAccess,

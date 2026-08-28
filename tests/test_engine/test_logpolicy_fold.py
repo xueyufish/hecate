@@ -14,15 +14,15 @@ from hecate.engine.eventstore import (
     EventType,
     InMemoryEventStore,
 )
-from hecate.engine.logfold import (
+from hecate.engine.types import ChannelDef, ChannelType
+from hecate.services.observability.logfold import (
     NonReplayablePrefixError,
     derive_messages,
     fold_session,
     fold_session_from_store,
 )
-from hecate.engine.loginvariants import InvariantViolation, list_registered, run_all
-from hecate.engine.logpolicy import should_log_channel
-from hecate.engine.types import ChannelDef, ChannelType
+from hecate.services.observability.loginvariants import InvariantViolation, list_registered, run_all
+from hecate.services.observability.logpolicy import should_log_channel
 
 # --- LogPolicy ---
 

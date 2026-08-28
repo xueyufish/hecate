@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.models.trace import TraceModel
 
 if TYPE_CHECKING:
-    from hecate.engine.metrics_store import MetricsStore
+    from hecate.services.observability.metrics_storage import MetricsStore
 
 logger = logging.getLogger(__name__)
 

@@ -47,7 +47,7 @@ async def _create_workflow_with_dsl(db: AsyncSession, dsl: dict) -> uuid.UUID:
     db.add(wf)
 
     from hecate.engine.compiler import GraphCompiler
-    from hecate.engine.graph_dsl import parse_graph
+    from hecate.services.workflow.graph_dsl import parse_graph
 
     graph_config = parse_graph(dsl)
     compiled = GraphCompiler().compile(graph_config)

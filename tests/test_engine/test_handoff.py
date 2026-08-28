@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from hecate.engine.compiler import GraphCompiler
-from hecate.engine.graph_dsl import GraphValidationError, parse_graph
 from hecate.engine.handoff import (
     build_handoff_channel_updates,
     filter_messages_for_handoff,
@@ -21,6 +20,7 @@ from hecate.services.orchestration.handoff import (
     validate_handoff_target,
     validate_handoff_target_from_list,
 )
+from hecate.services.workflow.graph_dsl import GraphValidationError, parse_graph
 
 
 def _make_compiled_with_handoff(

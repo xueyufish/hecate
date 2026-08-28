@@ -9,13 +9,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from hecate.engine.templates import (
-    build_broadcast_pipeline,
-    build_debate_graph,
-    build_fan_out_pipeline,
-    build_negotiation_graph,
-    build_sequential_pipeline,
-)
 from hecate.engine.types import (
     ChannelDef,
     ChannelType,
@@ -23,6 +16,13 @@ from hecate.engine.types import (
     GraphConfig,
     NodeConfig,
     NodeType,
+)
+from hecate.services.workflow.templates import (
+    build_broadcast_pipeline,
+    build_debate_graph,
+    build_fan_out_pipeline,
+    build_negotiation_graph,
+    build_sequential_pipeline,
 )
 
 

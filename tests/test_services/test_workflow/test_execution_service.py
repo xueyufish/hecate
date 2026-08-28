@@ -117,7 +117,7 @@ class TestWorkflowExecutionServiceChatMode:
 
 class TestWorkflowExecutionServiceThreeLayerMode:
     async def test_three_layer_no_guard_node(self) -> None:
-        from hecate.engine.templates import build_three_layer_graph
+        from hecate.services.workflow.templates import build_three_layer_graph
 
         graph = build_three_layer_graph(planner_model="gpt-4o", sub_agent_model="gpt-4o")
         assert "guard" not in graph.nodes

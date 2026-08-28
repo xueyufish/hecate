@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.engine.temporal.conflict import ConflictResolver, ConflictStrategy
+from hecate.services.temporal.conflict import ConflictResolver, ConflictStrategy
 
 
 @pytest.fixture

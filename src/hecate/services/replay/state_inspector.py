@@ -12,7 +12,7 @@ from typing import Any
 
 from hecate.engine.channel import ChannelManager
 from hecate.engine.eventstore import Event, EventStore, EventType
-from hecate.engine.logfold import fold_session
+from hecate.services.observability.logfold import fold_session
 
 
 def _select_commit_points(events: list[Event]) -> list[int]:

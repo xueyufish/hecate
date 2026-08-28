@@ -399,8 +399,8 @@ class ToolAccessPolicy:
             if fnmatch.fnmatch(str(arg_value), pattern.arg_pattern):
                 return True
             # Content-aware check (T3.2): only for shell-class tools.
-            from hecate.engine.shell_analysis import analyze_command
             from hecate.engine.workers.sandbox_router import is_shell_tool
+            from hecate.services.tool.shell_analysis import analyze_command
 
             if is_shell_tool(tool_name) and isinstance(arg_value, str):
                 # Extract single-token markers from the pattern (e.g. ``rm``

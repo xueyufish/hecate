@@ -6,9 +6,9 @@ import uuid
 
 import pytest
 
-from hecate.engine import loginvariants_t2  # noqa: F401  side-effect: register
 from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType
-from hecate.engine.loginvariants import InvariantViolationError, run_all
+from hecate.services.observability import loginvariants_t2  # noqa: F401  side-effect: register
+from hecate.services.observability.loginvariants import InvariantViolationError, run_all
 
 
 def _ev(sid, ss, etype, **payload):

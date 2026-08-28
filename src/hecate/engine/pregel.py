@@ -26,14 +26,13 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-# Side-effect import: register companion invariants (T2 turn-closure, T3
-# MONOTONIC.DENIAL). Defer to avoid a circular import via loginvariants.
-from hecate.engine import (
-    loginvariants_t2,  # noqa: F401
-    loginvariants_t3,  # noqa: F401
-)
+# Side-effect imports (T2 turn-closure, T3 MONOTONIC.DENIAL invariant
+# registration) are performed by importing the services.observability
+# loginvariants modules from the harness boot path, not from the engine
+# module top level. The engine runtime does not depend on those invariants
+# at import time; they are optional guards enabled by the harness.
 from hecate.engine.channel import ChannelManager
 from hecate.engine.checkpoint import CheckpointStore
 from hecate.engine.context import ContextEngine
@@ -43,7 +42,6 @@ from hecate.engine.eventstore import Event, EventStore, EventType
 from hecate.engine.eviction import EvictionPolicy, NoEviction
 from hecate.engine.retry import RetryExecutor, RetryStrategy
 from hecate.engine.scheduler import FIFOScheduler, SchedulerStrategy
-from hecate.engine.temporal.conflict import ConflictResolver
 from hecate.engine.types import (
     CompiledGraph,
     NodeType,
@@ -51,6 +49,9 @@ from hecate.engine.types import (
     WorkerResult,
 )
 from hecate.engine.worker import DirectWorkerPool, Worker, WorkerPool
+
+if TYPE_CHECKING:
+    from hecate.services.temporal.conflict import ConflictResolver
 
 logger = logging.getLogger(__name__)
 
@@ -460,7 +461,7 @@ class PregelRuntime:
             if self._event_store is not None and pending_writes:
                 batch_events: list[Event] = []
                 from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION
-                from hecate.engine.logpolicy import should_log_channel
+                from hecate.services.observability.logpolicy import should_log_channel
 
                 for _node_id, channel_updates, _node_id_repeat in pending_writes:
                     if not channel_updates:
@@ -566,7 +567,7 @@ class PregelRuntime:
         cache (or last replayed event), and injects ``resume_value`` into the
         ``_resume_value`` channel.
         """
-        from hecate.engine.logfold import NonReplayablePrefix, fold_session
+        from hecate.services.observability.logfold import NonReplayablePrefix, fold_session
 
         checkpoint = await self._checkpoint_store.load(session_id)
         cache_log_version = 0
@@ -613,9 +614,9 @@ class PregelRuntime:
         """
         if self._event_store is None:
             return
-        from hecate.engine.logfold import NonReplayablePrefixError, fold_session
-        from hecate.engine.loginvariants import InvariantViolationError, run_all
-        from hecate.engine.logpolicy import should_log_channel
+        from hecate.services.observability.logfold import NonReplayablePrefixError, fold_session
+        from hecate.services.observability.loginvariants import InvariantViolationError, run_all
+        from hecate.services.observability.logpolicy import should_log_channel
 
         try:
             all_events = await self._event_store.get_events(session_id)

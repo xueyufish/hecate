@@ -19,11 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.engine.checkpoint import InMemoryCheckpointStore
 from hecate.engine.compiler import GraphCompiler
 from hecate.engine.context import InMemoryContextEngine
-from hecate.engine.graph_dsl import parse_graph
 from hecate.engine.pregel import PregelRuntime
 from hecate.engine.types import NodeType, StreamMode, WorkerResult
 from hecate.engine.worker import Worker
 from hecate.models.workflow import WorkflowRunModel, WorkflowVersionModel
+from hecate.services.workflow.graph_dsl import parse_graph
 
 logger = logging.getLogger(__name__)
 
