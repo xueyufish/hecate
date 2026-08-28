@@ -4,6 +4,25 @@
 
 Hecate is an **enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent platform** — supporting cloud SaaS deployment and self-hosted private deployment. Built with Python 3.12+, FastAPI, and SQLAlchemy 2.0 async.
 
+## Local development setup
+
+Hecate uses [uv](https://docs.astral.sh/uv/) for dependency management. The repo ships an [`.envrc`](.envrc) that auto-creates and bootstraps `.venv` whenever you `cd` into the repo (or any worktree created via `git worktree add`).
+
+**One-time per machine:**
+
+```bash
+brew install direnv                                       # macOS
+echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc              # zsh (default on macOS)
+# or for bash:
+echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
+
+direnv allow                                              # run once per clone, inside the repo
+```
+
+After that, every `cd` into the repo (or a worktree) auto-activates `.venv`. New worktrees created via `./scripts/worktree-help.sh start <name>` also bootstrap `.venv` automatically; for raw `git worktree add`, direnv picks up the new directory on first `cd`.
+
+If you do not use direnv, follow the manual install in `## Commands` below instead.
+
 ## Commands
 
 ```bash

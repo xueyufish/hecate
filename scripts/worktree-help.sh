@@ -93,6 +93,34 @@ cleanup_main_openspec_change() {
     return 0
 }
 
+bootstrap_venv() {
+    local wt_path="$1"
+    local venv="${wt_path}/.venv"
+
+    if [[ -d "${venv}/lib" ]] && "${venv}/bin/python" -c "import hecate" 2>/dev/null; then
+        echo "  venv: already bootstrapped (${venv})"
+        return 0
+    fi
+
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "Warning: 'uv' not found in PATH; skipping venv bootstrap at ${venv}" >&2
+        echo "  Install: https://docs.astral.sh/uv/" >&2
+        echo "  Then run inside the worktree:" >&2
+        echo "    uv venv && uv pip install --prerelease=allow -e '.[dev]'" >&2
+        return 1
+    fi
+
+    echo "  venv: bootstrapping ${venv} (uv venv + uv pip install -e .[dev])..."
+    if (cd "${wt_path}" && uv venv .venv && \
+            uv pip install --prerelease=allow -e ".[dev]"); then
+        echo "  venv: ready."
+    else
+        echo "Warning: venv bootstrap failed; run manually inside the worktree:" >&2
+        echo "    uv pip install --prerelease=allow -e '.[dev]'" >&2
+        return 1
+    fi
+}
+
 init_openspec_tools() {
     local wt_path="$1"
     local tools="$2"
@@ -205,6 +233,7 @@ case "${cmd}" in
             if sync_openspec_change "${name}" "${wt_path}"; then
                 cleanup_main_openspec_change "${name}" "${wt_path}"
             fi
+            bootstrap_venv "${wt_path}"
             echo "Created worktree: ${wt_path} (branch: ${branch})"
         fi
 
