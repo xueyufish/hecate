@@ -1,6 +1,6 @@
-"""Factory for creating EnginePort adapters for production use.
+"""Factory for creating RuntimePort adapters for production use.
 
-Creates a concrete EnginePort that wires engine calls to actual service
+Creates a concrete RuntimePort that wires engine calls to actual service
 implementations (LLMService, tool execution, knowledge bases, etc.).
 """
 
@@ -14,7 +14,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.engine.ports import EnginePort, SpanContext
+from hecate.engine.ports import RuntimePort, SpanContext
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,8 @@ def set_quota_service_factory(factory: Any) -> None:
     _quota_service_factory = factory
 
 
-class _ProductionEnginePort(EnginePort):
-    """Production EnginePort adapter wiring engine calls to actual services.
+class _ProductionRuntimePort(RuntimePort):
+    """Production RuntimePort adapter wiring engine calls to actual services.
 
     Delegates LLM calls to LLMService, tool calls to the tool registry,
     and knowledge queries to the knowledge base service.
@@ -184,7 +184,7 @@ class _ProductionEnginePort(EnginePort):
             The tool's return value.
         """
         if self._tool_registry is None:
-            raise RuntimeError("ToolRegistry not configured in EnginePort")
+            raise RuntimeError("ToolRegistry not configured in RuntimePort")
         return await self._tool_registry.execute(name, args, context)
 
     async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
@@ -302,8 +302,8 @@ def create_engine_port(
     pre_hook: Any = None,
     post_hook: Any = None,
     context_engine: Any = None,
-) -> EnginePort:
-    """Create a production EnginePort adapter.
+) -> RuntimePort:
+    """Create a production RuntimePort adapter.
 
     Args:
         db: Database session for service lookups.
@@ -314,9 +314,9 @@ def create_engine_port(
         context_engine: Optional ContextEngine for message selection/compression.
 
     Returns:
-        A concrete EnginePort wired to production services.
+        A concrete RuntimePort wired to production services.
     """
-    return _ProductionEnginePort(
+    return _ProductionRuntimePort(
         db=db,
         llm_service=llm_service,
         tool_registry=tool_registry,

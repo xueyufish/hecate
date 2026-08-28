@@ -64,11 +64,11 @@ class WorkflowTool:
         channel_snapshot: dict[str, Any] | None = None,
         timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
-        """Execute the workflow via EnginePort.workflow_execute().
+        """Execute the workflow via RuntimePort.workflow_execute().
 
         Args:
             args: Tool arguments (workflow input data).
-            port: EnginePort-like object with workflow_execute().
+            port: RuntimePort-like object with workflow_execute().
             channel_snapshot: Current channel state (for context).
             timeout_seconds: Maximum execution time in seconds.
 

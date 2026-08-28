@@ -6,7 +6,7 @@ Validates the composition-over-inheritance guardrail design:
 - GuardrailResult: allow and block construction.
 - Each hook ABC cannot be instantiated directly.
 - NoOp implementations return ALLOW for all calls.
-- EnginePort guardrail properties default to empty lists.
+- RuntimePort guardrail properties default to empty lists.
 """
 
 from __future__ import annotations
@@ -178,11 +178,11 @@ async def test_custom_pre_tool_hook_can_block():
     assert "dangerous_tool" in result.reason
 
 
-# --- EnginePort integration ---
+# --- RuntimePort integration ---
 
 
-def test_engine_port_guardrail_properties_default_to_empty():
-    """EnginePort guardrail properties SHALL return empty lists by default."""
+def test_runtime_port_guardrail_properties_default_to_empty():
+    """RuntimePort guardrail properties SHALL return empty lists by default."""
 
     class MinimalPort:
         @property

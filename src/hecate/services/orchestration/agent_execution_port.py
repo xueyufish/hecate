@@ -1,6 +1,6 @@
-"""Concrete EnginePort adapter for agent execution.
+"""Concrete RuntimePort adapter for agent execution.
 
-Implements the ``agent_execute`` method on EnginePort by resolving the
+Implements the ``agent_execute`` method on RuntimePort by resolving the
 AgentModel from the database, building an isolated execution context
 (system prompt from persona, agent-specific tools, agent-specific knowledge
 bases), and invoking via the unified WorkflowExecutionService.
@@ -24,7 +24,7 @@ from hecate.engine.guardrail import (
     PostLLMHook,
     PreLLMHook,
 )
-from hecate.engine.ports import EnginePort, SpanContext
+from hecate.engine.ports import RuntimePort, SpanContext
 from hecate.models.agent import AgentModel
 from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.tool import ToolModel
@@ -38,8 +38,8 @@ from hecate.services.rag.service import knowledge_base_service
 logger = logging.getLogger(__name__)
 
 
-class AgentExecutionPort(EnginePort):
-    """EnginePort adapter that handles agent execution via database lookups.
+class AgentExecutionPort(RuntimePort):
+    """RuntimePort adapter that handles agent execution via database lookups.
 
     This adapter implements ``agent_execute`` by:
     1. Loading the AgentModel from the database by ID.
@@ -361,7 +361,7 @@ class AgentExecutionPort(EnginePort):
         )
         return result.scalar_one_or_none()
 
-    # Stub implementations for other EnginePort methods.
+    # Stub implementations for other RuntimePort methods.
     # These are required by the ABC but not used for agent execution.
 
     def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:

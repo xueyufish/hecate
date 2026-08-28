@@ -282,11 +282,11 @@ async def test_get_events_order_ascending(store: InMemoryEventStore, session_id:
     assert events == sorted(events, key=lambda e: e.version)
 
 
-# --- EnginePort integration ---
+# --- RuntimePort integration ---
 
 
-def test_engine_port_event_store_defaults_to_none():
-    """EnginePort.event_store SHALL return None by default."""
+def test_runtime_port_event_store_defaults_to_none():
+    """RuntimePort.event_store SHALL return None by default."""
 
     class MinimalPort:
         @property

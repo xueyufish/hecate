@@ -1,7 +1,7 @@
 """Tool execution worker with guardrail hook support.
 
 Parses tool calls from the messages channel, invokes PreToolHook before
-execution, executes tools via EnginePort, invokes PostToolHook after
+execution, executes tools via RuntimePort, invokes PostToolHook after
 execution, captures evidence, and writes tool result messages back to
 channel_updates.
 """
@@ -19,7 +19,7 @@ from hecate.engine.guardrail import (
     PostToolHook,
     PreToolHook,
 )
-from hecate.engine.ports import EnginePort
+from hecate.engine.ports import RuntimePort
 from hecate.engine.tool_access import (
     AccessDecision,
     ApprovalCallback,
@@ -38,7 +38,7 @@ class ToolWorker(Worker):
     """Worker that executes tool calls from the messages channel.
 
     Extracts tool calls from the last assistant message, executes each tool
-    via EnginePort, captures evidence, and returns tool result messages.
+    via RuntimePort, captures evidence, and returns tool result messages.
 
     Guard hooks are called before and after each tool execution:
     - ``PreToolHook``: called before execution; on BLOCK, the tool is skipped.
@@ -47,7 +47,7 @@ class ToolWorker(Worker):
 
     def __init__(
         self,
-        port: EnginePort,
+        port: RuntimePort,
         pre_tool_hook: PreToolHook | None = None,
         post_tool_hook: PostToolHook | None = None,
         access_policy: ToolAccessPolicy | None = None,

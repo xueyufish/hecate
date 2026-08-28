@@ -1,16 +1,21 @@
 """Engine/service boundary contract (Ports and Adapters pattern).
 
-This module defines EnginePort, the abstract interface that decouples the
+This module defines RuntimePort, the abstract interface that decouples the
 execution engine from external capability services (LLM providers, tool runners,
 knowledge bases, checkpoint storage, conversation history). The engine calls
 these methods to perform I/O without importing any concrete service module.
 
 **Why ports?** The engine is designed to be fully testable in isolation. By
-depending on the EnginePort abstract interface rather than concrete service
+depending on the RuntimePort abstract interface rather than concrete service
 implementations, unit tests can provide lightweight mocks or fakes. Production
 code supplies an adapter that wires each method to the actual service layer.
 This zero-dependency design keeps the engine framework-agnostic and allows
 different deployment configurations to swap service implementations freely.
+
+**Test doubles**: ``StubRuntimePort`` (below) is the canonical test double.
+Use this name when writing new tests; legacy test doubles (``StubPort``,
+``_StubPort``, ``MockEnginePort``) remain valid for existing tests but are
+not recommended for new code.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ from uuid import UUID
 
 @dataclass(frozen=True)
 class SpanContext:
-    """Immutable context returned when a span is created via EnginePort.
+    """Immutable context returned when a span is created via RuntimePort.
 
     Carries the IDs needed to correlate engine events with application-level traces.
     """
@@ -34,7 +39,7 @@ class SpanContext:
     parent_id: str | None = None
 
 
-class EnginePort(ABC):
+class RuntimePort(ABC):
     """Boundary interface between the execution engine and external capability services.
 
     The engine calls these methods to invoke LLM, execute tools, query knowledge,
@@ -188,7 +193,7 @@ class EnginePort(ABC):
         Concrete adapters SHOULD override this method to surface structured
         ``tool_calls`` from the underlying LLM service.
 
-        This is an optional method — concrete EnginePort implementations are not
+        This is an optional method — concrete RuntimePort implementations are not
         required to override it. Non-overriding ports degrade to plain token-stream
         semantics and engine tool-calling detection will simply not activate.
 
@@ -284,7 +289,7 @@ class EnginePort(ABC):
         Raises:
             ValueError: If the agent_id does not resolve to a valid agent.
         """
-        raise NotImplementedError("agent_execute requires a concrete EnginePort adapter")
+        raise NotImplementedError("agent_execute requires a concrete RuntimePort adapter")
 
     async def tool_execute_sandbox(
         self,
@@ -297,6 +302,13 @@ class EnginePort(ABC):
         When the sandbox container pool is enabled, executes inside a
         pooled container. Otherwise falls back to regular tool_execute.
 
+        Concrete adapters that support sandbox execution MUST override this
+        method. The default implementation here is a pass-through to
+        ``tool_execute`` — it deliberately does NOT import the sandbox service
+        from ``hecate.services.sandbox`` so that ``engine/`` remains
+        dependency-free at the module level. Sandbox routing is wired in by
+        the harness / orchestrator via a concrete adapter.
+
         Args:
             name: The registered tool name.
             args: Keyword arguments to pass to the tool.
@@ -305,22 +317,6 @@ class EnginePort(ABC):
         Returns:
             The tool's return value.
         """
-        from hecate.services.sandbox import get_sandbox_pool
-
-        pool = get_sandbox_pool()
-        if pool is not None:
-            from hecate.services.sandbox.executor import SandboxConfig
-
-            volumes = context.get("_sandbox_volumes", {}) if context else {}
-            cfg = SandboxConfig(volumes=volumes)
-            result = await pool.execute(name, args, cfg)
-            return {
-                "stdout": result.stdout,
-                "stderr": result.stderr,
-                "exit_code": result.exit_code,
-                "timed_out": result.timed_out,
-            }
-
         return await self.tool_execute(name, args, context)
 
     async def workflow_execute(
@@ -348,4 +344,64 @@ class EnginePort(ABC):
         Raises:
             ValueError: If the workflow_id does not resolve to a valid workflow.
         """
-        raise NotImplementedError("workflow_execute requires a concrete EnginePort adapter")
+        raise NotImplementedError("workflow_execute requires a concrete RuntimePort adapter")
+
+
+class StubRuntimePort(RuntimePort):
+    """Canonical test double for ``RuntimePort``.
+
+    Provides minimal no-op implementations of all abstract methods and the
+    default behavior for all optional methods. Use this class when writing
+    new tests against ``RuntimePort``.
+
+    Existing tests may use legacy names (``StubPort``, ``_StubPort``,
+    ``MockEnginePort``) that subclass ``RuntimePort`` directly. Those names
+    remain valid and are not deprecated by this PR.
+    """
+
+    async def llm_invoke(
+        self,
+        messages: list[dict],
+        config: dict,
+    ) -> AsyncGenerator[str, None]:
+        """Yield a single deterministic token for tests."""
+        yield "stub-response"
+
+    async def tool_execute(
+        self,
+        name: str,
+        args: dict,
+        context: dict | None = None,
+    ) -> Any:
+        return {"name": name, "args": args, "context": context}
+
+    async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
+        return []
+
+    async def checkpoint_save(self, state: dict) -> UUID:
+        return UUID(int=0)
+
+    async def checkpoint_load(self, checkpoint_id: UUID) -> dict:
+        return {}
+
+    async def conversation_load(self, session_id: UUID) -> list[dict]:
+        return []
+
+    async def conversation_save(self, session_id: UUID, messages: list[dict]) -> None:
+        return None
+
+    async def create_span(
+        self,
+        name: str,
+        parent_id: str | None = None,
+        attributes: dict[str, Any] | None = None,
+    ) -> SpanContext | None:
+        return None
+
+    async def end_span(
+        self,
+        span_id: str,
+        output_data: dict[str, Any] | None = None,
+        usage: dict[str, int] | None = None,
+    ) -> None:
+        return None

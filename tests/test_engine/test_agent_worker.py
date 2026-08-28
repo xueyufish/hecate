@@ -1,4 +1,4 @@
-"""Tests for AgentWorker — AGENT node execution via EnginePort."""
+"""Tests for AgentWorker — AGENT node execution via RuntimePort."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from hecate.engine.ports import EnginePort
+from hecate.engine.ports import RuntimePort
 from hecate.engine.types import WorkerResult
 from hecate.engine.workers.agent_worker import AgentWorker
 
 
-class MockAgentPort(EnginePort):
-    """Mock EnginePort that returns canned agent responses."""
+class MockAgentPort(RuntimePort):
+    """Mock RuntimePort that returns canned agent responses."""
 
     def __init__(self, response: str = "Mock agent response", should_fail: bool = False) -> None:
         self._response = response

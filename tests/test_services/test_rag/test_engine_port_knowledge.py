@@ -1,4 +1,4 @@
-"""Tests for EnginePort knowledge_query integration.
+"""Tests for RuntimePort knowledge_query integration.
 
 Tests cover:
 - AgentExecutionPort.knowledge_query() delegates to KnowledgeBaseService

@@ -3,7 +3,7 @@
 Production Workers for all node types in the execution engine:
 - ConditionWorker: evaluates expressions for graph routing
 - VariableSetWorker: writes values to channels
-- KnowledgeWorker: queries knowledge bases via EnginePort
+- KnowledgeWorker: queries knowledge bases via RuntimePort
 - ToolWorker: executes tools with guard hooks
 - AgentWorker: delegates to sub-agents via nested graph execution
 - SuggestionWorker: generates opening remarks and follow-up suggestions

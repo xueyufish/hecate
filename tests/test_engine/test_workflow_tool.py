@@ -12,7 +12,7 @@ from hecate.engine.workflow_tool import WorkflowTool
 
 @pytest.fixture
 def mock_port() -> MagicMock:
-    """Create a mock EnginePort."""
+    """Create a mock RuntimePort."""
     port = MagicMock()
     port.workflow_execute = AsyncMock(return_value={"output": "done", "status": "completed"})
     return port
@@ -82,7 +82,7 @@ def test_workflow_tool_to_tool_schema() -> None:
 
 
 async def test_workflow_tool_execute(mock_port: MagicMock) -> None:
-    """Test WorkflowTool execution via EnginePort."""
+    """Test WorkflowTool execution via RuntimePort."""
     wf_id = uuid.uuid4()
     tool = WorkflowTool(
         workflow_id=wf_id,

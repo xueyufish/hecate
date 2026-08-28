@@ -1,7 +1,7 @@
 """Knowledge retrieval worker for querying knowledge bases.
 
 Extracts a query from the messages channel, calls knowledge base search
-via EnginePort, and writes retrieved context and system messages to
+via RuntimePort, and writes retrieved context and system messages to
 channel_updates for downstream LLM consumption.
 """
 
@@ -11,7 +11,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from hecate.engine.ports import EnginePort
+from hecate.engine.ports import RuntimePort
 from hecate.engine.types import WorkerResult
 from hecate.engine.worker import Worker
 
@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 class KnowledgeWorker(Worker):
-    """Worker that queries knowledge bases via EnginePort and injects results.
+    """Worker that queries knowledge bases via RuntimePort and injects results.
 
     Extracts the search query from the last message in the ``messages`` channel,
-    calls ``EnginePort.knowledge_query()`` for the configured KB IDs, and
+    calls ``RuntimePort.knowledge_query()`` for the configured KB IDs, and
     writes the retrieved context to channels.
     """
 
-    def __init__(self, port: EnginePort, event_store: Any = None) -> None:
+    def __init__(self, port: RuntimePort, event_store: Any = None) -> None:
         super().__init__(event_store=event_store)
         self._port = port
 
@@ -87,7 +87,7 @@ class KnowledgeWorker(Worker):
             node_config: Node configuration dict.
 
         Returns:
-            The extracted query string.
+            The extracted search query.
         """
         template = node_config.get("query_template", "")
         if template:

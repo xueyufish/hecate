@@ -1,4 +1,4 @@
-"""Tests for SkillRegistry.invoke() — routing to EnginePort methods."""
+"""Tests for SkillRegistry.invoke() — routing to RuntimePort methods."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from hecate.skill_registry.types import SkillRef, SkillRefType
 
 @pytest.fixture
 def mock_port() -> MagicMock:
-    """Create a mock EnginePort."""
+    """Create a mock RuntimePort."""
     port = MagicMock()
     port.tool_execute = AsyncMock(return_value={"result": "sunny"})
     port.knowledge_query = AsyncMock(return_value=[{"content": "doc chunk"}])
@@ -49,10 +49,10 @@ async def test_invoke_tool(db_session: AsyncSession, sample_tool: ToolModel, moc
 
 
 async def test_invoke_tool_without_port(db_session: AsyncSession, sample_tool: ToolModel) -> None:
-    """Test that invoking a tool without EnginePort raises ValueError."""
+    """Test that invoking a tool without RuntimePort raises ValueError."""
     registry = SkillRegistry(db_session)
     ref = SkillRef(ref_type=SkillRefType.TOOL, ref_id="search_tool")
-    with pytest.raises(ValueError, match="EnginePort required"):
+    with pytest.raises(ValueError, match="RuntimePort required"):
         await registry.invoke(ref, {})
 
 

@@ -31,7 +31,7 @@ async def evaluate_routing(
         routing_config: Mode-specific configuration dict.
         input_value: The value to evaluate (typically from channel state).
         channel_snapshot: Current channel state for context.
-        engine_port: Optional EnginePort for LLM calls.
+        engine_port: Optional RuntimePort for LLM calls.
         last_speaker: Node ID of the last executing agent (for dynamic mode).
 
     Returns:
