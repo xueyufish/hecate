@@ -165,7 +165,7 @@ async def test_non_streaming_response_without_suggested_questions(client: AsyncC
 @pytest.mark.asyncio
 async def test_streaming_response_with_suggestions_event(client: AsyncClient):
     """Test that streaming with generate_opening is accepted by the API."""
-    with patch("hecate.services.orchestration.engine_port_adapter.create_engine_port") as mock_create_port:
+    with patch("hecate.services.orchestration.runtime_port_adapter.create_runtime_port") as mock_create_port:
         mock_port = MagicMock()
 
         async def mock_llm_invoke(*args, **kwargs):

@@ -73,10 +73,10 @@ def create_mcp_server() -> FastMCP:
                     return json.dumps({"error": "Session not found"})
 
                 from hecate.services.llm.service import llm_service
-                from hecate.services.orchestration.engine_port_adapter import create_engine_port
+                from hecate.services.orchestration.runtime_port_adapter import create_runtime_port
                 from hecate.services.workflow.execution_service import WorkflowExecutionService
 
-                port = create_engine_port(db, llm_service)
+                port = create_runtime_port(db, llm_service)
                 exec_service = WorkflowExecutionService(port=port, db=db)
 
                 result = await exec_service.execute(
@@ -128,10 +128,10 @@ def create_mcp_server() -> FastMCP:
                     return json.dumps({"error": "Session not found"})
 
                 from hecate.services.llm.service import llm_service
-                from hecate.services.orchestration.engine_port_adapter import create_engine_port
+                from hecate.services.orchestration.runtime_port_adapter import create_runtime_port
                 from hecate.services.workflow.execution_service import WorkflowExecutionService
 
-                port = create_engine_port(db, llm_service)
+                port = create_runtime_port(db, llm_service)
                 exec_service = WorkflowExecutionService(port=port, db=db)
 
                 result = await exec_service.execute(

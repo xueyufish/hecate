@@ -295,7 +295,7 @@ class _ProductionRuntimePort(RuntimePort):
         return await port.agent_execute(agent_id, messages, channel_snapshot, context, agent_definition)
 
 
-def create_engine_port(
+def create_runtime_port(
     db: AsyncSession,
     llm_service: Any,
     tool_registry: Any = None,

@@ -6,31 +6,15 @@ Hecate is an **enterprise-grade, multi-tenant, model-agnostic, MCP-first Agent p
 
 ## Local development setup
 
-Hecate uses [uv](https://docs.astral.sh/uv/) for dependency management. The repo ships an [`.envrc`](.envrc) that auto-creates and bootstraps `.venv` whenever you `cd` into the repo (or any worktree created via `git worktree add`).
-
-**One-time per machine:**
-
-```bash
-brew install direnv                                       # macOS
-echo 'eval "$(direnv hook zsh)"' >> ~/.zshrc              # zsh (default on macOS)
-# or for bash:
-echo 'eval "$(direnv hook bash)"' >> ~/.bashrc
-
-direnv allow                                              # run once per clone, inside the repo
-```
-
-After that, every `cd` into the repo (or a worktree) auto-activates `.venv`. New worktrees created via `./scripts/worktree-help.sh start <name>` also bootstrap `.venv` automatically; for raw `git worktree add`, direnv picks up the new directory on first `cd`.
-
-If you do not use direnv, follow the manual install in `## Commands` below instead.
+Hecate uses [uv](https://docs.astral.sh/uv/) with the venv at `.venv/`. The shipped [`.envrc`](.envrc) auto-creates and activates `.venv` on every `cd` into the repo or a worktree (including ones created by `./scripts/worktree-help.sh start`). One-time per machine: install direnv, hook it into your shell, run `direnv allow` — exact commands are in the `.envrc` header. Without direnv, use the manual install in `## Commands`.
 
 ## Commands
 
 ```bash
-# Install (uses uv + venv at .venv/)
-# (--prerelease=allow: required while fastmcp 4.x is only available as a beta)
+# Install (uv + venv at .venv/; --prerelease=allow needed while fastmcp 4.x is beta-only)
 source .venv/bin/activate && uv pip install --prerelease=allow -e ".[dev]"
 
-# Run all tests (1713 tests, takes ~6 min)
+# Run all tests (full suite, several minutes)
 python -m pytest tests/ -q
 
 # Run a single test file or function
@@ -53,60 +37,55 @@ alembic upgrade head
 uvicorn hecate.main:app --reload
 ```
 
-**Pre-commit hooks** run all 4 checks (ruff, ruff-format, mypy, pytest). pytest uses `scripts/smart-pytest.sh` which scopes tests to affected layers and skips for non-Python changes. Never use `--no-verify`.
+**Pre-commit hooks** run ruff, ruff-format, commitizen (commit-message check), mypy, and pytest. pytest is scoped to affected layers by `scripts/smart-pytest.sh` and skipped for non-Python changes. Never use `--no-verify`.
 
 ## Architecture layers
 
 ```
-engine/     → Zero external deps (no imports from services/, api/, models/); jsonschema is sole exception.
-              In practice the invariant holds for almost every engine module; documented exceptions:
-                * engine/checkpoint.py: PostgresCheckpointStore lives in services/ (deprecated since 1.3.19)
-                * engine/temporal/run_worker.py: imports Settings from core/
-                * engine/workers/ and engine/ports.py: import services/ sandbox + orchestration helpers
-                  (PostgreSQL-only fast paths) — T3+ work may reverse this.
-              **engine/middleware_factory.py is the one engine module that holds the invariant strict.**
+engine/     → Zero external deps: no imports from services/, api/, models/, core/ at module
+              level; jsonschema is the sole external exception. Exactly three modules carry
+              cross-layer refs, all TYPE_CHECKING-only or lazy inside function/method bodies:
+              pregel.py (services.observability logfold/loginvariants/logpolicy,
+              services.temporal.conflict), tool_access.py (services.tool.shell_analysis),
+              workers/coordinator_worker.py (orchestrator_validator, workflow.templates).
+              Do not add more — guarded by tests/test_engine/test_runtime_self_sufficiency.py
+              (Phase 0 gate for the future hecate-runtime wheel). Every other module holds
+              the invariant, including middleware_factory.py (stays in engine/ deliberately).
 services/   → Depends on models/, engine/ports (abstract interfaces only), and external libraries
-api/        → Depends on services/ and models/. Direct engine imports exist (chat.py: `EventStore`,
-              `GuardrailAction`, `Phase`, `SessionStateStore`, etc.; sessions/replay/management/
-              collaboration_patterns/orchestration_templates) — these are compile-time type imports
-              used at handler-signature boundaries and are tolerated because re-exporting via a
-              services/ facade would couple three layers worse. Do not introduce new ones; if you
-              need an engine type, add it to services/ first.
+api/        → Depends on services/ and models/. A few handlers import engine types for
+              compile-time signatures (v1/chat, v1/agents, management/{sessions, replay,
+              conversations, collaboration_patterns}) — tolerated legacy; do not add new
+              ones. If you need an engine type, expose it via services/ first.
 models/     → Pure data definitions (ORM + Pydantic); no business logic
 core/       → Infrastructure: config (pydantic-settings), database (async SQLAlchemy), DI, rate limiting
 ```
 
-**Layering violations to know about:**
-- `engine/checkpoint.py` PostgresCheckpointStore imports from `models/` — legacy, do not replicate.
-- `engine/temporal/run_worker.py` imports from `core/` — same.
+Historical violations (`engine/temporal/`, `engine/checkpoint.py` PostgresCheckpointStore) are gone — removed in PR0.3 and the #89 audit cleanup.
 
 **Engine `__init__.py` is empty** — import directly from submodules: `from hecate.engine.pregel import PregelRuntime`.
 
 ## Engine Extension Point Inventory
 
-The engine layer defines these abstract interfaces (all in `src/hecate/engine/`):
+| Extension point | File | Default impl |
+|-----|------|--------------|
+| RuntimePort | `engine/ports.py` | `StubRuntimePort` (test double); production: `services/orchestration/runtime_port_adapter.py::create_runtime_port` |
+| Worker / WorkerPool | `engine/worker.py` | `AgentWorker` / `DirectWorkerPool` |
+| CheckpointStore | `engine/checkpoint.py` | `InMemoryCheckpointStore` |
+| EventStore | `engine/eventstore.py` | `InMemoryEventStore` |
+| ContextEngine | `engine/context.py` | `InMemoryContextEngine` |
+| SchedulerStrategy | `engine/scheduler.py` | `FIFOScheduler` |
+| EvictionPolicy | `engine/eviction.py` | `NoEviction`, `SizeBasedEviction` |
+| OptimizationPass | `engine/optimization.py` | `DeadNodeElimination`, `ParallelBranchDetection` |
+| Guardrail hooks (Pre/Post × LLM/Tool) | `engine/guardrail.py` | `NoOp*Hook` variants |
+| MiddlewareChain | `engine/middleware.py` | `middleware_factory.py` builders; legacy hooks via `middleware_adapters.py` |
+| MonotonicDenialTracker (concrete dataclass) | `engine/monotonic_denials.py` | per-session, wired via `services/security/guardrail_assembly.py` |
+| RetryStrategy | `engine/retry.py` | `NoRetryStrategy` |
+| ConflictResolver (concrete class) | `services/temporal/conflict.py` | strategies via `ConflictStrategy` enum |
+| Shell analysis (module functions, no class) | `services/tool/shell_analysis.py` | feeds `engine/tool_access.py` content-aware gating |
 
-| Extension Point | File | Abstract methods | InMemory impl |
-|-----|------|-----------------|---------------|
-| EnginePort | `ports.py` | llm_invoke, tool_execute, knowledge_query, checkpoint_save/load, conversation_load/save | — (services provide adapter) |
-| Worker | `worker.py` | execute | AgentWorker in `workers/` |
-| WorkerPool | `worker.py` | dispatch | DirectWorkerPool |
-| CheckpointStore | `checkpoint.py` | save, load, list_checkpoints | InMemoryCheckpointStore |
-| EventStore | `eventstore.py` | append, get_events, replay, get_version | InMemoryEventStore |
-| ContextEngine | `context.py` | select_messages, compress, estimate_tokens | InMemoryContextEngine |
-| SchedulerStrategy | `scheduler.py` | select_next, set_weights | FIFOScheduler |
-| EvictionPolicy | `eviction.py` | should_evict, select_victim | NoEviction, SizeBasedEviction |
-| OptimizationPass | `optimization.py` | optimize | DeadNodeElimination, ParallelBranchDetection |
-| ConflictResolver | `temporal/conflict.py` | resolve | NoOpConflictResolver |
-| PreLLMHook / PostLLMHook / PreToolHook / PostToolHook | `guardrail.py` | on_pre_llm_call / on_post_llm_call / on_pre_tool_call / on_post_tool_call | NoOp variants for each |
-| MiddlewareChain (E3) | `middleware.py` | Chain.run (ordered stages, BLOCK short-circuit, SANITIZE pass-through) | `middleware_factory.py` builders; legacy hooks adapt via `middleware_adapters.py` |
-| MonotonicDenialTracker | `monotonic_denials.py` | deny, is_denied | per-session tracker wired via `guardrail_assembly.py` |
-| ShellAnalyzer | `shell_analysis.py` | decompose_command, analyze_command | feeds `tool_access.py` content-aware gating |
-| RetryStrategy | `retry.py` | should_retry, get_backoff, with_config | NoRetryStrategy |
+RuntimePort defines 9 abstract methods (llm_invoke, tool_execute, knowledge_query, checkpoint_save/load, conversation_load/save, create_span, end_span) plus 6 optional defaults: `context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`, `workflow_execute`, `llm_invoke_structured` (the production adapter overrides the last to stream structured `tool_calls`).
 
-EnginePort also has 6 optional methods with defaults: `context_assemble`, `evidence_query`, `agent_execute`, `tool_execute_sandbox`, `workflow_execute`, `llm_invoke_structured`. `llm_invoke_structured` delegates to `llm_invoke` by default (yields a single `{"content", "tool_calls": None}` chunk); the production adapter overrides it to stream content and accumulate structured `tool_calls` for the chat graph tool loop.
-
-**Integration status**: ContextEngine wired into LLMWorker via PregelRuntime execution_context (Phase 1). Guardrail hooks + middleware chains wired into BOTH the Pregel path (ToolWorker/LLMWorker) and the path-A direct tool loop (`api/v1/chat.py`) via `services/security/guardrail_assembly.py` (guardrail-upgrade-trio). ApprovalCallback emits durable APPROVAL_ASKED/DECIDED pairs; MONOTONIC.DENIAL + TOOL.PAIRING + APPROVAL.TURN_CLOSURE invariants run fail-stop on restore. RetryStrategy integrated into PregelRuntime via RetryExecutor (P3).
+Wired today: ContextEngine (PregelRuntime execution_context), guardrail hooks + middleware chains on both the Pregel path and the `api/v1/chat.py` direct tool loop (assembled by `services/security/guardrail_assembly.py`), and RetryStrategy via RetryExecutor.
 
 ## Key files (read these first on a new session)
 
@@ -115,55 +94,41 @@ EnginePort also has 6 optional methods with defaults: `context_assemble`, `evide
 | `docs/design/architecture.md` | Top-level architecture overview |
 | `docs/design/engine-design.md` | Execution engine deep dive |
 | `docs/design/concepts.md` | Core entity model and data design |
-| `docs/design/adr/` | Architecture Decision Records (32 ADRs; see `docs/design/adr/INDEX.md` for topic index) |
-| `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (4 node types, 4 channel types) — bundled in package |
-| `openspec/specs/` | 147 spec directories — the source of truth for each feature |
+| `docs/design/adr/INDEX.md` | ADRs, topic-grouped (`001-032*.md` chronological) |
+| `src/hecate/engine/ports.py` | RuntimePort boundary — start here for the engine/service seam |
+| `src/hecate/services/security/guardrail_assembly.py` | Hook + middleware wiring entry point |
+| `src/hecate/engine/graph-dsl.schema.json` | Graph DSL JSON Schema (10 node types, 4 channel types) |
+| `openspec/specs/` | Spec directories — source of truth per feature |
 | `openspec/changes/archive/` | Completed OpenSpec changes |
 
-> **Note**: Hecate's public strategic docs live at `docs/design/positioning.md` (vs competitors). All ADRs are at `docs/design/adr/INDEX.md` (topic-grouped) and `docs/design/adr/001-028*.md` (chronological). For the full docs map, start at `docs/README.md`.
+Strategic positioning lives at `docs/design/positioning.md`; the docs map starts at `docs/design/README.md` (per-section READMEs; there is no top-level `docs/README.md`).
 
 ## Gotchas and non-obvious facts
 
 - **Python env**: uv + Python 3.12, venv at `.venv/`. Use `uv pip install`, not bare `pip install`.
-- **Git**: GitHub Flow — all changes via PR to `main`. **`main` is a protected branch — DO NOT commit, amend, push, or apply edits directly to it.** Always create a feature branch first (`feat/xxx`, `fix/xxx`, `docs/xxx`, `chore/xxx`) via `git checkout -b <branch>` or `./scripts/opsx-flow.sh start <name>` and open a PR. CI runs on push and PR to `main`. Tag releases from `main` commits.
-  - **Self-check before any write**: `git rev-parse --abbrev-ref HEAD` must NOT return `main`. If it does, `git checkout <branch>` or `git checkout -b <branch>` first.
-  - **If you accidentally edited on main**: `git stash push -u -m "..."` then `git checkout -b docs/<topic>` (or `fix/<topic>` / `feat/<topic>`) then `git stash pop`. **Never** `git commit` on main, **never** `git reset --hard` on main to "undo" — the latter is unrecoverable without reflog archaeology.
-  - **Worktrees bypass this naturally**: `opsx-flow.sh start` always creates `feat/<name>` (or reuses it). Never run OpenSpec work directly on `main`.
-  - **Always confirm before `git push` to GitHub**: never push to `origin` (or any remote) without explicit user confirmation in chat. After CI checks pass locally, ask the user to approve the push before invoking `git push`, `git push --force-with-lease`, `./scripts/opsx-flow.sh push`, or any wrapper that calls push. The pre-push hook may still rebase and re-push after confirmation — that is fine. `--no-verify` on push requires explicit justification in chat. This applies to feature branches, not just `main`.
-- **Pre-commit hook** (`scripts/prevent-main-commit.sh`, installed to `.git/hooks/pre-commit`): refuses any `git commit` while the current branch is `main`, preventing accidental commits to the protected branch. The hook prints the recovery recipe (`git stash` → `git checkout -b <topic>` → `git stash pop`). Bypass with `git commit --no-verify` only for explicit edge cases (e.g. release tagging from `main`). Install once per clone: `cp scripts/prevent-main-commit.sh .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`. Worktrees share hooks with the main repo, so installing in the main `.git/hooks/` covers all worktrees. The existing `scripts/pre-commit.sh` (CI checks) calls this one first, so installing it via `cp scripts/pre-commit.sh` automatically gets main-protection.
-- **Pre-push hook** (`scripts/pre-push.sh`, installed to `.git/hooks/pre-push`): every `git push` automatically fetches `origin` and rebases against `origin/main` if the branch has fallen behind. If the rebase hits conflicts, the push is aborted and the hook prints resolution steps (`add → rebase --continue → re-push`). Install once per clone: `cp scripts/pre-push.sh .git/hooks/pre-push && chmod +x .git/hooks/pre-push`. Worktrees share hooks with the main repo, so installing in the main `.git/hooks/` covers all worktrees.
-- **CheckpointModel** inherits `Base` (not `BaseModel`) — intentionally immutable, no `updated_at`/`deleted_at`.
-- **AgentModel.model_config_db** — ORM column named `model_config` via `mapped_column("model_config", JSON)` to avoid Pydantic's `model_config` collision. CreateSchema uses `alias="model_config"`, ReadSchema uses `serialization_alias="model_config"`.
-- **metadata_ alias** — 5 models use `metadata_` (Python) → `metadata` (SQL) to avoid SQLAlchemy's reserved `metadata` attribute. ReadSchema uses `Field(validation_alias="metadata_")`.
+- **Git**: GitHub Flow; all changes via PR. **`main` is a protected branch — never commit, amend, push, or edit directly on it.** Self-check before any write: `git rev-parse --abbrev-ref HEAD` must not return `main`; if it does, `git checkout -b <branch>` first (`feat/`, `fix/`, `docs/`, `chore/`). If you accidentally edited on main: `git stash push -u -m "..."` → `git checkout -b <topic>` → `git stash pop`; never `git reset --hard` on main. CI runs on push and PR to `main`; tag releases from `main` commits.
+- **Push requires explicit user confirmation in chat** — any `git push`, `--force-with-lease`, or wrapper (`./scripts/opsx-flow.sh push`). After approval, the pre-push hook may rebase and re-push without a second confirmation. `--no-verify` (push or commit) needs explicit justification.
+- **Git hooks** (install once per clone; worktrees share `.git/hooks/`): `cp scripts/pre-commit.sh .git/hooks/pre-commit` — runs the checks and refuses commits on `main` (prints its own recovery recipe). `cp scripts/pre-push.sh .git/hooks/pre-push` — rebases onto `origin/main` before push; aborts with printed steps on conflict.
+- **AgentModel.model_config_db** — ORM column `model_config` via `mapped_column("model_config", JSON)` (avoids Pydantic `model_config` collision). CreateSchema `alias="model_config"`, ReadSchema `serialization_alias="model_config"`.
+- **metadata_ alias** — 11 models across 10 modules map `metadata_` (Python) → `metadata` (SQL); ReadSchema uses `Field(validation_alias="metadata_")`.
 - **engine/command.py** is a re-export of `Command` from `types.py` — convenience import, not dead code.
-- **compiler._detect_unreachable()** uses BFS from entry point; logs WARNING for unreachable nodes (does not raise).
-- **ChannelManager.write()** silently skips unregistered channels (no error). **read()** raises KeyError for unregistered channels. **restore()** bypasses write semantics — directly sets `_value` field.
-- **StreamMode.DEBUG** defined but not yielded in PregelRuntime (P3). StreamMode.MESSAGES is implemented.
-- **PERSISTENT_TOPIC** is deprecated — auto-migrated to `topic` with `persistent: true` in graph_dsl.py.
-- **mypy strict=true** but many error codes disabled in pyproject.toml — not truly strict.
-- **pyright LSP** produces false positives for Python 3.12 StrEnum — safe to ignore these diagnostics.
-- **Optional dependency groups** in pyproject.toml: `[llm]`, `[temporal]`, `[rag]`, `[security]`, `[tools]`, `[observability]`, `[mysql]`, `[scheduling]`, `[dev]`. Declare new packages in the right group.
-- **Conftest location**: `tests/conftest.py` (not root). Single file, no per-directory conftests.
+- **compiler._detect_unreachable()** uses BFS from entry; logs WARNING for unreachable nodes (does not raise).
+- **ChannelManager**: `write()` silently skips unregistered channels; `read()` raises KeyError (`ChannelNotFoundError`); `restore()` bypasses write semantics and sets `_value` directly.
+- **StreamMode** has only VALUES, UPDATES, MESSAGES — DEBUG no longer exists. MESSAGES is the SSE streaming mode.
+- **PERSISTENT_TOPIC** channel type is deprecated — auto-migrated to `topic` + `persistent: true` by `services/workflow/graph_dsl.py`.
+- **mypy** `strict=true` but many error codes disabled in pyproject.toml — not truly strict.
+- **Optional dependency groups** in pyproject.toml: `[llm] [temporal] [rag] [security] [tools] [redis] [observability] [mysql] [scheduling] [dev]` — declare new packages in the right group.
+- **Conftest**: shared fixtures in `tests/conftest.py`; two per-directory conftests exist (`test_browser`, `test_session_state` — fakeredis). Don't add more unless a fixture can't be shared.
 
 ## Conventions
 
 ### Project workflow
 
 - Feature IDs: `X.Y.Z` pattern (e.g., `1.3.1`, `9.4a`). Append letter suffixes — never renumber.
-- **OpenSpec workflow is MANDATORY for ALL changes** — no exceptions. Every change MUST follow: `proposal → design → specs → tasks → implement → verify → archive`. Use `/opsx-propose` to create a change, then `/opsx-apply` to implement tasks, then run verification commands, then `/opsx-archive` to close. Never skip the propose step or implement outside an OpenSpec change directory. Mark tasks complete in `tasks.md` immediately.
-- **OpenSpec commands MUST be triggered by the user manually** — the AI agent SHALL NOT automatically invoke `/opsx-explore`, `/opsx-propose`, `/opsx-apply`, `/opsx-archive`, or any other `/opsx-*` command. The agent may suggest running a command, but MUST wait for explicit user approval.
-- **OpenSpec change file sync (worktree creation)** — `./scripts/opsx-flow.sh start <name>` (via `worktree-help.sh start`) automatically detects uncommitted OpenSpec change artifacts under `openspec/changes/<name>/` in the **main repo's working tree** and syncs them into the new worktree. This rescues the case where `/opsx-propose` was run in the main checkout by mistake (worktrees only inherit tracked files from the base branch). After the worktree is ready, clean up the main copy with `rm -rf openspec/changes/<name>`.
-- **Correct OpenSpec invocation sequence**:
-  1. (Optional, in main) `/opsx-explore` — initial scoping to decide the change name and high-level shape. Does not write OpenSpec artifacts, so it is safe to run in main.
-  2. `./scripts/opsx-flow.sh start <change-name>` — creates worktree on `feat/<change-name>` branch.
-  3. (Optional, in worktree) `/opsx-explore` — deep dive with file/code references to refine the design before proposing.
-  4. Inside the worktree: `/opsx-propose <change-name>` — generates `proposal.md` / `design.md` / `specs/*.md` / `tasks.md` under `openspec/changes/<change-name>/`.
-  5. Inside the worktree: `/opsx-apply <change-name>` — implements tasks from `tasks.md`.
-  6. `./scripts/opsx-flow.sh push <change-name>` — pushes branch to origin.
-  7. PR → merge → `/opsx-archive <change-name>` to close the change.
-- Feature catalog: maintain P1→P5 priority ordering, update counts when features change.
-- **Catalog & Roadmap sync is MANDATORY** — when archiving an OpenSpec change (`/opsx-archive`), the agent MUST check and update `docs/design/positioning.md` before performing the archive move. This includes: updating feature descriptions. If the user skips this step in the archive flow, the agent MUST still remind them after the archive completes.
-- Run `ruff check` + `ruff format --check` + `mypy` + `pytest` before committing.
+- **OpenSpec workflow is MANDATORY for ALL changes**: `proposal → design → specs → tasks → implement → verify → archive`, driven by `/opsx-propose` → `/opsx-apply` → verification commands → `/opsx-archive`. Never implement outside a change directory; mark tasks complete in `tasks.md` immediately.
+- **`/opsx-*` commands are user-triggered only** — the agent may suggest but must wait for explicit approval.
+- Invocation sequence: (optional `/opsx-explore` in main — writes no artifacts, safe there) → `./scripts/opsx-flow.sh start <name>` (creates the `feat/<name>` worktree; also syncs uncommitted `openspec/changes/<name>/` artifacts from the main checkout — `rm -rf` that copy afterwards) → `/opsx-propose <name>` → (optional deeper `/opsx-explore`) → `/opsx-apply <name>` → `./scripts/opsx-flow.sh push <name>` → PR → merge → `/opsx-archive <name>`.
+- **On `/opsx-archive`**: check/update `docs/design/positioning.md` (feature descriptions, P1→P5 catalog) before the archive move; remind the user afterwards if skipped.
 
 ### Coding rules (enforced by ruff E/F/I/N/W/UP/B/SIM)
 
@@ -183,75 +148,36 @@ EnginePort also has 6 optional methods with defaults: `context_assemble`, `evide
 |----------|-----------|---------|
 | SQLAlchemy models | `XxxModel` | `AgentModel` |
 | Pydantic schemas | `XxxCreateSchema` / `XxxUpdateSchema` / `XxxReadSchema` | `AgentCreateSchema` |
-| **Extension port（抽象接口）** | `XxxPort`（无 `ABC` / `Abstract` / `Base` 前缀；`abc.ABC` 已在继承列表里声明抽象性） | `RuntimePort`、`OpsPort`、`KnowledgeQueryPort` |
-| **测试替身** | `StubXxx` | `StubRuntimePort` |
-| **默认实现** | `HecateXxxAdapter` | `HecateMemoryAdapter`、`HecateLLMAdapter` |
-| **第三方实现** | `<Vendor>XxxAdapter` | `Mem0Adapter`、`OpenAIAdapter` |
+| **Cross-layer boundary port** | `XxxPort` — reserved for engine↔services hexagonal seams only | `RuntimePort`, `AgentExecutionPort` |
+| **Engine-internal extension point** | Plain noun + `abc.ABC`; no `Port` / `Base` / `ABC` / `Abstract` / `I` marker (`abc.ABC` in the bases already marks abstractness) | `Worker`, `EventStore`, `ContextEngine`, `RetryStrategy` |
+| **Test doubles** | `StubXxx` | `StubRuntimePort` |
+| **Default implementations** | `HecateXxxAdapter` (current production RuntimePort impl: `_ProductionRuntimePort` in `services/orchestration/runtime_port_adapter.py`) | — |
+| **Vendor implementations** | `<Vendor>XxxAdapter` | `EmailNotificationAdapter`, `WebhookNotificationAdapter` |
 
 Standard Python naming elsewhere: `snake_case` for modules/functions, `PascalCase` for classes, `UPPER_SNAKE` for constants.
 
-**Why no `Abstract` / `Base` / `I` prefix**：Python 之禅"简单胜于复杂"——`abc.ABC` 已显式标记抽象，`Port` / `Adapter` 后缀已暗示协议与实现，多余前缀不增加信息。对齐 LangChain（`Runnable`、`BaseTool`）、Dify（`Tool`、`Provider`）、Python 标准库（`collections.abc.Mapping`、`pathlib.Path`）。
-
 ### Language
 
-All **code** artifacts — Python/TypeScript code, docstrings, comments, inline annotations — **SHALL be written in English**.
-
-**OpenSpec change artifacts** — `proposal.md`, `design.md`, `tasks.md`, and `specs/*.md` in `openspec/changes/` — **SHALL be written in Chinese by default** (prose content). Business terms, entity names, data table names, code classes/fields/properties, file paths, environment variables, and technology names (e.g. Docker, PostgreSQL, FastAPI, LangGraph) SHALL remain in English.
-
-We may converse in Chinese. Code artifacts are always English; OpenSpec change documents default to Chinese unless explicitly noted otherwise.
+Code artifacts — Python/TypeScript code, docstrings, comments, inline annotations — are always English. OpenSpec change artifacts (`proposal.md`, `design.md`, `tasks.md`, `specs/*.md` under `openspec/changes/`) default to Chinese prose; business terms, entity/table names, code identifiers, file paths, env vars, and technology names stay English.
 
 ### Documentation — no specific numbers or dates
 
-User-facing documentation in `README.md` and design docs under `docs/` **SHALL NOT** contain:
-
-- **Specific counts** used as descriptive/marketing markers — e.g. "26 interfaces + 8 SPI", "11 built-in tools", "35 data models", "32 ADRs", "100+ archived changes", "1713 tests", "1000+ stars".
-- **Specific dates** used as version pins to external specs or as release metadata — e.g. "MCP 2026-07-28 spec", "A2A v1.0 GA", "shipped 2026-08-22", "Accepted (2026-08-15; ...)".
-
-**Replacement**: use vague qualifiers (`many`, `multiple`, `several`, `recent`) or drop the number/date entirely.
-
-**Allowed exceptions** (do NOT strip):
-
-- Functional version requirements (`Python 3.12+`, `SQLAlchemy 2.0`, `JSON-RPC 2.0`).
-- HTTP status codes, port numbers, file sizes in commands.
-- Dates inside JSON code examples (e.g. `"timestamp": "2026-08-11T10:30:05Z"`).
-- Dates inside filesystem paths and `openspec/changes/` archive folder names.
-- Project-internal IDs (`P1`–`P5`, feature codes like `13.5`, `5.4b`).
-- Quantitative system requirements (CPU/RAM/disk minimums) in install instructions.
-- Factual observations about external projects in research notes (`docs/research/`).
-
-**Scope of this rule**:
-
-- ✅ Applies to: `README.md`, `docs/design/` (excluding `docs/design/adr/`), `docs/research/`, `docs/getting-started/`, `docs/tutorials/`, `docs/concepts/`, `docs/reference/`, `docs/how-to/`, `docs/operations/`, `docs/migrations/`, `docs/about/`, `docs/use-cases/`.
-- ⏸️ Temporarily exempt: `docs/features/`, `docs/design/adr/`. Re-evaluate later.
-
-**Rationale**: counts and dates go stale. A README claiming "32 ADRs" must be updated every time an ADR is added. Vague qualifiers describe capability without committing to a number that will be wrong tomorrow.
+`README.md` and `docs/**` (temporarily exempt: `docs/design/adr/`, `docs/features/`) must not contain specific counts or dates as descriptive/marketing markers — e.g. "32 ADRs", "1713 tests", "shipped 2026-08-22". Use vague qualifiers (`many`, `several`, `recent`) or drop the number. Allowed exceptions: functional version requirements (`Python 3.12+`, `SQLAlchemy 2.0`), HTTP status codes / port numbers / file sizes in commands, dates inside JSON examples and `openspec/` archive folder names, project-internal IDs (`P1`–`P5`, feature codes like `13.5`), quantitative hardware minimums in install instructions, and factual observations in `docs/research/`. Rationale: counts and dates go stale.
 
 ## Testing
 
-- `tests/` mirrors `src/hecate/` structure (`test_engine/`, `test_models/`, `test_api/`, `test_services/`).
-- Single `conftest.py` at `tests/`: `db_session` (AsyncSession + auto-rollback), `setup_database` (autouse, create_all/drop_all per test), `client` (httpx AsyncClient with DI overrides).
-- **Do NOT create separate engines in test files** — use `db_session` from conftest.
-- `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` decorator needed.
-- Database: in-memory SQLite (`sqlite+aiosqlite://`). Never connect to real PostgreSQL in unit tests.
-- Engine tests use lightweight stub classes (`SimpleWorker`, `InterruptWorker`) instead of mocking frameworks.
-- No factories — create models inline with `db_session.add()` + `await db_session.flush()`.
+- `tests/` mirrors `src/hecate/` (`test_engine/`, `test_models/`, `test_api/`, `test_services/`).
+- Shared fixtures in `tests/conftest.py`: `db_session` (AsyncSession + auto-rollback), `setup_database` (autouse, create_all/drop_all per test), `client` (httpx AsyncClient + DI overrides). Use `db_session` in all DB tests — never create separate engines in test files.
+- `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` needed. Database is in-memory SQLite (`sqlite+aiosqlite://`); never connect to real PostgreSQL in unit tests.
+- Engine tests use lightweight stub classes (`SimpleWorker`, `InterruptWorker`), not mocking frameworks. No factories — create models inline with `db_session.add()` + `await db_session.flush()`.
 - ruff S101 (assert in tests) is expected — per-file-ignores in pyproject.toml handle it.
-- **Integration tests** (tests that need ChannelManager, PregelRuntime, GraphCompiler, LLMService integration) must wait until the actual integration code is implemented — do not write integration tests for features that are interface-only.
+- New engine extension points: test that the interface is not instantiable, test the default impl, test edge cases. Do NOT write tests referencing integration points (ChannelManager, PregelRuntime, GraphCompiler, LLMService) until those integrations actually exist.
 
 ## What to do / What not to do
 
-- **Do** run `ruff check src/hecate/ tests/ && ruff format --check src/ tests/ && mypy src/ && python -m pytest tests/ -q` before committing.
-- **Do** ensure **0 errors** locally before pushing to GitHub. If any check fails, fix it first.
-- **Do** use `conftest.py`'s `db_session` fixture in all test files that need database access.
-- **Do** add new Python packages to `pyproject.toml` dependencies immediately when installing locally. Never use a package in code without declaring it.
-- **Do** write tests for new engine extension points: test the interface is not instantiable, test InMemory implementations, test edge cases. Do NOT write tests that reference integration points (ChannelManager, PregelRuntime, etc.) until those integration points actually exist.
-- **Don't** renumber feature IDs — use letter suffixes.
+- **Do** declare every new Python package in `pyproject.toml` (correct optional group) at install time — never use an undeclared package in code.
+- **Do** reach **0 errors** on all four verification checks before pushing.
 - **Don't** commit PDF files or large binary assets.
-- **Don't** add comments to code unless the logic is non-obvious.
-- **Don't** use `as any`, `@ts-ignore` or equivalent type suppression.
-- **Don't** import from `engine/` in `api/` — route through `services/` + `EnginePort`.
-- **Don't** use `git commit --no-verify` to skip pre-commit hooks.
-- **Don't** push to GitHub without explicit user confirmation. After local CI passes, ask the user to approve the push before running `git push` (or any wrapper such as `./scripts/opsx-flow.sh push`). The pre-push hook may still rebase and re-push after the user approves — that is fine and does not require a second confirmation.
-- **Don't** push directly without letting the pre-push hook rebase against `origin/main`. If you need to skip the hook for a force-push or special case, use `git push --no-verify` and explain why.
+- **Don't** use `as any`, `@ts-ignore`, or equivalent type suppression.
 - **Don't** assume test failures are "pre-existing" without investigating.
-- **Don't** delegate OpenSpec implementation tasks (`/opsx-apply`) to background agents. Implementation requires full design/specs/tasks context which causes background agent timeouts. Always implement directly as the main agent.
+- **Don't** delegate `/opsx-apply` implementation to background agents (full design/specs/tasks context causes timeouts); implement directly as the main agent.
