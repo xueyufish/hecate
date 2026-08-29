@@ -245,7 +245,7 @@ Enterprise identity federation via standard protocols:
 - **LDAP** — Bind authentication against Active Directory or OpenLDAP
 - **SCIM 2.0** — Automated user/group provisioning and deprovisioning from Azure AD, Okta, OneLogin
 
-SCIM Directory Sync extends the `AuthProviderBase` SPI with `sync_identity` capability — delegated CRUD on the identity provider's user directory.
+SCIM Directory Sync extends the `AuthProvider` SPI with `sync_identity` capability — delegated CRUD on the identity provider's user directory.
 
 ### Authorization & Access Control
 
@@ -429,5 +429,5 @@ The `request_context` carries the authenticated identity (App-level + User-level
 | [ADR-009](adr/009-dual-api-design.md) | Four API surfaces decision |
 | [ADR-011](adr/011-a2a-protocol-adoption.md) | A2A protocol adoption |
 | [ADR-012](adr/012-mcp-streamable-http.md) | MCP Streamable HTTP transport |
-| [ADR-016](adr/016-platform-spi-architecture.md) | Platform SPI (ChannelBase, AuthProviderBase) |
+| [ADR-016](adr/016-platform-spi-architecture.md) | Platform SPI (ChannelBase, AuthProvider) |
 | [ADR-018](adr/018-zero-trust-identity-architecture.md) | Zero Trust Identity Architecture |

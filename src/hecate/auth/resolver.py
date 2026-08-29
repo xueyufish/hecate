@@ -12,27 +12,27 @@ from fastapi import HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.auth.provider import AuthProviderBase
+from hecate.auth.provider import AuthProvider
 from hecate.core.auth_context import AuthContext
 
 logger = logging.getLogger(__name__)
 
 # Module-level provider list, populated by register_auth_providers()
-_providers: list[AuthProviderBase] = []
+_providers: list[AuthProvider] = []
 
 
-def register_auth_providers(*providers: AuthProviderBase) -> None:
+def register_auth_providers(*providers: AuthProvider) -> None:
     """Register auth providers for use by resolve_auth_context().
 
     Args:
-        *providers: AuthProviderBase instances in priority order.
+        *providers: AuthProvider instances in priority order.
     """
     _providers.clear()
     _providers.extend(providers)
     logger.info("Registered %d auth providers: %s", len(providers), [p.name for p in providers])
 
 
-def get_registered_providers() -> list[AuthProviderBase]:
+def get_registered_providers() -> list[AuthProvider]:
     """Return the currently registered auth providers."""
     return list(_providers)
 

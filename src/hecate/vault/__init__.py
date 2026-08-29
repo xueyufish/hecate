@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from hecate.vault.provider import SecretProviderBase
+from hecate.vault.provider import SecretProvider
 from hecate.vault.resolver import resolve_dynamic_credentials, resolve_secret
 
 __all__ = [
-    "SecretProviderBase",
+    "SecretProvider",
     "resolve_dynamic_credentials",
     "resolve_secret",
 ]

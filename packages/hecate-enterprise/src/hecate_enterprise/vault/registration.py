@@ -19,7 +19,7 @@ def register_secret_providers() -> int:
     providers: list = []
 
     if settings.VAULT_URL:
-        from hecate.vault.hcvault_provider import HashiCorpVaultProvider
+        from hecate_enterprise.vault.hcvault_provider import HashiCorpVaultProvider
 
         providers.append(
             HashiCorpVaultProvider(
@@ -32,7 +32,7 @@ def register_secret_providers() -> int:
         )
 
     if settings.AWS_SECRETS_REGION:
-        from hecate.vault.aws_provider import AWSSecretsManagerProvider
+        from hecate_enterprise.vault.aws_provider import AWSSecretsManagerProvider
 
         providers.append(
             AWSSecretsManagerProvider(
@@ -43,7 +43,7 @@ def register_secret_providers() -> int:
         )
 
     if settings.AZURE_KEYVAULT_URL:
-        from hecate.vault.azure_provider import AzureKeyVaultProvider
+        from hecate_enterprise.vault.azure_provider import AzureKeyVaultProvider
 
         providers.append(AzureKeyVaultProvider(vault_url=settings.AZURE_KEYVAULT_URL))
 

@@ -12,14 +12,14 @@ import secrets
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.auth.provider import AuthProviderBase
+from hecate.auth.provider import AuthProvider
 from hecate.core.auth_context import AuthContext
 from hecate.models.user import UserModel
 
 logger = logging.getLogger(__name__)
 
 
-class SAMLAuthProvider(AuthProviderBase):
+class SAMLAuthProvider(AuthProvider):
     """Authenticates requests via SAML 2.0 assertions.
 
     Validates SAML responses from an Identity Provider using

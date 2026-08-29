@@ -378,8 +378,8 @@ Hecate's Plugin System (5.5) originally described "provider/hook/extension" — 
 | **Model** | Custom LLM provider | `ModelPluginBase` | LLM invocation |
 | **Channel** | External communication channel (incl. notification adapters) | `ChannelBase` | Outbound message / inbound event |
 | **Evaluator** | Evaluation metrics (40+ built-in) | `EvaluatorBase` | Evaluation run |
-| **AuthProvider** | Authentication methods | `AuthProviderBase` | Authentication |
-| **SecretProvider** | Secret storage backend | `SecretProviderBase` | Secret resolution |
+| **AuthProvider** | Authentication methods | `AuthProvider` | Authentication |
+| **SecretProvider** | Secret storage backend | `SecretProvider` | Secret resolution |
 
 ### Plugin SDK Example
 

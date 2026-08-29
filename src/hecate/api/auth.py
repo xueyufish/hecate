@@ -23,10 +23,37 @@ from hecate.models.user import (
     TokenResponseSchema,
     UserReadSchema,
 )
-from hecate.services.auth.service import AuthService
+
+try:
+    from hecate_enterprise.services.auth.service import AuthService
+except ImportError as _e:  # pragma: no cover — core-only install path
+    AuthService = None
+    _AUTH_SERVICE_IMPORT_ERROR = _e
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-_auth_service = AuthService()
+
+
+def _get_auth_service() -> AuthService:
+    """Lazy AuthService factory.
+
+    The class lives in hecate-enterprise (PR1.1 step 3). In core-only
+    installs (no enterprise wheel) this raises at request time with a
+    503, and main.py skips mounting this router entirely (guarded
+    include). Keeping the import lazy here lets the module import
+    cleanly so route registration doesn't explode at collection.
+    """
+    if AuthService is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "error": {
+                    "code": "ENTERPRISE_REQUIRED",
+                    "message": "Auth service requires hecate-enterprise package",
+                    "details": str(_AUTH_SERVICE_IMPORT_ERROR),
+                }
+            },
+        )
+    return AuthService()
 
 
 @router.post(
@@ -40,7 +67,7 @@ async def register(
 ) -> UserReadSchema:
     """Register a new user with email and password."""
     try:
-        user = await _auth_service.register(db, body.email, body.password)
+        user = await _get_auth_service().register(db, body.email, body.password)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -56,7 +83,7 @@ async def login(
 ) -> LoginResponseSchema:
     """Authenticate a user and return JWT tokens with workspace context."""
     try:
-        user, access_token, refresh_token, workspaces = await _auth_service.login(db, body.email, body.password)
+        user, access_token, refresh_token, workspaces = await _get_auth_service().login(db, body.email, body.password)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -76,7 +103,7 @@ async def refresh_token(
 ) -> TokenResponseSchema:
     """Refresh access and refresh tokens."""
     try:
-        access, refresh = await _auth_service.refresh_tokens(db, body.refresh_token)
+        access, refresh = await _get_auth_service().refresh_tokens(db, body.refresh_token)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -93,7 +120,7 @@ async def switch_workspace(
 ) -> TokenResponseSchema:
     """Switch the active workspace context, issuing new tokens."""
     try:
-        access, refresh = await _auth_service.switch_workspace(db, ctx.user_id, body.workspace_id)
+        access, refresh = await _get_auth_service().switch_workspace(db, ctx.user_id, body.workspace_id)
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -114,7 +141,7 @@ async def get_me(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserReadSchema:
     """Return the authenticated user's profile."""
-    user = await _auth_service.get_user_by_id(db, ctx.user_id)
+    user = await _get_auth_service().get_user_by_id(db, ctx.user_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

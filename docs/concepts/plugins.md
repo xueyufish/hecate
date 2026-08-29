@@ -40,8 +40,8 @@ Hecate supports eight plugin types, each with a specific purpose. Choosing the r
 | **Model** | `ModelPluginBase` | Add a custom LLM provider | "I want to call provider X" |
 | **Channel** | `ChannelBase` | Add an external communication channel (Slack, Teams, etc.) | "I want messages from X" |
 | **Evaluator** | `EvaluatorBase` | Add a custom evaluation metric | "I want to measure Y" |
-| **Auth Provider** | `AuthProviderBase` | Add a new authentication method | "I want users to log in via X" |
-| **Secret Provider** | `SecretProviderBase` | Add a new secret storage backend | "I want secrets in X" |
+| **Auth Provider** | `AuthProvider` | Add a new authentication method | "I want users to log in via X" |
+| **Secret Provider** | `SecretProvider` | Add a new secret storage backend | "I want secrets in X" |
 
 **Rule of thumb**: pick the type that matches the **subsystem** you want to extend, not the language or framework you want to use. If you don't see your use case, the answer is usually **Extension** (most flexible).
 
@@ -228,7 +228,7 @@ See [Extension Architecture > Writing a custom SPI plugin](../design/extension-a
 Add support for a new authentication method (e.g., SAML assertion format your IdP uses):
 
 ```python
-class CustomSAMLProvider(AuthProviderBase):
+class CustomSAMLProvider(AuthProvider):
     @property
     def scheme(self) -> str: return "custom_saml"
     

@@ -12,10 +12,10 @@ from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from hecate_enterprise.auth.oidc_provider import OIDCAuthProvider
+from hecate_enterprise.auth.saml_provider import SAMLAuthProvider
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.auth.oidc_provider import OIDCAuthProvider
-from hecate.auth.saml_provider import SAMLAuthProvider
 from hecate.core.config import settings
 from hecate.core.database import get_db
 

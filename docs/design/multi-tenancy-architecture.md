@@ -162,7 +162,7 @@ Hecate ships five authentication providers in `src/hecate/auth/`:
 
 ```python
 # src/hecate/auth/provider.py
-class AuthProviderBase(ABC):
+class AuthProvider(ABC):
     @property
     @abstractmethod
     def name(self) -> str: ...  # "jwt", "api_key", "oidc", "saml", "ldap"
@@ -187,7 +187,7 @@ Returns `AuthContext` (user_id, org_id, workspace_ids[], scopes[]) or `None` if 
    - SAML: SAMLResponse POST         (SSO)
    - LDAP: simple bind over TLS      (direct)
 
-2. AuthProviderBase.authenticate(token) → AuthContext | None
+2. AuthProvider.authenticate(token) → AuthContext | None
 
 3. AuthContext attaches to request state (FastAPI Depends)
 
@@ -445,7 +445,7 @@ For high-sensitivity tenants (healthcare, finance, government), consider:
 - `src/hecate/models/organization.py` — OrganizationModel
 - `src/hecate/models/workspace.py` — WorkspaceModel
 - `src/hecate/models/workspace_member.py` — WorkspaceMemberModel + WorkspaceRole enum
-- `src/hecate/auth/provider.py` — AuthProviderBase
+- `src/hecate/auth/provider.py` — AuthProvider
 - `src/hecate/auth/jwt_provider.py` — JWT auth
 - `src/hecate/auth/api_key_provider.py` — API key auth
 - `src/hecate/auth/oidc_provider.py` — OIDC SSO

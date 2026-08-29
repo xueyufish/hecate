@@ -6,7 +6,7 @@ import logging
 
 from hecate.auth.api_key_provider import APIKeyAuthProvider
 from hecate.auth.jwt_provider import JWTAuthProvider
-from hecate.auth.provider import AuthProviderBase
+from hecate.auth.provider import AuthProvider
 from hecate.core.config import settings
 from hecate.plugin.manifest import PluginManifest
 from hecate.plugin.registry import PluginRegistry
@@ -23,13 +23,13 @@ def register_auth_providers(registry: PluginRegistry) -> int:
     Returns:
         Number of providers registered.
     """
-    provider_instances: list[AuthProviderBase] = [
+    provider_instances: list[AuthProvider] = [
         JWTAuthProvider(),
         APIKeyAuthProvider(),
     ]
 
     if settings.SSO_OIDC_CLIENT_ID and settings.SSO_OIDC_DISCOVERY_URL:
-        from hecate.auth.oidc_provider import OIDCAuthProvider
+        from hecate_enterprise.auth.oidc_provider import OIDCAuthProvider
 
         provider_instances.append(
             OIDCAuthProvider(
@@ -41,7 +41,7 @@ def register_auth_providers(registry: PluginRegistry) -> int:
         )
 
     if settings.SSO_SAML_SP_ENTITY_ID and settings.SSO_SAML_IDP_SSO_URL:
-        from hecate.auth.saml_provider import SAMLAuthProvider
+        from hecate_enterprise.auth.saml_provider import SAMLAuthProvider
 
         provider_instances.append(
             SAMLAuthProvider(
@@ -54,7 +54,7 @@ def register_auth_providers(registry: PluginRegistry) -> int:
         )
 
     if settings.SSO_LDAP_SERVER_URL and settings.SSO_LDAP_BASE_DN:
-        from hecate.auth.ldap_provider import LDAPAuthProvider
+        from hecate_enterprise.auth.ldap_provider import LDAPAuthProvider
 
         provider_instances.append(
             LDAPAuthProvider(

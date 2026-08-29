@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hecate-enterprise"
+version = "0.1.0"
+description = "Hecate identity & governance domain: SSO providers, SCIM, cloud secret backends, budget, tenant admin"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Hecate Team" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "hecate>=0.1.0",
+    "scim2-models>=0.2.0",
+]
+
+[project.optional-dependencies]
+# SSO providers (OIDC has no extra deps; SAML/LDAP bring their SDKs)
+sso = [
+    "python3-saml>=1.16.0",
+    "ldap3>=2.9",
+    "authlib>=1.3.0",
+]
+# Cloud secret backends
+vault = [
+    "hvac>=2.0.0",
+    "aiobotocore>=2.13.0",
+    "azure-keyvault-secrets>=4.8.0",
+    "azure-identity>=1.17.0",
+]
+# Enterprise tenant admin features (placeholder — populated in PR1.3)
+tenant = [
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate_enterprise"]

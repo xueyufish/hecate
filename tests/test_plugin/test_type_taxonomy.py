@@ -212,26 +212,26 @@ class TestSDKImports:
 
     def test_import_all_types(self):
         from hecate.plugin.sdk import (
-            AuthProviderBase,
+            AuthProvider,
             ChannelBase,
             EvaluatorBase,
             ExtensionPluginBase,
             ModelPluginBase,
             PluginContext,
-            SecretProviderBase,
+            SecretProvider,
             ToolPluginBase,
             TriggerPluginBase,
         )
 
         assert all(
             [
-                AuthProviderBase,
+                AuthProvider,
                 ChannelBase,
                 EvaluatorBase,
                 ExtensionPluginBase,
                 ModelPluginBase,
                 PluginContext,
-                SecretProviderBase,
+                SecretProvider,
                 ToolPluginBase,
                 TriggerPluginBase,
             ]

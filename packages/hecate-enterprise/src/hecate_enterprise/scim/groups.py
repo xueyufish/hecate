@@ -11,8 +11,8 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.scim.auth import verify_scim_token
-from hecate.scim.models import make_error, make_list_response, to_scim_group
+from hecate_enterprise.scim.auth import verify_scim_token
+from hecate_enterprise.scim.models import make_error, make_list_response, to_scim_group
 
 logger = logging.getLogger(__name__)
 

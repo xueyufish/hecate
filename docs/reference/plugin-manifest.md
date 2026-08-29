@@ -45,8 +45,8 @@ The plugin type. Must be one of the eight registered types (`PLUGIN_TYPE_REGISTR
 | `model` | LLM provider | `ModelPluginBase` |
 | `channel` | External communication channel | `ChannelBase` |
 | `evaluator` | Evaluation metric | `EvaluatorBase` |
-| `auth_provider` | Authentication method | `AuthProviderBase` |
-| `secret_provider` | Secret storage backend | `SecretProviderBase` |
+| `auth_provider` | Authentication method | `AuthProvider` |
+| `secret_provider` | Secret storage backend | `SecretProvider` |
 
 > **Note**: the former `notifier` type was merged into `channel` — notification dispatchers are now outbound `NotificationChannelAdapter` implementations extending `ChannelBase` (see `src/hecate/channel/notification.py`).
 

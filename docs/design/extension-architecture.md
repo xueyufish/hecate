@@ -286,12 +286,12 @@ class ChannelBase(ABC):
 
 **Built-in**: `RESTChannel`, `CLIChannel`, `FeishuChannel` (11.3), `SlackChannel` (11.9). **Planned**: `WebSocketChannel` (P4).
 
-### 3. `AuthProviderBase`
+### 3. `AuthProvider`
 
 Authentication provider for incoming requests.
 
 ```python
-class AuthProviderBase(ABC):
+class AuthProvider(ABC):
     @property
     @abstractmethod
     def scheme(self) -> str: ...       # "bearer", "api_key", "oauth2", "mtls"
@@ -321,7 +321,7 @@ class NotificationChannelAdapter(ChannelBase):
 
 **Built-in**: `EmailNotificationAdapter`, `WebhookNotificationAdapter`, `WebSocketNotificationAdapter`. **Planned**: `SlackNotificationAdapter`, `DingTalkNotificationAdapter`, `PagerDutyNotificationAdapter`. There is no `notifier` plugin type anymore — use `channel` (see the [plugin manifest](../reference/plugin-manifest.md)).
 
-### 5. `ToolPluginBase` / `ExtensionPluginBase` / `TriggerPluginBase` / `ModelPluginBase` / `SecretProviderBase`
+### 5. `ToolPluginBase` / `ExtensionPluginBase` / `TriggerPluginBase` / `ModelPluginBase` / `SecretProvider`
 
 The remaining five SPI types complete the eight-type taxonomy (registered in `PLUGIN_TYPE_REGISTRY` at `src/hecate/plugin/types/__init__.py`):
 
@@ -331,7 +331,7 @@ The remaining five SPI types complete the eight-type taxonomy (registered in `PL
 | `ExtensionPluginBase` | `src/hecate/plugin/types/extension.py` | Runtime interceptor auto-wired into all four guardrail hook points (Pre/Post LLM/Tool). |
 | `TriggerPluginBase` | `src/hecate/plugin/types/trigger.py` | Event-driven invocation: webhook, schedule, or message-queue triggered entry points. |
 | `ModelPluginBase` | `src/hecate/plugin/types/model.py` | Custom LLM provider built on the existing `InferenceBackendABC` surface. |
-| `SecretProviderBase` | `src/hecate/vault/provider.py` | Custom secret storage backend for the vault abstraction. |
+| `SecretProvider` | `src/hecate/vault/provider.py` | Custom secret storage backend for the vault abstraction. |
 
 All follow the same Plugin pattern (manifest → ABC → `PluginRegistry` → lifecycle). See the [plugin manifest reference](../reference/plugin-manifest.md) for the manifest contract and [Writing a custom SPI plugin](#example-a-custom-evaluator) for worked examples.
 
@@ -565,7 +565,7 @@ I want to customize Hecate. What do I do?
 │   → Implement EvaluatorBase + PluginManifest
 │
 ├── I want to add a new auth method (OAuth2, mTLS, SAML)
-│   → Implement AuthProviderBase + PluginManifest
+│   → Implement AuthProvider + PluginManifest
 │
 ├── I want to add a new notification channel (Slack, PagerDuty)
 │   → Implement a NotificationChannelAdapter (ChannelBase) + PluginManifest

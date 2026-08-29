@@ -22,7 +22,6 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response as StarletteResponse
 
 from hecate.api.audit import router as audit_router
-from hecate.api.auth import router as auth_router
 from hecate.api.evaluation import router as evaluation_router
 from hecate.api.management.a2a import router as a2a_management_router
 from hecate.api.management.agent_health import router as agent_health_router
@@ -91,12 +90,8 @@ from hecate.api.tool_decisions import router as tool_decisions_router
 from hecate.api.v1.agents import router as agent_chat_router
 from hecate.api.v1.chat import router as chat_router
 from hecate.api.v1.models import router as models_router
-from hecate.auth.sso_routes import router as sso_router
 from hecate.core.config import settings as _settings
 from hecate.core.database import engine
-from hecate.scim.discovery import router as scim_discovery_router
-from hecate.scim.groups import router as scim_groups_router
-from hecate.scim.users import router as scim_users_router
 
 logger = logging.getLogger(__name__)
 
@@ -144,10 +139,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             await session.rollback()
 
-    # Initialize secret providers
-    from hecate.vault.registration import register_secret_providers
+    # Initialize secret providers (lazy-imported from hecate-enterprise; if
+    # the wheel is not installed, log and continue with no providers
+    # registered — self-hosted installs without enterprise still work).
+    try:
+        from hecate_enterprise.vault.registration import register_secret_providers
 
-    register_secret_providers()
+        register_secret_providers()
+    except ImportError:
+        logger.debug("hecate-enterprise not installed; skipping secret-provider registration")
 
     # Initialize process-wide EventStore and SessionStateStore singletons
     # (eventstore-pg-wiring + session-state-store changes): wired into
@@ -292,7 +292,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         async def _record_forecast_snapshots() -> None:
             async with async_session_factory() as session:
-                from hecate.budget.budget_service import record_all_forecast_snapshots
+                from hecate_enterprise.budget.budget_service import record_all_forecast_snapshots
 
                 await record_all_forecast_snapshots(session)
 
@@ -676,7 +676,15 @@ async def metrics() -> PlainTextResponse:
     )
 
 
-app.include_router(auth_router, prefix="/api", tags=["auth"])
+# /auth depends on hecate-enterprise (AuthService in hecate_enterprise.services.auth.service).
+# Lazy include so core-only installs (no enterprise wheel) don't fail at import.
+try:
+    from hecate.api.auth import router as auth_router
+
+    app.include_router(auth_router, prefix="/api", tags=["auth"])
+except ImportError:
+    logger.debug("hecate-enterprise not installed; skipping /auth router")
+
 app.include_router(audit_router, prefix="/api", tags=["audit"])
 app.include_router(tool_decisions_router, prefix="/api", tags=["security"])
 app.include_router(security_findings_router, prefix="/api", tags=["security"])
@@ -721,10 +729,22 @@ app.include_router(fine_tuning_router)
 app.include_router(budget_router, tags=["budgets"])
 app.include_router(model_catalog_router, tags=["model-catalog"])
 app.include_router(model_lifecycle_router, tags=["model-lifecycle"])
-app.include_router(sso_router, tags=["sso"])
-app.include_router(scim_users_router, tags=["scim"])
-app.include_router(scim_groups_router, tags=["scim"])
-app.include_router(scim_discovery_router, tags=["scim"])
+
+# Enterprise-domain routers (SSO + SCIM). Lazy-imported: if
+# hecate-enterprise is not installed (self-hosted without enterprise
+# wheel), skip silently. ImportError is the expected downgrade signal.
+try:
+    from hecate_enterprise.auth.sso_routes import router as sso_router
+    from hecate_enterprise.scim.discovery import router as scim_discovery_router
+    from hecate_enterprise.scim.groups import router as scim_groups_router
+    from hecate_enterprise.scim.users import router as scim_users_router
+
+    app.include_router(sso_router, tags=["sso"])
+    app.include_router(scim_users_router, tags=["scim"])
+    app.include_router(scim_groups_router, tags=["scim"])
+    app.include_router(scim_discovery_router, tags=["scim"])
+except ImportError:
+    logger.debug("hecate-enterprise not installed; skipping SSO/SCIM routers")
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:

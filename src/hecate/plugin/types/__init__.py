@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 # Existing ABCs
-from hecate.auth.provider import AuthProviderBase
+from hecate.auth.provider import AuthProvider
 from hecate.channel.adapter import ChannelBase
 from hecate.plugin.spi.evaluator import EvaluatorBase
 
@@ -14,15 +14,15 @@ from hecate.plugin.types.extension import ExtensionPluginBase
 from hecate.plugin.types.model import ModelPluginBase
 from hecate.plugin.types.tool import ToolPluginBase
 from hecate.plugin.types.trigger import TriggerPluginBase
-from hecate.vault.provider import SecretProviderBase
+from hecate.vault.provider import SecretProvider
 
 __all__ = [
-    "AuthProviderBase",
+    "AuthProvider",
     "ChannelBase",
     "EvaluatorBase",
     "ExtensionPluginBase",
     "ModelPluginBase",
-    "SecretProviderBase",
+    "SecretProvider",
     "ToolPluginBase",
     "TriggerPluginBase",
     "PLUGIN_TYPE_REGISTRY",
@@ -35,6 +35,6 @@ PLUGIN_TYPE_REGISTRY: dict[str, type[Any]] = {
     "model": ModelPluginBase,
     "channel": ChannelBase,
     "evaluator": EvaluatorBase,
-    "auth_provider": AuthProviderBase,
-    "secret_provider": SecretProviderBase,
+    "auth_provider": AuthProvider,
+    "secret_provider": SecretProvider,
 }
