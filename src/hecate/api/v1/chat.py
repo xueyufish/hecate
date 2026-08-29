@@ -398,11 +398,11 @@ async def _process_chat(
     use_enhanced = parsed_kb_ids or request.generate_opening or request.generate_suggestions
 
     if use_enhanced:
-        from hecate.services.orchestration.engine_port_adapter import create_engine_port
+        from hecate.services.orchestration.runtime_port_adapter import create_runtime_port
 
         tool_registry = _build_tool_registry(db)
 
-        port = create_engine_port(db, llm_service, tool_registry=tool_registry)
+        port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
 
         exec_service = WorkflowExecutionService(
             port=port,

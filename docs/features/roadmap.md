@@ -315,7 +315,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 11.1-abc | ChannelBase ✅ (REST/WS/CLI as BuiltinChannel) | 5.5a ✅ (Sprint 4) | M |
-| 10.3-abc | AuthProviderBase ✅ (JWT/APIKey as BuiltinAuthProvider) | 5.5a ✅ (Sprint 4) | M |
+| 10.3-abc | AuthProvider ✅ (JWT/APIKey as BuiltinAuthProvider) | 5.5a ✅ (Sprint 4) | M |
 | 8.6-abc | NotifierABC 🔀 (merged into ChannelBase — notification dispatchers as outbound Channel adapters) | 5.5a ✅ (Sprint 4) | S |
 | 15.1 | i18n SPI ✅ (locale passing + message catalog loading + t() function) | 5.5a ✅ (Sprint 4) | M |
 
@@ -349,13 +349,13 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 10.3 | SSO/LDAP ✅ | Auth ✅ | M |
-| 10.3b | SCIM Directory Sync ✅ | AuthProviderBase ✅ | M |
+| 10.3b | SCIM Directory Sync ✅ | AuthProvider ✅ | M |
 | 10.7 | Budget Management & Cost Governance ✅ | Cost Dashboard ✅ | M |
 | 10.8 | Enterprise Vault Integration ✅ | Auth ✅ | M |
 
 ### Milestone M5 (End of Sprint 5)
 
-- [x] Platform SPI complete: ChannelBase ✅ + AuthProviderBase ✅ + i18n SPI ✅ defined. NotifierABC 🔀 merged into ChannelBase as NotificationChannelAdapter
+- [x] Platform SPI complete: ChannelBase ✅ + AuthProvider ✅ + i18n SPI ✅ defined. NotifierABC 🔀 merged into ChannelBase as NotificationChannelAdapter
 - [x] A2A Protocol with Signed Agent Cards operational
 - [x] Collaborative Conflict Handling with session locking
 - [x] Unified Skill Registry with Skill-Workflow mutual embedding
@@ -982,7 +982,7 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 | **M2: Platform Ready** | Month 4 | Canvas usable; Multi-Agent orchestrable; Multi-DB + Multi-Vector-DB supported |
 | **M3: Feature Complete** | Month 6 | P2 63/63 (100%); 5+ channels; Evaluation baseline operational |
 | **M4: Enterprise Ready** | Month 8 | Resilience infrastructure (exception hierarchy + auto-retry + tool gating) ✅; ContextEngine Phase 1 (LLMWorker context pipeline) ✅; Plugin SPI Core + EvaluatorBase defined ✅; Multi-Tenant RBAC + SSO; full security stack ✅; end-to-end observability ✅ |
-| **M5: P3 Enterprise** | Month 10 | Platform SPI complete: ChannelBase + AuthProviderBase + i18n SPI ✅ (NotifierABC merged into ChannelBase); A2A Protocol with Signed Agent Cards; Model Hub (Catalog + Lifecycle Manager); Enterprise Identity: SSO + SCIM + Vault + Budget Management ✅ |
+| **M5: P3 Enterprise** | Month 10 | Platform SPI complete: ChannelBase + AuthProvider + i18n SPI ✅ (NotifierABC merged into ChannelBase); A2A Protocol with Signed Agent Cards; Model Hub (Catalog + Lifecycle Manager); Enterprise Identity: SSO + SCIM + Vault + Budget Management ✅ |
 | **M6: P3 Security & Ops** | Month 12 | Ops Center (Dashboard + Agent Health + Conversation Analytics + Tool Execution Analytics + CI/CD Gating + Agent Catalog Governance); Security (DLP + Runtime Protection + Red Teaming); Plugin System; Deployment infrastructure (SaaS + Canary + Horizontal Scaling + Backup) |
 | **M7: P3 Complete** | Month 14 | P3 re-scoped 125/125 (100%); Event-Sourced State (log-as-truth + DeltaChannel); Dynamic Orchestration; Run Replay Phase 1; Browser Automation Tool; Skill Provider Registry; Advanced RAG (Reranking + Incremental + Quality Eval); Multi-Channel Wave 1 (11.2 simplified ✅ + 11.3 ✅ + 11.9 Slack ✅); Evaluation Suite (7.6a/b dropped); Canvas (Human Input/Form + Trigger; 1.1.18-20 deferred); Memory Enhancement |
 | **M8: P4 Intelligence** | Month 16 | Hallucination Detection operational; Self-Learning loop; Agentic RL Framework; Prompt Self-Optimization; Ontology Action System; OAG complete; Sleep-time Memory Consolidation; LLM-Managed Memory; Memory Intelligence features |
@@ -1019,7 +1019,7 @@ Multi-Database → Multi-Vector-DB → MCP Server Mode
 ```
 Organization Management → RBAC/SSO → Evaluation → Security → Observability → Operations
 Resilience → Exception Hierarchy (1.3.5g) → Auto-Retry (1.3.5h) → Tool Gating (1.3.5f)
-Plugin SPI Core (5.5a) → EvaluatorBase (7.2-abc) + ChannelBase (11.1-abc) + AuthProviderBase (10.3-abc) + NotifierABC (8.6-abc) + i18n SPI (15.1)
+Plugin SPI Core (5.5a) → EvaluatorBase (7.2-abc) + ChannelBase (11.1-abc) + AuthProvider (10.3-abc) + NotifierABC (8.6-abc) + i18n SPI (15.1)
 Failure Analysis → Meta-Agent Scheduler → Garbage Collector + Drift Detector + Compliance Checker
 Model Routing → A/B Testing → Gray Release → Circuit Breaker → Key Encryption → Intelligent Router
 Security → Sandbox Executor → Sandbox Pool → Event Store → Tracing → Metrics → NotifierABC
@@ -1069,7 +1069,7 @@ Multi-Step Memory Retrieval (4.20) → Function Chaining → Complex Query Resol
 Tool Memory (4.22) → Tool Usage Learning → Parameter Tuning
 Cross-Thread Memory Store (4.23) → Cross-Session Facts → Shared Knowledge
 A2A Protocol (P3) → Peer Selection → Agent Team Templates → Distributed Team Orchestration
-AuthProviderBase (P3) → SCIM Directory Sync (10.3b)
+AuthProvider (P3) → SCIM Directory Sync (10.3b)
 i18n SPI (P3) → Community Translations (15.2)
 Asset Marketplace → Industry Capabilities → Marketplace → Advanced RAG → Distributed → SDK → Compliance
 PyPI Distribution → End-User Application → Mobile GUI

@@ -59,6 +59,12 @@ hecate = "hecate.cli.main:app"
 hecate-migrate = "hecate.cli.migrate:main"
 hecate-flag-audit = "hecate.cli.flag_audit:main"
 
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+hecate = { workspace = true }
+
 [project.optional-dependencies]
 llm = [
     "litellm>=1.50.0",
@@ -75,16 +81,12 @@ rag = [
     "ragas>=0.2.0",
 ]
 security = [
+    # Core security primitives (rate limiting, core authlib usage, DLP
+    # outbound engines). SSO / SCIM / cloud-vault heavy deps moved to
+    # hecate-enterprise extras (see packages/hecate-enterprise/pyproject.toml).
     "llm-guard>=0.3.0",
     "slowapi>=0.1.9",
     "authlib>=1.3.0",
-    "python3-saml>=1.16.0",
-    "ldap3>=2.9",
-    "scim2-models>=0.2.0",
-    "hvac>=2.0.0",
-    "aiobotocore>=2.13.0",
-    "azure-keyvault-secrets>=4.8.0",
-    "azure-identity>=1.17.0",
     # Outbound DLP engine (4.x) — Presidio NER and detect-secrets for
     # the SecretsRecognizer and PresidioRecognizer. The built-in regex
     # and dictionary recognizers work without these.
@@ -173,7 +175,6 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
-pythonpath = ["src"]
 markers = [
     "perf: performance benchmarks, excluded from default suite via -m not perf",
     "integration: requires Docker, opt-in via RUN_INTEGRATION_TESTS=1",
@@ -189,6 +190,7 @@ update_changelog_on_bump = true
 
 [tool.mypy]
 python_version = "3.12"
+mypy_path = "src:packages/hecate-enterprise/src"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

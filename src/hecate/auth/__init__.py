@@ -1,23 +1,18 @@
 """Auth — pluggable authentication provider framework.
 
-This subpackage defines the abstract interfaces and built-in
-implementations for authentication providers.
+This subpackage holds the abstract interface (AuthProvider) and the
+always-on base implementations (api_key, jwt). Enterprise SSO providers
+(OIDC / SAML / LDAP) live in hecate-enterprise (see packages/).
 """
 
 from __future__ import annotations
 
 from hecate.auth.api_key_provider import APIKeyAuthProvider
 from hecate.auth.jwt_provider import JWTAuthProvider
-from hecate.auth.ldap_provider import LDAPAuthProvider
-from hecate.auth.oidc_provider import OIDCAuthProvider
-from hecate.auth.provider import AuthProviderBase
-from hecate.auth.saml_provider import SAMLAuthProvider
+from hecate.auth.provider import AuthProvider
 
 __all__ = [
     "APIKeyAuthProvider",
-    "AuthProviderBase",
+    "AuthProvider",
     "JWTAuthProvider",
-    "LDAPAuthProvider",
-    "OIDCAuthProvider",
-    "SAMLAuthProvider",
 ]

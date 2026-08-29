@@ -1,7 +1,7 @@
 """APIKeyAuthProvider — authenticates via database-backed API keys.
 
 Wraps the existing ``_resolve_api_key()`` logic as an
-AuthProviderBase implementation.
+AuthProvider implementation.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.auth.provider import AuthProviderBase
+from hecate.auth.provider import AuthProvider
 from hecate.core.auth_context import AuthContext
 from hecate.models.api_key import ApiKeyModel, ApiKeyScope
 from hecate.models.user import UserModel
@@ -28,7 +28,7 @@ def _hash_key(raw_key: str) -> str:
     return hashlib.sha256(raw_key.encode()).hexdigest()
 
 
-class APIKeyAuthProvider(AuthProviderBase):
+class APIKeyAuthProvider(AuthProvider):
     """Authenticates requests via database-backed API keys.
 
     Looks up the API key hash in the database and constructs

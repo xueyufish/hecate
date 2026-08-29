@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import pytest
+from hecate_enterprise.auth.saml_provider import SAMLAuthProvider
 
-from hecate.auth.provider import AuthProviderBase
-from hecate.auth.saml_provider import SAMLAuthProvider
+from hecate.auth.provider import AuthProvider
 
 
 class TestSAMLAuthProvider:
     def test_cannot_instantiate_abstract(self) -> None:
         with pytest.raises(TypeError):
-            AuthProviderBase()  # type: ignore[abstract]
+            AuthProvider()  # type: ignore[abstract]
 
     def test_name(self) -> None:
         provider = SAMLAuthProvider(

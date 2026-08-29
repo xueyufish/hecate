@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import pytest
+from hecate_enterprise.auth.ldap_provider import LDAPAuthProvider
 
-from hecate.auth.ldap_provider import LDAPAuthProvider
-from hecate.auth.provider import AuthProviderBase
+from hecate.auth.provider import AuthProvider
 
 
 class TestLDAPAuthProvider:
     def test_cannot_instantiate_abstract(self) -> None:
         with pytest.raises(TypeError):
-            AuthProviderBase()  # type: ignore[abstract]
+            AuthProvider()  # type: ignore[abstract]
 
     def test_name(self) -> None:
         provider = LDAPAuthProvider(

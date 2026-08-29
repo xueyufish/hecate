@@ -18,9 +18,9 @@ jobs:
         run: |
           pip install ruff
       - name: Lint
-        run: ruff check src/hecate/ tests/
+        run: ruff check src/hecate/ packages/ tests/
       - name: Format check
-        run: ruff format --check src/hecate/ tests/
+        run: ruff format --check src/hecate/ packages/ tests/
 
   typecheck:
     runs-on: ubuntu-latest
@@ -29,11 +29,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: |
-          pip install -e ".[dev]"
+        run: uv sync --package hecate --package hecate-enterprise --extra dev --prerelease=allow
       - name: Type check
-        run: mypy src/
+        run: uv run mypy src/ packages/
 
   test:
     runs-on: ubuntu-latest
@@ -42,11 +42,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: |
-          pip install -e ".[dev,scheduling,redis]"
+        run: uv sync --package hecate --package hecate-enterprise --extra dev --prerelease=allow
       - name: Run tests
-        run: pytest tests/ -q
+        run: uv run pytest tests/ -q
 
   migrations:
     runs-on: ubuntu-latest
@@ -69,13 +69,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: |
-          pip install -e ".[dev]"
+        run: uv sync --package hecate --package hecate-enterprise --extra dev --prerelease=allow
       - name: Fresh-database migration drift gate
         env:
           DRIFT_ADMIN_URL: postgresql://hecate:hecate@localhost:5432/postgres
-        run: pytest tests/test_migrations/test_upgrade_drift.py -v
+        run: uv run pytest tests/test_migrations/test_upgrade_drift.py -v
 
   # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
   # requires Docker-in-Docker and is covered by integration tests locally.

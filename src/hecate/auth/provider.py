@@ -1,4 +1,4 @@
-"""AuthProviderBase — abstract interface for authentication providers.
+"""AuthProvider — abstract interface for authentication providers.
 
 All auth providers — built-in or third-party — must implement this
 interface to be registered with the PluginRegistry under type="auth_provider".
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.auth_context import AuthContext
 
 
-class AuthProviderBase(ABC):
+class AuthProvider(ABC):
     """Abstract base class for authentication providers.
 
     Each provider attempts to authenticate a raw token and returns
@@ -27,7 +27,7 @@ class AuthProviderBase(ABC):
 
     Example::
 
-        class JWTAuthProvider(AuthProviderBase):
+        class JWTAuthProvider(AuthProvider):
             @property
             def name(self) -> str:
                 return "jwt"

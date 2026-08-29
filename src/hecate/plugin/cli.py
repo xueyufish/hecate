@@ -113,10 +113,10 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             """),
     },
     "auth_provider": {
-        "base_class": "AuthProviderBase",
-        "import_line": "from hecate.plugin.sdk import AuthProviderBase",
+        "base_class": "AuthProvider",
+        "import_line": "from hecate.plugin.sdk import AuthProvider",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(AuthProviderBase):
+            class {{CLASS_NAME}}(AuthProvider):
                 @property
                 def name(self) -> str:
                     return "{{PLUGIN_NAME}}"
@@ -130,10 +130,10 @@ _TEMPLATES: dict[str, dict[str, str]] = {
             """),
     },
     "secret_provider": {
-        "base_class": "SecretProviderBase",
-        "import_line": "from hecate.plugin.sdk import SecretProviderBase",
+        "base_class": "SecretProvider",
+        "import_line": "from hecate.plugin.sdk import SecretProvider",
         "class_body": textwrap.dedent("""\
-            class {{CLASS_NAME}}(SecretProviderBase):
+            class {{CLASS_NAME}}(SecretProvider):
                 async def get_secret(self, key: str) -> str | None:
                     return None
 

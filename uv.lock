@@ -8,8 +8,11 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
-[options]
-prerelease-mode = "allow"
+[manifest]
+members = [
+    "hecate",
+    "hecate-enterprise",
+]
 
 [[package]]
 name = "a2a-sdk"
@@ -2251,18 +2254,11 @@ scheduling = [
     { name = "croniter" },
 ]
 security = [
-    { name = "aiobotocore" },
     { name = "authlib" },
-    { name = "azure-identity" },
-    { name = "azure-keyvault-secrets" },
     { name = "detect-secrets" },
-    { name = "hvac" },
-    { name = "ldap3" },
     { name = "llm-guard" },
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
-    { name = "python3-saml" },
-    { name = "scim2-models" },
     { name = "slowapi" },
     { name = "spacy" },
 ]
@@ -2282,7 +2278,6 @@ tools = [
 [package.metadata]
 requires-dist = [
     { name = "a2a-sdk", marker = "extra == 'tools'", specifier = ">=1.1.0" },
-    { name = "aiobotocore", marker = "extra == 'security'", specifier = ">=2.13.0" },
     { name = "aiodocker", marker = "extra == 'tools'", specifier = ">=0.23.0" },
     { name = "aiomysql", marker = "extra == 'mysql'", specifier = ">=0.2" },
     { name = "aiosmtplib", marker = "extra == 'observability'", specifier = ">=3.0.0" },
@@ -2292,8 +2287,6 @@ requires-dist = [
     { name = "asgi-lifespan", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "authlib", marker = "extra == 'security'", specifier = ">=1.3.0" },
-    { name = "azure-identity", marker = "extra == 'security'", specifier = ">=1.17.0" },
-    { name = "azure-keyvault-secrets", marker = "extra == 'security'", specifier = ">=4.8.0" },
     { name = "bcrypt", specifier = ">=4.0.0" },
     { name = "beautifulsoup4", specifier = ">=4.12.0" },
     { name = "chromadb", marker = "extra == 'rag'", specifier = ">=0.5.0" },
@@ -2309,11 +2302,9 @@ requires-dist = [
     { name = "flagembedding", marker = "extra == 'rag'", specifier = ">=1.2" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
-    { name = "hvac", marker = "extra == 'security'", specifier = ">=2.0.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
     { name = "lark-oapi", extras = ["aiohttp"], marker = "extra == 'tools'", specifier = ">=1.4.0" },
-    { name = "ldap3", marker = "extra == 'security'", specifier = ">=2.9" },
     { name = "litellm", specifier = ">=1.50.0" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.50.0" },
     { name = "llm-guard", marker = "extra == 'security'", specifier = ">=0.3.0" },
@@ -2344,14 +2335,12 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
-    { name = "python3-saml", marker = "extra == 'security'", specifier = ">=1.16.0" },
     { name = "qdrant-client", marker = "extra == 'rag'", specifier = ">=1.12.0" },
     { name = "ragas", marker = "extra == 'rag'", specifier = ">=0.2.0" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
-    { name = "scim2-models", marker = "extra == 'security'", specifier = ">=0.2.0" },
     { name = "slack-bolt", marker = "extra == 'tools'", specifier = ">=1.18.0" },
     { name = "slowapi", marker = "extra == 'security'", specifier = ">=0.1.9" },
     { name = "spacy", marker = "extra == 'security'", specifier = ">=3.7,<3.8" },
@@ -2365,6 +2354,42 @@ requires-dist = [
     { name = "wrapt", marker = "extra == 'observability'", specifier = ">=1.13.0" },
 ]
 provides-extras = ["llm", "temporal", "rag", "security", "tools", "redis", "observability", "mysql", "scheduling", "dev"]
+
+[[package]]
+name = "hecate-enterprise"
+version = "0.1.0"
+source = { editable = "packages/hecate-enterprise" }
+dependencies = [
+    { name = "hecate" },
+    { name = "scim2-models" },
+]
+
+[package.optional-dependencies]
+sso = [
+    { name = "authlib" },
+    { name = "ldap3" },
+    { name = "python3-saml" },
+]
+vault = [
+    { name = "aiobotocore" },
+    { name = "azure-identity" },
+    { name = "azure-keyvault-secrets" },
+    { name = "hvac" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiobotocore", marker = "extra == 'vault'", specifier = ">=2.13.0" },
+    { name = "authlib", marker = "extra == 'sso'", specifier = ">=1.3.0" },
+    { name = "azure-identity", marker = "extra == 'vault'", specifier = ">=1.17.0" },
+    { name = "azure-keyvault-secrets", marker = "extra == 'vault'", specifier = ">=4.8.0" },
+    { name = "hecate", editable = "." },
+    { name = "hvac", marker = "extra == 'vault'", specifier = ">=2.0.0" },
+    { name = "ldap3", marker = "extra == 'sso'", specifier = ">=2.9" },
+    { name = "python3-saml", marker = "extra == 'sso'", specifier = ">=1.16.0" },
+    { name = "scim2-models", specifier = ">=0.2.0" },
+]
+provides-extras = ["sso", "vault", "tenant"]
 
 [[package]]
 name = "hf-xet"

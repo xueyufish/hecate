@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hecate.auth.provider import AuthProviderBase
+from hecate.auth.provider import AuthProvider
 from hecate.channel.adapter import ChannelBase
 from hecate.plugin.permission import PermissionChecker
 from hecate.plugin.spi.evaluator import EvaluatorBase
@@ -17,16 +17,16 @@ from hecate.plugin.types.extension import ExtensionPluginBase
 from hecate.plugin.types.model import ModelPluginBase
 from hecate.plugin.types.tool import ToolPluginBase
 from hecate.plugin.types.trigger import TriggerPluginBase
-from hecate.vault.provider import SecretProviderBase
+from hecate.vault.provider import SecretProvider
 
 __all__ = [
-    "AuthProviderBase",
+    "AuthProvider",
     "ChannelBase",
     "EvaluatorBase",
     "ExtensionPluginBase",
     "ModelPluginBase",
     "PluginContext",
-    "SecretProviderBase",
+    "SecretProvider",
     "ToolPluginBase",
     "TriggerPluginBase",
 ]

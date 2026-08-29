@@ -1,7 +1,14 @@
-"""Budget management API — CRUD, status with forecast, and chargeback reports."""
+"""Budget management API — CRUD, status with forecast, and chargeback reports.
+
+BudgetService lives in hecate-enterprise; this module is the enterprise-
+domain HTTP surface. We import lazily so core-only installs (no
+enterprise wheel) still build the module; the routes raise 503 at request
+time if BudgetService is missing.
+"""
 
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime
 
@@ -11,9 +18,17 @@ from pydantic import ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.budget.budget_service import BudgetService
 from hecate.core.database import get_db
 from hecate.models.quota import QuotaModel, QuotaResourceType
+
+try:
+    from hecate_enterprise.budget.budget_service import BudgetService
+
+    _BUDGET_AVAILABLE = True
+except ImportError:
+    BudgetService = None
+    _BUDGET_AVAILABLE = False
+    logging.getLogger(__name__).debug("hecate-enterprise not installed; /api/budgets routes disabled")
 
 router = APIRouter(prefix="/api/budgets", tags=["budgets"])
 
@@ -139,6 +154,9 @@ async def get_budget_status(
     if quota is None:
         raise HTTPException(status_code=404, detail="Budget not found")
 
+    if not _BUDGET_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Budget service requires hecate-enterprise package")
+
     service = BudgetService(db)
     utilization = await service.get_utilization(quota.scope, quota.scope_id)
     forecast = await service.forecast_remaining(quota.scope, quota.scope_id)
@@ -192,6 +210,9 @@ async def get_chargeback(
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> list[dict]:
     """Get chargeback report."""
+    if not _BUDGET_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Budget service requires hecate-enterprise package")
+
     service = BudgetService(db)
     return await service.create_chargeback(
         scope=data.scope,

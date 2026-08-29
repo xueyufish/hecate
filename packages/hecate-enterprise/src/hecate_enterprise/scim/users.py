@@ -14,9 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
 from hecate.models.user import UserModel
-from hecate.scim.auth import verify_scim_token
-from hecate.scim.filter_parser import apply_scim_filter
-from hecate.scim.models import from_scim_user, make_error, make_list_response, to_scim_user
+from hecate_enterprise.scim.auth import verify_scim_token
+from hecate_enterprise.scim.filter_parser import apply_scim_filter
+from hecate_enterprise.scim.models import from_scim_user, make_error, make_list_response, to_scim_user
 
 logger = logging.getLogger(__name__)
 

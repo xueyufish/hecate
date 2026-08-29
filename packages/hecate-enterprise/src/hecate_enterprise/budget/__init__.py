@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from hecate.budget.budget_service import BudgetService
+from hecate_enterprise.budget.budget_service import BudgetService
 
 __all__ = ["BudgetService"]

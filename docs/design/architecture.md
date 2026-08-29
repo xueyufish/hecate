@@ -51,8 +51,8 @@ The execution engine is Hecate's heart — a self-built Pregel runtime with zero
 | `Model` | `ModelPluginBase` | Custom LLM providers |
 | `Channel` | `ChannelBase` | External communication channels (incl. notification adapters) |
 | `Evaluator` | `EvaluatorBase` | Built-in evaluators covering LLM quality, RAG retrieval, and agent-level assessment |
-| `AuthProvider` | `AuthProviderBase` | Authentication methods (JWT/APIKey built-in) |
-| `SecretProvider` | `SecretProviderBase` | Secret storage backends |
+| `AuthProvider` | `AuthProvider` | Authentication methods (JWT/APIKey built-in) |
+| `SecretProvider` | `SecretProvider` | Secret storage backends |
 
 All SPI extension points depend on `Plugin SPI Core` (PluginRegistry + PluginManifest + PluginLifecycle) for registration and lifecycle management. See the [Extension Points reference](../reference/extension-points.md) for the full inventory with abstract methods and default implementations.
 

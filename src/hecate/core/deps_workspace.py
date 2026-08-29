@@ -6,7 +6,7 @@ with a unified AuthContext resolution mechanism.
 
 Authentication flow:
 1. Extract Bearer token from request header.
-2. Try registered auth providers (JWT, API key) via AuthProviderBase.
+2. Try registered auth providers (JWT, API key) via AuthProvider.
 3. Fallback to env-var API key (deprecated) → system scope.
 4. Raise 401 if all methods fail.
 """
@@ -77,7 +77,7 @@ async def get_auth_context(
     """Resolve the full authentication context for a request.
 
     Delegates to registered auth providers (JWT, API key) via the
-    AuthProviderBase framework. Falls back to env-var API key (deprecated)
+    AuthProvider framework. Falls back to env-var API key (deprecated)
     if no provider succeeds.
 
     Returns:
