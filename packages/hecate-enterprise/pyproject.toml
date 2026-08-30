@@ -25,6 +25,16 @@ dependencies = [
     "scim2-models>=0.2.0",
 ]
 
+[project.entry-points."hecate.auth_providers"]
+oidc = "hecate_enterprise.auth.oidc_provider:provider"
+saml = "hecate_enterprise.auth.saml_provider:provider"
+ldap = "hecate_enterprise.auth.ldap_provider:provider"
+
+[project.entry-points."hecate.secret_providers"]
+hcvault = "hecate_enterprise.vault.hcvault_provider:provider"
+aws = "hecate_enterprise.vault.aws_provider:provider"
+azure = "hecate_enterprise.vault.azure_provider:provider"
+
 [project.optional-dependencies]
 # SSO providers (OIDC has no extra deps; SAML/LDAP bring their SDKs)
 sso = [

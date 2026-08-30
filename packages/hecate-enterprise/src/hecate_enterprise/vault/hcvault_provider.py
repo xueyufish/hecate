@@ -100,3 +100,22 @@ class HashiCorpVaultProvider(SecretProvider):
             return client.sys.is_initialized()
         except Exception:
             return False
+
+
+def provider():
+    """Entry-point factory (PR1.2): hecate.secret_providers['hcvault'].
+
+    Zero-arg: reads settings. Returns a configured HashiCorpVaultProvider,
+    or None when VAULT_URL is unset (host skips None).
+    """
+    from hecate.core.config import settings
+
+    if not settings.VAULT_URL:
+        return None
+    return HashiCorpVaultProvider(
+        vault_url=settings.VAULT_URL,
+        vault_token=settings.VAULT_TOKEN,
+        vault_role_id=settings.VAULT_ROLE_ID,
+        vault_secret_id=settings.VAULT_SECRET_ID,
+        mount_point=settings.VAULT_MOUNT_POINT,
+    )

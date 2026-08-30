@@ -35,7 +35,7 @@ CORE_MAIN_MODULES: tuple[str, ...] = (
     "hecate.auth",
     "hecate.auth.provider",
     "hecate.auth.resolver",
-    "hecate.auth.registration",
+    # hecate.auth.registration removed in PR1.2 (replaced by entry_points).
     "hecate.auth.api_key_provider",
     "hecate.auth.jwt_provider",
     "hecate.vault",

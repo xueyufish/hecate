@@ -62,3 +62,15 @@ class AzureKeyVaultProvider(SecretProvider):
             return True
         except Exception:
             return False
+
+
+def provider():
+    """Entry-point factory (PR1.2): hecate.secret_providers['azure'].
+
+    Zero-arg: reads settings. Returns AzureKeyVaultProvider or None.
+    """
+    from hecate.core.config import settings
+
+    if not settings.AZURE_KEYVAULT_URL:
+        return None
+    return AzureKeyVaultProvider(vault_url=settings.AZURE_KEYVAULT_URL)

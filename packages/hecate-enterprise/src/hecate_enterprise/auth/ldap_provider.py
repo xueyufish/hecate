@@ -187,3 +187,22 @@ class LDAPAuthProvider(AuthProvider):
         await db.flush()
         logger.info("JIT provisioned LDAP user: %s (sso_id=%s)", email, sso_id)
         return user
+
+
+def provider():
+    """Entry-point factory (PR1.2): hecate.auth_providers['ldap'].
+
+    Zero-arg: reads settings. Returns LDAPAuthProvider or None.
+    """
+    from hecate.core.config import settings
+
+    if not (settings.SSO_LDAP_SERVER_URL and settings.SSO_LDAP_BASE_DN):
+        return None
+    return LDAPAuthProvider(
+        server_url=settings.SSO_LDAP_SERVER_URL,
+        base_dn=settings.SSO_LDAP_BASE_DN,
+        bind_dn=settings.SSO_LDAP_BIND_DN,
+        bind_password=settings.SSO_LDAP_BIND_PASSWORD,
+        search_filter=settings.SSO_LDAP_SEARCH_FILTER,
+        use_ssl=settings.SSO_LDAP_USE_SSL,
+    )

@@ -98,3 +98,19 @@ class AWSSecretsManagerProvider(SecretProvider):
                 return True
         except Exception:
             return False
+
+
+def provider():
+    """Entry-point factory (PR1.2): hecate.secret_providers['aws'].
+
+    Zero-arg: reads settings. Returns AWSSecretsManagerProvider or None.
+    """
+    from hecate.core.config import settings
+
+    if not settings.AWS_SECRETS_REGION:
+        return None
+    return AWSSecretsManagerProvider(
+        region_name=settings.AWS_SECRETS_REGION,
+        access_key_id=settings.AWS_SECRETS_ACCESS_KEY_ID,
+        secret_access_key=settings.AWS_SECRETS_SECRET_ACCESS_KEY,
+    )
