@@ -33,7 +33,6 @@ from hecate.services.orchestration.handoff import (
     is_handoff_tool_call,
     validate_handoff_target_from_list,
 )
-from hecate.services.rag.service import knowledge_base_service
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +304,8 @@ class AgentExecutionPort(RuntimePort):
 
         async def _search_one_kb(kb_id: UUID) -> list[dict]:
             """Search a single KB and return chunk dicts. Returns [] on failure."""
+            from hecate_memory.rag.service import knowledge_base_service
+
             try:
                 result = await self._db.execute(
                     select(KnowledgeBaseModel).where(

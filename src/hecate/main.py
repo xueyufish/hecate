@@ -55,9 +55,7 @@ from hecate.api.management.fine_tuning import router as fine_tuning_router
 from hecate.api.management.hooks import router as hooks_router
 from hecate.api.management.i18n import router as i18n_router
 from hecate.api.management.inference import router as inference_router
-from hecate.api.management.knowledge import router as knowledge_router
 from hecate.api.management.mcp import router as mcp_router
-from hecate.api.management.memory import router as memory_router
 from hecate.api.management.model_catalog import router as model_catalog_router
 from hecate.api.management.model_lifecycle import router as model_lifecycle_router
 from hecate.api.management.model_pricing import router as model_pricing_router
@@ -695,15 +693,24 @@ app.include_router(replay_router, prefix="/api", tags=["replay"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(skills_router, prefix="/api", tags=["skills"])
-app.include_router(knowledge_router, prefix="/api", tags=["knowledge-bases"])
 app.include_router(conversations_router, prefix="/api", tags=["conversations"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])
 app.include_router(orchestration_templates_router, prefix="/api", tags=["orchestration-templates"])
 app.include_router(collaboration_patterns_router, prefix="/api", tags=["collaboration-patterns"])
 app.include_router(agent_templates_router, prefix="/api", tags=["agent-templates"])
-app.include_router(memory_router, prefix="/api", tags=["memory"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
 app.include_router(model_providers_router, prefix="/api", tags=["model-providers"])
+
+# Memory + knowledge routes moved to hecate-memory in PR2.1. Lazy mount
+# so core-only installs (no hecate-memory) skip silently.
+try:
+    from hecate_memory.api.knowledge import router as knowledge_router
+    from hecate_memory.api.memory import router as memory_router
+
+    app.include_router(knowledge_router, prefix="/api", tags=["knowledge-bases"])
+    app.include_router(memory_router, prefix="/api", tags=["memory"])
+except ImportError:
+    logger.debug("hecate-memory not installed; skipping memory + knowledge routers")
 app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
 app.include_router(traces_router, prefix="/api", tags=["traces"])
 app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])

@@ -25,7 +25,7 @@ from hecate.models.prompt import (
     PromptVersionModel,
     PromptVersionReadSchema,
 )
-from hecate.services.memory.template_engine import TemplateEngine
+from hecate.services.template_engine import TemplateEngine
 
 logger = logging.getLogger(__name__)
 

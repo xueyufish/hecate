@@ -12,6 +12,7 @@ resolution-markers = [
 members = [
     "hecate",
     "hecate-enterprise",
+    "hecate-memory",
 ]
 
 [[package]]
@@ -2390,6 +2391,38 @@ requires-dist = [
     { name = "scim2-models", specifier = ">=0.2.0" },
 ]
 provides-extras = ["sso", "vault", "tenant"]
+
+[[package]]
+name = "hecate-memory"
+version = "0.1.0"
+source = { editable = "packages/hecate-memory" }
+dependencies = [
+    { name = "hecate" },
+    { name = "scim2-models" },
+]
+
+[package.optional-dependencies]
+rag = [
+    { name = "chromadb" },
+    { name = "docling" },
+    { name = "flagembedding" },
+    { name = "minio" },
+    { name = "qdrant-client" },
+    { name = "ragas" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "chromadb", marker = "extra == 'rag'", specifier = ">=0.5.0" },
+    { name = "docling", marker = "extra == 'rag'", specifier = ">=2.0" },
+    { name = "flagembedding", marker = "extra == 'rag'", specifier = ">=1.2" },
+    { name = "hecate", editable = "." },
+    { name = "minio", marker = "extra == 'rag'", specifier = ">=7.2" },
+    { name = "qdrant-client", marker = "extra == 'rag'", specifier = ">=1.12.0" },
+    { name = "ragas", marker = "extra == 'rag'", specifier = ">=0.2.0" },
+    { name = "scim2-models", specifier = ">=0.2.0" },
+]
+provides-extras = ["rag"]
 
 [[package]]
 name = "hf-xet"

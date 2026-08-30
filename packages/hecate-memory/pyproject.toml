@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hecate-memory"
+version = "0.1.0"
+description = "Hecate memory, RAG, and context engineering domain — extracted wheel"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Hecate Team" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "hecate>=0.1.0",
+    "scim2-models>=0.2.0",
+]
+
+[project.optional-dependencies]
+# RAG backends — install with `pip install hecate-memory[rag]`
+rag = [
+    "qdrant-client>=1.12.0",
+    "chromadb>=0.5.0",
+    "docling>=2.0",
+    "FlagEmbedding>=1.2",
+    "minio>=7.2",
+    "ragas>=0.2.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate_memory"]

@@ -41,7 +41,6 @@ from hecate.engine.workers.suggestion_worker import SuggestionWorker
 from hecate.engine.workers.tool_worker import ToolWorker
 from hecate.engine.workers.variable_set_worker import VariableSetWorker
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
-from hecate.services.context.offloader import ContextOffloader
 from hecate.services.state.state import AgentState
 from hecate.services.workflow.graph_dsl import parse_graph
 
@@ -355,6 +354,8 @@ class WorkflowExecutionService:
             from hecate.core.config import settings
 
             if settings.CONTEXT_OFFLOAD_ENABLED:
+                from hecate.engine.offloader import ContextOffloader
+
                 context_offloader = ContextOffloader(
                     environment=agent_env,
                     threshold_tokens=settings.CONTEXT_OFFLOAD_THRESHOLD_TOKENS,
