@@ -28,6 +28,10 @@ from hecate.engine.ports import RuntimePort, SpanContext
 from hecate.models.agent import AgentModel
 from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.tool import ToolModel
+from hecate.services.observability.span_adapter import (
+    create_otel_span,
+    end_otel_span,
+)
 from hecate.services.orchestration.handoff import (
     inject_handoff_tools_from_targets,
     is_handoff_tool_call,
@@ -392,20 +396,8 @@ class AgentExecutionPort(RuntimePort):
         parent_id: str | None = None,
         attributes: dict[str, Any] | None = None,
     ) -> SpanContext | None:
-        """Create an observability span via OTel tracer."""
-        try:
-            from opentelemetry import trace
-
-            tracer = trace.get_tracer(__name__)
-            span = tracer.start_span(name, attributes=attributes)
-            ctx = span.get_span_context()
-            return SpanContext(
-                span_id=format(ctx.span_id, "016x"),
-                trace_id=format(ctx.trace_id, "032x"),
-                parent_id=parent_id,
-            )
-        except Exception:
-            return None
+        """Create an observability span via the shared OTel adapter."""
+        return create_otel_span(name, parent_id=parent_id, attributes=attributes)
 
     async def end_span(
         self,
@@ -413,18 +405,5 @@ class AgentExecutionPort(RuntimePort):
         output_data: dict[str, Any] | None = None,
         usage: dict[str, int] | None = None,
     ) -> None:
-        """End an observability span."""
-        try:
-            from opentelemetry import trace
-
-            span = trace.get_current_span()
-            if span.is_recording():
-                if output_data:
-                    for k, v in output_data.items():
-                        span.set_attribute(f"output.{k}", str(v))
-                if usage:
-                    for k, v in usage.items():
-                        span.set_attribute(f"usage.{k}", v)
-                span.end()
-        except Exception as exc:
-            logger.warning("Failed to end OTel span: %s", exc)
+        """End an observability span via the shared OTel adapter."""
+        end_otel_span(span_id, output_data=output_data, usage=usage)

@@ -116,6 +116,7 @@ observability = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "wrapt>=1.13.0",
     "opentelemetry-semantic-conventions>=0.65b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
     "aiosmtplib>=3.0.0",
 ]
 mysql = [
@@ -142,6 +143,7 @@ dev = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "wrapt>=1.13.0",
     "opentelemetry-semantic-conventions>=0.65b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -11,8 +11,11 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from hecate.core.database import get_db
-from hecate.services.observability.metrics_storage import MetricsStore
-from hecate.services.observability.monitoring import ConnectionManager, MonitoringService
+from hecate.services.observability.monitoring import (
+    ConnectionManager,
+    MonitoringService,
+    get_metrics_store,
+)
 
 router = APIRouter()
 
@@ -22,13 +25,6 @@ _db_dep = Depends(get_db)
 
 _manager = ConnectionManager()
 _service: MonitoringService | None = None
-
-
-def get_metrics_store() -> MetricsStore:
-    """Return the application-level MetricsStore singleton."""
-    from hecate.services.observability.monitoring import create_metrics_store
-
-    return create_metrics_store()
 
 
 def get_monitoring_service() -> MonitoringService:
