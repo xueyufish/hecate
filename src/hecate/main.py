@@ -66,7 +66,6 @@ from hecate.api.management.monitoring import router as monitoring_router
 from hecate.api.management.monitoring_models import router as monitoring_models_router
 from hecate.api.management.ops_center_overview import router as ops_center_overview_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
-from hecate.api.management.orgs import router as orgs_router
 from hecate.api.management.plugins import router as plugins_router
 from hecate.api.management.preflight import router as preflight_router
 from hecate.api.management.prompts import router as prompts_router
@@ -81,8 +80,6 @@ from hecate.api.management.tool_policies import router as tool_policies_router
 from hecate.api.management.tools import router as tools_router
 from hecate.api.management.traces import router as traces_router
 from hecate.api.management.workflows import router as workflows_router
-from hecate.api.management.workspace_members import router as workspace_members_router
-from hecate.api.management.workspaces import router as workspaces_router
 from hecate.api.middleware import AuditMiddleware
 from hecate.api.schedules import router as schedules_router
 from hecate.api.security_findings import router as security_findings_router
@@ -707,9 +704,6 @@ app.include_router(agent_templates_router, prefix="/api", tags=["agent-templates
 app.include_router(memory_router, prefix="/api", tags=["memory"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
 app.include_router(model_providers_router, prefix="/api", tags=["model-providers"])
-app.include_router(orgs_router, prefix="/api", tags=["orgs"])
-app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
-app.include_router(workspace_members_router, prefix="/api", tags=["workspace-members"])
 app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
 app.include_router(traces_router, prefix="/api", tags=["traces"])
 app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
@@ -745,6 +739,19 @@ try:
     app.include_router(scim_discovery_router, tags=["scim"])
 except ImportError:
     logger.debug("hecate-enterprise not installed; skipping SSO/SCIM routers")
+
+# Tenant management routes (workspaces, orgs, workspace_members). Lazy-imported
+# from hecate-enterprise; if the wheel is not installed, skip silently.
+try:
+    from hecate_enterprise.tenant.api.orgs import router as orgs_router
+    from hecate_enterprise.tenant.api.workspace_members import router as workspace_members_router
+    from hecate_enterprise.tenant.api.workspaces import router as workspaces_router
+
+    app.include_router(workspaces_router, prefix="/api", tags=["workspaces"])
+    app.include_router(orgs_router, prefix="/api", tags=["orgs"])
+    app.include_router(workspace_members_router, prefix="/api", tags=["workspace-members"])
+except ImportError:
+    logger.debug("hecate-enterprise not installed; skipping tenant management routers")
 
 # MCP Server — conditional mount when MCP_SERVER_ENABLED=true
 if _settings.MCP_SERVER_ENABLED:
