@@ -20,8 +20,8 @@ from hecate.models.workspace import (
     WorkspaceReadSchema,
     WorkspaceUpdateSchema,
 )
-from hecate.services.organization_service import OrganizationService
-from hecate.services.workspace_service import WorkspaceService
+from hecate_enterprise.tenant.organization_service import OrganizationService
+from hecate_enterprise.tenant.workspace_service import WorkspaceService
 
 router = APIRouter(prefix="/orgs/{org_id}/workspaces", tags=["workspaces"])
 _workspace_service = WorkspaceService()

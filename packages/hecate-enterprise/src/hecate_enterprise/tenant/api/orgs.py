@@ -19,7 +19,7 @@ from hecate.models.organization import (
     OrganizationReadSchema,
     OrganizationUpdateSchema,
 )
-from hecate.services.organization_service import OrganizationService
+from hecate_enterprise.tenant.organization_service import OrganizationService
 
 router = APIRouter(prefix="/orgs", tags=["organizations"])
 _org_service = OrganizationService()

@@ -20,7 +20,7 @@ from hecate.models.workspace_member import (
     WorkspaceMemberReadSchema,
     WorkspaceMemberUpdateSchema,
 )
-from hecate.services.workspace_member_service import WorkspaceMemberService
+from hecate_enterprise.tenant.workspace_member_service import WorkspaceMemberService
 
 router = APIRouter(
     prefix="/orgs/{org_id}/workspaces/{workspace_id}/members",
