@@ -164,7 +164,7 @@ async def _restore_full(
             coll_name = obj.path.rsplit("/", 1)[-1].replace(".snapshot", "")
             await _restore_qdrant_collection(coll_name, snapshot_bytes)
     elif scope == "minio":
-        from hecate.services.rag.storage import MinIOStorage
+        from hecate_memory.rag.storage import MinIOStorage
 
         minio_storage = MinIOStorage()
         client = minio_storage._get_client()  # noqa: SLF001
@@ -272,7 +272,7 @@ async def _restore_minio_tenant(
         file_paths = [r[0] for r in rows]
 
     prefix = timestamp.strftime("%Y%m%d_%H%M%S") + "/minio/"
-    from hecate.services.rag.storage import MinIOStorage
+    from hecate_memory.rag.storage import MinIOStorage
 
     minio_storage = MinIOStorage()
     client = minio_storage._get_client()  # noqa: SLF001

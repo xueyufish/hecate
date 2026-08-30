@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.memory.template_engine import TemplateEngine
+from hecate.services.template_engine import TemplateEngine
 
 
 class TestTemplateEngine:

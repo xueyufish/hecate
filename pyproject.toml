@@ -190,7 +190,7 @@ update_changelog_on_bump = true
 
 [tool.mypy]
 python_version = "3.12"
-mypy_path = "src:packages/hecate-enterprise/src"
+mypy_path = "src:packages/hecate-enterprise/src:packages/hecate-memory/src"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

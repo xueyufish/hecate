@@ -422,7 +422,7 @@ def create_mcp_server() -> FastMCP:
                 if kb is None:
                     return json.dumps({"error": "Knowledge base not found"})
 
-                from hecate.services.rag.service import knowledge_base_service
+                from hecate_memory.rag.service import knowledge_base_service
 
                 search_results = await knowledge_base_service.search(
                     collection_name=kb.collection_name,
@@ -477,7 +477,7 @@ def create_mcp_server() -> FastMCP:
                 await db.flush()
                 await db.refresh(kb)
 
-                from hecate.services.rag.service import knowledge_base_service
+                from hecate_memory.rag.service import knowledge_base_service
 
                 await knowledge_base_service.create_collection(
                     collection_name=collection_name,
@@ -524,7 +524,7 @@ def create_mcp_server() -> FastMCP:
                 if kb is None:
                     return json.dumps({"error": "Knowledge base not found"})
 
-                from hecate.services.rag.service import knowledge_base_service
+                from hecate_memory.rag.service import knowledge_base_service
 
                 ingest_result = await knowledge_base_service.ingest_document_text(
                     text=content,

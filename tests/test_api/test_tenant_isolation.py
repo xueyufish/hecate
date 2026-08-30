@@ -295,7 +295,7 @@ async def test_vector_store_search_with_workspace_filter() -> None:
     """VectorStore search methods accept workspace_id for filtering."""
     import inspect
 
-    from hecate.services.rag.vector_store import VectorStore
+    from hecate_memory.rag.vector_store import VectorStore
 
     # Verify ABC signature includes workspace_id
 
@@ -317,7 +317,7 @@ async def test_vector_store_search_with_workspace_filter() -> None:
 @pytest.mark.asyncio
 async def test_qdrant_workspace_filter_builder() -> None:
     """QdrantVectorStore._build_workspace_filter handles workspace_id correctly."""
-    from hecate.services.rag.qdrant_store import QdrantVectorStore
+    from hecate_memory.rag.qdrant_store import QdrantVectorStore
 
     store = QdrantVectorStore(url="http://localhost:6333")
 

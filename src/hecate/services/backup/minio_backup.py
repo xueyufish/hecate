@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from hecate.core.config import settings
-from hecate.services.rag.storage import MinIOStorage
 
 from .factory import build_backup_path
 from .storage import BackupStorage
@@ -28,6 +27,8 @@ async def backup_minio(
     prefix: str = "",
 ) -> MinIOBackupResult:
     """Mirror MinIO bucket contents to backup storage."""
+    from hecate_memory.rag.storage import MinIOStorage
+
     source = MinIOStorage()
     client = source._get_client()  # noqa: SLF001
 
