@@ -1,52 +1,30 @@
-"""Vault registration — register configured secret providers."""
+"""Vault registration — entry_point-driven secret provider discovery.
+
+Per PR1.2, secret providers (HashiCorp / AWS / Azure) are discovered via
+the ``hecate.secret_providers`` entry-point group on the host. Each
+provider module exposes a zero-arg ``provider()`` factory that reads its
+own settings and returns an instance, or ``None`` when unconfigured.
+This module just hosts the function that main.py calls at lifespan
+startup; the actual provider construction happens in the entry-point
+factories (hecate_enterprise.vault.hcvault_provider, etc.).
+"""
 
 from __future__ import annotations
 
 import logging
 
-from hecate.core.config import settings
-from hecate.vault.resolver import register_providers
+from hecate.vault.resolver import load_entry_point_providers, register_providers
 
 logger = logging.getLogger(__name__)
 
 
 def register_secret_providers() -> int:
-    """Register configured secret providers.
+    """Discover and register secret providers via entry points.
 
     Returns:
         Number of providers registered.
     """
-    providers: list = []
-
-    if settings.VAULT_URL:
-        from hecate_enterprise.vault.hcvault_provider import HashiCorpVaultProvider
-
-        providers.append(
-            HashiCorpVaultProvider(
-                vault_url=settings.VAULT_URL,
-                vault_token=settings.VAULT_TOKEN,
-                vault_role_id=settings.VAULT_ROLE_ID,
-                vault_secret_id=settings.VAULT_SECRET_ID,
-                mount_point=settings.VAULT_MOUNT_POINT,
-            )
-        )
-
-    if settings.AWS_SECRETS_REGION:
-        from hecate_enterprise.vault.aws_provider import AWSSecretsManagerProvider
-
-        providers.append(
-            AWSSecretsManagerProvider(
-                region_name=settings.AWS_SECRETS_REGION,
-                access_key_id=settings.AWS_SECRETS_ACCESS_KEY_ID,
-                secret_access_key=settings.AWS_SECRETS_SECRET_ACCESS_KEY,
-            )
-        )
-
-    if settings.AZURE_KEYVAULT_URL:
-        from hecate_enterprise.vault.azure_provider import AzureKeyVaultProvider
-
-        providers.append(AzureKeyVaultProvider(vault_url=settings.AZURE_KEYVAULT_URL))
-
+    providers = load_entry_point_providers()
     register_providers(*providers)
     logger.info("Registered %d secret providers", len(providers))
     return len(providers)

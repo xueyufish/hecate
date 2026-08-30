@@ -160,3 +160,21 @@ class OIDCAuthProvider(AuthProvider):
         except Exception:
             logger.exception("Failed to fetch OIDC JWKS")
             return {"keys": []}
+
+
+def provider():
+    """Entry-point factory (PR1.2): hecate.auth_providers['oidc'].
+
+    Zero-arg: reads settings. Returns OIDCAuthProvider or None when
+    OIDC isn't configured (client_id + discovery_url both required).
+    """
+    from hecate.core.config import settings
+
+    if not (settings.SSO_OIDC_CLIENT_ID and settings.SSO_OIDC_DISCOVERY_URL):
+        return None
+    return OIDCAuthProvider(
+        client_id=settings.SSO_OIDC_CLIENT_ID,
+        client_secret=settings.SSO_OIDC_CLIENT_SECRET,
+        discovery_url=settings.SSO_OIDC_DISCOVERY_URL,
+        scope=settings.SSO_OIDC_SCOPE,
+    )

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
+from importlib.metadata import entry_points
 
 from hecate.core.config import settings
 
@@ -27,6 +29,33 @@ def register_providers(*providers: object) -> None:
 def get_registered_providers() -> list:
     """Return the currently registered secret providers."""
     return list(_providers)
+
+
+def load_entry_point_providers(gate: Callable[[], bool] | None = None) -> list:
+    """Discover secret providers via the ``hecate.secret_providers`` entry-point group.
+
+    Same zero-arg-factory contract as the auth variant (Airflow
+    get_provider_info / Kedro hooks precedent): each entry point loads to
+    a callable that reads its own settings and returns a provider instance
+    or ``None`` when unconfigured. The host skips ``None``. ``gate`` is
+    the future license-check hook; this PR passes ``None``.
+
+    Args:
+        gate: Optional predicate consulted before scanning; if it returns
+            ``False`` the scan is skipped (used by future license gating).
+    """
+    if gate is not None and not gate():
+        return []
+    discovered: list = []
+    for ep in entry_points(group="hecate.secret_providers"):
+        try:
+            instance = ep.load()()
+        except Exception:
+            logger.exception("Failed to load secret provider entry point %s", ep.name)
+            continue
+        if instance is not None:
+            discovered.append(instance)
+    return discovered
 
 
 async def resolve_secret(path: str) -> str | None:

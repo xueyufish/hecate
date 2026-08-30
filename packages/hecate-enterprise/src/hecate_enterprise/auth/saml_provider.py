@@ -183,3 +183,21 @@ class SAMLAuthProvider(AuthProvider):
         await db.flush()
         logger.info("JIT provisioned SAML user: %s (sso_id=%s)", email, sso_id)
         return user
+
+
+def provider():
+    """Entry-point factory (PR1.2): hecate.auth_providers['saml'].
+
+    Zero-arg: reads settings. Returns SAMLAuthProvider or None.
+    """
+    from hecate.core.config import settings
+
+    if not (settings.SSO_SAML_SP_ENTITY_ID and settings.SSO_SAML_IDP_SSO_URL):
+        return None
+    return SAMLAuthProvider(
+        sp_entity_id=settings.SSO_SAML_SP_ENTITY_ID,
+        sp_acs_url=settings.SSO_SAML_SP_ACS_URL,
+        idp_entity_id=settings.SSO_SAML_IDP_ENTITY_ID,
+        idp_sso_url=settings.SSO_SAML_IDP_SSO_URL,
+        idp_x509_cert=settings.SSO_SAML_IDP_X509_CERT,
+    )
