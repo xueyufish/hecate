@@ -87,6 +87,12 @@ class Settings(BaseSettings):
     EVENT_STORE_BACKEND: str = "memory"  # "memory" | "postgres"
     EVENT_STORE_PG_TABLE: str = "events"  # PG table name (operator-customizable)
 
+    # Memory provider backend (hecate.memory_providers entry point, PR2.2).
+    # Names: "builtin" (hecate-memory shipped in-process) or any third-party
+    # entry registered by an installed package. Unknown / failing factory
+    # degrades to "no memory backend" rather than raising.
+    MEMORY_PROVIDER: str = "builtin"
+
     VECTOR_STORE_TYPE: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""

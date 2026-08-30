@@ -33,6 +33,7 @@ from hecate.services.orchestration.handoff import (
     is_handoff_tool_call,
     validate_handoff_target_from_list,
 )
+from hecate.services.orchestration.memory_provider import resolve_memory_provider
 
 logger = logging.getLogger(__name__)
 
@@ -302,10 +303,12 @@ class AgentExecutionPort(RuntimePort):
         if not kb_ids:
             return []
 
+        provider = resolve_memory_provider()
+        if provider is None:
+            return []
+
         async def _search_one_kb(kb_id: UUID) -> list[dict]:
             """Search a single KB and return chunk dicts. Returns [] on failure."""
-            from hecate_memory.rag.service import knowledge_base_service
-
             try:
                 result = await self._db.execute(
                     select(KnowledgeBaseModel).where(
@@ -318,7 +321,7 @@ class AgentExecutionPort(RuntimePort):
                     logger.warning(f"Knowledge base {kb_id} not found. Skipping.")
                     return []
 
-                search_results = await knowledge_base_service.search(
+                search_results = await provider.search(
                     collection_name=kb.collection_name,
                     query=query,
                     limit=10,

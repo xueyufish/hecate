@@ -35,5 +35,10 @@ rag = [
     "ragas>=0.2.0",
 ]
 
+[project.entry-points."hecate.memory_providers"]
+# Default in-process backend; third-party memory packages (e.g. hecate-memory-mem0)
+# register additional entries under the same group.
+builtin = "hecate_memory.provider:provider"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/hecate_memory"]
