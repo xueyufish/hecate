@@ -422,9 +422,15 @@ def create_mcp_server() -> FastMCP:
                 if kb is None:
                     return json.dumps({"error": "Knowledge base not found"})
 
-                from hecate_memory.rag.service import knowledge_base_service
+                from hecate.services.orchestration.memory_provider import (
+                    resolve_memory_provider,
+                )
 
-                search_results = await knowledge_base_service.search(
+                provider = resolve_memory_provider()
+                if provider is None:
+                    return json.dumps({"error": "No memory provider configured"})
+
+                search_results = await provider.search(
                     collection_name=kb.collection_name,
                     query=query,
                     limit=limit,
