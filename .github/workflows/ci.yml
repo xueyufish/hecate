@@ -6,10 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -41,13 +37,16 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Single job name kept stable so branch protection's required-status-check
-    # binding does not drift. Concurrency comes from pytest-xdist (-n auto),
-    # wall-time safety from pytest-timeout (300s per test). On the previous
-    # sharded setup, matrix.shard produced two distinct check names
-    # (test (a, ...) / test (b, ...)) which detached from the required
-    # `test` binding and left the PR blocked.
+    # Deliberately the plain sequential run that PRs #103–#107 passed with
+    # (~16 min wall). Do NOT add pytest-xdist (-n auto), matrix sharding, or
+    # a concurrency/cancel-in-progress block here without a separate infra PR:
+    # each of those was tried on PR #109 and caused cascading failures —
+    # cancel-in-progress killed in-flight runs on every follow-up push, and
+    # matrix.shard detached this job from the branch-protection `test`
+    # required check. timeout-minutes 60 = ~4x historical wall time; a single
+    # hanging test surfaces as a clear FAIL via pytest-timeout instead of a
+    # silent job cancellation.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -59,7 +58,7 @@ jobs:
       - name: Run tests
         run: |
           uv pip install pytest-timeout
-          uv run pytest tests/ -q -n auto --timeout=300 -p no:cacheprovider
+          uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
 
   migrations:
     runs-on: ubuntu-latest
