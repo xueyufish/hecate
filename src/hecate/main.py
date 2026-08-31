@@ -305,11 +305,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Configure OpenTelemetry tracing (OTLP exporter when
     # OTEL_EXPORTER_OTLP_ENDPOINT is set, console otherwise; DB bridge +
-    # metrics feed via HecateTraceSpanProcessor).
+    # metrics feed via HecateTraceSpanProcessor). Keep the provider so the
+    # shutdown phase can stop its background threads — without shutdown the
+    # global tracer keeps recording into HecateTraceSpanProcessor's queue,
+    # which drains toward the production database (hangs test processes that
+    # run this lifespan via TestClient and have no Postgres).
+    tracing_provider = None
     try:
         from hecate.services.observability.otel_setup import configure_tracing
 
-        configure_tracing(app)
+        tracing_provider = configure_tracing(app)
     except ImportError:
         logger.warning("observability extras not installed — tracing disabled")
 
@@ -375,6 +380,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("SIEM export pipeline started")
 
     yield
+    # Shutdown: stop the OTel provider first so the (already-set) global
+    # tracer drops any spans emitted after this point instead of feeding the
+    # DB-bridge queue.
+    if tracing_provider is not None:
+        try:
+            tracing_provider.shutdown()
+        except Exception:
+            logger.exception("Tracing provider shutdown failed")
     # Shutdown: stop meta-agent scheduler
     if meta_scheduler is not None:
         try:

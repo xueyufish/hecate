@@ -55,12 +55,10 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
         run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --extra dev --prerelease=allow
-      - name: Dump collection order (diagnostics)
-        run: uv run pytest --collect-only -q tests/ 2>/dev/null | head -40
       - name: Run tests
         run: |
           uv pip install pytest-timeout
-          uv run pytest tests/ -v --timeout=300 -p no:cacheprovider 2>&1 | tee /tmp/pytest.log | grep -E "PASSED|FAILED|ERROR|Timeout" | tail -200
+          uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
 
   migrations:
     runs-on: ubuntu-latest

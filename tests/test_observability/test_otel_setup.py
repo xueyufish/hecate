@@ -65,6 +65,7 @@ class TestConfigureTracing:
 
         provider = otel_setup.configure_tracing(FastAPI())
         assert isinstance(provider, TracerProvider)
+        provider.shutdown()  # stop the BatchSpanProcessor worker thread
 
     def test_sets_global_tracer_provider(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """get_tracer() callers must be routed to the assembled provider.
@@ -89,3 +90,4 @@ class TestConfigureTracing:
         provider = otel_setup.configure_tracing(FastAPI())
         assert provider is not None
         assert captured["provider"] is provider
+        provider.shutdown()  # stop the BatchSpanProcessor worker thread
