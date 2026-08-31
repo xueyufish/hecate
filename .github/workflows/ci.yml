@@ -42,21 +42,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Shard the test suite to dodge pytest-xdist 3.8.0's flaky
-    # end-of-run controller deadlock (issue pytest-dev/pytest-xdist#1313):
-    # each shard runs with only 2 workers, which sharply lowers the
-    # execnet-pipe race probability. fail-fast:false keeps both shards'
-    # independent results visible if one stalls.
-    strategy:
-      fail-fast: false
-      matrix:
-        shard:
-            # Shard A: CPU/pure-Python heavy (engine + models + api).
-          - id: a
-            paths: tests/test_engine tests/test_api tests/test_memory tests/test_enterprise tests/test_a2a tests/test_plugin tests/test_model_hub tests/test_models tests/test_integration tests/test_install.py
-            # Shard B: IO/integration heavy (services + small dirs).
-          - id: b
-            paths: tests/test_services tests/test_e2e tests/test_mcp tests/test_ops_center tests/test_skill_registry tests/test_core tests/test_observability tests/test_i18n tests/test_cli tests/test_channel tests/test_migrations tests/test_build tests/test_vault tests/test_auth tests/test_gateway
+    # Single job name kept stable so branch protection's required-status-check
+    # binding does not drift. Concurrency comes from pytest-xdist (-n auto),
+    # wall-time safety from pytest-timeout (300s per test). On the previous
+    # sharded setup, matrix.shard produced two distinct check names
+    # (test (a, ...) / test (b, ...)) which detached from the required
+    # `test` binding and left the PR blocked.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -65,10 +56,10 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
         run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --extra dev --prerelease=allow
-      - name: Run tests (shard ${{ matrix.shard.id }})
+      - name: Run tests
         run: |
           uv pip install pytest-timeout
-          uv run pytest ${{ matrix.shard.paths }} -q -n 2 --timeout=300 -p no:cacheprovider
+          uv run pytest tests/ -q -n auto --timeout=300 -p no:cacheprovider
 
   migrations:
     runs-on: ubuntu-latest
