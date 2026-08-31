@@ -60,6 +60,17 @@ The `TimescaleMetricsStore` SHALL persist metrics to a `metrics` table (or hyper
 - **WHEN** TimescaleDB extension is not installed
 - **THEN** the store SHALL use `date_trunc('minute', timestamp)` as a fallback with equivalent results
 
+### Requirement: Span completions feed the MetricsStore
+The `HecateTraceSpanProcessor` SHALL be wired to the application-level MetricsStore singleton so every completed OTel span records per-type counters, duration histograms, error counters, and token totals. Writers and readers (WebSocket push loop, REST endpoints) SHALL share the same store instance.
+
+#### Scenario: Live traffic populates dashboards
+- **WHEN** engine traffic produces spans
+- **THEN** `GET /api/monitoring/metrics` and `/ws/monitoring` SHALL reflect current span counts, latencies, and token totals without any manual metric call
+
+#### Scenario: Shared singleton across writers and readers
+- **WHEN** the span processor records a metric and a dashboard queries the store
+- **THEN** both SHALL operate on the same MetricsStore instance
+
 ### Requirement: WebSocket endpoint pushes metric snapshots
 The system SHALL expose a WebSocket endpoint at `/ws/monitoring` that accepts connections from dashboard clients and pushes a `MetricsSnapshot` JSON every 5 seconds (configurable via `METRICS_PUSH_INTERVAL`).
 

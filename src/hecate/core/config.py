@@ -271,6 +271,13 @@ class Settings(BaseSettings):
     TRACE_DB_QUEUE_MAX_SIZE: int = 10000
     TRACE_DB_FLUSH_INTERVAL: int = 5  # seconds between TraceModel flush cycles
 
+    # OTLP export (PR3a). Endpoint uses OTel HTTP/protobuf convention
+    # (e.g. "http://collector:4318/v1/traces"). Empty = no OTLP export;
+    # spans still go to the console exporter in dev and the DB bridge.
+    # Headers use the OTel comma-separated "k1=v1,k2=v2" format.
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = ""
+    OTEL_EXPORTER_OTLP_HEADERS: str = ""
+
     # Agent health monitoring thresholds
     AGENT_HEALTH_ERROR_RATE_WARNING: float = 0.05
     AGENT_HEALTH_ERROR_RATE_CRITICAL: float = 0.15

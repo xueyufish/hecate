@@ -15,6 +15,10 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.engine.ports import RuntimePort, SpanContext
+from hecate.services.observability.span_adapter import (
+    create_otel_span,
+    end_otel_span,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -224,23 +228,8 @@ class _ProductionRuntimePort(RuntimePort):
         parent_id: str | None = None,
         attributes: dict[str, Any] | None = None,
     ) -> SpanContext | None:
-        """Create an observability span via OTel tracer and TracingService."""
-        try:
-            from opentelemetry import trace
-
-            tracer = trace.get_tracer(__name__)
-            span = tracer.start_span(name, attributes=attributes)
-            ctx = span.get_span_context()
-            otel_trace_id = format(ctx.trace_id, "032x")
-            otel_span_id = format(ctx.span_id, "016x")
-            return SpanContext(
-                span_id=otel_span_id,
-                trace_id=otel_trace_id,
-                parent_id=parent_id,
-            )
-        except Exception:
-            logger.debug("Tracing not available, returning None for span '%s'", name)
-            return None
+        """Create an observability span via the shared OTel adapter."""
+        return create_otel_span(name, parent_id=parent_id, attributes=attributes)
 
     async def end_span(
         self,
@@ -248,21 +237,8 @@ class _ProductionRuntimePort(RuntimePort):
         output_data: dict[str, Any] | None = None,
         usage: dict[str, int] | None = None,
     ) -> None:
-        """End an observability span."""
-        try:
-            from opentelemetry import trace
-
-            span = trace.get_current_span()
-            if span.is_recording():
-                if output_data:
-                    for k, v in output_data.items():
-                        span.set_attribute(f"output.{k}", str(v))
-                if usage:
-                    for k, v in usage.items():
-                        span.set_attribute(f"usage.{k}", v)
-                span.end()
-        except Exception:
-            logger.debug("Failed to end span %s", span_id)
+        """End an observability span via the shared OTel adapter."""
+        end_otel_span(span_id, output_data=output_data, usage=usage)
 
     async def agent_execute(
         self,

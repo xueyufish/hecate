@@ -116,6 +116,7 @@ observability = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "wrapt>=1.13.0",
     "opentelemetry-semantic-conventions>=0.65b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
     "aiosmtplib>=3.0.0",
 ]
 mysql = [
@@ -126,7 +127,9 @@ scheduling = [
     "croniter~=2.0",
 ]
 dev = [
-    "pytest>=8.0",
+    # <9: pytest-xdist has no official pytest 9 support; the 3.8+9.0 combo
+    # deadlocks the controller at end-of-run (phantom pending tests on one worker).
+    "pytest>=8.0,<9",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
     "pytest-xdist>=3.5",
@@ -142,6 +145,7 @@ dev = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "wrapt>=1.13.0",
     "opentelemetry-semantic-conventions>=0.65b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
 ]
 
 [tool.hatch.build.targets.wheel]
