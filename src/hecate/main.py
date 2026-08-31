@@ -303,24 +303,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except ImportError:
         logger.info("APScheduler not available — budget forecast scheduling disabled")
 
-    # Configure OpenTelemetry tracing
-    if _settings.TRACING_ENABLED:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    # Configure OpenTelemetry tracing (OTLP exporter when
+    # OTEL_EXPORTER_OTLP_ENDPOINT is set, console otherwise; DB bridge +
+    # metrics feed via HecateTraceSpanProcessor). Keep the provider so the
+    # shutdown phase can stop its background threads — without shutdown the
+    # global tracer keeps recording into HecateTraceSpanProcessor's queue,
+    # which drains toward the production database (hangs test processes that
+    # run this lifespan via TestClient and have no Postgres).
+    tracing_provider = None
+    try:
+        from hecate.services.observability.otel_setup import configure_tracing
 
-        provider = TracerProvider()
-        provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
-
-        # Register HecateTraceSpanProcessor for DB export
-        if _settings.TRACE_DB_EXPORT_ENABLED:
-            from hecate.services.observability.span_processor import HecateTraceSpanProcessor
-
-            _trace_processor = HecateTraceSpanProcessor()
-            provider.add_span_processor(_trace_processor)
-            _trace_processor._ensure_consumer()
-
-        FastAPIInstrumentor.instrument_app(app, tracer_provider=provider)
+        tracing_provider = configure_tracing(app)
+    except ImportError:
+        logger.warning("observability extras not installed — tracing disabled")
 
     # Start monitoring service
     from hecate.api.management.monitoring import get_monitoring_service
@@ -384,6 +380,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("SIEM export pipeline started")
 
     yield
+    # Shutdown: stop the OTel provider first so the (already-set) global
+    # tracer drops any spans emitted after this point instead of feeding the
+    # DB-bridge queue.
+    if tracing_provider is not None:
+        try:
+            tracing_provider.shutdown()
+        except Exception:
+            logger.exception("Tracing provider shutdown failed")
     # Shutdown: stop meta-agent scheduler
     if meta_scheduler is not None:
         try:

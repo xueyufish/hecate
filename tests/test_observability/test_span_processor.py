@@ -279,6 +279,114 @@ class TestOtelMetadataStorage:
         assert metadata["otel.span_id"] == "0c8a3b1234567890"
 
 
+class TestMetricsFeed:
+    """Tests for the MetricsStore feed wired into on_end (PR3a)."""
+
+    def _make_span(self, name: str = "tool:get_weather", status: str = "OK") -> MagicMock:
+        span = MagicMock()
+        span.name = name
+        span.status.status_code.name = status
+        span.attributes = {"usage.input_tokens": 100, "usage.output_tokens": 50}
+        span.start_time = 1_000_000_000
+        span.end_time = 1_000_050_000_000
+        span._hecate_record_id = uuid.uuid4()
+        return span
+
+    async def test_on_end_records_counters_and_histogram(self) -> None:
+        from hecate.services.observability.metrics_storage import InMemoryMetricsStore
+
+        store = InMemoryMetricsStore()
+        processor = HecateTraceSpanProcessor(metrics_store=store)
+        processor._ensure_consumer = MagicMock()
+
+        processor.on_end(self._make_span())
+
+        # metrics op + DB update op
+        assert processor._queue.qsize() == 2
+        items = []
+        while not processor._queue.empty():
+            items.append(processor._queue.get_nowait())
+        metrics_items = [i for i in items if i["op"] == "metrics"]
+
+        # Flushing metrics-only batches must not touch a DB session.
+        await processor._flush_batch(metrics_items)
+
+        names = {m.name for m in store.get_snapshot().metrics}
+        assert "span.tool.count" in names
+        assert "span.tool.duration_ms" in names
+        assert "tokens.input" in names
+        assert "tokens.output" in names
+
+    async def test_on_end_records_error_counter(self) -> None:
+        from hecate.services.observability.metrics_storage import InMemoryMetricsStore
+
+        store = InMemoryMetricsStore()
+        processor = HecateTraceSpanProcessor(metrics_store=store)
+        processor._ensure_consumer = MagicMock()
+
+        processor.on_end(self._make_span(name="llm:node_1", status="ERROR"))
+
+        items = []
+        while not processor._queue.empty():
+            items.append(processor._queue.get_nowait())
+        metrics_items = [i for i in items if i["op"] == "metrics"]
+        await processor._flush_batch(metrics_items)
+
+        names = {m.name for m in store.get_snapshot().metrics}
+        assert "span.error.count" in names
+        assert "span.generation.count" in names
+
+    async def test_metrics_recorded_without_db_record_id(self) -> None:
+        """Metrics survive even when the DB insert was dropped."""
+        from hecate.services.observability.metrics_storage import InMemoryMetricsStore
+
+        store = InMemoryMetricsStore()
+        processor = HecateTraceSpanProcessor(metrics_store=store)
+        processor._ensure_consumer = MagicMock()
+
+        span = self._make_span()
+        del span._hecate_record_id
+        processor.on_end(span)
+
+        items = []
+        while not processor._queue.empty():
+            items.append(processor._queue.get_nowait())
+        assert [i["op"] for i in items] == ["metrics"]
+        await processor._flush_batch(items)
+        assert {m.name for m in store.get_snapshot().metrics} == {
+            "span.tool.count",
+            "span.tool.duration_ms",
+            "tokens.input",
+            "tokens.output",
+        }
+
+    async def test_no_store_no_metrics_op(self) -> None:
+        """Without a metrics store, on_end enqueues only the DB update."""
+        processor = HecateTraceSpanProcessor()
+        processor._ensure_consumer = MagicMock()
+
+        processor.on_end(self._make_span())
+
+        items = []
+        while not processor._queue.empty():
+            items.append(processor._queue.get_nowait())
+        assert [i["op"] for i in items] == ["update"]
+
+
+class TestMonitoringSingleton:
+    """The MetricsStore singleton must be shared by writers and readers."""
+
+    def test_get_metrics_store_returns_same_instance(self) -> None:
+        from hecate.services.observability import monitoring as monitoring_mod
+
+        first = monitoring_mod.get_metrics_store()
+        try:
+            second = monitoring_mod.get_metrics_store()
+            assert first is second
+        finally:
+            monitoring_mod._metrics_store_singleton = None
+
+
 class TestPregelRuntimeRootSpan:
     """Tests for PregelRuntime root span creation."""
 

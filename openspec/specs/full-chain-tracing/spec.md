@@ -33,43 +33,51 @@ The system SHALL propagate `trace_id` from FastAPI middleware through Service â†
 - **WHEN** code runs outside an HTTP request (e.g., background task, CLI)
 - **THEN** `trace_id` SHALL be `None`, and span creation SHALL be a no-op (not raise)
 
-### Requirement: MetricsStore wiring in TracingService
-The `TracingService.end_span()` method SHALL call `MetricsStore.record_counter()` and `MetricsStore.record_histogram()` for every completed span, updating request counts, error counts, latency histograms, and token usage counters without additional instrumentation in the engine or worker layers.
+#### Scenario: Engine tracers route to the assembled provider
+- **WHEN** the tracing pipeline is assembled at startup
+- **THEN** the global tracer provider SHALL be set so spans created via `opentelemetry.trace.get_tracer()` (engine runtime, workers) reach the configured processors and exporters
 
-#### Scenario: Successful span updates request counter
-- **WHEN** `TracingService.end_span(record_id, status="completed")` is called
-- **THEN** `MetricsStore.record_counter("requests_total", 1, tags)` and `MetricsStore.record_histogram("request_latency_ms", latency_ms, tags)` SHALL be called
+### Requirement: MetricsStore wiring in the OTel span processor
+The `HecateTraceSpanProcessor` SHALL feed the application MetricsStore from every completed span: per-type counters (`span.{type}.count`), duration histograms (`span.{type}.duration_ms`), error counters (`span.error.count`), and token totals (`tokens.input` / `tokens.output`). Metric recording SHALL require no additional instrumentation in the engine or worker layers.
+
+#### Scenario: Successful span updates type counter and duration histogram
+- **WHEN** a span named `tool:get_weather` ends with status OK
+- **THEN** `MetricsStore.record_counter("span.tool.count", 1)` and `MetricsStore.record_histogram("span.tool.duration_ms", duration_ms)` SHALL be recorded
 
 #### Scenario: Error span updates error counter
-- **WHEN** `TracingService.end_span(record_id, status="error")` is called
-- **THEN** `MetricsStore.record_counter("errors_total", 1, tags)` SHALL be called in addition to the request counter
+- **WHEN** a span ends with OTel status ERROR
+- **THEN** `MetricsStore.record_counter("span.error.count", 1, tags={"type": <type>})` SHALL be recorded in addition
 
-#### Scenario: Span with usage data updates token counters
-- **WHEN** `TracingService.end_span(record_id, usage={"input_tokens": 100, "output_tokens": 50})` is called
-- **THEN** `MetricsStore.record_counter("input_tokens", 100, tags)` and `MetricsStore.record_counter("output_tokens", 50, tags)` SHALL be called
+#### Scenario: Span with usage attributes updates token counters
+- **WHEN** a completed span carries `usage.input_tokens` / `usage.output_tokens` attributes
+- **THEN** `MetricsStore.record_counter("tokens.input", ...)` and `MetricsStore.record_counter("tokens.output", ...)` SHALL be recorded
 
 #### Scenario: MetricsStore is optional (graceful degradation)
 - **WHEN** no MetricsStore is configured (None)
-- **THEN** `TracingService.end_span()` SHALL complete normally without attempting to record metrics
+- **THEN** span processing SHALL complete normally without recording metrics
 
-### Requirement: OpsTraceManager async queue with provider plugins
-The system SHALL provide an `OpsTraceManager` singleton that dispatches trace events to both local database persistence and optional external providers via async queue.
+### Requirement: Async persistence and external export via the OTel span processor
+The `HecateTraceSpanProcessor` SHALL persist spans to the `traces` table via a bounded async queue with a background consumer (never blocking the synchronous OTel callback). External export SHALL use the standard OTLP HTTP/protobuf exporter, configured by `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_HEADERS` â€” switching backends (Langfuse, Tempo, Jaeger, Datadog OTLP ingest) is configuration-only. When no endpoint is set, spans SHALL go to the console exporter.
 
-#### Scenario: Trace written to local database
-- **WHEN** `OpsTraceManager.on_span_end(span_data)` is called
-- **THEN** the span data SHALL be persisted to the `traces` table immediately
+#### Scenario: Span written to the traces table asynchronously
+- **WHEN** a span starts or ends
+- **THEN** the record SHALL be enqueued and written by the background consumer without blocking the caller
 
-#### Scenario: Trace dispatched to external provider
-- **WHEN** a `LangFuseProvider` is configured and a span ends
-- **THEN** the span data SHALL be queued for async dispatch to LangFuse without blocking the caller
+#### Scenario: Queue overflow drops spans instead of blocking
+- **WHEN** the persistence queue is full
+- **THEN** the span record SHALL be dropped with a warning log and the original request SHALL complete normally
 
-#### Scenario: Provider failure does not affect request
-- **WHEN** an external provider raises an exception during dispatch
-- **THEN** the error SHALL be logged but the original request SHALL complete normally
+#### Scenario: External backend receives spans via OTLP
+- **WHEN** `OTEL_EXPORTER_OTLP_ENDPOINT` points at an OTLP/HTTP receiver (e.g., Langfuse)
+- **THEN** all spans SHALL be exported there with no code change
 
-#### Scenario: Flush pending traces on shutdown
+#### Scenario: No endpoint configured falls back to console
+- **WHEN** `OTEL_EXPORTER_OTLP_ENDPOINT` is empty
+- **THEN** spans SHALL be written to the console exporter (dev default)
+
+#### Scenario: Flush pending spans on shutdown
 - **WHEN** the application shuts down
-- **THEN** all pending trace events in the async queue SHALL be flushed to configured providers
+- **THEN** pending span records in the async queue SHALL be flushed
 
 ### Requirement: Trace query REST API
 The system SHALL expose REST API endpoints for querying trace data. Trace queries SHALL be tenant-scoped: results SHALL only include traces belonging to the caller's tenant scope (organization/workspace), and traces outside the caller's scope SHALL never be returned or enumerated.
@@ -95,11 +103,11 @@ The system SHALL expose REST API endpoints for querying trace data. Trace querie
 - **THEN** the system SHALL return 404
 
 ### Requirement: Span creation in PregelRuntime and Workers
-PregelRuntime and Workers SHALL create spans at execution boundaries via `EnginePort.create_span` and `EnginePort.end_span`. LLMWorker SHALL additionally instrument time-to-first-token (TTFT) for streaming LLM calls by recording `ttft_ms` in the span's metadata.
+PregelRuntime and Workers SHALL create spans at execution boundaries via `RuntimePort.create_span` and `RuntimePort.end_span`. LLMWorker SHALL additionally instrument time-to-first-token (TTFT) for streaming LLM calls by recording `ttft_ms` in the span's metadata.
 
 #### Scenario: PregelRuntime creates node execution span
 - **WHEN** PregelRuntime starts executing a node
-- **THEN** it SHALL call `engine_port.create_span(name="node:{node_id}", attributes={"superstep": N})` and pass the returned `span_id` to the corresponding `_emit` call
+- **THEN** it SHALL call `runtime_port.create_span(name="node:{node_id}", attributes={"superstep": N})` and pass the returned `span_id` to the corresponding `_emit` call
 
 #### Scenario: LLMWorker creates generation span
 - **WHEN** LLMWorker calls `llm_invoke`

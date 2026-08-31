@@ -37,6 +37,16 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # Deliberately the plain sequential run that PRs #103–#107 passed with
+    # (~16 min wall). Do NOT add pytest-xdist (-n auto), matrix sharding, or
+    # a concurrency/cancel-in-progress block here without a separate infra PR:
+    # each of those was tried on PR #109 and caused cascading failures —
+    # cancel-in-progress killed in-flight runs on every follow-up push, and
+    # matrix.shard detached this job from the branch-protection `test`
+    # required check. timeout-minutes 60 = ~4x historical wall time; a single
+    # hanging test surfaces as a clear FAIL via pytest-timeout instead of a
+    # silent job cancellation.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,7 +56,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --extra dev --prerelease=allow
       - name: Run tests
-        run: uv run pytest tests/ -q
+        run: |
+          uv pip install pytest-timeout
+          uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
 
   migrations:
     runs-on: ubuntu-latest

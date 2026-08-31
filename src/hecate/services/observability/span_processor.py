@@ -26,6 +26,7 @@ from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 
 from hecate.core.config import settings
 from hecate.models.trace import TraceModel
+from hecate.services.observability.metrics_storage import MetricsStore
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,43 @@ def _build_usage(span: ReadableSpan) -> dict[str, int] | None:
     return usage or None
 
 
+def _build_metric_entries(
+    span: ReadableSpan,
+    span_type: str,
+    status: str,
+    usage: dict[str, int] | None,
+) -> list[dict[str, Any]]:
+    """Build metric records for a completed span.
+
+    Per-type counters, duration histograms, error counters, and token totals
+    (token counters stay at zero until workers pass ``usage=`` to
+    ``end_span``).
+
+    Args:
+        span: The completed OTel ReadableSpan.
+        span_type: Inferred span type ("tool", "generation", "trace", "span").
+        status: "error" or "completed".
+        usage: Token usage extracted from ``usage.*`` attributes, if any.
+
+    Returns:
+        List of ``{"kind", "name", "value", "tags"}`` entries.
+    """
+    entries: list[dict[str, Any]] = [
+        {"kind": "counter", "name": f"span.{span_type}.count", "value": 1},
+    ]
+    if span.start_time and span.end_time:
+        duration_ms = (span.end_time - span.start_time) / 1e6
+        entries.append({"kind": "histogram", "name": f"span.{span_type}.duration_ms", "value": duration_ms})
+    if status == "error":
+        entries.append({"kind": "counter", "name": "span.error.count", "value": 1, "tags": {"type": span_type}})
+    if usage:
+        if "input_tokens" in usage:
+            entries.append({"kind": "counter", "name": "tokens.input", "value": usage["input_tokens"]})
+        if "output_tokens" in usage:
+            entries.append({"kind": "counter", "name": "tokens.output", "value": usage["output_tokens"]})
+    return entries
+
+
 class HecateTraceSpanProcessor(SpanProcessor):
     """Bridges OTel spans to TraceModel via an async queue.
 
@@ -138,14 +176,22 @@ class HecateTraceSpanProcessor(SpanProcessor):
     are silently dropped with a warning log to prevent unbounded memory growth.
     """
 
-    def __init__(self, db_session_factory: Any = None) -> None:
+    def __init__(
+        self,
+        db_session_factory: Any = None,
+        metrics_store: MetricsStore | None = None,
+    ) -> None:
         """Initialize the processor.
 
         Args:
             db_session_factory: An async callable that returns an AsyncSession.
                 Defaults to ``async_session_factory`` from core.database.
+            metrics_store: Optional MetricsStore fed from span completions
+                (counters, duration histograms, error and token totals). When
+                provided, the monitoring dashboards receive live data.
         """
         self._db_session_factory = db_session_factory
+        self._metrics_store = metrics_store
         self._queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(
             maxsize=settings.TRACE_DB_QUEUE_MAX_SIZE,
         )
@@ -189,12 +235,30 @@ class HecateTraceSpanProcessor(SpanProcessor):
                 logger.exception("Error in trace consumer loop")
 
     async def _flush_batch(self, batch: list[dict[str, Any]]) -> None:
-        """Write a batch of span records to TraceModel.
+        """Write a batch of span records to TraceModel and MetricsStore.
 
         Args:
             batch: List of dicts with operation, trace_id, data fields.
         """
         if not batch:
+            return
+
+        metrics_items = [item for item in batch if item["op"] == "metrics"]
+        db_items = [item for item in batch if item["op"] != "metrics"]
+
+        if metrics_items and self._metrics_store is not None:
+            for item in metrics_items:
+                for entry in item["data"]:
+                    try:
+                        tags = entry.get("tags")
+                        if entry["kind"] == "counter":
+                            self._metrics_store.record_counter(entry["name"], entry["value"], tags=tags)
+                        elif entry["kind"] == "histogram":
+                            self._metrics_store.record_histogram(entry["name"], entry["value"], tags=tags)
+                    except Exception:
+                        logger.exception("Failed to record metric %s", entry.get("name"))
+
+        if not db_items:
             return
 
         if self._db_session_factory is None:
@@ -205,7 +269,7 @@ class HecateTraceSpanProcessor(SpanProcessor):
             factory = self._db_session_factory
 
         async with factory() as db:
-            for item in batch:
+            for item in db_items:
                 try:
                     op = item["op"]
                     if op == "insert":
@@ -286,21 +350,32 @@ class HecateTraceSpanProcessor(SpanProcessor):
         span._hecate_record_id = record_id
 
     def on_end(self, span: ReadableSpan) -> None:
-        """Called when a span ends. Enqueues a TraceModel update.
+        """Called when a span ends. Enqueues a TraceModel update and metrics.
 
         Args:
             span: The span that ended.
         """
-        record_id = getattr(span, "_hecate_record_id", None)
-        if record_id is None:
-            return
-
         output_data = _build_output_data(span)
         usage = _build_usage(span)
 
         # Determine status from OTel status code
         status_code = span.status.status_code if span.status else None
         status = "error" if status_code and status_code.name == "ERROR" else "completed"
+
+        # Metrics are recorded even when the DB insert was dropped (queue
+        # full at on_start) — they are cheap and the dashboards depend on
+        # completeness more than on exact DB parity.
+        if self._metrics_store is not None:
+            span_type = _infer_span_type(span.name)
+            metric_entries = _build_metric_entries(span, span_type, status, usage)
+            try:
+                self._queue.put_nowait({"op": "metrics", "data": metric_entries})
+            except asyncio.QueueFull:
+                logger.warning("Trace queue full, dropping metrics for '%s'", span.name)
+
+        record_id = getattr(span, "_hecate_record_id", None)
+        if record_id is None:
+            return
 
         update_data: dict[str, Any] = {
             "status": status,

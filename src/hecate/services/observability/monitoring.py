@@ -176,3 +176,19 @@ def create_metrics_store(
     return InMemoryMetricsStore(
         max_buffer_size=max_buffer_size or settings.MAX_METRICS_BUFFER_SIZE,
     )
+
+
+_metrics_store_singleton: MetricsStore | None = None
+
+
+def get_metrics_store() -> MetricsStore:
+    """Return the application-level MetricsStore singleton.
+
+    Writers (HecateTraceSpanProcessor) and readers (monitoring dashboards,
+    WebSocket push loop) must share one instance — a per-call factory here
+    previously handed each REST request a fresh empty store.
+    """
+    global _metrics_store_singleton
+    if _metrics_store_singleton is None:
+        _metrics_store_singleton = create_metrics_store()
+    return _metrics_store_singleton

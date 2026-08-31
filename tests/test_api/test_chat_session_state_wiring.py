@@ -66,11 +66,20 @@ def test_chat_di_fallback_factory_when_app_state_unset():
     assert resp.json()["type"] == "InMemorySessionStateStore"
 
 
-def test_lifespan_initializes_session_state_store(tmp_path):
+def test_lifespan_initializes_session_state_store(tmp_path, monkeypatch):
     """``main.py`` lifespan SHALL set ``app.state.session_state_store`` before
     serving requests. This is a smoke test that lazily imports the FastAPI
     app and exercises its lifespan."""
     pytest.importorskip("hecate.main")  # noqa: F811
+
+    # Only the session-state-store wiring is under test here; keep the full
+    # app lifespan from assembling the tracing pipeline (global tracer
+    # provider + DB-bridge span processor) — that state would leak into every
+    # later test in the same process and stall them on span-queue writes.
+    from hecate.core.config import settings
+
+    monkeypatch.setattr(settings, "TRACING_ENABLED", False)
+    monkeypatch.setattr(settings, "TRACE_DB_EXPORT_ENABLED", False)
 
     # Import only after marking skip — keeps the test file importable even
     # in environments where ``main.py`` cannot be imported (missing deps).
