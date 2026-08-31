@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -47,7 +51,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --extra dev --prerelease=allow
       - name: Run tests
-        run: uv run pytest tests/ -q -n auto
+        run: |
+          uv pip install pytest-timeout
+          uv run pytest tests/ -q -n auto --timeout=300
 
   migrations:
     runs-on: ubuntu-latest
