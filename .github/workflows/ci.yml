@@ -37,6 +37,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -46,7 +47,7 @@ jobs:
       - name: Install dependencies
         run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --extra dev --prerelease=allow
       - name: Run tests
-        run: uv run pytest tests/ -q
+        run: uv run pytest tests/ -q -n auto
 
   migrations:
     runs-on: ubuntu-latest
