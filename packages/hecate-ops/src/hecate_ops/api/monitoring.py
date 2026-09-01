@@ -6,12 +6,13 @@ endpoints for querying aggregated metrics and current snapshots.
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
 
 from hecate.core.database import get_db
-from hecate.services.observability.monitoring import (
+from hecate_ops.monitoring import (
     ConnectionManager,
     MonitoringService,
     get_metrics_store,
@@ -54,6 +55,18 @@ async def monitoring_websocket(websocket: WebSocket) -> None:
         _manager.disconnect(websocket)
 
 
+async def _maybe_await(value: Any) -> Any:
+    """Await ``value`` when the store returned a coroutine.
+
+    The MetricsStore contract is synchronous (in-memory stores are cheap);
+    the TimescaleDB implementation is the one async outlier, so call sites
+    normalize both shapes here.
+    """
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
 @router.get("/monitoring/metrics")
 async def query_metrics(
     name: str | None = Query(default=None),
@@ -69,7 +82,7 @@ async def query_metrics(
     """
     store = get_metrics_store()
     if name:
-        result = store.query_metrics(name, window=window, aggregation=aggregation)
+        result = await _maybe_await(store.query_metrics(name, window=window, aggregation=aggregation))
         if result is None:
             return {"metrics": [], "window": window}
         return {
@@ -86,7 +99,7 @@ async def query_metrics(
             ],
             "window": window,
         }
-    snapshot = store.get_snapshot(windows=[window])
+    snapshot = await _maybe_await(store.get_snapshot(windows=[window]))
     return {
         "metrics": [
             {
@@ -116,7 +129,7 @@ async def get_snapshot(
     """
     store = get_metrics_store()
     window_list = [w.strip() for w in windows.split(",")]
-    snapshot = store.get_snapshot(windows=window_list)
+    snapshot = await _maybe_await(store.get_snapshot(windows=window_list))
     return {
         "metrics": [
             {

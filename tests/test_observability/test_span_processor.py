@@ -6,7 +6,7 @@ import asyncio
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from hecate.services.observability.span_processor import (
+from hecate_ops.span_processor import (
     HecateTraceSpanProcessor,
     _build_metadata,
     _build_output_data,
@@ -293,7 +293,7 @@ class TestMetricsFeed:
         return span
 
     async def test_on_end_records_counters_and_histogram(self) -> None:
-        from hecate.services.observability.metrics_storage import InMemoryMetricsStore
+        from hecate_ops.metrics_storage import InMemoryMetricsStore
 
         store = InMemoryMetricsStore()
         processor = HecateTraceSpanProcessor(metrics_store=store)
@@ -318,7 +318,7 @@ class TestMetricsFeed:
         assert "tokens.output" in names
 
     async def test_on_end_records_error_counter(self) -> None:
-        from hecate.services.observability.metrics_storage import InMemoryMetricsStore
+        from hecate_ops.metrics_storage import InMemoryMetricsStore
 
         store = InMemoryMetricsStore()
         processor = HecateTraceSpanProcessor(metrics_store=store)
@@ -338,7 +338,7 @@ class TestMetricsFeed:
 
     async def test_metrics_recorded_without_db_record_id(self) -> None:
         """Metrics survive even when the DB insert was dropped."""
-        from hecate.services.observability.metrics_storage import InMemoryMetricsStore
+        from hecate_ops.metrics_storage import InMemoryMetricsStore
 
         store = InMemoryMetricsStore()
         processor = HecateTraceSpanProcessor(metrics_store=store)
@@ -377,7 +377,7 @@ class TestMonitoringSingleton:
     """The MetricsStore singleton must be shared by writers and readers."""
 
     def test_get_metrics_store_returns_same_instance(self) -> None:
-        from hecate.services.observability import monitoring as monitoring_mod
+        from hecate_ops import monitoring as monitoring_mod
 
         first = monitoring_mod.get_metrics_store()
         try:

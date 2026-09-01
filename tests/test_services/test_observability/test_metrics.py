@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.observability.metrics import MetricsCollector
+from hecate_ops.metrics import MetricsCollector
 
 
 class TestMetricsCollector:

@@ -94,8 +94,8 @@ def configure_tracing(app: FastAPI) -> TracerProvider | None:
     provider.add_span_processor(BatchSpanProcessor(build_span_exporter()))
 
     if settings.TRACE_DB_EXPORT_ENABLED:
-        from hecate.services.observability.monitoring import get_metrics_store
-        from hecate.services.observability.span_processor import HecateTraceSpanProcessor
+        from hecate_ops.monitoring import get_metrics_store
+        from hecate_ops.span_processor import HecateTraceSpanProcessor
 
         trace_processor = HecateTraceSpanProcessor(metrics_store=get_metrics_store())
         provider.add_span_processor(trace_processor)

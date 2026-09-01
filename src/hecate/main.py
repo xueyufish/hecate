@@ -60,7 +60,6 @@ from hecate.api.management.model_catalog import router as model_catalog_router
 from hecate.api.management.model_lifecycle import router as model_lifecycle_router
 from hecate.api.management.model_pricing import router as model_pricing_router
 from hecate.api.management.model_providers import router as model_providers_router
-from hecate.api.management.monitoring import router as monitoring_router
 from hecate.api.management.monitoring_models import router as monitoring_models_router
 from hecate.api.management.ops_center_overview import router as ops_center_overview_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
@@ -312,14 +311,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # run this lifespan via TestClient and have no Postgres).
     tracing_provider = None
     try:
-        from hecate.services.observability.otel_setup import configure_tracing
+        from hecate_ops.otel_setup import configure_tracing
 
         tracing_provider = configure_tracing(app)
     except ImportError:
         logger.warning("observability extras not installed — tracing disabled")
 
     # Start monitoring service
-    from hecate.api.management.monitoring import get_monitoring_service
+    from hecate_ops.api.monitoring import get_monitoring_service
 
     monitoring_svc = get_monitoring_service()
     monitoring_svc.start()
@@ -666,7 +665,7 @@ async def metrics() -> PlainTextResponse:
     Returns:
         PlainTextResponse: Metrics in Prometheus text format.
     """
-    from hecate.services.observability.metrics import MetricsCollector
+    from hecate_ops.metrics import MetricsCollector
 
     collector = MetricsCollector()
     return PlainTextResponse(
@@ -715,9 +714,19 @@ try:
     app.include_router(memory_router, prefix="/api", tags=["memory"])
 except ImportError:
     logger.debug("hecate-memory not installed; skipping memory + knowledge routers")
+
+# Monitoring routes moved to hecate-ops in PR3b. hecate-ops is a required
+# dependency of core (orchestration imports hecate_ops.span_adapter at module
+# level), so this import should always succeed; the guard keeps the router
+# mount failure-mode identical to the other extracted-package mounts.
+try:
+    from hecate_ops.api.monitoring import router as monitoring_router
+
+    app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
+except ImportError:
+    logger.warning("hecate-ops not installed; skipping monitoring routes")
 app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
 app.include_router(traces_router, prefix="/api", tags=["traces"])
-app.include_router(monitoring_router, prefix="/api", tags=["monitoring"])
 app.include_router(monitoring_models_router)
 app.include_router(model_pricing_router, prefix="/api", tags=["model-pricing"])
 app.include_router(costs_router, prefix="/api", tags=["costs"])

@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.metric import MetricModel
-from hecate.services.observability.metrics_storage import (
+from hecate_ops.metrics_storage import (
     MetricAggregate,
     MetricsSnapshot,
     MetricsStore,
@@ -56,7 +56,10 @@ class TimescaleMetricsStore(MetricsStore):
     def record_histogram(self, name: str, value: float, tags: dict[str, str] | None = None) -> None:
         self._record(name, value, "histogram", tags)
 
-    def query_metrics(
+    # Async overrides of the sync MetricsStore contract: AsyncSession requires
+    # awaited executes. Call sites normalize both shapes via isawaitable; the
+    # ignore keeps the sync ABC (in-memory default) undisturbed.
+    async def query_metrics(  # type: ignore[override]
         self,
         name: str,
         window: str = "5m",
@@ -75,7 +78,7 @@ class TimescaleMetricsStore(MetricsStore):
             for k, v in tags.items():
                 query = query.where(MetricModel.tags[k].as_string() == v)
 
-        result = db.execute(query)
+        result = await db.execute(query)
         row = result.scalar_one_or_none()
         if row is None:
             return None
@@ -88,7 +91,7 @@ class TimescaleMetricsStore(MetricsStore):
                 MetricModel.timestamp >= cutoff,
             )
         )
-        count_result = db.execute(count_query)
+        count_result = await db.execute(count_query)
         count = count_result.scalar_one()
 
         return MetricAggregate(
@@ -101,17 +104,17 @@ class TimescaleMetricsStore(MetricsStore):
             timestamp=datetime.now(UTC),
         )
 
-    def get_snapshot(self, windows: list[str] | None = None) -> MetricsSnapshot:
+    async def get_snapshot(self, windows: list[str] | None = None) -> MetricsSnapshot:  # type: ignore[override]
         windows = windows or ["5m"]
         db = self._ensure_session()
 
-        result = db.execute(select(MetricModel.name).distinct())
+        result = await db.execute(select(MetricModel.name).distinct())
         names = [row[0] for row in result.all()]
 
         all_metrics: list[MetricAggregate] = []
         for name in names:
             for window in windows:
-                agg = self.query_metrics(name, window=window)
+                agg = await self.query_metrics(name, window=window)
                 if agg is not None:
                     all_metrics.append(agg)
 

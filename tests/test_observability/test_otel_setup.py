@@ -6,9 +6,9 @@ import sys
 from unittest.mock import MagicMock
 
 import pytest
+from hecate_ops import otel_setup
 
 from hecate.core.config import settings
-from hecate.services.observability import otel_setup
 
 
 class TestParseOtlpHeaders:

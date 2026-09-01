@@ -6,8 +6,8 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from hecate.services.observability.metrics_storage import InMemoryMetricsStore
-from hecate.services.observability.monitoring import (
+from hecate_ops.metrics_storage import InMemoryMetricsStore
+from hecate_ops.monitoring import (
     ConnectionManager,
     MonitoringService,
     create_metrics_store,
@@ -173,12 +173,12 @@ class TestCreateMetricsStore:
         assert isinstance(store, InMemoryMetricsStore)
         assert store._buffer_size == 500
 
-    @patch("hecate.services.observability.monitoring.settings")
+    @patch("hecate_ops.monitoring.settings")
     def test_timescale_creates_timescale(self, mock_settings: MagicMock) -> None:
         mock_settings.METRICS_STORE_TYPE = "timescale"
         mock_settings.METRICS_PUSH_INTERVAL = 5
         mock_settings.MAX_METRICS_BUFFER_SIZE = 100000
         store = create_metrics_store("timescale")
-        from hecate.services.observability.timescale_metrics_store import TimescaleMetricsStore
+        from hecate_ops.timescale_metrics_store import TimescaleMetricsStore
 
         assert isinstance(store, TimescaleMetricsStore)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import logging
 from typing import Any
@@ -16,7 +17,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from hecate.core.config import settings
-from hecate.services.observability.metrics_storage import (
+from hecate_ops.metrics_storage import (
     InMemoryMetricsStore,
     MetricsStore,
 )
@@ -130,6 +131,8 @@ class MonitoringService:
             try:
                 if self._manager.active_count > 0:
                     snapshot = self._store.get_snapshot()
+                    if inspect.isawaitable(snapshot):
+                        snapshot = await snapshot
                     message = {
                         "type": "metrics_snapshot",
                         "timestamp": snapshot.timestamp.isoformat(),
@@ -170,7 +173,7 @@ def create_metrics_store(
     """
     store_type = store_type or settings.METRICS_STORE_TYPE
     if store_type == "timescale":
-        from hecate.services.observability.timescale_metrics_store import TimescaleMetricsStore
+        from hecate_ops.timescale_metrics_store import TimescaleMetricsStore
 
         return TimescaleMetricsStore()
     return InMemoryMetricsStore(
