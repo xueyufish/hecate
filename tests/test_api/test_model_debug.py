@@ -26,8 +26,13 @@ def provider_client(client: AsyncClient) -> AsyncClient:  # noqa: ARG001
 
 class TestModelTest:
     async def test_model_test_missing_litellm(self, provider_client: AsyncClient) -> None:
-        """Test POST /api/models/test returns 503 when litellm not available."""
-        with patch.dict("sys.modules", {"litellm": None}):
+        """Test POST /api/models/test returns 400 when litellm is not installed.
+
+        The LLM gateway swallows the ImportError into ``finish_reason='error'``,
+        which the management endpoint surfaces as HTTP 400 (consistent with
+        any other upstream LLM failure).
+        """
+        with patch("hecate.services.llm.service._get_litellm", side_effect=ImportError("no litellm")):
             response = await provider_client.post(
                 "/api/models/test",
                 json={
@@ -37,7 +42,8 @@ class TestModelTest:
                     "max_tokens": 50,
                 },
             )
-            assert response.status_code in (400, 503)
+            assert response.status_code == 400
+            assert "litellm" in response.text.lower() or "unknown" in response.text.lower()
 
     async def test_model_test_invalid_temperature(self, provider_client: AsyncClient) -> None:
         """Test POST /api/models/test rejects invalid temperature."""
@@ -96,10 +102,14 @@ class TestModelTest:
 
         mock_completion = AsyncMock(return_value=mock_response)
 
-        with patch("hecate.api.management.model_providers.litellm", create=True) as mock_litellm:
-            mock_litellm.acompletion = mock_completion
-            # Also ensure the import in the endpoint works
-            with patch("hecate.api.management.model_providers.decrypt_api_key", return_value="sk-test"):
+        # The endpoint now goes through the LLM gateway. Patch the gateway's
+        # litellm accessor to return a mock completion.
+        with patch("hecate.services.llm.service._get_litellm") as mock_get_litellm:
+            mock_get_litellm.return_value.acompletion = mock_completion
+            with patch(
+                "hecate.api.management.model_providers.decrypt_api_key",
+                return_value="sk-test",
+            ):
                 response = await provider_client.post(
                     "/api/models/test",
                     json={
@@ -113,3 +123,5 @@ class TestModelTest:
             assert "content" in result
             assert "model" in result
             assert "usage" in result
+        else:
+            pytest.fail(f"Expected 200, got {response.status_code}: {response.text}")

@@ -14,9 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-
-import httpx
 
 from hecate.services.evaluation.evaluator import Evaluator
 from hecate.services.evaluation.prompts import (
@@ -41,7 +38,7 @@ async def _call_llm_judge(
     prompt: str,
     llm_config: LLMConfig | None = None,
 ) -> dict:
-    """Call an LLM with a judge prompt and parse the JSON response.
+    """Call an LLM with a judge prompt via the LLM gateway and parse the JSON response.
 
     Args:
         prompt: The formatted judge prompt.
@@ -53,30 +50,20 @@ async def _call_llm_judge(
     Raises:
         RuntimeError: If the LLM call fails or response is invalid.
     """
-    config = llm_config or LLMConfig()
-    api_base = config.api_base or "https://api.openai.com/v1"
-    api_key = os.environ.get("OPENAI_API_KEY", "")
+    from hecate.services.llm.service import llm_service
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"{api_base}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": config.model,
-                "temperature": config.temperature,
-                "messages": [{"role": "user", "content": prompt}],
-            },
+    config = llm_config or LLMConfig()
+    try:
+        response = await llm_service.chat(
+            messages=[{"role": "user", "content": prompt}],
+            model=config.model,
+            temperature=config.temperature,
             timeout=60.0,
         )
-        response.raise_for_status()
+    except Exception as exc:
+        raise RuntimeError(f"LLM-as-judge call failed: {exc}") from exc
 
-    content = response.json()["choices"][0]["message"]["content"]
-
-    # Strip markdown code fences if present
-    content = content.strip()
+    content = (response.content or "").strip()
     if content.startswith("```"):
         lines = content.split("\n")
         content = "\n".join(lines[1:-1])
