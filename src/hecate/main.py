@@ -48,7 +48,6 @@ from hecate.api.management.collaboration_patterns import router as collaboration
 from hecate.api.management.conversation_analytics import router as conversation_analytics_router
 from hecate.api.management.conversations import router as conversations_router
 from hecate.api.management.costs import router as costs_router
-from hecate.api.management.environment import router as environment_router
 from hecate.api.management.feature_flags import router as feature_flags_router
 from hecate.api.management.hooks import router as hooks_router
 from hecate.api.management.i18n import router as i18n_router
@@ -816,7 +815,15 @@ app.include_router(mcp_router)
 app.include_router(tool_policies_router)
 app.include_router(tool_cache_router)
 app.include_router(hooks_router)
-app.include_router(environment_router)
+
+# Environment routes moved to hecate-sandbox in the phase-4 follow-ups.
+# Guarded mount mirrors the memory/ops/llm router pattern.
+try:
+    from hecate_sandbox.api.environment import router as environment_router
+
+    app.include_router(environment_router)
+except ImportError:
+    logger.warning("hecate-sandbox not installed; skipping environment routes")
 
 # Backup & Recovery API
 from hecate.api.system.backup import router as backup_router  # noqa: E402

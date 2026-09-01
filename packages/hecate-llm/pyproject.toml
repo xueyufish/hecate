@@ -28,5 +28,11 @@ llm = [
     "litellm>=1.50.0",
 ]
 
+[project.entry-points."hecate.llm_providers"]
+# Default litellm-backed gateway; third-party LLM gateway packages
+# (e.g. hecate-llm-openrouter) register additional entries under the
+# same group and implement the LLMGateway Protocol.
+litellm = "hecate_llm.provider:provider"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/hecate_llm"]
