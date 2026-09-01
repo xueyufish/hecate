@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from hecate.plugin.agent_plugins import McpServerSpec
-from hecate.plugin.stdio_sandbox import (
+from hecate.core.plugin.agent_plugins import McpServerSpec
+from hecate.core.plugin.stdio_sandbox import (
     CONTAINER_PLUGIN_DATA,
     CONTAINER_PLUGIN_ROOT,
     StdioSandboxError,

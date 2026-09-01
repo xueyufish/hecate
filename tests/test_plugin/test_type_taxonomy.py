@@ -6,12 +6,12 @@ from typing import Any
 
 import pytest
 
-from hecate.plugin.types import PLUGIN_TYPE_REGISTRY
-from hecate.plugin.types.extension import ExtensionPluginBase
-from hecate.plugin.types.model import ModelPluginBase
-from hecate.plugin.types.tool import ToolPluginBase
-from hecate.plugin.types.trigger import TriggerPluginBase
-from hecate.plugin.validation import validate_api_surface
+from hecate.core.plugin.types import PLUGIN_TYPE_REGISTRY
+from hecate.core.plugin.types.extension import ExtensionPluginBase
+from hecate.core.plugin.types.model import ModelPluginBase
+from hecate.core.plugin.types.tool import ToolPluginBase
+from hecate.core.plugin.types.trigger import TriggerPluginBase
+from hecate.core.plugin.validation import validate_api_surface
 
 # ── 8.1 ToolPluginBase ──────────────────────────────────────────────────
 
@@ -164,7 +164,7 @@ class TestValidateApiSurface:
 
 class TestPluginInitCLI:
     def test_scaffold_tool(self, tmp_path):
-        from hecate.plugin.cli import init_plugin
+        from hecate.core.plugin.cli import init_plugin
 
         path = init_plugin("my-test-tool", "tool", str(tmp_path))
         import pathlib
@@ -175,7 +175,7 @@ class TestPluginInitCLI:
         assert (p / "test_my_test_tool.py").exists()
 
     def test_scaffold_extension(self, tmp_path):
-        from hecate.plugin.cli import init_plugin
+        from hecate.core.plugin.cli import init_plugin
 
         path = init_plugin("my-ext", "extension", str(tmp_path))
         import pathlib
@@ -183,13 +183,13 @@ class TestPluginInitCLI:
         assert (pathlib.Path(path) / "plugin.yaml").exists()
 
     def test_invalid_type_rejected(self, tmp_path):
-        from hecate.plugin.cli import init_plugin
+        from hecate.core.plugin.cli import init_plugin
 
         with pytest.raises(ValueError, match="Invalid type"):
             init_plugin("bad", "unknown", str(tmp_path))
 
     def test_existing_dir_rejected(self, tmp_path):
-        from hecate.plugin.cli import init_plugin
+        from hecate.core.plugin.cli import init_plugin
 
         (tmp_path / "exists").mkdir()
         with pytest.raises(ValueError, match="already exists"):
@@ -201,17 +201,17 @@ class TestPluginInitCLI:
 
 class TestSDKImports:
     def test_import_tool_plugin(self):
-        from hecate.plugin.sdk import ToolPluginBase as T
+        from hecate.core.plugin.sdk import ToolPluginBase as T
 
         assert T is ToolPluginBase
 
     def test_import_extension_plugin(self):
-        from hecate.plugin.sdk import ExtensionPluginBase as E
+        from hecate.core.plugin.sdk import ExtensionPluginBase as E
 
         assert E is ExtensionPluginBase
 
     def test_import_all_types(self):
-        from hecate.plugin.sdk import (
+        from hecate.core.plugin.sdk import (
             AuthProvider,
             ChannelBase,
             EvaluatorBase,
@@ -238,7 +238,7 @@ class TestSDKImports:
         )
 
     def test_plugin_context_config(self):
-        from hecate.plugin.sdk import PluginContext
+        from hecate.core.plugin.sdk import PluginContext
 
         ctx = PluginContext(config={"key": "val"}, permissions=("network:https",))
         assert ctx.config == {"key": "val"}

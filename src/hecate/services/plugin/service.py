@@ -12,10 +12,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.models.plugin import PluginModel
-from hecate.models.security_finding import SecurityFindingModel
-from hecate.models.skill import SkillModel
-from hecate.plugin.agent_plugins import (
+from hecate.core.plugin.agent_plugins import (
     AgentPluginValidationError,
     ComponentInventory,
     McpServerSpec,
@@ -36,8 +33,8 @@ from hecate.plugin.agent_plugins import (
     validate_mcp_json,
     validate_plugin_json,
 )
-from hecate.plugin.config import validate_config
-from hecate.plugin.loader import (
+from hecate.core.plugin.config import validate_config
+from hecate.core.plugin.loader import (
     PythonEntryPolicy,
     check_python_entry,
     discover_plugins,
@@ -45,7 +42,10 @@ from hecate.plugin.loader import (
     load_plugin,
     validate_compatibility,
 )
-from hecate.plugin.manifest import PluginManifest
+from hecate.core.plugin.manifest import PluginManifest
+from hecate.models.plugin import PluginModel
+from hecate.models.security_finding import SecurityFindingModel
+from hecate.models.skill import SkillModel
 
 logger = logging.getLogger(__name__)
 
@@ -263,7 +263,7 @@ class PluginService:
         ValueError is raised identifying the gate and the remediation.
         """
         from hecate.core.config import settings
-        from hecate.plugin.installer import install_plugin as _install
+        from hecate.core.plugin.installer import install_plugin as _install
 
         plugins_root = Path(plugins_dir)
         bundle = Path(bundle_path)
@@ -290,7 +290,7 @@ class PluginService:
             msg = "Built-in plugins cannot be uninstalled"
             raise PermissionError(msg)
 
-        from hecate.plugin.installer import uninstall_plugin as _uninstall
+        from hecate.core.plugin.installer import uninstall_plugin as _uninstall
 
         _uninstall(plugin.name, Path(plugins_dir))
         plugin.deleted_at = __import__("datetime").datetime.now(__import__("datetime").UTC)
@@ -354,7 +354,7 @@ class PluginService:
                 package_root = staging
             elif source_type == "git":
                 descriptor = materialize_from_git(location, staging, ref=ref)
-                from hecate.plugin.agent_plugins import _locate_package_root
+                from hecate.core.plugin.agent_plugins import _locate_package_root
 
                 package_root = _locate_package_root(staging)
             else:  # pragma: no cover - guarded by API schema
@@ -712,7 +712,7 @@ class PluginService:
     def _stdio_sandbox_argv(plugin_name: str, server: dict[str, Any]) -> tuple[str, list[str]]:
         """Build the fail-closed sandbox wrapper for a stdio entry."""
         from hecate.core.config import settings
-        from hecate.plugin.stdio_sandbox import build_sandbox_command
+        from hecate.core.plugin.stdio_sandbox import build_sandbox_command
 
         try:
             return build_sandbox_command(
@@ -776,7 +776,7 @@ class PluginService:
 
     async def _run_install_scan(self, package_root: Path, content_hash: str | None) -> tuple[ScanResult, int]:
         """Run the rule-engine scan stage; any scanner failure rejects the install."""
-        from hecate.plugin.content_scanner import RuleEngineScanStage
+        from hecate.core.plugin.content_scanner import RuleEngineScanStage
 
         try:
             scan = RuleEngineScanStage().scan(package_root)
@@ -794,7 +794,7 @@ class PluginService:
         if not scan.findings or not content_hash:
             return scan, 0
         from hecate.core.config import settings
-        from hecate.plugin.content_scanner import SEVERITY_ORDER, compute_verdict
+        from hecate.core.plugin.content_scanner import SEVERITY_ORDER, compute_verdict
 
         threshold = SEVERITY_ORDER.get(settings.AGENT_PLUGIN_SCAN_BLOCK_AT, SEVERITY_ORDER["high"])
         rule_ids = {f["rule_id"] for f in scan.findings}
@@ -941,7 +941,7 @@ class PluginService:
         installed during the 5.5c no-op era (null scan result). A block
         verdict refuses the enable.
         """
-        from hecate.plugin.content_scanner import SCANNER_VERSION, RuleEngineScanStage
+        from hecate.core.plugin.content_scanner import SCANNER_VERSION, RuleEngineScanStage
 
         stored = plugin.scan_result or {}
         if stored.get("scanner_version") == SCANNER_VERSION:

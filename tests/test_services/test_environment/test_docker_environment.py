@@ -10,13 +10,17 @@ import tempfile
 from unittest.mock import patch
 
 import pytest
-
-from hecate.services.environment.environment import LocalEnvironment
-from hecate.services.environment.manager import EnvironmentManager
+from hecate_sandbox.environment.environment import LocalEnvironment
+from hecate_sandbox.environment.manager import EnvironmentManager
 
 
 def _check_docker_available() -> bool:
-    """Check if aiodocker and Docker daemon are available."""
+    """Check if aiodocker, Docker daemon, and the python:3.12-slim image are available.
+
+    The image check prevents CI runners (which have a daemon but not
+    this specific image) from 404-failing instead of skipping — see
+    docker-sandbox-smoke for actual end-to-end image coverage.
+    """
     try:
         import aiodocker  # noqa: F401
     except ImportError:
@@ -32,6 +36,16 @@ def _check_docker_available() -> bool:
             stderr=subprocess.DEVNULL,
             timeout=5,
         )
+        if result.returncode != 0:
+            return False
+        # Confirm the test image is present (avoids 404-failing the
+        # test on clean CI runners that lack python:3.12-slim).
+        result = subprocess.run(  # noqa: S603
+            ["docker", "image", "inspect", "python:3.12-slim"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
         return result.returncode == 0
     except Exception:
         return False
@@ -39,7 +53,10 @@ def _check_docker_available() -> bool:
 
 _DOCKER_AVAILABLE = _check_docker_available()
 
-docker_skip = pytest.mark.skipif(not _DOCKER_AVAILABLE, reason="aiodocker or Docker daemon not available")
+docker_skip = pytest.mark.skipif(
+    not _DOCKER_AVAILABLE,
+    reason="aiodocker, Docker daemon, or python:3.12-slim image not available",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +75,7 @@ async def test_manager_default_backend_is_local() -> None:
 
 async def test_manager_docker_backend_selection() -> None:
     """AGENT_ENV_BACKEND=docker creates DockerEnvironment."""
-    from hecate.services.environment.docker_environment import DockerEnvironment
+    from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
     with patch("hecate.core.config.settings.AGENT_ENV_BACKEND", "docker"):
         manager = EnvironmentManager()
@@ -104,7 +121,7 @@ async def test_manager_stats_includes_warm_pool() -> None:
 @docker_skip
 async def test_docker_environment_creates_container() -> None:
     """DockerEnvironment creates a container with subdirectories."""
-    from hecate.services.environment.docker_environment import DockerEnvironment
+    from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
     env = DockerEnvironment("test-agent-create")
     try:
@@ -121,7 +138,7 @@ async def test_docker_environment_creates_container() -> None:
 @docker_skip
 async def test_docker_environment_write_and_read() -> None:
     """DockerEnvironment write_file/read_file roundtrip."""
-    from hecate.services.environment.docker_environment import DockerEnvironment
+    from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
     env = DockerEnvironment("test-agent-io")
     try:
@@ -136,7 +153,7 @@ async def test_docker_environment_write_and_read() -> None:
 @docker_skip
 async def test_docker_environment_exec_shell() -> None:
     """DockerEnvironment exec_shell runs inside container."""
-    from hecate.services.environment.docker_environment import DockerEnvironment
+    from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
     env = DockerEnvironment("test-agent-exec")
     try:
@@ -151,7 +168,7 @@ async def test_docker_environment_exec_shell() -> None:
 @docker_skip
 async def test_docker_environment_exists_and_delete() -> None:
     """DockerEnvironment exists/delete work inside container."""
-    from hecate.services.environment.docker_environment import DockerEnvironment
+    from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
     env = DockerEnvironment("test-agent-exists")
     try:
@@ -167,7 +184,7 @@ async def test_docker_environment_exists_and_delete() -> None:
 @docker_skip
 async def test_docker_environment_list_files() -> None:
     """DockerEnvironment list_files returns entries."""
-    from hecate.services.environment.docker_environment import DockerEnvironment
+    from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
     env = DockerEnvironment("test-agent-list")
     try:

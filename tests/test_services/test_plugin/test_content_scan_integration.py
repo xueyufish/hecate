@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import hecate.plugin.content_scanner as content_scanner
+import hecate.core.plugin.content_scanner as content_scanner
 from hecate.core.config import settings
 from hecate.models.plugin import PluginModel
 from hecate.models.security_finding import SecurityFindingModel

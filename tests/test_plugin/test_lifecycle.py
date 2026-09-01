@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hecate.plugin.lifecycle import PluginLifecycle
+from hecate.core.plugin.lifecycle import PluginLifecycle
 
 
 class TestPluginLifecycleProtocol:

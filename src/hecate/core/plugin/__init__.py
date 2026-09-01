@@ -9,7 +9,7 @@ extensions in Hecate. It defines:
 
 Usage::
 
-    from hecate.plugin import PluginManifest, PluginRegistry
+    from hecate.core.plugin import PluginManifest, PluginRegistry
 
     manifest = PluginManifest(
         type="evaluator",
@@ -26,14 +26,14 @@ Usage::
 
 from __future__ import annotations
 
-from hecate.plugin.lifecycle import PluginLifecycle
-from hecate.plugin.manifest import PluginManifest
-from hecate.plugin.registry import PluginRegistry
-from hecate.plugin.sdk import PluginContext
-from hecate.plugin.types.extension import ExtensionPluginBase
-from hecate.plugin.types.model import ModelPluginBase
-from hecate.plugin.types.tool import ToolPluginBase
-from hecate.plugin.types.trigger import TriggerPluginBase
+from hecate.core.plugin.lifecycle import PluginLifecycle
+from hecate.core.plugin.manifest import PluginManifest
+from hecate.core.plugin.registry import PluginRegistry
+from hecate.core.plugin.sdk import PluginContext
+from hecate.core.plugin.types.extension import ExtensionPluginBase
+from hecate.core.plugin.types.model import ModelPluginBase
+from hecate.core.plugin.types.tool import ToolPluginBase
+from hecate.core.plugin.types.trigger import TriggerPluginBase
 
 __all__ = [
     "ExtensionPluginBase",

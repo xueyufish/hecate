@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from hecate.plugin.lifecycle import PluginLifecycle
-from hecate.plugin.manifest import PluginManifest
-from hecate.plugin.registry import PluginRegistry
+from hecate.core.plugin.lifecycle import PluginLifecycle
+from hecate.core.plugin.manifest import PluginManifest
+from hecate.core.plugin.registry import PluginRegistry
 
 
 def _make_manifest(type: str = "evaluator", name: str = "test") -> PluginManifest:

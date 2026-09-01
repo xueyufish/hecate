@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from hecate.auth.provider import AuthProvider
 from hecate.channel.adapter import ChannelBase
-from hecate.plugin.spi.evaluator import EvaluatorBase
+from hecate.core.plugin.spi.evaluator import EvaluatorBase
 from hecate.vault.provider import SecretProvider
 
 __all__ = [

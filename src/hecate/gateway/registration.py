@@ -18,8 +18,8 @@ import logging
 import os
 
 from hecate.channel.adapter import ChannelBase
-from hecate.plugin.manifest import PluginManifest
-from hecate.plugin.registry import PluginRegistry
+from hecate.core.plugin.manifest import PluginManifest
+from hecate.core.plugin.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 

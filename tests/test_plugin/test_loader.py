@@ -9,8 +9,7 @@ import yaml
 from jsonschema import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.models.plugin import PluginModel
-from hecate.plugin.loader import (
+from hecate.core.plugin.loader import (
     PythonEntryPolicy,
     _load_python,
     check_python_entry,
@@ -18,7 +17,8 @@ from hecate.plugin.loader import (
     load_plugin,
     validate_compatibility,
 )
-from hecate.plugin.manifest import PluginManifest
+from hecate.core.plugin.manifest import PluginManifest
+from hecate.models.plugin import PluginModel
 from hecate.services.plugin.service import PluginService
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -186,7 +186,7 @@ class TestLoadPluginGate:
         # any first-party-prefixed module to reach import. We verify by
         # monkey-patching importlib.import_module and asserting it was called
         # (i.e. the gate did not short-circuit).
-        import hecate.plugin.loader as loader_mod
+        import hecate.core.plugin.loader as loader_mod
 
         called: list[str] = []
 
@@ -225,7 +225,7 @@ class TestLoadPluginGate:
         assert result is None
 
     def test_rejected_entry_does_not_invoke_import_module(self, monkeypatch):
-        import hecate.plugin.loader as loader_mod
+        import hecate.core.plugin.loader as loader_mod
 
         called = False
 
@@ -251,7 +251,7 @@ class TestLoadPluginGate:
             version="1.0.0",
             entry="python:subprocess:Popen",
         )
-        with caplog.at_level("ERROR", logger="hecate.plugin.loader"):
+        with caplog.at_level("ERROR", logger="hecate.core.plugin.loader"):
             load_plugin(manifest, PythonEntryPolicy(saas_mode=False))
         assert any("T0 policy" in rec.message for rec in caplog.records)
 

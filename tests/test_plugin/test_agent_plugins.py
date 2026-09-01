@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from hecate.plugin.agent_plugins import (
+from hecate.core.plugin.agent_plugins import (
     AgentPluginValidationError,
     ComponentInventory,
     DiscoveredSkill,
@@ -291,13 +291,13 @@ class TestSkillDiscovery:
     def test_parse_candidate_name_mismatch_raises(self, tmp_path: Path) -> None:
         skill_md = tmp_path / "SKILL.md"
         skill_md.write_text("---\nname: ship-it\ndescription: d\n---\nbody")
-        from hecate.plugin.agent_plugins import DiscoveredSkill
+        from hecate.core.plugin.agent_plugins import DiscoveredSkill
 
         with pytest.raises(ValueError, match="does not match directory name"):
             parse_skill_candidate(DiscoveredSkill(dir_name="deploy", skill_md=skill_md))
 
     def test_parse_candidate_invalid_frontmatter_raises(self, tmp_path: Path) -> None:
-        from hecate.plugin.agent_plugins import DiscoveredSkill
+        from hecate.core.plugin.agent_plugins import DiscoveredSkill
 
         skill_md = tmp_path / "SKILL.md"
         skill_md.write_text("no frontmatter at all")

@@ -62,17 +62,20 @@ _PROBE_SCRIPT = textwrap.dedent(
     import json
     import sys
 
-    # Strip any cached hecate.services.* / hecate_ops.* before testing. This
-    # matters even though the subprocess is fresh: conftest.py or test files
-    # at module level might have pulled those modules in.
+    # Strip any cached hecate.services.* / hecate_ops.* / hecate_sandbox.*
+    # before testing. This matters even though the subprocess is fresh:
+    # conftest.py or test files at module level might have pulled those
+    # modules in.
     for k in list(sys.modules):
         if k == "hecate.services" or k.startswith("hecate.services."):
             del sys.modules[k]
         if k == "hecate_ops" or k.startswith("hecate_ops."):
             del sys.modules[k]
+        if k == "hecate_sandbox" or k.startswith("hecate_sandbox."):
+            del sys.modules[k]
 
     # Now patch __import__ so any attempt to pull services / the extracted
-    # ops package fails loudly.
+    # ops package / the extracted sandbox package fails loudly.
     import builtins
     _real = builtins.__import__
 
@@ -82,6 +85,10 @@ _PROBE_SCRIPT = textwrap.dedent(
                 "blocked by runtime-self-sufficiency guard: " + name
             )
         if name == "hecate_ops" or name.startswith("hecate_ops."):
+            raise ImportError(
+                "blocked by runtime-self-sufficiency guard: " + name
+            )
+        if name == "hecate_sandbox" or name.startswith("hecate_sandbox."):
             raise ImportError(
                 "blocked by runtime-self-sufficiency guard: " + name
             )

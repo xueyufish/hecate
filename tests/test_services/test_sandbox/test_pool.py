@@ -7,9 +7,8 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-from hecate.services.sandbox.executor import SandboxConfig, SandboxExecutor, SandboxResult
-from hecate.services.sandbox.pool import PooledContainer, PoolExhaustedError, SandboxPool
+from hecate_sandbox.sandbox.executor import SandboxConfig, SandboxExecutor, SandboxResult
+from hecate_sandbox.sandbox.pool import PooledContainer, PoolExhaustedError, SandboxPool
 
 # ---------------------------------------------------------------------------
 # TestPooledContainer
@@ -44,12 +43,12 @@ class TestSandboxExecutor:
 
         with (
             patch(
-                "hecate.services.sandbox.executor.asyncio.create_subprocess_exec",
+                "hecate_sandbox.sandbox.executor.asyncio.create_subprocess_exec",
                 new_callable=AsyncMock,
                 return_value=mock_proc,
             ),
             patch(
-                "hecate.services.sandbox.executor.asyncio.wait_for",
+                "hecate_sandbox.sandbox.executor.asyncio.wait_for",
                 new_callable=AsyncMock,
                 return_value=(b"hello", b""),
             ),
@@ -80,9 +79,9 @@ class TestSandboxExecutor:
 
         with (
             patch(
-                "hecate.services.sandbox.executor.asyncio.create_subprocess_exec", new_callable=AsyncMock
+                "hecate_sandbox.sandbox.executor.asyncio.create_subprocess_exec", new_callable=AsyncMock
             ) as mock_exec,
-            patch("hecate.services.sandbox.executor.asyncio.wait_for", new_callable=AsyncMock) as mock_wait_for,
+            patch("hecate_sandbox.sandbox.executor.asyncio.wait_for", new_callable=AsyncMock) as mock_wait_for,
         ):
             mock_exec.side_effect = [mock_create, mock_wait, mock_logs, mock_rm]
             mock_wait_for.side_effect = [(b"c123", b""), (b"0", b"")]
@@ -186,7 +185,7 @@ class TestSandboxPool:
 
         with (
             patch.object(pool, "_create_fresh_container", new_callable=AsyncMock) as mock_create,
-            patch("hecate.services.sandbox.pool.asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
+            patch("hecate_sandbox.sandbox.pool.asyncio.create_subprocess_exec", new_callable=AsyncMock) as mock_exec,
         ):
             mock_create.return_value = "c1"
             await pool.prewarm()
@@ -376,7 +375,7 @@ class TestSandboxPool:
 class TestGetSandboxPool:
     async def test_pool_disabled_by_default(self) -> None:
         """Task 5.13: Pool disabled by default — no SandboxPool instance created."""
-        from hecate.services.sandbox import _reset_pool_for_testing, get_sandbox_pool
+        from hecate_sandbox.sandbox import _reset_pool_for_testing, get_sandbox_pool
 
         _reset_pool_for_testing()
 

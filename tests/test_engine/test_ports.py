@@ -8,7 +8,7 @@ Also verifies:
 - ``RuntimePort`` cannot be instantiated directly (it is an ``abc.ABC``).
 - ``StubRuntimePort`` (the canonical test double) is a usable subclass.
 - ``tool_execute_sandbox`` default implementation delegates to ``tool_execute``
-  without importing ``hecate.services.sandbox`` (engine layering invariant).
+  without importing ``hecate_sandbox.sandbox`` (engine layering invariant).
 """
 
 from __future__ import annotations
@@ -156,15 +156,15 @@ class TestRuntimePortDefaultToolExecuteSandbox:
         """Ensure ``tool_execute_sandbox`` default does not pull in sandbox service.
 
         We monkeypatch the import to fail if the default implementation ever
-        tries to import ``hecate.services.sandbox``. Any concrete adapter that
+        tries to import ``hecate_sandbox.sandbox``. Any concrete adapter that
         wishes to support sandbox execution MUST override this method.
         """
 
         def _explode(name: str, *args: Any, **kwargs: Any) -> Any:
-            if name == "hecate.services.sandbox":
+            if name == "hecate_sandbox.sandbox":
                 raise AssertionError(
                     "RuntimePort.tool_execute_sandbox default must not import "
-                    "hecate.services.sandbox — concrete adapters should override."
+                    "hecate_sandbox.sandbox — concrete adapters should override."
                 )
             return _real_import(name, *args, **kwargs)
 
@@ -174,6 +174,6 @@ class TestRuntimePortDefaultToolExecuteSandbox:
         monkeypatch.setattr(builtins, "__import__", _explode)
 
         port = StubRuntimePort()
-        # If the default implementation tried to import hecate.services.sandbox,
+        # If the default implementation tried to import hecate_sandbox.sandbox,
         # the monkeypatched import would raise AssertionError.
         await port.tool_execute_sandbox("t", {})

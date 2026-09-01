@@ -7,8 +7,7 @@ import socket
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from hecate.services.environment.network_policy import (
+from hecate_sandbox.environment.network_policy import (
     NetworkEgressPolicy,
     NetworkPolicyMode,
     is_url_allowed,

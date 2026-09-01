@@ -17,14 +17,14 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.plugin.manifest import PluginManifest
+from hecate.core.plugin.registry import PluginRegistry
 from hecate.models.evaluation import (
     EvaluationItemModel,
     EvaluationRunModel,
     EvaluationScoreModel,
     RunStatus,
 )
-from hecate.plugin.manifest import PluginManifest
-from hecate.plugin.registry import PluginRegistry
 from hecate.services.evaluation.evaluator import Evaluator
 from hecate.services.evaluation.types import (
     AnswerSource,

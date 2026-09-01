@@ -13,7 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from hecate.services.sandbox.executor import SandboxConfig, SandboxExecutor, SandboxResult
+from hecate_sandbox.sandbox.executor import SandboxConfig, SandboxExecutor, SandboxResult
 
 logger = logging.getLogger(__name__)
 

@@ -7,9 +7,8 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
-from hecate.services.environment.environment import LocalEnvironment
-from hecate.services.environment.manager import EnvironmentManager
+from hecate_sandbox.environment.environment import LocalEnvironment
+from hecate_sandbox.environment.manager import EnvironmentManager
 
 # ---------------------------------------------------------------------------
 # LocalEnvironment tests

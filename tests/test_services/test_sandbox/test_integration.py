@@ -31,7 +31,7 @@ pytestmark = pytest.mark.skipif(
 
 class TestSandboxDockerIntegration:
     async def test_executor_create_and_run(self) -> None:
-        from hecate.services.sandbox.executor import SandboxConfig, SandboxExecutor
+        from hecate_sandbox.sandbox.executor import SandboxConfig, SandboxExecutor
 
         cfg = SandboxConfig(image="alpine:latest")
         executor = SandboxExecutor(config=cfg)

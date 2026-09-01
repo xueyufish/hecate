@@ -366,7 +366,7 @@ class BuiltInToolExecutor:
         """Execute code tool via SandboxPool (when enabled) or SandboxExecutor."""
         code = args["code"]
         try:
-            from hecate.services.sandbox.executor import SandboxConfig, SandboxExecutor
+            from hecate_sandbox.sandbox.executor import SandboxConfig, SandboxExecutor
         except ImportError:
             return {
                 "stdout": "",
@@ -381,7 +381,7 @@ class BuiltInToolExecutor:
 
         cfg = SandboxConfig(volumes=volumes)
 
-        from hecate.services.sandbox import get_sandbox_pool
+        from hecate_sandbox.sandbox import get_sandbox_pool
 
         pool = get_sandbox_pool()
         if pool is not None:
@@ -422,7 +422,7 @@ class BuiltInToolExecutor:
         if name == "browser_navigate":
             url = args.get("url", "")
             allowed = self._allowed_domains_for(context)
-            from hecate.services.environment.network_policy import is_url_allowed
+            from hecate_sandbox.environment.network_policy import is_url_allowed
 
             if not is_url_allowed(url, allowed):
                 return {

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.plugin.manifest import PluginManifest
+from hecate.core.plugin.manifest import PluginManifest
 
 
 class TestPluginManifest:

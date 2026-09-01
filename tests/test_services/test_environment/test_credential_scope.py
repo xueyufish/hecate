@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.environment.credential_scope import (
+from hecate_sandbox.environment.credential_scope import (
     CredentialScope,
 )
 

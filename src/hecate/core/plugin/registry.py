@@ -11,8 +11,8 @@ import logging
 import threading
 from typing import Any
 
-from hecate.plugin.lifecycle import PluginLifecycle
-from hecate.plugin.manifest import PluginManifest
+from hecate.core.plugin.lifecycle import PluginLifecycle
+from hecate.core.plugin.manifest import PluginManifest
 
 logger = logging.getLogger(__name__)
 

@@ -6,13 +6,12 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
-
-from hecate.services.browser.session import (
+from hecate_sandbox.browser.session import (
     BrowserSession,
     BrowserSessionManager,
     build_browser_pool,
 )
-from hecate.services.sandbox.pool import PooledContainer, SandboxPool
+from hecate_sandbox.sandbox.pool import PooledContainer, SandboxPool
 
 
 def _driver_response(payload: dict) -> bytes:

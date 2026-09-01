@@ -6,8 +6,7 @@ import sys
 import tempfile
 
 import pytest
-
-from hecate.services.environment.environment import ExecResult, LocalEnvironment
+from hecate_sandbox.environment.environment import ExecResult, LocalEnvironment
 
 
 def test_exec_result_dataclass_fields() -> None:

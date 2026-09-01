@@ -17,8 +17,8 @@ import pytest
 
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.im.message_bus import IMMessageBus
+from hecate.core.plugin.registry import PluginRegistry
 from hecate.gateway.registration import register_im_channels
-from hecate.plugin.registry import PluginRegistry
 
 
 def _stub_workflow_service(records: list[dict[str, Any]]) -> Any:

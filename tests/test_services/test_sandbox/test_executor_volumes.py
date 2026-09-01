@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-from hecate.services.sandbox.executor import SandboxConfig, SandboxExecutor
+from hecate_sandbox.sandbox.executor import SandboxConfig, SandboxExecutor
 
 
 class TestSandboxConfigVolumes:

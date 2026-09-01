@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.plugin.manifest import PluginManifest
-from hecate.plugin.registry import PluginRegistry
-from hecate.plugin.spi.evaluator import EvaluatorBase
+from hecate.core.plugin.manifest import PluginManifest
+from hecate.core.plugin.registry import PluginRegistry
+from hecate.core.plugin.spi.evaluator import EvaluatorBase
 from hecate.services.evaluation.evaluator import BuiltinEvaluator, Evaluator
 from hecate.services.evaluation.types import EvalInput, EvalOutput
 

@@ -6,7 +6,7 @@ import base64
 import json
 from pathlib import Path
 
-from hecate.plugin.content_scanner import (
+from hecate.core.plugin.content_scanner import (
     SCANNER_VERSION,
     ContentScanner,
     compute_verdict,
