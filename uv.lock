@@ -18,6 +18,7 @@ members = [
     "hecate-llm",
     "hecate-memory",
     "hecate-ops",
+    "hecate-sandbox",
 ]
 
 [[package]]
@@ -2191,6 +2192,7 @@ dependencies = [
     { name = "fastmcp" },
     { name = "hecate-llm" },
     { name = "hecate-ops" },
+    { name = "hecate-sandbox" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "jsonschema" },
@@ -2312,6 +2314,7 @@ requires-dist = [
     { name = "flagembedding", marker = "extra == 'rag'", specifier = ">=1.2" },
     { name = "hecate-llm", editable = "packages/hecate-llm" },
     { name = "hecate-ops", editable = "packages/hecate-ops" },
+    { name = "hecate-sandbox", editable = "packages/hecate-sandbox" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
@@ -2490,6 +2493,28 @@ requires-dist = [
     { name = "wrapt", marker = "extra == 'otel'", specifier = ">=1.13.0" },
 ]
 provides-extras = ["otel"]
+
+[[package]]
+name = "hecate-sandbox"
+version = "0.1.0"
+source = { editable = "packages/hecate-sandbox" }
+dependencies = [
+    { name = "aiodocker" },
+    { name = "hecate" },
+]
+
+[package.optional-dependencies]
+browser = [
+    { name = "playwright" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiodocker", specifier = ">=0.25.0" },
+    { name = "hecate", editable = "." },
+    { name = "playwright", marker = "extra == 'browser'", specifier = ">=1.40,<2.0" },
+]
+provides-extras = ["browser"]
 
 [[package]]
 name = "hf-xet"

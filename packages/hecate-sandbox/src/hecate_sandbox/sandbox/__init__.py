@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from hecate.services.sandbox.pool import SandboxPool
+    from hecate_sandbox.sandbox.pool import SandboxPool
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +34,8 @@ def get_sandbox_pool() -> SandboxPool | None:
         logger.debug("Sandbox container pool disabled")
         return None
 
-    from hecate.services.sandbox.executor import SandboxExecutor
-    from hecate.services.sandbox.pool import SandboxPool
+    from hecate_sandbox.sandbox.executor import SandboxExecutor
+    from hecate_sandbox.sandbox.pool import SandboxPool
 
     strategy = settings.SANDBOX_POOL_EXHAUSTION_STRATEGY
     if strategy not in ("wait", "temporary"):

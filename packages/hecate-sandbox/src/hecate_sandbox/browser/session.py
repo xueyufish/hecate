@@ -24,8 +24,8 @@ import logging
 import time
 from typing import Any
 
-from hecate.services.sandbox.executor import SandboxConfig, SandboxExecutor
-from hecate.services.sandbox.pool import PooledContainer, SandboxPool
+from hecate_sandbox.sandbox.executor import SandboxConfig, SandboxExecutor
+from hecate_sandbox.sandbox.pool import PooledContainer, SandboxPool
 
 logger = logging.getLogger(__name__)
 

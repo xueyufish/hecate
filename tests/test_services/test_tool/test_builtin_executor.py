@@ -97,7 +97,7 @@ class TestListFiles:
 
 class TestExecuteCode:
     async def test_sandbox_unavailable(self, executor: BuiltInToolExecutor) -> None:
-        with patch.dict("sys.modules", {"hecate.services.sandbox.executor": None}):
+        with patch.dict("sys.modules", {"hecate_sandbox.sandbox.executor": None}):
             result = await executor.execute("execute_code", {"code": "print(1)"})
             assert result["exit_code"] == -1
             assert "unavailable" in result["stderr"].lower()

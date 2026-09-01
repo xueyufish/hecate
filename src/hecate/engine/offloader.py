@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from hecate.services.environment.environment import AgentEnvironment
+    from hecate_sandbox.environment.environment import AgentEnvironment
 
 logger = logging.getLogger(__name__)
 

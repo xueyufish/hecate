@@ -305,7 +305,7 @@ class RuntimePort(ABC):
         Concrete adapters that support sandbox execution MUST override this
         method. The default implementation here is a pass-through to
         ``tool_execute`` — it deliberately does NOT import the sandbox service
-        from ``hecate.services.sandbox`` so that ``engine/`` remains
+        from ``hecate_sandbox.sandbox`` so that ``engine/`` remains
         dependency-free at the module level. Sandbox routing is wired in by
         the harness / orchestrator via a concrete adapter.
 

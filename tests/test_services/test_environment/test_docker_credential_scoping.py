@@ -7,7 +7,7 @@ are skipped when Docker/aiodocker is not available.
 
 from __future__ import annotations
 
-from hecate.services.environment.credential_scope import CredentialScope
+from hecate_sandbox.environment.credential_scope import CredentialScope
 
 
 class TestDockerCredentialScoping:

@@ -7,7 +7,7 @@ when Docker/aiodocker is not available.
 
 from __future__ import annotations
 
-from hecate.services.environment.network_policy import (
+from hecate_sandbox.environment.network_policy import (
     NetworkEgressPolicy,
     NetworkPolicyMode,
 )

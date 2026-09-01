@@ -48,6 +48,7 @@ dependencies = [
     "redis>=5.0.0",
     "hecate-ops",
     "hecate-llm",
+    "hecate-sandbox",
 ]
 
 [project.urls]
@@ -68,6 +69,7 @@ members = ["packages/*"]
 hecate = { workspace = true }
 hecate-ops = { workspace = true }
 hecate-llm = { workspace = true }
+hecate-sandbox = { workspace = true }
 
 [project.optional-dependencies]
 llm = [
@@ -198,7 +200,7 @@ update_changelog_on_bump = true
 
 [tool.mypy]
 python_version = "3.12"
-mypy_path = "src:packages/hecate-enterprise/src:packages/hecate-memory/src:packages/hecate-ops/src:packages/hecate-llm/src"
+mypy_path = "src:packages/hecate-enterprise/src:packages/hecate-memory/src:packages/hecate-ops/src:packages/hecate-llm/src:packages/hecate-sandbox/src"
 explicit_package_bases = true
 strict = true
 warn_return_any = true

@@ -92,8 +92,9 @@ def test_credential_scoping_setting_is_read_by_environment_manager() -> None:
     """
     import os
 
+    from hecate_sandbox.environment import manager as manager_pkg
+
     from hecate.core.config import Settings
-    from hecate.services.environment import manager as manager_pkg
 
     field_names = Settings.model_fields.keys()
     assert "AGENT_ENV_CREDENTIAL_SCOPING" in field_names, (

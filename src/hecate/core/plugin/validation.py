@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hecate.plugin.types import PLUGIN_TYPE_REGISTRY
+from hecate.core.plugin.types import PLUGIN_TYPE_REGISTRY
 
 
 def validate_api_surface(plugin_type: str, plugin_instance: Any) -> list[str]:

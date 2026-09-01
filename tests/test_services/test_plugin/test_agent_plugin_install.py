@@ -164,7 +164,7 @@ class TestInstallOrchestration:
         _write_package(src)
         (src / "skills" / "deploy" / "big.bin").write_bytes(b"x" * 100)
         service = PluginService(db_session)
-        from hecate.plugin.agent_plugins import AgentPluginValidationError
+        from hecate.core.plugin.agent_plugins import AgentPluginValidationError
 
         with pytest.raises(AgentPluginValidationError, match="cap"):
             await service.install_agent_plugin(**_install_kwargs(tmp_path, max_package_mb=0))
@@ -197,7 +197,7 @@ class TestReinstallAndCollision:
 
         other = tmp_path / "other-src"
         _write_package(other)
-        from hecate.plugin.agent_plugins import AgentPluginValidationError
+        from hecate.core.plugin.agent_plugins import AgentPluginValidationError
 
         with pytest.raises(AgentPluginValidationError, match="different"):
             await service.install_agent_plugin(**_install_kwargs(tmp_path, location=str(other)))
@@ -217,7 +217,7 @@ class TestReinstallAndCollision:
         src = tmp_path / "src"
         _write_package(src)
         service = PluginService(db_session)
-        from hecate.plugin.agent_plugins import AgentPluginValidationError
+        from hecate.core.plugin.agent_plugins import AgentPluginValidationError
 
         with pytest.raises(AgentPluginValidationError, match="collision.*deploy"):
             await service.install_agent_plugin(**_install_kwargs(tmp_path))

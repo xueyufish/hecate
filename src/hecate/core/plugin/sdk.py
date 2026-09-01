@@ -2,7 +2,7 @@
 
 Import all 8 type ABCs and helper utilities from here::
 
-    from hecate.plugin.sdk import ToolPluginBase, PluginContext
+    from hecate.core.plugin.sdk import ToolPluginBase, PluginContext
 """
 
 from __future__ import annotations
@@ -11,12 +11,12 @@ from typing import Any
 
 from hecate.auth.provider import AuthProvider
 from hecate.channel.adapter import ChannelBase
-from hecate.plugin.permission import PermissionChecker
-from hecate.plugin.spi.evaluator import EvaluatorBase
-from hecate.plugin.types.extension import ExtensionPluginBase
-from hecate.plugin.types.model import ModelPluginBase
-from hecate.plugin.types.tool import ToolPluginBase
-from hecate.plugin.types.trigger import TriggerPluginBase
+from hecate.core.plugin.permission import PermissionChecker
+from hecate.core.plugin.spi.evaluator import EvaluatorBase
+from hecate.core.plugin.types.extension import ExtensionPluginBase
+from hecate.core.plugin.types.model import ModelPluginBase
+from hecate.core.plugin.types.tool import ToolPluginBase
+from hecate.core.plugin.types.trigger import TriggerPluginBase
 from hecate.vault.provider import SecretProvider
 
 __all__ = [

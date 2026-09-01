@@ -11,14 +11,15 @@ Most tests are marked as integration tests requiring running services.
 
 from __future__ import annotations
 
-from hecate.engine.decision_sink import ToolDecisionEmitter
-from hecate.engine.tool_access import AccessDecision
-from hecate.engine.workers.sandbox_router import SandboxEnforcementRouter
-from hecate.services.environment.credential_scope import CredentialScope
-from hecate.services.environment.network_policy import (
+from hecate_sandbox.environment.credential_scope import CredentialScope
+from hecate_sandbox.environment.network_policy import (
     NetworkEgressPolicy,
     NetworkPolicyMode,
 )
+
+from hecate.engine.decision_sink import ToolDecisionEmitter
+from hecate.engine.tool_access import AccessDecision
+from hecate.engine.workers.sandbox_router import SandboxEnforcementRouter
 
 
 class TestEndToEndDefaultBehavior:

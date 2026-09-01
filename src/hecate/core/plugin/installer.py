@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from hecate.plugin.packaging import extract_bundle, validate_bundle
+from hecate.core.plugin.packaging import extract_bundle, validate_bundle
 
 logger = logging.getLogger(__name__)
 

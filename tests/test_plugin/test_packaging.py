@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from hecate.plugin.packaging import create_bundle, extract_bundle, validate_bundle
+from hecate.core.plugin.packaging import create_bundle, extract_bundle, validate_bundle
 
 
 def _make_plugin_dir(tmp_path: Path, name: str = "test-plugin", version: str = "1.0.0") -> Path:
@@ -94,7 +94,7 @@ class TestExtractBundle:
 
 class TestInstallPlugin:
     def test_install_creates_dir(self, tmp_path):
-        from hecate.plugin.installer import install_plugin
+        from hecate.core.plugin.installer import install_plugin
 
         plugin_dir = _make_plugin_dir(tmp_path)
         bundle = create_bundle(plugin_dir, tmp_path / "out.hecate-plugin")
@@ -104,7 +104,7 @@ class TestInstallPlugin:
         assert (plugins_dir / "test-plugin" / "plugin.yaml").is_file()
 
     def test_install_invalid_bundle(self, tmp_path):
-        from hecate.plugin.installer import install_plugin
+        from hecate.core.plugin.installer import install_plugin
 
         fake = tmp_path / "fake.hecate-plugin"
         fake.write_text("x")
@@ -117,7 +117,7 @@ class TestInstallPlugin:
 
 class TestUninstallPlugin:
     def test_uninstall_existing(self, tmp_path):
-        from hecate.plugin.installer import install_plugin, uninstall_plugin
+        from hecate.core.plugin.installer import install_plugin, uninstall_plugin
 
         plugin_dir = _make_plugin_dir(tmp_path)
         bundle = create_bundle(plugin_dir, tmp_path / "out.hecate-plugin")
@@ -127,7 +127,7 @@ class TestUninstallPlugin:
         assert not (plugins_dir / "test-plugin").exists()
 
     def test_uninstall_nonexistent(self, tmp_path):
-        from hecate.plugin.installer import uninstall_plugin
+        from hecate.core.plugin.installer import uninstall_plugin
 
         assert uninstall_plugin("nope", tmp_path / "plugins") is False
 
@@ -136,7 +136,7 @@ class TestUninstallPlugin:
 
 
 def test_install_upgrade(tmp_path):
-    from hecate.plugin.installer import install_plugin
+    from hecate.core.plugin.installer import install_plugin
 
     v1_dir = _make_plugin_dir(tmp_path, version="1.0.0")
     bundle_v1 = create_bundle(v1_dir, tmp_path / "v1.hecate-plugin")
@@ -200,7 +200,7 @@ async def test_api_delete_plugin(client, db_session):
 class TestInstallDependenciesSaaSGate:
     def test_saas_skips_pip_install(self, tmp_path, monkeypatch):
         from hecate.core.config import settings
-        from hecate.plugin.installer import _install_dependencies
+        from hecate.core.plugin.installer import _install_dependencies
 
         monkeypatch.setattr(settings, "SAAS_MODE", True, raising=True)
 
@@ -227,7 +227,7 @@ class TestInstallDependenciesSaaSGate:
 
     def test_self_hosted_runs_pip_install(self, tmp_path, monkeypatch):
         from hecate.core.config import settings
-        from hecate.plugin.installer import _install_dependencies
+        from hecate.core.plugin.installer import _install_dependencies
 
         monkeypatch.setattr(settings, "SAAS_MODE", False, raising=True)
 
@@ -258,7 +258,7 @@ class TestInstallDependenciesSaaSGate:
 
     def test_no_requirements_file_skipped(self, tmp_path, monkeypatch):
         from hecate.core.config import settings
-        from hecate.plugin.installer import _install_dependencies
+        from hecate.core.plugin.installer import _install_dependencies
 
         monkeypatch.setattr(settings, "SAAS_MODE", True, raising=True)
 

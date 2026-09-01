@@ -9,6 +9,6 @@ over HTTP via ``docker exec curl http://127.0.0.1:8080/<tool>``.
 
 from __future__ import annotations
 
-from hecate.services.browser.session import BrowserSession, BrowserSessionManager
+from hecate_sandbox.browser.session import BrowserSession, BrowserSessionManager
 
 __all__ = ["BrowserSession", "BrowserSessionManager"]

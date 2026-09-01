@@ -14,7 +14,7 @@ import time
 from typing import Protocol
 
 from hecate.core.config import settings
-from hecate.services.environment.environment import AgentEnvironment, LocalEnvironment
+from hecate_sandbox.environment.environment import AgentEnvironment, LocalEnvironment
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +56,9 @@ class EnvironmentManager:
     def _create_environment(self, agent_id: str) -> AgentEnvironment:
         """Create a new environment instance based on the configured backend."""
         if self._backend == "docker":
-            from hecate.services.environment.credential_scope import CredentialScope
-            from hecate.services.environment.docker_environment import DockerEnvironment
-            from hecate.services.environment.network_policy import (
+            from hecate_sandbox.environment.credential_scope import CredentialScope
+            from hecate_sandbox.environment.docker_environment import DockerEnvironment
+            from hecate_sandbox.environment.network_policy import (
                 NetworkEgressPolicy,
                 NetworkPolicyMode,
             )
@@ -142,7 +142,7 @@ class EnvironmentManager:
                         agent_id,
                     )
                     if self._backend == "docker":
-                        from hecate.services.environment.docker_environment import (
+                        from hecate_sandbox.environment.docker_environment import (
                             DockerEnvironment,
                         )
 
@@ -152,7 +152,7 @@ class EnvironmentManager:
                     logger.info("Reusing warm container for agent '%s'", agent_id)
                     env = warm_entry.environment
                     if self._backend == "docker":
-                        from hecate.services.environment.docker_environment import (
+                        from hecate_sandbox.environment.docker_environment import (
                             DockerEnvironment,
                         )
 
@@ -184,7 +184,7 @@ class EnvironmentManager:
                 return
 
             if self._backend == "docker" and len(self._warm_pool) < settings.DOCKER_WARM_POOL_SIZE:
-                from hecate.services.environment.docker_environment import DockerEnvironment
+                from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
                 if isinstance(entry.environment, DockerEnvironment):
                     await entry.environment.stop()
@@ -192,7 +192,7 @@ class EnvironmentManager:
                 logger.info("Moved environment '%s' to warm pool", agent_id)
             else:
                 if self._backend == "docker":
-                    from hecate.services.environment.docker_environment import DockerEnvironment
+                    from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
                     if isinstance(entry.environment, DockerEnvironment):
                         await entry.environment.remove()
@@ -203,7 +203,7 @@ class EnvironmentManager:
         async with self._lock:
             count = len(self._cache) + len(self._warm_pool)
             if self._backend == "docker":
-                from hecate.services.environment.docker_environment import DockerEnvironment
+                from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
                 for _agent_id, entry in list(self._cache.items()):
                     if isinstance(entry.environment, DockerEnvironment):
@@ -231,7 +231,7 @@ class EnvironmentManager:
         for agent_id in expired:
             entry = self._warm_pool.pop(agent_id, None)
             if entry is not None and self._backend == "docker":
-                from hecate.services.environment.docker_environment import DockerEnvironment
+                from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
                 if isinstance(entry.environment, DockerEnvironment):
                     await entry.environment.remove()

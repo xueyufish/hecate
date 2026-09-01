@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-from hecate.plugin.manifest import PluginManifest
+from hecate.core.plugin.manifest import PluginManifest
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +183,7 @@ def _load_mcp(entry: str) -> dict[str, str]:
 
 def _validate_type(manifest: PluginManifest, plugin_instance: Any) -> list[str]:
     """Validate that *plugin_instance* implements the correct ABC for its type."""
-    from hecate.plugin.validation import validate_api_surface
+    from hecate.core.plugin.validation import validate_api_surface
 
     return validate_api_surface(manifest.type, plugin_instance)
 

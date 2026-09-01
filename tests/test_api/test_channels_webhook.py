@@ -27,8 +27,8 @@ from hecate.channel.adapter import ChannelBase
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.im.message_bus import IMMessageBus
 from hecate.channel.types import CanonicalMessage, MessageContent
-from hecate.plugin.manifest import PluginManifest
-from hecate.plugin.registry import PluginRegistry
+from hecate.core.plugin.manifest import PluginManifest
+from hecate.core.plugin.registry import PluginRegistry
 
 
 class _StubAdapter(ChannelBase):

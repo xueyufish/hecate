@@ -27,7 +27,7 @@ from fastapi import APIRouter, Header, HTTPException, Path, Request, status
 from fastapi.responses import JSONResponse
 
 from hecate.channel.im.message_bus import IMMessageBus
-from hecate.plugin.registry import PluginRegistry
+from hecate.core.plugin.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 

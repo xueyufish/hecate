@@ -30,7 +30,7 @@ from typing import Any
 
 import yaml
 
-from hecate.plugin.agent_plugins import ScanResult, ScanStage
+from hecate.core.plugin.agent_plugins import ScanResult, ScanStage
 
 SCANNER_VERSION = "rule-engine-1"
 

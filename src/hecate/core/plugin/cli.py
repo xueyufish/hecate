@@ -20,7 +20,7 @@ VALID_TYPES = [
 _TEMPLATES: dict[str, dict[str, str]] = {
     "tool": {
         "base_class": "ToolPluginBase",
-        "import_line": "from hecate.plugin.sdk import ToolPluginBase",
+        "import_line": "from hecate.core.plugin.sdk import ToolPluginBase",
         "class_body": textwrap.dedent("""\
             class {{CLASS_NAME}}(ToolPluginBase):
                 @property
@@ -37,7 +37,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
     },
     "extension": {
         "base_class": "ExtensionPluginBase",
-        "import_line": "from hecate.plugin.sdk import ExtensionPluginBase",
+        "import_line": "from hecate.core.plugin.sdk import ExtensionPluginBase",
         "class_body": textwrap.dedent("""\
             class {{CLASS_NAME}}(ExtensionPluginBase):
                 def on_pre_tool(self, tool_name: str, args: dict[str, Any]) -> None:
@@ -46,7 +46,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
     },
     "trigger": {
         "base_class": "TriggerPluginBase",
-        "import_line": "from hecate.plugin.sdk import TriggerPluginBase",
+        "import_line": "from hecate.core.plugin.sdk import TriggerPluginBase",
         "class_body": textwrap.dedent("""\
             class {{CLASS_NAME}}(TriggerPluginBase):
                 trigger_type = "webhook"
@@ -57,7 +57,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
     },
     "model": {
         "base_class": "ModelPluginBase",
-        "import_line": "from hecate.plugin.sdk import ModelPluginBase",
+        "import_line": "from hecate.core.plugin.sdk import ModelPluginBase",
         "class_body": textwrap.dedent("""\
             class {{CLASS_NAME}}(ModelPluginBase):
                 async def invoke(self, messages: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
@@ -69,7 +69,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
     },
     "channel": {
         "base_class": "ChannelBase",
-        "import_line": "from hecate.plugin.sdk import ChannelBase",
+        "import_line": "from hecate.core.plugin.sdk import ChannelBase",
         "class_body": textwrap.dedent("""\
             class {{CLASS_NAME}}(ChannelBase):
                 @property
@@ -97,7 +97,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
     },
     "evaluator": {
         "base_class": "EvaluatorBase",
-        "import_line": "from hecate.plugin.sdk import EvaluatorBase",
+        "import_line": "from hecate.core.plugin.sdk import EvaluatorBase",
         "class_body": textwrap.dedent("""\
             class {{CLASS_NAME}}(EvaluatorBase):
                 @property
@@ -114,7 +114,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
     },
     "auth_provider": {
         "base_class": "AuthProvider",
-        "import_line": "from hecate.plugin.sdk import AuthProvider",
+        "import_line": "from hecate.core.plugin.sdk import AuthProvider",
         "class_body": textwrap.dedent("""\
             class {{CLASS_NAME}}(AuthProvider):
                 @property
@@ -131,7 +131,7 @@ _TEMPLATES: dict[str, dict[str, str]] = {
     },
     "secret_provider": {
         "base_class": "SecretProvider",
-        "import_line": "from hecate.plugin.sdk import SecretProvider",
+        "import_line": "from hecate.core.plugin.sdk import SecretProvider",
         "class_body": textwrap.dedent("""\
             class {{CLASS_NAME}}(SecretProvider):
                 async def get_secret(self, key: str) -> str | None:
@@ -258,7 +258,7 @@ def main() -> None:
     elif args.command == "package":
         from pathlib import Path
 
-        from hecate.plugin.packaging import create_bundle
+        from hecate.core.plugin.packaging import create_bundle
 
         try:
             output = create_bundle(Path(args.dir), Path(args.output) if args.output else None)
@@ -269,7 +269,7 @@ def main() -> None:
     elif args.command == "install":
         from pathlib import Path
 
-        from hecate.plugin.installer import install_plugin
+        from hecate.core.plugin.installer import install_plugin
 
         try:
             name = install_plugin(Path(args.file), Path(args.plugins_dir))
@@ -280,7 +280,7 @@ def main() -> None:
     elif args.command == "uninstall":
         from pathlib import Path
 
-        from hecate.plugin.installer import uninstall_plugin
+        from hecate.core.plugin.installer import uninstall_plugin
 
         removed = uninstall_plugin(args.name, Path(args.plugins_dir))
         if removed:

@@ -254,8 +254,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # decouple webhook ACK from Agent execution (design.md D5).
     try:
         from hecate.channel.im.message_bus import IMMessageBus
+        from hecate.core.plugin.registry import PluginRegistry
         from hecate.gateway.registration import register_channels, register_im_channels
-        from hecate.plugin.registry import PluginRegistry
 
         plugin_registry = PluginRegistry()
         register_channels(plugin_registry)
@@ -332,7 +332,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Sandbox Container Pool (9.4d): prewarm pool on startup
     sandbox_pool = None
     if _settings.SANDBOX_POOL_ENABLED:
-        from hecate.services.sandbox import get_sandbox_pool
+        from hecate_sandbox.sandbox import get_sandbox_pool
 
         sandbox_pool = get_sandbox_pool()
         if sandbox_pool:

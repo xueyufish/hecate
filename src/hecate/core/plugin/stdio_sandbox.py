@@ -14,7 +14,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from hecate.plugin.agent_plugins import McpServerSpec, check_stdio_entry
+from hecate.core.plugin.agent_plugins import McpServerSpec, check_stdio_entry
 
 logger = logging.getLogger(__name__)
 

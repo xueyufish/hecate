@@ -21,13 +21,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hecate.core.config import settings
-from hecate.services.environment.credential_scope import CredentialScope
-from hecate.services.environment.environment import (
+from hecate_sandbox.environment.credential_scope import CredentialScope
+from hecate_sandbox.environment.environment import (
     AgentEnvironment,
     ExecResult,
     FileInfo,
 )
-from hecate.services.environment.network_policy import (
+from hecate_sandbox.environment.network_policy import (
     NetworkEgressPolicy,
     NetworkPolicyMode,
 )

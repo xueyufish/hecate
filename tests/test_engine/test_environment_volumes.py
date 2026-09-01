@@ -22,7 +22,7 @@ class TestResolveEnvironmentVolumes:
         assert resolve_environment_volumes(None) == {}
 
     def test_docker_environment_resolves_to_named_volume(self) -> None:
-        from hecate.services.environment.docker_environment import DockerEnvironment
+        from hecate_sandbox.environment.docker_environment import DockerEnvironment
 
         env = MagicMock(spec=DockerEnvironment)
         env._volume_name = "agent-test-123"
@@ -30,7 +30,7 @@ class TestResolveEnvironmentVolumes:
         assert result == {"agent-test-123": _SANDBOX_MOUNT_POINT}
 
     def test_local_environment_resolves_to_host_path(self, tmp_path: Any) -> None:
-        from hecate.services.environment.environment import LocalEnvironment
+        from hecate_sandbox.environment.environment import LocalEnvironment
 
         env = MagicMock(spec=LocalEnvironment)
         env.root_path = tmp_path / "agent-test"

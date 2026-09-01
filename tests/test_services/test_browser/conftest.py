@@ -16,8 +16,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-from hecate.services.sandbox.pool import PooledContainer, SandboxPool
+from hecate_sandbox.sandbox.pool import PooledContainer, SandboxPool
 
 
 @pytest.fixture
