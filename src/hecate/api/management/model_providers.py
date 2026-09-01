@@ -82,16 +82,16 @@ def _validate_config(config: dict) -> None:
 
 
 async def _discover_models(provider_name: str, api_key: str, base_url: str | None = None) -> list[dict]:
-    """Discover available models via LiteLLM."""
-    try:
-        from litellm import get_valid_models
+    """Discover available models via the LLM gateway (single litellm access point)."""
+    from hecate.services.llm.service import llm_service
 
+    try:
         kwargs: dict = {}
         if base_url:
             kwargs["api_base"] = base_url
 
-        model_ids = get_valid_models(
-            custom_llm_provider=provider_name,
+        model_ids = llm_service.list_models(
+            provider=provider_name,
             api_key=api_key,
             **kwargs,
         )
@@ -450,42 +450,31 @@ async def test_model(
     )
     provider = provider_result.scalar_one_or_none()
 
-    try:
-        try:
-            from litellm import acompletion as litellm_completion
-        except ImportError as err:
-            raise HTTPException(
-                status_code=503,
-                detail="litellm is required for model testing",
-            ) from err
+    from hecate.services.llm.service import llm_service
 
-        litellm_kwargs: dict = {
-            "model": data.model_id,
-            "messages": [{"role": "user", "content": data.prompt}],
-            "temperature": data.temperature,
-            "max_tokens": data.max_tokens,
-        }
+    test_kwargs: dict = {
+        "model_id": data.model_id,
+        "prompt": data.prompt,
+        "temperature": data.temperature,
+        "max_tokens": data.max_tokens,
+    }
+    if provider is not None:
+        test_kwargs["api_key"] = decrypt_api_key(provider.api_key_encrypted)
+        if provider.base_url:
+            test_kwargs["api_base"] = provider.base_url
 
-        if provider is not None:
-            decrypted_key = decrypt_api_key(provider.api_key_encrypted)
-            litellm_kwargs["api_key"] = decrypted_key
-            if provider.base_url:
-                litellm_kwargs["api_base"] = provider.base_url
+    response = await llm_service.test_connection(**test_kwargs)
+    if response.finish_reason == "error":
+        error_msg = response.usage.get("error", "unknown") if isinstance(response.usage, dict) else "unknown"
+        raise HTTPException(status_code=400, detail=error_msg) from None
 
-        response = await litellm_completion(**litellm_kwargs)
-        choice = response.choices[0]
-
-        return {
-            "content": choice.message.content,
-            "model": response.model,
-            "usage": {
-                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
-                "total_tokens": response.usage.total_tokens if response.usage else 0,
-            },
-            "finish_reason": choice.finish_reason,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {
+        "content": response.content,
+        "model": response.model,
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+        "finish_reason": response.finish_reason,
+    }

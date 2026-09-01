@@ -44,13 +44,13 @@ class ModelListResponse(BaseModel):
 
 
 def _discover_models() -> list[str]:
-    """Discover available models from configured API keys via LiteLLM."""
-    try:
-        from litellm import get_valid_models
+    """Discover available models from configured API keys via the LLM gateway."""
+    from hecate.services.llm.service import llm_service
 
-        return get_valid_models()
+    try:
+        return llm_service.list_models()
     except Exception as e:
-        logger.warning(f"Failed to discover models via LiteLLM: {e}")
+        logger.warning(f"Failed to discover models via LLM gateway: {e}")
         return []
 
 

@@ -280,5 +280,89 @@ class LLMService:
                 continue
         raise RuntimeError("All models failed")
 
+    def list_models(
+        self,
+        *,
+        provider: str | None = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ) -> list[str]:
+        """Return litellm-recognised model ids for the given provider.
+
+        Used by ``POST /api/model-providers`` (auto-discover) and
+        ``GET /api/v1/models`` (fallback when no DB providers exist).
+        Returns ``[]`` when litellm is unavailable so callers degrade cleanly
+        instead of crashing — the admin UI can fall back to a manual list.
+        """
+        try:
+            litellm = _get_litellm()
+        except ImportError:
+            logger.warning("litellm not installed; list_models returns []")
+            return []
+        try:
+            return list(
+                litellm.get_valid_models(
+                    custom_llm_provider=provider,
+                    api_key=api_key,
+                    api_base=api_base,
+                )
+                or []
+            )
+        except Exception as e:
+            logger.warning("litellm.get_valid_models failed for provider %r: %s", provider, e)
+            return []
+
+    async def test_connection(
+        self,
+        model_id: str,
+        *,
+        prompt: str,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
+    ) -> LLMResponse:
+        """Run a one-shot short completion against ``model_id`` to verify reachability.
+
+        Returns a structured result instead of raising so the admin
+        ``POST /api/model-providers/{id}/test`` endpoint can render a uniform
+        response. On success ``content`` is the model's reply; on failure
+        ``content is None`` and ``finish_reason == "error"`` with the
+        exception message captured in ``usage``.
+        """
+        try:
+            litellm = _get_litellm()
+        except ImportError:
+            logger.warning("litellm not installed; test_connection returns error")
+            return LLMResponse(model=model_id, finish_reason="error")
+
+        messages = [{"role": "user", "content": prompt}]
+        litellm_kwargs: dict[str, Any] = {}
+        if api_key is not None:
+            litellm_kwargs["api_key"] = api_key
+        if api_base is not None:
+            litellm_kwargs["api_base"] = api_base
+        try:
+            response = await litellm.acompletion(
+                model=model_id,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                **litellm_kwargs,
+            )
+            choice = response.choices[0]
+            return LLMResponse(
+                content=choice.message.content,
+                model=response.model,
+                finish_reason=choice.finish_reason,
+            )
+        except Exception as e:
+            logger.warning("LLM test_connection failed for model %s: %s", model_id, e)
+            return LLMResponse(
+                model=model_id,
+                finish_reason="error",
+                usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            )
+
 
 llm_service = LLMService()
