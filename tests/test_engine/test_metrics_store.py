@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 
-from hecate.services.observability.metrics_storage import (
+from hecate_ops.metrics_storage import (
     InMemoryMetricsStore,
     MetricsSnapshot,
     MetricsStore,

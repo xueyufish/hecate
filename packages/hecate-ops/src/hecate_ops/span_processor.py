@@ -26,7 +26,7 @@ from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 
 from hecate.core.config import settings
 from hecate.models.trace import TraceModel
-from hecate.services.observability.metrics_storage import MetricsStore
+from hecate_ops.metrics_storage import MetricsStore
 
 logger = logging.getLogger(__name__)
 

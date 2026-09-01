@@ -46,6 +46,7 @@ dependencies = [
     "rich>=13.0.0",
     "litellm>=1.50.0",
     "redis>=5.0.0",
+    "hecate-ops",
 ]
 
 [project.urls]
@@ -64,6 +65,7 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 hecate = { workspace = true }
+hecate-ops = { workspace = true }
 
 [project.optional-dependencies]
 llm = [
@@ -194,7 +196,7 @@ update_changelog_on_bump = true
 
 [tool.mypy]
 python_version = "3.12"
-mypy_path = "src:packages/hecate-enterprise/src:packages/hecate-memory/src"
+mypy_path = "src:packages/hecate-enterprise/src:packages/hecate-memory/src:packages/hecate-ops/src"
 strict = true
 warn_return_any = true
 warn_unused_configs = true

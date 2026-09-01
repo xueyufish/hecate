@@ -14,6 +14,10 @@ from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import UUID
 
+from hecate_ops.span_adapter import (
+    create_otel_span,
+    end_otel_span,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,10 +32,6 @@ from hecate.engine.ports import RuntimePort, SpanContext
 from hecate.models.agent import AgentModel
 from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.tool import ToolModel
-from hecate.services.observability.span_adapter import (
-    create_otel_span,
-    end_otel_span,
-)
 from hecate.services.orchestration.handoff import (
     inject_handoff_tools_from_targets,
     is_handoff_tool_call,

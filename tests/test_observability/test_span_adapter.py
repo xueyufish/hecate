@@ -5,14 +5,14 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-
-from hecate.engine.ports import SpanContext
-from hecate.services.observability import span_adapter
-from hecate.services.observability.span_adapter import (
+from hecate_ops import span_adapter
+from hecate_ops.span_adapter import (
     create_otel_span,
     end_otel_span,
     reset_span_registry,
 )
+
+from hecate.engine.ports import SpanContext
 
 
 def _sdk_tracer() -> object:

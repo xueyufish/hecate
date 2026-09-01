@@ -16,6 +16,7 @@ members = [
     "hecate",
     "hecate-enterprise",
     "hecate-memory",
+    "hecate-ops",
 ]
 
 [[package]]
@@ -2187,6 +2188,7 @@ dependencies = [
     { name = "email-validator" },
     { name = "fastapi" },
     { name = "fastmcp" },
+    { name = "hecate-ops" },
     { name = "httpx" },
     { name = "jinja2" },
     { name = "jsonschema" },
@@ -2306,6 +2308,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fastmcp", specifier = ">=4.0.0b3,<5" },
     { name = "flagembedding", marker = "extra == 'rag'", specifier = ">=1.2" },
+    { name = "hecate-ops", editable = "packages/hecate-ops" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
@@ -2430,6 +2433,40 @@ requires-dist = [
     { name = "scim2-models", specifier = ">=0.2.0" },
 ]
 provides-extras = ["rag"]
+
+[[package]]
+name = "hecate-ops"
+version = "0.1.0"
+source = { editable = "packages/hecate-ops" }
+dependencies = [
+    { name = "hecate" },
+]
+
+[package.optional-dependencies]
+otel = [
+    { name = "aiosmtplib" },
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-exporter-otlp-proto-http" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-sdk" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "wrapt" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aiosmtplib", marker = "extra == 'otel'", specifier = ">=3.0.0" },
+    { name = "hecate", editable = "." },
+    { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20.0" },
+    { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.20.0" },
+    { name = "opentelemetry-instrumentation", marker = "extra == 'otel'", specifier = ">=0.41b0" },
+    { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel'", specifier = ">=0.41b0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.20.0" },
+    { name = "opentelemetry-semantic-conventions", marker = "extra == 'otel'", specifier = ">=0.65b0" },
+    { name = "wrapt", marker = "extra == 'otel'", specifier = ">=1.13.0" },
+]
+provides-extras = ["otel"]
 
 [[package]]
 name = "hf-xet"
