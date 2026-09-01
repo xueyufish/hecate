@@ -9,8 +9,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock
 
 import pytest
+from hecate_llm.service import LLMResponse
 
-from hecate.services.llm.service import LLMResponse
 from hecate.services.suggestions.service import SuggestionService
 
 

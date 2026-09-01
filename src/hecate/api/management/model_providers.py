@@ -83,7 +83,7 @@ def _validate_config(config: dict) -> None:
 
 async def _discover_models(provider_name: str, api_key: str, base_url: str | None = None) -> list[dict]:
     """Discover available models via the LLM gateway (single litellm access point)."""
-    from hecate.services.llm.service import llm_service
+    from hecate_llm.service import llm_service
 
     try:
         kwargs: dict = {}
@@ -450,7 +450,7 @@ async def test_model(
     )
     provider = provider_result.scalar_one_or_none()
 
-    from hecate.services.llm.service import llm_service
+    from hecate_llm.service import llm_service
 
     test_kwargs: dict = {
         "model_id": data.model_id,

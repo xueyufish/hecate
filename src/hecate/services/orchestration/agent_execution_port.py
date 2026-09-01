@@ -96,7 +96,8 @@ class AgentExecutionPort(RuntimePort):
         Raises:
             ValueError: If agent_id does not resolve to a valid agent.
         """
-        from hecate.services.llm.service import llm_service
+        from hecate_llm.service import llm_service
+
         from hecate.services.skill.loader import SkillLoader
 
         agent = await self._load_agent(agent_id)

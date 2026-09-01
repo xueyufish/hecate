@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
-from hecate.services.llm.service import LLMResponse
+from hecate_llm.service import LLMResponse
 
 
 class LLMGateway(Protocol):

@@ -273,7 +273,7 @@ class PromptAnalyticsService:
             }
 
         try:
-            from hecate.services.llm.service import LLMService
+            from hecate_llm.service import LLMService
 
             diff_text = "\n".join(f"{e['type'].upper()}: {e['content']}" for e in diff["diff_entries"])
             messages = [

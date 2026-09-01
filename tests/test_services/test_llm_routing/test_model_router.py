@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.llm.routing import ModelInfo, ModelRouter, RoutingStrategy
+from hecate_llm.routing import ModelInfo, ModelRouter, RoutingStrategy
 
 
 def _make_model(

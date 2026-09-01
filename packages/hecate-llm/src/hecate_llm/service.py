@@ -14,7 +14,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Any
 
-from hecate.services.llm.routing import ModelRouter, RoutingStrategy
+from hecate_llm.routing import ModelRouter, RoutingStrategy
 
 logger = logging.getLogger(__name__)
 

@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from hecate_llm.hub.monitoring import MonitoringService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.model_hub.monitoring import MonitoringService
 
 router = APIRouter(prefix="/api/monitoring/models", tags=["monitoring"])
 

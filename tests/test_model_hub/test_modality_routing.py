@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-
-from hecate.services.llm.routing import (
+from hecate_llm.routing import (
     ModelInfo,
     ModelRouter,
     NoCapableModelError,

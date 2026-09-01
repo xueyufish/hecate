@@ -198,7 +198,7 @@ class EvaluationEngine:
             return ""
 
         try:
-            from hecate.services.llm.service import LLMService
+            from hecate_llm.service import LLMService
 
             context_text = "\n\n".join(contexts)
             messages = [

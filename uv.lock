@@ -15,6 +15,7 @@ prerelease-mode = "allow"
 members = [
     "hecate",
     "hecate-enterprise",
+    "hecate-llm",
     "hecate-memory",
     "hecate-ops",
 ]
@@ -2188,6 +2189,7 @@ dependencies = [
     { name = "email-validator" },
     { name = "fastapi" },
     { name = "fastmcp" },
+    { name = "hecate-llm" },
     { name = "hecate-ops" },
     { name = "httpx" },
     { name = "jinja2" },
@@ -2308,6 +2310,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fastmcp", specifier = ">=4.0.0b3,<5" },
     { name = "flagembedding", marker = "extra == 'rag'", specifier = ">=1.2" },
+    { name = "hecate-llm", editable = "packages/hecate-llm" },
     { name = "hecate-ops", editable = "packages/hecate-ops" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
@@ -2401,6 +2404,26 @@ requires-dist = [
     { name = "scim2-models", specifier = ">=0.2.0" },
 ]
 provides-extras = ["sso", "vault", "tenant"]
+
+[[package]]
+name = "hecate-llm"
+version = "0.1.0"
+source = { editable = "packages/hecate-llm" }
+dependencies = [
+    { name = "hecate" },
+]
+
+[package.optional-dependencies]
+llm = [
+    { name = "litellm" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "hecate", editable = "." },
+    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.50.0" },
+]
+provides-extras = ["llm"]
 
 [[package]]
 name = "hecate-memory"

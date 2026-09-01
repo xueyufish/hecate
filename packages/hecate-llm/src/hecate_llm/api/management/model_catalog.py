@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
+from hecate_llm.hub.catalog_service import CatalogService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.model_hub.catalog_service import CatalogService
 
 router = APIRouter(prefix="/api/models/catalog", tags=["model-catalog"])
 

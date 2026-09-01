@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hecate-llm"
+version = "0.1.0"
+description = "Hecate LLM gateway and model management domain — extracted from core"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Hecate Team" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "hecate>=0.1.0",
+]
+
+[project.optional-dependencies]
+llm = [
+    "litellm>=1.50.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate_llm"]
