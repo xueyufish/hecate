@@ -6,10 +6,10 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from hecate_llm.hub.fine_tuning import FineTuningService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.model_hub.fine_tuning import FineTuningService
 from hecate.models.dataset import DatasetReadSchema
 from hecate.models.fine_tuning_job import FineTuningJobCreateSchema, FineTuningJobReadSchema
 

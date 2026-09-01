@@ -11,7 +11,8 @@ import json
 import logging
 import re
 
-from hecate.services.llm.service import LLMService
+from hecate_llm.service import LLMService
+
 from hecate.services.suggestions.prompts import build_followup_prompt, build_opening_prompt
 from hecate.services.suggestions.types import SuggestionResult
 

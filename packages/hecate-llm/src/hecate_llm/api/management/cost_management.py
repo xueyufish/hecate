@@ -6,10 +6,10 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from hecate_llm.hub.cost_management import CostBudgetService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.model_hub.cost_management import CostBudgetService
 from hecate.models.model_cost_budget import (
     ModelCostBudgetCreateSchema,
     ModelCostBudgetUpdateSchema,

@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from hecate_llm.hub.monitoring import MonitoringService
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hecate.model_hub.monitoring import MonitoringService
 
 
 @pytest.fixture

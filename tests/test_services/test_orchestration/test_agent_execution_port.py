@@ -62,7 +62,7 @@ async def test_agent_execute_loads_tools(db_session):
 
     from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
 
-    with patch("hecate.services.llm.service.llm_service", mock_llm):
+    with patch("hecate_llm.service.llm_service", mock_llm):
         port = AgentExecutionPort(db_session)
         result = await port.agent_execute(
             agent_id=agent.id,
@@ -101,7 +101,7 @@ async def test_agent_execute_queries_knowledge_bases(db_session):
     port = AgentExecutionPort(db_session)
 
     with (
-        patch("hecate.services.llm.service.llm_service", mock_llm),
+        patch("hecate_llm.service.llm_service", mock_llm),
         patch.object(port, "knowledge_query", new_callable=AsyncMock) as mock_kb,
     ):
         mock_kb.return_value = [
@@ -139,7 +139,7 @@ async def test_agent_execute_pre_hook_blocks(db_session):
 
     port = AgentExecutionPort(db_session, pre_hook=mock_pre_hook)
 
-    with patch("hecate.services.llm.service.llm_service", mock_llm):
+    with patch("hecate_llm.service.llm_service", mock_llm):
         result = await port.agent_execute(
             agent_id=agent.id,
             messages=[{"role": "user", "content": "bad input"}],
@@ -176,7 +176,7 @@ async def test_agent_execute_agent_definition_filters_tools(db_session):
 
     port = AgentExecutionPort(db_session)
 
-    with patch("hecate.services.llm.service.llm_service", mock_llm):
+    with patch("hecate_llm.service.llm_service", mock_llm):
         await port.agent_execute(
             agent_id=agent.id,
             messages=[{"role": "user", "content": "search"}],
@@ -218,7 +218,7 @@ async def test_agent_execute_post_hook_sanitizes(db_session):
 
     port = AgentExecutionPort(db_session, post_hook=mock_post_hook)
 
-    with patch("hecate.services.llm.service.llm_service", mock_llm):
+    with patch("hecate_llm.service.llm_service", mock_llm):
         result = await port.agent_execute(
             agent_id=agent.id,
             messages=[{"role": "user", "content": "test"}],
@@ -381,7 +381,7 @@ async def test_agent_execute_injects_handoff_tool(db_session):
     mock_response.model = "gpt-4o"
     mock_response.tool_calls = None
 
-    with patch("hecate.services.llm.service.llm_service") as mock_llm:
+    with patch("hecate_llm.service.llm_service") as mock_llm:
         mock_llm.chat = AsyncMock(return_value=mock_response)
 
         result = await port.agent_execute(
@@ -414,7 +414,7 @@ async def test_agent_execute_no_handoff_tool_without_targets(db_session):
     mock_response.model = "gpt-4o"
     mock_response.tool_calls = None
 
-    with patch("hecate.services.llm.service.llm_service") as mock_llm:
+    with patch("hecate_llm.service.llm_service") as mock_llm:
         mock_llm.chat = AsyncMock(return_value=mock_response)
 
         result = await port.agent_execute(
@@ -451,7 +451,7 @@ async def test_agent_execute_detects_handoff_call(db_session):
     mock_response.model = "gpt-4o"
     mock_response.tool_calls = [mock_tc]
 
-    with patch("hecate.services.llm.service.llm_service") as mock_llm:
+    with patch("hecate_llm.service.llm_service") as mock_llm:
         mock_llm.chat = AsyncMock(return_value=mock_response)
 
         result = await port.agent_execute(
@@ -489,7 +489,7 @@ async def test_agent_execute_invalid_handoff_target(db_session):
     mock_response.model = "gpt-4o"
     mock_response.tool_calls = [mock_tc]
 
-    with patch("hecate.services.llm.service.llm_service") as mock_llm:
+    with patch("hecate_llm.service.llm_service") as mock_llm:
         mock_llm.chat = AsyncMock(return_value=mock_response)
 
         result = await port.agent_execute(

@@ -14,6 +14,8 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
+from hecate_llm.service import LLMResponse, llm_service
+from hecate_llm.tool_calling import format_tools_for_llm, inject_tool_results, parse_tool_calls
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,8 +32,6 @@ from hecate.engine.session_state import SessionStateStore
 from hecate.models.agent import AgentModel
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 from hecate.models.tool import ToolModel
-from hecate.services.llm.service import LLMResponse, llm_service
-from hecate.services.llm.tool_calling import format_tools_for_llm, inject_tool_results, parse_tool_calls
 from hecate.services.session_lock import session_lock_manager
 from hecate.services.tool.registry import ToolRegistry
 from hecate.services.workflow.execution_service import WorkflowExecutionService

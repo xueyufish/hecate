@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
+from hecate_llm.hub.catalog_service import CatalogService
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hecate.model_hub.catalog_service import CatalogService
 
 
 class TestCatalogService:

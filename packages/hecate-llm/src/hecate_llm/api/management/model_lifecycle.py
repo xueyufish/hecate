@@ -7,10 +7,10 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from hecate_llm.hub.lifecycle_service import LifecycleService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.model_hub.lifecycle_service import LifecycleService
 
 router = APIRouter(prefix="/api/models", tags=["model-lifecycle"])
 

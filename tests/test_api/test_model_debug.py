@@ -32,7 +32,7 @@ class TestModelTest:
         which the management endpoint surfaces as HTTP 400 (consistent with
         any other upstream LLM failure).
         """
-        with patch("hecate.services.llm.service._get_litellm", side_effect=ImportError("no litellm")):
+        with patch("hecate_llm.service._get_litellm", side_effect=ImportError("no litellm")):
             response = await provider_client.post(
                 "/api/models/test",
                 json={
@@ -104,7 +104,7 @@ class TestModelTest:
 
         # The endpoint now goes through the LLM gateway. Patch the gateway's
         # litellm accessor to return a mock completion.
-        with patch("hecate.services.llm.service._get_litellm") as mock_get_litellm:
+        with patch("hecate_llm.service._get_litellm") as mock_get_litellm:
             mock_get_litellm.return_value.acompletion = mock_completion
             with patch(
                 "hecate.api.management.model_providers.decrypt_api_key",

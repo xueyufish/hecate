@@ -11,13 +11,13 @@ import json
 import logging
 import uuid
 
+from hecate_llm.service import llm_service
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.config import settings
 from hecate.models.conversation import ConversationModel
 from hecate.models.conversation_cluster import ConversationClusterModel
-from hecate.services.llm.service import llm_service
 
 logger = logging.getLogger(__name__)
 

@@ -64,7 +64,7 @@ class HecateAgentExecutor:
 
         try:
             # Execute via LLM service directly
-            from hecate.services.llm.service import llm_service
+            from hecate_llm.service import llm_service
 
             model_name = (
                 agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"

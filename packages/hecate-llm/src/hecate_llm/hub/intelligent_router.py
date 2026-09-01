@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hecate.model_hub.cache import CacheStrategyABC, InMemoryCacheStrategy, generate_cache_key
-from hecate.services.llm.routing import ModelInfo, ModelRouter, RoutingStrategy
+from hecate_llm.hub.cache import CacheStrategyABC, InMemoryCacheStrategy, generate_cache_key
+from hecate_llm.routing import ModelInfo, ModelRouter, RoutingStrategy
 
 logger = logging.getLogger(__name__)
 

@@ -15,8 +15,9 @@ import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from hecate.services.llm.circuit_breaker import CircuitBreakerManager, _extract_prefix
-from hecate.services.llm.service import LLMService
+from hecate_llm.circuit_breaker import CircuitBreakerManager, _extract_prefix
+from hecate_llm.service import LLMService
+
 from hecate.services.validation.retry_policy import CircuitState
 
 # ---------------------------------------------------------------------------
@@ -270,7 +271,7 @@ class TestNoBreakerRegression:
         mock_response.usage.total_tokens = 15
         mock_response.choices[0].finish_reason = "stop"
 
-        with patch("hecate.services.llm.service._get_litellm") as mock_litellm:
+        with patch("hecate_llm.service._get_litellm") as mock_litellm:
             mock_litellm.return_value.acompletion = AsyncMock(return_value=mock_response)
             result = await service.chat([], model="openai/gpt-4o")
 
@@ -300,7 +301,7 @@ class TestNoBreakerRegression:
                 raise Exception("primary failed")
             return mock_response
 
-        with patch("hecate.services.llm.service._get_litellm") as mock_litellm:
+        with patch("hecate_llm.service._get_litellm") as mock_litellm:
             mock_litellm.return_value.acompletion = side_effect
             result = await service.chat([], model="openai/gpt-4o")
 

@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from hecate_llm.hub.cost_management import BudgetEnforcementHook, CostBudgetService
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.model_hub.cost_management import BudgetEnforcementHook, CostBudgetService
 from hecate.models.model_cost_budget import ModelCostBudgetCreateSchema
 
 

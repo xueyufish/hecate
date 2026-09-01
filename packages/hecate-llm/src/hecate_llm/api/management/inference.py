@@ -6,10 +6,10 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from hecate_llm.hub.inference_manager import InferenceManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.model_hub.inference_manager import InferenceManager
 from hecate.models.inference_endpoint import InferenceEndpointCreateSchema, InferenceEndpointReadSchema
 
 router = APIRouter(prefix="/api/inference", tags=["inference"])

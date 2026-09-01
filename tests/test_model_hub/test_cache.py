@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from hecate.model_hub.cache import InMemoryCacheStrategy, generate_cache_key
+from hecate_llm.hub.cache import InMemoryCacheStrategy, generate_cache_key
 
 
 class TestInMemoryCacheStrategy:

@@ -13,6 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from hecate_llm.service import llm_service
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +21,6 @@ from hecate.core.config import settings
 from hecate.engine.eventstore import EventStore
 from hecate.models.conversation import ConversationModel
 from hecate.models.conversation_turn_score import ConversationTurnScoreModel
-from hecate.services.llm.service import llm_service
 from hecate.services.ops_center.conversation_messages import project_conversation_messages
 
 logger = logging.getLogger(__name__)

@@ -10,7 +10,7 @@ Tests cover:
 
 from __future__ import annotations
 
-from hecate.services.llm.tool_calling import (
+from hecate_llm.tool_calling import (
     create_tool_result_message,
     format_tools_for_llm,
     inject_tool_results,

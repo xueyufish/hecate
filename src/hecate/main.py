@@ -47,20 +47,14 @@ from hecate.api.management.budget import router as budget_router
 from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
 from hecate.api.management.conversation_analytics import router as conversation_analytics_router
 from hecate.api.management.conversations import router as conversations_router
-from hecate.api.management.cost_management import router as cost_management_router
 from hecate.api.management.costs import router as costs_router
 from hecate.api.management.environment import router as environment_router
 from hecate.api.management.feature_flags import router as feature_flags_router
-from hecate.api.management.fine_tuning import router as fine_tuning_router
 from hecate.api.management.hooks import router as hooks_router
 from hecate.api.management.i18n import router as i18n_router
-from hecate.api.management.inference import router as inference_router
 from hecate.api.management.mcp import router as mcp_router
-from hecate.api.management.model_catalog import router as model_catalog_router
-from hecate.api.management.model_lifecycle import router as model_lifecycle_router
 from hecate.api.management.model_pricing import router as model_pricing_router
 from hecate.api.management.model_providers import router as model_providers_router
-from hecate.api.management.monitoring_models import router as monitoring_models_router
 from hecate.api.management.ops_center_overview import router as ops_center_overview_router
 from hecate.api.management.orchestration_templates import router as orchestration_templates_router
 from hecate.api.management.plugins import router as plugins_router
@@ -727,10 +721,8 @@ except ImportError:
     logger.warning("hecate-ops not installed; skipping monitoring routes")
 app.include_router(api_keys_router, prefix="/api", tags=["api-keys"])
 app.include_router(traces_router, prefix="/api", tags=["traces"])
-app.include_router(monitoring_models_router)
 app.include_router(model_pricing_router, prefix="/api", tags=["model-pricing"])
 app.include_router(costs_router, prefix="/api", tags=["costs"])
-app.include_router(cost_management_router)
 app.include_router(alert_rules_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_events_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_silences_router, prefix="/api", tags=["alerts"])
@@ -738,11 +730,29 @@ app.include_router(alert_channels_router, prefix="/api", tags=["alerts"])
 app.include_router(alert_escalation_policies_router, prefix="/api", tags=["alerts"])
 app.include_router(quotas_router, prefix="/api", tags=["quotas"])
 app.include_router(i18n_router, tags=["i18n"])
-app.include_router(inference_router)
-app.include_router(fine_tuning_router)
 app.include_router(budget_router, tags=["budgets"])
-app.include_router(model_catalog_router, tags=["model-catalog"])
-app.include_router(model_lifecycle_router, tags=["model-lifecycle"])
+
+# hecate-llm model_hub routers (cost_management, fine_tuning, inference,
+# model_catalog, model_lifecycle, monitoring_models) moved to the
+# packages/hecate-llm wheel in PR4b. Required dependency, but keep the
+# lazy mount guard for shape consistency with memory/ops routers and so
+# test/script contexts can override it cleanly.
+try:
+    from hecate_llm.api.management.cost_management import router as cost_management_router
+    from hecate_llm.api.management.fine_tuning import router as fine_tuning_router
+    from hecate_llm.api.management.inference import router as inference_router
+    from hecate_llm.api.management.model_catalog import router as model_catalog_router
+    from hecate_llm.api.management.model_lifecycle import router as model_lifecycle_router
+    from hecate_llm.api.management.monitoring_models import router as monitoring_models_router
+
+    app.include_router(monitoring_models_router)
+    app.include_router(cost_management_router)
+    app.include_router(inference_router)
+    app.include_router(fine_tuning_router)
+    app.include_router(model_catalog_router, tags=["model-catalog"])
+    app.include_router(model_lifecycle_router, tags=["model-lifecycle"])
+except ImportError:
+    logger.warning("hecate-llm not installed; skipping model_hub routers")
 
 # Enterprise-domain routers (SSO + SCIM). Lazy-imported: if
 # hecate-enterprise is not installed (self-hosted without enterprise

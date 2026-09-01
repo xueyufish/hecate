@@ -45,7 +45,7 @@ class ModelListResponse(BaseModel):
 
 def _discover_models() -> list[str]:
     """Discover available models from configured API keys via the LLM gateway."""
-    from hecate.services.llm.service import llm_service
+    from hecate_llm.service import llm_service
 
     try:
         return llm_service.list_models()

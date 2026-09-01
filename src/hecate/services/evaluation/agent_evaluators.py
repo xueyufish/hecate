@@ -50,7 +50,7 @@ async def _call_llm_judge(
     Raises:
         RuntimeError: If the LLM call fails or response is invalid.
     """
-    from hecate.services.llm.service import llm_service
+    from hecate_llm.service import llm_service
 
     config = llm_config or LLMConfig()
     try:

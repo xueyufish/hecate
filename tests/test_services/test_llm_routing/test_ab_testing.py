@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.llm.ab_testing import ABTestConfig, ABTestManager, ABTestResult
+from hecate_llm.ab_testing import ABTestConfig, ABTestManager, ABTestResult
 
 
 def _make_config(

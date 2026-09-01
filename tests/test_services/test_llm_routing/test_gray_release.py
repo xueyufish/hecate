@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.llm.gray_release import (
+from hecate_llm.gray_release import (
     GrayReleaseConfig,
     GrayReleaseManager,
     RolloutSchedule,

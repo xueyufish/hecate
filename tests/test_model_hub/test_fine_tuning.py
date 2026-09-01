@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from hecate.model_hub.fine_tuning import (
+from hecate_llm.hub.fine_tuning import (
     FineTuningBackendABC,
     FineTuningService,
     InMemoryFineTuningBackend,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_abc_not_instantiable() -> None:

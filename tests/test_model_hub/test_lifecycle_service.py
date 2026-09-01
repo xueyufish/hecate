@@ -6,9 +6,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from hecate_llm.hub.lifecycle_service import LifecycleService
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from hecate.model_hub.lifecycle_service import LifecycleService
 
 
 class TestLifecycleService:
