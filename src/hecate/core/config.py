@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     # degrades to "no memory backend" rather than raising.
     MEMORY_PROVIDER: str = "builtin"
 
+    # LLM gateway backend (hecate.llm_providers entry point, phase-4
+    # follow-ups). Names: "litellm" (hecate-llm shipped in-process, default)
+    # or any third-party gateway implementing the LLMGateway Protocol.
+    # Unknown / failing factory degrades to the litellm singleton rather
+    # than raising.
+    LLM_PROVIDER: str = "litellm"
+
     VECTOR_STORE_TYPE: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""

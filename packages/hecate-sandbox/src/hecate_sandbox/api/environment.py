@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, UploadFile
+
 from hecate_sandbox.environment.manager import EnvironmentManager
 
 router = APIRouter(prefix="/api/agents/{agent_id}/environment", tags=["environment"])
