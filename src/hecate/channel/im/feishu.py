@@ -228,3 +228,25 @@ def create_feishu_channel(
         verification_token=verification_token,
         transport=transport,
     )
+
+
+def provider() -> FeishuChannel | None:
+    """Zero-arg entry-point factory for ``hecate.channel_providers``.
+
+    Reads its own ``HECATE_IM_FEISHU_*`` env configuration and returns a
+    configured :class:`FeishuChannel`, or ``None`` when unconfigured — the
+    resolver skips ``None`` without blocking boot.
+    """
+    import os
+
+    app_id = os.environ.get("HECATE_IM_FEISHU_APP_ID")
+    app_secret = os.environ.get("HECATE_IM_FEISHU_APP_SECRET")
+    if not app_id or not app_secret:
+        return None
+    return create_feishu_channel(
+        app_id=app_id,
+        app_secret=app_secret,
+        encrypt_key=os.environ.get("HECATE_IM_FEISHU_ENCRYPT_KEY"),
+        verification_token=os.environ.get("HECATE_IM_FEISHU_VERIFICATION_TOKEN"),
+        transport=os.environ.get("HECATE_IM_FEISHU_TRANSPORT", "webhook"),
+    )

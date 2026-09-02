@@ -217,3 +217,24 @@ def create_slack_channel(
         app_token=app_token,
         token_verification_enabled=token_verification_enabled,
     )
+
+
+def provider() -> SlackChannel | None:
+    """Zero-arg entry-point factory for ``hecate.channel_providers``.
+
+    Reads its own ``HECATE_IM_SLACK_*`` env configuration and returns a
+    configured :class:`SlackChannel`, or ``None`` when unconfigured — the
+    resolver skips ``None`` without blocking boot.
+    """
+    import os
+
+    bot_token = os.environ.get("HECATE_IM_SLACK_BOT_TOKEN")
+    signing_secret = os.environ.get("HECATE_IM_SLACK_SIGNING_SECRET")
+    if not bot_token or not signing_secret:
+        return None
+    return create_slack_channel(
+        bot_token=bot_token,
+        signing_secret=signing_secret,
+        app_token=os.environ.get("HECATE_IM_SLACK_APP_TOKEN"),
+        token_verification_enabled=os.environ.get("HECATE_IM_SLACK_TEST_MODE") != "1",
+    )

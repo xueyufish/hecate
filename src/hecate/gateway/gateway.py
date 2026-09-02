@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import uuid
 
+from hecate.channel.resolver import im_channel_names
 from hecate.channel.types import CanonicalMessage
 from hecate.gateway.session import SessionRouter
 
@@ -90,7 +91,9 @@ class Gateway:
         return session_id
 
     def _is_im_channel(self, channel_id: str) -> bool:
-        return channel_id in IM_CHANNEL_PREFIXES and self._im_message_bus is not None
+        # Resolver-derived union (hardcoded prefixes + configured channels),
+        # resolved lazily so import-time stays free of entry-point scans.
+        return channel_id in im_channel_names() and self._im_message_bus is not None
 
     async def _route_im(self, message: CanonicalMessage) -> str:
         """Resolve the deterministic conversation UUID for an IM message.

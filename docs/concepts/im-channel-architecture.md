@@ -87,6 +87,37 @@ Both are registered with the existing `PluginRegistry` under
 `type="channel"` at startup. The webhook endpoint resolves the adapter by
 name.
 
+### ChannelProvider contract & entry-points route (PR5a)
+
+`ChannelBase` (in `hecate/channel/adapter.py`) is the single shared
+interface every IM channel implements. PR5a formalised it with four
+non-abstract default hooks (subclasses stay source-compatible):
+
+- `on_load()` / `on_unload()` — lifecycle (default no-op).
+- `health_check() -> str` — coarse ops signal (default `"ok"`).
+- `verify_webhook(headers, raw_body) -> tuple[int, dict]` — signed/encrypted
+  webhook verification (default `(200, {})`, meaning "not
+  platform-verified, continue to receive"). Slack's `slack_bolt` middleware
+  and Feishu's `lark_oapi.handle_webhook_request` override this; the webhook
+  route calls it before `receive`, replacing the prior leaky
+  `getattr(adapter, "underlying")` access.
+
+Channel discovery uses the `hecate.channel_providers` entry-point group,
+mirroring the `hecate.memory_providers` / `hecate.llm_providers` pattern.
+The in-core Feishu and Slack adapters declare themselves in the root
+`pyproject.toml`; PR5b extracts them into
+`packages/hecate-channel-{feishu,slack}/` which register under the same
+group. `Settings.CHANNEL_PROVIDERS` (default `("feishu", "slack")`) is a
+**tuple** because channels are inherently multi-instance — Feishu and
+Slack run side by side, unlike memory/llm which are single-select.
+
+`register_im_channels` calls `resolve_channel_providers()` first, then
+falls back to the historical env-gated soft-import branches (so an
+environment where entry-point metadata is unavailable still boots
+correctly). `im_channel_names()` unions the historical hardcoded prefixes
+with the resolver's output, so a newly installed channel package routes
+correctly without editing `gateway.py`.
+
 ### CanonicalMessage and ChannelCapabilities
 
 `hecate/channel/types.py` defines `CanonicalMessage`, the universal message
