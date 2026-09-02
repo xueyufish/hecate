@@ -10,7 +10,9 @@ Agents.
   ngrok / a similar tunnel during development)
 - A workspace in Hecate with at least one user (the binding workflow
   requires a Hecate user to bind the IM identity to)
-- Python dependencies installed: `uv pip install "hecate[tools]"`
+- Python dependencies installed: the channel plugin packages
+  `uv pip install hecate-channel-feishu hecate-channel-slack`
+  (each brings its own IM SDK; install only the channels you use)
 
 ## Feishu (Lark)
 
@@ -116,19 +118,26 @@ reply with a binding URL — same flow as Feishu.
 
 ## Channel discovery (PR5a)
 
-Both Feishu and Slack are registered automatically as entry points under
-`hecate.channel_providers` in the root `pyproject.toml`. The `Settings`
-field `CHANNEL_PROVIDERS` (default `("feishu", "slack")`) controls which
-named channels are loaded at boot — the resolver reads the tuple and
-ignores any installed entry whose name is not listed. To disable a
-channel without uninstalling its package, simply remove it from the
-tuple (e.g., `CHANNEL_PROVIDERS=("slack",)` keeps Slack only).
+Feishu and Slack ship as channel plugin packages
+(`hecate-channel-feishu` / `hecate-channel-slack`, PR5b) that register
+themselves as entry points under `hecate.channel_providers`. The
+`Settings` field `CHANNEL_PROVIDERS` (default `("feishu", "slack")`)
+controls which named channels are loaded at boot — the resolver reads the
+tuple and ignores any installed entry whose name is not listed. To
+disable a channel without uninstalling its package, simply remove it
+from the tuple (e.g., `CHANNEL_PROVIDERS=("slack",)` keeps Slack only).
 
 Each factory reads its own `HECATE_IM_*` env vars and returns `None`
 when unconfigured — the resolver skips `None` without raising, so a
 partial setup boots cleanly. If the entry-point metadata is unavailable
 (e.g. unusual packaging), `register_im_channels` falls back to the
 historical env-gated soft-import path automatically.
+
+Webhook requests are verified before anything else happens: Slack
+signatures (`X-Slack-Signature`, signing-secrets `v0` scheme) and Feishu
+encryption/verification tokens are checked by each adapter's
+`verify_webhook` hook. A request that fails verification is rejected
+with 401 and never reaches the Agent.
 
 ## Troubleshooting
 

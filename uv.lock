@@ -14,6 +14,8 @@ prerelease-mode = "allow"
 [manifest]
 members = [
     "hecate",
+    "hecate-channel-feishu",
+    "hecate-channel-slack",
     "hecate-enterprise",
     "hecate-llm",
     "hecate-memory",
@@ -2281,9 +2283,7 @@ tools = [
     { name = "a2a-sdk" },
     { name = "aiodocker" },
     { name = "duckduckgo-search" },
-    { name = "lark-oapi", extra = ["aiohttp"] },
     { name = "playwright" },
-    { name = "slack-bolt" },
     { name = "tavily-python" },
 ]
 
@@ -2319,7 +2319,6 @@ requires-dist = [
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28.0" },
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "jsonschema", specifier = ">=4.23.0" },
-    { name = "lark-oapi", extras = ["aiohttp"], marker = "extra == 'tools'", specifier = ">=1.4.0" },
     { name = "litellm", specifier = ">=1.50.0" },
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.50.0" },
     { name = "llm-guard", marker = "extra == 'security'", specifier = ">=0.3.0" },
@@ -2358,7 +2357,6 @@ requires-dist = [
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.0" },
     { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
-    { name = "slack-bolt", marker = "extra == 'tools'", specifier = ">=1.18.0" },
     { name = "slowapi", marker = "extra == 'security'", specifier = ">=0.1.9" },
     { name = "spacy", marker = "extra == 'security'", specifier = ">=3.7,<3.8" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.36" },
@@ -2371,6 +2369,36 @@ requires-dist = [
     { name = "wrapt", marker = "extra == 'observability'", specifier = ">=1.13.0" },
 ]
 provides-extras = ["llm", "temporal", "rag", "security", "tools", "redis", "observability", "mysql", "scheduling", "dev"]
+
+[[package]]
+name = "hecate-channel-feishu"
+version = "0.1.0"
+source = { editable = "packages/channels/hecate-channel-feishu" }
+dependencies = [
+    { name = "hecate" },
+    { name = "lark-oapi", extra = ["aiohttp"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "hecate", editable = "." },
+    { name = "lark-oapi", extras = ["aiohttp"], specifier = ">=1.4.0" },
+]
+
+[[package]]
+name = "hecate-channel-slack"
+version = "0.1.0"
+source = { editable = "packages/channels/hecate-channel-slack" }
+dependencies = [
+    { name = "hecate" },
+    { name = "slack-bolt" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "hecate", editable = "." },
+    { name = "slack-bolt", specifier = ">=1.18.0" },
+]
 
 [[package]]
 name = "hecate-enterprise"

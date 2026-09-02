@@ -2,16 +2,20 @@
 
 Thin wrapper around the official ``slack_bolt.App`` SDK that translates
 between Slack events and Hecate's :class:`CanonicalMessage`. Transport
-(Socket Mode / Webhook), signature verification, and OAuth are delegated to
-the SDK; this module handles the Hecate-side normalization and response
-rendering.
+(Socket Mode / Webhook), OAuth, and event dispatch are delegated to the
+SDK; this module handles the Hecate-side normalization, response
+rendering, and webhook signature verification (the Slack signing-secrets
+``v0`` scheme).
 
 Design references: D1, D2 in ``openspec/changes/multi-channel-feishu-slack/design.md``.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -23,7 +27,9 @@ from hecate.channel.types import Attachment, CanonicalMessage, MessageContent
 logger = logging.getLogger(__name__)
 
 
-# slack_bolt is an optional dependency (see [tools] extras).
+# slack_bolt ships as this package's main dependency; the guard keeps the
+# module importable in environments that load it without the package
+# environment (e.g. tooling importing the module for introspection).
 try:
     from slack_bolt import App as SlackBoltApp
 
@@ -31,6 +37,11 @@ try:
 except ImportError:  # pragma: no cover - guarded by extras
     SlackBoltApp = None
     _SLACK_AVAILABLE = False
+
+
+# Slack's signing-secrets spec rejects requests whose signature basestring
+# is older than five minutes (replay protection).
+_SIGNATURE_REPLAY_WINDOW_SECONDS = 300
 
 
 class SlackChannel(ChannelBase):
@@ -41,8 +52,8 @@ class SlackChannel(ChannelBase):
 
     Args:
         bot_token: Slack Bot User OAuth Token (``xoxb-...``).
-        signing_secret: Slack Signing Secret used by ``RequestVerification``
-            middleware to validate inbound HTTP requests.
+        signing_secret: Slack Signing Secret used for webhook signature
+            verification and by ``RequestVerification`` middleware.
         app_token: Slack App-Level Token (``xapp-...``) for Socket Mode.
             Optional; required only when running in Socket Mode.
     """
@@ -55,7 +66,7 @@ class SlackChannel(ChannelBase):
         token_verification_enabled: bool = True,
     ) -> None:
         if not _SLACK_AVAILABLE or SlackBoltApp is None:
-            raise RuntimeError("slack_bolt is not installed. Install with: uv pip install 'hecate[tools]'")
+            raise RuntimeError("slack_bolt is not installed. Install with: uv pip install hecate-channel-slack")
         self._bot_token = bot_token
         self._signing_secret = signing_secret
         self._app_token = app_token
@@ -86,14 +97,34 @@ class SlackChannel(ChannelBase):
             max_message_length=40000,
         )
 
-    @property
-    def underlying_app(self) -> Any:
-        """Expose the underlying :class:`slack_bolt.App` for advanced wiring.
+    async def verify_webhook(self, headers: dict[str, str], raw_body: bytes) -> tuple[int, dict]:
+        """Verify the Slack signing-secrets signature (``v0`` scheme).
 
-        Used by the webhook endpoint to register Bolt event listeners when
-        delegating URL verification to the SDK.
+        Implemented directly (HMAC-SHA256 over ``v0:<timestamp>:<body>``)
+        rather than delegated to Bolt's ``RequestVerification`` middleware:
+        webhook POSTs terminate at Hecate's FastAPI endpoint and never flow
+        through the Bolt request pipeline, so the middleware does not run
+        on this path.
+
+        Returns:
+            ``(200, {})`` when the signature is valid and fresh; a 401
+            payload describing the failure otherwise.
         """
-        return self._app
+        signature = headers.get("x-slack-signature") or headers.get("X-Slack-Signature")
+        timestamp = headers.get("x-slack-request-timestamp") or headers.get("X-Slack-Request-Timestamp")
+        if not signature or not timestamp:
+            return 401, {"error": "missing X-Slack-Signature / X-Slack-Request-Timestamp headers"}
+        try:
+            ts = int(timestamp)
+        except ValueError:
+            return 401, {"error": "invalid X-Slack-Request-Timestamp header"}
+        if abs(int(time.time()) - ts) > _SIGNATURE_REPLAY_WINDOW_SECONDS:
+            return 401, {"error": "request timestamp outside the replay window"}
+        basestring = b"v0:" + timestamp.encode("utf-8") + b":" + raw_body
+        digest = hmac.new(self._signing_secret.encode("utf-8"), basestring, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(f"v0={digest}", signature):
+            return 401, {"error": "signature verification failed"}
+        return 200, {}
 
     async def receive(self, raw: object) -> CanonicalMessage:
         """Convert a Slack ``event_callback`` payload to a :class:`CanonicalMessage`.
@@ -216,25 +247,4 @@ def create_slack_channel(
         signing_secret=signing_secret,
         app_token=app_token,
         token_verification_enabled=token_verification_enabled,
-    )
-
-
-def provider() -> SlackChannel | None:
-    """Zero-arg entry-point factory for ``hecate.channel_providers``.
-
-    Reads its own ``HECATE_IM_SLACK_*`` env configuration and returns a
-    configured :class:`SlackChannel`, or ``None`` when unconfigured — the
-    resolver skips ``None`` without blocking boot.
-    """
-    import os
-
-    bot_token = os.environ.get("HECATE_IM_SLACK_BOT_TOKEN")
-    signing_secret = os.environ.get("HECATE_IM_SLACK_SIGNING_SECRET")
-    if not bot_token or not signing_secret:
-        return None
-    return create_slack_channel(
-        bot_token=bot_token,
-        signing_secret=signing_secret,
-        app_token=os.environ.get("HECATE_IM_SLACK_APP_TOKEN"),
-        token_verification_enabled=os.environ.get("HECATE_IM_SLACK_TEST_MODE") != "1",
     )

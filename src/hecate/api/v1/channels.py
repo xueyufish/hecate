@@ -3,17 +3,21 @@
 Exposes ``POST /v1/channels/{name}/webhook`` for inbound messages from
 Feishu, Slack, and future IM platforms. The endpoint resolves the channel
 adapter via the existing ``PluginRegistry`` (type="channel"), validates
-the request signature via the SDK, dispatches the inbound payload to the
-:class:`IMMessageBus`, and returns 200 OK within the platform's 3-second
-window.
+the request via the adapter's ``verify_webhook`` hook, dispatches the
+inbound payload to the :class:`IMMessageBus`, and returns 200 OK within
+the platform's 3-second window.
 
-Signature verification and challenge handling are delegated to the
-underlying SDK when possible:
+Signature verification and challenge handling are the adapter's concern,
+never the route's (PR5b):
 
-- Feishu: ``lark_oapi`` handles URL verification (``type=url_verification``)
-  and event decryption via ``encrypt_key`` / ``verification_token``.
-- Slack: ``slack_bolt.RequestVerification`` middleware checks
-  ``X-Slack-Signature`` and ``X-Slack-Request-Timestamp``.
+- Feishu (``hecate-channel-feishu``): delegates to ``lark_oapi``'s
+  ``handle_webhook_request`` — signature validation, event decryption,
+  and URL-verification challenges.
+- Slack (``hecate-channel-slack``): implements the signing-secrets ``v0``
+  scheme directly (HMAC-SHA256 + replay window); Bolt's request
+  middleware never runs on this path.
+- Adapters without platform verification inherit the ``(200, {})``
+  default and pass through.
 
 Design reference: D7 in ``openspec/changes/multi-channel-feishu-slack/design.md``.
 """
@@ -23,7 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Header, HTTPException, Path, Request, status
+from fastapi import APIRouter, HTTPException, Path, Request, status
 from fastapi.responses import JSONResponse
 
 from hecate.channel.im.message_bus import IMMessageBus
@@ -70,8 +74,6 @@ async def webhook_challenge(
 async def webhook(
     request: Request,
     name: str = Path(..., description="Channel adapter name (e.g., 'feishu', 'slack')"),
-    x_slack_signature: str | None = Header(default=None, alias="X-Slack-Signature"),
-    x_slack_request_timestamp: str | None = Header(default=None, alias="X-Slack-Request-Timestamp"),
 ) -> JSONResponse:
     """Receive an inbound webhook from an IM platform."""
     registry = get_plugin_registry(request)
@@ -94,6 +96,23 @@ async def webhook(
         )
 
     raw_body = await request.body()
+
+    # Platform-level verification / decryption is the adapter's concern
+    # (PR5b): signed or encrypted webhooks override ``verify_webhook``;
+    # everyone else inherits the ``(200, {})`` default and passes through.
+    # This must run before JSON decoding — signatures cover the raw body,
+    # and encrypted payloads are not JSON-decodable until decrypted.
+    try:
+        verify_status, verify_body = await adapter.verify_webhook(dict(request.headers), raw_body)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Webhook verification failed for channel=%s: %s", name, exc)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Signature verification failed",
+        ) from exc
+    if verify_status != 200:
+        return JSONResponse(status_code=verify_status, content=verify_body or {})
+
     try:
         payload: Any = await _decode_payload(request, name, raw_body, adapter)
     except HTTPException:
@@ -109,26 +128,6 @@ async def webhook(
     if isinstance(payload, dict) and payload.get("type") == "url_verification":
         challenge = payload.get("challenge", "")
         return JSONResponse(status_code=200, content={"challenge": challenge})
-
-    # Dispatch through the SDK signature-verification layer when available.
-    # For Slack, RequestVerification runs as middleware on the underlying
-    # Bolt app, so by this point the request is already verified.
-    # For Feishu, the SDK exposes ``handle_webhook_request``.
-    underlying = getattr(adapter, "underlying", None)
-    if name == "feishu" and underlying is not None and hasattr(underlying, "handle_webhook_request"):
-        try:
-            status_code, body = await underlying.handle_webhook_request(
-                headers=dict(request.headers),
-                body=raw_body,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("Feishu signature verification failed: %s", exc)
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Signature verification failed",
-            ) from exc
-        if status_code != 200:
-            return JSONResponse(status_code=status_code, content=body or {})
 
     # Normalize to CanonicalMessage and enqueue.
     try:
