@@ -114,6 +114,22 @@ Restart Hecate. Logs should include the Slack registration line.
 DM the bot (`@<your-bot-name>` in a channel, or open a DM). Hecate will
 reply with a binding URL — same flow as Feishu.
 
+## Channel discovery (PR5a)
+
+Both Feishu and Slack are registered automatically as entry points under
+`hecate.channel_providers` in the root `pyproject.toml`. The `Settings`
+field `CHANNEL_PROVIDERS` (default `("feishu", "slack")`) controls which
+named channels are loaded at boot — the resolver reads the tuple and
+ignores any installed entry whose name is not listed. To disable a
+channel without uninstalling its package, simply remove it from the
+tuple (e.g., `CHANNEL_PROVIDERS=("slack",)` keeps Slack only).
+
+Each factory reads its own `HECATE_IM_*` env vars and returns `None`
+when unconfigured — the resolver skips `None` without raising, so a
+partial setup boots cleanly. If the entry-point metadata is unavailable
+(e.g. unusual packaging), `register_im_channels` falls back to the
+historical env-gated soft-import path automatically.
+
 ## Troubleshooting
 
 ### Webhook returns 503

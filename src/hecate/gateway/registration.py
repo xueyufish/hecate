@@ -52,18 +52,46 @@ def register_channels(registry: PluginRegistry) -> int:
 def register_im_channels(registry: PluginRegistry) -> int:
     """Register Feishu and Slack adapters when their credentials are present.
 
-    Each registration is gated on its own set of environment variables so
-    deployments can enable only the channels they have credentials for.
+    Two registration routes, in order:
+
+    1. **Entry-point route (PR5a)** — ``resolve_channel_providers()``
+       scans ``hecate.channel_providers`` for names listed in
+       ``settings.CHANNEL_PROVIDERS``. Factories read their own
+       ``HECATE_IM_*`` env vars and return ``None`` when unconfigured,
+       so an entry-point hit and "credentials configured" coincide.
+    2. **Env-gated fallback** — the historical soft-import branches run
+       only for names the resolver did not already register (e.g. an
+       environment where the entry-point metadata is unavailable). This
+       keeps the boot path robust to partial configuration and preserves
+       the historical log lines.
+
     Missing credentials are logged at INFO and the adapter is skipped
     without raising — this keeps the boot path robust to partial
     configuration.
     """
     count = 0
+    registered: set[str] = set()
+
+    # 1. Entry-point route (PR5a)
+    try:
+        from hecate.channel.resolver import resolve_channel_providers
+
+        for name, adapter in resolve_channel_providers().items():
+            _register(registry, adapter)
+            registered.add(name)
+            count += 1
+            logger.info("Registered %s IM channel adapter", name)
+    except Exception:  # noqa: BLE001
+        logger.exception("Channel provider resolver failed; falling back to env-gated registration")
+
+    # 2. Env-gated fallback — only for names the resolver did not register.
 
     # Feishu (Lark)
     feishu_app_id = os.environ.get("HECATE_IM_FEISHU_APP_ID")
     feishu_app_secret = os.environ.get("HECATE_IM_FEISHU_APP_SECRET")
-    if feishu_app_id and feishu_app_secret:
+    if "feishu" in registered:
+        logger.debug("Feishu already registered via entry point; skipping env-gated branch")
+    elif feishu_app_id and feishu_app_secret:
         try:
             from hecate.channel.im.feishu import create_feishu_channel
 
@@ -89,7 +117,9 @@ def register_im_channels(registry: PluginRegistry) -> int:
     # Slack
     slack_bot_token = os.environ.get("HECATE_IM_SLACK_BOT_TOKEN")
     slack_signing_secret = os.environ.get("HECATE_IM_SLACK_SIGNING_SECRET")
-    if slack_bot_token and slack_signing_secret:
+    if "slack" in registered:
+        logger.debug("Slack already registered via entry point; skipping env-gated branch")
+    elif slack_bot_token and slack_signing_secret:
         try:
             from hecate.channel.im.slack import create_slack_channel
 

@@ -119,3 +119,54 @@ class TestChannelBase:
         ch = TestChannel()
         assert ch.name == "test"
         assert ch.description == "Test channel"
+
+
+class TestChannelBaseDefaultHooks:
+    """PR5a optional hooks — defaults must be no-ops so existing
+    subclasses (notification adapters, im adapters, plugin SDK) stay
+    source-compatible without overriding them."""
+
+    def _make(self) -> ChannelBase:
+        class TestChannel(ChannelBase):
+            @property
+            def name(self) -> str:
+                return "test"
+
+            @property
+            def description(self) -> str:
+                return "Test channel"
+
+            @property
+            def capabilities(self) -> ChannelCapabilities:
+                return ChannelCapabilities()
+
+            async def receive(self, raw: object) -> CanonicalMessage:
+                return CanonicalMessage(
+                    id=uuid.uuid4(),
+                    channel_id="test",
+                    user_id="u",
+                    session_id=None,
+                    content=MessageContent(text=str(raw)),
+                )
+
+            async def respond(self, message_id: str, response: object) -> None:
+                pass
+
+            async def stream(self, message_id: str, chunks: object) -> None:
+                pass
+
+        return TestChannel()
+
+    async def test_verify_webhook_default_continues(self) -> None:
+        """Default (200, {}) means 'not platform-verified, continue to receive'."""
+        status, payload = await self._make().verify_webhook({"x": "1"}, b"body")
+        assert status == 200
+        assert payload == {}
+
+    async def test_health_check_default_ok(self) -> None:
+        assert await self._make().health_check() == "ok"
+
+    async def test_lifecycle_hooks_default_noop(self) -> None:
+        ch = self._make()
+        await ch.on_load()  # must not raise
+        await ch.on_unload()  # must not raise

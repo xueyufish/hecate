@@ -51,6 +51,14 @@ dependencies = [
     "hecate-sandbox",
 ]
 
+[project.entry-points."hecate.channel_providers"]
+# In-core IM channel adapters (PR5a). PR5b extracts these into
+# packages/hecate-channel-{slack,feishu}/ which register under the same
+# group; factories read their own HECATE_IM_* env vars and return None
+# when unconfigured (the resolver skips None).
+slack = "hecate.channel.im.slack:provider"
+feishu = "hecate.channel.im.feishu:provider"
+
 [project.urls]
 Homepage = "https://github.com/xueyufish/hecate"
 Repository = "https://github.com/xueyufish/hecate"

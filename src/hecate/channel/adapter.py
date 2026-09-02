@@ -105,3 +105,47 @@ class ChannelBase(ABC):
             chunks: Async iterator of response chunks.
         """
         ...
+
+    # ------------------------------------------------------------------
+    # Optional lifecycle / verification hooks (PR5a). All default to
+    # no-ops so existing subclasses stay source-compatible; channels
+    # override only what their platform needs. The webhook router uses
+    # ``verify_webhook`` in preference to reaching into SDK internals
+    # (``adapter.underlying``), which is the seam PR5b's package split
+    # relies on.
+    # ------------------------------------------------------------------
+
+    async def on_load(self) -> None:
+        """Lifecycle hook invoked after registration. Default no-op."""
+        return None
+
+    async def on_unload(self) -> None:
+        """Lifecycle hook invoked before shutdown. Default no-op."""
+        return None
+
+    async def health_check(self) -> str:
+        """Return a coarse health signal for ops dashboards.
+
+        Default ``"ok"``; adapters with remote dependencies should probe
+        their platform and return a short human-readable status instead.
+        """
+        return "ok"
+
+    async def verify_webhook(self, headers: dict[str, str], raw_body: bytes) -> tuple[int, dict]:  # noqa: RUF012
+        """Verify a webhook request's authenticity and optionally decrypt it.
+
+        Adapters whose platform enforces signed / encrypted webhooks
+        override this (e.g., Feishu delegates to ``lark_oapi``'s handler;
+        Slack relies on ``slack_bolt`` middleware and keeps the default).
+        The webhook router calls this before ``receive``; returning a
+        non-200 status short-circuits the request with that response.
+
+        Args:
+            headers: The incoming request's headers.
+            raw_body: The raw (undecoded) request body.
+
+        Returns:
+            ``(status_code, response_payload)`` — default ``(200, {})``
+            meaning "not platform-verified, continue to receive()".
+        """
+        return 200, {}

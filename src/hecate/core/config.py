@@ -100,6 +100,13 @@ class Settings(BaseSettings):
     # than raising.
     LLM_PROVIDER: str = "litellm"
 
+    # Channel providers to activate (hecate.channel_providers entry point,
+    # PR5a). Multi-select — channels are inherently multi-instance (Feishu
+    # + Slack side by side). Each named entry's zero-arg factory reads its
+    # own HECATE_IM_* env vars; unconfigured (None) or raising factories
+    # are skipped without blocking boot.
+    CHANNEL_PROVIDERS: tuple[str, ...] = ("feishu", "slack")
+
     VECTOR_STORE_TYPE: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
