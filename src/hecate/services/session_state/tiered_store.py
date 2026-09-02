@@ -26,7 +26,7 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from hecate.engine.session_state import SessionState, SessionStateStore, SessionSummary
+from hecate.runtime.session_state import SessionState, SessionStateStore, SessionSummary
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class TieredSessionStateStore(SessionStateStore):
         except Exception as redis_exc:
             # Distinguish Redis-failure-swallow from genuine SessionStateConflictError
             # (which the Redis lock raises after exhausting its retry budget).
-            from hecate.engine.session_state import SessionStateConflictError
+            from hecate.runtime.session_state import SessionStateConflictError
 
             if isinstance(redis_exc, SessionStateConflictError):
                 raise

@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from hecate.engine.eventstore import Event, EventType, EventVersionConflictError
+from hecate.runtime.eventstore import Event, EventType, EventVersionConflictError
 from hecate.services.event_state.models import EventModel
 from hecate.services.event_state.postgres_store import PostgresEventStore
 

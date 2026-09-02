@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import Any
 
-from hecate.engine.guardrail import GuardrailAction, GuardrailResult, PostToolHook
+from hecate.runtime.guardrail import GuardrailAction, GuardrailResult, PostToolHook
 from hecate.services.security.anonymizer import pii_anonymizer
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,7 @@ class ToolResultSecurityHook(PostToolHook):
         import asyncio
         import re
 
-        from hecate.engine.eventstore import Event, EventType
+        from hecate.runtime.eventstore import Event, EventType
 
         pii_types: dict[str, int] = {}
         for pii_type, pattern in pii_anonymizer.PATTERNS.items():

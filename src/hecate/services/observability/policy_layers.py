@@ -14,8 +14,8 @@ import fnmatch
 import logging
 from typing import Any
 
-from hecate.engine.tool_access import AccessDecision, ToolAccessPolicy
-from hecate.engine.tool_gate import ToolGateEvaluator
+from hecate.runtime.tool_access import AccessDecision, ToolAccessPolicy
+from hecate.runtime.tool_gate import ToolGateEvaluator
 from hecate.services.observability.policy_pipeline import (
     PermissionMode,
     PolicyContext,

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from starlette.requests import Request
 
 from hecate.core.deps_event_store import get_event_store
-from hecate.engine.eventstore import InMemoryEventStore
+from hecate.runtime.eventstore import InMemoryEventStore
 
 
 def _make_request(app: FastAPI) -> Request:

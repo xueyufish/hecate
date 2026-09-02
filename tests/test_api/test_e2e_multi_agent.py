@@ -9,10 +9,10 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from hecate.engine.checkpoint import InMemoryCheckpointStore
-from hecate.engine.compiler import GraphCompiler
-from hecate.engine.pregel import PregelRuntime
-from hecate.engine.types import StreamMode
+from hecate.runtime.checkpoint import InMemoryCheckpointStore
+from hecate.runtime.compiler import GraphCompiler
+from hecate.runtime.pregel import PregelRuntime
+from hecate.runtime.types import StreamMode
 from hecate.services.workflow.graph_dsl import parse_graph
 from hecate.services.workflow.test_runner import _TestWorker
 

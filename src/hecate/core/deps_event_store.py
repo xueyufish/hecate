@@ -16,7 +16,7 @@ from __future__ import annotations
 from fastapi import Request
 
 from hecate.core.config import settings
-from hecate.engine.eventstore import EventStore
+from hecate.runtime.eventstore import EventStore
 from hecate.services.event_state import create_event_store
 
 

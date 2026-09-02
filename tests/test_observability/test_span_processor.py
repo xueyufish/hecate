@@ -392,8 +392,8 @@ class TestPregelRuntimeRootSpan:
 
     async def test_execute_with_otel_creates_root_span(self, db_session: AsyncMock) -> None:
         """execute() creates a root session span when OTel is available."""
-        from hecate.engine.pregel import PregelRuntime
-        from hecate.engine.types import CompiledGraph
+        from hecate.runtime.pregel import PregelRuntime
+        from hecate.runtime.types import CompiledGraph
 
         graph = MagicMock(spec=CompiledGraph)
         graph.name = "test"
@@ -429,8 +429,8 @@ class TestPregelRuntimeRootSpan:
 
     async def test_execute_without_otel_runs_normally(self, db_session: AsyncMock) -> None:
         """execute() works normally when OTel is not available."""
-        from hecate.engine.pregel import PregelRuntime
-        from hecate.engine.types import CompiledGraph
+        from hecate.runtime.pregel import PregelRuntime
+        from hecate.runtime.types import CompiledGraph
 
         graph = MagicMock(spec=CompiledGraph)
         graph.name = "test"

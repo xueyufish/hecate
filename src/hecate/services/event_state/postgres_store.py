@@ -40,7 +40,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from hecate.engine.eventstore import Event, EventStore, EventVersionConflictError
+from hecate.runtime.eventstore import Event, EventStore, EventVersionConflictError
 from hecate.services.event_state.models import EventModel
 
 logger = logging.getLogger(__name__)
@@ -301,7 +301,7 @@ def _row_to_event(row: EventModel) -> Event:
     unknown string values fall back to ``EventType.CUSTOM`` so future event
     types do not break reads of historical rows.
     """
-    from hecate.engine.eventstore import EventType
+    from hecate.runtime.eventstore import EventType
 
     try:
         event_type = EventType(row.event_type)

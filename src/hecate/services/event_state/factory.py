@@ -3,7 +3,7 @@
 Provides :func:`create_event_store` that selects an implementation based on
 ``settings.EVENT_STORE_BACKEND``. Supported values:
 
-- ``"memory"`` — :class:`hecate.engine.eventstore.InMemoryEventStore`
+- ``"memory"`` — :class:`hecate.runtime.eventstore.InMemoryEventStore`
   (single-process, default for backward compatibility).
 - ``"postgres"`` — :class:`PostgresEventStore` (durable append-only log,
   recommended for production).
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from hecate.core.config import Settings
 from hecate.core.request_context import get_tenant_context
-from hecate.engine.eventstore import EventStore, InMemoryEventStore
+from hecate.runtime.eventstore import EventStore, InMemoryEventStore
 from hecate.services.event_state.postgres_store import PostgresEventStore
 
 SUPPORTED_BACKENDS = ("memory", "postgres")

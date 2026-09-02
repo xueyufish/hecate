@@ -16,13 +16,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
-from hecate.engine.errors import (
+from hecate.runtime.errors import (
     ChannelError,
     EngineError,
     ErrorCategory,
     SecurityError,
 )
-from hecate.engine.retry import RetryStrategy
+from hecate.runtime.retry import RetryStrategy
 
 # Provider SDK exception types — imported conditionally to avoid hard dependency
 _PROVIDER_EXCEPTIONS: dict[type, ErrorCategory] = {}

@@ -20,27 +20,27 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.engine.checkpoint import InMemoryCheckpointStore
-from hecate.engine.compiler import GraphCompiler
-from hecate.engine.context import InMemoryContextEngine
-from hecate.engine.eventstore import EventStore
-from hecate.engine.guardrail import (
+from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
+from hecate.runtime.checkpoint import InMemoryCheckpointStore
+from hecate.runtime.compiler import GraphCompiler
+from hecate.runtime.context import InMemoryContextEngine
+from hecate.runtime.eventstore import EventStore
+from hecate.runtime.guardrail import (
     PostLLMHook,
     PostToolHook,
     PreLLMHook,
     PreToolHook,
 )
-from hecate.engine.pregel import PregelRuntime
-from hecate.engine.session_state import SessionState, SessionStateConflictError, SessionStateStore
-from hecate.engine.types import StreamMode
-from hecate.engine.workers.agent_worker import AgentWorker
-from hecate.engine.workers.condition_worker import ConditionWorker
-from hecate.engine.workers.knowledge_worker import KnowledgeWorker
-from hecate.engine.workers.llm_worker import LLMWorker
-from hecate.engine.workers.suggestion_worker import SuggestionWorker
-from hecate.engine.workers.tool_worker import ToolWorker
-from hecate.engine.workers.variable_set_worker import VariableSetWorker
-from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
+from hecate.runtime.pregel import PregelRuntime
+from hecate.runtime.session_state import SessionState, SessionStateConflictError, SessionStateStore
+from hecate.runtime.types import StreamMode
+from hecate.runtime.workers.agent_worker import AgentWorker
+from hecate.runtime.workers.condition_worker import ConditionWorker
+from hecate.runtime.workers.knowledge_worker import KnowledgeWorker
+from hecate.runtime.workers.llm_worker import LLMWorker
+from hecate.runtime.workers.suggestion_worker import SuggestionWorker
+from hecate.runtime.workers.tool_worker import ToolWorker
+from hecate.runtime.workers.variable_set_worker import VariableSetWorker
 from hecate.services.state.state import AgentState
 from hecate.services.workflow.graph_dsl import parse_graph
 
@@ -167,7 +167,7 @@ class WorkflowExecutionService:
         if access_policy is not None:
             self._access_policy = access_policy
         elif self._tool_policy_rules:
-            from hecate.engine.tool_access import ToolAccessPolicy
+            from hecate.runtime.tool_access import ToolAccessPolicy
 
             self._access_policy = ToolAccessPolicy()
         else:
@@ -354,7 +354,7 @@ class WorkflowExecutionService:
             from hecate.core.config import settings
 
             if settings.CONTEXT_OFFLOAD_ENABLED:
-                from hecate.engine.offloader import ContextOffloader
+                from hecate.runtime.offloader import ContextOffloader
 
                 context_offloader = ContextOffloader(
                     environment=agent_env,

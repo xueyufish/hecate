@@ -17,15 +17,15 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.engine.monotonic_denials import MonotonicDenialTracker
-from hecate.engine.tool_access import (
+from hecate.models.tool_policy import ToolPolicyModel, ToolPolicyRuleModel
+from hecate.runtime.monotonic_denials import MonotonicDenialTracker
+from hecate.runtime.tool_access import (
     ApprovalCallback,
     ApprovalDecision,
     RuleAction,
     ToolAccessPolicy,
     ToolRule,
 )
-from hecate.models.tool_policy import ToolPolicyModel, ToolPolicyRuleModel
 from hecate.services.security.hooks import create_security_hooks
 
 _RULE_ACTION_BY_VALUE: dict[str, RuleAction] = {
@@ -205,7 +205,7 @@ def build_middleware_chains(
     ``enabled=False``, the corresponding NoOp hook is installed and the
     chain collapses to a passthrough.
     """
-    from hecate.engine.middleware_factory import build_llm_chain, build_tool_chain
+    from hecate.runtime.middleware_factory import build_llm_chain, build_tool_chain
 
     cfg = guardrail_config or {}
     input_enabled = bool(cfg.get("input_security", {}).get("enabled", True))
@@ -214,7 +214,7 @@ def build_middleware_chains(
 
     if not (input_enabled and output_enabled):
         # Pre/post-LLM hooks are effectively no-op; produce passthrough chains.
-        from hecate.engine.guardrail import (
+        from hecate.runtime.guardrail import (
             NoOpPostLLMHook,
             NoOpPreLLMHook,
         )
@@ -230,7 +230,7 @@ def build_middleware_chains(
         )
 
     if not data_enabled:
-        from hecate.engine.guardrail import NoOpPostToolHook
+        from hecate.runtime.guardrail import NoOpPostToolHook
 
         tool_chains = build_tool_chain(
             pre_hook=hooks.pre_tool_hook,
@@ -261,7 +261,7 @@ class NoAnswerApprovalCallback(ApprovalCallback):
         risk_level: str,
         context: dict,
     ) -> ApprovalDecision:
-        from hecate.engine.tool_access import ApprovalScope
+        from hecate.runtime.tool_access import ApprovalScope
 
         return ApprovalDecision(approved=False, reason="no_answerer_placeholder", scope=ApprovalScope.ONCE)
 

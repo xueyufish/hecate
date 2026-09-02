@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hecate.engine.types import (
+from hecate.runtime.types import (
     ChannelDef,
     ChannelType,
     Edge,
@@ -1056,7 +1056,7 @@ def build_dynamic_orchestration_executor(
                 )
 
     # Track dependency level → list of (task_id, agent_id) for FAN_OUT batching.
-    from hecate.services.observability.orchestrator_validator import budget_topological_levels
+    from hecate.runtime.replay.orchestrator_validator import budget_topological_levels
 
     levels = budget_topological_levels(dag)
 

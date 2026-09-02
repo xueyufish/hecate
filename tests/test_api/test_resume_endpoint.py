@@ -11,8 +11,8 @@ from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_workspace import get_auth_context
-from hecate.engine.eventstore import Event, EventType, InMemoryEventStore
 from hecate.main import app
+from hecate.runtime.eventstore import Event, EventType, InMemoryEventStore
 
 
 class _StubDBSession:

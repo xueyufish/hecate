@@ -25,13 +25,13 @@ from hecate.core.database import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
-from hecate.engine.eventstore import EventStore
-from hecate.engine.guardrail import GuardrailAction
-from hecate.engine.middleware import Phase
-from hecate.engine.session_state import SessionStateStore
 from hecate.models.agent import AgentModel
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 from hecate.models.tool import ToolModel
+from hecate.runtime.eventstore import EventStore
+from hecate.runtime.guardrail import GuardrailAction
+from hecate.runtime.middleware import Phase
+from hecate.runtime.session_state import SessionStateStore
 from hecate.services.session_lock import session_lock_manager
 from hecate.services.tool.registry import ToolRegistry
 from hecate.services.workflow.execution_service import WorkflowExecutionService
@@ -740,7 +740,7 @@ async def _execute_tool_calls(
     Returns:
         List of result dicts with tool_call_id, result, and is_error.
     """
-    from hecate.engine.tool_access import AccessDecision
+    from hecate.runtime.tool_access import AccessDecision
 
     results: list[dict[str, Any]] = []
     risk_overrides = risk_overrides or {}

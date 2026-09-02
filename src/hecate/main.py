@@ -340,7 +340,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Tool decision pipeline (5.9 P0): structured tool policy decision events
     from hecate.api.tool_decisions import set_tool_decision_service
-    from hecate.engine.decision_sink import decision_emitter
+    from hecate.runtime.decision_sink import decision_emitter
     from hecate.services.security.decision_service import ToolDecisionService
 
     if _settings.AGENT_ENV_DECISION_ENABLED:

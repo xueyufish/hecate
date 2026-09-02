@@ -18,7 +18,7 @@ from hecate_ops.span_adapter import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.engine.ports import RuntimePort, SpanContext
+from hecate.runtime.ports import RuntimePort, SpanContext
 
 logger = logging.getLogger(__name__)
 

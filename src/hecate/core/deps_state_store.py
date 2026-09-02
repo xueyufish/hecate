@@ -16,7 +16,7 @@ from __future__ import annotations
 from fastapi import Request
 
 from hecate.core.config import settings
-from hecate.engine.session_state import SessionStateStore
+from hecate.runtime.session_state import SessionStateStore
 from hecate.services.session_state import create_session_state_store
 
 

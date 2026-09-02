@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hecate.engine.eventstore import Event, EventType, InMemoryEventStore
+from hecate.runtime.eventstore import Event, EventType, InMemoryEventStore
 from hecate.services.event_state.postgres_store import PostgresEventStore
 
 

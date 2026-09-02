@@ -6,8 +6,8 @@ import uuid
 
 import pytest
 
-from hecate.engine.eventstore import EventStore, InMemoryEventStore
-from hecate.engine.session_state import InMemorySessionStateStore
+from hecate.runtime.eventstore import EventStore, InMemoryEventStore
+from hecate.runtime.session_state import InMemorySessionStateStore
 from hecate.services.orchestration.session_state_materializer import (
     SessionStateMaterializer,
     _bounded_retain,

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from hecate.engine.guardrail import GuardrailAction
+from hecate.runtime.guardrail import GuardrailAction
 from hecate.services.security.dlp.result import DLPAction, DLPFinding, DLPResult
 from hecate.services.security.hooks.input_security import InputSecurityHook
 from hecate.services.security.hooks.output_security import OutputSecurityHook

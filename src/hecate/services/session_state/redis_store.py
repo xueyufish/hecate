@@ -36,7 +36,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from hecate.core.config import settings
-from hecate.engine.session_state import (
+from hecate.runtime.session_state import (
     SessionState,
     SessionStateConflictError,
     SessionStateStore,

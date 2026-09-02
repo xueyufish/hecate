@@ -58,8 +58,8 @@ async def _create_message(  # noqa: ARG001
     """
     from sqlalchemy import select
 
-    from hecate.engine.eventstore import Event, EventType
     from hecate.models.session import SessionModel
+    from hecate.runtime.eventstore import Event, EventType
 
     store = _shared_event_store()
     session_uuid = getattr(_create_message, "_session_ids", {}).get(str(conversation_id))

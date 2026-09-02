@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hecate.engine.types import Command, CompiledGraph, WorkerResult
+from hecate.runtime.types import Command, CompiledGraph, WorkerResult
 
 logger = logging.getLogger(__name__)
 

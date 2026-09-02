@@ -21,9 +21,9 @@ from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_workspace import get_auth_context
-from hecate.engine.eventstore import EventStore
 from hecate.models.session import SessionModel
-from hecate.services.observability.logfold import NonReplayablePrefix
+from hecate.runtime.eventstore import EventStore
+from hecate.runtime.replay.logfold import NonReplayablePrefix
 from hecate.services.replay.assembler import (
     REPLAY_PAYLOAD_PREVIEW_CHARS,
     assemble_timeline,

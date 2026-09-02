@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hecate.engine.guardrail import GuardrailResult
+from hecate.runtime.guardrail import GuardrailResult
 
 
 class ExtensionPluginBase:

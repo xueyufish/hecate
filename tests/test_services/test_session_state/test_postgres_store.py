@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy.dialects import postgresql
 
-from hecate.engine.session_state import SessionState
+from hecate.runtime.session_state import SessionState
 from hecate.services.session_state.postgres_store import PostgresSessionStateStore
 
 

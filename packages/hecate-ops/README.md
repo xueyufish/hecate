@@ -30,7 +30,7 @@ core's orchestration adapters import `hecate_ops.span_adapter` directly, and
 the main application mounts `hecate_ops.api.monitoring` lazily (the guard
 exists for test isolation, not for optional installation).
 
-Engine-sufficiency note: `hecate.engine.*` never imports `hecate_ops` — the
+Engine-sufficiency note: `hecate.runtime.*` never imports `hecate_ops` — the
 engine's observability companions (`logfold`, `loginvariants*`, `logpolicy`,
 `orchestrator_validator`) deliberately remain in the core package and are
 guarded by `tests/test_engine/test_runtime_self_sufficiency.py`.

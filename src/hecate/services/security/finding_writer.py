@@ -158,7 +158,7 @@ class SecurityFindingWriter:
         self, *, event_type: str, finding: SecurityFindingModel, payload: dict[str, Any]
     ) -> None:
         try:
-            from hecate.engine.eventstore import Event
+            from hecate.runtime.eventstore import Event
 
             event = Event(
                 session_id=self._session_id,

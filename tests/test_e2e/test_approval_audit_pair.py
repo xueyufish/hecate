@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import uuid
 
-from hecate.engine.eventstore import EventType, InMemoryEventStore
-from hecate.engine.tool_access import (
+from hecate.runtime.eventstore import EventType, InMemoryEventStore
+from hecate.runtime.tool_access import (
     AccessDecision,
     ApprovalScope,
     RuleAction,

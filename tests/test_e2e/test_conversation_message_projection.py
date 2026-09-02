@@ -23,9 +23,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from hecate.core.config import settings
-from hecate.engine.eventstore import Event, EventType
 from hecate.models.conversation import ConversationModel
 from hecate.models.session import SessionModel
+from hecate.runtime.eventstore import Event, EventType
 from hecate.services.event_state import create_event_store
 
 

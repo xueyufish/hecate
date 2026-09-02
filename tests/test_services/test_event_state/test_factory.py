@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hecate.engine.eventstore import InMemoryEventStore
+from hecate.runtime.eventstore import InMemoryEventStore
 from hecate.services.event_state.factory import SUPPORTED_BACKENDS, create_event_store
 from hecate.services.event_state.postgres_store import PostgresEventStore
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hecate.engine.ports import SpanContext
+from hecate.runtime.ports import SpanContext
 
 logger = logging.getLogger(__name__)
 

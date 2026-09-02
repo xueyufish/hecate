@@ -12,7 +12,7 @@ from hecate_ops.span_adapter import (
     reset_span_registry,
 )
 
-from hecate.engine.ports import SpanContext
+from hecate.runtime.ports import SpanContext
 
 
 def _sdk_tracer() -> object:

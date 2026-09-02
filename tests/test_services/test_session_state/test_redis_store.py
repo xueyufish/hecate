@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from hecate.engine.session_state import SessionState
+from hecate.runtime.session_state import SessionState
 from hecate.services.session_state.redis_store import RedisSessionStateStore
 
 

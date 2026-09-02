@@ -3,7 +3,7 @@
 Provides :func:`create_session_state_store` that selects an implementation
 based on ``settings.SESSION_STATE_STORE_BACKEND``. Supported values:
 
-- ``"memory"`` — :class:`hecate.engine.session_state.InMemorySessionStateStore`
+- ``"memory"`` — :class:`hecate.runtime.session_state.InMemorySessionStateStore`
   (single-process, default for backward compatibility).
 - ``"redis"`` — :class:`RedisSessionStateStore` (Redis-only, hot-path cache).
 - ``"postgres"`` — :class:`PostgresSessionStateStore` (PG-only, durable truth).
@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from hecate.core.config import Settings
-from hecate.engine.session_state import InMemorySessionStateStore, SessionStateStore
+from hecate.runtime.session_state import InMemorySessionStateStore, SessionStateStore
 from hecate.services.session_state.postgres_store import PostgresSessionStateStore
 from hecate.services.session_state.redis_store import RedisSessionStateStore
 from hecate.services.session_state.tiered_store import TieredSessionStateStore

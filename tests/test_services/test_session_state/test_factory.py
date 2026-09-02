@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from hecate.core.config import Settings
-from hecate.engine.session_state import InMemorySessionStateStore
+from hecate.runtime.session_state import InMemorySessionStateStore
 from hecate.services.session_state import (
     PostgresSessionStateStore,
     RedisSessionStateStore,

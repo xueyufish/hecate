@@ -7,7 +7,7 @@ import logging
 import uuid
 from typing import Any
 
-from hecate.engine.guardrail import GuardrailAction, GuardrailResult, PostLLMHook
+from hecate.runtime.guardrail import GuardrailAction, GuardrailResult, PostLLMHook
 from hecate.services.security.finding_writer import FindingWriterAdapter, SecurityFindingWriter
 from hecate.services.security.llm_guard import llm_guard_scanner
 
@@ -316,7 +316,7 @@ class OutputSecurityHook(PostLLMHook):
         if self._event_store is None or self._session_id is None:
             return
         try:
-            from hecate.engine.eventstore import Event, EventType
+            from hecate.runtime.eventstore import Event, EventType
 
             try:
                 etype = EventType(event_type)
@@ -447,7 +447,7 @@ class OutputSecurityHook(PostLLMHook):
         import asyncio
         import re
 
-        from hecate.engine.eventstore import Event, EventType
+        from hecate.runtime.eventstore import Event, EventType
 
         placeholders = re.findall(r"\[[A-Z]+_\d+\]", content)
         if not placeholders:

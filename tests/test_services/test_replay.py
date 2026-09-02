@@ -10,7 +10,7 @@ import uuid
 
 import pytest
 
-from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType, InMemoryEventStore
+from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType, InMemoryEventStore
 from hecate.services.replay.assembler import (
     REPLAY_PAYLOAD_PREVIEW_CHARS,
     assemble_timeline,
@@ -344,7 +344,7 @@ async def test_state_inspector_empty_when_before_first_commit() -> None:
 
 @pytest.mark.asyncio
 async def test_state_inspector_nonreplayable_prefix_raises() -> None:
-    from hecate.services.observability.logfold import NonReplayablePrefix
+    from hecate.runtime.replay.logfold import NonReplayablePrefix
 
     sid = uuid.uuid4()
     events = [

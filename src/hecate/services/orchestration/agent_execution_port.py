@@ -21,17 +21,17 @@ from hecate_ops.span_adapter import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.engine.guardrail import (
+from hecate.models.agent import AgentModel
+from hecate.models.knowledge import KnowledgeBaseModel
+from hecate.models.tool import ToolModel
+from hecate.runtime.guardrail import (
     GuardrailAction,
     NoOpPostLLMHook,
     NoOpPreLLMHook,
     PostLLMHook,
     PreLLMHook,
 )
-from hecate.engine.ports import RuntimePort, SpanContext
-from hecate.models.agent import AgentModel
-from hecate.models.knowledge import KnowledgeBaseModel
-from hecate.models.tool import ToolModel
+from hecate.runtime.ports import RuntimePort, SpanContext
 from hecate.services.orchestration.handoff import (
     inject_handoff_tools_from_targets,
     is_handoff_tool_call,

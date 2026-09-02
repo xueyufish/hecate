@@ -19,9 +19,9 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from hecate.engine.checkpoint import CheckpointStore
-from hecate.engine.eventstore import EventStore
-from hecate.engine.session_state import SessionState, SessionStateStore
+from hecate.runtime.checkpoint import CheckpointStore
+from hecate.runtime.eventstore import EventStore
+from hecate.runtime.session_state import SessionState, SessionStateStore
 
 logger = logging.getLogger(__name__)
 

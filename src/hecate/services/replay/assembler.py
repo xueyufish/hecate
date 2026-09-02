@@ -16,7 +16,7 @@ import json
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from hecate.engine.eventstore import Event, EventType
+from hecate.runtime.eventstore import Event, EventType
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
