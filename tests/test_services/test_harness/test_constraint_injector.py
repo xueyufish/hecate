@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from hecate.services.harness.constraint_generator import (
+from hecate.runtime.self_improvement.constraint_generator import (
     ConstraintPriority,
     ConstraintRule,
 )
-from hecate.services.harness.constraint_injector import ConstraintInjector
+from hecate.runtime.self_improvement.constraint_injector import ConstraintInjector
 
 
 class TestConstraintInjector:

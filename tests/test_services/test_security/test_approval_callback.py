@@ -5,8 +5,8 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
-from hecate.engine.eventstore import EventType
-from hecate.engine.tool_access import ApprovalDecision, ApprovalScope
+from hecate.runtime.eventstore import EventType
+from hecate.runtime.tool_access import ApprovalDecision, ApprovalScope
 from hecate.services.security.approval import FailingClosedApprovalCallback
 
 
@@ -174,7 +174,7 @@ async def test_rebuild_approval_projection_from_event_log():
     the event log. Replaying the events yields the same rows as live
     capture.
     """
-    from hecate.engine.eventstore import InMemoryEventStore
+    from hecate.runtime.eventstore import InMemoryEventStore
     from hecate.services.security.approval import rebuild_approval_projection
 
     store = InMemoryEventStore()

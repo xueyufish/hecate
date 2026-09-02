@@ -18,9 +18,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.config import settings
-from hecate.engine.eventstore import EventStore
 from hecate.models.conversation import ConversationModel
 from hecate.models.conversation_turn_score import ConversationTurnScoreModel
+from hecate.runtime.eventstore import EventStore
 from hecate.services.ops_center.conversation_messages import project_conversation_messages
 
 logger = logging.getLogger(__name__)

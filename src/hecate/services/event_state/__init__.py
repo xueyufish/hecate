@@ -1,7 +1,7 @@
 """Event state store services — PostgreSQL implementation + factory.
 
 Public API exports the production backend plus the factory helper. The
-engine-layer ``EventStore`` ABC (``hecate.engine.eventstore``) remains the
+engine-layer ``EventStore`` ABC (``hecate.runtime.eventstore``) remains the
 import path for the abstract interface; this package provides the concrete
 persistence implementation and the factory.
 """

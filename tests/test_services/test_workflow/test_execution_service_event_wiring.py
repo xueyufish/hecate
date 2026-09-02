@@ -13,8 +13,8 @@ from __future__ import annotations
 import uuid
 from unittest.mock import MagicMock
 
-from hecate.engine.eventstore import EventStore, InMemoryEventStore
-from hecate.engine.session_state import SessionState
+from hecate.runtime.eventstore import EventStore, InMemoryEventStore
+from hecate.runtime.session_state import SessionState
 from hecate.services.workflow.execution_service import WorkflowExecutionService, _sync_event_position
 
 
@@ -47,7 +47,7 @@ async def test_sync_event_position_returns_state_unchanged_when_no_store():
 
 async def test_sync_event_position_updates_position_when_store_has_events():
     """``_sync_event_position`` SHALL set ``event_position`` to ``get_version(session_id)``."""
-    from hecate.engine.eventstore import Event, EventType
+    from hecate.runtime.eventstore import Event, EventType
 
     session_id = uuid.uuid4()
     store = InMemoryEventStore()
@@ -71,7 +71,7 @@ async def test_sync_event_position_zero_for_empty_store():
 
 async def test_sync_event_position_uses_provided_session_id():
     """``_sync_event_position`` SHALL query the store with the provided session_id, not the state's."""
-    from hecate.engine.eventstore import Event, EventType
+    from hecate.runtime.eventstore import Event, EventType
 
     target_session = uuid.uuid4()
     other_session = uuid.uuid4()

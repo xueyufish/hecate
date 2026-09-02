@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from hecate.core.deps import verify_api_key
-from hecate.engine.types import GraphConfig
+from hecate.runtime.types import GraphConfig
 from hecate.services.workflow.patterns import (
     PATTERN_DEFINITIONS,
     CollaborationPattern,

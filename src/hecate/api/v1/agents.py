@@ -37,9 +37,9 @@ from hecate.core.database import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
-from hecate.engine.eventstore import EventStore
-from hecate.engine.session_state import SessionStateStore
 from hecate.models.agent import AgentModel
+from hecate.runtime.eventstore import EventStore
+from hecate.runtime.session_state import SessionStateStore
 from hecate.services.session_lock import session_lock_manager
 
 router = APIRouter()

@@ -14,7 +14,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from hecate.engine.guardrail import GuardrailAction
+from hecate.runtime.guardrail import GuardrailAction
 from hecate.services.mcp.client import HecateMCPClient
 from hecate.services.security.dlp.defaults import DEFAULT_RULES
 from hecate.services.security.dlp.policy import (

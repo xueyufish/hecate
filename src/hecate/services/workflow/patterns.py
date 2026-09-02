@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from hecate.engine.types import (
+from hecate.runtime.types import (
     ChannelDef,
     ChannelType,
     Edge,

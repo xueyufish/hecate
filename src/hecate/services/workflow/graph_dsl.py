@@ -21,8 +21,8 @@ from importlib.resources import files
 
 import jsonschema
 
-from hecate.engine.errors import GraphValidationError
-from hecate.engine.types import (
+from hecate.runtime.errors import GraphValidationError
+from hecate.runtime.types import (
     ChannelDef,
     ChannelType,
     Edge,
@@ -43,7 +43,7 @@ def _load_schema() -> dict:
     loaded via ``importlib.resources`` so it works both in development and after
     ``pip install``.
     """
-    schema_path = files("hecate.engine").joinpath("graph-dsl.schema.json")
+    schema_path = files("hecate.runtime").joinpath("graph-dsl.schema.json")
     return json.loads(schema_path.read_text(encoding="utf-8"))
 
 

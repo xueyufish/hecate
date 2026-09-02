@@ -14,8 +14,8 @@ import json
 import logging
 from typing import Any
 
-from hecate.engine.guardrail import GuardrailAction, GuardrailResult
-from hecate.engine.session_hooks import HookAction, HookResult
+from hecate.runtime.guardrail import GuardrailAction, GuardrailResult
+from hecate.runtime.session_hooks import HookAction, HookResult
 
 logger = logging.getLogger(__name__)
 

@@ -25,8 +25,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from hecate.engine.eventstore import Event, EventType
-from hecate.engine.tool_access import (
+from hecate.runtime.eventstore import Event, EventType
+from hecate.runtime.tool_access import (
     ApprovalCallback,
     ApprovalDecision,
     ApprovalScope,

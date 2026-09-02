@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from hecate.api.v1.chat import _execute_tool_calls
-from hecate.engine.tool_access import (
+from hecate.runtime.tool_access import (
     ApprovalDecision,
     ApprovalScope,
     RuleAction,

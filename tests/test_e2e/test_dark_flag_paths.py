@@ -21,8 +21,8 @@ from unittest.mock import patch
 
 import pytest
 
-from hecate.engine.tool_access import AccessDecision
-from hecate.engine.workers.sandbox_router import SandboxEnforcementRouter
+from hecate.runtime.tool_access import AccessDecision
+from hecate.runtime.workers.sandbox_router import SandboxEnforcementRouter
 
 
 def test_sandbox_router_off_routes_nothing() -> None:
@@ -64,7 +64,7 @@ def test_sandbox_router_detects_abnormal_container_exit() -> None:
     Negative exit codes signal timeout or signal (OOM, segfault); the
     router must surface them as SIEM events rather than silently passing.
     """
-    from hecate.engine.workers import sandbox_router as router_module
+    from hecate.runtime.workers import sandbox_router as router_module
 
     router = SandboxEnforcementRouter(enabled=True)
     with (

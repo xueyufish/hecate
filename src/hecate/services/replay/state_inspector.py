@@ -10,9 +10,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from hecate.engine.channel import ChannelManager
-from hecate.engine.eventstore import Event, EventStore, EventType
-from hecate.services.observability.logfold import fold_session
+from hecate.runtime.channel import ChannelManager
+from hecate.runtime.eventstore import Event, EventStore, EventType
+from hecate.runtime.replay.logfold import fold_session
 
 
 def _select_commit_points(events: list[Event]) -> list[int]:
@@ -74,7 +74,7 @@ def inspect_at_version(
     # uses (the messages channel is the only one the model-visible projection
     # depends on; others remain optional).
     cm = ChannelManager()
-    from hecate.engine.types import ChannelDef, ChannelType
+    from hecate.runtime.types import ChannelDef, ChannelType
 
     cm.register("messages", ChannelDef(type=ChannelType.TOPIC, default=[]))
 

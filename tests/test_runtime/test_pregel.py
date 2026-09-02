@@ -1,0 +1,875 @@
+"""Tests for the Pregel runtime execution engine.
+
+Validates the core superstep-driven execution loop that drives graph-based
+agent workflows.  Covered behaviours:
+
+- Linear multi-node execution and checkpoint persistence.
+- Interrupt / resume semantics (pause at a node, restore state, continue).
+- Conditional branching via the ``_route`` channel.
+- ``Command.goto`` jumps that skip intermediate nodes.
+- Cycle detection via ``max_supersteps`` guard.
+- ``ChannelManager`` semantics for all channel types (LAST_VALUE, TOPIC,
+  ACCUMULATOR).
+
+The tests use lightweight **worker stubs** instead of real LLM calls, keeping
+them fast and deterministic.
+"""
+
+from __future__ import annotations
+
+import uuid
+
+import pytest
+
+from hecate.runtime.channel import ChannelManager
+from hecate.runtime.checkpoint import InMemoryCheckpointStore
+from hecate.runtime.errors import MaxSuperstepsError
+from hecate.runtime.eviction import SizeBasedEviction
+from hecate.runtime.pregel import PregelRuntime
+from hecate.runtime.types import (
+    ChannelDef,
+    ChannelType,
+    Command,
+    CompiledGraph,
+    Edge,
+    NodeConfig,
+    NodeType,
+    WorkerResult,
+)
+from hecate.runtime.worker import Worker
+
+
+class SimpleWorker(Worker):
+    """Pass-through worker that echoes the node id as output.
+
+    Used as the baseline worker in tests that do not need interrupts,
+    routing, or goto commands.
+    """
+
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"messages": [f"{node_id}_output"]},
+        )
+
+
+class InterruptWorker(Worker):
+    """Worker that emits an interrupt ``Command`` when reaching a target node.
+
+    All other nodes behave like ``SimpleWorker``.  The ``interrupt_at``
+    parameter controls which node triggers the interrupt, defaulting to ``B``.
+    """
+
+    def __init__(self, interrupt_at: str = "B", event_store=None):
+        super().__init__(event_store=event_store)
+        self._interrupt_at = interrupt_at
+
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
+        if node_id == self._interrupt_at:
+            return WorkerResult(
+                node_id=node_id,
+                channel_updates={"messages": ["interrupted"]},
+                command=Command(interrupt={"type": "approval", "message": "Please confirm"}),
+            )
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"messages": [f"{node_id}_output"]},
+        )
+
+
+class RoutingWorker(Worker):
+    """Worker that writes a route value on the ``_route`` channel at a condition node.
+
+    This simulates a conditional node deciding which branch to take.  The
+    ``route_value`` parameter (``"true"`` or ``"false"``) determines the edge
+    the engine will follow out of the condition node (``"check"``).
+    """
+
+    def __init__(self, route_value: str = "true", event_store=None):
+        super().__init__(event_store=event_store)
+        self._route_value = route_value
+
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
+        updates: dict = {"messages": [f"{node_id}_output"]}
+        if node_id == "check":
+            updates["_route"] = self._route_value
+        return WorkerResult(node_id=node_id, channel_updates=updates)
+
+
+class GotoWorker(Worker):
+    """Worker that issues a ``Command.goto("C")`` when executing node A.
+
+    Used to verify that the runtime can skip intermediate nodes (B) and jump
+    directly to a downstream node (C).
+    """
+
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
+        if node_id == "A":
+            return WorkerResult(
+                node_id=node_id,
+                channel_updates={"messages": ["from_A"]},
+                command=Command(goto="C"),
+            )
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"messages": [f"{node_id}_output"]},
+        )
+
+
+class InterruptRoutingWorker(Worker):
+    """Worker that interrupts at a condition node while setting a specific route.
+
+    Combines the behaviours of ``InterruptWorker`` and ``RoutingWorker``:
+    when the engine reaches the ``"check"`` node it writes ``_route`` and
+    raises an interrupt simultaneously.  On resume the engine must honour the
+    route that was set before the interrupt.
+    """
+
+    def __init__(self, route_value: str = "false", event_store=None):
+        super().__init__(event_store=event_store)
+        self._route_value = route_value
+
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
+        if node_id == "check":
+            return WorkerResult(
+                node_id=node_id,
+                channel_updates={"messages": ["checking"], "_route": self._route_value},
+                command=Command(interrupt={"type": "approval", "message": "Confirm route?"}),
+            )
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"messages": [f"{node_id}_output"]},
+        )
+
+
+def _make_linear_graph() -> CompiledGraph:
+    """Build a three-node linear graph: A -> B -> C -> END.
+
+    Each node is a ``CONVERSATION`` type.  The single ``messages`` TOPIC
+    channel collects output from every superstep.
+    """
+    return CompiledGraph(
+        nodes={
+            "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
+            "B": NodeConfig(id="B", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}),
+            "C": NodeConfig(id="C", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "C"}),
+        },
+        edges=[
+            Edge(source="A", target="B"),
+            Edge(source="B", target="C"),
+            Edge(source="C", target="__end__"),
+        ],
+        channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+        entry_point="A",
+        name="test-linear",
+    )
+
+
+def _make_conditional_graph() -> CompiledGraph:
+    """Build a graph with a conditional branch: start -> check -> branch_a | branch_b.
+
+    The ``check`` node is a ``CONDITION`` type whose outgoing edge maps
+    ``{"true": "branch_a", "false": "branch_b"}``.  Both branches lead to
+    ``__end__``.
+    """
+    return CompiledGraph(
+        nodes={
+            "start": NodeConfig(
+                id="start", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "Start"}
+            ),
+            "check": NodeConfig(id="check", type=NodeType.CONDITION, config={"expression": "route"}),
+            "branch_a": NodeConfig(
+                id="branch_a", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}
+            ),
+            "branch_b": NodeConfig(
+                id="branch_b", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}
+            ),
+        },
+        edges=[
+            Edge(source="start", target="check"),
+            Edge(source="check", target={"true": "branch_a", "false": "branch_b"}),
+            Edge(source="branch_a", target="__end__"),
+            Edge(source="branch_b", target="__end__"),
+        ],
+        channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+        entry_point="start",
+        name="test-conditional",
+    )
+
+
+def _make_goto_graph() -> CompiledGraph:
+    """Build a linear graph (A -> B -> C) used to test Command.goto skips.
+
+    The topology is identical to ``_make_linear_graph``; the difference is
+    that tests pair it with ``GotoWorker`` which jumps from A directly to C.
+    """
+    return CompiledGraph(
+        nodes={
+            "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
+            "B": NodeConfig(id="B", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}),
+            "C": NodeConfig(id="C", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "C"}),
+        },
+        edges=[
+            Edge(source="A", target="B"),
+            Edge(source="B", target="C"),
+            Edge(source="C", target="__end__"),
+        ],
+        channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+        entry_point="A",
+        name="test-goto",
+    )
+
+
+class TestLinearExecution:
+    """Verify that the engine processes a straight-line graph from entry to END."""
+
+    @pytest.mark.asyncio
+    async def test_linear_three_nodes(self):
+        """All three nodes execute in order and emit a final values event."""
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id, initial_input={"messages": ["init"]}):
+            results.append(event)
+
+        assert len(results) == 3
+        assert results[-1]["type"] == "values"
+
+    @pytest.mark.asyncio
+    async def test_checkpoints_saved(self):
+        """A checkpoint is persisted after each superstep so the session can be resumed."""
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        cps = await store.list_checkpoints(session_id)
+        assert len(cps) == 3
+
+
+class TestInterruptResume:
+    """Validate interrupt-then-resume semantics: execution pauses at a node,
+    preserves channel state in a checkpoint, and continues correctly after the
+    caller supplies a resume value."""
+
+    @pytest.mark.asyncio
+    async def test_interrupt_stops_execution(self):
+        """When a worker raises an interrupt the runtime stops and reports the interrupt event."""
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        assert runtime.is_interrupted
+        assert results[-1]["type"] == "interrupt"
+
+    @pytest.mark.asyncio
+    async def test_resume_from_interrupt(self):
+        """Resuming with a fresh runtime instance replays from the checkpoint and runs the remaining nodes."""
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id, initial_input={"messages": ["init"]}):
+            results.append(event)
+
+        assert runtime.is_interrupted
+        # Only A and B executed before the interrupt; C is still pending.
+        assert len(results) == 2
+
+        # Resume with a new runtime that uses a non-interrupting worker.
+        runtime2 = PregelRuntime(graph, SimpleWorker(), store)
+        resume_results = []
+        async for event in runtime2.execute(session_id, resume_value="approved"):
+            resume_results.append(event)
+
+        assert not runtime2.is_interrupted
+        assert len(resume_results) == 1
+        assert resume_results[-1]["type"] == "values"
+        final_state = resume_results[-1]["state"]
+        assert "C_output" in final_state.get("messages", [])
+
+    @pytest.mark.asyncio
+    async def test_interrupt_preserves_channel_state(self):
+        """Channel state written before the interrupt is captured in the checkpoint."""
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id, initial_input={"messages": ["init"]}):
+            pass
+
+        checkpoint = await store.load(session_id)
+        assert checkpoint is not None
+        assert "A_output" in checkpoint["channel_state"].get("messages", [])
+
+
+class TestConditionalExecution:
+    """Verify that the engine follows the correct branch when a condition node
+    writes a route value to the ``_route`` channel."""
+
+    @pytest.mark.asyncio
+    async def test_conditional_true_branch(self):
+        """When ``_route`` is ``"true"`` the engine executes branch_a and skips branch_b."""
+        graph = _make_conditional_graph()
+        worker = RoutingWorker(route_value="true")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        assert len(results) == 3
+        final_messages = results[-1]["state"]["messages"]
+        assert "branch_a_output" in final_messages
+        assert "branch_b_output" not in final_messages
+
+    @pytest.mark.asyncio
+    async def test_conditional_false_branch(self):
+        """When ``_route`` is ``"false"`` the engine executes branch_b and skips branch_a."""
+        graph = _make_conditional_graph()
+        worker = RoutingWorker(route_value="false")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        assert len(results) == 3
+        final_messages = results[-1]["state"]["messages"]
+        assert "branch_b_output" in final_messages
+        assert "branch_a_output" not in final_messages
+
+
+class TestCommandGoto:
+    """Validate that ``Command.goto`` causes the engine to jump to an arbitrary
+    downstream node, skipping any intermediate nodes."""
+
+    @pytest.mark.asyncio
+    async def test_goto_skips_intermediate_node(self):
+        """Node A issues goto(C); node B should never execute."""
+        graph = _make_goto_graph()
+        worker = GotoWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        final_messages = results[-1]["state"]["messages"]
+        assert "from_A" in final_messages
+        assert "C_output" in final_messages
+        assert "B_output" not in final_messages
+
+
+class TestChannelManager:
+    """Unit tests for ``ChannelManager`` write / read semantics across all
+    channel types, and for snapshot / restore round-tripping."""
+
+    def test_last_value_overwrites(self):
+        """LAST_VALUE channel keeps only the most recent write."""
+        mgr = ChannelManager()
+        mgr.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
+        mgr.write("val", "a")
+        mgr.write("val", "b")
+        assert mgr.read("val") == "b"
+
+    def test_topic_appends(self):
+        """TOPIC channel accumulates values into a list."""
+        mgr = ChannelManager()
+        mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
+        mgr.write("msgs", "a")
+        mgr.write("msgs", "b")
+        assert mgr.read("msgs") == ["a", "b"]
+
+    def test_accumulator_adds(self):
+        """ACCUMULATOR channel reduces values using the configured function."""
+        mgr = ChannelManager()
+        mgr.register("count", ChannelDef(type=ChannelType.ACCUMULATOR, initial=0, reduce_fn="add"))
+        mgr.write("count", 1)
+        mgr.write("count", 2)
+        mgr.write("count", 3)
+        assert mgr.read("count") == 6
+
+    def test_restore_rebuilds_state(self):
+        """A snapshot taken from one manager can fully restore another."""
+        mgr = ChannelManager()
+        mgr.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
+        mgr.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
+        mgr.write("msgs", "a")
+        mgr.write("val", 42)
+        snapshot = mgr.snapshot()
+
+        mgr2 = ChannelManager()
+        mgr2.register("msgs", ChannelDef(type=ChannelType.TOPIC, default=[]))
+        mgr2.register("val", ChannelDef(type=ChannelType.LAST_VALUE))
+        mgr2.restore(snapshot)
+        assert mgr2.read("msgs") == ["a"]
+        assert mgr2.read("val") == 42
+
+
+def _make_interrupt_conditional_graph() -> CompiledGraph:
+    """Build a conditional graph used for interrupt-then-resume routing tests.
+
+    Same topology as ``_make_conditional_graph`` but paired with
+    ``InterruptRoutingWorker`` so the engine interrupts at the ``check`` node
+    while simultaneously recording the chosen route.
+    """
+    return CompiledGraph(
+        nodes={
+            "start": NodeConfig(
+                id="start", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "Start"}
+            ),
+            "check": NodeConfig(id="check", type=NodeType.CONDITION, config={"expression": "route"}),
+            "branch_a": NodeConfig(
+                id="branch_a", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}
+            ),
+            "branch_b": NodeConfig(
+                id="branch_b", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}
+            ),
+        },
+        edges=[
+            Edge(source="start", target="check"),
+            Edge(source="check", target={"true": "branch_a", "false": "branch_b"}),
+            Edge(source="branch_a", target="__end__"),
+            Edge(source="branch_b", target="__end__"),
+        ],
+        channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+        entry_point="start",
+        name="test-interrupt-conditional",
+    )
+
+
+class TestInterruptResumeRouting:
+    """Verify that the route value recorded before an interrupt is honoured
+    after resume, so execution follows the correct branch."""
+
+    @pytest.mark.asyncio
+    async def test_resume_follows_false_branch(self):
+        """Interrupt at ``check`` with route=false; after resume, branch_b runs and branch_a does not."""
+        graph = _make_interrupt_conditional_graph()
+        worker = InterruptRoutingWorker(route_value="false")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id, initial_input={"messages": ["init"]}):
+            pass
+
+        assert runtime.is_interrupted
+
+        runtime2 = PregelRuntime(graph, SimpleWorker(), store)
+        resume_results = []
+        async for event in runtime2.execute(session_id, resume_value="approved"):
+            resume_results.append(event)
+
+        final_messages = resume_results[-1]["state"]["messages"]
+        assert "branch_b_output" in final_messages
+        assert "branch_a_output" not in final_messages
+
+    @pytest.mark.asyncio
+    async def test_resume_follows_true_branch(self):
+        """Interrupt at ``check`` with route=true; after resume, branch_a runs and branch_b does not."""
+        graph = _make_interrupt_conditional_graph()
+        worker = InterruptRoutingWorker(route_value="true")
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id, initial_input={"messages": ["init"]}):
+            pass
+
+        assert runtime.is_interrupted
+
+        runtime2 = PregelRuntime(graph, SimpleWorker(), store)
+        resume_results = []
+        async for event in runtime2.execute(session_id, resume_value="approved"):
+            resume_results.append(event)
+
+        final_messages = resume_results[-1]["state"]["messages"]
+        assert "branch_a_output" in final_messages
+        assert "branch_b_output" not in final_messages
+
+
+class TestMaxSupersteps:
+    """Verify that the runtime raises an error when a graph cycles beyond the
+    configured superstep limit, preventing infinite loops."""
+
+    @pytest.mark.asyncio
+    async def test_cyclic_graph_raises(self):
+        """An A <-> B cycle should exhaust max_supersteps and raise MaxSuperstepsError."""
+        graph = CompiledGraph(
+            nodes={
+                "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "A"}),
+                "B": NodeConfig(id="B", type=NodeType.CONVERSATION, config={"model": "test", "system_prompt": "B"}),
+            },
+            edges=[
+                Edge(source="A", target="B"),
+                Edge(source="B", target="A"),
+            ],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+            entry_point="A",
+            name="test-cyclic",
+        )
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store, max_supersteps=10)
+
+        session_id = uuid.uuid4()
+        with pytest.raises(MaxSuperstepsError, match="max supersteps"):
+            async for _ in runtime.execute(session_id):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_default_max_supersteps(self):
+        """When not explicitly set the runtime defaults to 100 supersteps."""
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        assert runtime._max_supersteps == 100
+
+
+class TopFiveWorker(Worker):
+    async def execute(
+        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+    ) -> WorkerResult:
+        return WorkerResult(
+            node_id=node_id,
+            channel_updates={"messages": [f"{node_id}_{i}" for i in range(5)]},
+        )
+
+
+class TestEvictionIntegration:
+    @pytest.mark.asyncio
+    async def test_runtime_applies_eviction_policy(self):
+        graph = _make_linear_graph()
+        worker = TopFiveWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store, eviction_policy=SizeBasedEviction(max_size=3))
+
+        session_id = uuid.uuid4()
+        results = []
+        async for event in runtime.execute(session_id):
+            results.append(event)
+
+        final_state = results[-1]["state"]
+        assert len(final_state["messages"]) == 3
+        assert final_state["messages"][-3:] == final_state["messages"]
+
+
+class TestEventStoreIntegration:
+    @pytest.mark.asyncio
+    async def test_pregel_records_lifecycle_events(self):
+        """PregelRuntime records NODE_START, NODE_END, CHANNEL_WRITE, SUPERSTEP_END events."""
+        from hecate.runtime.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events = await event_store.get_events(session_id)
+        event_types = [e.event_type for e in events]
+
+        assert EventType.CUSTOM in event_types  # SESSION_START
+        assert EventType.NODE_START in event_types
+        assert EventType.NODE_END in event_types
+        assert EventType.CHANNEL_WRITE in event_types
+
+    @pytest.mark.asyncio
+    async def test_pregel_records_resume_event(self):
+        """PregelRuntime records RESUME event when resuming from checkpoint."""
+        from hecate.runtime.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        checkpoint_store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, checkpoint_store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events_before = await event_store.get_events(session_id)
+        assert any(e.event_type == EventType.INTERRUPT for e in events_before)
+
+        runtime2 = PregelRuntime(graph, SimpleWorker(), checkpoint_store, event_store=event_store)
+        async for _ in runtime2.execute(session_id, resume_value="approved"):
+            pass
+
+        events_after = await event_store.get_events(session_id)
+        assert any(e.event_type == EventType.RESUME for e in events_after)
+
+    @pytest.mark.asyncio
+    async def test_pregel_records_interrupt_event(self):
+        """PregelRuntime records INTERRUPT event when worker returns interrupt command."""
+        from hecate.runtime.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events = await event_store.get_events(session_id)
+        assert any(e.event_type == EventType.INTERRUPT for e in events)
+
+    @pytest.mark.asyncio
+    async def test_pregel_records_error_event(self):
+        """PregelRuntime records ERROR event when worker returns error."""
+        from hecate.runtime.eventstore import EventType, InMemoryEventStore
+
+        class ErrorWorker(Worker):
+            async def execute(self, node_id, node_config, channel_snapshot, execution_context=None) -> WorkerResult:
+                return WorkerResult(node_id=node_id, error=ValueError("test error"))
+
+        graph = _make_linear_graph()
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, ErrorWorker(), store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        with pytest.raises(ValueError, match="test error"):
+            async for _ in runtime.execute(session_id):
+                pass
+
+        events = await event_store.get_events(session_id)
+        assert any(e.event_type == EventType.ERROR for e in events)
+
+    @pytest.mark.asyncio
+    async def test_pregel_no_recording_without_event_store(self):
+        """PregelRuntime does not record events when event_store is None."""
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        runtime = PregelRuntime(graph, worker, store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        assert runtime._event_store is None
+
+    @pytest.mark.asyncio
+    async def test_pregel_emits_turn_start_and_end(self):
+        """T0.5 — guardrail-upgrade-trio emits TURN_START on entry and a paired
+        TURN_END on natural graph completion. The pair encloses any
+        APPROVAL_ASKED/APPROVAL_DECIDED events emitted later (1.3.4) and
+        anchors turn-level replay analysis (ADR-030 seam registry).
+        """
+        from hecate.runtime.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = SimpleWorker()
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events = await event_store.get_events(session_id)
+        turn_starts = [e for e in events if e.event_type == EventType.TURN_START]
+        turn_ends = [e for e in events if e.event_type == EventType.TURN_END]
+        assert len(turn_starts) == 1
+        assert len(turn_ends) == 1
+        assert turn_starts[0].version < turn_ends[0].version
+        assert turn_ends[0].payload.get("reason") == "graph_complete"
+
+    @pytest.mark.asyncio
+    async def test_pregel_interrupt_emits_paired_turn_end(self):
+        """T0.5 — interrupt path emits TURN_END with reason='interrupt' before
+        returning, so the audit pair stays closed even when the loop exits via
+        ``break`` rather than while-condition exhaustion.
+        """
+        from hecate.runtime.eventstore import EventType, InMemoryEventStore
+
+        graph = _make_linear_graph()
+        worker = InterruptWorker(interrupt_at="B")
+        store = InMemoryCheckpointStore()
+        event_store = InMemoryEventStore()
+        runtime = PregelRuntime(graph, worker, store, event_store=event_store)
+
+        session_id = uuid.uuid4()
+        async for _ in runtime.execute(session_id):
+            pass
+
+        events = await event_store.get_events(session_id)
+        turn_ends = [e for e in events if e.event_type == EventType.TURN_END]
+        assert len(turn_ends) == 1
+        assert turn_ends[0].payload.get("reason") == "interrupt"
+
+    @pytest.mark.asyncio
+    async def test_restore_runs_invariant_registry_fail_stop(self):
+        """T0.4 — guardrail-upgrade-trio wires ``loginvariants.run_all`` into
+        the restore path. A log that violates a registered invariant must
+        raise ``RuntimeError`` carrying the invariant code, not log a warning
+        and continue. This pins the fail-stop contract for the 9.4
+        MONOTONIC.DENIAL invariant and the corrected TOOL.PAIRING check.
+        """
+        from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType, InMemoryEventStore
+
+        # Plant a violating event stream: TOOL_CALL without matching TOOL_RESULT.
+        session_id = uuid.uuid4()
+        event_store = InMemoryEventStore()
+        bad_event = Event(
+            session_id=session_id,
+            superstep=1,
+            event_type=EventType.TOOL_CALL,
+            payload={
+                "tool_name": "bash",
+                "tool_call_id": "tcx-orphan",
+                "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+            },
+        )
+        await event_store.append(bad_event)
+        await event_store.append(
+            Event(
+                session_id=session_id,
+                superstep=1,
+                event_type=EventType.STEP_END,
+                payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION},
+            )
+        )
+
+        # Build a runtime whose channel manager matches the event stream so the
+        # projection-equivalence path does not also raise; we isolate the
+        # invariant violation.
+        from hecate.runtime.channel import ChannelDef, ChannelManager, ChannelType
+        from hecate.runtime.types import CompiledGraph, Edge, NodeConfig, NodeType
+
+        cm = ChannelManager()
+        cm.register("messages", ChannelDef(type=ChannelType.TOPIC, default=[]))
+
+        graph = CompiledGraph(
+            nodes={"n": NodeConfig(id="n", type=NodeType.AGENT, config={})},
+            edges=[Edge(source="n", target="n", trigger="passthrough")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+            entry_point="n",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore(), event_store=event_store)
+        runtime._channel_manager = cm
+
+        with pytest.raises(RuntimeError) as exc:
+            await runtime._assert_projection_equivalent(session_id)
+        assert "TOOL.PAIRING" in str(exc.value)
+
+
+class TestHandoffTargets:
+    """Tests for PregelRuntime populating handoff_targets in execution_context."""
+
+    def test_build_handoff_targets_static(self) -> None:
+        """Static handoff edge populates one target."""
+        graph = CompiledGraph(
+            nodes={
+                "router": NodeConfig(id="router", type=NodeType.AGENT, config={"agent_id": "uuid-r"}),
+                "billing": NodeConfig(
+                    id="billing",
+                    type=NodeType.AGENT,
+                    config={"agent_id": "uuid-b", "description": "Billing agent"},
+                ),
+            },
+            edges=[Edge(source="router", target="billing", trigger="handoff")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            entry_point="router",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore())
+        targets = runtime._build_handoff_targets("router", NodeType.AGENT)
+        assert len(targets) == 1
+        assert targets[0]["node_id"] == "billing"
+        assert targets[0]["description"] == "Billing agent"
+
+    def test_build_handoff_targets_dynamic(self) -> None:
+        """Dynamic handoff edge with dict target populates all values."""
+        graph = CompiledGraph(
+            nodes={
+                "triage": NodeConfig(id="triage", type=NodeType.AGENT, config={"agent_id": "uuid-t"}),
+                "billing": NodeConfig(id="billing", type=NodeType.AGENT, config={"agent_id": "uuid-b"}),
+                "tech": NodeConfig(id="tech", type=NodeType.AGENT, config={"agent_id": "uuid-t2"}),
+            },
+            edges=[Edge(source="triage", target={"billing": "billing", "tech": "tech"}, trigger="dynamic_handoff")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            entry_point="triage",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore())
+        targets = runtime._build_handoff_targets("triage", NodeType.AGENT)
+        assert len(targets) == 2
+        node_ids = {t["node_id"] for t in targets}
+        assert node_ids == {"billing", "tech"}
+
+    def test_build_handoff_targets_non_agent(self) -> None:
+        """Non-AGENT nodes return empty list."""
+        graph = CompiledGraph(
+            nodes={
+                "conv": NodeConfig(id="conv", type=NodeType.CONVERSATION, config={"model": "gpt-4o"}),
+                "agent": NodeConfig(id="agent", type=NodeType.AGENT, config={"agent_id": "uuid-a"}),
+            },
+            edges=[Edge(source="conv", target="agent", trigger="handoff")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            entry_point="conv",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore())
+        targets = runtime._build_handoff_targets("conv", NodeType.CONVERSATION)
+        assert targets == []
+
+    def test_build_handoff_targets_no_handoff_edges(self) -> None:
+        """AGENT node without handoff edges returns empty list."""
+        graph = CompiledGraph(
+            nodes={
+                "a": NodeConfig(id="a", type=NodeType.AGENT, config={"agent_id": "uuid-a"}),
+                "b": NodeConfig(id="b", type=NodeType.AGENT, config={"agent_id": "uuid-b"}),
+            },
+            edges=[Edge(source="a", target="b")],
+            channels={"messages": ChannelDef(type=ChannelType.TOPIC)},
+            entry_point="a",
+        )
+        runtime = PregelRuntime(graph, SimpleWorker(), InMemoryCheckpointStore())
+        targets = runtime._build_handoff_targets("a", NodeType.AGENT)
+        assert targets == []

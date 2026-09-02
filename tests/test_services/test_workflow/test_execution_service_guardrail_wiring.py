@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hecate.engine.tool_access import (
+from hecate.runtime.tool_access import (
     ApprovalDecision,
     ApprovalScope,
     RuleAction,

@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from hecate.core.deps_state_store import get_session_state_store
-from hecate.engine.session_state import InMemorySessionStateStore, SessionState, SessionStateStore
+from hecate.runtime.session_state import InMemorySessionStateStore, SessionState, SessionStateStore
 
 
 def _build_app_with_singleton(singleton: SessionStateStore) -> FastAPI:

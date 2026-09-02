@@ -23,8 +23,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hecate.engine.session_state import SessionStateStore
-from hecate.engine.types import StreamMode
+from hecate.runtime.session_state import SessionStateStore
+from hecate.runtime.types import StreamMode
 from hecate.services.state.state import AgentState
 from hecate.services.workflow.execution_service import WorkflowExecutionService
 

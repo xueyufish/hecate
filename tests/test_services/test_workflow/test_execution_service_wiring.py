@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from hecate.engine.session_state import SessionState, SessionStateStore
+from hecate.runtime.session_state import SessionState, SessionStateStore
 from hecate.services.state.state import AgentState
 from hecate.services.workflow.execution_service import WorkflowExecutionService
 

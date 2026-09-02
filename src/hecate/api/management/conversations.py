@@ -19,12 +19,12 @@ from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_workspace import get_auth_context
-from hecate.engine.eventstore import EventStore
 from hecate.models.conversation import (
     ConversationCreateSchema,
     ConversationModel,
     ConversationReadSchema,
 )
+from hecate.runtime.eventstore import EventStore
 from hecate.services.ops_center.conversation_messages import project_conversation_messages
 
 router = APIRouter()

@@ -1,7 +1,7 @@
 """Session state store services — Redis + PostgreSQL + Tiered implementations.
 
 Public API exports the three production backends plus the factory helper.
-The engine-layer ``SessionStateStore`` ABC (``hecate.engine.session_state``)
+The engine-layer ``SessionStateStore`` ABC (``hecate.runtime.session_state``)
 remains the import path for the abstract interface; this package provides
 the concrete persistence implementations and the factory.
 """

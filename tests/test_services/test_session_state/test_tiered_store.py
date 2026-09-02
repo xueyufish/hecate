@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hecate.engine.session_state import SessionState, SessionSummary
+from hecate.runtime.session_state import SessionState, SessionSummary
 from hecate.services.session_state.tiered_store import TieredSessionStateStore
 
 

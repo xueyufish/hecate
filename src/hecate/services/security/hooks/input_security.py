@@ -7,7 +7,7 @@ import logging
 import uuid
 from typing import Any
 
-from hecate.engine.guardrail import GuardrailAction, GuardrailResult, PreLLMHook
+from hecate.runtime.guardrail import GuardrailAction, GuardrailResult, PreLLMHook
 from hecate.services.security.anonymizer import pii_anonymizer
 from hecate.services.security.llm_guard import llm_guard_scanner
 
@@ -155,7 +155,7 @@ class InputSecurityHook(PreLLMHook):
             logger.warning("PII audit enabled but event_store or session_id not configured")
             return
 
-        from hecate.engine.eventstore import Event, EventType
+        from hecate.runtime.eventstore import Event, EventType
 
         pii_types: dict[str, int] = {}
         for placeholder in mappings.values():

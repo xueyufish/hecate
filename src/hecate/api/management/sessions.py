@@ -22,9 +22,9 @@ from hecate.core.deps import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
-from hecate.engine.eventstore import EventStore
-from hecate.engine.session_state import SessionStateStore
 from hecate.models.session import SessionCreateSchema, SessionModel, SessionReadSchema
+from hecate.runtime.eventstore import EventStore
+from hecate.runtime.session_state import SessionStateStore
 
 router = APIRouter()
 
@@ -170,7 +170,7 @@ async def resume_session(
     Raises:
         HTTPException: 400 if no unclosed INTERRUPT exists in the event log.
     """
-    from hecate.engine.eventstore import EventType
+    from hecate.runtime.eventstore import EventType
 
     events = await event_store.get_events(session_id)
     has_unclosed_interrupt = any(event.event_type == EventType.INTERRUPT for event in events) and not any(

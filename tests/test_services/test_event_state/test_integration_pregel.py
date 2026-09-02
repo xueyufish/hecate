@@ -10,8 +10,8 @@ import uuid
 
 import pytest
 
-from hecate.engine.eventstore import Event, EventType, InMemoryEventStore
-from hecate.engine.session_state import SessionState
+from hecate.runtime.eventstore import Event, EventType, InMemoryEventStore
+from hecate.runtime.session_state import SessionState
 from hecate.services.workflow.execution_service import _sync_event_position
 
 

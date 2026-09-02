@@ -14,7 +14,7 @@ import pytest
 
 from hecate.core.config import settings
 from hecate.core.deps_state_store import get_session_state_store
-from hecate.engine.session_state import InMemorySessionStateStore, SessionStateStore
+from hecate.runtime.session_state import InMemorySessionStateStore, SessionStateStore
 from hecate.services.session_state import create_session_state_store
 
 
@@ -66,7 +66,7 @@ def test_factory_default_returns_in_memory_for_default_backend():
 
 def test_fallback_save_then_load_round_trips():
     """The fallback path SHALL produce a usable store that round-trips save/load."""
-    from hecate.engine.session_state import SessionState
+    from hecate.runtime.session_state import SessionState
 
     request = _FakeRequest(_FakeAppEmptyState())
     store = get_session_state_store(request)

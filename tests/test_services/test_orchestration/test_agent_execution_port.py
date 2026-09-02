@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hecate.engine.agent_tool import AgentDefinition
-from hecate.engine.guardrail import GuardrailAction, GuardrailResult
 from hecate.models.agent import AgentModel
 from hecate.models.tool import ToolModel
+from hecate.runtime.agent_tool import AgentDefinition
+from hecate.runtime.guardrail import GuardrailAction, GuardrailResult
 
 
 def _make_agent(
@@ -231,7 +231,7 @@ async def test_agent_execute_post_hook_sanitizes(db_session):
 @pytest.mark.asyncio
 async def test_agent_worker_direct_mode_default():
     """AgentWorker defaults to direct mode when invocation_mode is missing."""
-    from hecate.engine.workers.agent_worker import AgentWorker
+    from hecate.runtime.workers.agent_worker import AgentWorker
 
     mock_service = AsyncMock(return_value={"response": "direct result", "usage": {}})
     worker = AgentWorker(execution_service=mock_service)
@@ -250,7 +250,7 @@ async def test_agent_worker_direct_mode_default():
 @pytest.mark.asyncio
 async def test_agent_worker_tool_mode():
     """AgentWorker with invocation_mode='tool' creates AgentTool schema."""
-    from hecate.engine.workers.agent_worker import AgentWorker
+    from hecate.runtime.workers.agent_worker import AgentWorker
 
     worker = AgentWorker()
     agent_id = uuid.uuid4()
@@ -279,7 +279,7 @@ async def test_agent_worker_tool_mode():
 @pytest.mark.asyncio
 async def test_agent_worker_tool_mode_no_definition():
     """AgentWorker tool mode with no agent_definition uses defaults."""
-    from hecate.engine.workers.agent_worker import AgentWorker
+    from hecate.runtime.workers.agent_worker import AgentWorker
 
     worker = AgentWorker()
     agent_id = uuid.uuid4()
@@ -301,7 +301,7 @@ async def test_agent_worker_tool_mode_no_definition():
 @pytest.mark.asyncio
 async def test_agent_worker_missing_agent_id():
     """AgentWorker returns error when agent_id is missing."""
-    from hecate.engine.workers.agent_worker import AgentWorker
+    from hecate.runtime.workers.agent_worker import AgentWorker
 
     worker = AgentWorker()
 
@@ -318,8 +318,8 @@ async def test_agent_worker_missing_agent_id():
 @pytest.mark.asyncio
 async def test_compiler_validates_invocation_mode():
     """GraphCompiler rejects invalid invocation_mode values."""
-    from hecate.engine.compiler import GraphCompiler
-    from hecate.engine.types import GraphConfig, NodeConfig, NodeType
+    from hecate.runtime.compiler import GraphCompiler
+    from hecate.runtime.types import GraphConfig, NodeConfig, NodeType
     from hecate.services.workflow.graph_dsl import GraphValidationError
 
     config = GraphConfig(
@@ -342,8 +342,8 @@ async def test_compiler_validates_invocation_mode():
 @pytest.mark.asyncio
 async def test_compiler_accepts_valid_invocation_mode():
     """GraphCompiler accepts valid invocation_mode values."""
-    from hecate.engine.compiler import GraphCompiler
-    from hecate.engine.types import GraphConfig, NodeConfig, NodeType
+    from hecate.runtime.compiler import GraphCompiler
+    from hecate.runtime.types import GraphConfig, NodeConfig, NodeType
 
     config = GraphConfig(
         entry="agent_1",

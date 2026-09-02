@@ -13,8 +13,8 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.engine.eventstore import EventStore
 from hecate.models.session import SessionModel
+from hecate.runtime.eventstore import EventStore
 from hecate.services.replay.assembler import derive_session_messages
 
 

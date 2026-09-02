@@ -34,7 +34,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.sql import desc
 
-from hecate.engine.session_state import SessionState, SessionStateStore, SessionSummary
+from hecate.runtime.session_state import SessionState, SessionStateStore, SessionSummary
 from hecate.services.session_state.models import SessionStateModel
 
 

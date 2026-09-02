@@ -16,9 +16,9 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.deps_event_store import get_event_store
-from hecate.engine.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType, InMemoryEventStore
 from hecate.models.agent import AgentModel
 from hecate.models.session import SessionModel
+from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType, InMemoryEventStore
 
 
 def _make_event(

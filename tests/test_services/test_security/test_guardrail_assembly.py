@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import uuid
 
-from hecate.engine.tool_access import ApprovalDecision, RuleAction
 from hecate.models.tool_policy import ToolPolicyModel, ToolPolicyRuleModel
+from hecate.runtime.tool_access import ApprovalDecision, RuleAction
 from hecate.services.security.guardrail_assembly import (
     GuardrailBundle,
     NoAnswerApprovalCallback,
@@ -177,7 +177,7 @@ async def test_assemble_builds_middleware_chains_for_each_phase(db_session):
     Phase values. Stages that are disabled in ``guardrail_config`` are
     filtered at assembly time (here the default config keeps every stage).
     """
-    from hecate.engine.middleware import Phase
+    from hecate.runtime.middleware import Phase
 
     bundle = await assemble_guardrails(
         db_session,
@@ -201,7 +201,7 @@ async def test_assemble_builds_middleware_chains_for_each_phase(db_session):
 async def test_assemble_filters_disabled_stages_from_chain(db_session):
     """A disabled section (e.g. ``input_security.enabled=False``) collapses
     that pre-LLM chain to a NoOp wrapper — the stage is NOT added to the chain."""
-    from hecate.engine.middleware import Phase
+    from hecate.runtime.middleware import Phase
 
     bundle = await assemble_guardrails(
         db_session,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.harness.failure_analyzer import FailureAnalyzer, FailureType
+from hecate.runtime.self_improvement.failure_analyzer import FailureAnalyzer, FailureType
 
 
 class TestFailureAnalyzer:

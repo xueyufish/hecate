@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hecate.engine.session_state import (
+from hecate.runtime.session_state import (
     InMemorySessionStateStore,
     SessionState,
     SessionStateConflictError,

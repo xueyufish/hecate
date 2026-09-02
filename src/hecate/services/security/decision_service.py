@@ -18,12 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.config import settings
 from hecate.core.database import async_session_factory
-from hecate.engine.decision_sink import DecisionSink
 from hecate.models.tool_decision import (
     ToolDecisionModel,
     ToolDecisionQuerySchema,
     ToolDecisionReadSchema,
 )
+from hecate.runtime.decision_sink import DecisionSink
 
 logger = logging.getLogger(__name__)
 

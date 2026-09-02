@@ -17,9 +17,9 @@ from hecate_sandbox.environment.network_policy import (
     NetworkPolicyMode,
 )
 
-from hecate.engine.decision_sink import ToolDecisionEmitter
-from hecate.engine.tool_access import AccessDecision
-from hecate.engine.workers.sandbox_router import SandboxEnforcementRouter
+from hecate.runtime.decision_sink import ToolDecisionEmitter
+from hecate.runtime.tool_access import AccessDecision
+from hecate.runtime.workers.sandbox_router import SandboxEnforcementRouter
 
 
 class TestEndToEndDefaultBehavior:
