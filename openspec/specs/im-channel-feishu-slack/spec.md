@@ -48,7 +48,7 @@ The system SHALL provide a `SlackChannel` class in `src/hecate/channel/im/slack.
 
 ### Requirement: Webhook endpoint dispatches to registered IM channel adapters
 
-The system SHALL provide a FastAPI route `POST /v1/channels/{name}/webhook` that accepts inbound webhooks from IM platforms. The route SHALL resolve `{name}` against the `PluginRegistry` (type=`channel`), validate the inbound request with the adapter's transport handler (signature verification, challenge response), call `ChannelABC.receive(raw_body)` to obtain a `CanonicalMessage`, enqueue it to the MessageBus, and return `200 OK` within 200 milliseconds.
+The system SHALL provide a FastAPI route `POST /v1/channels/{name}/webhook` that accepts inbound webhooks from IM platforms. The route SHALL resolve `{name}` against the `PluginRegistry` (type=`channel`), validate the inbound request by calling the adapter's `verify_webhook(headers, raw_body)` hook before JSON decoding (signature verification, decryption, challenge response are the adapter's concern — Slack implements the signing-secrets `v0` scheme, Feishu delegates to the `lark_oapi` handler; a non-200 result short-circuits with that status and body), call `ChannelABC.receive(raw_body)` to obtain a `CanonicalMessage`, enqueue it to the MessageBus, and return `200 OK` within 200 milliseconds.
 
 #### Scenario: Slack URL verification challenge
 

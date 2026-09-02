@@ -135,10 +135,11 @@ class ChannelBase(ABC):
         """Verify a webhook request's authenticity and optionally decrypt it.
 
         Adapters whose platform enforces signed / encrypted webhooks
-        override this (e.g., Feishu delegates to ``lark_oapi``'s handler;
-        Slack relies on ``slack_bolt`` middleware and keeps the default).
-        The webhook router calls this before ``receive``; returning a
-        non-200 status short-circuits the request with that response.
+        override this (e.g. ``hecate-channel-feishu`` delegates to
+        ``lark_oapi``'s handler; ``hecate-channel-slack`` implements the
+        signing-secrets ``v0`` scheme directly). The webhook router calls
+        this before ``receive``; returning a non-200 status short-circuits
+        the request with that response.
 
         Args:
             headers: The incoming request's headers.

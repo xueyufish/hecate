@@ -31,7 +31,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --extra dev --prerelease=allow
+        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev --prerelease=allow
       - name: Type check
         run: uv run mypy src/ packages/
 
@@ -54,7 +54,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --extra dev --prerelease=allow
+        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev --prerelease=allow
       - name: Run tests
         run: |
           uv pip install pytest-timeout
@@ -83,7 +83,7 @@ jobs:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
-        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --extra dev --prerelease=allow
+        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev --prerelease=allow
       - name: Fresh-database migration drift gate
         env:
           DRIFT_ADMIN_URL: postgresql://hecate:hecate@localhost:5432/postgres

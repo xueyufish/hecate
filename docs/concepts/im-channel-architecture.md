@@ -77,11 +77,12 @@ shape.
 ### ChannelBase and the Plugin Registry
 
 `hecate/channel/adapter.py` defines `ChannelBase`, an abstract base class
-with three methods: `receive`, `respond`, and `stream`. Concrete
-implementations live in `hecate/channel/im/`:
+with three methods: `receive`, `respond`, and `stream`. Since PR5b the
+concrete implementations live in the channel plugin packages under
+`packages/channels/`:
 
-- `feishu.py` — wraps `lark_oapi.channel.FeishuChannel`
-- `slack.py` — wraps `slack_bolt.App`
+- `hecate-channel-feishu` — wraps `lark_oapi.channel.FeishuChannel`
+- `hecate-channel-slack` — wraps `slack_bolt.App`
 
 Both are registered with the existing `PluginRegistry` under
 `type="channel"` at startup. The webhook endpoint resolves the adapter by
@@ -97,19 +98,24 @@ non-abstract default hooks (subclasses stay source-compatible):
 - `health_check() -> str` — coarse ops signal (default `"ok"`).
 - `verify_webhook(headers, raw_body) -> tuple[int, dict]` — signed/encrypted
   webhook verification (default `(200, {})`, meaning "not
-  platform-verified, continue to receive"). Slack's `slack_bolt` middleware
-  and Feishu's `lark_oapi.handle_webhook_request` override this; the webhook
-  route calls it before `receive`, replacing the prior leaky
-  `getattr(adapter, "underlying")` access.
+  platform-verified, continue to `receive`"). The webhook route calls it
+  before JSON decoding — signatures cover the raw body, and encrypted
+  payloads are not JSON-decodable until decrypted. `hecate-channel-feishu`
+  delegates to `lark_oapi`'s `handle_webhook_request`;
+  `hecate-channel-slack` implements the signing-secrets `v0` scheme
+  directly (HMAC-SHA256 over `v0:<timestamp>:<body>` with a five-minute
+  replay window) — webhook POSTs terminate at Hecate's FastAPI endpoint
+  and never flow through Bolt's `RequestVerification` middleware.
 
 Channel discovery uses the `hecate.channel_providers` entry-point group,
 mirroring the `hecate.memory_providers` / `hecate.llm_providers` pattern.
-The in-core Feishu and Slack adapters declare themselves in the root
-`pyproject.toml`; PR5b extracts them into
-`packages/hecate-channel-{feishu,slack}/` which register under the same
-group. `Settings.CHANNEL_PROVIDERS` (default `("feishu", "slack")`) is a
-**tuple** because channels are inherently multi-instance — Feishu and
-Slack run side by side, unlike memory/llm which are single-select.
+The adapters live in the channel plugin packages
+`packages/channels/hecate-channel-{feishu,slack}/` (PR5b), which register
+under that group; the historical in-core entries were retired when the
+packages were extracted. `Settings.CHANNEL_PROVIDERS` (default
+`("feishu", "slack")`) is a **tuple** because channels are inherently
+multi-instance — Feishu and Slack run side by side, unlike memory/llm
+which are single-select.
 
 `register_im_channels` calls `resolve_channel_providers()` first, then
 falls back to the historical env-gated soft-import branches (so an

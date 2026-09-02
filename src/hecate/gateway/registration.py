@@ -1,15 +1,16 @@
-"""Channel registration — register built-in channel adapters with PluginRegistry.
+"""Channel registration — register channel adapters with PluginRegistry.
 
 The function is split into two phases:
 
 - ``register_channels`` (legacy) — registers only the empty placeholder list,
   preserved for back-compat with the existing test suite that imports it.
-- ``register_im_channels`` — registers Feishu and Slack adapters when the
-  corresponding environment credentials are present.
+- ``register_im_channels`` — registers IM adapters (Feishu, Slack, ...) via
+  the ``hecate.channel_providers`` entry-point group when the corresponding
+  environment credentials are present.
 
-Future IM platforms (DingTalk, WeCom, Telegram, etc.) follow the same
-pattern: append a ``try`` block here with the appropriate credential
-gating.
+Future IM platforms (DingTalk, WeCom, Telegram, etc.) ship as channel
+plugin packages (``packages/channels/hecate-channel-*``) registering
+under the same entry-point group — no core change required.
 """
 
 from __future__ import annotations
@@ -61,7 +62,8 @@ def register_im_channels(registry: PluginRegistry) -> int:
        so an entry-point hit and "credentials configured" coincide.
     2. **Env-gated fallback** — the historical soft-import branches run
        only for names the resolver did not already register (e.g. an
-       environment where the entry-point metadata is unavailable). This
+       environment where the entry-point metadata is unavailable). They
+       lazy-import the channel plugin packages extracted in PR5b. This
        keeps the boot path robust to partial configuration and preserves
        the historical log lines.
 
@@ -93,7 +95,7 @@ def register_im_channels(registry: PluginRegistry) -> int:
         logger.debug("Feishu already registered via entry point; skipping env-gated branch")
     elif feishu_app_id and feishu_app_secret:
         try:
-            from hecate.channel.im.feishu import create_feishu_channel
+            from hecate_channel_feishu.channel import create_feishu_channel
 
             adapter = create_feishu_channel(
                 app_id=feishu_app_id,
@@ -107,7 +109,8 @@ def register_im_channels(registry: PluginRegistry) -> int:
             logger.info("Registered Feishu IM channel adapter")
         except ImportError:
             logger.info(
-                "lark_oapi not installed; skipping Feishu IM channel. Install with: uv pip install 'hecate[tools]'"
+                "hecate-channel-feishu not installed; skipping Feishu IM channel. "
+                "Install with: uv pip install hecate-channel-feishu"
             )
         except Exception:  # noqa: BLE001
             logger.exception("Failed to register Feishu IM channel")
@@ -121,7 +124,7 @@ def register_im_channels(registry: PluginRegistry) -> int:
         logger.debug("Slack already registered via entry point; skipping env-gated branch")
     elif slack_bot_token and slack_signing_secret:
         try:
-            from hecate.channel.im.slack import create_slack_channel
+            from hecate_channel_slack.channel import create_slack_channel
 
             # Test environments set HECATE_IM_SLACK_TEST_MODE=1 to skip the
             # auth.test round-trip that slack_bolt runs on construction.
@@ -137,7 +140,8 @@ def register_im_channels(registry: PluginRegistry) -> int:
             logger.info("Registered Slack IM channel adapter")
         except ImportError:
             logger.info(
-                "slack_bolt not installed; skipping Slack IM channel. Install with: uv pip install 'hecate[tools]'"
+                "hecate-channel-slack not installed; skipping Slack IM channel. "
+                "Install with: uv pip install hecate-channel-slack"
             )
         except Exception:  # noqa: BLE001
             logger.exception("Failed to register Slack IM channel")

@@ -17,11 +17,11 @@ Factory contract (duck-typed, no ABC beyond ``ChannelBase``):
 - A raising factory is logged and skipped — one broken channel never
   blocks the others or the boot path.
 
-The shipped in-core adapters (``channel/im/{feishu,slack}.py``) declare
-their own entries under this group in the root ``pyproject.toml``;
-PR5b extracts them into ``hecate-channel-{feishu,slack}`` packages that
-register under the same group, at which point the in-core entries are
-retired.
+The shipped channel adapters live in the plugin packages
+``packages/channels/hecate-channel-{feishu,slack}`` (PR5b) and register
+their entries under this group; the historical in-core entries were
+retired when the packages were extracted. Third-party channels follow
+the same route.
 """
 
 from __future__ import annotations

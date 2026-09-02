@@ -8,14 +8,16 @@ Covers the dispatch logic of
 - Unknown channel name returns 404.
 - Missing or missing registry returns 503.
 - Signed payload from a registered adapter is normalized and enqueued.
+- ``verify_webhook`` rejections short-circuit the request (PR5b).
 
-The Slack / Feishu SDKs are mocked so signature verification does not
-require real signing secrets.
+Adapters are stubbed at the :class:`ChannelBase` level so signature
+verification does not require real signing secrets; the real Slack /
+Feishu verification implementations are covered by
+``tests/test_channels/``.
 """
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -50,10 +52,6 @@ class _StubAdapter(ChannelBase):
     @property
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(markdown=True)
-
-    @property
-    def underlying(self) -> Any:  # pragma: no cover - unused in tests
-        return None
 
     async def receive(self, raw: object) -> CanonicalMessage:
         self.received.append(raw)
@@ -263,3 +261,97 @@ async def test_invalid_json_returns_400() -> None:
             headers={"content-type": "application/json"},
         )
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# verify_webhook dispatch (PR5b) — the route calls the adapter hook before
+# JSON decoding; non-200 results short-circuit with the adapter's payload.
+# ---------------------------------------------------------------------------
+
+
+class _VerifyingAdapter(_StubAdapter):
+    """Adapter stub whose ``verify_webhook`` returns a canned response."""
+
+    def __init__(self, name: str = "stub", result: tuple[int, dict] = (401, {"error": "bad signature"})) -> None:
+        super().__init__(name)
+        self._result = result
+        self.verified: list[tuple[dict[str, str], bytes]] = []
+
+    async def verify_webhook(self, headers: dict[str, str], raw_body: bytes) -> tuple[int, dict]:
+        self.verified.append((headers, raw_body))
+        return self._result
+
+
+class _ExplodingVerifyAdapter(_StubAdapter):
+    """Adapter stub whose ``verify_webhook`` raises."""
+
+    async def verify_webhook(self, headers: dict[str, str], raw_body: bytes) -> tuple[int, dict]:
+        raise RuntimeError("simulated SDK failure")
+
+
+def _register(registry: PluginRegistry, adapter: _StubAdapter) -> None:
+    registry.register(
+        PluginManifest(
+            type="channel",
+            name=adapter.name,
+            version="1.0.0",
+            api_version="1.0",
+            min_platform_version="0.6.0",
+            description=adapter.description,
+        ),
+        adapter,
+    )
+
+
+@pytest.mark.asyncio
+async def test_verification_rejection_short_circuits() -> None:
+    """A 401 from verify_webhook is returned verbatim; receive() never runs."""
+    adapter = _VerifyingAdapter(name="feishu", result=(401, {"error": "bad signature"}))
+    registry = PluginRegistry()
+    _register(registry, adapter)
+    app = _make_app(registry=registry, bus=IMMessageBus())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/v1/channels/feishu/webhook",
+            json={"type": "message", "text": "hi"},
+        )
+    assert resp.status_code == 401
+    assert resp.json() == {"error": "bad signature"}
+    assert adapter.received == []
+    # The hook saw the raw body and the request headers.
+    assert len(adapter.verified) == 1
+    assert adapter.verified[0][1] == b'{"type":"message","text":"hi"}'
+    assert "content-type" in adapter.verified[0][0]
+
+
+@pytest.mark.asyncio
+async def test_verification_body_passthrough_for_non_200() -> None:
+    """Any non-200 status short-circuits with the adapter's (status, body)."""
+    adapter = _VerifyingAdapter(name="slack", result=(403, {"error": "timestamp too old"}))
+    registry = PluginRegistry()
+    _register(registry, adapter)
+    app = _make_app(registry=registry, bus=IMMessageBus())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/v1/channels/slack/webhook",
+            json={"type": "message", "text": "hi"},
+        )
+    assert resp.status_code == 403
+    assert resp.json() == {"error": "timestamp too old"}
+
+
+@pytest.mark.asyncio
+async def test_verification_exception_returns_401() -> None:
+    """An exploding verify_webhook becomes a 401, never a 500."""
+    adapter = _ExplodingVerifyAdapter(name="slack")
+    registry = PluginRegistry()
+    _register(registry, adapter)
+    app = _make_app(registry=registry, bus=IMMessageBus())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        resp = await c.post(
+            "/v1/channels/slack/webhook",
+            json={"type": "message", "text": "hi"},
+        )
+    assert resp.status_code == 401
+    assert resp.json() == {"detail": "Signature verification failed"}
+    assert adapter.received == []

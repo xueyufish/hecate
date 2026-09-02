@@ -1,18 +1,20 @@
 """Core self-sufficiency guard.
 
 Verifies that ``hecate`` (the main package) can be imported and exercised
-without ``hecate_enterprise`` being importable — the "core-only install"
-invariant from the package-split plan (PR1.1). If any main-package module
-structurally requires ``hecate_enterprise``, core-only deployments
-(self-hosted without the enterprise wheel) break at import time.
+without ``hecate_enterprise`` (PR1.1) or the channel plugin packages
+``hecate_channel_slack`` / ``hecate_channel_feishu`` (PR5b) being
+importable — the "core-only install" invariant from the package-split
+plan. If any main-package module structurally requires one of the
+optional wheels, core-only deployments (self-hosted without them) break
+at import time.
 
 Companion to ``tests/test_engine/test_runtime_self_sufficiency.py`` (which
 guards the runtime domain's independence from hecate.services). This file
-guards the main package's independence from hecate_enterprise.
+guards the main package's independence from the optional wheels.
 
 Why subprocess? An in-process monkeypatch of ``builtins.__import__`` cannot
 catch imports that already happened during conftest / collection. A fresh
-interpreter guarantees we start with ``hecate_enterprise`` unimportable
+interpreter guarantees we start with the optional packages unimportable
 (blocked via an import hook) and no cached module state.
 """
 
@@ -26,9 +28,18 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Main-package modules that must remain importable without hecate_enterprise.
-# Covers the wiring surface: the FastAPI app factory (routers mount lazily
-# inside main), the auth/vault contract halves, and key infrastructure.
+# Optional package import-prefixes that must not be required by core.
+_BLOCKED_PREFIXES: tuple[str, ...] = (
+    "hecate_enterprise",
+    "hecate_channel_slack",
+    "hecate_channel_feishu",
+)
+
+# Main-package modules that must remain importable without the optional
+# wheels. Covers the wiring surface: the FastAPI app factory (routers
+# mount lazily inside main), the auth/vault contract halves, and key
+# infrastructure — including the two modules that lazy-import the channel
+# plugin packages (registration fallback + webhook router).
 CORE_MAIN_MODULES: tuple[str, ...] = (
     "hecate",
     "hecate.main",
@@ -46,6 +57,8 @@ CORE_MAIN_MODULES: tuple[str, ...] = (
     "hecate.core.deps",
     "hecate.core.deps_workspace",
     "hecate.api.management.budget",
+    "hecate.gateway.registration",
+    "hecate.api.v1.channels",
 )
 
 _PROBE_SCRIPT = textwrap.dedent(
@@ -53,20 +66,25 @@ _PROBE_SCRIPT = textwrap.dedent(
     import json
     import sys
 
-    # Block hecate_enterprise at the import machinery level for the whole
-    # subprocess lifetime. Any attempt to import it raises immediately.
+    # Block the optional packages at the import machinery level for the
+    # whole subprocess lifetime. Any attempt to import them raises
+    # immediately.
     import importlib.abc
 
-    class _EnterpriseBlocker(importlib.abc.MetaPathFinder):
+    _BLOCKED = __BLOCKED__
+
+    class _OptionalPackageBlocker(importlib.abc.MetaPathFinder):
         def find_spec(self, fullname, path=None, target=None):
-            if fullname == "hecate_enterprise" or fullname.startswith("hecate_enterprise."):
-                raise ImportError(
-                    "blocked by core-self-sufficiency guard: " + fullname
-                )
+            for prefix in _BLOCKED:
+                if fullname == prefix or fullname.startswith(prefix + "."):
+                    raise ImportError(
+                        "blocked by core-self-sufficiency guard: " + fullname
+                    )
             return None
 
-    sys.meta_path.insert(0, _EnterpriseBlocker())
-    sys.modules.pop("hecate_enterprise", None)
+    sys.meta_path.insert(0, _OptionalPackageBlocker())
+    for prefix in _BLOCKED:
+        sys.modules.pop(prefix, None)
 
     result = {"imported": [], "attempted": [], "errors": []}
     for m in __MODULES__:
@@ -83,8 +101,9 @@ _PROBE_SCRIPT = textwrap.dedent(
 
 
 def _run_subprocess_probe() -> dict[str, object]:
-    """Spawn a Python subprocess that imports main modules with enterprise blocked."""
+    """Spawn a Python subprocess that imports main modules with the optional wheels blocked."""
     script = _PROBE_SCRIPT.replace("__MODULES__", repr(list(CORE_MAIN_MODULES)))
+    script = script.replace("__BLOCKED__", repr(list(_BLOCKED_PREFIXES)))
     proc = subprocess.run(  # noqa: S603 — sys.executable is trusted; no shell
         [sys.executable, "-c", script],
         cwd=REPO_ROOT,
@@ -98,21 +117,21 @@ def _run_subprocess_probe() -> dict[str, object]:
     raise AssertionError(f"subprocess did not emit __RESULT__. stdout={proc.stdout!r} stderr={proc.stderr!r}")
 
 
-def test_main_package_importable_without_enterprise() -> None:
-    """Every core main-package module must import without hecate_enterprise.
+def test_main_package_importable_without_optional_wheels() -> None:
+    """Every core main-package module must import without the optional wheels.
 
     The core-only invariant: self-hosted installs without the
-    hecate-enterprise wheel must be able to build the FastAPI app
-    (hecate.main) and use the base auth mechanisms.
+    hecate-enterprise and channel-plugin wheels must be able to build the
+    FastAPI app (hecate.main) and use the base auth mechanisms.
     """
     result = _run_subprocess_probe()
 
     errors = result.get("errors", [])
     assert not errors, (
-        "main-package modules failed to import without hecate_enterprise:\n"
+        "main-package modules failed to import without the optional wheels:\n"
         + "\n".join(f"  {e['module']}: {e['error']}" for e in errors)
         + "\n\nThese imports prove that src/hecate/ still structurally depends on"
-        " hecate_enterprise — move the code back to core or lazy-mount it."
+        " an optional package — move the code back to core or lazy-mount it."
     )
 
     attempted = sorted(result["attempted"])

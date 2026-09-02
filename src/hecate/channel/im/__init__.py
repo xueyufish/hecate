@@ -1,13 +1,10 @@
-"""IM channel adapters — Feishu (Lark) and Slack.
+"""IM channel infrastructure — message bus and identity binding.
 
-Thin layer over official IM SDKs (`lark_oapi.channel`, `slack_bolt`) that
-normalizes platform-specific messages into Hecate's `CanonicalMessage` and
-routes Agent responses back to the originating platform.
+The platform adapters themselves (Feishu, Slack) live in the channel
+plugin packages (``packages/channels/hecate-channel-*/``) since PR5b and
+are discovered via the ``hecate.channel_providers`` entry-point group.
+This package keeps the transport-agnostic infrastructure:
 
-Public API (populated as tasks 3-8 land):
-
-- :class:`FeishuChannel` — Feishu/Lark inbound + outbound adapter
-- :class:`SlackChannel` — Slack inbound + outbound adapter
 - :class:`IMMessageBus` — async decoupling between webhook ACK and Agent execution
 - :class:`IMBindingService` — mandatory IM identity binding workflow
 """

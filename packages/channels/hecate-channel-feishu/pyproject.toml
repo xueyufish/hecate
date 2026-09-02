@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hecate-channel-feishu"
+version = "0.1.0"
+description = "Feishu (Lark) IM channel adapter for Hecate — implements the ChannelProvider contract"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Hecate Team" },
+]
+dependencies = [
+    "hecate>=0.1.0",
+    "lark-oapi[aiohttp]>=1.4.0",
+]
+
+[project.entry-points."hecate.channel_providers"]
+feishu = "hecate_channel_feishu.provider:provider"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate_channel_feishu"]

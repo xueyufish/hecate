@@ -51,14 +51,6 @@ dependencies = [
     "hecate-sandbox",
 ]
 
-[project.entry-points."hecate.channel_providers"]
-# In-core IM channel adapters (PR5a). PR5b extracts these into
-# packages/hecate-channel-{slack,feishu}/ which register under the same
-# group; factories read their own HECATE_IM_* env vars and return None
-# when unconfigured (the resolver skips None).
-slack = "hecate.channel.im.slack:provider"
-feishu = "hecate.channel.im.feishu:provider"
-
 [project.urls]
 Homepage = "https://github.com/xueyufish/hecate"
 Repository = "https://github.com/xueyufish/hecate"
@@ -71,7 +63,10 @@ hecate-migrate = "hecate.cli.migrate:main"
 hecate-flag-audit = "hecate.cli.flag_audit:main"
 
 [tool.uv.workspace]
-members = ["packages/*"]
+members = ["packages/*", "packages/channels/*"]
+# ``packages/*`` would otherwise match the channels/ bucket directory itself
+# (a plain folder grouping plugin packages, no pyproject) — exclude it.
+exclude = ["packages/channels"]
 
 [tool.uv.sources]
 hecate = { workspace = true }
@@ -114,8 +109,8 @@ tools = [
     "tavily-python>=0.5",
     "a2a-sdk>=1.1.0",
     "aiodocker>=0.23.0",
-    "lark-oapi[aiohttp]>=1.4.0",
-    "slack-bolt>=1.18.0",
+    # IM channel SDKs (lark-oapi / slack-bolt) moved to the channel
+    # plugin packages (packages/channels/hecate-channel-*, PR5b).
     "playwright>=1.40,<2.0",
 ]
 redis = [
@@ -208,7 +203,7 @@ update_changelog_on_bump = true
 
 [tool.mypy]
 python_version = "3.12"
-mypy_path = "src:packages/hecate-enterprise/src:packages/hecate-memory/src:packages/hecate-ops/src:packages/hecate-llm/src:packages/hecate-sandbox/src"
+mypy_path = "src:packages/hecate-enterprise/src:packages/hecate-memory/src:packages/hecate-ops/src:packages/hecate-llm/src:packages/hecate-sandbox/src:packages/channels/hecate-channel-slack/src:packages/channels/hecate-channel-feishu/src"
 explicit_package_bases = true
 strict = true
 warn_return_any = true

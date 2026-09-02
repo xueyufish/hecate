@@ -4,13 +4,12 @@ Thin wrapper around the official ``lark_oapi.channel.FeishuChannel`` SDK that
 translates between IM-platform-specific events and Hecate's
 :class:`CanonicalMessage`. Transport, signature verification, reconnection,
 deduplication, rate limiting, and card-streaming throttling are delegated to
-the SDK; this module only handles the Hecate-side normalization and the
-response-side rendering.
+the SDK; this module only handles the Hecate-side normalization, the
+response-side rendering, and the webhook verification delegation.
 
 The adapter is only registered when the workspace's Feishu App credentials
-are present (see :mod:`hecate.gateway.registration`). At runtime, the
-adapter is constructed via :func:`create_feishu_channel`, which reads
-credentials from the active SecretProvider.
+are present (the entry-point factory reads ``HECATE_IM_FEISHU_*`` env vars
+and returns ``None`` when unconfigured).
 
 Design references: D1, D2 in ``openspec/changes/multi-channel-feishu-slack/design.md``.
 """
@@ -30,15 +29,14 @@ from hecate.channel.types import Attachment, CanonicalMessage, MessageContent
 logger = logging.getLogger(__name__)
 
 
-# lark_oapi is an optional dependency (see [tools] extras). Soft import so the
-# rest of Hecate can be imported without the IM SDK installed.
+# lark_oapi ships as this package's main dependency; the guard keeps the
+# module importable in environments that load it without the package
+# environment (e.g. tooling importing the module for introspection).
 try:
-    import lark_oapi as lark
     from lark_oapi.channel import FeishuChannel as LarkFeishuChannel
 
     _LARK_AVAILABLE = True
 except ImportError:  # pragma: no cover - guarded by extras
-    lark = None
     LarkFeishuChannel = None
     _LARK_AVAILABLE = False
 
@@ -56,10 +54,12 @@ class FeishuChannel(ChannelBase):
       :class:`CanonicalMessage`.
     - ``respond`` / ``stream`` — translates Hecate responses back to the
       Feishu API via the underlying SDK's ``send`` method.
+    - ``verify_webhook`` — delegates signature verification and payload
+      decryption to the SDK's ``handle_webhook_request``.
 
     Args:
         app_id: Feishu App ID (e.g., ``"cli_xxx"``).
-        app_secret: Feishu App secret, retrieved from SecretProvider.
+        app_secret: Feishu App secret.
         encrypt_key: Webhook/event decryption key (optional).
         verification_token: Webhook/event verification token (optional).
         transport: ``"webhook"`` (HTTP callback) or ``"ws"`` (WebSocket
@@ -76,7 +76,7 @@ class FeishuChannel(ChannelBase):
         transport: str = "webhook",
     ) -> None:
         if not _LARK_AVAILABLE or LarkFeishuChannel is None:
-            raise RuntimeError("lark_oapi is not installed. Install with: uv pip install 'hecate[tools]'")
+            raise RuntimeError("lark_oapi is not installed. Install with: uv pip install hecate-channel-feishu")
         self._app_id = app_id
         self._app_secret = app_secret
         self._encrypt_key = encrypt_key
@@ -108,15 +108,17 @@ class FeishuChannel(ChannelBase):
             max_message_length=30000,
         )
 
-    @property
-    def underlying(self) -> Any:
-        """Return the underlying ``lark_oapi.channel.FeishuChannel``.
+    async def verify_webhook(self, headers: dict[str, str], raw_body: bytes) -> tuple[int, dict]:
+        """Delegate verification/decryption to ``lark_oapi``'s webhook handler.
 
-        Exposed so the webhook endpoint can call SDK-specific methods like
-        ``handle_webhook_request`` for signature verification without
-        re-implementing Feishu's verification protocol.
+        The SDK validates signatures, decrypts encrypted event payloads, and
+        answers URL-verification challenges itself. Returning the SDK's
+        ``(status, body)`` verbatim keeps the webhook route free of any
+        Feishu-specific knowledge.
         """
-        return self._underlying
+        if self._underlying is None or not hasattr(self._underlying, "handle_webhook_request"):
+            return 200, {}
+        return await self._underlying.handle_webhook_request(headers=dict(headers), body=raw_body)
 
     async def receive(self, raw: object) -> CanonicalMessage:
         """Convert a Feishu webhook event payload into a :class:`CanonicalMessage`.
@@ -227,26 +229,4 @@ def create_feishu_channel(
         encrypt_key=encrypt_key,
         verification_token=verification_token,
         transport=transport,
-    )
-
-
-def provider() -> FeishuChannel | None:
-    """Zero-arg entry-point factory for ``hecate.channel_providers``.
-
-    Reads its own ``HECATE_IM_FEISHU_*`` env configuration and returns a
-    configured :class:`FeishuChannel`, or ``None`` when unconfigured — the
-    resolver skips ``None`` without blocking boot.
-    """
-    import os
-
-    app_id = os.environ.get("HECATE_IM_FEISHU_APP_ID")
-    app_secret = os.environ.get("HECATE_IM_FEISHU_APP_SECRET")
-    if not app_id or not app_secret:
-        return None
-    return create_feishu_channel(
-        app_id=app_id,
-        app_secret=app_secret,
-        encrypt_key=os.environ.get("HECATE_IM_FEISHU_ENCRYPT_KEY"),
-        verification_token=os.environ.get("HECATE_IM_FEISHU_VERIFICATION_TOKEN"),
-        transport=os.environ.get("HECATE_IM_FEISHU_TRANSPORT", "webhook"),
     )
