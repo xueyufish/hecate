@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.validation.output_validator import OutputSchemaValidator
+from hecate.studio.validation.output_validator import OutputSchemaValidator
 
 
 class TestOutputSchemaValidator:

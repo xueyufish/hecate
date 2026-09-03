@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.a2a.types import Task, TaskState, TaskStatus
+from hecate.channel.a2a.types import Task, TaskState, TaskStatus
 
 
 def test_task_creation() -> None:
@@ -28,7 +28,7 @@ def test_task_with_status() -> None:
 
 def test_task_with_artifacts() -> None:
     """Test Task with artifacts."""
-    from hecate.a2a.types import Artifact
+    from hecate.channel.a2a.types import Artifact
 
     artifact = Artifact(name="response", parts=[{"text": "Hello"}])
     task = Task(artifacts=[artifact])

@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.security.output.prompt_leakage.fingerprint import (
+from hecate.ops.output_security.prompt_leakage.fingerprint import (
     fingerprint,
     overlap_ratio,
 )
-from hecate.services.security.output.prompt_leakage.redactor import redact
-from hecate.services.security.output.prompt_leakage.scanner import (
+from hecate.ops.output_security.prompt_leakage.redactor import redact
+from hecate.ops.output_security.prompt_leakage.scanner import (
     resolve_config,
     scan,
 )
-from hecate.services.security.output.prompt_leakage.severity import classify
+from hecate.ops.output_security.prompt_leakage.severity import classify
 
 
 class TestFingerprint:
@@ -123,9 +123,9 @@ class TestScanner:
 @pytest.mark.asyncio
 async def test_integration_smoke() -> None:
     """Smoke test: full pipeline from system prompt to redacted response."""
-    from hecate.services.security.output.prompt_leakage.fingerprint import fingerprint
-    from hecate.services.security.output.prompt_leakage.redactor import redact
-    from hecate.services.security.output.prompt_leakage.scanner import (
+    from hecate.ops.output_security.prompt_leakage.fingerprint import fingerprint
+    from hecate.ops.output_security.prompt_leakage.redactor import redact
+    from hecate.ops.output_security.prompt_leakage.scanner import (
         resolve_config,
         scan,
     )

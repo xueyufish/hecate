@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.services.ops_center.agent_health import AgentHealthService
+from hecate.ops.ops_center.agent_health import AgentHealthService
 
 router = APIRouter(prefix="/api/ops-center/agents", tags=["ops-center"])
 

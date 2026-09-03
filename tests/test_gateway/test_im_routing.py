@@ -11,12 +11,12 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.models.organization import OrganizationModel
-from hecate.models.workspace import WorkspaceModel
-from hecate.services.im_session_router import (
+from hecate.channel.gateway.im_session_router import (
     IMSessionRouter,
     derive_conversation_id,
 )
+from hecate.models.organization import OrganizationModel
+from hecate.models.workspace import WorkspaceModel
 
 
 def test_derive_conversation_id_is_deterministic() -> None:

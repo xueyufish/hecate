@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.a2a.types import TaskState
+from hecate.channel.a2a.types import TaskState
 
 
 def test_task_state_values() -> None:

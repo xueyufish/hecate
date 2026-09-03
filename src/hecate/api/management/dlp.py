@@ -30,7 +30,7 @@ from hecate.models.dlp import (
     DLPPolicyReadSchema,
     DLPPolicyUpdateSchema,
 )
-from hecate.services.security.dlp.service import (
+from hecate.ops.dlp.service import (
     DLPService,
     known_entity_types,
     supported_directions,

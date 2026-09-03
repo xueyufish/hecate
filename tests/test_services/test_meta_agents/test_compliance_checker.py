@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from hecate.services.meta_agents.compliance_checker import (
+from hecate.studio.meta_agents.compliance_checker import (
     ComplianceCheckerAgent,
     ComplianceReport,
 )
@@ -26,7 +26,7 @@ async def test_check_code_style_parses_ruff_output(agent: ComplianceCheckerAgent
     mock_proc.communicate.return_value = (ruff_output.encode(), b"")
     mock_proc.returncode = 0
 
-    with patch("hecate.services.meta_agents.compliance_checker.asyncio.create_subprocess_exec", return_value=mock_proc):
+    with patch("hecate.studio.meta_agents.compliance_checker.asyncio.create_subprocess_exec", return_value=mock_proc):
         violations = await agent.check_code_style(Path("/fake"))
 
     assert len(violations) == 2
@@ -38,7 +38,7 @@ async def test_check_code_style_parses_ruff_output(agent: ComplianceCheckerAgent
 
 async def test_check_code_style_handles_missing_ruff(agent: ComplianceCheckerAgent) -> None:
     with patch(
-        "hecate.services.meta_agents.compliance_checker.asyncio.create_subprocess_exec",
+        "hecate.studio.meta_agents.compliance_checker.asyncio.create_subprocess_exec",
         side_effect=FileNotFoundError,
     ):
         violations = await agent.check_code_style()

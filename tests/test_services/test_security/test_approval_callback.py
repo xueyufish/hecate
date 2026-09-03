@@ -6,8 +6,8 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 from hecate.runtime.eventstore import EventType
+from hecate.runtime.security.approval import FailingClosedApprovalCallback
 from hecate.runtime.tool_access import ApprovalDecision, ApprovalScope
-from hecate.services.security.approval import FailingClosedApprovalCallback
 
 
 def _event_store() -> MagicMock:
@@ -175,7 +175,7 @@ async def test_rebuild_approval_projection_from_event_log():
     capture.
     """
     from hecate.runtime.eventstore import InMemoryEventStore
-    from hecate.services.security.approval import rebuild_approval_projection
+    from hecate.runtime.security.approval import rebuild_approval_projection
 
     store = InMemoryEventStore()
     sid = uuid.uuid4()

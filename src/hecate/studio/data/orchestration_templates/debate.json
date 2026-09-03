@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "name": "Debate",
+  "description": "Two debaters alternate arguments for a set number of rounds, with an optional judge delivering a final verdict.",
+  "category": "debate",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" },
+    "debate_round": { "type": "last_value" },
+    "max_debate_rounds": { "type": "last_value" }
+  },
+  "nodes": {
+    "debater_a": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are Debater A. Present clear, evidence-based arguments.",
+        "channels": {
+          "readable": ["messages"],
+          "writable": ["messages"]
+        }
+      }
+    },
+    "debater_b": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are Debater B. Present counter-arguments with supporting reasoning.",
+        "channels": {
+          "readable": ["messages"],
+          "writable": ["messages"]
+        }
+      }
+    },
+    "check_rounds": {
+      "type": "condition",
+      "config": {
+        "expression": "debate_round < max_debate_rounds",
+        "channels": { "readable": ["debate_round", "max_debate_rounds"] }
+      }
+    },
+    "judge": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a debate judge. Review all arguments and deliver a balanced verdict.",
+        "channels": {
+          "readable": ["messages"],
+          "writable": ["messages"]
+        }
+      }
+    }
+  },
+  "edges": [
+    { "source": "__start__", "target": "debater_a" },
+    { "source": "debater_a", "target": "debater_b" },
+    { "source": "debater_b", "target": "check_rounds" },
+    {
+      "source": "check_rounds",
+      "target": { "true": "debater_a", "false": "judge" }
+    },
+    { "source": "judge", "target": "__end__" }
+  ],
+  "entry": "debater_a"
+}

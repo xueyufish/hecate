@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from types import SimpleNamespace
 
-from hecate.services.security.finding_writer import (
+from hecate.ops.security.findings_writer import (
     FindingWriterAdapter,
     SecurityFindingWriter,
 )

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.trace import TraceModel
-from hecate.services.ops_center.agent_health import (
+from hecate.ops.ops_center.agent_health import (
     AgentHealthService,
     _classify_health_status,
     _compute_health_score,

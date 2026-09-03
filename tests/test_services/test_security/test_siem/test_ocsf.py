@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from hecate.services.security.siem.event import (
+from hecate.ops.siem.event import (
     EventSeverity,
     EventSource,
     EventType,
     SecurityEvent,
 )
-from hecate.services.security.siem.exporter import SIEMExporter
-from hecate.services.security.siem.ocsf import OCSFFormatter
+from hecate.ops.siem.exporter import SIEMExporter
+from hecate.ops.siem.ocsf import OCSFFormatter
 
 
 class CountingExporter(SIEMExporter):

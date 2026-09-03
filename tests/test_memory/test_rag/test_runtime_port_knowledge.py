@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 @pytest.mark.asyncio
 async def test_knowledge_query_empty_kb_ids() -> None:
     """Test knowledge_query with empty kb_ids returns empty list."""
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     mock_db = AsyncMock(spec=AsyncSession)
     port = AgentExecutionPort(db=mock_db)
@@ -31,7 +31,7 @@ async def test_knowledge_query_empty_kb_ids() -> None:
 @pytest.mark.asyncio
 async def test_knowledge_query_with_mock_search() -> None:
     """Test knowledge_query delegates to KnowledgeBaseService.search()."""
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     mock_db = AsyncMock(spec=AsyncSession)
     port = AgentExecutionPort(db=mock_db)

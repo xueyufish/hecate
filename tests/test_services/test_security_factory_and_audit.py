@@ -6,7 +6,7 @@ import uuid
 
 from hecate.runtime.eventstore import EventType, InMemoryEventStore
 from hecate.runtime.guardrail import NoOpPostLLMHook, NoOpPostToolHook, NoOpPreLLMHook, NoOpPreToolHook
-from hecate.services.security.hooks import (
+from hecate.runtime.security.hooks import (
     InputSecurityHook,
     OutputSecurityHook,
     ToolResultSecurityHook,

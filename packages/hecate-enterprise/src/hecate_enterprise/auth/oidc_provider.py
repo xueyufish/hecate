@@ -13,8 +13,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.auth.provider import AuthProvider
 from hecate.core.auth_context import AuthContext
+from hecate.enterprise.auth.provider import AuthProvider
 from hecate.models.user import UserModel
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ class OIDCAuthProvider(AuthProvider):
 
 
 def provider():
-    """Entry-point factory (PR1.2): hecate.auth_providers['oidc'].
+    """Entry-point factory (PR1.2): hecate.enterprise.auth_providers['oidc'].
 
     Zero-arg: reads settings. Returns OIDCAuthProvider or None when
     OIDC isn't configured (client_id + discovery_url both required).

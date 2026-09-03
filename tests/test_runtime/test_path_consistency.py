@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from hecate.api.v1.chat import _execute_tool_calls
+from hecate.channel.api.v1.chat import _execute_tool_calls
 from hecate.runtime.tool_access import (
     ApprovalDecision,
     ApprovalScope,

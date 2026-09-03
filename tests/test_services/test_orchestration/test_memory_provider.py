@@ -15,12 +15,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hecate.core.config import settings
-from hecate.services.orchestration import memory_provider as mp_mod
-from hecate.services.orchestration.memory_provider import (
+from hecate.core.composition import memory_provider as mp_mod
+from hecate.core.composition.memory_provider import (
     reset_memory_provider_cache,
     resolve_memory_provider,
 )
+from hecate.core.config import settings
 
 
 @dataclass
@@ -166,7 +166,7 @@ async def test_knowledge_query_returns_empty_when_provider_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """chat path: resolver returns None → knowledge_query short-circuits to []."""
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     monkeypatch.setattr(mp_mod, "entry_points", lambda group: [])
     # Without configuring any KB IDs the function still returns [] cheaply.
@@ -180,7 +180,7 @@ async def test_knowledge_query_uses_provider(monkeypatch: pytest.MonkeyPatch) ->
     """chat path: injected stub provider receives the search call and its hits shape the response."""
 
     from hecate.models.knowledge import KnowledgeBaseModel
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     hit = _StubHit(content="hello world", score=0.9, metadata={"source": "doc-1"})
     stub = _StubProvider(hits=[hit])
@@ -191,7 +191,7 @@ async def test_knowledge_query_uses_provider(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(mp_mod, "resolve_memory_provider", lambda: stub)
 
-    from hecate.services.orchestration import agent_execution_port as aep
+    from hecate.runtime import agent_execution_port as aep
 
     monkeypatch.setattr(aep, "resolve_memory_provider", lambda: stub)
 

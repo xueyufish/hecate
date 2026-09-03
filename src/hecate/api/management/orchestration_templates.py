@@ -15,13 +15,13 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from hecate.core.deps import verify_api_key
-from hecate.services.workflow.patterns import infer_pattern
+from hecate.studio.workflows.patterns import infer_pattern
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "data" / "orchestration_templates"
+TEMPLATES_DIR = Path(__file__).parent.parent.parent / "studio" / "data" / "orchestration_templates"
 
 _template_cache: dict[str, dict] | None = None
 
@@ -74,7 +74,7 @@ async def list_templates(
 
         pattern_type: str | None = None
         try:
-            from hecate.services.workflow.graph_dsl import parse_graph
+            from hecate.studio.workflows.graph_dsl import parse_graph
 
             # Strip non-DSL fields before parsing to avoid schema validation errors
             dsl_data = {

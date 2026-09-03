@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from hecate.services.mcp.client import HecateMCPClient
+from hecate.tools.mcp.client import HecateMCPClient
 
 
 @pytest.fixture

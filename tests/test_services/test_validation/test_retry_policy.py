@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.validation.retry_policy import (
+from hecate.studio.validation.retry_policy import (
     CircuitBreaker,
     CircuitState,
     ErrorClassifier,

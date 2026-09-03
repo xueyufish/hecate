@@ -24,14 +24,14 @@ from hecate.core.deps_workspace import get_auth_context
 from hecate.models.session import SessionModel
 from hecate.runtime.eventstore import EventStore
 from hecate.runtime.replay.logfold import NonReplayablePrefix
-from hecate.services.replay.assembler import (
+from hecate.studio.replay.assembler import (
     REPLAY_PAYLOAD_PREVIEW_CHARS,
     assemble_timeline,
     derive_guardrail_blocks,
     derive_message_bodies,
     enrich_traces,
 )
-from hecate.services.replay.state_inspector import inspect_at_version
+from hecate.studio.replay.state_inspector import inspect_at_version
 
 router = APIRouter()
 

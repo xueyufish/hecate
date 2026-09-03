@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from hecate_enterprise.auth.ldap_provider import LDAPAuthProvider
 
-from hecate.auth.provider import AuthProvider
+from hecate.enterprise.auth.provider import AuthProvider
 
 
 class TestLDAPAuthProvider:

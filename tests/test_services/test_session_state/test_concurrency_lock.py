@@ -26,8 +26,8 @@ from hecate.runtime.session_state import (
     SessionState,
     SessionStateConflictError,
 )
-from hecate.services.session_state.postgres_store import PostgresSessionStateStore
-from hecate.services.session_state.redis_store import RedisSessionStateStore
+from hecate.studio.session_state.postgres_store import PostgresSessionStateStore
+from hecate.studio.session_state.redis_store import RedisSessionStateStore
 
 pytest.importorskip("fakeredis")
 import fakeredis.aioredis  # noqa: E402
@@ -80,7 +80,7 @@ async def test_redis_lock_contention_raises_conflict():
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = _make_redis_store(fake)
     # Tighten retry budget so the test doesn't sleep long.
-    import hecate.services.session_state.redis_store as redis_mod
+    import hecate.studio.session_state.redis_store as redis_mod
 
     original_max = redis_mod._LOCK_MAX_RETRIES
     original_min = redis_mod._LOCK_RETRY_MIN_S
@@ -200,8 +200,8 @@ def _noop_lock_cm(*_a: object, **_kw: object):
 
 async def test_persist_retry_then_success(monkeypatch):
     """Lock acquisition fails twice, succeeds on 3rd — save still completes."""
-    from hecate.services.state.state import AgentState
-    from hecate.services.workflow.execution_service import WorkflowExecutionService
+    from hecate.studio.state.state import AgentState
+    from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
     store = AsyncMock()
     # First two lock attempts raise ConflictError, third succeeds.
@@ -219,7 +219,7 @@ async def test_persist_retry_then_success(monkeypatch):
     store.acquire_session_lock = flaky_lock
     store.save = AsyncMock()
     # Speed up retries.
-    import hecate.services.workflow.execution_service as es_mod
+    import hecate.studio.workflows.execution_service as es_mod
 
     monkeypatch.setattr(es_mod, "_LOCK_RETRY_MIN_S", 0.001)
     monkeypatch.setattr(es_mod, "_LOCK_RETRY_MAX_S", 0.005)
@@ -238,8 +238,8 @@ async def test_persist_retry_then_success(monkeypatch):
 
 async def test_persist_retry_3_times_fail_propagates(monkeypatch):
     """All 3 lock attempts fail — SessionStateConflictError propagates."""
-    from hecate.services.state.state import AgentState
-    from hecate.services.workflow.execution_service import WorkflowExecutionService
+    from hecate.studio.state.state import AgentState
+    from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
     store = AsyncMock()
 
@@ -251,7 +251,7 @@ async def test_persist_retry_3_times_fail_propagates(monkeypatch):
 
     store.acquire_session_lock = always_fail
     store.save = AsyncMock()
-    import hecate.services.workflow.execution_service as es_mod
+    import hecate.studio.workflows.execution_service as es_mod
 
     monkeypatch.setattr(es_mod, "_LOCK_RETRY_MIN_S", 0.001)
     monkeypatch.setattr(es_mod, "_LOCK_RETRY_MAX_S", 0.005)

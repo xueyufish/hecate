@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.preflight import LLM_CREDENTIAL_ENV_VARS, _check_llm_credentials
+from hecate.ops.preflight import LLM_CREDENTIAL_ENV_VARS, _check_llm_credentials
 
 
 async def test_llm_credentials_pass_when_key_present(monkeypatch):

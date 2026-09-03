@@ -20,7 +20,7 @@ def test_cli_backup_create():
     mock_record.status = "completed"
     mock_record.error_message = None
 
-    with patch("hecate.services.backup.orchestrator.create_backup", new_callable=AsyncMock, return_value=mock_record):
+    with patch("hecate.ops.backup.orchestrator.create_backup", new_callable=AsyncMock, return_value=mock_record):
         result = runner.invoke(backup, ["create", "--scope", "pg"])
 
     assert result.exit_code == 0
@@ -36,7 +36,7 @@ def test_cli_backup_create_with_error():
     mock_record.status = "failed"
     mock_record.error_message = "Connection refused"
 
-    with patch("hecate.services.backup.orchestrator.create_backup", new_callable=AsyncMock, return_value=mock_record):
+    with patch("hecate.ops.backup.orchestrator.create_backup", new_callable=AsyncMock, return_value=mock_record):
         result = runner.invoke(backup, ["create"])
 
     assert result.exit_code == 0
@@ -47,7 +47,7 @@ def test_cli_backup_list_empty():
     """hecate backup list shows 'No backups found' when empty."""
     runner = CliRunner()
 
-    with patch("hecate.services.backup.orchestrator.list_backups", new_callable=AsyncMock, return_value=[]):
+    with patch("hecate.ops.backup.orchestrator.list_backups", new_callable=AsyncMock, return_value=[]):
         result = runner.invoke(backup, ["list"])
 
     assert result.exit_code == 0
@@ -65,7 +65,7 @@ def test_cli_backup_list_with_records():
     mock_record.status = "completed"
     mock_record.size_bytes = 1048576
 
-    with patch("hecate.services.backup.orchestrator.list_backups", new_callable=AsyncMock, return_value=[mock_record]):
+    with patch("hecate.ops.backup.orchestrator.list_backups", new_callable=AsyncMock, return_value=[mock_record]):
         result = runner.invoke(backup, ["list"])
 
     assert result.exit_code == 0
@@ -79,7 +79,7 @@ def test_cli_backup_verify():
 
     mock_result = {"matched": True, "mismatches": []}
 
-    with patch("hecate.services.backup.verification.verify_backup", new_callable=AsyncMock, return_value=mock_result):
+    with patch("hecate.ops.backup.verification.verify_backup", new_callable=AsyncMock, return_value=mock_result):
         result = runner.invoke(backup, ["verify", str(backup_id)])
 
     assert result.exit_code == 0
@@ -93,7 +93,7 @@ def test_cli_backup_verify_failed():
 
     mock_result = {"matched": False, "mismatches": ["agents: expected 10, got 8"]}
 
-    with patch("hecate.services.backup.verification.verify_backup", new_callable=AsyncMock, return_value=mock_result):
+    with patch("hecate.ops.backup.verification.verify_backup", new_callable=AsyncMock, return_value=mock_result):
         result = runner.invoke(backup, ["verify", str(backup_id)])
 
     assert result.exit_code == 0
@@ -109,7 +109,7 @@ def test_cli_restore_confirms():
     mock_result.status = "completed"
     mock_result.error = None
 
-    with patch("hecate.services.backup.restore.restore_backup", new_callable=AsyncMock, return_value=mock_result):
+    with patch("hecate.ops.backup.restore.restore_backup", new_callable=AsyncMock, return_value=mock_result):
         result = runner.invoke(restore, [str(backup_id), "--yes"])
 
     assert result.exit_code == 0
@@ -137,7 +137,7 @@ def test_cli_restore_with_conflict_replace():
     mock_result.error = None
 
     with patch(
-        "hecate.services.backup.restore.restore_backup", new_callable=AsyncMock, return_value=mock_result
+        "hecate.ops.backup.restore.restore_backup", new_callable=AsyncMock, return_value=mock_result
     ) as mock_restore:
         result = runner.invoke(
             restore,

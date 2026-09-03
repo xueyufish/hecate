@@ -17,7 +17,7 @@ from fastapi import Request
 
 from hecate.core.config import settings
 from hecate.runtime.session_state import SessionStateStore
-from hecate.services.session_state import create_session_state_store
+from hecate.studio.session_state import create_session_state_store
 
 
 def get_session_state_store(request: Request) -> SessionStateStore:

@@ -25,7 +25,7 @@ import pytest
 from asgi_lifespan import LifespanManager
 from starlette.types import ASGIApp
 
-from hecate.services.mcp.server import create_mcp_server
+from hecate.tools.mcp.server import create_mcp_server
 
 
 @pytest.fixture

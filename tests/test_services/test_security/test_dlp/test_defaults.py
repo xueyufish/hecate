@@ -7,12 +7,12 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.dlp import DLPPolicyModel
-from hecate.services.security.dlp.defaults import (
+from hecate.ops.dlp.defaults import (
     DEFAULT_RULES,
     create_default_policies_for_org,
     default_rules_already_installed,
 )
-from hecate.services.security.dlp.result import DLPAction
+from hecate.ops.dlp.result import DLPAction
 
 
 class TestDefaultRulesSpec:

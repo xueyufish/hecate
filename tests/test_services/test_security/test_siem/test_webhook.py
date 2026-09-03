@@ -6,13 +6,13 @@ import json
 
 import httpx
 
-from hecate.services.security.siem.event import (
+from hecate.ops.siem.event import (
     EventSeverity,
     EventSource,
     EventType,
     SecurityEvent,
 )
-from hecate.services.security.siem.webhook import WebhookSIEMExporter
+from hecate.ops.siem.webhook import WebhookSIEMExporter
 
 
 def _make_event(**kwargs) -> SecurityEvent:

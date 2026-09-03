@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.models.dlp import (
     DLPPolicyModel,
 )
-from hecate.services.security.dlp.result import DLPAction
-from hecate.services.security.dlp.service import (
+from hecate.ops.dlp.result import DLPAction
+from hecate.ops.dlp.service import (
     DLPService,
     known_entity_types,
     supported_directions,

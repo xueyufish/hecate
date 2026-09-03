@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from hecate_enterprise.auth.oidc_provider import OIDCAuthProvider
 
-from hecate.auth.provider import AuthProvider
+from hecate.enterprise.auth.provider import AuthProvider
 
 
 class TestOIDCAuthProvider:

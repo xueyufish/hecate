@@ -15,8 +15,8 @@ import hecate.core.plugin.content_scanner as content_scanner
 from hecate.core.config import settings
 from hecate.models.plugin import PluginModel
 from hecate.models.security_finding import SecurityFindingModel
-from hecate.services.plugin.service import PluginService, ScanBlockedError
-from hecate.services.security.finding_service import SecurityFindingService
+from hecate.ops.security.findings import SecurityFindingService
+from hecate.studio.plugin.service import PluginService, ScanBlockedError
 
 WS = uuid.UUID("11111111-1111-1111-1111-111111111111")
 INSTALLER = "admin@example.com"

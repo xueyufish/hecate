@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.mcp.client import HecateMCPClient
-from hecate.services.mcp.connection import MCPClientManager
+from hecate.tools.mcp.client import HecateMCPClient
+from hecate.tools.mcp.connection import MCPClientManager
 
 
 @pytest.mark.asyncio

@@ -39,7 +39,7 @@ async def test_e2e_create_agent_and_chat(client: AsyncClient) -> None:
     mock_response.usage = {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18}
     mock_response.finish_reason = "stop"
 
-    with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+    with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
         mock_llm.chat = AsyncMock(return_value=mock_response)
         chat_data = {
             "model": "gpt-4o",

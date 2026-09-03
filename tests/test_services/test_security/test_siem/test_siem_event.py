@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from hecate.services.security.siem.collector import SecurityEventCollector
-from hecate.services.security.siem.event import (
+from hecate.ops.siem.collector import SecurityEventCollector
+from hecate.ops.siem.event import (
     EventSeverity,
     EventSource,
     EventType,
@@ -12,7 +12,7 @@ from hecate.services.security.siem.event import (
     from_security_finding,
     from_tool_decision,
 )
-from hecate.services.security.siem.exporter import NullSIEMExporter, SIEMExporter
+from hecate.ops.siem.exporter import NullSIEMExporter, SIEMExporter
 
 
 class TestSecurityEventNormalization:
@@ -224,7 +224,7 @@ class TestSecurityEventCollector:
         await collector.stop()
 
     def test_emit_to_siem_noop_when_disabled(self) -> None:
-        from hecate.services.security.siem.collector import emit_to_siem
+        from hecate.ops.siem.collector import emit_to_siem
 
         # Should not raise when collector is None
         event = SecurityEvent(

@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.trace import TraceModel
-from hecate.services.ops_center.tool_analytics import ToolAnalyticsService
+from hecate.ops.ops_center.tool_analytics import ToolAnalyticsService
 
 
 async def _insert_tool_span(

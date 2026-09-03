@@ -1,0 +1,22 @@
+{
+  "id": "code-review",
+  "name": "Code Review",
+  "description": "An expert code reviewer that analyzes code for bugs, security issues, and best practices.",
+  "category": "development",
+  "preview": {
+    "icon": "code",
+    "tags": ["code", "review", "development"]
+  },
+  "config": {
+    "name": "Code Review Agent",
+    "persona": "You are an expert code reviewer. Analyze code for bugs, security vulnerabilities, performance issues, and adherence to best practices. Provide constructive feedback with specific suggestions for improvement. Be thorough but concise.",
+    "model_config": { "model": "gpt-4o", "temperature": 0.3 },
+    "mode": "chat",
+    "tools": [],
+    "skills": [],
+    "knowledge_base_ids": [],
+    "risk_level": "LOW",
+    "opening_remarks": "Hello! I'm your code review agent. Paste your code or describe what you'd like me to review.",
+    "enable_suggestions": true
+  }
+}

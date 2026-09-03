@@ -31,9 +31,9 @@ from hecate.models.workflow import (
     WorkflowRunReadSchema,
     WorkflowUpdateSchema,
 )
-from hecate.services.workflow.graph_dsl import GraphValidationError
-from hecate.services.workflow.test_runner import WorkflowTestRunner
-from hecate.services.workflow_service import WorkflowService
+from hecate.studio.workflows.graph_dsl import GraphValidationError
+from hecate.studio.workflows.service import WorkflowService
+from hecate.studio.workflows.test_runner import WorkflowTestRunner
 
 router = APIRouter()
 

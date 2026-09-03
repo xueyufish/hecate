@@ -7,12 +7,12 @@ from typing import Any
 
 import pytest
 
+from hecate.ops.dlp.result import DLPAction, DLPFinding, DLPResult
 from hecate.runtime.guardrail import GuardrailAction
-from hecate.services.security.dlp.result import DLPAction, DLPFinding, DLPResult
-from hecate.services.security.hooks.input_security import InputSecurityHook
-from hecate.services.security.hooks.output_security import OutputSecurityHook
-from hecate.services.security.hooks.stream_deanonymizer import StreamDeanonymizer
-from hecate.services.security.hooks.tool_result_security import ToolResultSecurityHook
+from hecate.runtime.security.hooks.input_security import InputSecurityHook
+from hecate.runtime.security.hooks.output_security import OutputSecurityHook
+from hecate.runtime.security.hooks.stream_deanonymizer import StreamDeanonymizer
+from hecate.runtime.security.hooks.tool_result_security import ToolResultSecurityHook
 
 # -- InputSecurityHook tests --
 
@@ -210,7 +210,7 @@ class _StubOutputDLPScanner:
 
     def scan(self, text: str, direction: str, **_: object) -> Any:  # noqa: ANN401
         self.last_direction = direction
-        from hecate.services.security.dlp.result import (
+        from hecate.ops.dlp.result import (
             DLPAction,
             DLPFinding,
             DLPResult,
@@ -248,7 +248,7 @@ class _StubOutputDLPScanner:
                 text="see [EMAIL] for details",
                 audit_data=[],
             )
-        from hecate.services.security.dlp.result import (
+        from hecate.ops.dlp.result import (
             DLPAction,
             DLPResult,
         )
@@ -320,7 +320,7 @@ class TestOutputSecurityHookWithDLPScanner:
         class _CaptureScanner:
             def scan(self, text: str, direction: str, **_: object) -> Any:  # noqa: ANN401
                 seen_by_scanner.append(text)
-                from hecate.services.security.dlp.result import (
+                from hecate.ops.dlp.result import (
                     DLPAction,
                     DLPResult,
                 )
@@ -460,7 +460,7 @@ class _StubToolDLPScanner:
         self.findings: list[Any] = []
 
     def scan(self, text: str, direction: str, **_: object) -> Any:
-        from hecate.services.security.dlp.result import (
+        from hecate.ops.dlp.result import (
             DLPAction,
             DLPFinding,
             DLPResult,

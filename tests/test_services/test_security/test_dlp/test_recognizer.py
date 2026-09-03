@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.security.dlp.recognizer import (
+from hecate.ops.dlp.recognizer import (
     DLPRecognizer,
     DLPRecognizerRegistry,
 )
-from hecate.services.security.dlp.result import DLPFinding
+from hecate.ops.dlp.result import DLPFinding
 
 
 class _StubRecognizer(DLPRecognizer):

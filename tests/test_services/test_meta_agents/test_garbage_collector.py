@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.session import SessionModel
-from hecate.services.meta_agents.garbage_collector import (
+from hecate.studio.meta_agents.garbage_collector import (
     CleanupReport,
     GarbageCollectorAgent,
 )

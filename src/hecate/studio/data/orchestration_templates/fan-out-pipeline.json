@@ -1,0 +1,75 @@
+{
+  "version": "1.0",
+  "name": "Fan-out Pipeline",
+  "description": "A parallel processing pipeline where a researcher fans out to multiple analysts, results are merged, and a summarizer produces the final output.",
+  "category": "pipeline",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" },
+    "research_data": { "type": "last_value" },
+    "analysis_results": { "type": "last_value" }
+  },
+  "nodes": {
+    "researcher": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a research agent. Gather relevant information and key points on the given topic.",
+        "channels": { "readable": ["messages"], "writable": ["messages", "research_data"] }
+      }
+    },
+    "fanout": {
+      "type": "fan-out",
+      "config": {
+        "branches": ["analyst_a", "analyst_b", "analyst_c"]
+      }
+    },
+    "analyst_a": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are Analyst A. Analyze the research data from a financial perspective.",
+        "channels": { "readable": ["messages", "research_data"], "writable": ["messages"] }
+      }
+    },
+    "analyst_b": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are Analyst B. Analyze the research data from a technical perspective.",
+        "channels": { "readable": ["messages", "research_data"], "writable": ["messages"] }
+      }
+    },
+    "analyst_c": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are Analyst C. Analyze the research data from a market perspective.",
+        "channels": { "readable": ["messages", "research_data"], "writable": ["messages"] }
+      }
+    },
+    "merge": {
+      "type": "merge",
+      "config": {
+        "fan_out_source": "fanout",
+        "output_channel": "analysis_results"
+      }
+    },
+    "summarizer": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a summarizer agent. Synthesize the analysis from multiple perspectives into a cohesive summary.",
+        "channels": { "readable": ["messages", "analysis_results"], "writable": ["messages"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "researcher", "target": "fanout" },
+    { "source": "analyst_a", "target": "merge" },
+    { "source": "analyst_b", "target": "merge" },
+    { "source": "analyst_c", "target": "merge" },
+    { "source": "merge", "target": "summarizer" },
+    { "source": "summarizer", "target": "__end__" }
+  ],
+  "entry": "researcher"
+}

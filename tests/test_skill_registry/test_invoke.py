@@ -9,8 +9,8 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.tool import ToolModel
-from hecate.skill_registry.registry import SkillRegistry
-from hecate.skill_registry.types import SkillRef, SkillRefType
+from hecate.tools.skill_registry.registry import SkillRegistry
+from hecate.tools.skill_registry.types import SkillRef, SkillRefType
 
 
 @pytest.fixture

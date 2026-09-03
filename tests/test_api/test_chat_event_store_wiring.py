@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import inspect
 
-from hecate.api.v1.chat import _process_chat, create_chat_completion
+from hecate.channel.api.v1.chat import _process_chat, create_chat_completion
 
 
 def test_chat_endpoint_has_event_store_depends():

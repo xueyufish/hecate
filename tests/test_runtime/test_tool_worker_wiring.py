@@ -1,7 +1,7 @@
 """T0.2 (guardrail-upgrade-trio) — ToolWorker gating wiring integration tests.
 
 The existing ToolWorker accepts ``access_policy`` and ``approval_callback`` but
-its constructor at ``services/workflow/execution_service.py:587`` did not pass
+its constructor at ``studio/workflows/execution_service.py:587`` did not pass
 them. These tests pin the wired-up behavior so production paths (Pregel and
 path-A direct tool loop) cannot silently bypass gating.
 """

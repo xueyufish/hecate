@@ -8,7 +8,7 @@ import pytest
 
 from hecate.runtime.eventstore import EventStore, InMemoryEventStore
 from hecate.runtime.session_state import InMemorySessionStateStore
-from hecate.services.orchestration.session_state_materializer import (
+from hecate.runtime.session_state_materializer import (
     SessionStateMaterializer,
     _bounded_retain,
     _project_channel_state,

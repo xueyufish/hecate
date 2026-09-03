@@ -6,7 +6,7 @@ dependency on services/orchestration.
 
 Other handoff concerns (tool schema generation, target validation, the
 ``handoff_to_agent`` detection helper) remain in
-``hecate.services.orchestration.handoff`` because ``AgentExecutionPort`` (a
+``hecate.studio.agents.handoff`` because ``AgentExecutionPort`` (a
 concrete RuntimePort adapter) consumes them — splitting them out would
 invert the layering.
 """

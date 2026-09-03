@@ -7,9 +7,9 @@ import uuid
 from sqlalchemy import select
 
 from hecate.models.evaluation import EvaluationDatasetModel, EvaluationItemModel
-from hecate.services.evaluation.engine import EvaluationEngine
-from hecate.services.evaluation.evaluator import Evaluator
-from hecate.services.evaluation.types import AnswerSource, EvalInput, EvalOutput, Score
+from hecate.ops.evaluation.engine import EvaluationEngine
+from hecate.ops.evaluation.evaluator import Evaluator
+from hecate.ops.evaluation.types import AnswerSource, EvalInput, EvalOutput, Score
 
 
 class AlwaysGoodEvaluator(Evaluator):

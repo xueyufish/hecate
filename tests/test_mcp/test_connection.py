@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.mcp.circuit_breaker import CircuitState
-from hecate.services.mcp.client import HecateMCPClient
-from hecate.services.mcp.connection import MCPClientManager
-from hecate.services.mcp.errors import MCPConnectionError, MCPErrorCode
+from hecate.tools.mcp.circuit_breaker import CircuitState
+from hecate.tools.mcp.client import HecateMCPClient
+from hecate.tools.mcp.connection import MCPClientManager
+from hecate.tools.mcp.errors import MCPConnectionError, MCPErrorCode
 
 
 class _FakeClient(HecateMCPClient):

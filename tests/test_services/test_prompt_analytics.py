@@ -14,7 +14,7 @@ class TestPromptVersionCommitMessage:
 
     async def test_create_prompt_with_commit_message(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -27,7 +27,7 @@ class TestPromptVersionCommitMessage:
 
     async def test_create_prompt_without_commit_message(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -39,7 +39,7 @@ class TestPromptVersionCommitMessage:
 
     async def test_update_prompt_with_commit_message(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -57,7 +57,7 @@ class TestPromptVersionCommitMessage:
 
     async def test_version_listing_includes_commit_messages(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -83,7 +83,7 @@ class TestPromptVersionCommitMessage:
 
     async def test_rollback_preserves_commit_message(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -106,7 +106,7 @@ class TestProtectedLabels:
 
     async def test_admin_can_add_protected_label(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -121,7 +121,7 @@ class TestProtectedLabels:
 
     async def test_non_admin_blocked_from_protected_label(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -136,7 +136,7 @@ class TestProtectedLabels:
 
     async def test_non_admin_can_modify_non_protected_labels(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -151,7 +151,7 @@ class TestProtectedLabels:
 
     async def test_admin_can_remove_protected_label(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -167,7 +167,7 @@ class TestProtectedLabels:
         assert "staging" in result.version.labels
 
     async def test_check_protected_labels_static_method(self) -> None:
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService.__new__(PromptService)
         svc._check_protected_labels([], ["production"], "admin")
@@ -183,8 +183,8 @@ class TestPromptAnalyticsService:
 
     async def test_compute_diff_identical_templates(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema
-        from hecate.services.prompt_analytics_service import PromptAnalyticsService
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.analytics import PromptAnalyticsService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -201,8 +201,8 @@ class TestPromptAnalyticsService:
 
     async def test_compute_diff_different_templates(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_analytics_service import PromptAnalyticsService
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.analytics import PromptAnalyticsService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -222,8 +222,8 @@ class TestPromptAnalyticsService:
 
     async def test_compute_diff_nonexistent_version(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema
-        from hecate.services.prompt_analytics_service import PromptAnalyticsService
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.analytics import PromptAnalyticsService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -238,8 +238,8 @@ class TestPromptAnalyticsService:
 
     async def test_get_version_analytics_empty(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema
-        from hecate.services.prompt_analytics_service import PromptAnalyticsService
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.analytics import PromptAnalyticsService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -257,8 +257,8 @@ class TestPromptAnalyticsService:
 
     async def test_compare_versions(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_analytics_service import PromptAnalyticsService
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.analytics import PromptAnalyticsService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -276,8 +276,8 @@ class TestPromptAnalyticsService:
 
     async def test_generate_change_summary_initial_version(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema
-        from hecate.services.prompt_analytics_service import PromptAnalyticsService
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.analytics import PromptAnalyticsService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(
@@ -293,8 +293,8 @@ class TestPromptAnalyticsService:
 
     async def test_generate_change_summary_no_changes(self, db_session) -> None:
         from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-        from hecate.services.prompt_analytics_service import PromptAnalyticsService
-        from hecate.services.prompt_service import PromptService
+        from hecate.studio.prompts.analytics import PromptAnalyticsService
+        from hecate.studio.prompts.service import PromptService
 
         svc = PromptService(db_session)
         data = PromptCreateSchema(

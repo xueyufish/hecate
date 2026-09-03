@@ -14,12 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
 from hecate.core.deps_workspace import get_auth_context
+from hecate.enterprise.auth.api_key_service import ApiKeyService
 from hecate.models.api_key import (
     ApiKeyCreateResponseSchema,
     ApiKeyCreateSchema,
     ApiKeyReadSchema,
 )
-from hecate.services.api_key_service import ApiKeyService
 
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])
 _api_key_service = ApiKeyService()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from hecate.services.mcp.registry import MCPServerRegistry
+from hecate.tools.mcp.registry import MCPServerRegistry
 
 
 def test_register_and_list() -> None:

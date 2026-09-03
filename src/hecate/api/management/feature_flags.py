@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from hecate.core.deps_feature_flags import get_feature_flag_service
-from hecate.services.feature_flags import FeatureFlagService
+from hecate.core.feature_flags import FeatureFlagService
 
 router = APIRouter(prefix="/api/feature-flags", tags=["feature-flags"])
 

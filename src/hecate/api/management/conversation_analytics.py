@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.database import get_db
 from hecate.models.conversation import ConversationModel
 from hecate.models.conversation_turn_score import ConversationTurnScoreModel, FeedbackSubmitSchema
-from hecate.services.ops_center.conversation_analytics import ConversationAnalyticsService
+from hecate.ops.ops_center.conversation_analytics import ConversationAnalyticsService
 
 router = APIRouter(prefix="/api/ops-center/conversations", tags=["ops-center"])
 

@@ -24,7 +24,7 @@ from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
 from hecate.core.deps_workspace import get_auth_context
 from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-from hecate.services.prompt_service import PromptService
+from hecate.studio.prompts.service import PromptService
 
 router = APIRouter()
 
@@ -202,7 +202,7 @@ async def diff_prompt_versions(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Compute a line-level diff between two prompt versions."""
-    from hecate.services.prompt_analytics_service import PromptAnalyticsService
+    from hecate.studio.prompts.analytics import PromptAnalyticsService
 
     svc = PromptAnalyticsService(db)
     try:
@@ -223,7 +223,7 @@ async def get_prompt_analytics(
     days: Annotated[int, Query(ge=1, le=365)] = 7,
 ) -> dict:
     """Get per-version performance analytics from trace data."""
-    from hecate.services.prompt_analytics_service import PromptAnalyticsService
+    from hecate.studio.prompts.analytics import PromptAnalyticsService
 
     svc = PromptAnalyticsService(db)
     return await svc.get_version_analytics(prompt_id, version, days)
@@ -239,7 +239,7 @@ async def compare_prompt_versions(
     days: Annotated[int, Query(ge=1, le=365)] = 7,
 ) -> dict:
     """Compare analytics for two prompt versions side by side."""
-    from hecate.services.prompt_analytics_service import PromptAnalyticsService
+    from hecate.studio.prompts.analytics import PromptAnalyticsService
 
     svc = PromptAnalyticsService(db)
     return await svc.compare_versions(prompt_id, from_version, to_version, days)
@@ -253,7 +253,7 @@ async def generate_prompt_summary(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Generate an AI-assisted change summary for a prompt version."""
-    from hecate.services.prompt_analytics_service import PromptAnalyticsService
+    from hecate.studio.prompts.analytics import PromptAnalyticsService
 
     svc = PromptAnalyticsService(db)
     return await svc.generate_change_summary(prompt_id, version)

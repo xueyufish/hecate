@@ -16,7 +16,7 @@ from hecate.models.quota import (
     QuotaReadSchema,
     QuotaUpdateSchema,
 )
-from hecate.services.quota_service import QuotaService
+from hecate.ops.quota import QuotaService
 
 quotas_router = APIRouter(tags=["quotas"])
 

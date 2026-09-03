@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.evolution.policy_evolver import (
+from hecate.studio.evolution.policy_evolver import (
     PolicyEvolver,
     PromptStrategy,
     ToolStrategy,
 )
-from hecate.services.evolution.trajectory_analyzer import AnalysisResult
+from hecate.studio.evolution.trajectory_analyzer import AnalysisResult
 
 
 @pytest.fixture

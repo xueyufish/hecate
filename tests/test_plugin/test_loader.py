@@ -19,7 +19,7 @@ from hecate.core.plugin.loader import (
 )
 from hecate.core.plugin.manifest import PluginManifest
 from hecate.models.plugin import PluginModel
-from hecate.services.plugin.service import PluginService
+from hecate.studio.plugin.service import PluginService
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 

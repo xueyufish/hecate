@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
-from hecate.services.workflow.test_runner import WorkflowTestRunner
+from hecate.studio.workflows.test_runner import WorkflowTestRunner
 
 LINEAR_DSL = {
     "version": "1.0",
@@ -47,7 +47,7 @@ async def _create_workflow_with_dsl(db: AsyncSession, dsl: dict) -> uuid.UUID:
     db.add(wf)
 
     from hecate.runtime.compiler import GraphCompiler
-    from hecate.services.workflow.graph_dsl import parse_graph
+    from hecate.studio.workflows.graph_dsl import parse_graph
 
     graph_config = parse_graph(dsl)
     compiled = GraphCompiler().compile(graph_config)

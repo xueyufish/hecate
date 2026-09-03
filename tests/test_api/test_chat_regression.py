@@ -21,7 +21,7 @@ def _override_user_id():
 
 class TestChatRegression:
     async def test_non_streaming_basic(self, client):
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(
                 return_value=MagicMock(
                     content="Hi!",
@@ -44,7 +44,7 @@ class TestChatRegression:
         assert data["choices"][0]["message"]["content"] == "Hi!"
 
     async def test_streaming_basic(self, client):
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
 
             async def fake_stream(*args, **kwargs):
                 yield {"choices": [{"delta": {"content": "Hello"}, "finish_reason": None}]}
@@ -62,7 +62,7 @@ class TestChatRegression:
         assert response.status_code == 200
 
     async def test_with_kb_ids_enhanced_path(self, client):
-        with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
             mock_service = MagicMock()
             mock_service.execute = AsyncMock(
                 return_value={
@@ -86,7 +86,7 @@ class TestChatRegression:
         assert data["choices"][0]["message"]["content"] == "Based on docs..."
 
     async def test_with_generate_opening_enhanced_path(self, client):
-        with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
             mock_service = MagicMock()
             mock_service.execute = AsyncMock(
                 return_value={
@@ -112,7 +112,7 @@ class TestChatRegression:
         assert data["choices"][0]["message"]["suggested_questions"] == ["What can you do?"]
 
     async def test_with_generate_suggestions_enhanced_path(self, client):
-        with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
             mock_service = MagicMock()
             mock_service.execute = AsyncMock(
                 return_value={
@@ -137,7 +137,7 @@ class TestChatRegression:
         assert data["choices"][0]["message"]["suggested_questions"] == ["Tell me more", "What else?"]
 
     async def test_simple_passthrough_no_kb(self, client):
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(
                 return_value=MagicMock(
                     content="OK",
@@ -157,7 +157,7 @@ class TestChatRegression:
         assert response.status_code == 200
 
     async def test_empty_messages(self, client):
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(
                 return_value=MagicMock(
                     content="Hello!",
@@ -177,7 +177,7 @@ class TestChatRegression:
         assert response.status_code == 200
 
     async def test_custom_model(self, client):
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(
                 return_value=MagicMock(
                     content="OK",

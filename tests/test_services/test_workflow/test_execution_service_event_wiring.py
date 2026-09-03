@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 from hecate.runtime.eventstore import EventStore, InMemoryEventStore
 from hecate.runtime.session_state import SessionState
-from hecate.services.workflow.execution_service import WorkflowExecutionService, _sync_event_position
+from hecate.studio.workflows.execution_service import WorkflowExecutionService, _sync_event_position
 
 
 def _service(event_store: EventStore | None = None) -> WorkflowExecutionService:

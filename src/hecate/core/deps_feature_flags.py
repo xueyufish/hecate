@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from hecate.services.feature_flags import FeatureFlagService
+from hecate.core.feature_flags import FeatureFlagService
 
 
 def get_feature_flag_service(request: Request) -> FeatureFlagService:

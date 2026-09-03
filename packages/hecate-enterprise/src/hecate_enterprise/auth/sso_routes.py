@@ -171,7 +171,7 @@ async def oidc_callback(
         )
 
     # Issue Hecate JWT
-    from hecate.services.auth.token import create_access_token
+    from hecate.enterprise.auth.token import create_access_token
 
     access_token = create_access_token(user_id=ctx.user_id)
 
@@ -254,7 +254,7 @@ async def saml_acs(
         )
 
     # Issue Hecate JWT
-    from hecate.services.auth.token import create_access_token
+    from hecate.enterprise.auth.token import create_access_token
 
     access_token = create_access_token(user_id=ctx.user_id)
 

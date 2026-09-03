@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.security.dlp.recognizers.dictionary import DictionaryRecognizer
+from hecate.ops.dlp.recognizers.dictionary import DictionaryRecognizer
 
 
 class TestDictionaryRecognizerMetadata:

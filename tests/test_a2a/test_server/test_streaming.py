@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from hecate.a2a.server.streaming import format_sse_event, task_to_status_event
-from hecate.a2a.types import Task, TaskState, TaskStatus
+from hecate.channel.a2a.server.streaming import format_sse_event, task_to_status_event
+from hecate.channel.a2a.types import Task, TaskState, TaskStatus
 
 
 def test_format_sse_event() -> None:

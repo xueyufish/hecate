@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from hecate.services.evaluation.types import (
+from hecate.ops.evaluation.types import (
     EvalInput,
     EvalOutput,
     EvaluationRunResult,

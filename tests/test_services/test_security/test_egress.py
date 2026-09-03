@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.security.dlp.policy import (
+from hecate.ops.dlp.policy import (
     DLPPolicyResolver,
     DLPPolicyRule,
     PolicyScope,
 )
-from hecate.services.security.dlp.recognizer import (
+from hecate.ops.dlp.recognizer import (
     DLPRecognizer,
     DLPRecognizerRegistry,
 )
-from hecate.services.security.dlp.result import DLPAction, DLPFinding
-from hecate.services.security.dlp.scanner import DLPScanner
-from hecate.services.security.egress import (
+from hecate.ops.dlp.result import DLPAction, DLPFinding
+from hecate.ops.dlp.scanner import DLPScanner
+from hecate.runtime.security.egress import (
     DLPEgressFilter,
     EgressAction,
     EgressFilter,

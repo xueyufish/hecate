@@ -17,8 +17,8 @@ import pytest
 from pydantic import ValidationError
 
 from hecate.runtime.session_state import SessionState, SessionStateStore
-from hecate.services.state.state import AgentState
-from hecate.services.workflow.execution_service import WorkflowExecutionService
+from hecate.studio.state.state import AgentState
+from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
 
 @asynccontextmanager

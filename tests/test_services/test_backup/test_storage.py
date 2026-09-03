@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hecate.services.backup.storage import BackupFile, BackupStorage
+from hecate.ops.backup.storage import BackupFile, BackupStorage
 
 
 def test_backup_file_dataclass():
@@ -26,7 +26,7 @@ def test_backup_storage_is_abstract():
 
 async def test_minio_storage_upload():
     """MinIOBackupStorage.upload calls minio client put_object."""
-    from hecate.services.backup.minio_storage import MinIOBackupStorage
+    from hecate.ops.backup.minio_storage import MinIOBackupStorage
 
     storage = MinIOBackupStorage()
     mock_client = MagicMock()
@@ -40,7 +40,7 @@ async def test_minio_storage_upload():
 
 async def test_minio_storage_download():
     """MinIOBackupStorage.download returns file bytes."""
-    from hecate.services.backup.minio_storage import MinIOBackupStorage
+    from hecate.ops.backup.minio_storage import MinIOBackupStorage
 
     storage = MinIOBackupStorage()
     mock_response = MagicMock()
@@ -58,7 +58,7 @@ async def test_minio_storage_download():
 
 async def test_minio_storage_list_objects():
     """MinIOBackupStorage.list_objects returns BackupFile list."""
-    from hecate.services.backup.minio_storage import MinIOBackupStorage
+    from hecate.ops.backup.minio_storage import MinIOBackupStorage
 
     storage = MinIOBackupStorage()
     mock_obj = MagicMock()
@@ -78,7 +78,7 @@ async def test_minio_storage_list_objects():
 
 async def test_minio_storage_exists():
     """MinIOBackupStorage.exists returns True when object exists."""
-    from hecate.services.backup.minio_storage import MinIOBackupStorage
+    from hecate.ops.backup.minio_storage import MinIOBackupStorage
 
     storage = MinIOBackupStorage()
     mock_client = MagicMock()
@@ -94,7 +94,7 @@ async def test_minio_storage_exists():
 
 async def test_minio_storage_delete():
     """MinIOBackupStorage.delete removes object if it exists."""
-    from hecate.services.backup.minio_storage import MinIOBackupStorage
+    from hecate.ops.backup.minio_storage import MinIOBackupStorage
 
     storage = MinIOBackupStorage()
     mock_client = MagicMock()
@@ -111,7 +111,7 @@ async def test_minio_storage_delete():
 
 async def test_s3_storage_upload():
     """S3BackupStorage.upload calls boto3 client put_object."""
-    from hecate.services.backup.s3_storage import S3BackupStorage
+    from hecate.ops.backup.s3_storage import S3BackupStorage
 
     storage = S3BackupStorage()
     mock_client = MagicMock()
@@ -124,10 +124,10 @@ async def test_s3_storage_upload():
 
 async def test_factory_creates_minio_storage():
     """create_backup_storage returns MinIOBackupStorage when type=minio."""
-    from hecate.services.backup.factory import create_backup_storage
-    from hecate.services.backup.minio_storage import MinIOBackupStorage
+    from hecate.ops.backup.factory import create_backup_storage
+    from hecate.ops.backup.minio_storage import MinIOBackupStorage
 
-    with patch("hecate.services.backup.factory.settings") as mock_settings:
+    with patch("hecate.ops.backup.factory.settings") as mock_settings:
         mock_settings.BACKUP_STORAGE_TYPE = "minio"
         storage = create_backup_storage()
         assert isinstance(storage, MinIOBackupStorage)
@@ -135,10 +135,10 @@ async def test_factory_creates_minio_storage():
 
 async def test_factory_creates_s3_storage():
     """create_backup_storage returns S3BackupStorage when type=s3."""
-    from hecate.services.backup.factory import create_backup_storage
-    from hecate.services.backup.s3_storage import S3BackupStorage
+    from hecate.ops.backup.factory import create_backup_storage
+    from hecate.ops.backup.s3_storage import S3BackupStorage
 
-    with patch("hecate.services.backup.factory.settings") as mock_settings:
+    with patch("hecate.ops.backup.factory.settings") as mock_settings:
         mock_settings.BACKUP_STORAGE_TYPE = "s3"
         mock_settings.BACKUP_S3_BUCKET = "test-bucket"
         mock_settings.BACKUP_S3_ACCESS_KEY = "test-key"
@@ -149,9 +149,9 @@ async def test_factory_creates_s3_storage():
 
 async def test_factory_rejects_invalid_type():
     """create_backup_storage raises ValueError for unknown type."""
-    from hecate.services.backup.factory import create_backup_storage
+    from hecate.ops.backup.factory import create_backup_storage
 
-    with patch("hecate.services.backup.factory.settings") as mock_settings:
+    with patch("hecate.ops.backup.factory.settings") as mock_settings:
         mock_settings.BACKUP_STORAGE_TYPE = "invalid"
         with pytest.raises(ValueError, match="Unknown BACKUP_STORAGE_TYPE"):
             create_backup_storage()
@@ -161,7 +161,7 @@ def test_build_backup_path():
     """build_backup_path creates structured path."""
     from datetime import datetime
 
-    from hecate.services.backup.factory import build_backup_path
+    from hecate.ops.backup.factory import build_backup_path
 
     ts = datetime(2026, 7, 30, 2, 0, 0, tzinfo=UTC)
     path = build_backup_path(ts, "pg", "full.dump")
@@ -172,7 +172,7 @@ def test_build_manifest_path():
     """build_manifest_path creates manifest path."""
     from datetime import datetime
 
-    from hecate.services.backup.factory import build_manifest_path
+    from hecate.ops.backup.factory import build_manifest_path
 
     ts = datetime(2026, 7, 30, 2, 0, 0, tzinfo=UTC)
     path = build_manifest_path(ts)
@@ -181,7 +181,7 @@ def test_build_manifest_path():
 
 def test_build_wal_path():
     """build_wal_path creates WAL path."""
-    from hecate.services.backup.factory import build_wal_path
+    from hecate.ops.backup.factory import build_wal_path
 
     path = build_wal_path("000000010000000000000001")
     assert path == "wal/000000010000000000000001"

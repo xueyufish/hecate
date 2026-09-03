@@ -15,7 +15,7 @@ from hecate.models.model_pricing import (
     ModelPricingCreateSchema,
     ModelPricingUpdateSchema,
 )
-from hecate.services.cost_service import CostService
+from hecate.ops.cost import CostService
 
 router = APIRouter()
 

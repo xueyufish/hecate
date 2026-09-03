@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from hecate.services.mcp.connection import MCPClientManager
+from hecate.tools.mcp.connection import MCPClientManager
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 

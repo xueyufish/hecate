@@ -10,7 +10,7 @@ from hecate.runtime.handoff import (
     filter_messages_for_handoff,
 )
 from hecate.runtime.types import ChannelDef, ChannelType, CompiledGraph, Edge, NodeConfig, NodeType
-from hecate.services.orchestration.handoff import (
+from hecate.studio.agents.handoff import (
     build_handoff_tool_schema,
     create_handoff_worker_result,
     get_handoff_targets_for_node,
@@ -20,7 +20,7 @@ from hecate.services.orchestration.handoff import (
     validate_handoff_target,
     validate_handoff_target_from_list,
 )
-from hecate.services.workflow.graph_dsl import GraphValidationError, parse_graph
+from hecate.studio.workflows.graph_dsl import GraphValidationError, parse_graph
 
 
 def _make_compiled_with_handoff(

@@ -10,7 +10,7 @@ import pytest
 
 from hecate.runtime.retry import NoRetryStrategy, RetryExecutor, RetryStrategy
 from hecate.runtime.types import WorkerResult
-from hecate.services.validation.retry_policy import (
+from hecate.studio.validation.retry_policy import (
     DefaultRetryStrategy,
     ErrorClassifier,
 )

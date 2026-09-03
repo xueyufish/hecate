@@ -7,7 +7,7 @@ combinations.
 
 from __future__ import annotations
 
-from hecate.services.suggestions.prompts import build_followup_prompt, build_opening_prompt
+from hecate.studio.suggestions.prompts import build_followup_prompt, build_opening_prompt
 
 
 class TestBuildOpeningPrompt:

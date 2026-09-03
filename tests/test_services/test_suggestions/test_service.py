@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock
 import pytest
 from hecate_llm.service import LLMResponse
 
-from hecate.services.suggestions.service import SuggestionService
+from hecate.studio.suggestions.service import SuggestionService
 
 
 @pytest.fixture

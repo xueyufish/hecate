@@ -347,7 +347,7 @@ async def import_skill(
     Raises:
         HTTPException: 422 for invalid format, 413 for file too large.
     """
-    from hecate.services.skill.parser import parse_skill_md
+    from hecate.tools.skill.parser import parse_skill_md
 
     # File size check (100KB limit)
     max_file_size = 100 * 1024

@@ -27,21 +27,6 @@ from hecate.api.management.a2a import router as a2a_management_router
 from hecate.api.management.agent_health import router as agent_health_router
 from hecate.api.management.agent_templates import router as agent_templates_router
 from hecate.api.management.agents import router as agents_router
-from hecate.api.management.alerts import (
-    channels_router as alert_channels_router,
-)
-from hecate.api.management.alerts import (
-    escalation_policies_router as alert_escalation_policies_router,
-)
-from hecate.api.management.alerts import (
-    events_router as alert_events_router,
-)
-from hecate.api.management.alerts import (
-    rules_router as alert_rules_router,
-)
-from hecate.api.management.alerts import (
-    silences_router as alert_silences_router,
-)
 from hecate.api.management.api_keys import router as api_keys_router
 from hecate.api.management.budget import router as budget_router
 from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
@@ -74,9 +59,24 @@ from hecate.api.middleware import AuditMiddleware
 from hecate.api.schedules import router as schedules_router
 from hecate.api.security_findings import router as security_findings_router
 from hecate.api.tool_decisions import router as tool_decisions_router
-from hecate.api.v1.agents import router as agent_chat_router
-from hecate.api.v1.chat import router as chat_router
-from hecate.api.v1.models import router as models_router
+from hecate.channel.api.v1.agents import router as agent_chat_router
+from hecate.channel.api.v1.chat import router as chat_router
+from hecate.channel.api.v1.models import router as models_router
+from hecate.channel.management.alerts import (
+    channels_router as alert_channels_router,
+)
+from hecate.channel.management.alerts import (
+    escalation_policies_router as alert_escalation_policies_router,
+)
+from hecate.channel.management.alerts import (
+    events_router as alert_events_router,
+)
+from hecate.channel.management.alerts import (
+    rules_router as alert_rules_router,
+)
+from hecate.channel.management.alerts import (
+    silences_router as alert_silences_router,
+)
 from hecate.core.config import settings as _settings
 from hecate.core.database import engine
 
@@ -112,302 +112,18 @@ class _OTelAttributeMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager.
 
-    Handles startup and shutdown events for the FastAPI application.
-    On startup: ensures database connection pool is ready; seeds built-in tools.
-    On shutdown: disposes of the database connection pool.
+    Composition lives in :mod:`hecate.core.composition.wiring`. This
+    function remains as the FastAPI lifespan entry point and delegates
+    the actual assembly work to ``compose_application``.
     """
-    from hecate.core.database import async_session_factory
-    from hecate.services.tool.registry import seed_builtin_tools
+    from hecate.core.composition.wiring import compose_application
 
-    async with async_session_factory() as session:
-        try:
-            await seed_builtin_tools(session)
-            await session.commit()
-        except Exception:
-            await session.rollback()
+    async with compose_application(app):
+        yield
 
-    # Initialize secret providers (lazy-imported from hecate-enterprise; if
-    # the wheel is not installed, log and continue with no providers
-    # registered — self-hosted installs without enterprise still work).
-    try:
-        from hecate_enterprise.vault.registration import register_secret_providers
-
-        register_secret_providers()
-    except ImportError:
-        logger.debug("hecate-enterprise not installed; skipping secret-provider registration")
-
-    # Initialize process-wide EventStore and SessionStateStore singletons
-    # (eventstore-pg-wiring + session-state-store changes): wired into
-    # chat/completions via get_event_store / get_session_state_store Depends.
-    from hecate.core.config import settings as _state_settings
-    from hecate.services.event_state import create_event_store
-    from hecate.services.session_state import create_session_state_store
-
-    app.state.event_store = create_event_store(_state_settings)
-    app.state.session_state_store = create_session_state_store(_state_settings)
-    logger.info("EventStore backend=%s", _state_settings.EVENT_STORE_BACKEND)
-    logger.info("SessionStateStore backend=%s", _state_settings.SESSION_STATE_STORE_BACKEND)
-
-    # Initialize the DLP engine (4.x): build a base DLPScanner with the
-    # built-in recognizers (RegexRecognizer, DictionaryRecognizer with the
-    # canonical PII list, SecretsRecognizer and PresidioRecognizer when
-    # their optional dependencies are installed). Per-request DB-backed
-    # rules (DLPCustomRegexModel, DLPDictionaryModel) are layered on by
-    # the DLPService at request time — this base scanner is the fast
-    # in-memory fallback for callers that don't need DB-backed config.
-    if _state_settings.DLP_ENABLED:
-        from hecate.services.security.dlp.policy import (
-            DLPPolicyResolver,
-        )
-        from hecate.services.security.dlp.recognizer import (
-            DLPRecognizerRegistry,
-        )
-        from hecate.services.security.dlp.recognizers.regex import (
-            RegexRecognizer,
-        )
-        from hecate.services.security.dlp.scanner import (
-            DLPScanner,
-        )
-
-        base_registry = DLPRecognizerRegistry()
-        base_registry.register(RegexRecognizer())
-        app.state.dlp_scanner = DLPScanner(base_registry, policy=DLPPolicyResolver(rules=[]))
-        logger.info(
-            "DLP engine initialized (buffer=%d overlap=%d)",
-            _state_settings.DLP_STREAM_BUFFER_SIZE,
-            _state_settings.DLP_STREAM_OVERLAP,
-        )
-    else:
-        app.state.dlp_scanner = None
-        logger.info("DLP engine disabled (DLP_ENABLED=false)")
-
-    # Discover and register plugins from the plugins directory
-    try:
-        from hecate.services.plugin.service import PluginService
-
-        async with async_session_factory() as plugin_session:
-            plugin_service = PluginService(plugin_session)
-            summary = await plugin_service.register_discovered_plugins(_settings.PLUGINS_DIR)
-            await plugin_session.commit()
-            logger.info(
-                "Plugin discovery: %d discovered, %d registered, %d errors",
-                summary["discovered"],
-                summary["registered"],
-                summary["errors"],
-            )
-    except Exception:
-        logger.exception("Plugin discovery failed")
-
-    # Agent Plugins 1.0 ingestion (5.5c): replay MCP registrations for
-    # enabled packages and clean orphaned snapshot directories.
-    try:
-        from hecate.services.plugin.service import PluginService
-
-        async with async_session_factory() as plugin_session:
-            plugin_service = PluginService(plugin_session)
-            replayed = await plugin_service.replay_agent_plugin_mcp()
-            orphans = await plugin_service.cleanup_orphan_agent_plugin_dirs(_settings.PLUGINS_DIR)
-            await plugin_session.commit()
-            if replayed or orphans:
-                logger.info(
-                    "Agent Plugins maintenance: %d packages replayed, %d orphan dirs removed",
-                    replayed,
-                    orphans,
-                )
-    except Exception:
-        logger.exception("Agent Plugins maintenance failed")
-
-    # Meta-agents (13.9a-d): run lifecycle ops agents on an interval.
-    # Default off; enabled deployments get the GC (report-only cleanup
-    # scanning) and the compliance checker (ruff + security config audit).
-    # DriftDetector is NOT registered — it needs an expected-baseline
-    # source that deployment tooling must define first.
-    meta_scheduler = None
-    if _state_settings.META_AGENTS_ENABLED:
-        try:
-            from hecate.core.database import async_session_factory
-            from hecate.services.meta_agents.compliance_checker import ComplianceCheckerAgent
-            from hecate.services.meta_agents.garbage_collector import GarbageCollectorAgent
-            from hecate.services.meta_agents.scheduler import MetaAgentScheduler
-
-            interval = _state_settings.META_AGENTS_INTERVAL_SECONDS
-            gc_agent = GarbageCollectorAgent()
-            compliance_agent = ComplianceCheckerAgent()
-
-            async def _gc_tick() -> None:
-                async with async_session_factory() as session:
-                    await gc_agent.run(session)
-
-            meta_scheduler = MetaAgentScheduler()
-            meta_scheduler.register("garbage_collector", _gc_tick, interval_seconds=interval)
-            meta_scheduler.register("compliance_checker", compliance_agent.run, interval_seconds=interval)
-            await meta_scheduler.start()
-            app.state.meta_scheduler = meta_scheduler
-            logger.info("Meta-agents started (interval=%ds): garbage_collector, compliance_checker", interval)
-        except Exception:
-            logger.exception("Meta-agent startup failed; continuing without meta-agents")
-            meta_scheduler = None
-
-    # Initialize IM channels (Feishu, Slack) — register adapters and
-    # spin up the asynchronous MessageBus used by the webhook endpoint to
-    # decouple webhook ACK from Agent execution (design.md D5).
-    try:
-        from hecate.channel.im.message_bus import IMMessageBus
-        from hecate.core.plugin.registry import PluginRegistry
-        from hecate.gateway.registration import register_channels, register_im_channels
-
-        plugin_registry = PluginRegistry()
-        register_channels(plugin_registry)
-        registered_im = register_im_channels(plugin_registry)
-        app.state.plugin_registry = plugin_registry
-
-        im_bus = IMMessageBus()
-        await im_bus.start()
-        app.state.im_message_bus = im_bus
-        logger.info("IM channels initialized: %d IM adapter(s) registered", registered_im)
-    except Exception:
-        logger.exception("IM channel initialization failed; continuing without IM support")
-
-    # Register daily budget forecast snapshot task
-    try:
-        from apscheduler.schedulers.asyncio import AsyncIOScheduler
-        from apscheduler.triggers.cron import CronTrigger
-
-        from hecate.core.database import async_session_factory
-
-        scheduler = AsyncIOScheduler()
-
-        async def _record_forecast_snapshots() -> None:
-            async with async_session_factory() as session:
-                from hecate_enterprise.budget.budget_service import record_all_forecast_snapshots
-
-                await record_all_forecast_snapshots(session)
-
-        scheduler.add_job(
-            _record_forecast_snapshots,
-            trigger=CronTrigger(hour=0, minute=5),
-            id="budget_forecast_snapshot",
-            name="Daily Budget Forecast Snapshot",
-            replace_existing=True,
-        )
-        scheduler.start()
-        logger.info("Budget forecast scheduler started (daily at 00:05 UTC)")
-    except ImportError:
-        logger.info("APScheduler not available — budget forecast scheduling disabled")
-
-    # Configure OpenTelemetry tracing (OTLP exporter when
-    # OTEL_EXPORTER_OTLP_ENDPOINT is set, console otherwise; DB bridge +
-    # metrics feed via HecateTraceSpanProcessor). Keep the provider so the
-    # shutdown phase can stop its background threads — without shutdown the
-    # global tracer keeps recording into HecateTraceSpanProcessor's queue,
-    # which drains toward the production database (hangs test processes that
-    # run this lifespan via TestClient and have no Postgres).
-    tracing_provider = None
-    try:
-        from hecate_ops.otel_setup import configure_tracing
-
-        tracing_provider = configure_tracing(app)
-    except ImportError:
-        logger.warning("observability extras not installed — tracing disabled")
-
-    # Start monitoring service
-    from hecate_ops.api.monitoring import get_monitoring_service
-
-    monitoring_svc = get_monitoring_service()
-    monitoring_svc.start()
-
-    # Start audit batch writer
-    import asyncio
-
-    from hecate.api.middleware import set_audit_queue
-    from hecate.services.audit.store import AuditEvent, DatabaseAuditStore
-    from hecate.services.audit.writer import AuditBatchWriter
-
-    audit_queue: asyncio.Queue[AuditEvent] = asyncio.Queue(maxsize=10000)
-    set_audit_queue(audit_queue)
-    audit_writer = AuditBatchWriter(DatabaseAuditStore(), audit_queue)
-    await audit_writer.start()
-
-    # Sandbox Container Pool (9.4d): prewarm pool on startup
-    sandbox_pool = None
-    if _settings.SANDBOX_POOL_ENABLED:
-        from hecate_sandbox.sandbox import get_sandbox_pool
-
-        sandbox_pool = get_sandbox_pool()
-        if sandbox_pool:
-            await sandbox_pool.prewarm()
-            logger.info("Sandbox container pool prewarmed: %d containers", sandbox_pool.total_count)
-
-    # Tool decision pipeline (5.9 P0): structured tool policy decision events
-    from hecate.api.tool_decisions import set_tool_decision_service
-    from hecate.runtime.decision_sink import decision_emitter
-    from hecate.services.security.decision_service import ToolDecisionService
-
-    if _settings.AGENT_ENV_DECISION_ENABLED:
-        tool_decision_svc = ToolDecisionService()
-        await tool_decision_svc.start()
-        decision_emitter.set_sink(tool_decision_svc)
-        set_tool_decision_service(tool_decision_svc)
-    else:
-        tool_decision_svc = None
-
-    # Security finding service (FindingEngine output persistence)
-    from hecate.api.security_findings import set_security_finding_service
-    from hecate.services.security.finding_service import SecurityFindingService
-
-    finding_svc = SecurityFindingService()
-    set_security_finding_service(finding_svc)
-
-    # SIEM export pipeline (8.7): security event export to external SIEM
-    siem_collector = None
-    if _settings.SIEM_ENABLED:
-        from hecate.services.security.siem.collector import (
-            SecurityEventCollector,
-            set_collector,
-        )
-
-        siem_collector = SecurityEventCollector()
-        set_collector(siem_collector)
-        await siem_collector.start()
-        logger.info("SIEM export pipeline started")
-
-    yield
-    # Shutdown: stop the OTel provider first so the (already-set) global
-    # tracer drops any spans emitted after this point instead of feeding the
-    # DB-bridge queue.
-    if tracing_provider is not None:
-        try:
-            tracing_provider.shutdown()
-        except Exception:
-            logger.exception("Tracing provider shutdown failed")
-    # Shutdown: stop meta-agent scheduler
-    if meta_scheduler is not None:
-        try:
-            await meta_scheduler.stop()
-        except Exception:
-            logger.exception("Meta-agent shutdown failed")
-    # Shutdown: stop sandbox container pool
-    if sandbox_pool:
-        await sandbox_pool.shutdown()
-    # Shutdown: stop SIEM collector
-    if siem_collector:
-        await siem_collector.stop()
-    # Shutdown: stop tool decision service
-    if tool_decision_svc:
-        decision_emitter.disable()
-        await tool_decision_svc.stop()
-    # Shutdown: stop IM message bus
-    im_message_bus = getattr(app.state, "im_message_bus", None)
-    if im_message_bus is not None:
-        try:
-            await im_message_bus.stop()
-        except Exception:
-            logger.exception("IM message bus shutdown failed")
-    # Shutdown: stop audit writer
-    await audit_writer.stop()
-    # Shutdown: stop monitoring service
-    await monitoring_svc.stop()
-    # Shutdown: clean up database connections
+    # Clean up database connections (the composition root leaves the
+    # engine disposal here because the engine is created in main.py's
+    # module scope, not in composition).
     await engine.dispose()
 
 
@@ -786,7 +502,7 @@ except ImportError:
 if _settings.MCP_SERVER_ENABLED:
     from fastmcp.utilities.lifespan import combine_lifespans
 
-    from hecate.services.mcp.server import create_mcp_server
+    from hecate.tools.mcp.server import create_mcp_server
 
     _mcp = create_mcp_server()
     # fastmcp 4 / FastAPI integration: http_app(path="/") avoids the
@@ -798,7 +514,7 @@ if _settings.MCP_SERVER_ENABLED:
 
 # A2A Server — conditional mount when A2A_SERVER_ENABLED=true
 if _settings.A2A_SERVER_ENABLED:
-    from hecate.a2a.server.app import router as a2a_router
+    from hecate.channel.a2a.server.app import router as a2a_router
 
     app.include_router(a2a_router, tags=["a2a"])
 
@@ -833,8 +549,8 @@ app.include_router(backup_router, tags=["backup"])
 # IM channel webhooks (Feishu + Slack) — registered after backup to keep
 # the system routers grouped together. The IMMessageBus is initialized in
 # the lifespan handler below.
-from hecate.api.v1.channels import router as im_channels_router  # noqa: E402
-from hecate.api.v1.im_bindings import router as im_bindings_router  # noqa: E402
+from hecate.channel.api.v1.channels import router as im_channels_router  # noqa: E402
+from hecate.channel.api.v1.im_bindings import router as im_bindings_router  # noqa: E402
 
 app.include_router(im_channels_router)
 app.include_router(im_bindings_router)

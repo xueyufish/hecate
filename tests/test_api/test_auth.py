@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
-from hecate.services.auth.password import hash_password, verify_password
-from hecate.services.auth.token import (
+from hecate.enterprise.auth.password import hash_password, verify_password
+from hecate.enterprise.auth.token import (
     create_access_token,
     create_refresh_token,
     decode_access_token,

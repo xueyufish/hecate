@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from hecate.services.workflow.execution_service import WorkflowExecutionService
+from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
 
 def _make_port(tokens: list[str] | None = None) -> MagicMock:
@@ -117,7 +117,7 @@ class TestWorkflowExecutionServiceChatMode:
 
 class TestWorkflowExecutionServiceThreeLayerMode:
     async def test_three_layer_no_guard_node(self) -> None:
-        from hecate.services.workflow.templates import build_three_layer_graph
+        from hecate.studio.workflows.templates import build_three_layer_graph
 
         graph = build_three_layer_graph(planner_model="gpt-4o", sub_agent_model="gpt-4o")
         assert "guard" not in graph.nodes

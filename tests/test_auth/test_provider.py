@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.auth.api_key_provider import APIKeyAuthProvider
-from hecate.auth.jwt_provider import JWTAuthProvider
-from hecate.auth.provider import AuthProvider
+from hecate.enterprise.auth.api_key_provider import APIKeyAuthProvider
+from hecate.enterprise.auth.jwt_provider import JWTAuthProvider
+from hecate.enterprise.auth.provider import AuthProvider
 
 
 class TestAuthProvider:

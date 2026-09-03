@@ -12,7 +12,7 @@ import pytest
 
 from hecate.runtime.eventstore import Event, EventType, InMemoryEventStore
 from hecate.runtime.session_state import SessionState
-from hecate.services.workflow.execution_service import _sync_event_position
+from hecate.studio.workflows.execution_service import _sync_event_position
 
 
 @pytest.mark.parametrize("n_events", [1, 3, 10])

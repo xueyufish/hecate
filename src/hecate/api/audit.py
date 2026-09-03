@@ -18,7 +18,7 @@ from fastapi.responses import Response
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps_workspace import get_auth_context
 from hecate.models.audit import AuditLogQuerySchema
-from hecate.services.audit.service import AuditService, create_default_audit_service
+from hecate.ops.audit.service import AuditService, create_default_audit_service
 
 logger = logging.getLogger(__name__)
 

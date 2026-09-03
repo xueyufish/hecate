@@ -11,7 +11,7 @@ pytest.importorskip("apscheduler")
 
 def test_get_scheduler_returns_singleton():
     """get_scheduler returns the same scheduler instance."""
-    from hecate.services.backup.scheduler import get_scheduler
+    from hecate.ops.backup.scheduler import get_scheduler
 
     s1 = get_scheduler()
     s2 = get_scheduler()
@@ -20,7 +20,7 @@ def test_get_scheduler_returns_singleton():
 
 def test_start_backup_scheduler_disabled():
     """start_backup_scheduler is a no-op when BACKUP_SCHEDULE_ENABLED=false."""
-    from hecate.services.backup import scheduler as sched_mod
+    from hecate.ops.backup import scheduler as sched_mod
 
     with patch.object(sched_mod.settings, "BACKUP_SCHEDULE_ENABLED", False):
         sched_mod.start_backup_scheduler()
@@ -28,9 +28,9 @@ def test_start_backup_scheduler_disabled():
 
 async def test_apply_retention_policy_no_excess():
     """apply_retention_policy returns 0 when under limit."""
-    from hecate.services.backup.scheduler import apply_retention_policy
+    from hecate.ops.backup.scheduler import apply_retention_policy
 
-    with patch("hecate.services.backup.scheduler.async_session_factory") as mock_factory:
+    with patch("hecate.ops.backup.scheduler.async_session_factory") as mock_factory:
         mock_session = AsyncMock()
         mock_result = MagicMock()
         mock_result.scalars.return_value.all.return_value = []
@@ -45,8 +45,8 @@ async def test_apply_retention_policy_no_excess():
 
 async def test_scheduled_backup_calls_create_backup():
     """_scheduled_backup calls create_backup with scope=all."""
-    from hecate.services.backup.scheduler import _scheduled_backup
+    from hecate.ops.backup.scheduler import _scheduled_backup
 
-    with patch("hecate.services.backup.scheduler.create_backup", new_callable=AsyncMock) as mock_create:
+    with patch("hecate.ops.backup.scheduler.create_backup", new_callable=AsyncMock) as mock_create:
         await _scheduled_backup()
         mock_create.assert_called_once()

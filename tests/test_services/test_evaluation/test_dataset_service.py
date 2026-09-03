@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from hecate.services.evaluation.dataset_service import EvaluationDatasetService
+from hecate.ops.evaluation.dataset_service import EvaluationDatasetService
 
 
 @pytest.fixture

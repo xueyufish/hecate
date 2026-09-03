@@ -6,7 +6,7 @@ from dataclasses import asdict
 
 from fastapi import APIRouter
 
-from hecate.services.preflight import run_checks
+from hecate.ops.preflight import run_checks
 
 router = APIRouter(prefix="/api", tags=["preflight"])
 

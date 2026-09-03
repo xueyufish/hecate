@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.skill.parser import parse_skill_md
+from hecate.tools.skill.parser import parse_skill_md
 
 
 class TestParseSkillMd:

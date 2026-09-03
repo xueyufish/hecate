@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.models.agent import AgentModel
 from hecate.models.conversation import ConversationModel
 from hecate.models.trace import TraceModel
-from hecate.services.ops_center.agent_health import AgentHealthService
-from hecate.services.ops_center.overview import OpsCenterOverviewService
+from hecate.ops.ops_center.agent_health import AgentHealthService
+from hecate.ops.ops_center.overview import OpsCenterOverviewService
 
 
 async def _insert_trace(

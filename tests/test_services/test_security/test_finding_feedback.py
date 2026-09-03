@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.security_finding import SecurityFindingModel
-from hecate.services.security.finding_service import SecurityFindingService
+from hecate.ops.security.findings import SecurityFindingService
 
 
 @pytest.fixture

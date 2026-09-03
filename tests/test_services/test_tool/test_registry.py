@@ -8,9 +8,9 @@ from typing import Any
 import pytest
 
 from hecate.models.tool import ToolModel
-from hecate.services.tool.builtin import BuiltInToolExecutor
-from hecate.services.tool.registry import ToolRegistry, seed_builtin_tools
-from hecate.services.tool.search import SearchProvider
+from hecate.tools.tool.builtin import BuiltInToolExecutor
+from hecate.tools.tool.registry import ToolRegistry, seed_builtin_tools
+from hecate.tools.tool.search import SearchProvider
 
 
 class MockSearchProvider(SearchProvider):

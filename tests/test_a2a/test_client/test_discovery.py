@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.a2a.client.discovery import discover_agent_card
+from hecate.channel.a2a.client.discovery import discover_agent_card
 
 
 def test_discover_agent_card_module_exists() -> None:

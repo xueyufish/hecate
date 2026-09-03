@@ -10,12 +10,12 @@ from hecate.models.backup import RestoreConflict
 
 async def test_restore_backup_not_found():
     """restore_backup returns failed when backup record not found."""
-    from hecate.services.backup.restore import restore_backup
+    from hecate.ops.backup.restore import restore_backup
 
     backup_id = uuid.uuid4()
     mock_storage = MagicMock()
 
-    with patch("hecate.services.backup.restore.async_session_factory") as mock_factory:
+    with patch("hecate.ops.backup.restore.async_session_factory") as mock_factory:
         mock_session = AsyncMock()
         mock_session.get = AsyncMock(return_value=None)
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -29,7 +29,7 @@ async def test_restore_backup_not_found():
 
 async def test_restore_resolve_scopes():
     """_resolve_scopes expands 'all' to 4 scopes."""
-    from hecate.services.backup.restore import _resolve_scopes
+    from hecate.ops.backup.restore import _resolve_scopes
 
     assert _resolve_scopes("all") == ["pg", "qdrant", "minio", "fs"]
     assert _resolve_scopes("pg") == ["pg"]
@@ -44,7 +44,7 @@ def test_restore_conflict_enum():
 
 def test_tenant_scoped_tables_includes_core_models():
     """TENANT_SCOPED_TABLES includes expected table names."""
-    from hecate.services.backup.restore import TENANT_SCOPED_TABLES
+    from hecate.ops.backup.restore import TENANT_SCOPED_TABLES
 
     assert "agents" in TENANT_SCOPED_TABLES
     assert "conversations" in TENANT_SCOPED_TABLES

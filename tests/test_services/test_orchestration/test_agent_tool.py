@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 
 from hecate.models.agent import AgentModel
-from hecate.services.orchestration.agent_tool import (
+from hecate.studio.agents.agent_tool import (
     build_agent_tool_schema,
     find_agent_id_for_tool,
     is_agent_tool,

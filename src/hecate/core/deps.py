@@ -25,8 +25,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.config import settings
 from hecate.core.database import get_db
+from hecate.enterprise.auth.token import decode_access_token
 from hecate.models.agent import AgentModel
-from hecate.services.auth.token import decode_access_token
 
 logger = logging.getLogger(__name__)
 

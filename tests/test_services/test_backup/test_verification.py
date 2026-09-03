@@ -13,11 +13,11 @@ from hecate.models.backup import BackupRecordModel
 
 async def test_verify_backup_not_found():
     """verify_backup raises ValueError for unknown backup ID."""
-    from hecate.services.backup.verification import verify_backup
+    from hecate.ops.backup.verification import verify_backup
 
     backup_id = uuid.uuid4()
 
-    with patch("hecate.services.backup.verification.async_session_factory") as mock_factory:
+    with patch("hecate.ops.backup.verification.async_session_factory") as mock_factory:
         mock_session = AsyncMock()
         mock_session.get = AsyncMock(return_value=None)
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -29,7 +29,7 @@ async def test_verify_backup_not_found():
 
 async def test_verify_backup_row_count_match():
     """verify_backup returns matched=True when row counts are equal."""
-    from hecate.services.backup.verification import verify_backup
+    from hecate.ops.backup.verification import verify_backup
 
     backup_id = uuid.uuid4()
     mock_record = MagicMock(spec=BackupRecordModel)
@@ -42,12 +42,12 @@ async def test_verify_backup_row_count_match():
     mock_storage.list_objects = AsyncMock(return_value=[])
 
     with (
-        patch("hecate.services.backup.verification.create_backup_storage", return_value=mock_storage),
-        patch("hecate.services.backup.verification.async_session_factory") as mock_factory,
-        patch("hecate.services.backup.verification._run_createdb", new_callable=AsyncMock),
-        patch("hecate.services.backup.verification._run_dropdb", new_callable=AsyncMock),
-        patch("hecate.services.backup.verification._run_pg_restore_to_db", new_callable=AsyncMock),
-        patch("hecate.services.backup.verification._query_row_counts", return_value={"agents": 10, "users": 5}),
+        patch("hecate.ops.backup.verification.create_backup_storage", return_value=mock_storage),
+        patch("hecate.ops.backup.verification.async_session_factory") as mock_factory,
+        patch("hecate.ops.backup.verification._run_createdb", new_callable=AsyncMock),
+        patch("hecate.ops.backup.verification._run_dropdb", new_callable=AsyncMock),
+        patch("hecate.ops.backup.verification._run_pg_restore_to_db", new_callable=AsyncMock),
+        patch("hecate.ops.backup.verification._query_row_counts", return_value={"agents": 10, "users": 5}),
     ):
         mock_session = AsyncMock()
         mock_session.get = AsyncMock(return_value=mock_record)
@@ -64,7 +64,7 @@ async def test_verify_backup_row_count_match():
 
 async def test_verify_backup_row_count_mismatch():
     """verify_backup returns matched=False when counts differ."""
-    from hecate.services.backup.verification import verify_backup
+    from hecate.ops.backup.verification import verify_backup
 
     backup_id = uuid.uuid4()
     mock_record = MagicMock(spec=BackupRecordModel)
@@ -77,12 +77,12 @@ async def test_verify_backup_row_count_mismatch():
     mock_storage.list_objects = AsyncMock(return_value=[])
 
     with (
-        patch("hecate.services.backup.verification.create_backup_storage", return_value=mock_storage),
-        patch("hecate.services.backup.verification.async_session_factory") as mock_factory,
-        patch("hecate.services.backup.verification._run_createdb", new_callable=AsyncMock),
-        patch("hecate.services.backup.verification._run_dropdb", new_callable=AsyncMock),
-        patch("hecate.services.backup.verification._run_pg_restore_to_db", new_callable=AsyncMock),
-        patch("hecate.services.backup.verification._query_row_counts", return_value={"agents": 8}),
+        patch("hecate.ops.backup.verification.create_backup_storage", return_value=mock_storage),
+        patch("hecate.ops.backup.verification.async_session_factory") as mock_factory,
+        patch("hecate.ops.backup.verification._run_createdb", new_callable=AsyncMock),
+        patch("hecate.ops.backup.verification._run_dropdb", new_callable=AsyncMock),
+        patch("hecate.ops.backup.verification._run_pg_restore_to_db", new_callable=AsyncMock),
+        patch("hecate.ops.backup.verification._query_row_counts", return_value={"agents": 8}),
     ):
         mock_session = AsyncMock()
         mock_session.get = AsyncMock(return_value=mock_record)

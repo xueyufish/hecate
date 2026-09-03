@@ -16,8 +16,8 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from hecate.runtime.eventstore import Event, EventType, EventVersionConflictError
-from hecate.services.event_state.models import EventModel
-from hecate.services.event_state.postgres_store import PostgresEventStore
+from hecate.studio.event_state.models import EventModel
+from hecate.studio.event_state.postgres_store import PostgresEventStore
 
 
 def _compile_sql(stmt) -> str:

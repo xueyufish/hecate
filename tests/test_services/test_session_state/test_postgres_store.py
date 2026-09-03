@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from hecate.runtime.session_state import SessionState
-from hecate.services.session_state.postgres_store import PostgresSessionStateStore
+from hecate.studio.session_state.postgres_store import PostgresSessionStateStore
 
 
 def _compile_sql(stmt) -> str:

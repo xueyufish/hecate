@@ -16,8 +16,8 @@ from typing import Any
 
 import pytest
 
-import hecate.services.security.dlp.recognizers.presidio as presidio_mod
-from hecate.services.security.dlp.recognizers.presidio import (
+import hecate.ops.dlp.recognizers.presidio as presidio_mod
+from hecate.ops.dlp.recognizers.presidio import (
     _HAS_PRESIDIO,
     PresidioRecognizer,
 )

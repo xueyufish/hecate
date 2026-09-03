@@ -15,7 +15,7 @@ import contextlib
 
 import pytest
 
-from hecate.services.session_lock import SessionLockManager
+from hecate.studio.session_lock import SessionLockManager
 
 
 async def test_acquire_release() -> None:

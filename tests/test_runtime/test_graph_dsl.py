@@ -22,8 +22,8 @@ from typing import Any
 import pytest
 
 from hecate.runtime.compiler import GraphCompiler
-from hecate.services.workflow.graph_dsl import GraphValidationError, parse_graph
-from hecate.services.workflow.templates import build_three_layer_graph
+from hecate.studio.workflows.graph_dsl import GraphValidationError, parse_graph
+from hecate.studio.workflows.templates import build_three_layer_graph
 
 SIMPLE_LINEAR = """
 {

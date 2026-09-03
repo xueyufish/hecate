@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.config import Settings
 from hecate.core.plugin.packaging import BUNDLE_EXTENSION, create_bundle
 from hecate.models.plugin import PluginModel
-from hecate.services.plugin.service import PluginService
+from hecate.studio.plugin.service import PluginService
 
 
 @pytest.fixture(autouse=True)

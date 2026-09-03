@@ -12,13 +12,13 @@ from hecate.runtime.types import (
     NodeConfig,
     NodeType,
 )
-from hecate.services.workflow.patterns import (
+from hecate.studio.workflows.patterns import (
     PATTERN_DEFINITIONS,
     CollaborationPattern,
     build_graph_from_pattern,
     infer_pattern,
 )
-from hecate.services.workflow.templates import (
+from hecate.studio.workflows.templates import (
     build_broadcast_pipeline,
     build_debate_graph,
     build_fan_out_pipeline,

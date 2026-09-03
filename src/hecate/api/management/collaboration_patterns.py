@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from hecate.core.deps import verify_api_key
 from hecate.runtime.types import GraphConfig
-from hecate.services.workflow.patterns import (
+from hecate.studio.workflows.patterns import (
     PATTERN_DEFINITIONS,
     CollaborationPattern,
     build_graph_from_pattern,

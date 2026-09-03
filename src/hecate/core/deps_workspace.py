@@ -22,12 +22,12 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.auth.api_key_provider import APIKeyAuthProvider
-from hecate.auth.jwt_provider import JWTAuthProvider
-from hecate.auth.resolver import register_auth_providers, resolve_auth_context
 from hecate.core.auth_context import AuthContext
 from hecate.core.config import settings
 from hecate.core.database import get_db
+from hecate.enterprise.auth.api_key_provider import APIKeyAuthProvider
+from hecate.enterprise.auth.jwt_provider import JWTAuthProvider
+from hecate.enterprise.auth.resolver import register_auth_providers, resolve_auth_context
 from hecate.models.workspace_member import WorkspaceRole
 
 logger = logging.getLogger(__name__)

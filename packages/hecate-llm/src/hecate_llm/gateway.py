@@ -14,7 +14,7 @@ Why a Protocol and not a BaseClass:
   the platform
 
 Embedding is explicitly OUT OF SCOPE: vector embeddings for hybrid search
-go through ``services.orchestration.memory_provider``, not through the LLM
+go through ``core.composition.memory_provider``, not through the LLM
 gateway. This matches today's reality — ``grep -r 'litellm.embedding' src/``
 returns zero hits.
 """

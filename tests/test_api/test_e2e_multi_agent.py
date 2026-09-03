@@ -13,8 +13,8 @@ from hecate.runtime.checkpoint import InMemoryCheckpointStore
 from hecate.runtime.compiler import GraphCompiler
 from hecate.runtime.pregel import PregelRuntime
 from hecate.runtime.types import StreamMode
-from hecate.services.workflow.graph_dsl import parse_graph
-from hecate.services.workflow.test_runner import _TestWorker
+from hecate.studio.workflows.graph_dsl import parse_graph
+from hecate.studio.workflows.test_runner import _TestWorker
 
 
 def test_multi_agent_linear_execution():

@@ -11,12 +11,12 @@ from typing import Any
 
 import pytest
 
-from hecate.core.config import settings
-from hecate.services.orchestration import llm_gateway as gateway_mod
-from hecate.services.orchestration.llm_gateway import (
+from hecate.core.composition import llm_gateway as gateway_mod
+from hecate.core.composition.llm_gateway import (
     reset_llm_gateway_cache,
     resolve_llm_gateway,
 )
+from hecate.core.config import settings
 
 
 class _StubGateway:

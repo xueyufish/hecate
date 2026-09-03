@@ -12,8 +12,8 @@ from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.skill import SkillModel
 from hecate.models.tool import ToolModel
 from hecate.models.workflow import WorkflowModel
-from hecate.skill_registry.registry import SkillRegistry
-from hecate.skill_registry.types import SkillNotFoundError, SkillRef, SkillRefType
+from hecate.tools.skill_registry.registry import SkillRegistry
+from hecate.tools.skill_registry.types import SkillNotFoundError, SkillRef, SkillRefType
 
 
 @pytest.fixture

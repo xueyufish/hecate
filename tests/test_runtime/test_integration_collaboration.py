@@ -19,7 +19,7 @@ from hecate.runtime.types import (
     WorkerResult,
 )
 from hecate.runtime.worker import Worker
-from hecate.services.workflow.templates import build_debate_graph, build_negotiation_graph
+from hecate.studio.workflows.templates import build_debate_graph, build_negotiation_graph
 
 # ---------------------------------------------------------------------------
 # Stub workers for integration tests

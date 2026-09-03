@@ -14,12 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.plugin import PluginModel
 from hecate.models.skill import SkillModel
-from hecate.services.plugin.service import (
+from hecate.studio.plugin.service import (
     AGENT_PLUGIN_TYPE,
     FeatureDisabledError,
     PluginService,
 )
-from hecate.services.skill.loader import SkillLoader
+from hecate.tools.skill.loader import SkillLoader
 
 WS = uuid.UUID("11111111-1111-1111-1111-111111111111")
 
@@ -285,7 +285,7 @@ class TestUninstallCascade:
         service = PluginService(db_session)
         plugin = await service.install_agent_plugin(**_install_kwargs(tmp_path))
 
-        import hecate.services.plugin.service as svc_module
+        import hecate.studio.plugin.service as svc_module
 
         real_rmtree = svc_module.shutil.rmtree
 

@@ -11,13 +11,13 @@ import uuid
 import pytest
 
 from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType, InMemoryEventStore
-from hecate.services.replay.assembler import (
+from hecate.studio.replay.assembler import (
     REPLAY_PAYLOAD_PREVIEW_CHARS,
     assemble_timeline,
     derive_guardrail_blocks,
     derive_message_bodies,
 )
-from hecate.services.replay.state_inspector import inspect_at_version
+from hecate.studio.replay.state_inspector import inspect_at_version
 
 
 def _make_event(
@@ -373,7 +373,7 @@ async def test_state_inspector_session_wrapper_via_inmemory_store() -> None:
     sid = uuid.uuid4()
     store = InMemoryEventStore()
     await store.append(_make_event(sid, version=1, superstep=1, event_type=EventType.STEP_END))
-    from hecate.services.replay.state_inspector import inspect_session_at
+    from hecate.studio.replay.state_inspector import inspect_session_at
 
     out = await inspect_session_at(store, sid, at_version=1)
     assert out["effective_version"] == 1

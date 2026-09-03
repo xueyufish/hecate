@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from hecate.core.config import settings
-from hecate.services.tool.builtin import BuiltInToolExecutor
-from hecate.services.tool.search import SearchProvider
+from hecate.tools.tool.builtin import BuiltInToolExecutor
+from hecate.tools.tool.search import SearchProvider
 
 
 class _StubSearchProvider(SearchProvider):

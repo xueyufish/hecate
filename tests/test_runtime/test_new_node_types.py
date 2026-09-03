@@ -19,7 +19,7 @@ from hecate.runtime.types import (
     WorkerResult,
 )
 from hecate.runtime.worker import Worker
-from hecate.services.workflow.graph_dsl import parse_graph
+from hecate.studio.workflows.graph_dsl import parse_graph
 
 # --- DSL fixtures ---
 

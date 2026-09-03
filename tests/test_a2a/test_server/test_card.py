@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.a2a.server.card import generate_agent_card
+from hecate.channel.a2a.server.card import generate_agent_card
 
 
 def test_generate_agent_card_defaults() -> None:

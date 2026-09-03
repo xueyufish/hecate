@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from hecate.services.security.siem.collector import (
+from hecate.ops.siem.collector import (
     SecurityEventCollector,
     set_collector,
 )
-from hecate.services.security.siem.event import (
+from hecate.ops.siem.event import (
     EventSeverity,
     EventSource,
     EventType,
@@ -14,7 +14,7 @@ from hecate.services.security.siem.event import (
     from_security_finding,
     from_tool_decision,
 )
-from hecate.services.security.siem.exporter import SIEMExporter
+from hecate.ops.siem.exporter import SIEMExporter
 
 
 class CaptureExporter(SIEMExporter):
@@ -47,7 +47,7 @@ class TestToolDecisionToSIEM:
             decision="DENY",
             reason="blocked",
         )
-        from hecate.services.security.siem.collector import emit_to_siem
+        from hecate.ops.siem.collector import emit_to_siem
 
         emit_to_siem(event)
         await collector._flush_batch()
@@ -71,7 +71,7 @@ class TestToolDecisionToSIEM:
             decision="ALLOW",
             reason="approved",
         )
-        from hecate.services.security.siem.collector import emit_to_siem
+        from hecate.ops.siem.collector import emit_to_siem
 
         emit_to_siem(event)
         await collector._flush_batch()
@@ -99,7 +99,7 @@ class TestFindingToSIEM:
             workspace_id="ws-1",
             user_id="user-1",
         )
-        from hecate.services.security.siem.collector import emit_to_siem
+        from hecate.ops.siem.collector import emit_to_siem
 
         emit_to_siem(event)
         await collector._flush_batch()
@@ -120,7 +120,7 @@ class TestFilteringIntegration:
         collector.register_exporter(exporter)
         set_collector(collector)
 
-        from hecate.services.security.siem.collector import emit_to_siem
+        from hecate.ops.siem.collector import emit_to_siem
 
         # INFO event should be filtered out
         info_event = SecurityEvent(
@@ -151,7 +151,7 @@ class TestFilteringIntegration:
         collector.register_exporter(exporter)
         set_collector(collector)
 
-        from hecate.services.security.siem.collector import emit_to_siem
+        from hecate.ops.siem.collector import emit_to_siem
 
         # API event should be filtered out
         api_event = SecurityEvent(
@@ -253,7 +253,7 @@ class TestDisabledSIEM:
     """Tests for SIEM disabled behavior."""
 
     def test_emit_to_siem_noop_without_collector(self) -> None:
-        from hecate.services.security.siem.collector import emit_to_siem
+        from hecate.ops.siem.collector import emit_to_siem
 
         set_collector(None)
         event = SecurityEvent(

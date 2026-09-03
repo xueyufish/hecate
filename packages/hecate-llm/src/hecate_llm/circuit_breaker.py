@@ -14,7 +14,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from hecate.services.validation.retry_policy import CircuitBreaker, CircuitState
+from hecate.studio.validation.retry_policy import CircuitBreaker, CircuitState
 
 if TYPE_CHECKING:
     from collections.abc import Callable

@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.services.ops_center.tool_analytics import ToolAnalyticsService
+from hecate.ops.ops_center.tool_analytics import ToolAnalyticsService
 
 router = APIRouter(prefix="/api/ops-center/tools", tags=["ops-center"])
 

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 
-from hecate.services.mcp.connection import MCPClientManager
+from hecate.tools.mcp.connection import MCPClientManager
 
 
 @pytest.fixture

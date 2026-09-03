@@ -14,7 +14,7 @@ from hecate.models.model_pricing import (
     ModelPricingReadSchema,
 )
 from hecate.models.trace import TraceModel
-from hecate.services.cost_service import CostService
+from hecate.ops.cost import CostService
 
 
 class TestModelPricingModel:

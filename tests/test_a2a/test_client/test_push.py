@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.a2a.client.push import router
+from hecate.channel.a2a.client.push import router
 
 
 def test_push_webhook_router_exists() -> None:

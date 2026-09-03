@@ -18,7 +18,7 @@ from hecate.core.deps_workspace import get_auth_context
 from hecate.models.tool_decision import (
     ToolDecisionQuerySchema,
 )
-from hecate.services.security.decision_service import ToolDecisionService
+from hecate.ops.tool_decisions import ToolDecisionService
 
 logger = logging.getLogger(__name__)
 

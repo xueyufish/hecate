@@ -1,0 +1,60 @@
+{
+  "version": "1.0",
+  "name": "Broadcast Pipeline",
+  "description": "A round-robin broadcast pipeline where all participants share a common message channel, with a moderator framing the discussion.",
+  "category": "broadcast",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" }
+  },
+  "nodes": {
+    "moderator": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a discussion moderator. Introduce the topic and set the stage for a productive group discussion.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "alice": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are Alice, a creative thinker. Share your perspective on the topic.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "bob": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are Bob, an analytical thinker. Provide data-driven insights on the topic.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "charlie": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are Charlie, a critical thinker. Challenge assumptions and offer alternative viewpoints.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "moderator_summary": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a discussion moderator. Summarize the key points from the group discussion and provide concluding thoughts.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "__start__", "target": "moderator" },
+    { "source": "moderator", "target": "alice" },
+    { "source": "alice", "target": "bob" },
+    { "source": "bob", "target": "charlie" },
+    { "source": "charlie", "target": "moderator_summary" },
+    { "source": "moderator_summary", "target": "__end__" }
+  ],
+  "entry": "moderator"
+}

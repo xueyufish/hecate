@@ -10,8 +10,8 @@ from pydantic import BaseModel as PydanticBase
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.database import get_db
-from hecate.skill_registry.registry import SkillRegistry
-from hecate.skill_registry.types import SkillNotFoundError, SkillRef, SkillRefType
+from hecate.tools.skill_registry.registry import SkillRegistry
+from hecate.tools.skill_registry.types import SkillNotFoundError, SkillRef, SkillRefType
 
 logger = logging.getLogger(__name__)
 

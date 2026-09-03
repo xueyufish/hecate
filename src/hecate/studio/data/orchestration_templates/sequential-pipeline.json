@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "name": "Sequential Pipeline",
+  "description": "A sequential pipeline of researcher → writer → reviewer agents with revision loop for quality assurance.",
+  "category": "pipeline",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" },
+    "researcher_output": { "type": "last_value" },
+    "writer_output": { "type": "last_value" },
+    "review_status": { "type": "last_value" }
+  },
+  "nodes": {
+    "researcher": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a research agent. Gather relevant information and key points on the given topic.",
+        "channels": { "readable": ["messages"], "writable": ["messages", "researcher_output"] }
+      }
+    },
+    "writer": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a content writer. Create well-structured content based on the research data provided.",
+        "channels": { "readable": ["messages", "researcher_output"], "writable": ["messages", "writer_output", "review_status"] }
+      }
+    },
+    "reviewer": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a content reviewer. Review the draft for quality, accuracy, and clarity. Set review_status to 'approved' or 'needs_revision'.",
+        "channels": { "readable": ["messages", "writer_output", "review_status"], "writable": ["messages", "review_status"] }
+      }
+    },
+    "check_revision": {
+      "type": "condition",
+      "config": {
+        "expression": "review_status == 'needs_revision'",
+        "channels": { "readable": ["review_status"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "__start__", "target": "researcher" },
+    { "source": "researcher", "target": "writer" },
+    { "source": "writer", "target": "reviewer" },
+    { "source": "reviewer", "target": "check_revision" },
+    {
+      "source": "check_revision",
+      "target": { "true": "writer", "false": "__end__" }
+    }
+  ],
+  "entry": "researcher"
+}
