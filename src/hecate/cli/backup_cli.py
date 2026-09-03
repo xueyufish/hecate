@@ -18,7 +18,7 @@ def backup() -> None:
 @click.option("--scope", default="all", help="Backup scope: all, pg, qdrant, minio, fs")
 def create(scope: str) -> None:
     """Create a new backup."""
-    from hecate.services.backup.orchestrator import create_backup
+    from hecate.ops.backup.orchestrator import create_backup
 
     click.echo(f"Creating backup (scope={scope})...")
     record = asyncio.run(create_backup(scope=scope))
@@ -32,7 +32,7 @@ def create(scope: str) -> None:
 @click.option("--limit", default=50, help="Maximum number of records")
 def list_backups(status: str | None, limit: int) -> None:
     """List backup records."""
-    from hecate.services.backup.orchestrator import list_backups as _list
+    from hecate.ops.backup.orchestrator import list_backups as _list
 
     records = asyncio.run(_list(status=status, limit=limit))
     if not records:
@@ -50,7 +50,7 @@ def list_backups(status: str | None, limit: int) -> None:
 @click.argument("backup_id", type=uuid.UUID)
 def verify(backup_id: uuid.UUID) -> None:
     """Verify a backup's integrity."""
-    from hecate.services.backup.verification import verify_backup
+    from hecate.ops.backup.verification import verify_backup
 
     click.echo(f"Verifying backup {backup_id}...")
     result = asyncio.run(verify_backup(backup_id))
@@ -106,7 +106,7 @@ def restore(
     yes: bool,
 ) -> None:
     """Restore data from a backup."""
-    from hecate.services.backup.restore import restore_backup
+    from hecate.ops.backup.restore import restore_backup
 
     if not yes:
         click.echo(f"WARNING: This will restore backup {backup_id}")

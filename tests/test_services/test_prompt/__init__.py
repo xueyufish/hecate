@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.prompt import PromptCreateSchema, PromptUpdateSchema
-from hecate.services.prompt_service import PromptService
+from hecate.studio.prompts.service import PromptService
 
 
 @pytest.mark.asyncio

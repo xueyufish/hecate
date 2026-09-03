@@ -24,8 +24,8 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from hecate.api.v1.channels import router as im_channels_router
 from hecate.channel.adapter import ChannelBase
+from hecate.channel.api.v1.channels import router as im_channels_router
 from hecate.channel.capabilities import ChannelCapabilities
 from hecate.channel.im.message_bus import IMMessageBus
 from hecate.channel.types import CanonicalMessage, MessageContent

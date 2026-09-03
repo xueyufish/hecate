@@ -10,10 +10,10 @@ from hecate.models.dlp import (
     DLPCustomRegexModel,
     DLPDictionaryModel,
 )
-from hecate.services.security.dlp.recognizers.dictionary import (
+from hecate.ops.dlp.recognizers.dictionary import (
     DictionaryRecognizer,
 )
-from hecate.services.security.dlp.registry_factory import (
+from hecate.ops.dlp.registry_factory import (
     DLPRegistryFactory,
     _CustomPatternRecognizer,
 )

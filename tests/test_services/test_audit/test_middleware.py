@@ -14,7 +14,7 @@ from hecate.api.middleware import (
     _map_path_to_action,
     set_audit_queue,
 )
-from hecate.services.audit.store import AuditEvent
+from hecate.ops.audit.store import AuditEvent
 
 
 async def _dummy_endpoint(request: object) -> JSONResponse:

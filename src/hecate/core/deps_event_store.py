@@ -17,7 +17,7 @@ from fastapi import Request
 
 from hecate.core.config import settings
 from hecate.runtime.eventstore import EventStore
-from hecate.services.event_state import create_event_store
+from hecate.studio.event_state import create_event_store
 
 
 def get_event_store(request: Request) -> EventStore:

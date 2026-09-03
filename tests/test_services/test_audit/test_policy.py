@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from hecate.services.audit.policy import (
+from hecate.ops.audit.policy import (
     BulkDeleteRule,
     DetectionContext,
     FindingEngine,
@@ -13,7 +13,7 @@ from hecate.services.audit.policy import (
     OffHoursRule,
     UnusualIPRule,
 )
-from hecate.services.audit.store import AuditEvent
+from hecate.ops.audit.store import AuditEvent
 
 
 def _make_event(

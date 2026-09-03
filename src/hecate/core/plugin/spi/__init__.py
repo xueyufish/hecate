@@ -7,10 +7,10 @@ must implement.
 
 from __future__ import annotations
 
-from hecate.auth.provider import AuthProvider
 from hecate.channel.adapter import ChannelBase
 from hecate.core.plugin.spi.evaluator import EvaluatorBase
-from hecate.vault.provider import SecretProvider
+from hecate.enterprise.auth.provider import AuthProvider
+from hecate.enterprise.vault.provider import SecretProvider
 
 __all__ = [
     "AuthProvider",

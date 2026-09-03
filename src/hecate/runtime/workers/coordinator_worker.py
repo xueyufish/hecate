@@ -484,7 +484,7 @@ class CoordinatorWorker(Worker):
         ctx: dict,
     ) -> dict[str, Any]:
         """Execute the materialised sub-graph in an isolated child session."""
-        from hecate.services.workflow.templates import build_dynamic_orchestration_executor
+        from hecate.studio.workflows.templates import build_dynamic_orchestration_executor
 
         sub_graph = build_dynamic_orchestration_executor(
             dag=dag,

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
 from hecate.core.deps_workspace import get_auth_context
-from hecate.services.cost_service import CostService
+from hecate.ops.cost import CostService
 
 router = APIRouter()
 

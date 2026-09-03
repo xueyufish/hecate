@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.evaluation.evaluator import Evaluator
-from hecate.services.evaluation.types import EvalInput, EvalOutput, Score
+from hecate.ops.evaluation.evaluator import Evaluator
+from hecate.ops.evaluation.types import EvalInput, EvalOutput, Score
 
 
 class TestEvaluatorBase:
@@ -50,7 +50,7 @@ class TestEvaluatorBase:
         assert evaluator.llm_config is None
 
     def test_subclass_with_llm_config(self) -> None:
-        from hecate.services.evaluation.types import LLMConfig
+        from hecate.ops.evaluation.types import LLMConfig
 
         class DummyEvaluator(Evaluator):
             @property

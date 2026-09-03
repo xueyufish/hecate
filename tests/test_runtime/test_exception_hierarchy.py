@@ -17,7 +17,7 @@ from hecate.runtime.errors import (
     SecurityError,
 )
 from hecate.runtime.types import ChannelDef, ChannelType
-from hecate.services.validation.retry_policy import ErrorClassifier
+from hecate.studio.validation.retry_policy import ErrorClassifier
 
 # --- Exception hierarchy tests ---
 

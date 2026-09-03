@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.budget import BudgetForecastModel
 from hecate.models.quota import QuotaResourceType
-from hecate.services.cost_service import CostService
-from hecate.services.quota_service import QuotaService
+from hecate.ops.cost import CostService
+from hecate.ops.quota import QuotaService
 
 logger = logging.getLogger(__name__)
 

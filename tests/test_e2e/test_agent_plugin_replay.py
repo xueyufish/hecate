@@ -20,7 +20,7 @@ from pathlib import Path
 
 from hecate.api.management.mcp import get_mcp_manager
 from hecate.core.config import settings as _settings  # noqa: F401  (settings import for install_agent_plugin)
-from hecate.services.plugin.service import PluginService
+from hecate.studio.plugin.service import PluginService
 
 _MINIMAL_MANIFEST = {
     "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",

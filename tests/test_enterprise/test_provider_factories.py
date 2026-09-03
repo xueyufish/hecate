@@ -2,7 +2,7 @@
 
 Each enterprise provider module exposes a zero-arg ``provider()`` factory
 that reads its own settings and returns an instance, or ``None`` when
-unconfigured. The host (hecate.auth.resolver / hecate.vault.resolver)
+unconfigured. The host (hecate.enterprise.auth.resolver / hecate.enterprise.vault.resolver)
 skips ``None``.
 
 These tests verify the contract without setting environment variables
@@ -100,7 +100,7 @@ def test_azure_provider_returns_instance_when_configured(monkeypatch: pytest.Mon
 
 def test_load_entry_point_providers_respects_gate() -> None:
     """The ``gate`` parameter is the future license-check hook (PR1.2: always None)."""
-    from hecate.auth.resolver import load_entry_point_providers
+    from hecate.enterprise.auth.resolver import load_entry_point_providers
 
     # Gate returning False short-circuits the scan entirely.
     assert load_entry_point_providers(gate=lambda: False) == []

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from hecate.core.config import settings
-from hecate.services.model_provider.crypto import decrypt_api_key, encrypt_api_key
+from hecate.enterprise.auth.crypto import decrypt_api_key, encrypt_api_key
 
 
 class TestEncryptDecrypt:

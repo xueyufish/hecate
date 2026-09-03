@@ -26,7 +26,7 @@ from hecate.core.config import settings
 from hecate.models.conversation import ConversationModel
 from hecate.models.session import SessionModel
 from hecate.runtime.eventstore import Event, EventType
-from hecate.services.event_state import create_event_store
+from hecate.studio.event_state import create_event_store
 
 
 async def test_get_conversation_returns_messages_projected_from_event_log(

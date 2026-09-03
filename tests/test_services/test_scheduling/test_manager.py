@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.scheduling.manager import ScheduleManager
+from hecate.ops.scheduling.manager import ScheduleManager
 
 
 class TestCronValidation:

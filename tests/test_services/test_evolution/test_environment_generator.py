@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.evolution.environment_generator import (
+from hecate.studio.evolution.environment_generator import (
     EnvironmentConfig,
     SyntheticEnvironmentGenerator,
 )

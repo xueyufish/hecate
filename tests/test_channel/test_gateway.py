@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import uuid
 
+from hecate.channel.gateway.gateway import Gateway
+from hecate.channel.gateway.session import SessionRouter
 from hecate.channel.types import CanonicalMessage, MessageContent
-from hecate.gateway.gateway import Gateway
-from hecate.gateway.session import SessionRouter
 
 
 class TestSessionRouter:

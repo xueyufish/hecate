@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.workflow import WorkflowCreateSchema, WorkflowUpdateSchema
-from hecate.services.workflow_service import WorkflowService
+from hecate.studio.workflows.service import WorkflowService
 
 VALID_DSL = {
     "version": "1.0",

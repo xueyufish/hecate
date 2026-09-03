@@ -10,11 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.conversation import ConversationModel
 from hecate.models.conversation_cluster import ConversationClusterModel
-from hecate.services.ops_center.conversation_cluster_manager import (
+from hecate.ops.ops_center.conversation_cluster_manager import (
     ConversationClusterManager,
     _compute_centroid,
 )
-from hecate.services.ops_center.conversation_topic_matcher import (
+from hecate.ops.ops_center.conversation_topic_matcher import (
     ConversationTopicMatcher,
     _cosine_similarity,
 )
@@ -166,9 +166,7 @@ class TestGenerateClusterLabel:
             }
         )
 
-        with patch(
-            "hecate.services.ops_center.conversation_cluster_manager.llm_service.chat", return_value=mock_response
-        ):
+        with patch("hecate.ops.ops_center.conversation_cluster_manager.llm_service.chat", return_value=mock_response):
             manager = ConversationClusterManager(db_session)
             label = await manager.generate_cluster_label(cluster.id)
 

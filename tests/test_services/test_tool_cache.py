@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from hecate.services.tool.cache import (
+from hecate.tools.tool.cache import (
     DANGEROUS_BUILTINS,
     SIDE_EFFECT_PREFIXES,
     ToolCache,

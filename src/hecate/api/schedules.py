@@ -31,8 +31,8 @@ from hecate.models.scheduled_task import (
     ScheduledTaskReadSchema,
     ScheduledTaskUpdateSchema,
 )
-from hecate.services.scheduling.manager import ScheduleManager
-from hecate.services.scheduling.service import ScheduledTaskService
+from hecate.ops.scheduling.manager import ScheduleManager
+from hecate.ops.scheduling.service import ScheduledTaskService
 
 logger = logging.getLogger(__name__)
 

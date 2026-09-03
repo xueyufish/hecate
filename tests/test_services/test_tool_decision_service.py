@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from hecate.models.tool_decision import ToolDecisionQuerySchema
-from hecate.services.security.decision_service import ToolDecisionService
+from hecate.ops.tool_decisions import ToolDecisionService
 
 
 class TestToolDecisionServiceEmit:

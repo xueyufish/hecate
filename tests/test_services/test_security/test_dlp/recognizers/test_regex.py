@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from hecate.services.security.dlp.recognizers.regex import (
+from hecate.ops.dlp.recognizers.regex import (
     RegexRecognizer,
     _luhn_check,
 )
-from hecate.services.security.dlp.result import DLPFinding
+from hecate.ops.dlp.result import DLPFinding
 
 
 class TestLuhnCheck:

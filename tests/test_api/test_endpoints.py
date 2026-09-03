@@ -186,7 +186,7 @@ async def test_chat_completions(client: AsyncClient, auth_headers: dict) -> None
     mock_response.usage = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
     mock_response.finish_reason = "stop"
 
-    with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+    with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
         mock_llm.chat = AsyncMock(return_value=mock_response)
         chat_data = {
             "model": "gpt-4o",
@@ -202,7 +202,7 @@ async def test_chat_completions(client: AsyncClient, auth_headers: dict) -> None
 @pytest.mark.asyncio
 async def test_list_models(client: AsyncClient, auth_headers: dict) -> None:
     """Test listing models."""
-    with patch("hecate.api.v1.models._discover_models", return_value=["gpt-4o"]):
+    with patch("hecate.channel.api.v1.models._discover_models", return_value=["gpt-4o"]):
         response = await client.get("/v1/models", headers=auth_headers)
         assert response.status_code == 200
         data = response.json()

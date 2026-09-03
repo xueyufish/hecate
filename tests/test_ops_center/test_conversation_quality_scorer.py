@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.conversation import ConversationModel
-from hecate.services.ops_center.conversation_quality_scorer import (
+from hecate.ops.ops_center.conversation_quality_scorer import (
     ConversationQualityScorer,
     _build_judge_prompt,
     _parse_judge_response,
@@ -25,7 +25,7 @@ def _shared_event_store():
     """
     if _shared_event_store._store is None:
         from hecate.core.config import settings
-        from hecate.services.event_state import create_event_store
+        from hecate.studio.event_state import create_event_store
 
         _shared_event_store._store = create_event_store(settings)
     return _shared_event_store._store
@@ -193,9 +193,7 @@ class TestScoreTurn:
             }
         )
 
-        with patch(
-            "hecate.services.ops_center.conversation_quality_scorer.llm_service.chat", return_value=mock_response
-        ):
+        with patch("hecate.ops.ops_center.conversation_quality_scorer.llm_service.chat", return_value=mock_response):
             scorer = ConversationQualityScorer(db_session)
             result = await scorer.score_turn(
                 conversation_id=conv.id,
@@ -220,7 +218,7 @@ class TestScoreTurn:
         asst_msg = await _create_message(db_session, conv.id, "assistant", "Hello")
 
         with patch(
-            "hecate.services.ops_center.conversation_quality_scorer.llm_service.chat",
+            "hecate.ops.ops_center.conversation_quality_scorer.llm_service.chat",
             side_effect=Exception("LLM error"),
         ):
             scorer = ConversationQualityScorer(db_session)
@@ -259,7 +257,7 @@ class TestScoreConversation:
         )
 
         with patch(
-            "hecate.services.ops_center.conversation_quality_scorer.llm_service.chat",
+            "hecate.ops.ops_center.conversation_quality_scorer.llm_service.chat",
             return_value=mock_response,
         ):
             scorer = ConversationQualityScorer(db_session, event_store=_shared_event_store())
@@ -285,9 +283,7 @@ class TestScoreConversation:
             }
         )
 
-        with patch(
-            "hecate.services.ops_center.conversation_quality_scorer.llm_service.chat", return_value=mock_response
-        ):
+        with patch("hecate.ops.ops_center.conversation_quality_scorer.llm_service.chat", return_value=mock_response):
             scorer = ConversationQualityScorer(db_session, event_store=_shared_event_store())
             await scorer.score_conversation(conv.id)
 

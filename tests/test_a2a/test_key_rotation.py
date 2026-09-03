@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.a2a.signing import generate_es256_keypair, generate_jwks
+from hecate.channel.a2a.signing import generate_es256_keypair, generate_jwks
 
 
 def test_key_rotation_generates_new_keypair() -> None:

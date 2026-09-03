@@ -194,8 +194,8 @@ class AgentTool:
         Returns:
             The remote agent's response, or an error dict.
         """
-        from hecate.a2a.client.client import A2AClient
-        from hecate.a2a.types import Message
+        from hecate.channel.a2a.client.client import A2AClient
+        from hecate.channel.a2a.types import Message
 
         task = args.get("task", args.get("input", ""))
         message = Message(role="user", parts=[{"text": task}])

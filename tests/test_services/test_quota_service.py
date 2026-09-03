@@ -16,7 +16,7 @@ from hecate.models.quota import (
     QuotaUsageModel,
     QuotaWindowType,
 )
-from hecate.services.quota_service import QuotaService, _invalidate_cache
+from hecate.ops.quota import QuotaService, _invalidate_cache
 
 _DEFAULT_WS = _uuid.UUID("00000000-0000-0000-0000-000000000000")
 
@@ -165,7 +165,7 @@ class TestQuotaUsageTracking:
 
     async def test_soft_limit_alert(self, db_session):
         from hecate.models.alert import AlertState
-        from hecate.services.alert_service import AlertService
+        from hecate.ops.alerts.service import AlertService
 
         service = QuotaService(db_session)
         scope_id = uuid.uuid4()

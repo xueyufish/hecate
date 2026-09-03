@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.multi_agent.task_allocator import (
+from hecate.studio.agents.task_allocator import (
     AgentInfo,
     DynamicTaskAllocator,
 )

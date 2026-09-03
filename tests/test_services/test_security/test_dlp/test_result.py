@@ -15,7 +15,7 @@ import dataclasses
 
 import pytest
 
-from hecate.services.security.dlp.result import DLPAction, DLPFinding, DLPResult
+from hecate.ops.dlp.result import DLPAction, DLPFinding, DLPResult
 
 
 class TestDLPAction:

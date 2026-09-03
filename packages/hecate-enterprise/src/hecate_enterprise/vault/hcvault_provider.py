@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from hecate.vault.provider import SecretProvider
+from hecate.enterprise.vault.provider import SecretProvider
 
 logger = logging.getLogger(__name__)
 

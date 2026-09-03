@@ -127,7 +127,7 @@ class TestE2EProviderModelFlow:
         }
         mock_response.finish_reason = "stop"
 
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=mock_response)
             resp = await e2e_client.post(
                 "/v1/chat/completions",
@@ -157,7 +157,7 @@ class TestE2EProviderModelFlow:
         }
         mock_response.finish_reason = "stop"
 
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=mock_response)
             resp = await e2e_client.post(
                 "/v1/chat/completions",
@@ -209,7 +209,7 @@ class TestE2EProviderModelFlow:
         mock_response.usage = {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5}
         mock_response.finish_reason = "stop"
 
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=mock_response)
             chat_resp = await e2e_client.post(
                 "/v1/chat/completions",

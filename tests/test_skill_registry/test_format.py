@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from hecate.skill_registry.registry import SkillRegistry
-from hecate.skill_registry.types import ResolvedSkill, SkillRefType
+from hecate.tools.skill_registry.registry import SkillRegistry
+from hecate.tools.skill_registry.types import ResolvedSkill, SkillRefType
 
 
 def test_format_empty_list() -> None:

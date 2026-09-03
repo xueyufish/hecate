@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
-from hecate.api.v1.chat import ChatCompletionRequest, ChatMessage
+from hecate.channel.api.v1.chat import ChatCompletionRequest, ChatMessage
 from hecate.core.deps import get_current_user_id
 from hecate.main import app
 
@@ -76,7 +76,7 @@ def test_chat_message_suggested_questions_default():
 @pytest.mark.asyncio
 async def test_create_chat_completion_passes_opening_flags(client: AsyncClient):
     """Test that create_chat_completion passes generate_opening and generate_suggestions through the engine."""
-    with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+    with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
         mock_service.execute = AsyncMock(
             return_value={
@@ -104,7 +104,7 @@ async def test_create_chat_completion_passes_opening_flags(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_non_streaming_response_with_suggested_questions(client: AsyncClient):
     """Test that non-streaming response includes suggested_questions in ChatMessage."""
-    with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+    with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
         mock_service.execute = AsyncMock(
             return_value={
@@ -135,7 +135,7 @@ async def test_non_streaming_response_with_suggested_questions(client: AsyncClie
 @pytest.mark.asyncio
 async def test_non_streaming_response_without_suggested_questions(client: AsyncClient):
     """Test that non-streaming response without suggestions has null suggested_questions."""
-    with patch("hecate.api.v1.chat.WorkflowExecutionService") as mock_cls:
+    with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
         mock_service.execute = AsyncMock(
             return_value={
@@ -165,7 +165,7 @@ async def test_non_streaming_response_without_suggested_questions(client: AsyncC
 @pytest.mark.asyncio
 async def test_streaming_response_with_suggestions_event(client: AsyncClient):
     """Test that streaming with generate_opening is accepted by the API."""
-    with patch("hecate.services.orchestration.runtime_port_adapter.create_runtime_port") as mock_create_port:
+    with patch("hecate.core.composition.runtime_port_adapter.create_runtime_port") as mock_create_port:
         mock_port = MagicMock()
 
         async def mock_llm_invoke(*args, **kwargs):
@@ -191,7 +191,7 @@ async def test_streaming_response_with_suggestions_event(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-@patch("hecate.api.v1.chat.llm_service")
+@patch("hecate.channel.api.v1.chat.llm_service")
 async def test_streaming_response_without_suggestions(mock_llm_service, client: AsyncClient):
     """Test that streaming without suggestions flag does not yield suggestions event."""
 

@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from hecate.services.security.siem.event import (
+from hecate.ops.siem.event import (
     EventSeverity,
     EventSource,
     EventType,
     SecurityEvent,
 )
-from hecate.services.security.siem.syslog import SyslogSIEMExporter
+from hecate.ops.siem.syslog import SyslogSIEMExporter
 
 
 def _make_event(severity: EventSeverity = EventSeverity.INFO) -> SecurityEvent:

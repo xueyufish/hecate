@@ -1,7 +1,7 @@
 """Agent template API endpoints.
 
 Provides endpoints for listing and instantiating agent templates.
-Templates are loaded from JSON files in src/hecate/data/agent_templates/.
+Templates are loaded from JSON files in src/hecate/studio/data/agent_templates/.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "data" / "agent_templates"
+TEMPLATES_DIR = Path(__file__).parent.parent.parent / "studio" / "data" / "agent_templates"
 
 _template_cache: list[dict[str, Any]] | None = None
 

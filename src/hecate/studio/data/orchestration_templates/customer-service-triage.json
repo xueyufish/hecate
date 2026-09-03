@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "name": "Customer Service Triage",
+  "description": "A router agent that triages customer inquiries and hands off to specialist agents (billing, technical, general).",
+  "category": "customer-service",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" }
+  },
+  "nodes": {
+    "triage": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a customer service triage agent. Analyze the customer's request and hand off to the appropriate specialist.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "billing": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a billing specialist. Handle payment issues, refund requests, and invoice inquiries.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "technical": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a technical support specialist. Handle product troubleshooting, bug reports, and configuration issues.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "general": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a general support agent. Handle general inquiries, feedback, and non-specialized requests.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "__start__", "target": "triage" },
+    { "source": "triage", "target": "billing", "type": "handoff" },
+    { "source": "triage", "target": "technical", "type": "handoff" },
+    { "source": "triage", "target": "general", "type": "handoff" },
+    { "source": "billing", "target": "__end__" },
+    { "source": "technical", "target": "__end__" },
+    { "source": "general", "target": "__end__" }
+  ],
+  "entry": "triage"
+}

@@ -60,7 +60,7 @@ async def test_agent_execute_loads_tools(db_session):
     mock_response.model = "gpt-4o"
     mock_llm.chat = AsyncMock(return_value=mock_response)
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     with patch("hecate_llm.service.llm_service", mock_llm):
         port = AgentExecutionPort(db_session)
@@ -96,7 +96,7 @@ async def test_agent_execute_queries_knowledge_bases(db_session):
     mock_response.model = "gpt-4o"
     mock_llm.chat = AsyncMock(return_value=mock_response)
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     port = AgentExecutionPort(db_session)
 
@@ -135,7 +135,7 @@ async def test_agent_execute_pre_hook_blocks(db_session):
     mock_llm = MagicMock()
     mock_llm.chat = AsyncMock()
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     port = AgentExecutionPort(db_session, pre_hook=mock_pre_hook)
 
@@ -172,7 +172,7 @@ async def test_agent_execute_agent_definition_filters_tools(db_session):
     mock_response.model = "gpt-4o"
     mock_llm.chat = AsyncMock(return_value=mock_response)
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     port = AgentExecutionPort(db_session)
 
@@ -214,7 +214,7 @@ async def test_agent_execute_post_hook_sanitizes(db_session):
     mock_response.model = "gpt-4o"
     mock_llm.chat = AsyncMock(return_value=mock_response)
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     port = AgentExecutionPort(db_session, post_hook=mock_post_hook)
 
@@ -320,7 +320,7 @@ async def test_compiler_validates_invocation_mode():
     """GraphCompiler rejects invalid invocation_mode values."""
     from hecate.runtime.compiler import GraphCompiler
     from hecate.runtime.types import GraphConfig, NodeConfig, NodeType
-    from hecate.services.workflow.graph_dsl import GraphValidationError
+    from hecate.studio.workflows.graph_dsl import GraphValidationError
 
     config = GraphConfig(
         entry="agent_1",
@@ -371,7 +371,7 @@ async def test_agent_execute_injects_handoff_tool(db_session):
     db_session.add(tool)
     await db_session.flush()
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     port = AgentExecutionPort(db=db_session)
 
@@ -404,7 +404,7 @@ async def test_agent_execute_no_handoff_tool_without_targets(db_session):
     db_session.add(tool)
     await db_session.flush()
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     port = AgentExecutionPort(db=db_session)
 
@@ -436,7 +436,7 @@ async def test_agent_execute_detects_handoff_call(db_session):
     db_session.add(tool)
     await db_session.flush()
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     port = AgentExecutionPort(db=db_session)
 
@@ -474,7 +474,7 @@ async def test_agent_execute_invalid_handoff_target(db_session):
     db_session.add(tool)
     await db_session.flush()
 
-    from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
 
     port = AgentExecutionPort(db=db_session)
 

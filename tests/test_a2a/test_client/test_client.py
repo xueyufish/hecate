@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.a2a.client.client import A2AClient
+from hecate.channel.a2a.client.client import A2AClient
 
 
 def test_a2a_client_init() -> None:

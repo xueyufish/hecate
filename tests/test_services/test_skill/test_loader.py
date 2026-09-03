@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.agent import AgentModel
 from hecate.models.skill import SkillModel
-from hecate.services.skill.loader import SkillLoader
+from hecate.tools.skill.loader import SkillLoader
 
 
 async def _create_skill(

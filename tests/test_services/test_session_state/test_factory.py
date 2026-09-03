@@ -11,7 +11,7 @@ import pytest
 
 from hecate.core.config import Settings
 from hecate.runtime.session_state import InMemorySessionStateStore
-from hecate.services.session_state import (
+from hecate.studio.session_state import (
     PostgresSessionStateStore,
     RedisSessionStateStore,
     TieredSessionStateStore,

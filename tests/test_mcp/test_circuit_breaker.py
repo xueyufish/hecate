@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from hecate.services.mcp.circuit_breaker import CircuitBreaker, CircuitState
+from hecate.tools.mcp.circuit_breaker import CircuitBreaker, CircuitState
 
 
 def test_initial_state_closed() -> None:

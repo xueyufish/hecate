@@ -9,14 +9,14 @@ from jose import JWTError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.models.user import UserModel
-from hecate.models.workspace_member import WorkspaceMemberModel
-from hecate.services.auth.password import hash_password, verify_password
-from hecate.services.auth.token import (
+from hecate.enterprise.auth.password import hash_password, verify_password
+from hecate.enterprise.auth.token import (
     create_access_token,
     create_refresh_token,
     decode_refresh_token,
 )
+from hecate.models.user import UserModel
+from hecate.models.workspace_member import WorkspaceMemberModel
 
 logger = logging.getLogger(__name__)
 

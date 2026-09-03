@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from hecate_llm.circuit_breaker import CircuitBreakerManager, _extract_prefix
 from hecate_llm.service import LLMService
 
-from hecate.services.validation.retry_policy import CircuitState
+from hecate.studio.validation.retry_policy import CircuitState
 
 # ---------------------------------------------------------------------------
 # 4.2 Prefix extraction

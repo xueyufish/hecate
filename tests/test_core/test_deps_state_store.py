@@ -15,7 +15,7 @@ import pytest
 from hecate.core.config import settings
 from hecate.core.deps_state_store import get_session_state_store
 from hecate.runtime.session_state import InMemorySessionStateStore, SessionStateStore
-from hecate.services.session_state import create_session_state_store
+from hecate.studio.session_state import create_session_state_store
 
 
 class _FakeRequest:

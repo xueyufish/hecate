@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.vault.provider import SecretProvider
+from hecate.enterprise.vault.provider import SecretProvider
 
 
 class TestSecretProvider:

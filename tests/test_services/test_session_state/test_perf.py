@@ -21,8 +21,8 @@ from hecate.runtime.session_state import (
     InMemorySessionStateStore,
     SessionState,
 )
-from hecate.services.session_state.postgres_store import PostgresSessionStateStore
-from hecate.services.session_state.redis_store import RedisSessionStateStore
+from hecate.studio.session_state.postgres_store import PostgresSessionStateStore
+from hecate.studio.session_state.redis_store import RedisSessionStateStore
 
 pytest.importorskip("fakeredis")
 import fakeredis.aioredis  # noqa: E402

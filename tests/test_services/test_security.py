@@ -8,8 +8,8 @@ Tests cover:
 
 from __future__ import annotations
 
-from hecate.services.security.anonymizer import pii_anonymizer
-from hecate.services.security.llm_guard import llm_guard_scanner
+from hecate.runtime.security.anonymizer import pii_anonymizer
+from hecate.runtime.security.llm_guard import llm_guard_scanner
 
 
 def test_pii_anonymize_email() -> None:
@@ -58,21 +58,21 @@ async def test_llm_guard_scan_unsafe() -> None:
 
 
 def test_scan_result_sanitized_text_default() -> None:
-    from hecate.services.security.llm_guard import ScanResult
+    from hecate.runtime.security.llm_guard import ScanResult
 
     result = ScanResult(is_safe=True, score=1.0, issues=[])
     assert result.sanitized_text is None
 
 
 def test_scan_result_sanitized_text_set() -> None:
-    from hecate.services.security.llm_guard import ScanResult
+    from hecate.runtime.security.llm_guard import ScanResult
 
     result = ScanResult(is_safe=True, score=1.0, issues=[], sanitized_text="clean text")
     assert result.sanitized_text == "clean text"
 
 
 async def test_scan_prompt_disabled_no_sanitized_text() -> None:
-    from hecate.services.security.llm_guard import LLMGuardScanner
+    from hecate.runtime.security.llm_guard import LLMGuardScanner
 
     scanner = LLMGuardScanner(enabled=False)
     result = await scanner.scan_prompt("test")
@@ -80,7 +80,7 @@ async def test_scan_prompt_disabled_no_sanitized_text() -> None:
 
 
 async def test_scan_output_disabled_no_sanitized_text() -> None:
-    from hecate.services.security.llm_guard import LLMGuardScanner
+    from hecate.runtime.security.llm_guard import LLMGuardScanner
 
     scanner = LLMGuardScanner(enabled=False)
     result = await scanner.scan_output("test")

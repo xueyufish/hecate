@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.security.output.injection_detection.recognizers import (
+from hecate.ops.output_security.injection_detection.recognizers import (
     CodePythonRecognizer,
     SqlInjectionRecognizer,
     TemplateJinjaRecognizer,
     XssRecognizer,
 )
-from hecate.services.security.output.injection_detection.recognizers.base import (
+from hecate.ops.output_security.injection_detection.recognizers.base import (
     make_recognizer_from_custom_pattern,
 )
-from hecate.services.security.output.injection_detection.scanner import (
+from hecate.ops.output_security.injection_detection.scanner import (
     resolve_config,
     scan,
     scan_with_guardrail_cfg,

@@ -43,22 +43,22 @@ _BLOCKED_PREFIXES: tuple[str, ...] = (
 CORE_MAIN_MODULES: tuple[str, ...] = (
     "hecate",
     "hecate.main",
-    "hecate.auth",
-    "hecate.auth.provider",
-    "hecate.auth.resolver",
-    # hecate.auth.registration removed in PR1.2 (replaced by entry_points).
-    "hecate.auth.api_key_provider",
-    "hecate.auth.jwt_provider",
-    "hecate.vault",
-    "hecate.vault.provider",
-    "hecate.vault.resolver",
+    "hecate.enterprise.auth",
+    "hecate.enterprise.auth.provider",
+    "hecate.enterprise.auth.resolver",
+    # hecate.enterprise.auth.registration removed in PR1.2 (replaced by entry_points).
+    "hecate.enterprise.auth.api_key_provider",
+    "hecate.enterprise.auth.jwt_provider",
+    "hecate.enterprise.vault",
+    "hecate.enterprise.vault.provider",
+    "hecate.enterprise.vault.resolver",
     "hecate.core.config",
     "hecate.core.database",
     "hecate.core.deps",
     "hecate.core.deps_workspace",
     "hecate.api.management.budget",
-    "hecate.gateway.registration",
-    "hecate.api.v1.channels",
+    "hecate.channel.gateway.registration",
+    "hecate.channel.api.v1.channels",
 )
 
 _PROBE_SCRIPT = textwrap.dedent(

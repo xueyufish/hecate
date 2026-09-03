@@ -46,10 +46,10 @@ from hecate.models.evaluation import (
     EvaluationScoreModel,
     EvaluationScoreReadSchema,
 )
-from hecate.services.evaluation.dataset_service import EvaluationDatasetService
-from hecate.services.evaluation.engine import EvaluationEngine
-from hecate.services.evaluation.evaluator import Evaluator
-from hecate.services.evaluation.types import AnswerSource
+from hecate.ops.evaluation.dataset_service import EvaluationDatasetService
+from hecate.ops.evaluation.engine import EvaluationEngine
+from hecate.ops.evaluation.evaluator import Evaluator
+from hecate.ops.evaluation.types import AnswerSource
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ _EVALUATOR_REGISTRY: dict[str, type[Evaluator]] = {}
 def _get_evaluator_registry() -> dict[str, type[Evaluator]]:
     """Lazily populate and return the evaluator registry."""
     if not _EVALUATOR_REGISTRY:
-        from hecate.services.evaluation.agent_evaluators import (
+        from hecate.ops.evaluation.agent_evaluators import (
             CompletenessEvaluator,
             CorrectnessEvaluator,
             RelevancyEvaluator,
@@ -78,7 +78,7 @@ def _get_evaluator_registry() -> dict[str, type[Evaluator]]:
 
         # RAG evaluators are optional — only register if ragas is available
         try:
-            from hecate.services.evaluation.rag_evaluators import (
+            from hecate.ops.evaluation.rag_evaluators import (
                 AnswerRelevancyEvaluator,
                 ContextPrecisionEvaluator,
                 ContextRecallEvaluator,

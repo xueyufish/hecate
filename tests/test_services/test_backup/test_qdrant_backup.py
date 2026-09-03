@@ -5,27 +5,27 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from hecate.services.backup.storage import BackupStorage
+from hecate.ops.backup.storage import BackupStorage
 
 
 async def test_qdrant_backup_all_collections():
     """backup_qdrant creates snapshots for all collections."""
-    from hecate.services.backup.qdrant_backup import backup_qdrant
+    from hecate.ops.backup.qdrant_backup import backup_qdrant
 
     mock_storage = MagicMock(spec=BackupStorage)
     mock_storage.upload = AsyncMock(return_value="path")
 
     with (
         patch(
-            "hecate.services.backup.qdrant_backup._list_collections",
+            "hecate.ops.backup.qdrant_backup._list_collections",
             return_value=["kb_001", "kb_002"],
         ),
         patch(
-            "hecate.services.backup.qdrant_backup._create_and_download_snapshot",
+            "hecate.ops.backup.qdrant_backup._create_and_download_snapshot",
             return_value=b"snapshot data",
         ),
         patch(
-            "hecate.services.backup.qdrant_backup._get_vector_count",
+            "hecate.ops.backup.qdrant_backup._get_vector_count",
             return_value=500,
         ),
     ):
@@ -41,7 +41,7 @@ async def test_qdrant_backup_all_collections():
 
 async def test_qdrant_backup_single_collection_failure():
     """backup_qdrant continues when one collection fails."""
-    from hecate.services.backup.qdrant_backup import backup_qdrant
+    from hecate.ops.backup.qdrant_backup import backup_qdrant
 
     mock_storage = MagicMock(spec=BackupStorage)
     mock_storage.upload = AsyncMock(return_value="path")
@@ -53,15 +53,15 @@ async def test_qdrant_backup_single_collection_failure():
 
     with (
         patch(
-            "hecate.services.backup.qdrant_backup._list_collections",
+            "hecate.ops.backup.qdrant_backup._list_collections",
             return_value=["kb_ok", "kb_bad"],
         ),
         patch(
-            "hecate.services.backup.qdrant_backup._create_and_download_snapshot",
+            "hecate.ops.backup.qdrant_backup._create_and_download_snapshot",
             side_effect=mock_snapshot,
         ),
         patch(
-            "hecate.services.backup.qdrant_backup._get_vector_count",
+            "hecate.ops.backup.qdrant_backup._get_vector_count",
             return_value=100,
         ),
     ):
@@ -75,13 +75,13 @@ async def test_qdrant_backup_single_collection_failure():
 
 async def test_qdrant_backup_empty_collections():
     """backup_qdrant handles empty collection list."""
-    from hecate.services.backup.qdrant_backup import backup_qdrant
+    from hecate.ops.backup.qdrant_backup import backup_qdrant
 
     mock_storage = MagicMock(spec=BackupStorage)
     mock_storage.upload = AsyncMock(return_value="path")
 
     with patch(
-        "hecate.services.backup.qdrant_backup._list_collections",
+        "hecate.ops.backup.qdrant_backup._list_collections",
         return_value=[],
     ):
         result = await backup_qdrant(mock_storage, datetime(2026, 7, 30, tzinfo=UTC))
@@ -92,7 +92,7 @@ async def test_qdrant_backup_empty_collections():
 
 async def test_qdrant_backup_vector_count_metadata():
     """backup_qdrant records vector counts per collection."""
-    from hecate.services.backup.qdrant_backup import backup_qdrant
+    from hecate.ops.backup.qdrant_backup import backup_qdrant
 
     mock_storage = MagicMock(spec=BackupStorage)
     mock_storage.upload = AsyncMock(return_value="path")
@@ -108,15 +108,15 @@ async def test_qdrant_backup_vector_count_metadata():
 
     with (
         patch(
-            "hecate.services.backup.qdrant_backup._list_collections",
+            "hecate.ops.backup.qdrant_backup._list_collections",
             return_value=list(vector_counts.keys()),
         ),
         patch(
-            "hecate.services.backup.qdrant_backup._create_and_download_snapshot",
+            "hecate.ops.backup.qdrant_backup._create_and_download_snapshot",
             return_value=b"snap",
         ),
         patch(
-            "hecate.services.backup.qdrant_backup._get_vector_count",
+            "hecate.ops.backup.qdrant_backup._get_vector_count",
             side_effect=mock_count,
         ),
     ):

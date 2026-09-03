@@ -305,7 +305,7 @@ def _run_agent_install(args: object) -> None:
 
     from hecate.core.config import settings
     from hecate.core.database import async_session_factory
-    from hecate.services.plugin.service import PluginService
+    from hecate.studio.plugin.service import PluginService
 
     workspace_id: _uuid.UUID | None = None
     if getattr(args, "workspace", None):
@@ -347,7 +347,7 @@ def _run_agent_uninstall(args: object) -> None:
 
     from hecate.core.config import settings
     from hecate.core.database import async_session_factory
-    from hecate.services.plugin.service import PluginService
+    from hecate.studio.plugin.service import PluginService
 
     async def _uninstall() -> None:
         async with async_session_factory() as session:
@@ -371,7 +371,7 @@ def _run_agent_list() -> None:
 
     from hecate.core.database import async_session_factory
     from hecate.models.plugin import PluginModel
-    from hecate.services.plugin.service import AGENT_PLUGIN_TYPE
+    from hecate.studio.plugin.service import AGENT_PLUGIN_TYPE
 
     async def _list() -> list[object]:
         async with async_session_factory() as session:

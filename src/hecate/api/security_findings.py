@@ -27,7 +27,7 @@ from pydantic import Field
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps_workspace import get_auth_context
 from hecate.models.security_finding import SecurityFindingQuerySchema
-from hecate.services.security.finding_service import SecurityFindingService
+from hecate.ops.security.findings import SecurityFindingService
 
 logger = logging.getLogger(__name__)
 

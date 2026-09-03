@@ -14,7 +14,7 @@ from hecate.models.workflow import (
 )
 from hecate.runtime.compiler import GraphCompiler
 from hecate.runtime.types import ExecutionMode
-from hecate.services.workflow.graph_dsl import GraphValidationError, parse_graph
+from hecate.studio.workflows.graph_dsl import GraphValidationError, parse_graph
 
 CONVERSATIONAL_DSL = {
     "version": "1.0",
@@ -101,7 +101,7 @@ class TestWorkflowModelExecutionMode:
     """Test WorkflowModel execution_mode field via service layer."""
 
     async def test_create_default_mode(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -110,7 +110,7 @@ class TestWorkflowModelExecutionMode:
         assert result.execution_mode == "conversational"
 
     async def test_create_task_mode(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(
@@ -123,7 +123,7 @@ class TestWorkflowModelExecutionMode:
         assert result.execution_mode == "task"
 
     async def test_update_execution_mode(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -135,7 +135,7 @@ class TestWorkflowModelExecutionMode:
         assert updated.execution_mode == "task"
 
     async def test_update_mode_with_suggestion_graph_fails(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=SUGGESTION_DSL)
@@ -150,7 +150,7 @@ class TestWorkflowPublishVersion:
     """Test WorkflowService.publish_version()."""
 
     async def test_publish_sets_pointer(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -160,7 +160,7 @@ class TestWorkflowPublishVersion:
         assert result.published_version == 1
 
     async def test_publish_adds_production_label(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -171,7 +171,7 @@ class TestWorkflowPublishVersion:
         assert "production" in version.labels
 
     async def test_republish_moves_label(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -190,7 +190,7 @@ class TestWorkflowPublishVersion:
         assert "production" in v2.labels
 
     async def test_publish_nonexistent_version_raises(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -200,7 +200,7 @@ class TestWorkflowPublishVersion:
             await service.publish_version(created.id, 99)
 
     async def test_publish_nonexistent_workflow_raises(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         with pytest.raises(ValueError, match="not found"):
@@ -211,7 +211,7 @@ class TestWorkflowVersionLabel:
     """Test WorkflowService.get_version_by_label()."""
 
     async def test_find_by_label(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -224,7 +224,7 @@ class TestWorkflowVersionLabel:
         assert result.version == 1
 
     async def test_find_by_label_not_found(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -238,7 +238,7 @@ class TestWorkflowPublishedVersion:
     """Test WorkflowService.get_published_version()."""
 
     async def test_get_published(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -250,7 +250,7 @@ class TestWorkflowPublishedVersion:
         assert result.version == 1
 
     async def test_get_published_none_raises(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -264,7 +264,7 @@ class TestWorkflowDiffVersions:
     """Test WorkflowService.diff_versions()."""
 
     async def test_identical_versions(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -279,7 +279,7 @@ class TestWorkflowDiffVersions:
         assert result["v2"] == 2
 
     async def test_different_versions(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)
@@ -293,7 +293,7 @@ class TestWorkflowDiffVersions:
         assert result["summary"]["values_changed"] > 0 or result["summary"]["dictionary_item_added"] > 0
 
     async def test_diff_nonexistent_version_raises(self, db_session: AsyncSession) -> None:
-        from hecate.services.workflow_service import WorkflowService
+        from hecate.studio.workflows.service import WorkflowService
 
         service = WorkflowService(db_session)
         data = WorkflowCreateSchema(name="test", graph_dsl=CONVERSATIONAL_DSL)

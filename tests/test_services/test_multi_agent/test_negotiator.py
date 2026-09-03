@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.multi_agent.negotiator import (
+from hecate.studio.agents.negotiator import (
     NegotiationStatus,
     P2PNegotiator,
 )

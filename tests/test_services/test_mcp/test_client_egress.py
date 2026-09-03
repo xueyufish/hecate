@@ -8,20 +8,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from hecate.services.mcp.client import HecateMCPClient
-from hecate.services.security.dlp.policy import (
+from hecate.ops.dlp.policy import (
     DLPPolicyResolver,
     DLPPolicyRule,
     PolicyScope,
 )
-from hecate.services.security.dlp.recognizer import DLPRecognizerRegistry
-from hecate.services.security.dlp.result import DLPAction, DLPFinding
-from hecate.services.security.dlp.scanner import DLPScanner
-from hecate.services.security.egress import (
+from hecate.ops.dlp.recognizer import DLPRecognizerRegistry
+from hecate.ops.dlp.result import DLPAction, DLPFinding
+from hecate.ops.dlp.scanner import DLPScanner
+from hecate.runtime.security.egress import (
     DLPEgressFilter,
     EgressAction,
     EgressResult,
 )
+from hecate.tools.mcp.client import HecateMCPClient
 
 
 class _StubTextContent:

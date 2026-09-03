@@ -90,7 +90,7 @@ class TestSecurityFindingService:
     """Tests for SecurityFindingService query and cleanup."""
 
     async def test_query_by_rule_name(self, db_session) -> None:  # type: ignore[no-untyped-def]
-        from hecate.services.security.finding_service import SecurityFindingService
+        from hecate.ops.security.findings import SecurityFindingService
 
         org_id = uuid.uuid4()
         finding = SecurityFindingModel(
@@ -111,7 +111,7 @@ class TestSecurityFindingService:
         assert results[0].rule_name == "bulk_delete_rule"
 
     async def test_query_by_severity(self, db_session) -> None:  # type: ignore[no-untyped-def]
-        from hecate.services.security.finding_service import SecurityFindingService
+        from hecate.ops.security.findings import SecurityFindingService
 
         org_id = uuid.uuid4()
         for sev in ("low", "medium", "high", "critical"):

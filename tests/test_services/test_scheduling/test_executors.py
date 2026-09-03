@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock, patch
 
-from hecate.services.scheduling.executors import (
+from hecate.ops.scheduling.executors import (
     AgentExecutor,
     ExecutorRegistry,
     WorkflowExecutor,
@@ -49,7 +49,7 @@ class TestAgentExecutor:
         task_id = uuid.uuid4()
 
         with patch(
-            "hecate.services.scheduling.executors.AgentService",
+            "hecate.ops.scheduling.executors.AgentService",
             create=True,
         ) as mock_service_cls:
             mock_instance = AsyncMock()
@@ -73,7 +73,7 @@ class TestWorkflowExecutor:
         task_id = uuid.uuid4()
 
         with patch(
-            "hecate.services.scheduling.executors.WorkflowService",
+            "hecate.ops.scheduling.executors.WorkflowService",
             create=True,
         ) as mock_service_cls:
             mock_instance = AsyncMock()

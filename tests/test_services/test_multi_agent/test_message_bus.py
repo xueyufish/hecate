@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.multi_agent.message_bus import AgentMessageBus
+from hecate.studio.agents.message_bus import AgentMessageBus
 
 
 class TestAgentMessageBus:

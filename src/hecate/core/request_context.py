@@ -2,7 +2,7 @@
 
 Provides a contextvar-based carrier for ``(org_id, user_id)`` so that
 factories constructing per-worker singletons (e.g.
-:class:`~hecate.services.event_state.PostgresEventStore`) can read the
+:class:`~hecate.studio.event_state.PostgresEventStore`) can read the
 current request's tenant without threading the tuple through every call
 site.
 

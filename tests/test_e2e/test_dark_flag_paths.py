@@ -117,7 +117,7 @@ def test_siem_event_vocabulary_resolves_when_feature_on() -> None:
     A regression where these classes disappear (e.g. deleted because
     SIEM was always off) breaks the dark-flag flip without anyone noticing.
     """
-    from hecate.services.security.siem.event import EventSeverity, EventSource, EventType, SecurityEvent
+    from hecate.ops.siem.event import EventSeverity, EventSource, EventType, SecurityEvent
 
     assert EventSeverity is not None
     assert EventType is not None

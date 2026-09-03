@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from hecate.auth.provider import AuthProvider
-from hecate.auth.resolver import get_registered_providers, register_auth_providers, resolve_auth_context
 from hecate.core.auth_context import AuthContext
+from hecate.enterprise.auth.provider import AuthProvider
+from hecate.enterprise.auth.resolver import get_registered_providers, register_auth_providers, resolve_auth_context
 
 
 class _MockProvider(AuthProvider):

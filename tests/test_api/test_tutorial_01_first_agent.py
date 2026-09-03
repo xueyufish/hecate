@@ -164,7 +164,7 @@ class TestStep4ChatWithAgent:
         )
         agent_id = create.json()["id"]
 
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=_mock_llm("Exit code 137 means SIGKILL..."))
             response = await client.post(
                 f"/v1/agents/{agent_id}/chat/completions",
@@ -200,7 +200,7 @@ class TestStep4ChatWithAgent:
         )
         agent_id = create.json()["id"]
 
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=_mock_llm())
             await client.post(
                 f"/v1/agents/{agent_id}/chat/completions",
@@ -229,7 +229,7 @@ class TestStep4ChatWithAgent:
         )
         agent_id = create.json()["id"]
 
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=_mock_llm())
             await client.post(
                 "/v1/chat/completions",
@@ -337,8 +337,8 @@ class TestStep5AgentTools:
         await client.put(f"/api/agents/{agent_id}", json={"tools": ["web_search"]})
 
         with (
-            patch("hecate.api.v1.chat.llm_service") as mock_llm,
-            patch("hecate.api.v1.chat._build_tool_registry") as mock_registry_builder,
+            patch("hecate.channel.api.v1.chat.llm_service") as mock_llm,
+            patch("hecate.channel.api.v1.chat._build_tool_registry") as mock_registry_builder,
         ):
             mock_registry_builder.return_value = MagicMock()
             mock_llm.chat = AsyncMock(return_value=_mock_llm("answer"))
@@ -383,8 +383,8 @@ class TestStep5AgentTools:
         }
 
         with (
-            patch("hecate.api.v1.chat.llm_service") as mock_llm,
-            patch("hecate.api.v1.chat._build_tool_registry", return_value=fake_registry),
+            patch("hecate.channel.api.v1.chat.llm_service") as mock_llm,
+            patch("hecate.channel.api.v1.chat._build_tool_registry", return_value=fake_registry),
         ):
             mock_llm.chat = AsyncMock(
                 side_effect=[
@@ -461,8 +461,8 @@ class TestStep5AgentTools:
                 yield chunk
 
         with (
-            patch("hecate.api.v1.chat.llm_service") as mock_llm,
-            patch("hecate.api.v1.chat._build_tool_registry", return_value=fake_registry),
+            patch("hecate.channel.api.v1.chat.llm_service") as mock_llm,
+            patch("hecate.channel.api.v1.chat._build_tool_registry", return_value=fake_registry),
         ):
             mock_llm.chat_stream = fake_chat_stream
             response = await client.post(
@@ -502,7 +502,7 @@ class TestStep6Sessions:
         agent_id = create.json()["id"]
         sid = str(uuid.uuid4())
 
-        with patch("hecate.api.v1.chat.llm_service") as mock_llm:
+        with patch("hecate.channel.api.v1.chat.llm_service") as mock_llm:
             mock_llm.chat = AsyncMock(return_value=_mock_llm("reply"))
             response = await client.post(
                 f"/v1/agents/{agent_id}/chat/completions",

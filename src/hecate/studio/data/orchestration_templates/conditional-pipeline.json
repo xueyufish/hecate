@@ -1,0 +1,70 @@
+{
+  "version": "1.0",
+  "name": "Conditional Pipeline",
+  "description": "A conditional routing pipeline where a classifier agent categorizes input and routes to the appropriate specialist agent.",
+  "category": "pipeline",
+  "state": {
+    "messages": { "type": "topic", "reduce": "append" },
+    "category": { "type": "last_value" }
+  },
+  "nodes": {
+    "classifier": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a classifier agent. Analyze the input and determine its category: finance, tech, or legal. Write the category to the 'category' channel.",
+        "channels": { "readable": ["messages"], "writable": ["messages", "category"] }
+      }
+    },
+    "check_category": {
+      "type": "condition",
+      "config": {
+        "expression": "category"
+      }
+    },
+    "finance_agent": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a finance specialist agent. Handle finance-related requests with expertise in financial analysis and regulations.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "tech_agent": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a technology specialist agent. Handle tech-related requests with expertise in software, infrastructure, and engineering.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "legal_agent": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a legal specialist agent. Handle legal-related requests with expertise in contracts, compliance, and regulations.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    },
+    "general_agent": {
+      "type": "agent",
+      "config": {
+        "agent_id": "",
+        "system_prompt": "You are a general-purpose agent. Handle requests that do not fit into a specific category.",
+        "channels": { "readable": ["messages"], "writable": ["messages"] }
+      }
+    }
+  },
+  "edges": [
+    { "source": "classifier", "target": "check_category" },
+    {
+      "source": "check_category",
+      "target": { "finance": "finance_agent", "tech": "tech_agent", "legal": "legal_agent", "default": "general_agent" }
+    },
+    { "source": "finance_agent", "target": "__end__" },
+    { "source": "tech_agent", "target": "__end__" },
+    { "source": "legal_agent", "target": "__end__" },
+    { "source": "general_agent", "target": "__end__" }
+  ],
+  "entry": "classifier"
+}

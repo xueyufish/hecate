@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import logging
 
-from hecate.vault.resolver import load_entry_point_providers, register_providers
+from hecate.enterprise.vault.resolver import load_entry_point_providers, register_providers
 
 logger = logging.getLogger(__name__)
 

@@ -6,12 +6,12 @@ import hashlib
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from hecate.services.backup.storage import BackupStorage
+from hecate.ops.backup.storage import BackupStorage
 
 
 async def test_pg_backup_success():
     """backup_postgresql runs pg_dump and uploads result."""
-    from hecate.services.backup.pg_backup import backup_postgresql
+    from hecate.ops.backup.pg_backup import backup_postgresql
 
     mock_storage = MagicMock(spec=BackupStorage)
     mock_storage.upload = AsyncMock(return_value="path")
@@ -19,9 +19,9 @@ async def test_pg_backup_success():
     fake_dump = b"fake pg_dump output"
 
     with (
-        patch("hecate.services.backup.pg_backup._run_pg_dump", return_value=fake_dump),
-        patch("hecate.services.backup.pg_backup._collect_row_counts", return_value={"agents": 5}),
-        patch("hecate.services.backup.pg_backup._check_wal_archive", return_value=True),
+        patch("hecate.ops.backup.pg_backup._run_pg_dump", return_value=fake_dump),
+        patch("hecate.ops.backup.pg_backup._collect_row_counts", return_value={"agents": 5}),
+        patch("hecate.ops.backup.pg_backup._check_wal_archive", return_value=True),
     ):
         result = await backup_postgresql(mock_storage, datetime(2026, 7, 30, tzinfo=UTC))
 
@@ -35,15 +35,15 @@ async def test_pg_backup_success():
 
 async def test_pg_backup_wal_disabled_warning():
     """backup_postgresql records warning when WAL archiving is disabled."""
-    from hecate.services.backup.pg_backup import backup_postgresql
+    from hecate.ops.backup.pg_backup import backup_postgresql
 
     mock_storage = MagicMock(spec=BackupStorage)
     mock_storage.upload = AsyncMock(return_value="path")
 
     with (
-        patch("hecate.services.backup.pg_backup._run_pg_dump", return_value=b"dump"),
-        patch("hecate.services.backup.pg_backup._collect_row_counts", return_value={}),
-        patch("hecate.services.backup.pg_backup._check_wal_archive", return_value=False),
+        patch("hecate.ops.backup.pg_backup._run_pg_dump", return_value=b"dump"),
+        patch("hecate.ops.backup.pg_backup._collect_row_counts", return_value={}),
+        patch("hecate.ops.backup.pg_backup._check_wal_archive", return_value=False),
     ):
         result = await backup_postgresql(mock_storage, datetime(2026, 7, 30, tzinfo=UTC))
 
@@ -54,16 +54,16 @@ async def test_pg_backup_wal_disabled_warning():
 
 async def test_pg_backup_checksum_correctness():
     """backup_postgresql computes correct SHA256 checksum."""
-    from hecate.services.backup.pg_backup import backup_postgresql
+    from hecate.ops.backup.pg_backup import backup_postgresql
 
     mock_storage = MagicMock(spec=BackupStorage)
     mock_storage.upload = AsyncMock(return_value="path")
     test_data = b"x" * 1024
 
     with (
-        patch("hecate.services.backup.pg_backup._run_pg_dump", return_value=test_data),
-        patch("hecate.services.backup.pg_backup._collect_row_counts", return_value={}),
-        patch("hecate.services.backup.pg_backup._check_wal_archive", return_value=True),
+        patch("hecate.ops.backup.pg_backup._run_pg_dump", return_value=test_data),
+        patch("hecate.ops.backup.pg_backup._collect_row_counts", return_value={}),
+        patch("hecate.ops.backup.pg_backup._check_wal_archive", return_value=True),
     ):
         result = await backup_postgresql(mock_storage, datetime(2026, 7, 30, tzinfo=UTC))
 

@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 from hecate.runtime.types import ChannelType, GraphConfig, NodeType
-from hecate.services.workflow.graph_dsl import parse_graph
-from hecate.services.workflow.templates import build_broadcast_pipeline, build_sequential_pipeline
+from hecate.studio.workflows.graph_dsl import parse_graph
+from hecate.studio.workflows.templates import build_broadcast_pipeline, build_sequential_pipeline
 
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "src" / "hecate" / "data" / "orchestration_templates"
+TEMPLATES_DIR = Path(__file__).parent.parent.parent / "src" / "hecate" / "studio" / "data" / "orchestration_templates"
 
 STAGES_2 = [
     {"id": "researcher", "model": "gpt-4o", "system_prompt": "Research the topic."},

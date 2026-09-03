@@ -22,6 +22,7 @@ from __future__ import annotations
 import uuid
 
 from hecate.runtime.eventstore import EventType, InMemoryEventStore
+from hecate.runtime.security.approval import FailingClosedApprovalCallback
 from hecate.runtime.tool_access import (
     AccessDecision,
     ApprovalScope,
@@ -29,7 +30,6 @@ from hecate.runtime.tool_access import (
     ToolAccessPolicy,
     ToolRule,
 )
-from hecate.services.security.approval import FailingClosedApprovalCallback
 
 
 def _events_for(store: InMemoryEventStore, session_id: uuid.UUID) -> list:

@@ -25,8 +25,8 @@ import pytest
 
 from hecate.runtime.session_state import SessionStateStore
 from hecate.runtime.types import StreamMode
-from hecate.services.state.state import AgentState
-from hecate.services.workflow.execution_service import WorkflowExecutionService
+from hecate.studio.state.state import AgentState
+from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
 
 @asynccontextmanager

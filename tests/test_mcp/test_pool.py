@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.mcp.client import HecateMCPClient
-from hecate.services.mcp.errors import MCPConnectionError, MCPErrorCode
-from hecate.services.mcp.pool import ConnectionPool
+from hecate.tools.mcp.client import HecateMCPClient
+from hecate.tools.mcp.errors import MCPConnectionError, MCPErrorCode
+from hecate.tools.mcp.pool import ConnectionPool
 
 
 class _FakeClient(HecateMCPClient):

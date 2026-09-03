@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.deps import get_db, verify_api_key
+from hecate.enterprise.auth.crypto import decrypt_api_key, encrypt_api_key
 from hecate.models.model_provider import (
     CustomModelCreateSchema,
     ModelProviderCreateSchema,
@@ -32,7 +33,6 @@ from hecate.models.model_provider import (
     ModelTestRequestSchema,
     ModelUpdateSchema,
 )
-from hecate.services.model_provider.crypto import decrypt_api_key, encrypt_api_key
 
 logger = logging.getLogger(__name__)
 

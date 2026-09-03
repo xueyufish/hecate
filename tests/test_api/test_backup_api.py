@@ -35,7 +35,7 @@ def mock_backup_record():
 async def test_api_create_backup(client, mock_backup_record):
     """POST /api/system/backups creates a backup."""
     with patch(
-        "hecate.services.backup.orchestrator.create_backup",
+        "hecate.ops.backup.orchestrator.create_backup",
         new_callable=AsyncMock,
         return_value=mock_backup_record,
     ):
@@ -50,7 +50,7 @@ async def test_api_create_backup(client, mock_backup_record):
 async def test_api_list_backups(client, mock_backup_record):
     """GET /api/system/backups returns backup list."""
     with patch(
-        "hecate.services.backup.orchestrator.list_backups",
+        "hecate.ops.backup.orchestrator.list_backups",
         new_callable=AsyncMock,
         return_value=[mock_backup_record],
     ):
@@ -114,7 +114,7 @@ async def test_api_restore_with_confirm(client):
     mock_result.error = None
 
     with patch(
-        "hecate.services.backup.restore.restore_backup",
+        "hecate.ops.backup.restore.restore_backup",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):
@@ -134,7 +134,7 @@ async def test_api_verify_backup(client):
     mock_result = {"matched": True, "mismatches": []}
 
     with patch(
-        "hecate.services.backup.verification.verify_backup",
+        "hecate.ops.backup.verification.verify_backup",
         new_callable=AsyncMock,
         return_value=mock_result,
     ):

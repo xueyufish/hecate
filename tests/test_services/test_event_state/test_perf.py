@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from hecate.runtime.eventstore import Event, EventType, InMemoryEventStore
-from hecate.services.event_state.postgres_store import PostgresEventStore
+from hecate.studio.event_state.postgres_store import PostgresEventStore
 
 
 def _percentile(samples: list[float], p: float) -> float:

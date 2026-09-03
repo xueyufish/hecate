@@ -12,12 +12,12 @@ from __future__ import annotations
 import uuid
 
 from hecate.models.tool_policy import ToolPolicyModel, ToolPolicyRuleModel
-from hecate.runtime.tool_access import ApprovalDecision, RuleAction
-from hecate.services.security.guardrail_assembly import (
+from hecate.runtime.security.guardrail_assembly import (
     GuardrailBundle,
     NoAnswerApprovalCallback,
     assemble_guardrails,
 )
+from hecate.runtime.tool_access import ApprovalDecision, RuleAction
 
 
 async def _make_workspace_policy(db, workspace_id, action, pattern, *, arg_conditions=None, priority=0):

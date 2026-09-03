@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.meta_agents.drift_detector import (
+from hecate.studio.meta_agents.drift_detector import (
     DriftDetectorAgent,
     DriftReport,
 )

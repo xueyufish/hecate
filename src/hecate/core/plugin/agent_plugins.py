@@ -441,7 +441,7 @@ def parse_skill_candidate(discovered: DiscoveredSkill) -> SkillImportCandidate:
     a mismatch skips the skill (raised as ValueError for the orchestrator
     to record and continue).
     """
-    from hecate.services.skill.parser import parse_skill_md
+    from hecate.tools.skill.parser import parse_skill_md
 
     content = discovered.skill_md.read_text(encoding="utf-8")
     parsed = parse_skill_md(content)

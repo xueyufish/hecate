@@ -400,7 +400,7 @@ class ToolAccessPolicy:
                 return True
             # Content-aware check (T3.2): only for shell-class tools.
             from hecate.runtime.workers.sandbox_router import is_shell_tool
-            from hecate.services.tool.shell_analysis import analyze_command
+            from hecate.tools.tool.shell_analysis import analyze_command
 
             if is_shell_tool(tool_name) and isinstance(arg_value, str):
                 # Extract single-token markers from the pattern (e.g. ``rm``

@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from hecate.services.audit.policy import FindingEngine, UnusualIPRule
-from hecate.services.audit.store import AuditEvent, AuditStore
-from hecate.services.audit.writer import AuditBatchWriter, WriterConfig
+from hecate.ops.audit.policy import FindingEngine, UnusualIPRule
+from hecate.ops.audit.store import AuditEvent, AuditStore
+from hecate.ops.audit.writer import AuditBatchWriter, WriterConfig
 
 
 class InMemoryAuditStore(AuditStore):

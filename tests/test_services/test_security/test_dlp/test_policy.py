@@ -10,12 +10,12 @@ Covers spec §dlp-policy-management requirements:
 
 from __future__ import annotations
 
-from hecate.services.security.dlp.policy import (
+from hecate.ops.dlp.policy import (
     DLPPolicyResolver,
     DLPPolicyRule,
     PolicyScope,
 )
-from hecate.services.security.dlp.result import DLPAction
+from hecate.ops.dlp.result import DLPAction
 
 
 def rule(

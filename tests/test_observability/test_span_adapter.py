@@ -102,8 +102,8 @@ class TestEndOtelSpan:
 class TestPortDelegation:
     async def test_runtime_port_methods_delegate(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Both RuntimePort implementations share the adapter behavior."""
-        from hecate.services.orchestration.agent_execution_port import AgentExecutionPort
-        from hecate.services.orchestration.runtime_port_adapter import _ProductionRuntimePort
+        from hecate.core.composition.runtime_port_adapter import _ProductionRuntimePort
+        from hecate.runtime.agent_execution_port import AgentExecutionPort
 
         monkeypatch.setattr("opentelemetry.trace.get_tracer", lambda *a, **k: _sdk_tracer())
 

@@ -19,7 +19,7 @@ from hecate.runtime.tool_access import (
     ToolAccessPolicy,
     ToolRule,
 )
-from hecate.services.workflow.execution_service import WorkflowExecutionService
+from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
 
 class _StubPort:

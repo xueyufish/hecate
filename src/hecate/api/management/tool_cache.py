@@ -17,7 +17,7 @@ def set_cache(cache: object) -> None:
 
 def _get_cache() -> object:
     if _cache is None:
-        from hecate.services.tool.cache import ToolCache
+        from hecate.tools.tool.cache import ToolCache
 
         return ToolCache()
     return _cache

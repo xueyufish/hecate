@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.tool.search import SearchProvider
-from hecate.services.tool.search.duckduckgo import DuckDuckGoSearchProvider
-from hecate.services.tool.search.factory import create_search_provider
-from hecate.services.tool.search.serper import SerperSearchProvider
-from hecate.services.tool.search.tavily import TavilySearchProvider
+from hecate.tools.tool.search import SearchProvider
+from hecate.tools.tool.search.duckduckgo import DuckDuckGoSearchProvider
+from hecate.tools.tool.search.factory import create_search_provider
+from hecate.tools.tool.search.serper import SerperSearchProvider
+from hecate.tools.tool.search.tavily import TavilySearchProvider
 
 
 class TestSearchProviderABC:

@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 from hecate.runtime.tool_access import ToolAccessPolicy
-from hecate.services.observability.policy_layers import (
+from hecate.tools.policy.policy_layers import (
     ModeLayer,
     PluginAvailabilityLayer,
     ProfileLayer,
     SecurityLayer,
     VisibilityLayer,
 )
-from hecate.services.observability.policy_pipeline import (
+from hecate.tools.policy.policy_pipeline import (
     PermissionMode,
     PolicyContext,
     PolicyDecision,

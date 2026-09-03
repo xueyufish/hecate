@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from hecate.runtime.session_state import SessionState, SessionSummary
-from hecate.services.session_state.tiered_store import TieredSessionStateStore
+from hecate.studio.session_state.tiered_store import TieredSessionStateStore
 
 
 def _pg_store_mock() -> AsyncMock:

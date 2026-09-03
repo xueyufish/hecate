@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from hecate.services.meta_agents.scheduler import (
+from hecate.studio.meta_agents.scheduler import (
     MetaAgentScheduler,
 )
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from hecate.services.evaluation.types import EvalInput, EvalOutput
+from hecate.ops.evaluation.types import EvalInput, EvalOutput
 
 
 class EvaluatorBase(ABC):

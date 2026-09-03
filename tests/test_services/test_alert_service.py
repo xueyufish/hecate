@@ -16,8 +16,8 @@ from hecate.models.alert import (
     EscalationPolicyModel,
     NotificationChannelModel,
 )
-from hecate.services.alert_service import AlertService
-from hecate.services.notification_dispatcher import (
+from hecate.ops.alerts.service import AlertService
+from hecate.ops.notification import (
     NotificationDispatcher,
     render_dingtalk_markdown,
     render_feishu_card,

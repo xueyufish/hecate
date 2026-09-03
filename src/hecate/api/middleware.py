@@ -15,7 +15,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response as StarletteResponse
 
-from hecate.services.audit.store import AuditEvent
+from hecate.ops.audit.store import AuditEvent
 
 logger = logging.getLogger(__name__)
 

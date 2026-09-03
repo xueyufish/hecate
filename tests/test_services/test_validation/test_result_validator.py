@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.services.validation.result_validator import ResultValidator
+from hecate.studio.validation.result_validator import ResultValidator
 
 
 class TestResultValidator:

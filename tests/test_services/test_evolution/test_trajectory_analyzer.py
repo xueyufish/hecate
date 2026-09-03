@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.evolution.trajectory_analyzer import (
+from hecate.studio.evolution.trajectory_analyzer import (
     TrajectoryAnalyzer,
     TrajectoryPoint,
 )

@@ -22,8 +22,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import hecate.services.security.dlp.recognizers.secrets as secrets_mod
-from hecate.services.security.dlp.recognizers.secrets import (
+import hecate.ops.dlp.recognizers.secrets as secrets_mod
+from hecate.ops.dlp.recognizers.secrets import (
     _HAS_DETECT_SECRETS,
     SecretsRecognizer,
 )

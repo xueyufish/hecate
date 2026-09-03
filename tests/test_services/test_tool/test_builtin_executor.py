@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from hecate.services.tool.builtin import BUILTIN_TOOL_DEFINITIONS, BuiltInToolExecutor
-from hecate.services.tool.search import SearchProvider
+from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS, BuiltInToolExecutor
+from hecate.tools.tool.search import SearchProvider
 
 
 class MockSearchProvider(SearchProvider):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.services.feature_flags.evaluator import (
+from hecate.core.feature_flags.evaluator import (
     FLAG_ACTIVE,
     FLAG_DEPRECATED,
     FLAG_DRAFT,

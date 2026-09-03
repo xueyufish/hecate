@@ -49,7 +49,7 @@ async def generate_signing_key(
     """
     import uuid
 
-    from hecate.a2a.signing import generate_es256_keypair
+    from hecate.channel.a2a.signing import generate_es256_keypair
 
     private_jwk, public_jwk = generate_es256_keypair()
     kid = str(uuid.uuid4())
@@ -123,7 +123,7 @@ async def rotate_signing_key(
     """
     import uuid
 
-    from hecate.a2a.signing import generate_es256_keypair
+    from hecate.channel.a2a.signing import generate_es256_keypair
 
     result = await db.execute(
         select(AgentCardKeyModel).where(

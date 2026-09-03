@@ -14,22 +14,22 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from hecate.runtime.guardrail import GuardrailAction
-from hecate.services.mcp.client import HecateMCPClient
-from hecate.services.security.dlp.defaults import DEFAULT_RULES
-from hecate.services.security.dlp.policy import (
+from hecate.ops.dlp.defaults import DEFAULT_RULES
+from hecate.ops.dlp.policy import (
     DLPPolicyResolver,
     DLPPolicyRule,
     PolicyScope,
 )
-from hecate.services.security.dlp.recognizer import DLPRecognizerRegistry
-from hecate.services.security.dlp.recognizers.regex import RegexRecognizer
-from hecate.services.security.dlp.result import DLPAction
-from hecate.services.security.dlp.scanner import DLPScanner
-from hecate.services.security.egress import DLPEgressFilter
-from hecate.services.security.hooks.tool_result_security import (
+from hecate.ops.dlp.recognizer import DLPRecognizerRegistry
+from hecate.ops.dlp.recognizers.regex import RegexRecognizer
+from hecate.ops.dlp.result import DLPAction
+from hecate.ops.dlp.scanner import DLPScanner
+from hecate.runtime.guardrail import GuardrailAction
+from hecate.runtime.security.egress import DLPEgressFilter
+from hecate.runtime.security.hooks.tool_result_security import (
     ToolResultSecurityHook,
 )
+from hecate.tools.mcp.client import HecateMCPClient
 
 
 class _StubTextContent:

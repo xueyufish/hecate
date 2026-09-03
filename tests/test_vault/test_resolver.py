@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from hecate.vault.resolver import clear_cache, register_providers, resolve_dynamic_credentials, resolve_secret
+from hecate.enterprise.vault.resolver import (
+    clear_cache,
+    register_providers,
+    resolve_dynamic_credentials,
+    resolve_secret,
+)
 
 
 @pytest.fixture(autouse=True)

@@ -14,7 +14,7 @@ from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
 from hecate.core.deps_workspace import get_auth_context
 from hecate.models.plugin import PluginModel
-from hecate.services.plugin.service import AGENT_PLUGIN_TYPE, PluginService
+from hecate.studio.plugin.service import AGENT_PLUGIN_TYPE, PluginService
 
 router = APIRouter(prefix="/api/plugins", tags=["plugins"])
 
@@ -57,7 +57,7 @@ async def install_agent_plugin(
 ) -> PluginReadSchema:
     """Install an Agent Plugins 1.0 package from dir/git/zip source."""
     from hecate.core.config import settings
-    from hecate.services.plugin.service import FeatureDisabledError, PluginService
+    from hecate.studio.plugin.service import FeatureDisabledError, PluginService
 
     if not settings.AGENT_PLUGINS_INGESTION_ENABLED:
         raise HTTPException(
@@ -65,7 +65,7 @@ async def install_agent_plugin(
             detail="Agent Plugins ingestion is disabled",
         )
 
-    from hecate.services.plugin.service import ScanBlockedError
+    from hecate.studio.plugin.service import ScanBlockedError
 
     service = PluginService(db)
     try:
@@ -116,7 +116,7 @@ async def enable_plugin(
     plugin_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> PluginReadSchema:
-    from hecate.services.plugin.service import ScanBlockedError
+    from hecate.studio.plugin.service import ScanBlockedError
 
     service = PluginService(db)
     try:

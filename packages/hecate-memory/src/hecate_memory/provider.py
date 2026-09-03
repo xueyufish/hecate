@@ -15,7 +15,7 @@ Contract (duck-typed — no inheritance required):
 - ``SearchHitLike`` exposes ``content: str``, ``score: float``, ``metadata: dict``.
 
 The returned object is consumed by the core package through the
-``MemoryProvider`` Protocol in ``hecate.services.orchestration.memory_provider``.
+``MemoryProvider`` Protocol in ``hecate.core.composition.memory_provider``.
 """
 
 from __future__ import annotations

@@ -7,7 +7,7 @@ import sys
 
 
 def main() -> int:
-    from hecate.services.preflight import run_checks
+    from hecate.ops.preflight import run_checks
 
     results = asyncio.run(run_checks())
     has_fail = False

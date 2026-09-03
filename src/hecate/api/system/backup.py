@@ -41,7 +41,7 @@ class RestoreResponse(PydanticBase):
 async def create_backup_endpoint(req: CreateBackupRequest) -> BackupRecordModel:
     """Create a new backup. Platform Admin only."""
     _require_platform_admin()
-    from hecate.services.backup.orchestrator import create_backup
+    from hecate.ops.backup.orchestrator import create_backup
 
     record = await create_backup(scope=req.scope)
     return record
@@ -53,7 +53,7 @@ async def list_backups_endpoint(
     limit: int = Query(50, le=200),
 ) -> list[BackupRecordModel]:
     """List backup records."""
-    from hecate.services.backup.orchestrator import list_backups
+    from hecate.ops.backup.orchestrator import list_backups
 
     return await list_backups(status=status, limit=limit)
 
@@ -72,7 +72,7 @@ async def get_backup_endpoint(backup_id: uuid.UUID) -> BackupRecordModel:
 async def verify_backup_endpoint(backup_id: uuid.UUID) -> dict:
     """Trigger verification of a backup."""
     _require_platform_admin()
-    from hecate.services.backup.verification import verify_backup
+    from hecate.ops.backup.verification import verify_backup
 
     result = await verify_backup(backup_id)
     return result
@@ -85,7 +85,7 @@ async def restore_endpoint(req: RestoreRequest) -> RestoreResponse:
     if not req.confirm:
         raise HTTPException(status_code=400, detail="confirm=true is required for restore")
 
-    from hecate.services.backup.restore import restore_backup
+    from hecate.ops.backup.restore import restore_backup
 
     result = await restore_backup(
         backup_id=req.backup_id,

@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from hecate.services.event_state.models import EventModel
+from hecate.studio.event_state.models import EventModel
 
 
 async def test_eventmodel_round_trips_jsonb_payload(db_session):

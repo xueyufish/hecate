@@ -24,8 +24,8 @@ from hecate.models.conversation import (
     ConversationModel,
     ConversationReadSchema,
 )
+from hecate.ops.ops_center.conversation_messages import project_conversation_messages
 from hecate.runtime.eventstore import EventStore
-from hecate.services.ops_center.conversation_messages import project_conversation_messages
 
 router = APIRouter()
 
