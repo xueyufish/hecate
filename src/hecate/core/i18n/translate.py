@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hecate.i18n.catalog import MessageCatalog
-from hecate.i18n.locale_resolver import LocaleResolver
+from hecate.core.i18n.catalog import MessageCatalog
+from hecate.core.i18n.locale_resolver import LocaleResolver
 
 logger = logging.getLogger(__name__)
 

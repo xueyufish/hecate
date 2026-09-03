@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from hecate.i18n.catalog import MessageCatalog
+from hecate.core.i18n.catalog import MessageCatalog
 
 
 class TestMessageCatalog:

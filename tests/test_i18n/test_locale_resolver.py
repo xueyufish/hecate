@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.i18n.locale_resolver import LocaleResolver
+from hecate.core.i18n.locale_resolver import LocaleResolver
 
 
 class TestLocaleResolver:

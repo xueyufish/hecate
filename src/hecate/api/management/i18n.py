@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from hecate.i18n.translate import get_catalog
+from hecate.core.i18n.translate import get_catalog
 
 router = APIRouter(prefix="/api/i18n", tags=["i18n"])
 

@@ -6,9 +6,9 @@ translation function for multi-language support.
 
 from __future__ import annotations
 
-from hecate.i18n.catalog import MessageCatalog
-from hecate.i18n.locale_resolver import LocaleResolver
-from hecate.i18n.translate import get_catalog, get_resolver, t
+from hecate.core.i18n.catalog import MessageCatalog
+from hecate.core.i18n.locale_resolver import LocaleResolver
+from hecate.core.i18n.translate import get_catalog, get_resolver, t
 
 __all__ = [
     "LocaleResolver",
