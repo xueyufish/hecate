@@ -10,7 +10,7 @@ Detect and respond to LLM outputs that reproduce content from the system prompt 
 
 The system SHALL extract the system prompt content from the `messages` argument of `PostLLMHook.on_post_llm_call(response, messages)` as `messages[0]["content"]` when `messages[0]["role"] == "system"`. This is the canonical system prompt baseline for the comparison. If `messages[0]` is not a system message, the detector SHALL treat the entire `messages` list as the baseline (full conversation inspection — degraded mode, documented in design.md).
 
-This requirement relies on the existing contract verified by `agent_execution_port.py:110` (`full_messages = [system_message] + messages`) and the parallel Pregel path construction. The system prompt source is `agent.persona + skills_block` (from `AgentModel`), as confirmed by `services/workflow/execution_service.py:255-261`.
+This requirement relies on the existing contract verified by `agent_execution_port.py:110` (`full_messages = [system_message] + messages`) and the parallel Pregel path construction. The system prompt source is `agent.persona + skills_block` (from `AgentModel`), as confirmed by `studio/workflows/execution_service.py:255-261`.
 
 #### Scenario: standard chat execution
 
@@ -130,7 +130,7 @@ When the detector emits a finding, it SHALL also append an `EventType.PROMPT_LEA
 }
 ```
 
-`EventType.PROMPT_LEAKAGE_DETECTED` is a NEW EventType value added to the enum (`engine/eventstore.py`). Per the ADR-030 §1 contract, the enum is additive — old readers fall back to `CUSTOM` via the unknown-type handling already present.
+`EventType.PROMPT_LEAKAGE_DETECTED` is a NEW EventType value added to the enum (`runtime/eventstore.py`). Per the ADR-030 §1 contract, the enum is additive — old readers fall back to `CUSTOM` via the unknown-type handling already present.
 
 #### Scenario: BLOCK action emits event
 

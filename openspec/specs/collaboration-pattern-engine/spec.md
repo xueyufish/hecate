@@ -4,10 +4,10 @@
 TBD - created by archiving change p2-collaboration-pattern-selection. Update Purpose after archive.
 ## Requirements
 ### Requirement: CollaborationPattern enum
-The engine SHALL define a `CollaborationPattern` StrEnum in `engine/patterns.py` with 7 values: `SEQUENTIAL`, `PARALLEL`, `HANDOFF`, `BROADCAST`, `NEGOTIATION`, `DEBATE`, `DYNAMIC`. Each value maps to a canonical collaboration topology; `DYNAMIC` denotes a runtime-emitted sub-graph produced by a COORDINATOR node.
+The engine SHALL define a `CollaborationPattern` StrEnum in `studio/workflows/patterns.py` with 7 values: `SEQUENTIAL`, `PARALLEL`, `HANDOFF`, `BROADCAST`, `NEGOTIATION`, `DEBATE`, `DYNAMIC`. Each value maps to a canonical collaboration topology; `DYNAMIC` denotes a runtime-emitted sub-graph produced by a COORDINATOR node.
 
 #### Scenario: Enum values are accessible
-- **WHEN** `from hecate.engine.patterns import CollaborationPattern` is executed
+- **WHEN** `from hecate.studio.workflows.patterns import CollaborationPattern` is executed
 - **THEN** the enum SHALL have exactly 7 members: SEQUENTIAL, PARALLEL, HANDOFF, BROADCAST, NEGOTIATION, DEBATE, DYNAMIC
 
 #### Scenario: Enum values are lowercase strings

@@ -33,8 +33,8 @@ Hecate provides three independent hook systems. Each one fires at a different po
 
 | System | Location | Configured via | Fires at | Returns |
 |-------|----------|---------------|----------|---------|
-| **Engine guardrail hooks** | `engine/guardrail.py` | Python subclass, wired per Worker | Before/after each LLM call and tool call | `ALLOW`, `BLOCK`, or `SANITIZE` |
-| **Session lifecycle hooks** | `engine/session_hooks.py` | Python subclass, wired per session | Session start/end, prompt submit, pre-compact | `ALLOW`, `BLOCK`, or `INJECT` |
+| **Engine guardrail hooks** | `runtime/guardrail.py` | Python subclass, wired per Worker | Before/after each LLM call and tool call | `ALLOW`, `BLOCK`, or `SANITIZE` |
+| **Session lifecycle hooks** | `runtime/session_hooks.py` | Python subclass, wired per session | Session start/end, prompt submit, pre-compact | `ALLOW`, `BLOCK`, or `INJECT` |
 | **Shell command hooks** | DB-backed (`hook_configs` table) | REST API at `/api/hooks` | All of the above events | Shell exit code: `0` allow, `2` block |
 
 ### When to use which
@@ -281,7 +281,7 @@ curl -X DELETE http://localhost:8000/api/hooks/3f5e... \
 
 When shell hooks aren't expressive enough, subclass one of the engine hook ABCs directly. This is how the built-in `InputSecurityHook` itself is built.
 
-The four guardrail hook ABCs (`src/hecate/engine/guardrail.py`):
+The four guardrail hook ABCs (`src/hecate/runtime/guardrail.py`):
 
 | ABC | Method | Fires |
 |-----|--------|-------|
@@ -308,7 +308,7 @@ This `PreToolHook` blocks any `write_file` call that targets a path outside the 
 # my_project/hooks/path_safety.py
 from __future__ import annotations
 
-from hecate.engine.guardrail import (
+from hecate.runtime.guardrail import (
     GuardrailAction,
     GuardrailResult,
     PreToolHook,
@@ -433,7 +433,7 @@ The most common cause is `HOOK_SHELL_ENABLED=false`. Shell hooks are off by defa
 Check three things in order:
 
 1. The agent's `guardrail_config.input_security.enabled` is `true`. Verify with `hecate agent get <id>`.
-2. The PII type you expect is in the `pii_entities` list. The default set is `email`, `phone`, `credit_card`, `ssn`, `ip_address`. Custom patterns must be added in the `pii_anonymizer` (see `src/hecate/services/security/anonymizer.py`).
+2. The PII type you expect is in the `pii_entities` list. The default set is `email`, `phone`, `credit_card`, `ssn`, `ip_address`. Custom patterns must be added in the `pii_anonymizer` (see `src/hecate/runtime/security/anonymizer.py`).
 3. The input actually matches the regex. For example, `+1-555-0142` matches the phone pattern; `555-0142` alone may not.
 
 ### A blocking hook returns a generic error

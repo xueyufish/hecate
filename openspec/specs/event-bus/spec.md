@@ -4,7 +4,7 @@
 TBD - created by archiving change multi-agent-advanced-collaboration. Update Purpose after archive.
 ## Requirements
 ### Requirement: EventBus ABC defines pub/sub interface
-The engine SHALL define an `EventBus` ABC in `engine/eventbus.py` with abstract methods: `publish`, `subscribe`, `unsubscribe`, and `close`.
+The engine SHALL define an `EventBus` ABC in `runtime/eventbus.py` with abstract methods: `publish`, `subscribe`, `unsubscribe`, and `close`.
 
 #### Scenario: Publish event
 - **WHEN** `publish(topic="agent_researcher", event=CollaborationEvent(...))` is called

@@ -54,14 +54,14 @@ The system SHALL include a "Broadcast Pipeline" orchestration template in the te
 - **THEN** the response SHALL include an entry with `id` "broadcast-pipeline" containing name, description, category, and preview metadata
 
 ### Requirement: Factory functions exported from templates module
-The system SHALL export `build_sequential_pipeline`, `build_broadcast_pipeline`, `build_negotiation_graph`, and `build_debate_graph` from `engine/templates.py`. Additionally, `build_negotiation_graph` and `build_debate_graph` SHALL have corresponding JSON template files for catalog listing.
+The system SHALL export `build_sequential_pipeline`, `build_broadcast_pipeline`, `build_negotiation_graph`, and `build_debate_graph` from `studio/workflows/templates.py`. Additionally, `build_negotiation_graph` and `build_debate_graph` SHALL have corresponding JSON template files for catalog listing.
 
 #### Scenario: Import negotiation graph factory
-- **WHEN** `from hecate.engine.templates import build_negotiation_graph` is executed
+- **WHEN** `from hecate.studio.workflows.templates import build_negotiation_graph` is executed
 - **THEN** the import SHALL succeed and the function SHALL be callable
 
 #### Scenario: Import debate graph factory
-- **WHEN** `from hecate.engine.templates import build_debate_graph` is executed
+- **WHEN** `from hecate.studio.workflows.templates import build_debate_graph` is executed
 - **THEN** the import SHALL succeed and the function SHALL be callable
 
 ### Requirement: Orchestration template listing includes pattern type

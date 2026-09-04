@@ -20,9 +20,9 @@ Hecate is an **open-source, self-hosted, Python-first agent platform** for engin
 
 | Layer | Path | May import | Key rule |
 |-------|------|-----------|----------|
-| `engine/` | `src/hecate/engine/` | `jsonschema` only | Zero deps on services, api, models. Sole external exception: `jsonschema` for DSL validation. |
-| `services/` | `src/hecate/services/` | `models/`, `engine/ports` | Depends on engine abstract interfaces only, never on engine implementations. |
-| `api/` | `src/hecate/api/` | `services/`, `models/` | Never imports `engine/` directly — routes through services + `EnginePort`. |
+| `runtime/` | `src/hecate/runtime/` | `jsonschema` only | Zero deps on services, api, models. Sole external exception: `jsonschema` for DSL validation. |
+| domains (`studio/` `ops/` `tools/` `enterprise/` `channel/`) | `src/hecate/<domain>/` | `models/`, `runtime/ports`, `core/` | Domain modules depend on runtime abstract interfaces only, never on runtime implementations; cross-domain edges go through `core/composition/`. |
+| `api/` | `src/hecate/api/` | `services/`, `models/` | Never imports `runtime/` directly — routes through services + `EnginePort`. |
 | `models/` | `src/hecate/models/` | SQLAlchemy, Pydantic | Pure data definitions. No business logic. |
 | `core/` | `src/hecate/core/` | config, database, DI, rate limiting | Infrastructure shared across all layers. |
 

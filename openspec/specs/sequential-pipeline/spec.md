@@ -1,7 +1,7 @@
 ## Requirements
 
 ### Requirement: Sequential pipeline factory function
-The system SHALL provide a `build_sequential_pipeline()` factory function in `engine/templates.py` that accepts a list of stage definitions and returns a `GraphConfig` representing a linear sequential pipeline with auto-wired channels.
+The system SHALL provide a `build_sequential_pipeline()` factory function in `studio/workflows/templates.py` that accepts a list of stage definitions and returns a `GraphConfig` representing a linear sequential pipeline with auto-wired channels.
 
 #### Scenario: Basic two-stage pipeline
 - **WHEN** `build_sequential_pipeline(stages=[{"id": "researcher", "model": "gpt-4o", "system_prompt": "You are a researcher."}, {"id": "writer", "model": "gpt-4o", "system_prompt": "You are a writer."}])` is called

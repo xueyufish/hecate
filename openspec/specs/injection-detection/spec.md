@@ -108,7 +108,7 @@ This naming convention is forward-compatible with the SIEM collector's `from_sec
 
 ### Requirement: Detector supports streaming via the existing accumulated-response contract
 
-Streaming LLM responses (`LLMWorker.execute_stream`) accumulate the full response before invoking the post hook (see `engine/workers/llm_worker.py` execute_stream path, post hook call at line 570). The detector SHALL operate on the full accumulated string, NOT on individual tokens. This is a deliberate alignment with Bedrock Guardrails `ApplyGuardrail` semantics — token-level chunk scanning is a future change (see Deferred items in proposal.md).
+Streaming LLM responses (`LLMWorker.execute_stream`) accumulate the full response before invoking the post hook (see `runtime/workers/llm_worker.py` execute_stream path, post hook call at line 570). The detector SHALL operate on the full accumulated string, NOT on individual tokens. This is a deliberate alignment with Bedrock Guardrails `ApplyGuardrail` semantics — token-level chunk scanning is a future change (see Deferred items in proposal.md).
 
 #### Scenario: streaming response fires a finding at end-of-stream
 
@@ -130,7 +130,7 @@ This capability SHALL reserve a `sink` parameter in the recognizer base class si
 
 The detector SHALL run inside `OutputSecurityHook.on_post_llm_call` and SHALL be invoked identically from both execution paths:
 
-- Pregel path: `engine/workers/llm_worker.py` lines 416 (non-streaming) and 570 (streaming)
+- Pregel path: `runtime/workers/llm_worker.py` lines 416 (non-streaming) and 570 (streaming)
 - Path A direct chat loop: `services/orchestration/agent_execution_port.py:239`
 
 No new wiring SHALL be added to these two call sites — the existing factory (`create_security_hooks`) and assembly (`assemble_guardrails`) handle it via the standard hook pipeline.

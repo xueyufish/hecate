@@ -396,12 +396,19 @@ class LLMWorker(Worker):
         ttft_ms = ((first_token_time - llm_start) * 1000) if first_token_time else total_latency_ms
 
         if span_ctx:
+            prompt_tokens = sum(_estimate_message_tokens(m) for m in shaped_messages)
+            completion_tokens = len(full_response) // 4
             await self._port.end_span(
                 span_ctx.span_id,
                 output_data={
                     "response_length": len(full_response),
                     "ttft_ms": ttft_ms,
                     "total_latency_ms": total_latency_ms,
+                },
+                usage={
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
                 },
             )
 
@@ -550,12 +557,19 @@ class LLMWorker(Worker):
         ttft_ms = ((first_token_time - llm_start) * 1000) if first_token_time else total_latency_ms
 
         if span_ctx:
+            prompt_tokens = sum(_estimate_message_tokens(m) for m in shaped_messages)
+            completion_tokens = len(full_response) // 4
             await self._port.end_span(
                 span_ctx.span_id,
                 output_data={
                     "response_length": len(full_response),
                     "ttft_ms": ttft_ms,
                     "total_latency_ms": total_latency_ms,
+                },
+                usage={
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
                 },
             )
 

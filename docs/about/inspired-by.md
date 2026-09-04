@@ -74,7 +74,7 @@ Hecate exposes this format at `/v1/chat/completions` (see [OpenAI Compatibility 
 
 ## Monitoring and observability
 
-- **[OpenTelemetry](https://opentelemetry.io/)** — the standard for distributed tracing. Hecate's span bridge (`src/hecate/services/observability/span_processor.py`) converts OTel spans to Hecate's internal `TraceModel` for unified query.
+- **[OpenTelemetry](https://opentelemetry.io/)** — the standard for distributed tracing. Hecate's span bridge (`packages/hecate-ops/src/hecate_ops/span_processor.py`) converts OTel spans to Hecate's internal `TraceModel` for unified query.
 - **[Prometheus](https://prometheus.io/)** — the metrics exposition format. Hecate exposes ~30 standard metrics in Prometheus format.
 - **[LangSmith](https://www.langchain.com/langsmith)** — the LLM-observability platform. Hecate ships a `LangFuseTraceProvider` (LangSmith's sibling project) so you can forward spans to any LLM-observability backend.
 

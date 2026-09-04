@@ -27,7 +27,7 @@ The engine has four layers:
 3. **Advanced Features** — A2A Protocol (v1.0 GA), Signed Agent Cards, Distributed Session State (Redis), Dynamic Orchestration (Coordinator node · 7th pattern per [ADR-032](../design/adr/032-dynamic-orchestration.md)), plus deferred P4/P5 items (5-Level Intent, Context Processor Chain, NL2Agent, Agentic RL, Prompt Self-Optimization, Async Execution API, Distributed Execution, Saga/Compensation, ReAct Loop Middleware, Branching log-fork), plus P3-shipped engine-side extensions (Execution Replay 8.20, ApprovalCallback durable HITL pairs, ShellAnalyzer content-aware gating)
 4. **Downstream** — Workers hand off via `EnginePort` to the Services layer (LLM / Tools / Knowledge / Checkpoint Cache via ProductionEnginePort)
 
-All engine modules define abstract interfaces with InMemory defaults, keeping the engine portable, testable, and free of framework coupling. Engine internals (compiler, channels, scheduler, workers) live entirely under `src/hecate/engine/`; the only tolerated external dependency is `jsonschema` for DSL validation.
+All engine modules define abstract interfaces with InMemory defaults, keeping the engine portable, testable, and free of framework coupling. Engine internals (compiler, channels, scheduler, workers) live entirely under `src/hecate/runtime/`; the only tolerated external dependency is `jsonschema` for DSL validation.
 
 ---
 
@@ -455,14 +455,14 @@ Each level informs the next, enabling more accurate routing and context gatherin
 
 The **Dynamic Orchestration** capability adds the seventh multi-agent pattern: a COORDINATOR node that turns a goal plus an agent roster into a runtime task DAG, dispatches workers in an isolated child session, and folds their outputs through a synthesis step.
 
-- **Coordinator node type**: `NodeType.COORDINATOR` lives alongside `AGENT`, `FAN_OUT`, `MERGE`, etc. (`src/hecate/engine/types.py`).
-- **TaskDAG schema**: planner-facing Pydantic model in `src/hecate/engine/dynamic_types.py` — `goal`, `tasks`, `dependencies`, `synthesis_prompt`, `synthesis_transform`, `verify`, `budgets`. The LLM writes intent; the executor materialises the graph.
-- **Executor template**: `build_dynamic_orchestration_executor(dag, roster)` in `src/hecate/engine/templates.py` produces a `GraphConfig` whose nodes and channels are uniquely named (`task_<task_id>_<revision>`, `<task_id>.<expected_output>`). Dependency levels exceeding `max_concurrent` are split into sequential batches chained by FAN_OUT/MERGE pairs.
-- **Magentic double-loop** (`src/hecate/engine/workers/coordinator_worker.py`): outer-loop replan (each iteration's prompt is rebuilt from goal + roster + ledger summary, never from prior reasoning tokens); inner-loop dispatch + evaluator five-question stall counter (`≤ budgets.stall_limit` defaults to 2; over the limit triggers `stall_cap_exceeded` and a best-effort return).
+- **Coordinator node type**: `NodeType.COORDINATOR` lives alongside `AGENT`, `FAN_OUT`, `MERGE`, etc. (`src/hecate/runtime/types.py`).
+- **TaskDAG schema**: planner-facing Pydantic model in `src/hecate/runtime/dynamic_types.py` — `goal`, `tasks`, `dependencies`, `synthesis_prompt`, `synthesis_transform`, `verify`, `budgets`. The LLM writes intent; the executor materialises the graph.
+- **Executor template**: `build_dynamic_orchestration_executor(dag, roster)` in `src/hecate/studio/workflows/templates.py` produces a `GraphConfig` whose nodes and channels are uniquely named (`task_<task_id>_<revision>`, `<task_id>.<expected_output>`). Dependency levels exceeding `max_concurrent` are split into sequential batches chained by FAN_OUT/MERGE pairs.
+- **Magentic double-loop** (`src/hecate/runtime/workers/coordinator_worker.py`): outer-loop replan (each iteration's prompt is rebuilt from goal + roster + ledger summary, never from prior reasoning tokens); inner-loop dispatch + evaluator five-question stall counter (`≤ budgets.stall_limit` defaults to 2; over the limit triggers `stall_cap_exceeded` and a best-effort return).
 - **Three-axis budget + additive stop_reason**: `max_iterations`, `max_total_tasks`, `max_concurrent`, `stall_limit`, `token_budget`. Capped partial results emit an `ORCHESTRATOR_EVALUATION` with `stop_reason ∈ {token_capped, turn_capped, loop_capped, stall_capped}` plus the guidance string `"reuse it, retry tighter, or raise budget"` so the next iteration's planner does not mistake them for clean completions. Status enum stays unchanged — DeerFlow Phase 2 lesson.
 - **Five-isolation properties** for the child session: distinct `child_session_id`; sub-graph's long-term memory writes keyed by the child id, not the parent thread; explicit `channel_mapping.input` (unregistered parent channels raise `KeyError`); explicit `channel_mapping.output` (sub-graph `messages` never copied to parent); failure authority limited to `WorkerResult.error` and the status contract (output text is never parsed).
-- **Fail-closed pre-dispatch validation** (`src/hecate/engine/orchestrator_validator.py`): `validate_task_requirements(dag, roster)` rejects cycles, missing roster entries, capability gaps, and dangling references. Called from both CoordinatorWorker and the canvas save path.
-- **Benefit-based delegation rubric** (`src/hecate/engine/dynamic_types.py::BENEFIT_BASED_DELEGATION_RUBRIC`): public constant embedded in the planner system prompt; byte-level snapshotted by `tests/test_coordinator_prompt.py`.
+- **Fail-closed pre-dispatch validation** (`src/hecate/runtime/replay/orchestrator_validator.py`): `validate_task_requirements(dag, roster)` rejects cycles, missing roster entries, capability gaps, and dangling references. Called from both CoordinatorWorker and the canvas save path.
+- **Benefit-based delegation rubric** (`src/hecate/runtime/dynamic_types.py::BENEFIT_BASED_DELEGATION_RUBRIC`): public constant embedded in the planner system prompt; byte-level snapshotted by `tests/test_coordinator_prompt.py`.
 - **Event source-of-truth** (per ADR-030): two new additive `EventType` values, `ORCHESTRATOR_DECISION` (plan revision + dag + reasoning) and `ORCHESTRATOR_EVALUATION` (typed blocker + stop_reason + guidance_string), are emitted into the EventStore by default; `LogPolicy` does not exclude them. `SUBGRAPH_START`/`SUBGRAPH_END` reference pairs anchor child sessions. Fold-to-version reconstructs the plan-revision history.
 
 **References**: [ADR-032](adr/032-dynamic-orchestration.md), [ADR-030](adr/030-event-sourced-execution-state.md), [ADR-007](adr/007-multi-agent-as-graph-templates.md), [ADR-001](adr/001-graph-first-orchestration.md).
@@ -706,4 +706,4 @@ The per-target description priority is: `handoff.description` (node-level overri
 | [Access Channel Design](access-channel-design.md) | API surfaces, authentication, gateway control plane |
 | [Core Concepts](concepts.md) | Entity definitions, relationships, data model |
 | [ADR Directory](adr/) | Architecture Decision Records |
-| [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) | JSON Schema for graph definition |
+| [Graph DSL Schema](../../src/hecate/runtime/graph-dsl.schema.json) | JSON Schema for graph definition |

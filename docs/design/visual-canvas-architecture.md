@@ -208,7 +208,7 @@ Adding a new node type requires:
 1. Implement React component in `web/src/components/workflow/`
 2. Add to `node-types.tsx` registry
 3. Add Zod schema in `lib/dsl.ts`
-4. Add server-side validation in `src/hecate/services/workflow/`
+4. Add server-side validation in `src/hecate/studio/workflows/`
 5. Add to `node-palette.tsx` sidebar
 6. Update [Graph DSL Reference](../reference/graph-dsl.md)
 

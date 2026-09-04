@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: DangerousPattern dataclass
-The system SHALL define `DangerousPattern` as a dataclass in `engine/tool_access.py` with four fields: `tool_pattern` (str, tool-name glob), `arg_key` (str, argument key to inspect), `arg_pattern` (str, glob pattern for argument value), and `description` (str, human-readable reason).
+The system SHALL define `DangerousPattern` as a dataclass in `runtime/tool_access.py` with four fields: `tool_pattern` (str, tool-name glob), `arg_key` (str, argument key to inspect), `arg_pattern` (str, glob pattern for argument value), and `description` (str, human-readable reason).
 
 #### Scenario: Construction with all fields
 - **WHEN** `DangerousPattern("bash", "command", "rm -rf /", "recursive root delete")` is constructed
@@ -12,7 +12,7 @@ The system SHALL define `DangerousPattern` as a dataclass in `engine/tool_access
 - **THEN** `tool_pattern` is `"*"` matching all tools
 
 ### Requirement: Built-in dangerous patterns list
-The system SHALL define `DANGEROUS_PATTERNS` as a module-level constant list of `DangerousPattern` instances in `engine/tool_access.py` covering destructive shell commands, dangerous code execution, sensitive file access, and SQL injection patterns.
+The system SHALL define `DANGEROUS_PATTERNS` as a module-level constant list of `DangerousPattern` instances in `runtime/tool_access.py` covering destructive shell commands, dangerous code execution, sensitive file access, and SQL injection patterns.
 
 #### Scenario: Shell command patterns
 - **WHEN** `DANGEROUS_PATTERNS` is inspected
@@ -92,7 +92,7 @@ The system SHALL extend `ToolAccessPolicy.evaluate()` to accept an optional `arg
 - **THEN** arg_conditions on rules are ignored (treated as name-only match)
 
 ### Requirement: WorkspaceBoundaryPolicy class
-The system SHALL define `WorkspaceBoundaryPolicy` as a class in `engine/tool_access.py` with a `check(tool_name: str, arguments: dict[str, Any], workspace_root: str) -> AccessDecision | None` method. The method returns `EXECUTE` if the tool's path argument resolves within `workspace_root`, `REQUIRE_APPROVAL` if outside, and `None` if the tool has no path argument.
+The system SHALL define `WorkspaceBoundaryPolicy` as a class in `runtime/tool_access.py` with a `check(tool_name: str, arguments: dict[str, Any], workspace_root: str) -> AccessDecision | None` method. The method returns `EXECUTE` if the tool's path argument resolves within `workspace_root`, `REQUIRE_APPROVAL` if outside, and `None` if the tool has no path argument.
 
 #### Scenario: Path inside workspace
 - **WHEN** `policy.check("write_file", {"path": "src/main.py"}, "/workspace")` is called
@@ -194,8 +194,8 @@ The system SHALL extend `ToolWorker._check_access()` to forward parsed tool call
 - **THEN** `_check_access` returns `None` (no enforcement)
 
 ### Requirement: Engine layer zero dependencies maintained
-`engine/tool_access.py` SHALL continue to have zero external dependencies beyond the Python standard library after all extensions.
+`runtime/tool_access.py` SHALL continue to have zero external dependencies beyond the Python standard library after all extensions.
 
 #### Scenario: No new imports
-- **WHEN** `engine/tool_access.py` imports are inspected
+- **WHEN** `runtime/tool_access.py` imports are inspected
 - **THEN** all imports are from `__future__`, `abc`, `dataclasses`, `enum`, `fnmatch`, `logging`, `os.path`, or `typing`

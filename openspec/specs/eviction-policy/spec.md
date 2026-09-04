@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: EvictionPolicy ABC defines pluggable channel eviction
-The engine SHALL define an `EvictionPolicy` ABC in `engine/eviction.py` with methods: `should_evict` and `select_victim`.
+The engine SHALL define an `EvictionPolicy` ABC in `runtime/eviction.py` with methods: `should_evict` and `select_victim`.
 
 #### Scenario: Check if eviction is needed
 - **WHEN** `should_evict(channel_name, current_size, context)` is called

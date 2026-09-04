@@ -126,7 +126,7 @@ The key node is `ask_human`: it invokes the `ask_human_approval` tool, whose wor
 Because the DSL is declarative — it describes *what* runs, not *how* — the `interrupt()` call lives in the tool's Python worker, not in the workflow JSON. Here is what the tool worker looks like:
 
 ```python
-from hecate.engine.command import interrupt
+from hecate.runtime.command import interrupt
 
 
 def ask_human_approval(draft: str, prompt: str) -> dict:

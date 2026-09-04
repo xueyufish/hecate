@@ -470,6 +470,6 @@ Dataset Management → Training Config → Job Submission → Progress Monitor �
 - [Engine Design](engine-design.md) — Pregel runtime and execution engine
 - [Security Architecture](security-architecture.md) — Guardrails, PII masking, sandbox execution, audit trail for model governance integration
 - [Ops Center Design](ops-center-design.md) — Shared composition pattern; Model Monitoring (G4) and Cost Management (G8) integrate with Ops Center dashboards
-- [LLM Service Source](https://github.com/xueyufish/hecate/tree/main/src/hecate/services/llm) — Current LLM service implementation
-- [Model Routing Source](https://github.com/xueyufish/hecate/tree/main/src/hecate/services/llm/routing.py) — ModelRouter implementation
+- [LLM Service Source](https://github.com/xueyufish/hecate/tree/main/packages/hecate-llm/src/hecate_llm/) — Current LLM service implementation
+- [Model Routing Source](https://github.com/xueyufish/hecate/tree/main/packages/hecate-llm/src/hecate_llm/ (routing)) — ModelRouter implementation
 - [Model Provider Schema](https://github.com/xueyufish/hecate/tree/main/src/hecate/models/) — ORM models for providers and registry

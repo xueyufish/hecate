@@ -56,71 +56,58 @@ Hecate's architecture separates these by **purpose** and **storage backend** so 
 
 ## Trace architecture
 
-Hecate's tracing implementation lives in `src/hecate/services/observability/`:
+Hecate's tracing pipeline lives in `packages/hecate-ops/src/hecate_ops/`:
 
 ```
-src/hecate/services/observability/
-├── tracing.py             # OpenTelemetry setup helpers
-├── trace_manager.py       # OpsTraceManager — async queue + background dispatch
-├── trace_providers.py     # TraceProvider ABC + LangFuse/OTel implementations
+packages/hecate-ops/src/hecate_ops/
+├── otel_setup.py          # configure_tracing() — OTel SDK setup, OTLP exporter
 ├── span_processor.py      # OTel SpanProcessor that bridges OTel → Hecate TraceModel
-└── structured_logger.py   # TraceContext-aware structured logger
+├── span_adapter.py        # create_otel_span / end_otel_span + span registry
+├── metrics.py             # Prometheus collector + dataclasses
+├── metrics_storage.py     # metrics persistence
+├── monitoring.py          # MonitoringService + MetricsStore
+└── timescale_metrics_store.py  # TimescaleDB store
 ```
+
+The earlier in-repo trace-manager layer (`OpsTraceManager` / `TraceProvider`
+ABC / structured logger) was retired in PR3a — spans now flow through the
+OTel SDK directly, exported via OTLP (or any backend an OTLP exporter can
+reach, e.g. LangFuse, Jaeger, an OTel Collector).
 
 ### The bridge: OTel ↔ Hecate
 
-Hecate is **OTel-native**: every span emitted in the engine goes through the OTel SDK, then a custom `SpanProcessor` (`src/hecate/services/observability/span_processor.py`) bridges OTel spans into Hecate's internal `TraceModel`. This gives you:
+Hecate is **OTel-native**: every span emitted in the engine goes through the OTel SDK, then a custom `SpanProcessor` (`packages/hecate-ops/src/hecate_ops/span_processor.py`) bridges OTel spans into Hecate's internal `TraceModel`. This gives you:
 
 - **Local query**: Hecate can answer "show me all spans for session X" without an external backend
 - **External export**: Simultaneously forward spans to LangFuse, OTel Collector, Jaeger, etc.
-- **Span type inference**: Hecate classifies span names (e.g., `hecate.engine.pregel.superstep` → type=`superstep`) for better filtering in UIs
+- **Span type inference**: Hecate classifies span names (e.g., `hecate.runtime.pregel.superstep` → type=`superstep`) for better filtering in UIs
 
-### TraceManager lifecycle
+### Span pipeline lifecycle
 
-The `OpsTraceManager` (in `trace_manager.py`) runs as a background async worker:
+The retired `OpsTraceManager` queue/dispatch layer is replaced by the OTel
+SDK's own `TracerProvider` + `BatchSpanProcessor` (wired in
+`packages/hecate-ops/src/hecate_ops/otel_setup.py::configure_tracing`):
 
-```python
-class OpsTraceManager:
-    async def start(self) -> None: ...        # Start background worker
-    async def stop(self) -> None: ...         # Graceful shutdown, flush queue
-    
-    async def on_trace_start(self, trace_data: dict) -> None: ...
-    async def on_span_start(self, span_data: dict) -> None: ...
-    async def on_span_end(self, span_data: dict) -> None: ...
-    async def flush(self) -> None: ...        # Force flush (e.g., before shutdown)
-```
+1. Engine and API code create spans via the OTel API (`create_otel_span` /
+   `end_otel_span` in `span_adapter.py` wrap a registry keyed by span id)
+2. The SDK's batch processor buffers spans and exports them over OTLP
+3. `span_processor.py` simultaneously bridges each span into Hecate's
+   internal `TraceModel` for local query
 
-Internally:
+The batch processor prevents slow exporters from blocking the engine. If an
+export fails, the span is dropped by the SDK without failing the request.
 
-1. Spans arrive via `on_span_*` callbacks
-2. They're queued in an async queue (default capacity 10,000)
-3. A background worker consumes the queue and dispatches to each registered `TraceProvider`
-4. Each provider forwards to its backend (LangFuse, OTel Collector, etc.)
+### Backends
 
-The queue prevents slow providers from blocking the engine. If a provider fails, the span is logged but doesn't fail the request.
+Spans export over OTLP to any compatible backend:
 
-### TraceProvider ABC
+- **OTel Collector / Jaeger / Tempo** — native OTLP destinations
+- **LangFuse** — popular LLM observability platform, reached via OTLP
+- **No export** — when tracing is disabled, `configure_tracing` returns
+  `None` and spans become no-ops
 
-```python
-# src/hecate/services/observability/trace_providers.py
-class TraceProvider(ABC):
-    @abstractmethod
-    async def on_trace_start(self, data: dict[str, Any]) -> None: ...
-    
-    @abstractmethod
-    async def on_span_start(self, data: dict[str, Any]) -> None: ...
-    
-    @abstractmethod
-    async def on_span_end(self, data: dict[str, Any]) -> None: ...
-```
-
-Hecate ships implementations for:
-
-- **OpenTelemetry Collector** (`OTelTraceProvider`) — OTel-native export to any OTel-compatible backend
-- **LangFuse** (`LangFuseTraceProvider`) — popular LLM observability platform
-- **No-op** (`NullTraceProvider`) — drops all traces; useful for tests
-
-Third-party providers can be added via plugin (see [Extension Architecture](extension-architecture.md)).
+New destinations are added at the exporter level (OTLP endpoint config), not
+via in-process provider plugins.
 
 ### Span hierarchy in Hecate
 
@@ -130,13 +117,13 @@ Each chat completion produces a span tree:
 Trace (root)
 ├── Span: hecate.api.chat_completions        (HTTP entry)
 │   ├── Span: hecate.auth.authenticate        (AuthN/AuthZ)
-│   ├── Span: hecate.engine.pregel.invoke    (Engine entry)
-│   │   ├── Span: hecate.engine.superstep.1   (Pregel superstep 1)
-│   │   │   ├── Span: hecate.engine.llm_invoke
-│   │   │   ├── Span: hecate.engine.tool_use
+│   ├── Span: hecate.runtime.pregel.invoke    (Engine entry)
+│   │   ├── Span: hecate.runtime.superstep.1   (Pregel superstep 1)
+│   │   │   ├── Span: hecate.runtime.llm_invoke
+│   │   │   ├── Span: hecate.runtime.tool_use
 │   │   │   └── Span: hecate.guardrail.pre_llm
-│   │   ├── Span: hecate.engine.superstep.2   (Pregel superstep 2)
-│   │   └── Span: hecate.engine.checkpoint.save
+│   │   ├── Span: hecate.runtime.superstep.2   (Pregel superstep 2)
+│   │   └── Span: hecate.runtime.checkpoint.save
 │   └── Span: hecate.api.serialize_response
 ```
 
@@ -149,7 +136,7 @@ This hierarchy lets you answer:
 
 ## Metric architecture
 
-Hecate's metrics implementation is in `src/hecate/services/observability/`:
+Hecate's metrics implementation is in `packages/hecate-ops/src/hecate_ops/`:
 
 - `metrics.py` — Prometheus-compatible collector
 - `monitoring.py` — MonitoringService with snapshots
@@ -200,7 +187,7 @@ hecate_redis_connections_active
 hecate_guardrail_blocks_total{guardrail_type, agent_id}
 ```
 
-The exact list is in `src/hecate/services/observability/metrics.py`.
+The exact list is in `packages/hecate-ops/src/hecate_ops/metrics.py`.
 
 ### MetricsStore ABC
 
@@ -232,9 +219,9 @@ This is what powers the dashboard's "current state" view.
 
 ## Log architecture
 
-Hecate uses Python's `logging` module with a structured-logging shim:
+Hecate uses Python's `logging` module with JSON formatting:
 
-- `src/hecate/services/observability/structured_logger.py` — adds TraceContext (current trace_id, span_id) to every log line automatically
+- Log records carry trace context (current trace_id, span_id) via the OTel span attributes; the former dedicated structured-logger shim was retired in PR3a
 - Logs are emitted as JSON to stdout by default
 - Container runtimes (Docker, Kubernetes) collect stdout; aggregators (Loki, ELK, Datadog) parse JSON
 
@@ -275,7 +262,7 @@ Audit logs are **separate** from application logs because they have different re
 
 Audit logs live in:
 
-- `src/hecate/services/audit/` — write pipeline
+- `src/hecate/ops/audit/` — write pipeline
   - `writer.py` — `AuditBatchWriter` (queue + batch(50) / 2s flush)
   - `store.py` — `AuditStore` (Postgres backend)
   - `policy.py` — detection rules (BulkDelete / OffHours / UnusualIP)
@@ -303,7 +290,7 @@ Every mutating action through the Management API:
 The audit pipeline runs **detection rules** on each event before persisting:
 
 ```python
-# src/hecate/services/audit/policy.py
+# src/hecate/ops/audit/policy.py
 class BulkDeleteRule(DetectionRule):
     """Flags bulk delete operations within a time window."""
 
@@ -326,7 +313,7 @@ SIEM integration (`siem-security-pipeline`) ships events to Splunk / Datadog / E
 
 ## Agent health monitoring
 
-Hecate continuously evaluates per-agent health. The classification function is in `src/hecate/services/ops_center/agent_health.py`:
+Hecate continuously evaluates per-agent health. The classification function is in `src/hecate/ops/ops_center/agent_health.py`:
 
 ```python
 def _classify_health_status(error_rate: float, p95_latency_ms: float) -> str:
@@ -350,7 +337,7 @@ GET /api/ops/fleet → list of agents with health status, last error, last succe
 
 ## Conversation analytics
 
-`src/hecate/services/ops_center/` provides four analytics:
+`src/hecate/ops/ops_center/` provides four analytics:
 
 | Module | What it does |
 |---|---|
@@ -439,23 +426,21 @@ Default settings are conservative; tune for your scale.
 
 ## Implementation references
 
-- `src/hecate/services/observability/trace_manager.py` — OpsTraceManager
-- `src/hecate/services/observability/trace_providers.py` — TraceProvider ABC
-- `src/hecate/services/observability/span_processor.py` — OTel SpanProcessor bridge
-- `src/hecate/services/observability/tracing.py` — OTel setup
-- `src/hecate/services/observability/metrics.py` — Prometheus collector + dataclasses
-- `src/hecate/services/observability/monitoring.py` — MonitoringService + MetricsStore
-- `src/hecate/services/observability/timescale_metrics_store.py` — TimescaleDB store
-- `src/hecate/services/observability/structured_logger.py` — structured logger
-- `src/hecate/services/ops_center/agent_health.py` — health classification
-- `src/hecate/services/ops_center/conversation_analytics.py` — analytics
-- `src/hecate/services/ops_center/conversation_quality_scorer.py` — quality scorer
-- `src/hecate/services/ops_center/conversation_cluster_manager.py` — clustering
-- `src/hecate/services/audit/writer.py` — AuditBatchWriter
-- `src/hecate/services/audit/store.py` — AuditStore
-- `src/hecate/services/audit/policy.py` — detection rules
-- `src/hecate/services/audit/archiver.py` — archival
-- `src/hecate/services/event_state/postgres_store.py` — OTel integration
+- `packages/hecate-ops/src/hecate_ops/span_processor.py` — OTel SpanProcessor bridge
+- `packages/hecate-ops/src/hecate_ops/span_adapter.py` — create/end span + registry
+- `packages/hecate-ops/src/hecate_ops/otel_setup.py` — OTel setup
+- `packages/hecate-ops/src/hecate_ops/metrics.py` — Prometheus collector + dataclasses
+- `packages/hecate-ops/src/hecate_ops/monitoring.py` — MonitoringService + MetricsStore
+- `packages/hecate-ops/src/hecate_ops/timescale_metrics_store.py` — TimescaleDB store
+- `src/hecate/ops/ops_center/agent_health.py` — health classification
+- `src/hecate/ops/ops_center/conversation_analytics.py` — analytics
+- `src/hecate/ops/ops_center/conversation_quality_scorer.py` — quality scorer
+- `src/hecate/ops/ops_center/conversation_cluster_manager.py` — clustering
+- `src/hecate/ops/audit/writer.py` — AuditBatchWriter
+- `src/hecate/ops/audit/store.py` — AuditStore
+- `src/hecate/ops/audit/policy.py` — detection rules
+- `src/hecate/ops/audit/archiver.py` — archival
+- `src/hecate/studio/event_state/postgres_store.py` — OTel integration
 
 ## Related documents
 

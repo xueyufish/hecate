@@ -366,7 +366,7 @@ The pipeline is **subtractive**: each layer can only remove tools from the visib
 
 ### Problem
 
-Hecate's Plugin System (5.5) originally described "provider/hook/extension" — a vague 3-type model. Dify has 6 well-defined plugin types with a Python SDK, Claude Code has 5 clear extension types. Hecate needs a structured taxonomy and developer SDK to build a thriving plugin ecosystem. The taxonomy below is the **implemented** registry in `src/hecate/plugin/types/__init__.py` (`PLUGIN_TYPE_REGISTRY`).
+Hecate's Plugin System (5.5) originally described "provider/hook/extension" — a vague 3-type model. Dify has 6 well-defined plugin types with a Python SDK, Claude Code has 5 clear extension types. Hecate needs a structured taxonomy and developer SDK to build a thriving plugin ecosystem. The taxonomy below is the **implemented** registry in `src/hecate/core/plugin/types/__init__.py` (`PLUGIN_TYPE_REGISTRY`).
 
 ### 8 Plugin Types
 
@@ -384,7 +384,7 @@ Hecate's Plugin System (5.5) originally described "provider/hook/extension" — 
 ### Plugin SDK Example
 
 ```python
-from hecate.plugin.sdk import ToolPluginBase
+from hecate.core.plugin.sdk import ToolPluginBase
 
 class WeatherTool(ToolPluginBase):
     """Fetch weather data from OpenWeatherMap API."""
@@ -639,4 +639,4 @@ Session Lifecycle:
 - [Model Hub Design](model-hub-design.md) — Parallel enhancement pattern for gap closure
 - [ADR-016: Platform SPI Architecture](adr/016-platform-spi-architecture.md) — Plugin SPI Core foundation
 - [ADR-008: Security via Hooks](adr/008-security-via-hooks.md) — Guardrail Hooks architecture
-- [Tool Registry Source](https://github.com/xueyufish/hecate/tree/main/src/hecate/services/tool) — Current tool service implementation
+- [Tool Registry Source](https://github.com/xueyufish/hecate/tree/main/src/hecate/tools/tool) — Current tool service implementation

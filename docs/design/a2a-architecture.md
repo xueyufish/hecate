@@ -273,7 +273,7 @@ A2A client errors map to Hecate's internal exception hierarchy:
 | Task failed mid-execution (state=failed) | `RemoteTaskFailed` | No |
 | Task canceled | `RemoteTaskCanceled` | No |
 
-These map to Hecate's retry strategy (`src/hecate/engine/retry.py`) and circuit breaker.
+These map to Hecate's retry strategy (`src/hecate/runtime/retry.py`) and circuit breaker.
 
 ---
 

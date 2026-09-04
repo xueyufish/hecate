@@ -2,7 +2,7 @@
 
 How to back up and restore Hecate's data stores through the built-in Backup & Recovery API. The API coordinates backups across PostgreSQL, Qdrant, MinIO, and the filesystem, tracks each backup as a `BackupRecord`, and supports point-in-time restore with conflict policies.
 
-All endpoints live under `/api/system` and are intended for Platform Admin use. Endpoints are defined in `src/hecate/api/system/backup.py`; orchestration logic lives in `hecate.services.backup`.
+All endpoints live under `/api/system` and are intended for Platform Admin use. Endpoints are defined in `src/hecate/api/system/backup.py`; orchestration logic lives in `hecate.ops.backup`.
 
 ---
 

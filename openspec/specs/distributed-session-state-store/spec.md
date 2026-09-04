@@ -4,7 +4,7 @@
 分布式会话状态存储：为跨请求、跨副本的 Agent 会话提供可持久化的状态快照（channel state + agent state + event position + metadata）。支持 `memory` / `redis` / `postgres` / `tiered` 四种 backend，通过 FastAPI DI 注入生产 chat 请求路径，操作员可用环境变量切换 backend 而无需代码改动。
 ## Requirements
 ### Requirement: SessionState frozen dataclass aggregates per-session execution state
-The engine SHALL define a `SessionState` Pydantic v2 frozen model in `src/hecate/engine/session_state.py` that aggregates the complete per-session state at a checkpoint boundary, including channel state, agent state, event position, and metadata.
+The engine SHALL define a `SessionState` Pydantic v2 frozen model in `src/hecate/runtime/session_state.py` that aggregates the complete per-session state at a checkpoint boundary, including channel state, agent state, event position, and metadata.
 
 The model SHALL have fields:
 - `channel_state: dict[str, Any]` — full snapshot of all PregelRuntime channel values (subset of existing `CheckpointStore` `channel_state`)
@@ -27,7 +27,7 @@ The model SHALL be frozen (immutable) so concurrent superstep snapshots cannot m
 - **THEN** the resulting instance SHALL be equal (same field values) to the original
 
 ### Requirement: SessionStateStore ABC defines save/load/list interface with tenant-scoped keys
-The engine SHALL define `SessionStateStore` as an abstract base class in `src/hecate/engine/session_state.py` with methods:
+The engine SHALL define `SessionStateStore` as an abstract base class in `src/hecate/runtime/session_state.py` with methods:
 
 - `async save(org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID, state: SessionState) -> None`
 - `async load(org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID) -> SessionState | None`
@@ -58,7 +58,7 @@ The ABC SHALL accept `(org_id, user_id, session_id)` as the three-part key for e
 - **THEN** `list_recent(org_1, user_id=user_a)` SHALL return only sessions for `user_a`, not `user_b`
 
 ### Requirement: InMemorySessionStateStore implementation supports single-process use and tests
-The engine SHALL provide `InMemorySessionStateStore` in `src/hecate/engine/session_state.py` implementing `SessionStateStore` for single-process use and unit testing.
+The engine SHALL provide `InMemorySessionStateStore` in `src/hecate/runtime/session_state.py` implementing `SessionStateStore` for single-process use and unit testing.
 
 Storage SHALL be a nested dict `_storage: dict[uuid.UUID, dict[uuid.UUID, dict[uuid.UUID, tuple[SessionState, datetime]]]]` keyed by `(org_id, user_id, session_id)`.
 
@@ -81,7 +81,7 @@ The implementation SHALL also maintain `_updated_at_index: list[tuple[uuid.UUID,
 - **THEN** the result SHALL be ordered by `updated_at` descending (most recent first)
 
 ### Requirement: SessionStateStore raises NotFoundError-like exception for unknown session
-The engine SHALL define `SessionNotFoundError(ValueError)` exception in `src/hecate/engine/session_state.py` that implementations MAY raise for not-found cases.
+The engine SHALL define `SessionNotFoundError(ValueError)` exception in `src/hecate/runtime/session_state.py` that implementations MAY raise for not-found cases.
 
 The default `load()` contract SHALL return `None` for not-found (per the `load` scenario above), but implementations MAY raise `SessionNotFoundError` instead when callers explicitly want exception-based error handling. Both behaviors SHALL be supported.
 
@@ -124,12 +124,12 @@ Default values SHALL be provided for optional convenience: `event_position=0`, `
 - **THEN** `event_position` SHALL default to `0` and `metadata` SHALL default to `{}`
 
 ### Requirement: SessionStateStore extension point reserved for future MemoryProvider integration
-The engine SHALL reserve a comment-documented extension point in `src/hecate/engine/session_state.py` for future integration with a `MemoryProvider` abstraction (long-term memory layer for cross-session user profiles, semantic facts, etc.).
+The engine SHALL reserve a comment-documented extension point in `src/hecate/runtime/session_state.py` for future integration with a `MemoryProvider` abstraction (long-term memory layer for cross-session user profiles, semantic facts, etc.).
 
 The extension point SHALL NOT be implemented in this change. It SHALL be a single comment block referencing the planned future feature and explaining why the current `SessionStateStore` does not handle long-term memory.
 
 #### Scenario: MemoryProvider extension point is documented but not implemented
-- **WHEN** a developer reads `src/hecate/engine/session_state.py`
+- **WHEN** a developer reads `src/hecate/runtime/session_state.py`
 - **THEN** they SHALL find a comment block explaining the future `MemoryProvider` integration point and the rationale for separating short-term session state from long-term memory
 
 ### Requirement: SessionStateStore ABC methods are all async
@@ -144,7 +144,7 @@ The engine SHALL require all `SessionStateStore` ABC methods (`save`, `load`, `l
 - **THEN** both SHALL complete concurrently without serializing on each other (async semantics)
 
 ### Requirement: RedisSessionStateStore persists SessionState to Redis
-The services layer SHALL provide `RedisSessionStateStore` in `src/hecate/services/session_state/redis_store.py` implementing `SessionStateStore` for Redis-backed hot-path persistence.
+The services layer SHALL provide `RedisSessionStateStore` in `src/hecate/studio/session_state/redis_store.py` implementing `SessionStateStore` for Redis-backed hot-path persistence.
 
 The implementation SHALL use `redis.asyncio` (redis-py >= 5.0) for asynchronous I/O. The connection SHALL be lazily initialized on first use via `redis.asyncio.from_url(redis_url, decode_responses=True)`. The store SHALL accept a `redis_url: str` constructor parameter and MAY accept an optional `key_prefix: str` (default `"hecate:state:"`) and `ttl_seconds: int | None` parameter (default = configured `SESSION_STATE_TTL_DAYS * 86400`).
 
@@ -177,7 +177,7 @@ The Redis key SHALL be `{key_prefix}{org_id}:{user_id}:{session_id}` where `{org
 - **THEN** the implementation SHALL use `SCAN MATCH <key_prefix>{org_id}:*` to enumerate keys, filter by `{user_id}:{session_id}` substring, deserialize each, sort by `updated_at` descending, and return the first `limit` `SessionSummary` entries
 
 ### Requirement: PostgresSessionStateStore persists SessionState to PostgreSQL via ORM
-The services layer SHALL provide `PostgresSessionStateStore` in `src/hecate/services/session_state/postgres_store.py` implementing `SessionStateStore` for PostgreSQL-backed durable persistence.
+The services layer SHALL provide `PostgresSessionStateStore` in `src/hecate/studio/session_state/postgres_store.py` implementing `SessionStateStore` for PostgreSQL-backed durable persistence.
 
 The implementation SHALL use the existing async SQLAlchemy `async_session_factory` (from `hecate.core.database`) and the new `SessionStateModel` ORM class. The store SHALL accept an `async_session_factory` constructor parameter.
 
@@ -206,7 +206,7 @@ The table SHALL be named `session_states` (configurable via `SESSION_STATE_PG_TA
 - **THEN** the implementation SHALL propagate the exception to the caller (PG is the source of truth — failures must be loud)
 
 ### Requirement: TieredSessionStateStore composes Redis cache and Postgres durable store
-The services layer SHALL provide `TieredSessionStateStore` in `src/hecate/services/session_state/tiered_store.py` implementing `SessionStateStore` for the production-recommended write-through + read-through + Redis-failure-degraded mode.
+The services layer SHALL provide `TieredSessionStateStore` in `src/hecate/studio/session_state/tiered_store.py` implementing `SessionStateStore` for the production-recommended write-through + read-through + Redis-failure-degraded mode.
 
 The implementation SHALL accept both a `redis_store: RedisSessionStateStore` and a `postgres_store: PostgresSessionStateStore` constructor parameter. The tiered store SHALL coordinate the two backends per the write-through and read-through protocols in this spec.
 
@@ -239,7 +239,7 @@ The implementation SHALL accept both a `redis_store: RedisSessionStateStore` and
 - **THEN** the implementation SHALL log a warning and delegate to `postgres_store.list_recent()`
 
 ### Requirement: SessionStateStoreFactory selects backend from settings
-The services layer SHALL provide `create_session_state_store(settings) -> SessionStateStore` in `src/hecate/services/session_state/factory.py` that selects an implementation based on the `SESSION_STATE_STORE_BACKEND` setting value.
+The services layer SHALL provide `create_session_state_store(settings) -> SessionStateStore` in `src/hecate/studio/session_state/factory.py` that selects an implementation based on the `SESSION_STATE_STORE_BACKEND` setting value.
 
 Supported backend values:
 - `"memory"` — returns a new `InMemorySessionStateStore` (default, preserves backward compatibility)
@@ -287,7 +287,7 @@ The core configuration module (`src/hecate/core/config.py`) SHALL expose the fol
 - **THEN** the factory SHALL construct a fully-functional `TieredSessionStateStore`
 
 ### Requirement: SessionStateModel ORM persists SessionState to PostgreSQL
-The services layer SHALL provide `SessionStateModel` in `src/hecate/services/session_state/models.py` as a SQLAlchemy ORM model mapping to the `session_states` table with:
+The services layer SHALL provide `SessionStateModel` in `src/hecate/studio/session_state/models.py` as a SQLAlchemy ORM model mapping to the `session_states` table with:
 
 - Composite primary key `(org_id, user_id, session_id)` (UUID type)
 - `state` column of JSONB-compatible type (SQLAlchemy `JSON`) — stored as `SessionState.model_dump_json()`
@@ -347,7 +347,7 @@ Integration tests SHALL be marked with `@pytest.mark.integration` and skipped by
 - **THEN** they SHALL use `fakeredis` for Redis simulation and `unittest.mock` for PG simulation, without requiring Docker
 
 ### Requirement: WorkflowExecutionService 接受可选 SessionStateStore 参数
-services 层 `WorkflowExecutionService`（`src/hecate/services/workflow/execution_service.py`）的构造函数 SHALL 接受可选参数 `checkpoint_store: SessionStateStore | None = None`。
+services 层 `WorkflowExecutionService`（`src/hecate/studio/workflows/execution_service.py`）的构造函数 SHALL 接受可选参数 `checkpoint_store: SessionStateStore | None = None`。
 
 当参数为 `None` 时，service SHALL per-request 创建 `InMemoryCheckpointStore()`（engine 层 ABC，**不是** `SessionStateStore`）用于 `PregelRuntime` 的中间 superstep 回滚需求，与既有默认行为一致。当参数为 `None` 时 service 继续工作但**无**跨请求持久化能力（旧单请求模式）。
 
@@ -412,7 +412,7 @@ FastAPI 依赖函数 `get_session_state_store` SHALL 定义在 `src/hecate/core/
 - **THEN** 返回的对象是 `SessionStateStore` 的子类，可立即用于 save/load/list_recent
 
 ### Requirement: main.py lifespan 初始化 app.state 单例
-`src/hecate/main.py` 应用 lifespan SHALL 在启动过程中初始化 `app.state.session_state_store` 恰好一次，使用 `hecate.services.session_state` 中的 `create_session_state_store(settings)`。
+`src/hecate/main.py` 应用 lifespan SHALL 在启动过程中初始化 `app.state.session_state_store` 恰好一次，使用 `hecate.studio.session_state` 中的 `create_session_state_store(settings)`。
 
 初始化 SHALL 在 `Base.metadata.create_all`（或等价 migration）运行之后、任何请求处理器被调用之前发生。单例 MUST 在 worker 内的请求间持续存在，但 MAY 在多 worker 部署中每个 worker 进程重新创建（每个 worker 拥有自己的 store 实例和自己的连接池）。
 
@@ -497,7 +497,7 @@ chat endpoint SHALL NOT 在不带 `checkpoint_store` 的情况下构造 `Workflo
 - **THEN** chat 请求使用配置的 backend，无代码改动
 
 ### Requirement: 流式执行路径 SHALL 通过 SessionStateStore 持久化 agent_state
-services 层 `WorkflowExecutionService._stream_execute`（`src/hecate/services/workflow/execution_service.py`）SHALL 在 stream 正常结束后调用 `_persist_session_state` 一次，将 `agent_state.model_dump(mode="json")` 写入 wired `SessionStateStore`。
+services 层 `WorkflowExecutionService._stream_execute`（`src/hecate/studio/workflows/execution_service.py`）SHALL 在 stream 正常结束后调用 `_persist_session_state` 一次，将 `agent_state.model_dump(mode="json")` 写入 wired `SessionStateStore`。
 
 stream 异常断开（client disconnect / timeout / 未捕获异常）时，`_stream_execute` SHALL 在异常重抛前 best-effort 调用 `_persist_session_state`。best-effort 调用的失败 SHALL 被 swallow 并 log warning——in-memory `agent_state` 在当前请求内仍有效。
 
@@ -519,7 +519,7 @@ stream 异常断开（client disconnect / timeout / 未捕获异常）时，`_st
 - **THEN** `if self._state_store and agent_state:` 分支被移除
 
 ### Requirement: SessionStateStore SHALL 提供可选的 session 锁接口
-engine 层 `SessionStateStore` ABC（`src/hecate/engine/session_state.py`）SHALL 新增 `acquire_session_lock` 异步上下文管理器方法，签名为：
+engine 层 `SessionStateStore` ABC（`src/hecate/runtime/session_state.py`）SHALL 新增 `acquire_session_lock` 异步上下文管理器方法，签名为：
 
 ```python
 @asynccontextmanager
@@ -541,7 +541,7 @@ async def acquire_session_lock(
 - **THEN** `SessionStateConflictError` 被抛出，消息含三元组
 
 ### Requirement: RedisSessionStateStore SHALL 用 SET NX + 原子 owner 校验 release 实现锁
-`src/hecate/services/session_state/redis_store.py` 的 `RedisSessionStateStore.acquire_session_lock` SHALL：
+`src/hecate/studio/session_state/redis_store.py` 的 `RedisSessionStateStore.acquire_session_lock` SHALL：
 
 1. 生成 owner UUID（每次调用唯一）
 2. 执行 `SET lock:{org}:{user}:{session} {owner_uuid} NX PX {timeout_ms}`
@@ -566,7 +566,7 @@ async def acquire_session_lock(
 - **THEN** 原 client 的 release 检查 owner UUID 不匹配，返回 0，不删除
 
 ### Requirement: PostgresSessionStateStore SHALL 用 SELECT FOR UPDATE 在事务内串行化
-`src/hecate/services/session_state/postgres_store.py` 的 `PostgresSessionStateStore` SHALL 在 `save` 方法的事务内用 `SELECT ... FOR UPDATE` 锁定 `(org_id, user_id, session_id)` 对应行（如存在），自然串行化并发写。
+`src/hecate/studio/session_state/postgres_store.py` 的 `PostgresSessionStateStore` SHALL 在 `save` 方法的事务内用 `SELECT ... FOR UPDATE` 锁定 `(org_id, user_id, session_id)` 对应行（如存在），自然串行化并发写。
 
 `acquire_session_lock` 方法 SHALL 是 no-op（继承 default）—— PG 行锁在 save 事务内自动生效，不需要显式 acquire。
 
@@ -580,7 +580,7 @@ async def acquire_session_lock(
 - **THEN** `SELECT FOR UPDATE` 返回空，执行 INSERT ON CONFLICT DO UPDATE
 
 ### Requirement: TieredSessionStateStore SHALL 用 Redis 锁 + PG 行锁双保险
-`src/hecate/services/session_state/tiered_store.py` 的 `TieredSessionStateStore.acquire_session_lock` SHALL 委托给 `redis_store.acquire_session_lock`（Redis SETNX 锁）。`save` 方法 SHALL 内部调用 `postgres_store.save`（自动带 PG 行锁）。
+`src/hecate/studio/session_state/tiered_store.py` 的 `TieredSessionStateStore.acquire_session_lock` SHALL 委托给 `redis_store.acquire_session_lock`（Redis SETNX 锁）。`save` 方法 SHALL 内部调用 `postgres_store.save`（自动带 PG 行锁）。
 
 Redis 锁失败时（Redis 不可用），Tiered SHALL fallback 到只用 PG 行锁（记录 Redis 异常并 log warning）。
 
@@ -595,7 +595,7 @@ Redis 锁失败时（Redis 不可用），Tiered SHALL fallback 到只用 PG 行
 - **THEN** 继续进入临界区，依赖 PG 行锁保证一致性
 
 ### Requirement: _persist_session_state SHALL 用 jitter retry + fail-fast 策略
-`WorkflowExecutionService._persist_session_state`（`src/hecate/services/workflow/execution_service.py`）SHALL 在调用 `save` 前用 `acquire_session_lock` 包裹，retry 3 次（jitter 20-150ms 随机），仍失败抛 `SessionStateConflictError`。
+`WorkflowExecutionService._persist_session_state`（`src/hecate/studio/workflows/execution_service.py`）SHALL 在调用 `save` 前用 `acquire_session_lock` 包裹，retry 3 次（jitter 20-150ms 随机），仍失败抛 `SessionStateConflictError`。
 
 `_persist_session_state` SHALL NOT 在锁失败或 save 失败时 fallback 到 legacy `self._state_store.save`——fallback 分支 SHALL 被移除（保留 fallback 会造成双 store 状态分裂）。
 
@@ -688,31 +688,31 @@ SHALL NOT 在**每个** superstep 边界调用 `SessionStateStore.save`——该
 
 ### Requirement: AgentStateStore ABC is marked deprecated via PEP 562 __deprecated__ module attribute
 
-The engine SHALL mark `hecate.services.state.store` as a deprecated module by setting `__deprecated__ = ("Use hecate.engine.session_state.SessionStateStore instead.",)` at module level. The deprecation message SHALL direct users to `hecate.engine.session_state.SessionStateStore` as the replacement abstraction.
+The engine SHALL mark `hecate.studio.session_state` as a deprecated module by setting `__deprecated__ = ("Use hecate.runtime.session_state.SessionStateStore instead.",)` at module level. The deprecation message SHALL direct users to `hecate.runtime.session_state.SessionStateStore` as the replacement abstraction.
 
 `__deprecated__` SHALL be set in the `store` submodule only (not in `state` submodule, which defines the still-used `AgentState` Pydantic model).
 
 The `AgentStateStore` ABC and `InMemoryStateStore` class docstrings SHALL begin with a `.. deprecated::` Sphinx directive referencing this change and the migration guide at `docs/migrations/agent-state-store.md`.
 
-#### Scenario: import hecate.services.state.store triggers no warning at import time
-- **WHEN** a module imports `from hecate.services.state.store import AgentStateStore`
+#### Scenario: import hecate.studio.session_state triggers no warning at import time
+- **WHEN** a module imports `from hecate.studio.session_state import AgentStateStore`
 - **THEN** no `DeprecationWarning` is emitted at import time (only on attribute access, per PEP 562 semantics)
 
 #### Scenario: accessing AgentStateStore via the deprecated module triggers DeprecationWarning
-- **WHEN** Python evaluates `from hecate.services.state.store import AgentStateStore` and the module is marked with `__deprecated__`
+- **WHEN** Python evaluates `from hecate.studio.session_state import AgentStateStore` and the module is marked with `__deprecated__`
 - **THEN** Python SHALL emit `DeprecationWarning` at attribute access time with the configured message
 - **THEN** the warning's `stacklevel` SHALL be `1` (PEP 562 default; import site is reported)
 
 #### Scenario: AgentStateStore docstring contains deprecated directive
 - **WHEN** a developer reads `AgentStateStore.__doc__` via `help(AgentStateStore)` or introspection
 - **THEN** the docstring SHALL contain a `.. deprecated::` directive
-- **THEN** the directive's text SHALL reference `hecate.engine.session_state.SessionStateStore` and the migration guide URL
+- **THEN** the directive's text SHALL reference `hecate.runtime.session_state.SessionStateStore` and the migration guide URL
 
 ### Requirement: AgentStateStore construction emits DeprecationWarning with stacklevel=2
 
 The `AgentStateStore` ABC and `InMemoryStateStore` class SHALL emit a `DeprecationWarning` when their `__init__` methods are invoked. The warning SHALL be issued from inside `__init__` with `stacklevel=2` so the call site (not the ABC definition) is reported.
 
-The warning message SHALL follow the format `"AgentStateStore is deprecated. Use hecate.engine.session_state.SessionStateStore instead. See docs/migrations/agent-state-store.md for migration."`. The `AgentStateStore` ABC SHALL NOT raise on construction — `__init__` is empty (no-op), so the deprecation is emitted via a class-level `__init_subclass__` hook OR by adding `__init__` to the concrete `InMemoryStateStore` only (the ABC is abstract and cannot be instantiated directly via Python semantics).
+The warning message SHALL follow the format `"AgentStateStore is deprecated. Use hecate.runtime.session_state.SessionStateStore instead. See docs/migrations/agent-state-store.md for migration."`. The `AgentStateStore` ABC SHALL NOT raise on construction — `__init__` is empty (no-op), so the deprecation is emitted via a class-level `__init_subclass__` hook OR by adding `__init__` to the concrete `InMemoryStateStore` only (the ABC is abstract and cannot be instantiated directly via Python semantics).
 
 The concrete `InMemoryStateStore.__init__` SHALL emit the warning. The ABC `AgentStateStore` SHALL NOT have a callable `__init__`; users who attempt to instantiate the ABC directly SHALL receive Python's standard `TypeError: Can't instantiate abstract class` (no `DeprecationWarning` because the failure precedes construction).
 
@@ -735,7 +735,7 @@ The concrete `InMemoryStateStore.__init__` SHALL emit the warning. The ABC `Agen
 
 ### Requirement: WorkflowExecutionService.state_store parameter emits DeprecationWarning at construction
 
-`services/workflow/execution_service.py` `WorkflowExecutionService.__init__` SHALL emit a `DeprecationWarning` when the `state_store` parameter is provided (not `None`). The warning SHALL be emitted with `stacklevel=2` so the caller's source line is reported.
+`studio/workflows/execution_service.py` `WorkflowExecutionService.__init__` SHALL emit a `DeprecationWarning` when the `state_store` parameter is provided (not `None`). The warning SHALL be emitted with `stacklevel=2` so the caller's source line is reported.
 
 The parameter SHALL remain in the signature (no removal) to preserve backward compatibility with existing 23 tests in `tests/test_services/test_workflow/test_execution_service.py` that use `state_store=mock_state_store`. The docstring SHALL begin with `.. deprecated::` referencing the migration to `checkpoint_store` (the already-recommended path per the existing `distributed-session-state-store` spec line 437).
 
@@ -823,9 +823,9 @@ This change (`13.4a-6`) SHALL implement deprecation only — it SHALL NOT delete
 
 #### Scenario: this change does not delete AgentStateStore files
 - **WHEN** the implementation of `13.4a-6` is complete
-- **THEN** `src/hecate/services/state/store.py` SHALL still exist
-- **THEN** `src/hecate/services/state/state.py` SHALL still exist
-- **THEN** `src/hecate/services/state/__init__.py` SHALL still export `AgentStateStore` and `InMemoryStateStore`
+- **THEN** `src/hecate/studio/session_state/ (pre-Phase-R module removed)` SHALL still exist
+- **THEN** `src/hecate/studio/session_state/ (pre-Phase-R module removed)` SHALL still exist
+- **THEN** `src/hecate/studio/session_state/__init__.py` SHALL still export `AgentStateStore` and `InMemoryStateStore`
 - **THEN** the `state_store` parameter on `WorkflowExecutionService.__init__` SHALL still exist (only the `DeprecationWarning` is added)
 - **THEN** `git grep "AgentStateStore" src/` SHALL return non-empty results
 

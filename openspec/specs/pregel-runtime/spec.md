@@ -48,7 +48,7 @@ The runtime SHALL support interrupt/resume: interrupt 时 SHALL 保存物化缓�
 - **THEN** 这些值 SHALL 来自日志事件（最后 `INTERRUPT` 事件 + 该节点 `CHANNEL_WRITE` delta），而非缓存 metadata
 
 #### Scenario: Engine layer has no PostgresCheckpointStore
-- **WHEN** examining `engine/checkpoint.py`
+- **WHEN** examining `runtime/checkpoint.py`
 - **THEN** it SHALL contain only `CheckpointStore` ABC and `InMemoryCheckpointStore`
 - **AND** it SHALL NOT import from `models/`, `services/`, or `sqlalchemy`
 

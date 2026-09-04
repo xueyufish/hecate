@@ -38,7 +38,7 @@ Sandboxed code execution (running shell commands inside a Docker environment) is
 
 Edges connect nodes. An edge may be unconditional (always taken) or **conditional** (taken only when an expression evaluates to true). A `condition` node fans out to multiple targets based on its evaluation.
 
-Graphs are written as JSON conforming to a [JSON Schema](../../src/hecate/engine/graph-dsl.schema.json) bundled in the package. The visual canvas emits the same JSON; the Python SDK builds it programmatically. Both feed into the same compiler. See the [Graph DSL Reference](../reference/graph-dsl.md) for the complete schema.
+Graphs are written as JSON conforming to a [JSON Schema](../../src/hecate/runtime/graph-dsl.schema.json) bundled in the package. The visual canvas emits the same JSON; the Python SDK builds it programmatically. Both feed into the same compiler. See the [Graph DSL Reference](../reference/graph-dsl.md) for the complete schema.
 
 ---
 

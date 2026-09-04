@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: RiskLevel enum
-The system SHALL define `RiskLevel` as a `StrEnum` in `engine/tool_access.py` with four members: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
+The system SHALL define `RiskLevel` as a `StrEnum` in `runtime/tool_access.py` with four members: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.
 
 #### Scenario: String values
 - **WHEN** `RiskLevel.LOW` is converted to string
@@ -49,7 +49,7 @@ The system SHALL define `ApprovalDecision` as a dataclass with three fields: `ap
 - **THEN** `approved` is `False` and `reason` is `"Timeout"`
 
 ### Requirement: ApprovalCallback abstract base class
-The system SHALL define `ApprovalCallback` as an ABC in `engine/tool_access.py` with one abstract async method: `request_approval(self, tool_name: str, arguments: dict, risk_level: str, context: dict) -> ApprovalDecision`.
+The system SHALL define `ApprovalCallback` as an ABC in `runtime/tool_access.py` with one abstract async method: `request_approval(self, tool_name: str, arguments: dict, risk_level: str, context: dict) -> ApprovalDecision`.
 
 #### Scenario: Cannot instantiate directly
 - **WHEN** `ApprovalCallback()` is called
@@ -82,7 +82,7 @@ The system SHALL define `RuleAction` as a `StrEnum` with three members: `ALLOW`,
 - **THEN** the result is `3`
 
 ### Requirement: ToolAccessPolicy evaluate method
-The system SHALL define `ToolAccessPolicy` as a concrete class in `engine/tool_access.py` with an `evaluate(tool_meta: dict, rules: list[ToolRule], context: dict, arguments: dict | None = None) -> AccessDecision` method that applies five-layer evaluation: dangerous patterns, user rules (with arg_conditions), workspace boundary, risk-level fallback, and sandbox routing.
+The system SHALL define `ToolAccessPolicy` as a concrete class in `runtime/tool_access.py` with an `evaluate(tool_meta: dict, rules: list[ToolRule], context: dict, arguments: dict | None = None) -> AccessDecision` method that applies five-layer evaluation: dangerous patterns, user rules (with arg_conditions), workspace boundary, risk-level fallback, and sandbox routing.
 
 #### Scenario: No rules, LOW risk — auto-execute
 - **WHEN** `policy.evaluate({"risk_level": "low", "approval_required": False, "sandbox_enabled": False}, rules=[], context={})` is called
@@ -282,12 +282,12 @@ When no `access_policy` is configured on ToolWorker, all tools SHALL execute via
 - **THEN** the tool executes normally via `port.tool_execute()`
 
 ### Requirement: Engine layer zero dependencies
-`engine/tool_access.py` SHALL have zero external dependencies beyond the Python standard library. No imports from `models/`, `services/`, `api/`, or third-party packages.
+`runtime/tool_access.py` SHALL have zero external dependencies beyond the Python standard library. No imports from `models/`, any domain directory (`enterprise/`, `channel/`, `studio/`, `ops/`, `tools/`), `api/`, or third-party packages.
 
 #### Scenario: No model imports
-- **WHEN** `engine/tool_access.py` is inspected
-- **THEN** no import statements reference `hecate.models`, `hecate.services`, or `hecate.api`
+- **WHEN** `runtime/tool_access.py` is inspected
+- **THEN** no import statements reference `hecate.models`, any domain module (`hecate.enterprise`, `hecate.channel`, `hecate.studio`, `hecate.ops`, `hecate.tools`), or `hecate.api`
 
 #### Scenario: Only stdlib imports
-- **WHEN** `engine/tool_access.py` imports are inspected
+- **WHEN** `runtime/tool_access.py` imports are inspected
 - **THEN** all imports are from `__future__`, `abc`, `dataclasses`, `enum`, `fnmatch`, `logging`, or `typing`

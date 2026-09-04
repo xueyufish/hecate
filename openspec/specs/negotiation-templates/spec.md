@@ -4,7 +4,7 @@
 TBD - created by archiving change multi-agent-advanced-collaboration. Update Purpose after archive.
 ## Requirements
 ### Requirement: Negotiation graph template
-The system SHALL provide a `build_negotiation_graph` factory function in `engine/templates.py` that returns a `GraphConfig` implementing a two-agent negotiation protocol: proposal → response → accept/reject, with configurable max rounds.
+The system SHALL provide a `build_negotiation_graph` factory function in `studio/workflows/templates.py` that returns a `GraphConfig` implementing a two-agent negotiation protocol: proposal → response → accept/reject, with configurable max rounds.
 
 #### Scenario: Negotiation template structure
 - **WHEN** `build_negotiation_graph(agent_a_model, agent_b_model, max_rounds=5)` is called
@@ -45,7 +45,7 @@ The system SHALL provide a `build_debate_graph` factory function returning a `Gr
 Both negotiation and debate template functions SHALL follow the established pattern: accept model/prompt parameters, return `GraphConfig`, use `NodeType.AGENT` for agent nodes, and define channels in the `state` dict.
 
 #### Scenario: Import template factory
-- **WHEN** `from hecate.engine.templates import build_negotiation_graph, build_debate_graph` is executed
+- **WHEN** `from hecate.studio.workflows.templates import build_negotiation_graph, build_debate_graph` is executed
 - **THEN** the import SHALL succeed
 
 #### Scenario: Returned GraphConfig is compilable

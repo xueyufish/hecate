@@ -175,19 +175,23 @@ Canvas and SDK are two interfaces to the same system, not separate products. Age
 
 ## Code Architecture
 
-The modules above are implemented across five code layers with strict dependency rules. These rules ensure the engine remains framework-agnostic and testable in isolation.
+The modules are implemented across six domain directories and two cross-cutting layers with strict dependency rules. These rules ensure the runtime remains framework-agnostic and testable in isolation.
 
 ### Layer Dependencies
 
-| Layer | Path | May Import | Key Rule |
+| Module | Path | May Import | Key Rule |
 |-------|------|-----------|----------|
-| `engine/` | `src/hecate/engine/` | `jsonschema` only | Zero deps on `services/`, `api/`, `models/`. Sole external exception: `jsonschema` for DSL validation. |
-| `services/` | `src/hecate/services/` | `models/`, `engine/ports`, external libs | Depends on engine abstract interfaces only, never on engine implementations. |
-| `api/` | `src/hecate/api/` | `services/`, `models/` | Never imports `engine/` directly — routes through services + `EnginePort`. |
+| `runtime/` | `src/hecate/runtime/` | `jsonschema` only | Zero deps on other domains or workspace wheels. Sole external exception: `jsonschema` for DSL validation. Pinned by the subprocess self-sufficiency probe. |
 | `models/` | `src/hecate/models/` | SQLAlchemy, Pydantic | Pure data definitions (ORM + Pydantic schemas). No business logic. |
-| `core/` | `src/hecate/core/` | config, database, DI, rate limiting | Infrastructure shared across all layers. |
+| `core/` | `src/hecate/core/` | config, database, DI, composition root, plugin loader | Cross-cutting infrastructure shared by all domains; the only place allowed to wire workspace wheels together. |
+| `enterprise/` `tools/` `channel/` `studio/` `ops/` | `src/hecate/<domain>/` | `models/`, `core/`, `runtime/` abstract interfaces, own package | No cross-domain structural coupling — domain-to-domain edges go through `core/composition/`. Wheel wheels (`hecate_enterprise`, `hecate_ops`, `hecate_llm`, ...) are consumed only via composition-root wiring. |
+| `api/` (management routers) | `src/hecate/api/` | domain services via `core/` deps | Route layer only; scheduled to migrate into the owning domains. |
 
-The engine layer defines all abstract interfaces ([extension point inventory](../../AGENTS.md#engine-extension-point-inventory)). Services provide concrete implementations. The API layer orchestrates services. This separation keeps the engine testable with lightweight stubs instead of integration dependencies.
+The runtime domain defines all abstract interfaces (see
+`src/hecate/runtime/AGENTS.md` for the extension-point inventory). Domains
+provide concrete implementations wired by the composition root. This
+separation keeps the runtime testable with lightweight stubs instead of
+integration dependencies.
 
 ### Request Lifecycle
 
@@ -275,7 +279,7 @@ Ordered to match the [Module Architecture](#module-architecture) walkthrough abo
 Sub-domain deep-dives beyond the module-level documents.
 
 - [RAG Pipeline Design](rag-pipeline-design.md) — Document ingestion, chunking, BGE-M3 embedding, hybrid search, RRF fusion, citation system
-- [Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json) — JSON Schema for graph definition (10 node types, 4 channel types)
+- [Graph DSL Schema](../../src/hecate/runtime/graph-dsl.schema.json) — JSON Schema for graph definition (10 node types, 4 channel types)
 
 ### Cross-Cutting References
 

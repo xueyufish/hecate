@@ -211,7 +211,8 @@ By default only `StructuredLogger` instances emit JSON. To convert the entire lo
 # In a custom app entrypoint or plugin
 import logging
 import sys
-from hecate.services.observability.structured_logger import StructuredLogger
+# The dedicated StructuredLogger shim was retired in PR3a; trace context now
+# rides on OTel span attributes via packages/hecate-ops/src/hecate_ops/span_adapter.py
 
 root = logging.getLogger()
 handler = logging.StreamHandler(sys.stdout)

@@ -1,7 +1,7 @@
 ## Requirements
 
 ### Requirement: Broadcast pipeline factory function
-The system SHALL provide a `build_broadcast_pipeline()` factory function in `engine/templates.py` that accepts a list of participant definitions and returns a `GraphConfig` representing a sequential round-robin graph where all participants share the same `messages` TOPIC channel.
+The system SHALL provide a `build_broadcast_pipeline()` factory function in `studio/workflows/templates.py` that accepts a list of participant definitions and returns a `GraphConfig` representing a sequential round-robin graph where all participants share the same `messages` TOPIC channel.
 
 #### Scenario: Basic three-participant broadcast
 - **WHEN** `build_broadcast_pipeline(participants=[{"id": "alice", "model": "gpt-4o", "system_prompt": "..."}, {"id": "bob", "model": "gpt-4o", "system_prompt": "..."}, {"id": "charlie", "model": "gpt-4o", "system_prompt": "..."}])` is called

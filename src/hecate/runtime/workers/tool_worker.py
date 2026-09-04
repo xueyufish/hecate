@@ -9,6 +9,7 @@ channel_updates.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from hecate.runtime.eventstore import Event, EventType
@@ -358,6 +359,7 @@ class ToolWorker(Worker):
                 )
             )
         try:
+            tool_start = time.monotonic()
             if use_sandbox:
                 from hecate.runtime.environment_volumes import resolve_environment_volumes
 
@@ -410,6 +412,7 @@ class ToolWorker(Worker):
             await self._port.end_span(
                 span_ctx.span_id,
                 output_data={"result_length": len(str(result))},
+                usage={"duration_ms": int((time.monotonic() - tool_start) * 1000)},
             )
 
         # Post-tool hook (chain takes precedence; legacy hook is the fallback).

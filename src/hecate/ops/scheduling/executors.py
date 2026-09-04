@@ -3,7 +3,7 @@
 Provides:
 
 - :class:`TaskExecutor` — ABC for scheduled task execution
-- :class:`AgentExecutor` — runs an agent via AgentService
+- :class:`AgentExecutor` — runs an agent via a one-shot LLM call
 - :class:`WorkflowExecutor` — runs a workflow via WorkflowService
 - :class:`ExecutorRegistry` — maps task_type strings to executor instances
 """
@@ -41,8 +41,12 @@ class TaskExecutor(ABC):
 class AgentExecutor(TaskExecutor):
     """Execute a scheduled agent run.
 
-    Uses ``AgentService`` to create a conversation and send a message
-    based on the task configuration.
+    Runs a one-shot LLM call with the agent's persona and model
+    (same pattern as ``channel/a2a/server/executor.py``): load the agent
+    row, call ``llm_service`` directly. The pre-Phase-R ``AgentService``
+    chat path no longer exists; full graph-engine wiring
+    (WorkflowExecutionService + RuntimePort) needs request-scoped handles
+    a background scheduler does not have.
 
     Expected task_config keys:
 
@@ -59,15 +63,28 @@ class AgentExecutor(TaskExecutor):
             return {"status": "failed", "error": "Missing agent_id in task_config"}
 
         try:
-            from hecate.services.agent.service import AgentService
+            from hecate_llm.service import llm_service
+            from sqlalchemy import select
 
-            service = AgentService()
-            result = await service.chat(
-                agent_id=uuid.UUID(agent_id),
-                message=message,
+            from hecate.core.database import async_session_factory
+            from hecate.models.agent import AgentModel
+
+            async with async_session_factory() as db:
+                result = await db.execute(select(AgentModel).where(AgentModel.id == uuid.UUID(agent_id)))
+                agent = result.scalar_one_or_none()
+            if agent is None:
+                return {"status": "failed", "error": f"Agent {agent_id} not found"}
+
+            model_name = (
+                agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"
             )
+            messages = [
+                {"role": "system", "content": agent.persona or "You are a helpful assistant."},
+                {"role": "user", "content": message},
+            ]
+            llm_result = await llm_service.chat(messages, model=model_name)
             logger.info("AgentExecutor completed for task %s agent %s", task_id, agent_id)
-            return {"status": "success", "result": result}
+            return {"status": "success", "result": llm_result.content or ""}
         except Exception as e:
             logger.error("AgentExecutor failed for task %s: %s", task_id, e)
             return {"status": "failed", "error": str(e)}
@@ -76,7 +93,10 @@ class AgentExecutor(TaskExecutor):
 class WorkflowExecutor(TaskExecutor):
     """Execute a scheduled workflow run.
 
-    Uses ``WorkflowService`` to trigger a workflow execution.
+    Runs the workflow through ``WorkflowTestRunner`` — the same
+    workflow-level execution entry the management ``test-run`` endpoint
+    uses — with ``mock=False`` for a real run. The pre-Phase-R
+    ``WorkflowService.execute(workflow_id, ...)`` no longer exists.
 
     Expected task_config keys:
 
@@ -92,20 +112,32 @@ class WorkflowExecutor(TaskExecutor):
             return {"status": "failed", "error": "Missing workflow_id in task_config"}
 
         try:
-            from hecate.studio.workflows.service import WorkflowService
+            from hecate.core.database import async_session_factory
+            from hecate.studio.workflows.test_runner import WorkflowTestRunner
 
-            # TODO(phase-r-followup): WorkflowService.__init__ requires a
-            # AsyncSession but WorkflowExecutor.execute() has no DB handle.
-            # Pre-existing bug surfaced by the studio/ move (mypy now
-            # resolves the cross-package type). Skip the type error until
-            # a follow-up wires a DB session through the scheduler.
-            service = WorkflowService()  # type: ignore[call-arg]
-            result = await service.execute(
-                workflow_id=uuid.UUID(workflow_id),
-                input_data=task_config.get("input_data", {}),
+            async with async_session_factory() as db:
+                runner = WorkflowTestRunner(db)
+                result = await runner.run_test(
+                    workflow_id=uuid.UUID(workflow_id),
+                    input_data=task_config.get("input_data", {}),
+                    mock=False,
+                )
+            status = "success" if result.status == "completed" else "failed"
+            logger.info(
+                "WorkflowExecutor completed for task %s workflow %s status %s",
+                task_id,
+                workflow_id,
+                result.status,
             )
-            logger.info("WorkflowExecutor completed for task %s workflow %s", task_id, workflow_id)
-            return {"status": "success", "result": result}
+            return {
+                "status": status,
+                "result": {
+                    "run_id": str(result.run_id),
+                    "workflow_status": result.status,
+                    "total_duration_ms": result.total_duration_ms,
+                    "error": result.error,
+                },
+            }
         except Exception as e:
             logger.error("WorkflowExecutor failed for task %s: %s", task_id, e)
             return {"status": "failed", "error": str(e)}

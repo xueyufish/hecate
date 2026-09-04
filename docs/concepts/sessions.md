@@ -183,7 +183,7 @@ Agent runs → hits Interrupt node → session paused (state = interrupted)
 Implementation:
 
 ```python
-from hecate.engine.commands import interrupt, Command
+from hecate.runtime.commands import interrupt, Command
 
 async def risky_node(state):
     # Pause for human review
@@ -236,12 +236,12 @@ Sessions are the **universal unit of work** across Hecate. If you understand ses
 ## Implementation references
 
 - `src/hecate/models/session.py` — SessionModel + status enum + current_node + checkpoint_id
-- `src/hecate/engine/eventstore.py` — event log (source of truth)
-- `src/hecate/engine/checkpoint.py` — CheckpointStore ABC (materialized cache)
-- `src/hecate/services/orchestration/session_state_materializer.py` — production cache materializer (implements CheckpointStore ABC)
-- `src/hecate/services/session_state/` — session state store abstraction (memory / Postgres / Redis)
-- `src/hecate/services/event_state/` — event sourcing for session transitions
-- `src/hecate/engine/commands.py` — interrupt / Command APIs
+- `src/hecate/runtime/eventstore.py` — event log (source of truth)
+- `src/hecate/runtime/checkpoint.py` — CheckpointStore ABC (materialized cache)
+- `src/hecate/runtime/session_state_materializer.py` — production cache materializer (implements CheckpointStore ABC)
+- `src/hecate/studio/session_state/` — session state store abstraction (memory / Postgres / Redis)
+- `src/hecate/studio/event_state/` — event sourcing for session transitions
+- `src/hecate/runtime/commands.py` — interrupt / Command APIs
 
 ## Related documents
 

@@ -4,9 +4,9 @@ Define core type definitions for the Hecate execution engine including node type
 ### Requirement: NodeType enum defines 6 execution behaviors
 The `NodeType` enum SHALL define: CONVERSATION, TOOL_CALL, CONDITION, AGENT, KNOWLEDGE_RETRIEVAL, VARIABLE_SET, FAN_OUT, MERGE.
 
-The `CollaborationEventType` enum SHALL be defined in `engine/eventbus.py` with values: AGENT_MESSAGE, AGENT_REQUEST, AGENT_RESPONSE, TASK_ASSIGNED, TASK_COMPLETED, NEGOTIATION_PROPOSAL, NEGOTIATION_ACCEPT, NEGOTIATION_REJECT, DEBATE_ARGUMENT, DEBATE_REBUTTAL, DEBATE_CONCLUSION.
+The `CollaborationEventType` enum SHALL be defined in `runtime/eventbus.py` with values: AGENT_MESSAGE, AGENT_REQUEST, AGENT_RESPONSE, TASK_ASSIGNED, TASK_COMPLETED, NEGOTIATION_PROPOSAL, NEGOTIATION_ACCEPT, NEGOTIATION_REJECT, DEBATE_ARGUMENT, DEBATE_REBUTTAL, DEBATE_CONCLUSION.
 
-This is a new enum alongside the existing `EventType` in `engine/eventstore.py` — the existing EventType SHALL NOT be modified.
+This is a new enum alongside the existing `EventType` in `runtime/eventstore.py` — the existing EventType SHALL NOT be modified.
 
 #### Scenario: Conversation node
 - **WHEN** a node has type CONVERSATION

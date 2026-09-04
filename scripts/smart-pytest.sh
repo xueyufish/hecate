@@ -2,7 +2,8 @@
 # Run pytest scoped to changed files based on dependency layer mapping.
 # Optimizations:
 #   1. Skip pytest for doc-only, frontend-only, config-only changes
-#   2. Scope tests by dependency layer (engine->test_engine, etc.)
+#   2. Scope tests by domain directory (runtime->test_runtime, etc.);
+#      test dirs keep legacy names (e.g. test_auth covers enterprise/auth)
 #   3. Use pytest-xdist for parallel execution (-n auto)
 set -euo pipefail
 
@@ -25,18 +26,30 @@ test_dirs=""
 
 while IFS= read -r f; do
     case "$f" in
-        src/hecate/core/*|alembic/*|pyproject.toml)
-            echo "pytest: full suite (infrastructure change: $f)"
+        src/hecate/core/*|src/hecate/main.py|src/hecate/cli/*|alembic/*|pyproject.toml|packages/*)
+            echo "pytest: full suite (infrastructure/composition/wheel change: $f)"
             exec .venv/bin/python -m pytest tests/ -q --tb=short -x -n auto
             ;;
-        src/hecate/engine/*)
-            test_dirs="$test_dirs tests/test_engine"
+        src/hecate/runtime/*)
+            test_dirs="$test_dirs tests/test_runtime"
+            ;;
+        src/hecate/enterprise/*)
+            test_dirs="$test_dirs tests/test_enterprise tests/test_auth tests/test_vault tests/test_budget tests/test_api tests/test_services"
+            ;;
+        src/hecate/channel/*)
+            test_dirs="$test_dirs tests/test_channel tests/test_channels tests/test_a2a tests/test_gateway tests/test_api tests/test_services"
+            ;;
+        src/hecate/tools/*)
+            test_dirs="$test_dirs tests/test_mcp tests/test_skill_registry tests/test_plugin tests/test_api tests/test_services"
+            ;;
+        src/hecate/studio/*)
+            test_dirs="$test_dirs tests/test_api tests/test_services"
+            ;;
+        src/hecate/ops/*)
+            test_dirs="$test_dirs tests/test_observability tests/test_ops_center tests/test_api tests/test_services"
             ;;
         src/hecate/models/*)
             test_dirs="$test_dirs tests/test_models tests/test_api tests/test_services"
-            ;;
-        src/hecate/services/*)
-            test_dirs="$test_dirs tests/test_services tests/test_api"
             ;;
         src/hecate/api/*)
             test_dirs="$test_dirs tests/test_api"
