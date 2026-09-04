@@ -18,6 +18,14 @@ Closes #
 
 -
 
+## Merging
+
+<!-- Repository settings: "Allow merge commits" is OFF.
+     Only "Rebase and merge" or "Squash and merge" are available. -->
+
+- [ ] Merge via **Rebase and merge** (preferred — preserves per-commit history) or **Squash and merge** (acceptable — collapses a multi-commit branch into one commit on `main`).
+- [ ] Do **not** use "Create a merge commit" — that button is disabled at the repo level.
+
 ## Checklist
 
 - [ ] `ruff check src/hecate/ tests/` passes
