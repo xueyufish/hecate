@@ -2,7 +2,7 @@
 Define the EventStore abstraction for recording and replaying granular agent execution events, enabling observability, debugging, and state recovery across sessions.
 ## Requirements
 ### Requirement: Event dataclass captures granular execution state
-The engine SHALL define an immutable `Event` dataclass in `engine/eventstore.py` with fields: `id` (UUID, auto-generated), `session_id` (UUID), `superstep` (int), `event_type` (EventType enum), `node_id` (str | None), `timestamp` (datetime, auto-generated), `payload` (dict), `trace_id` (str | None, default None).
+The engine SHALL define an immutable `Event` dataclass in `runtime/eventstore.py` with fields: `id` (UUID, auto-generated), `session_id` (UUID), `superstep` (int), `event_type` (EventType enum), `node_id` (str | None), `timestamp` (datetime, auto-generated), `payload` (dict), `trace_id` (str | None, default None).
 
 #### Scenario: Create a node execution event with trace correlation
 - **WHEN** an Event is created with `session_id`, `superstep=3`, `event_type=EventType.NODE_START`, `node_id="agent_1"`, `trace_id="abc123"`
@@ -129,7 +129,7 @@ Worker ABC SHALL accept an optional `event_store: EventStore | None = None` para
 
 ### Requirement: PostgresEventStore persists EventStore events to PostgreSQL via ORM
 
-services 层 SHALL 提供 `PostgresEventStore`（`src/hecate/services/event_state/postgres_store.py`）实现 engine-layer `EventStore` ABC，把 `Event` 记录以 append-only 方式落表到 `events` 表。
+services 层 SHALL 提供 `PostgresEventStore`（`src/hecate/studio/event_state/postgres_store.py`）实现 engine-layer `EventStore` ABC，把 `Event` 记录以 append-only 方式落表到 `events` 表。
 
 实现 SHALL 复用既有 `async_session_factory`（来自 `hecate.core.database`），与 `PostgresSessionStateStore` 共享连接池与 PG 方言处理。
 
@@ -172,7 +172,7 @@ services 层 SHALL 提供 `PostgresEventStore`（`src/hecate/services/event_stat
 
 ### Requirement: EventModel ORM 映射 events 表
 
-services 层 SHALL 在 `src/hecate/services/event_state/models.py` 提供 `EventModel` SQLAlchemy ORM 类，映射到 `events` 表，字段如下：
+services 层 SHALL 在 `src/hecate/studio/event_state/models.py` 提供 `EventModel` SQLAlchemy ORM 类，映射到 `events` 表，字段如下：
 
 - `id: UUID`（主键之一，对应 `Event.id`）
 - `session_id: UUID`（主键之一，外键关联 `sessions` 概念——但 Hecate 无 sessions 表，故仅作索引列）
@@ -232,7 +232,7 @@ ABC 方法（`append`, `get_events`, `replay`, `get_version`）SHALL 保持 `ses
 
 ### Requirement: WorkflowExecutionService 构造接受可选 event_store
 
-services 层 `WorkflowExecutionService`（`src/hecate/services/workflow/execution_service.py`）的构造函数 SHALL 接受可选参数 `event_store: EventStore | None = None`。
+services 层 `WorkflowExecutionService`（`src/hecate/studio/workflows/execution_service.py`）的构造函数 SHALL 接受可选参数 `event_store: EventStore | None = None`。
 
 当 `event_store` 为 `None` 时（默认），`PregelRuntime(event_store=None)` 不记录事件，行为与 Change 5 前完全一致——既有测试零修改通过。
 
@@ -287,9 +287,9 @@ async def _sync_event_position(state: SessionState, event_store: EventStore | No
 
 ### Requirement: create_event_store factory 按 setting 选择后端
 
-services 层 SHALL 在 `src/hecate/services/event_state/factory.py` 提供 `create_event_store(settings) -> EventStore`，根据 `settings.EVENT_STORE_BACKEND` 返回实现：
+services 层 SHALL 在 `src/hecate/studio/event_state/factory.py` 提供 `create_event_store(settings) -> EventStore`，根据 `settings.EVENT_STORE_BACKEND` 返回实现：
 
-- `"memory"`（默认）→ `InMemoryEventStore()`（来自 `hecate.engine.eventstore`，保持向后兼容）
+- `"memory"`（默认）→ `InMemoryEventStore()`（来自 `hecate.runtime.eventstore`，保持向后兼容）
 - `"postgres"` → `PostgresEventStore(async_session_factory=..., tenant_context_provider=...)`
 
 未知值 SHALL 抛 `ValueError`，消息列出支持的 backend。

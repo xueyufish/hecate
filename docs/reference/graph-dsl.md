@@ -2,9 +2,9 @@
 
 The Graph DSL is a JSON format for defining Hecate agent workflows. A graph definition describes **channels** (state), **nodes** (execution units), and **edges** (control flow). The parser validates the JSON against a [JSON Schema](https://json-schema.org/) bundled inside the engine package, then the compiler performs structural validation before producing a `CompiledGraph` for the Pregel runtime.
 
-- **Schema file**: `src/hecate/engine/graph-dsl.schema.json`
-- **Parser**: `src/hecate/engine/graph_dsl.py` — `parse_graph(raw) → GraphConfig`
-- **Compiler**: `src/hecate/engine/compiler.py` — `GraphCompiler.compile(config) → CompiledGraph`
+- **Schema file**: `src/hecate/runtime/graph-dsl.schema.json`
+- **Parser**: `src/hecate/runtime/graph_dsl.py` — `parse_graph(raw) → GraphConfig`
+- **Compiler**: `src/hecate/runtime/compiler.py` — `GraphCompiler.compile(config) → CompiledGraph`
 - **Version**: `1.0` (the only accepted value)
 
 ---
@@ -504,5 +504,5 @@ A researcher fans out to multiple analysts, results are merged, then summarized:
 - **[Extension Points](extension-points.md)** — the many engine extension interfaces + multiple plugin SPI types you can implement to customize execution.
 - **[Engine Design](../design/engine-design.md)** — how the Pregel runtime executes a compiled graph superstep by superstep.
 - **[Multi-Agent Orchestration Tutorial](../tutorials/04-multi-agent.md)** — build workflows with the six collaboration patterns using prebuilt templates.
-- **[Graph DSL Schema](../../src/hecate/engine/graph-dsl.schema.json)** — the authoritative JSON Schema file.
+- **[Graph DSL Schema](../../src/hecate/runtime/graph-dsl.schema.json)** — the authoritative JSON Schema file.
 - **[CLI Reference](cli.md)** — use `hecate workflow validate` to check a graph definition before deployment.

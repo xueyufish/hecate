@@ -4,7 +4,7 @@
 TBD - created by archiving change multi-agent-advanced-collaboration. Update Purpose after archive.
 ## Requirements
 ### Requirement: TaskAllocator ABC defines agent selection interface
-The engine SHALL define a `TaskAllocator` ABC in `engine/task_allocator.py` with abstract method `allocate` that accepts a task description, a list of candidate agents, and optional configuration, returning the best-fit agent or None.
+The engine SHALL define a `TaskAllocator` ABC in `runtime/task_allocator.py` with abstract method `allocate` that accepts a task description, a list of candidate agents, and optional configuration, returning the best-fit agent or None.
 
 #### Scenario: Allocate with matching candidate
 - **WHEN** `allocate(task="Analyze financial report", candidates=[agent_a, agent_b])` is called and agent_a is a finance specialist

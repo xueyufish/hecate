@@ -5,10 +5,10 @@ Adds the 7th multi-agent collaboration pattern (Dynamic Orchestration) as a grap
 ## Requirements
 
 ### Requirement: COORDINATOR NodeType exists
-The system SHALL define a `COORDINATOR` value in the `NodeType` StrEnum in `engine/types.py`. The value MUST be lowercase string `"coordinator"` and SHALL be a first-class dispatch branch in `PregelRuntime._execute_inner`, alongside `FAN_IN` and `MERGE`.
+The system SHALL define a `COORDINATOR` value in the `NodeType` StrEnum in `runtime/types.py`. The value MUST be lowercase string `"coordinator"` and SHALL be a first-class dispatch branch in `PregelRuntime._execute_inner`, alongside `FAN_IN` and `MERGE`.
 
 #### Scenario: NodeType value present in enum
-- **WHEN** `from hecate.engine.types import NodeType` is executed
+- **WHEN** `from hecate.runtime.types import NodeType` is executed
 - **THEN** `NodeType.COORDINATOR` SHALL be accessible with `.value == "coordinator"`
 
 #### Scenario: Coordinator node dispatches via worker pool
@@ -16,7 +16,7 @@ The system SHALL define a `COORDINATOR` value in the `NodeType` StrEnum in `engi
 - **THEN** `PregelRuntime._execute_inner` SHALL route that node through `CoordinatorWorker` instead of the default worker pool
 
 ### Requirement: TaskDAG public contract
-The system SHALL define `TaskDAG` as a Pydantic model in `engine/dynamic_types.py` with the following fields: `goal: str` (non-empty), `tasks: list[TaskNode]`, `dependencies: dict[str, list[str]]` mapping task id to upstream task ids, `synthesis_prompt: str | None`, `budgets: OrchestrationBudgets`, `verify: VerifyConfig | None`. `TaskNode` SHALL have `id: str`, `agent_id: str`, `inputs: dict[str, str]` (mapping local input name to upstream task id + output name), `expected_output: str`, `on_failure: Literal["continue","stop","replan"] = "stop"`.
+The system SHALL define `TaskDAG` as a Pydantic model in `runtime/dynamic_types.py` with the following fields: `goal: str` (non-empty), `tasks: list[TaskNode]`, `dependencies: dict[str, list[str]]` mapping task id to upstream task ids, `synthesis_prompt: str | None`, `budgets: OrchestrationBudgets`, `verify: VerifyConfig | None`. `TaskNode` SHALL have `id: str`, `agent_id: str`, `inputs: dict[str, str]` (mapping local input name to upstream task id + output name), `expected_output: str`, `on_failure: Literal["continue","stop","replan"] = "stop"`.
 
 #### Scenario: Valid TaskDAG round-trips through Pydantic
 - **WHEN** a TaskDAG with 3 tasks and 2 dependencies is constructed and serialized
@@ -31,7 +31,7 @@ The system SHALL define `TaskDAG` as a Pydantic model in `engine/dynamic_types.p
 - **THEN** validation SHALL reject with a cycle error
 
 ### Requirement: Fail-closed pre-dispatch validation
-The system SHALL provide a `validate_task_requirements(dag: TaskDAG, roster: list[AgentRequirement]) -> ValidationReport` function exported from `engine/orchestrator_validator.py`. The function MUST reject the orchestration before any worker dispatches when any of the following hold: (a) the DAG contains a cycle, an unreferenced node, or a dangling dependency reference; (b) `tasks[].agent_id` is not present in the roster; (c) `tasks[].agent_id` requires a tool or knowledge base that no roster agent exposes; (d) `tasks[].inputs` references an output name that the upstream task does not declare. The function MUST be callable both at coordinator worker construction time and from the graph design canvas at save time.
+The system SHALL provide a `validate_task_requirements(dag: TaskDAG, roster: list[AgentRequirement]) -> ValidationReport` function exported from `runtime/replay/orchestrator_validator.py`. The function MUST reject the orchestration before any worker dispatches when any of the following hold: (a) the DAG contains a cycle, an unreferenced node, or a dangling dependency reference; (b) `tasks[].agent_id` is not present in the roster; (c) `tasks[].agent_id` requires a tool or knowledge base that no roster agent exposes; (d) `tasks[].inputs` references an output name that the upstream task does not declare. The function MUST be callable both at coordinator worker construction time and from the graph design canvas at save time.
 
 #### Scenario: DAG with cycle rejected
 - **WHEN** `validate_task_requirements` is called with a DAG where `dependencies["b"] = ["b"]`
@@ -46,7 +46,7 @@ The system SHALL provide a `validate_task_requirements(dag: TaskDAG, roster: lis
 - **THEN** `validate_task_requirements` SHALL return `is_valid = True` with no errors
 
 ### Requirement: CoordinatorWorker executes the orchestration cycle
-The system SHALL provide `CoordinatorWorker` in `engine/workers/coordinator_worker.py`. On each superstep where the COORDINATOR node is scheduled, it SHALL: (1) call the planner model with the goal + roster + current `_ledger` channel to obtain a candidate `TaskDAG` revision; (2) call `validate_task_requirements` against the current roster; (3) write the validated TaskDAG to the `_plan` channel; (4) emit an `ORCHESTRATOR_DECISION` event with payload `{plan_revision, dag, reasoning}`; (5) invoke the executor template to compile the TaskDAG into a sub-GraphConfig; (6) execute the sub-graph in a fresh `child_session_id` with a fresh `ChannelManager`; (7) on sub-graph completion, run the evaluator model to produce an `ORCHESTRATOR_EVALUATION` event with typed blocker payload. The coordinator MUST abort and raise an error if validation fails at step 2.
+The system SHALL provide `CoordinatorWorker` in `runtime/workers/coordinator_worker.py`. On each superstep where the COORDINATOR node is scheduled, it SHALL: (1) call the planner model with the goal + roster + current `_ledger` channel to obtain a candidate `TaskDAG` revision; (2) call `validate_task_requirements` against the current roster; (3) write the validated TaskDAG to the `_plan` channel; (4) emit an `ORCHESTRATOR_DECISION` event with payload `{plan_revision, dag, reasoning}`; (5) invoke the executor template to compile the TaskDAG into a sub-GraphConfig; (6) execute the sub-graph in a fresh `child_session_id` with a fresh `ChannelManager`; (7) on sub-graph completion, run the evaluator model to produce an `ORCHESTRATOR_EVALUATION` event with typed blocker payload. The coordinator MUST abort and raise an error if validation fails at step 2.
 
 #### Scenario: Valid revision proceeds
 - **WHEN** the planner returns a TaskDAG that passes `validate_task_requirements`
@@ -124,7 +124,7 @@ The system SHALL allow each `TaskNode` to declare a `verify` field referencing a
 - **THEN** the task's ledger entry SHALL record `verified = false` and the next `ORCHESTRATOR_EVALUATION` SHALL emit `verdict = "stalled"` for that task
 
 ### Requirement: New EventTypes for orchestration decisions
-The system SHALL extend `EventType` in `engine/eventstore.py` additively with two values: `ORCHESTRATOR_DECISION` and `ORCHESTRATOR_EVALUATION`. The `LogPolicy.should_log_channel` function SHALL NOT exclude these event types. Each `ORCHESTRATOR_DECISION` event payload MUST include `plan_revision: int` (monotonically increasing per orchestration), `dag: dict | None` (the TaskDAG or `None` for replan-cap-terminated iterations), and `reasoning: str`. Each `ORCHESTRATOR_EVALUATION` event payload MUST include `verdict: Literal["satisfied", "needs_user_input", "missing_evidence", "run_failed", "external_wait", "goal_not_met_yet", "stalled"]`, `blocker: str | None`, and optional `stop_reason` and `guidance_string`.
+The system SHALL extend `EventType` in `runtime/eventstore.py` additively with two values: `ORCHESTRATOR_DECISION` and `ORCHESTRATOR_EVALUATION`. The `LogPolicy.should_log_channel` function SHALL NOT exclude these event types. Each `ORCHESTRATOR_DECISION` event payload MUST include `plan_revision: int` (monotonically increasing per orchestration), `dag: dict | None` (the TaskDAG or `None` for replan-cap-terminated iterations), and `reasoning: str`. Each `ORCHESTRATOR_EVALUATION` event payload MUST include `verdict: Literal["satisfied", "needs_user_input", "missing_evidence", "run_failed", "external_wait", "goal_not_met_yet", "stalled"]`, `blocker: str | None`, and optional `stop_reason` and `guidance_string`.
 
 #### Scenario: ORCHESTRATOR_DECISION carries plan_revision
 - **WHEN** iteration 2 of an orchestration emits a new `ORCHESTRATOR_DECISION`

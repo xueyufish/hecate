@@ -2,7 +2,7 @@
 
 ### Requirement: HecateError base exception class
 
-The engine SHALL define `HecateError(Exception)` in `engine/errors.py` as the base exception for all Hecate-specific errors. All Hecate exception types SHALL inherit from `HecateError`.
+The engine SHALL define `HecateError(Exception)` in `runtime/errors.py` as the base exception for all Hecate-specific errors. All Hecate exception types SHALL inherit from `HecateError`.
 
 #### Scenario: Catch all Hecate errors
 

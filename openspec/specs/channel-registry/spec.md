@@ -4,7 +4,7 @@
 TBD - created by archiving change channel-registry. Update Purpose after archive.
 ## Requirements
 ### Requirement: ChannelBehavior ABC defines write semantics contract
-The engine SHALL define a `ChannelBehavior` ABC in `engine/channel.py` with 4 abstract methods: `initial_value(defn) -> Any`, `write(current, value, defn) -> Any`, `is_evictable() -> bool`, and `resolve_conflict(current, proposed) -> Any`.
+The engine SHALL define a `ChannelBehavior` ABC in `runtime/channel.py` with 4 abstract methods: `initial_value(defn) -> Any`, `write(current, value, defn) -> Any`, `is_evictable() -> bool`, and `resolve_conflict(current, proposed) -> Any`.
 
 #### Scenario: Custom behavior implementation
 - **WHEN** a class extends ChannelBehavior and implements all 4 methods

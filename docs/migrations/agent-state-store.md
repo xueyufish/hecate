@@ -2,7 +2,7 @@
 
 > **Deprecated in:** 13.4a-6 (Aug 2026)
 > **Hard removal planned for:** 13.4a-7 (≥ next minor version)
-> **Replacement:** `hecate.engine.session_state.SessionStateStore`
+> **Replacement:** `hecate.runtime.session_state.SessionStateStore`
 
 ---
 
@@ -13,7 +13,7 @@ per-session state persistence abstraction. It used a two-part key
 `(agent_id, session_id)` and had a single in-memory implementation
 (`InMemoryStateStore`).
 
-`SessionStateStore` (in `src/hecate/engine/session_state.py`) is the
+`SessionStateStore` (in `src/hecate/runtime/session_state.py`) is the
 production-ready replacement delivered across the 13.4a change series
 (1/5 through 5/5, PR #46). It provides:
 
@@ -87,7 +87,7 @@ loaded = await store.load(agent_id, session_id)
 ### After (recommended)
 
 ```python
-from hecate.engine.session_state import SessionState, InMemorySessionStateStore
+from hecate.runtime.session_state import SessionState, InMemorySessionStateStore
 
 store = InMemorySessionStateStore()
 session_state = SessionState(

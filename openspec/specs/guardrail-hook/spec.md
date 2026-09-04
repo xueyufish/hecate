@@ -24,7 +24,7 @@ The system SHALL define `GuardrailAction` as a `StrEnum` with three members: `AL
 - **THEN** the value is `"sanitize"`
 
 ### Requirement: GuardrailResult dataclass
-The system SHALL define a `GuardrailResult` dataclass in `engine/guardrail.py` with three fields: `action` (GuardrailAction, default ALLOW), `reason` (str, default ""), and `modified_data` (dict | None, default None).
+The system SHALL define a `GuardrailResult` dataclass in `runtime/guardrail.py` with three fields: `action` (GuardrailAction, default ALLOW), `reason` (str, default ""), and `modified_data` (dict | None, default None).
 
 #### Scenario: Allow action with defaults
 - **WHEN** `GuardrailResult()` is constructed
@@ -39,7 +39,7 @@ The system SHALL define a `GuardrailResult` dataclass in `engine/guardrail.py` w
 - **THEN** `action` is `GuardrailAction.SANITIZE` and `modified_data` is `{"messages": [...]}`
 
 ### Requirement: PreLLMHook abstract base class
-The system SHALL define a `PreLLMHook` ABC in `engine/guardrail.py` with one abstract async method: `on_pre_llm_call(self, messages: list[dict], model: str, tools: list[dict] | None) -> GuardrailResult`.
+The system SHALL define a `PreLLMHook` ABC in `runtime/guardrail.py` with one abstract async method: `on_pre_llm_call(self, messages: list[dict], model: str, tools: list[dict] | None) -> GuardrailResult`.
 
 #### Scenario: Cannot instantiate directly
 - **WHEN** `PreLLMHook()` is called
@@ -109,8 +109,8 @@ LLMWorker and ToolWorker SHALL handle the SANITIZE action by replacing the relev
 - **THEN** the worker SHALL treat it as ALLOW (pass through unchanged) and log a warning
 
 ### Requirement: Module structure
-The `engine/__init__.py` SHALL remain empty. Users import directly from submodules: `from hecate.engine.guardrail import PreLLMHook, PostLLMHook, PreToolHook, PostToolHook`.
+The `runtime/__init__.py` SHALL remain empty. Users import directly from submodules: `from hecate.runtime.guardrail import PreLLMHook, PostLLMHook, PreToolHook, PostToolHook`.
 
 #### Scenario: Direct submodule import
-- **WHEN** code does `from hecate.engine.guardrail import PreLLMHook`
+- **WHEN** code does `from hecate.runtime.guardrail import PreLLMHook`
 - **THEN** the import succeeds without errors

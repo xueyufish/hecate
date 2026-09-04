@@ -54,7 +54,7 @@ A minimal adapter module looks like this:
 
 from __future__ import annotations
 
-from hecate.services.orchestration.memory_provider import MemoryProvider
+from hecate.ops.orchestration.memory_provider import MemoryProvider
 
 
 class VendorMemoryProvider:
@@ -187,13 +187,13 @@ shipped). The shape follows this guide; refer to it when writing your own.
   replaces `hecate-memory`'s search backend — depending on it would create a
   circular deployment (uninstalling `hecate-memory` would break your
   backend). Use only the public types from
-  `hecate.services.orchestration.memory_provider`.
+  `hecate.ops.orchestration.memory_provider`.
 - **Do not skip the zero-arg factory signature.** The host invokes
   `ep.load()()` — no arguments — at the discovery stage.
 
 ## Reference
 
-- `src/hecate/services/orchestration/memory_provider.py` — the resolver
+- `src/hecate/core/composition/memory_provider.py` — the resolver
   and Protocols.
 - `packages/hecate-memory/src/hecate_memory/provider.py` — the `builtin`
   reference implementation.

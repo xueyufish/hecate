@@ -2,7 +2,7 @@
 
 Hecate's engine layer defines a set of abstract interfaces (ABCs) that let you customize every aspect of graph execution — from LLM invocation and tool execution to scheduling, checkpointing, context management, and safety hooks. Each interface ships with a default implementation suitable for testing or single-process use; production deployments provide concrete adapters in the `services/` layer.
 
-The engine has **zero external dependencies** (except `jsonschema` for Graph DSL validation). All abstract interfaces live in `src/hecate/engine/`. In addition to the engine ABCs below, the plugin system defines **multiple SPIs types** (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) — see the [Plugin Manifest Schema](plugin-manifest.md).
+The engine has **zero external dependencies** (except `jsonschema` for Graph DSL validation). All abstract interfaces live in `src/hecate/runtime/`. In addition to the engine ABCs below, the plugin system defines **multiple SPIs types** (Tool / Extension / Trigger / Model / Channel / Evaluator / Auth / Secret) — see the [Plugin Manifest Schema](plugin-manifest.md).
 
 ---
 
@@ -45,7 +45,7 @@ Additionally, [ConflictResolver](#conflictresolver-temporal) in `temporal/confli
 
 ## 1. EnginePort
 
-**File**: `src/hecate/engine/ports.py`
+**File**: `src/hecate/runtime/ports.py`
 
 The boundary interface between the execution engine and external capability services (LLM providers, tool runners, knowledge bases, checkpoint storage, conversation history, observability). The engine calls these methods to perform I/O without importing any service module.
 
@@ -133,7 +133,7 @@ class SpanContext:
 
 ## 2. Worker
 
-**File**: `src/hecate/engine/worker.py`
+**File**: `src/hecate/runtime/worker.py`
 
 Abstract interface for executing a single graph node. A Worker receives a node ID, its configuration, and a read-only snapshot of all channels. It returns a `WorkerResult` with channel updates and an optional `Command`.
 
@@ -165,13 +165,13 @@ The default `execute_stream` delegates to `execute()` with no intermediate event
 
 ### Built-in implementation: `AgentWorker`
 
-Located in `src/hecate/engine/workers/`. Dispatches execution based on node type (conversation, tool-call, condition, agent, knowledge-retrieval, etc.).
+Located in `src/hecate/runtime/workers/`. Dispatches execution based on node type (conversation, tool-call, condition, agent, knowledge-retrieval, etc.).
 
 ---
 
 ## 3. WorkerPool
 
-**File**: `src/hecate/engine/worker.py`
+**File**: `src/hecate/runtime/worker.py`
 
 Abstract interface for dispatching worker execution. Controls how workers are scheduled and awaited — implementations may provide direct async, thread-based, or distributed dispatch.
 
@@ -195,7 +195,7 @@ Awaits each worker directly in the current event loop without parallelism. This 
 
 ## 4. CheckpointStore
 
-**File**: `src/hecate/engine/checkpoint.py`
+**File**: `src/hecate/runtime/checkpoint.py`
 
 Abstract interface for persisting and retrieving **materialized caches** of execution state. Per [Log-as-Truth (ADR-030)](../design/adr/030-event-sourced-execution-state.md), the execution event log is the source of truth; a checkpoint is a **discardable cache** — a fold of the log (`channel_state` + `log_version` cursor) that makes recovery fast without full replay. A checkpoint captures the full channel state and the `log_version` cursor at materialization time.
 
@@ -237,9 +237,9 @@ Uses dual storage: a full chronological history per session (for `list_checkpoin
 
 ## 5. EventStore
 
-**File**: `src/hecate/engine/eventstore.py`
+**File**: `src/hecate/runtime/eventstore.py`
 
-Abstract interface for append-only event persistence — the **execution-state source of truth** (Log-as-Truth, [ADR-030](../design/adr/030-event-sourced-execution-state.md)). Records granular execution events (node start/end, tool calls, channel writes with post-adjudication values, `STEP_END` commit points, interrupts) as a versioned log. Channel state is fully reconstructable by folding the log (`fold_session`, `engine/logfold.py`); checkpoints are just materialized caches of that fold.
+Abstract interface for append-only event persistence — the **execution-state source of truth** (Log-as-Truth, [ADR-030](../design/adr/030-event-sourced-execution-state.md)). Records granular execution events (node start/end, tool calls, channel writes with post-adjudication values, `STEP_END` commit points, interrupts) as a versioned log. Channel state is fully reconstructable by folding the log (`fold_session`, `runtime/logfold.py`); checkpoints are just materialized caches of that fold.
 
 ### Abstract methods
 
@@ -295,7 +295,7 @@ For testing and single-process use. Production uses `PostgresEventStore`.
 
 ## 6. ContextEngine
 
-**File**: `src/hecate/engine/context.py`
+**File**: `src/hecate/runtime/context.py`
 
 Abstract interface for context management — message selection, compression, and token estimation. This is the bottom layer for context operations; higher-level orchestration delegates to it.
 
@@ -335,7 +335,7 @@ Simple heuristics: ~4 characters per token for estimation, keeps most recent mes
 
 ## 7. SchedulerStrategy
 
-**File**: `src/hecate/engine/scheduler.py`
+**File**: `src/hecate/runtime/scheduler.py`
 
 Abstract interface for node scheduling. Determines the order in which ready nodes are dispatched each superstep.
 
@@ -363,7 +363,7 @@ Returns nodes in their original input order (first-in, first-out). Ignores weigh
 
 ## 8. EvictionPolicy
 
-**File**: `src/hecate/engine/eviction.py`
+**File**: `src/hecate/runtime/eviction.py`
 
 Abstract interface for channel eviction. Controls when and which items are removed from `topic` channels that can grow unboundedly during long-running sessions.
 
@@ -396,7 +396,7 @@ class EvictionPolicy(ABC):
 
 ## 9. OptimizationPass
 
-**File**: `src/hecate/engine/optimization.py`
+**File**: `src/hecate/runtime/optimization.py`
 
 Abstract interface for graph optimization. Each pass takes a `CompiledGraph` and returns a new (potentially optimized) `CompiledGraph`. The original is never modified. Passes are applied in list order during compilation.
 
@@ -421,7 +421,7 @@ Passes are configured via `GraphCompiler(passes=[...])`.
 
 ## 10. Guardrail Hooks
 
-**File**: `src/hecate/engine/guardrail.py`, `src/hecate/engine/middleware.py`
+**File**: `src/hecate/runtime/guardrail.py`, `src/hecate/runtime/middleware.py`
 
 Each of the four hook positions is an **ordered middleware chain**. The chain semantics (stage order, BLOCK short-circuit, SANITIZE pass-through, monotonic tightening) are fixed by the engine kernel; stages cannot re-order or skip other stages. The four legacy hook ABCs (`PreLLMHook`, `PostLLMHook`, `PreToolHook`, `PostToolHook`) remain as backward-compatible single-stage adapters wrapped by `HookStageAdapter` so existing implementations slot into a chain without rewrites.
 
@@ -508,7 +508,7 @@ class PostToolHook(ABC):
 
 ## 11. RetryStrategy
 
-**File**: `src/hecate/engine/retry.py`
+**File**: `src/hecate/runtime/retry.py`
 
 Abstract interface for retry decisions. Implementations decide whether an error warrants a retry and how long to wait before the next attempt. The strategy is **stateless** — the `RetryExecutor` passes the current attempt number (0-based) to each call.
 
@@ -546,7 +546,7 @@ Never retries — errors propagate immediately. This is the default, preserving 
 
 ## 12. ChannelBehavior
 
-**File**: `src/hecate/engine/channel.py`
+**File**: `src/hecate/runtime/channel.py`
 
 Abstract interface for channel value semantics. Defines how a channel type initializes its value and how writes are merged into the current value during graph execution.
 
@@ -579,7 +579,7 @@ class ChannelBehavior(ABC):
 
 ## 13. DecisionSink
 
-**File**: `src/hecate/engine/decision_sink.py`
+**File**: `src/hecate/runtime/decision_sink.py`
 
 Abstract interface for security/audit decision recording. Each tool decision (approve/deny/ask) is emitted as an event for the audit trail.
 
@@ -607,7 +607,7 @@ The production adapter (in `services/`) persists events to the audit log tables.
 
 ## 14. EventBus
 
-**File**: `src/hecate/engine/eventbus.py`
+**File**: `src/hecate/runtime/eventbus.py`
 
 Abstract interface for publish/subscribe collaboration events between agents. Used by broadcast, debate, and other multi-agent patterns to exchange `CollaborationEvent`s on named topics.
 
@@ -638,7 +638,7 @@ class EventBus(ABC):
 
 ## 15. MetricsStore
 
-**File**: `src/hecate/engine/metrics_store.py`
+**File**: `src/hecate/runtime/metrics_store.py`
 
 Abstract interface for telemetry recording. The engine records counters, gauges, and histograms at every boundary (LLM calls, tool invocations, checkpoint saves) without depending on a specific backend.
 
@@ -676,7 +676,7 @@ class MetricsStore(ABC):
 
 ## 16. PolicyLayer
 
-**File**: `src/hecate/engine/policy_pipeline.py`
+**File**: `src/hecate/runtime/policy_pipeline.py`
 
 Abstract interface for a single policy decision stage. Layers are composed into a `ToolPolicyPipeline` that evaluates tool-call visibility and execution permissions.
 
@@ -703,7 +703,7 @@ Composable layers built into `ToolPolicyPipeline`, including rule-based allow/de
 
 ## 17. Session Hooks
 
-**File**: `src/hecate/engine/session_hooks.py`
+**File**: `src/hecate/runtime/session_hooks.py`
 
 Four abstract hook interfaces that fire at session lifecycle boundaries, letting extensions observe or veto lifecycle transitions. All return a `HookResult` and may emit a `HookAction` (e.g. allow/deny/redirect). This section covers inventory rows 17–20 — the four interfaces below share one section rather than each getting its own.
 
@@ -744,7 +744,7 @@ class PreCompactHook(ABC):
 
 ## 21. SessionStateStore
 
-**File**: `src/hecate/engine/session_state.py`
+**File**: `src/hecate/runtime/session_state.py`
 
 Abstract interface for durable session state (summary, memory, conversation metadata) independent of the checkpoint store. Used by long-running sessions to persist `SessionState` between invocations.
 
@@ -778,7 +778,7 @@ Production stores live in `services/session_state/`: Redis, PostgreSQL, and a ti
 
 ## 22. TaskAllocator
 
-**File**: `src/hecate/engine/task_allocator.py`
+**File**: `src/hecate/runtime/task_allocator.py`
 
 Abstract interface for task-to-agent assignment in dynamic orchestration. Given a task and a set of candidate agents, selects the best-fit agent (creating one if allowed).
 
@@ -805,7 +805,7 @@ class TaskAllocator(ABC):
 
 ## 23. ApprovalCallback
 
-**File**: `src/hecate/engine/tool_access.py`
+**File**: `src/hecate/runtime/tool_access.py`
 
 Abstract interface for human-in-the-loop approval. When a tool call requires approval (per policy/risk level), the engine invokes the callback and blocks until a decision arrives.
 
@@ -841,19 +841,19 @@ An `ONCE`-scoped approval is consumed on first use: a subsequent call for the sa
 
 ## 24. MiddlewareChain
 
-**File**: `src/hecate/engine/middleware.py`
+**File**: `src/hecate/runtime/middleware.py`
 
 The waterfall chain kernel (1.3.5i E3). Each of the four legacy hook positions (see [10. Guardrail Hooks](#10-guardrail-hooks)) hosts an ordered chain of stages. A stage receives `(ctx, call_next)` and must either call `call_next()` — pass-through, optionally with modified data — or short-circuit with a `StageDecision`. The kernel enforces chain-level semantics that stages cannot bypass: BLOCK short-circuits with the originating stage's identity, a SANITIZE without `modified_data` is a contract violation surfaced as BLOCK, and decisions tighten monotonically downstream (a later stage can never loosen an earlier BLOCK). Builders in `middleware_factory.py` assemble chains per agent with scope filtering; legacy `PreLLMHook`/`PostLLMHook`/`PreToolHook`/`PostToolHook` implementations wrap as single stages via `middleware_adapters.py` without code changes.
 
 ## 25. MonotonicDenialTracker
 
-**File**: `src/hecate/engine/monotonic_denials.py`
+**File**: `src/hecate/runtime/monotonic_denials.py`
 
 Per-session tracker enforcing the monotonic denial invariant (9.4 content-aware gating upgrade): once `deny(tool_call_id)` is recorded, `is_denied` reports it for the rest of the session — no guard ordering can resurrect a denied call. The `MONOTONIC.DENIAL` log invariant fail-stops execution if a denied `tool_call_id` executes again.
 
 ## 26. ShellAnalyzer
 
-**File**: `src/hecate/engine/shell_analysis.py`
+**File**: `src/hecate/tools/tool/shell_analysis.py`
 
 Content-aware shell inspection (9.4 content-aware gating upgrade). `decompose_command` performs a quote-aware operator split of a shell command into pipeline segments; `analyze_command` runs dangerous-pattern analysis per segment (command substitution, redirect targets, chained operators). `ToolAccessPolicy._match_dangerous_patterns` routes shell tool arguments through these functions so gating decisions see command **content**, not just the tool's static `risk_level`.
 
@@ -861,7 +861,7 @@ Content-aware shell inspection (9.4 content-aware gating upgrade). `decompose_co
 
 ## ConflictResolver (Temporal)
 
-**File**: `src/hecate/engine/temporal/conflict.py`
+**File**: `src/hecate/runtime/temporal/conflict.py`
 
 Resolves conflicts when multiple agents update the same channel simultaneously. Unlike the other extension points, `ConflictResolver` is a **concrete class** (not an ABC) — it provides multiple resolution strategies out of the box.
 

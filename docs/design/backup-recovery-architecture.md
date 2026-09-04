@@ -66,7 +66,7 @@ WAL archiving enables **Point-in-Time Recovery (PITR)**: restore from yesterday'
 
 ## Storage backends
 
-Backups can land in any of four storage types (`src/hecate/services/backup/`):
+Backups can land in any of four storage types (`src/hecate/ops/backup/`):
 
 | Backend | Module | Use case |
 |---|---|---|
@@ -180,7 +180,7 @@ curl -X POST http://localhost:8000/api/restore \
 
 ## Scheduler
 
-The scheduler (`src/hecate/services/backup/scheduler.py`) runs as a background process:
+The scheduler (`src/hecate/ops/backup/scheduler.py`) runs as a background process:
 
 ```python
 class BackupScheduler:
@@ -209,7 +209,7 @@ Schedule is configured via `BACKUP_SCHEDULE_FULL`, `BACKUP_SCHEDULE_INCREMENTAL`
 A backup that doesn't restore is worse than no backup. Hecate includes `verification.py` that runs every backup through a **restore dry-run**:
 
 ```python
-# src/hecate/services/backup/verification.py
+# src/hecate/ops/backup/verification.py
 async def verify_backup(backup_id: UUID) -> VerificationResult:
     """Restore the backup to a temporary location and validate."""
     
@@ -440,18 +440,18 @@ Default: 30 days hot + 90 days cold + indefinite archive for compliance-tagged b
 ## Implementation references
 
 - `src/hecate/models/backup.py` — BackupRecordModel + enums
-- `src/hecate/services/backup/factory.py` — backup backend factory
-- `src/hecate/services/backup/pg_backup.py` — PostgreSQL backup (`pg_dump`)
-- `src/hecate/services/backup/qdrant_backup.py` — Qdrant snapshot
-- `src/hecate/services/backup/minio_backup.py` — MinIO backup
-- `src/hecate/services/backup/fs_backup.py` — filesystem backup
-- `src/hecate/services/backup/storage.py` — BackupStorage ABC
-- `src/hecate/services/backup/minio_storage.py` — MinIO storage backend
-- `src/hecate/services/backup/s3_storage.py` — S3 storage backend
-- `src/hecate/services/backup/orchestrator.py` — backup orchestration
-- `src/hecate/services/backup/scheduler.py` — cron-style scheduler
-- `src/hecate/services/backup/verification.py` — backup verification (restore dry-run)
-- `src/hecate/services/backup/restore.py` — restore from backup
+- `src/hecate/ops/backup/factory.py` — backup backend factory
+- `src/hecate/ops/backup/pg_backup.py` — PostgreSQL backup (`pg_dump`)
+- `src/hecate/ops/backup/qdrant_backup.py` — Qdrant snapshot
+- `src/hecate/ops/backup/minio_backup.py` — MinIO backup
+- `src/hecate/ops/backup/fs_backup.py` — filesystem backup
+- `src/hecate/ops/backup/storage.py` — BackupStorage ABC
+- `src/hecate/ops/backup/minio_storage.py` — MinIO storage backend
+- `src/hecate/ops/backup/s3_storage.py` — S3 storage backend
+- `src/hecate/ops/backup/orchestrator.py` — backup orchestration
+- `src/hecate/ops/backup/scheduler.py` — cron-style scheduler
+- `src/hecate/ops/backup/verification.py` — backup verification (restore dry-run)
+- `src/hecate/ops/backup/restore.py` — restore from backup
 - `src/hecate/api/system/backup.py` — Management API
 - `src/hecate/cli/backup_cli.py` — `hecate-migrate backup ...` commands
 

@@ -2,7 +2,7 @@
 
 The :class:`BrowserSession` represents a single agent session's browser
 instance. Each session is backed by a dedicated sandbox container acquired
-from :class:`hecate.services.sandbox.pool.SandboxPool`; inside the
+from :class:`hecate_sandbox.sandbox.pool.SandboxPool`; inside the
 container, the HTTP driver (``docker/sandbox/entrypoint.py``) holds the
 singleton Chromium and answers JSON-over-HTTP tool calls.
 

@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: ContextEngine ABC defines pluggable context management
-The engine SHALL define a `ContextEngine` ABC in `engine/context.py` with methods: `select_messages`, `compress`, `estimate_tokens`.
+The engine SHALL define a `ContextEngine` ABC in `runtime/context.py` with methods: `select_messages`, `compress`, `estimate_tokens`.
 
 #### Scenario: Select messages within budget
 - **WHEN** `select_messages(history, budget)` is called with message history and token budget

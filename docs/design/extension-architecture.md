@@ -36,7 +36,7 @@ Hecate uses a **two-tier** extension architecture. The boundary is **load-time v
 │                       Engine Layer (load-time)                       │
 │                                                                      │
 │   26 Engine Extension Interfaces                                  │
-│   - Abstract base classes in src/hecate/engine/                     │
+│   - Abstract base classes in src/hecate/runtime/                     │
 │   - Default InMemory implementations                                 │
 │   - Hot-swappable via dependency injection (engine startup)         │
 │   - Custom code runs IN the engine process                          │
@@ -52,7 +52,7 @@ Hecate uses a **two-tier** extension architecture. The boundary is **load-time v
 │                    Platform Layer (runtime)                          │
 │                                                                      │
 │   8 Plugin SPI Types                                               │
-│   - ABCs in src/hecate/plugin/types/ + spi/                        │
+│   - ABCs in src/hecate/core/plugin/types/ + spi/                        │
 │   - Loaded via PluginRegistry (manifest-driven)                    │
 │   - Custom code runs OUTSIDE the engine                            │
 │   - Affects integration surface                                    │
@@ -82,7 +82,7 @@ Hecate uses a **two-tier** extension architecture. The boundary is **load-time v
 All engine extension interfaces follow the **Ports and Adapters pattern** (a.k.a. Hexagonal Architecture):
 
 ```
-src/hecate/engine/
+src/hecate/runtime/
 ├── ports.py            ← EnginePort (the master boundary)
 ├── worker.py           ← Worker / WorkerPool
 ├── checkpoint.py       ← CheckpointStore
@@ -118,7 +118,7 @@ Each module exposes an `ABC` (abstract base class) and ships with at least one d
 The most important Core extension point. **All** engine-to-service communication goes through `EnginePort`. The engine never imports a service module directly.
 
 ```python
-# src/hecate/engine/ports.py
+# src/hecate/runtime/ports.py
 class EnginePort(ABC):
     @abstractmethod
     def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]: ...
@@ -136,14 +136,14 @@ class EnginePort(ABC):
     async def checkpoint_load(self, session_id: UUID) -> dict | None: ...
 ```
 
-**Default**: `InMemoryEnginePort` (testing only). **Production**: concrete adapter in `src/hecate/services/` that delegates to real services.
+**Default**: `InMemoryEnginePort` (testing only). **Production**: concrete adapter in `src/hecate/ops/` that delegates to real services.
 
 ### 2. `Worker` / `WorkerPool`
 
 Dispatches node execution. The default uses an asyncio-based pool.
 
 ```python
-# src/hecate/engine/worker.py
+# src/hecate/runtime/worker.py
 class Worker(ABC):
     @abstractmethod
     async def execute_node(self, node: Node, state: State) -> NodeResult: ...
@@ -226,7 +226,7 @@ All SPI extension points follow the **Plugin pattern** with a manifest, ABC, reg
 
 ### PluginManifest (the contract)
 
-Every SPI plugin must declare a `PluginManifest` (from `src/hecate/plugin/manifest.py`):
+Every SPI plugin must declare a `PluginManifest` (from `src/hecate/core/plugin/manifest.py`):
 
 ```python
 @dataclass(frozen=True)
@@ -248,7 +248,7 @@ The manifest is **immutable** (frozen dataclass). Plugins cannot mutate their ow
 ### 1. `EvaluatorBase`
 
 ```python
-# src/hecate/plugin/spi/evaluator.py
+# src/hecate/core/plugin/spi/evaluator.py
 class EvaluatorBase(ABC):
     @property
     @abstractmethod
@@ -323,14 +323,14 @@ class NotificationChannelAdapter(ChannelBase):
 
 ### 5. `ToolPluginBase` / `ExtensionPluginBase` / `TriggerPluginBase` / `ModelPluginBase` / `SecretProvider`
 
-The remaining five SPI types complete the eight-type taxonomy (registered in `PLUGIN_TYPE_REGISTRY` at `src/hecate/plugin/types/__init__.py`):
+The remaining five SPI types complete the eight-type taxonomy (registered in `PLUGIN_TYPE_REGISTRY` at `src/hecate/core/plugin/types/__init__.py`):
 
 | ABC | File | Purpose |
 |-----|------|---------|
-| `ToolPluginBase` | `src/hecate/plugin/types/tool.py` | Callable tool that agents can invoke (built-in, custom, or MCP-backed). |
-| `ExtensionPluginBase` | `src/hecate/plugin/types/extension.py` | Runtime interceptor auto-wired into all four guardrail hook points (Pre/Post LLM/Tool). |
-| `TriggerPluginBase` | `src/hecate/plugin/types/trigger.py` | Event-driven invocation: webhook, schedule, or message-queue triggered entry points. |
-| `ModelPluginBase` | `src/hecate/plugin/types/model.py` | Custom LLM provider built on the existing `InferenceBackendABC` surface. |
+| `ToolPluginBase` | `src/hecate/core/plugin/types/tool.py` | Callable tool that agents can invoke (built-in, custom, or MCP-backed). |
+| `ExtensionPluginBase` | `src/hecate/core/plugin/types/extension.py` | Runtime interceptor auto-wired into all four guardrail hook points (Pre/Post LLM/Tool). |
+| `TriggerPluginBase` | `src/hecate/core/plugin/types/trigger.py` | Event-driven invocation: webhook, schedule, or message-queue triggered entry points. |
+| `ModelPluginBase` | `src/hecate/core/plugin/types/model.py` | Custom LLM provider built on the existing `InferenceBackendABC` surface. |
 | `SecretProvider` | `src/hecate/vault/provider.py` | Custom secret storage backend for the vault abstraction. |
 
 All follow the same Plugin pattern (manifest → ABC → `PluginRegistry` → lifecycle). See the [plugin manifest reference](../reference/plugin-manifest.md) for the manifest contract and [Writing a custom SPI plugin](#example-a-custom-evaluator) for worked examples.
@@ -343,7 +343,7 @@ All follow the same Plugin pattern (manifest → ABC → `PluginRegistry` → li
 
 ## Plugin lifecycle
 
-A plugin goes through five states, managed by `PluginRegistry` (from `src/hecate/plugin/registry.py`):
+A plugin goes through five states, managed by `PluginRegistry` (from `src/hecate/core/plugin/registry.py`):
 
 ```
                             install
@@ -366,7 +366,7 @@ A plugin goes through five states, managed by `PluginRegistry` (from `src/hecate
 | **Disabled** | Manifest preserved, instance kept for re-enable, no new invocations |
 | **Uninstalled** | Package removed, instance destroyed |
 
-The lifecycle hooks are in `src/hecate/plugin/lifecycle.py` (optional `PluginLifecycle` protocol). Plugins can implement hooks to be notified of transitions:
+The lifecycle hooks are in `src/hecate/core/plugin/lifecycle.py` (optional `PluginLifecycle` protocol). Plugins can implement hooks to be notified of transitions:
 
 ```python
 class PluginLifecycle(Protocol):
@@ -386,9 +386,9 @@ Not all hooks are required — implement only what you need.
 
 ```python
 # my_evaluator.py
-from hecate.plugin import PluginManifest, PluginContext
-from hecate.plugin.spi.evaluator import EvaluatorBase
-from hecate.services.evaluation.types import EvalInput, EvalOutput
+from hecate.core.plugin import PluginManifest, PluginContext
+from hecate.core.plugin.spi.evaluator import EvaluatorBase
+from hecate.ops.evaluation.types import EvalInput, EvalOutput
 
 
 class DomainSpecificEvaluator(EvaluatorBase):
@@ -433,8 +433,8 @@ def register(registry):
 Then deploy:
 
 ```bash
-python -m hecate.plugin.cli package ./my_evaluator
-python -m hecate.plugin.cli install ./my_evaluator.hecate-plugin
+python -m hecate.core.plugin.cli package ./my_evaluator
+python -m hecate.core.plugin.cli install ./my_evaluator.hecate-plugin
 # enable/disable via the plugin management REST API (/api/plugins)
 ```
 
@@ -444,8 +444,8 @@ The "Extension" plugin type is special — it inherits from `ExtensionPluginBase
 
 ```python
 # my_pii_filter.py
-from hecate.plugin.types.extension import ExtensionPluginBase
-from hecate.engine.guardrail import GuardrailResult, GuardrailAction
+from hecate.core.plugin.types.extension import ExtensionPluginBase
+from hecate.runtime.guardrail import GuardrailResult, GuardrailAction
 
 
 class MyPIIFilter(ExtensionPluginBase):
@@ -497,7 +497,7 @@ Plugins cannot grant themselves permissions after registration — the manifest 
 Plugins receive a `PluginContext` at registration time, giving them access to Hecate's services without needing to import internals:
 
 ```python
-# src/hecate/plugin/sdk.py
+# src/hecate/core/plugin/sdk.py
 class PluginContext:
     db_session: AsyncSession          # Database access (subject to permissions)
     audit_log: AuditLogger            # Emit audit events
@@ -507,7 +507,7 @@ class PluginContext:
     cancel_token: CancelToken          # Cooperative cancellation
 ```
 
-Plugins should **never** import from `src/hecate/engine/` internals — only from published SPI interfaces and `hecate.plugin.sdk`. This boundary keeps third-party code from coupling to engine internals that may change.
+Plugins should **never** import from `src/hecate/runtime/` internals — only from published SPI interfaces and `hecate.core.plugin.sdk`. This boundary keeps third-party code from coupling to engine internals that may change.
 
 ---
 
@@ -609,34 +609,34 @@ If you have a use case for any of these, file an issue — we may be missing the
 
 For specific implementation details:
 
-- `src/hecate/engine/ports.py` — EnginePort ABC
-- `src/hecate/engine/worker.py` — Worker + WorkerPool ABCs
-- `src/hecate/engine/checkpoint.py` — CheckpointStore ABC
-- `src/hecate/engine/eventstore.py` — EventStore ABC
-- `src/hecate/engine/context.py` — ContextEngine ABC
-- `src/hecate/engine/scheduler.py` — SchedulerStrategy ABC
-- `src/hecate/engine/eviction.py` — EvictionPolicy ABC
-- `src/hecate/engine/optimization.py` — OptimizationPass ABC
-- `src/hecate/engine/guardrail.py` — Pre/Post LLM/Tool Hook ABCs
-- `src/hecate/engine/retry.py` — RetryStrategy ABC
-- `src/hecate/engine/temporal/conflict.py` — ConflictResolver ABC
-- `src/hecate/plugin/__init__.py` — Public SPI exports
-- `src/hecate/plugin/manifest.py` — PluginManifest dataclass
-- `src/hecate/plugin/registry.py` — PluginRegistry
-- `src/hecate/plugin/lifecycle.py` — PluginLifecycle protocol
-- `src/hecate/plugin/sdk.py` — PluginContext
-- `src/hecate/plugin/spi/evaluator.py` — EvaluatorBase
-- `src/hecate/plugin/types/extension.py` — ExtensionPluginBase (4 hooks)
-- `src/hecate/plugin/types/tool.py` — ToolPluginBase
-- `src/hecate/plugin/types/model.py` — ModelPluginBase
-- `src/hecate/plugin/types/trigger.py` — TriggerPluginBase
-- `src/hecate/plugin/cli.py` — standalone plugin CLI (`python -m hecate.plugin.cli`)
-- `src/hecate/plugin/hot_reload.py` — plugin hot-reload
-- `src/hecate/plugin/permission.py` — permissions enforcement
-- `src/hecate/plugin/loader.py` — plugin loader
-- `src/hecate/plugin/installer.py` — plugin installer
-- `src/hecate/plugin/validation.py` — manifest validation
-- `src/hecate/plugin/packaging.py` — plugin packaging
+- `src/hecate/runtime/ports.py` — EnginePort ABC
+- `src/hecate/runtime/worker.py` — Worker + WorkerPool ABCs
+- `src/hecate/runtime/checkpoint.py` — CheckpointStore ABC
+- `src/hecate/runtime/eventstore.py` — EventStore ABC
+- `src/hecate/runtime/context.py` — ContextEngine ABC
+- `src/hecate/runtime/scheduler.py` — SchedulerStrategy ABC
+- `src/hecate/runtime/eviction.py` — EvictionPolicy ABC
+- `src/hecate/runtime/optimization.py` — OptimizationPass ABC
+- `src/hecate/runtime/guardrail.py` — Pre/Post LLM/Tool Hook ABCs
+- `src/hecate/runtime/retry.py` — RetryStrategy ABC
+- `src/hecate/runtime/temporal/conflict.py` — ConflictResolver ABC
+- `src/hecate/core/plugin/__init__.py` — Public SPI exports
+- `src/hecate/core/plugin/manifest.py` — PluginManifest dataclass
+- `src/hecate/core/plugin/registry.py` — PluginRegistry
+- `src/hecate/core/plugin/lifecycle.py` — PluginLifecycle protocol
+- `src/hecate/core/plugin/sdk.py` — PluginContext
+- `src/hecate/core/plugin/spi/evaluator.py` — EvaluatorBase
+- `src/hecate/core/plugin/types/extension.py` — ExtensionPluginBase (4 hooks)
+- `src/hecate/core/plugin/types/tool.py` — ToolPluginBase
+- `src/hecate/core/plugin/types/model.py` — ModelPluginBase
+- `src/hecate/core/plugin/types/trigger.py` — TriggerPluginBase
+- `src/hecate/core/plugin/cli.py` — standalone plugin CLI (`python -m hecate.core.plugin.cli`)
+- `src/hecate/core/plugin/hot_reload.py` — plugin hot-reload
+- `src/hecate/core/plugin/permission.py` — permissions enforcement
+- `src/hecate/core/plugin/loader.py` — plugin loader
+- `src/hecate/core/plugin/installer.py` — plugin installer
+- `src/hecate/core/plugin/validation.py` — manifest validation
+- `src/hecate/core/plugin/packaging.py` — plugin packaging
 
 ## Related documents
 

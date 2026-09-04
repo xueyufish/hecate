@@ -54,7 +54,7 @@ Hecate unifies all multi-agent topologies under six collaboration patterns, each
 | **Negotiation** | Two agents propose and counter-propose until agreement | Conflict resolution, contract drafting |
 | **Debate** | Two debaters argue opposing views; a judge selects the best answer | Decision support, exploring tradeoffs |
 
-The patterns live in `src/hecate/engine/patterns.py`. Each has a builder in `engine/templates.py` that emits a `GraphConfig` — nodes, edges, channels — ready for compilation.
+The patterns live in `src/hecate/studio/workflows/patterns.py`. Each has a builder in `runtime/templates.py` that emits a `GraphConfig` — nodes, edges, channels — ready for compilation.
 
 ---
 
@@ -462,7 +462,7 @@ curl -X POST http://localhost:8000/api/workflows/<WORKFLOW_ID>/rollback/1 \
 
 ## Writing your own graph DSL
 
-For patterns the generators don't cover, write the DSL directly. The schema is `src/hecate/engine/graph-dsl.schema.json`. A minimal example:
+For patterns the generators don't cover, write the DSL directly. The schema is `src/hecate/runtime/graph-dsl.schema.json`. A minimal example:
 
 ```json
 {
@@ -506,7 +506,7 @@ For patterns the generators don't cover, write the DSL directly. The schema is `
 
 Node types: `agent`, `condition`, `fan_out`, `merge`. Channel types: `topic` (append-reduce), `last_value`. Edges can have `when` predicates for conditional routing.
 
-See the bundled [Graph DSL JSON Schema](../../src/hecate/engine/graph-dsl.schema.json) for the full schema definition.
+See the bundled [Graph DSL JSON Schema](../../src/hecate/runtime/graph-dsl.schema.json) for the full schema definition.
 
 ---
 

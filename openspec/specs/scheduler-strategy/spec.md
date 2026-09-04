@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: SchedulerStrategy ABC defines pluggable node scheduling
-The engine SHALL define a `SchedulerStrategy` ABC in `engine/scheduler.py` with abstract methods: `select_next` and `set_weights`.
+The engine SHALL define a `SchedulerStrategy` ABC in `runtime/scheduler.py` with abstract methods: `select_next` and `set_weights`.
 
 #### Scenario: Select next nodes to execute
 - **WHEN** `select_next(nodes, context)` is called with a list of ready node IDs

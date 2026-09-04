@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: OptimizationPass ABC defines pluggable graph optimization
-The engine SHALL define an `OptimizationPass` ABC in `engine/optimization.py` with abstract method: `optimize(graph: CompiledGraph) -> CompiledGraph`.
+The engine SHALL define an `OptimizationPass` ABC in `runtime/optimization.py` with abstract method: `optimize(graph: CompiledGraph) -> CompiledGraph`.
 
 #### Scenario: Optimize returns new graph
 - **WHEN** `optimize(graph)` is called with a CompiledGraph

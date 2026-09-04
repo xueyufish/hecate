@@ -157,12 +157,12 @@ See [Model Hub](../concepts/model-hub.md).
 
 | What | Where |
 |------|-------|
-| Engine (Pregel runtime, compiler, channels) | `src/hecate/engine/` |
-| Services (LLM, RAG, tools, MCP, auth) | `src/hecate/services/` |
+| Engine (Pregel runtime, compiler, channels) | `src/hecate/runtime/` |
+| Domains (studio, ops, tools, enterprise, channel) | `src/hecate/<domain>/`; extracted wheels under `packages/` (LLM, RAG, sandbox, enterprise, ops pipeline) |
 | API routes | `src/hecate/api/` |
 | ORM models | `src/hecate/models/` |
 | Configuration | `src/hecate/core/config.py` |
-| Graph DSL JSON Schema | `src/hecate/engine/graph-dsl.schema.json` |
+| Graph DSL JSON Schema | `src/hecate/runtime/graph-dsl.schema.json` |
 | App entrypoint | `src/hecate/main.py` |
 | Tests | `tests/` (mirrors `src/hecate/` structure) |
 

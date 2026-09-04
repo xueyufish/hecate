@@ -62,7 +62,7 @@ from datetime import datetime, timezone
 
 from redis.asyncio import Redis
 
-from hecate.engine.checkpoint import CheckpointStore
+from hecate.runtime.checkpoint import CheckpointStore
 
 
 class RedisCheckpointStore(CheckpointStore):
@@ -122,7 +122,7 @@ Test with lightweight stubs — no real Redis needed for unit tests. Mock the Re
 ```python
 from __future__ import annotations
 
-from hecate.engine.guardrail import PostLLMHook
+from hecate.runtime.guardrail import PostLLMHook
 
 
 class ProfanityFilterHook(PostLLMHook):
@@ -176,7 +176,7 @@ async def test_profanity_filter_blocks_banned_word():
 ```python
 from __future__ import annotations
 
-from hecate.engine.scheduler import SchedulerStrategy
+from hecate.runtime.scheduler import SchedulerStrategy
 
 
 class PriorityScheduler(SchedulerStrategy):
@@ -217,7 +217,7 @@ The engine is designed for testability with lightweight stubs — no mocking fra
 
 ```python
 # Verify your CheckpointStore is a valid implementation
-from hecate.engine.checkpoint import CheckpointStore
+from hecate.runtime.checkpoint import CheckpointStore
 
 assert isinstance(my_store, CheckpointStore)  # duck-type check
 # Or test that the ABC cannot be instantiated directly:
