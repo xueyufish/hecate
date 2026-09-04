@@ -83,24 +83,24 @@
 - [x] 11.1 `ruff check src/hecate/ tests/` clean
 - [x] 11.2 `ruff format --check src/hecate/ tests/` clean (run `ruff format` if not)
 - [x] 11.3 `mypy src/` clean
-- [ ] 11.4 Full `python -m pytest tests/ -q` → expect ≈4089 passed (no regression)
+- [x] 11.4 Full `python -m pytest tests/ -q` → expect ≈4089 passed (no regression)
 - [x] 11.5 `python -m pytest tests/test_layering_domain.py tests/test_runtime/test_runtime_self_sufficiency.py tests/test_build/test_core_self_sufficiency.py -q` → all green
 - [x] 11.6 `python -c "import hecate.main; import hecate.ops.scheduling.executors"` → smoke OK
-- [ ] 11.7 pre-commit hook runs cleanly on commit attempt
+- [x] 11.7 pre-commit hook runs cleanly on commit attempt
 
 ## 12. Documentation sync
 
 - [x] 12.1 Edit `docs/research/industry-architecture-comparison.md` §1.4 主包行 — remove "遗留：顶层 api/management/* 41 个管理路由待归域（note" 注记
 - [x] 12.2 Edit `docs/research/industry-architecture-comparison.md` §1.1 分歧注 ⑧ — remove (now obsolete after PR lands)
-- [ ] 12.3 Edit `docs/research/industry-architecture-comparison.md` §3.5 Phase R table — update to reflect PR #121 (this change)
-- [ ] 12.4 Verify no stale `src/hecate/api/management/` paths in any committed doc (research doc + git-tracked docs)
+- [x] 12.3 Edit `docs/research/industry-architecture-comparison.md` §3.5 Phase R table — update to reflect PR #121 (this change)
+- [x] 12.4 Verify no stale `src/hecate/api/management/` paths in any committed doc (research doc + git-tracked docs)
 
 ## 13. Commit & PR
 
-- [ ] 13.1 Single `git commit -m "refactor(domain): relocate api/management routers per Phase R §1.1"` with detailed body (mirrors PR #120 commit message style)
-- [ ] 13.2 `git push --set-upstream origin opsx/api-management-relocate` (after user approval per AGENTS.md Git rule)
-- [ ] 13.3 Open PR via GitHub UI; recommend "Squash and merge" (per AGENTS.md `Merge commits are disabled at the repo level`)
-- [ ] 13.4 Update `docs/research/...` §3.7 schedule table Phase R row to include this PR number
+- [x] 13.1 Single `git commit -m "refactor(domain): relocate api/management routers per Phase R §1.1"` with detailed body (mirrors PR #120 commit message style)
+- [x] 13.2 `git push --set-upstream origin opsx/api-management-relocate` (after user approval per AGENTS.md Git rule)
+- [x] 13.3 Open PR via GitHub UI; recommend "Squash and merge" (per AGENTS.md `Merge commits are disabled at the repo level`)
+- [x] 13.4 Update `docs/research/...` §3.7 schedule table Phase R row to include this PR number
 
 ## Out of scope (future change)
 
