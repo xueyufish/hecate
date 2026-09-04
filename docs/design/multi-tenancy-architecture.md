@@ -456,7 +456,7 @@ For high-sensitivity tenants (healthcare, finance, government), consider:
 - `src/hecate/auth/registration.py` — user registration flow
 - `src/hecate/scim/` — SCIM 2.0 implementation
 - `src/hecate/api/auth.py` — auth endpoints
-- `src/hecate/api/middleware.py` — tenant isolation middleware
+- `src/hecate/core/middleware/audit.py` — tenant isolation middleware
 
 ## Related documents
 

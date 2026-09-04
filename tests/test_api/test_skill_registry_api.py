@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.api.management.skill_registry import router
+from hecate.tools.api.skill_registry import router
 
 
 def test_skill_registry_router_exists() -> None:

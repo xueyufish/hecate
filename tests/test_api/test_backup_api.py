@@ -64,7 +64,7 @@ async def test_api_list_backups(client, mock_backup_record):
 
 async def test_api_get_backup_detail(client, mock_backup_record):
     """GET /api/system/backups/{id} returns backup details."""
-    with patch("hecate.api.system.backup.async_session_factory") as mock_factory:
+    with patch("hecate.ops.api.backup.async_session_factory") as mock_factory:
         mock_session = AsyncMock()
         mock_session.get = AsyncMock(return_value=mock_backup_record)
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)
@@ -81,7 +81,7 @@ async def test_api_get_backup_not_found(client):
     """GET /api/system/backups/{id} returns 404 for unknown backup."""
     backup_id = uuid.uuid4()
 
-    with patch("hecate.api.system.backup.async_session_factory") as mock_factory:
+    with patch("hecate.ops.api.backup.async_session_factory") as mock_factory:
         mock_session = AsyncMock()
         mock_session.get = AsyncMock(return_value=None)
         mock_factory.return_value.__aenter__ = AsyncMock(return_value=mock_session)

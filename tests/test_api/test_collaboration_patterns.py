@@ -104,7 +104,7 @@ def test_generate_missing_params_returns_422():
 
 def test_template_listing_includes_pattern_type():
     """GET /api/orchestration-templates includes pattern_type field."""
-    from hecate.api.management import orchestration_templates as mod
+    from hecate.studio.api import orchestration_templates as mod
 
     mod._template_cache = None
 
@@ -129,7 +129,7 @@ def test_template_listing_includes_pattern_type():
 
 def test_new_templates_loadable():
     """Negotiation and debate templates are loadable via API."""
-    from hecate.api.management import orchestration_templates as mod
+    from hecate.studio.api import orchestration_templates as mod
 
     mod._template_cache = None
 

@@ -24,7 +24,7 @@ def _override_auth():
 @pytest.fixture(autouse=True)
 def _clear_template_cache():
     """Clear template cache before each test."""
-    from hecate.api.management import orchestration_templates as mod
+    from hecate.studio.api import orchestration_templates as mod
 
     mod._template_cache = None
     yield

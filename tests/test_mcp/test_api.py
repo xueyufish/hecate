@@ -18,7 +18,7 @@ def mcp_manager() -> MCPClientManager:
 
 async def test_list_connections_empty(client: AsyncClient) -> None:
     """List connections returns empty list when no servers registered."""
-    with patch("hecate.api.management.mcp.get_mcp_manager") as mock:
+    with patch("hecate.tools.api.mcp.get_mcp_manager") as mock:
         manager = MCPClientManager(health_check_interval=0)
         mock.return_value = manager
         resp = await client.get("/api/mcp/connections")
@@ -28,7 +28,7 @@ async def test_list_connections_empty(client: AsyncClient) -> None:
 
 async def test_list_connections_with_servers(client: AsyncClient) -> None:
     """List connections returns registered servers with status."""
-    with patch("hecate.api.management.mcp.get_mcp_manager") as mock:
+    with patch("hecate.tools.api.mcp.get_mcp_manager") as mock:
         manager = MCPClientManager(health_check_interval=0)
         manager.register_server("srv1", "http://localhost:8001", "http", "ws-1")
         mock.return_value = manager
@@ -43,7 +43,7 @@ async def test_list_connections_with_servers(client: AsyncClient) -> None:
 
 async def test_get_connection_detail(client: AsyncClient) -> None:
     """Get connection detail for a specific server."""
-    with patch("hecate.api.management.mcp.get_mcp_manager") as mock:
+    with patch("hecate.tools.api.mcp.get_mcp_manager") as mock:
         manager = MCPClientManager(health_check_interval=0)
         manager.register_server("srv1", "http://localhost:8001", "http")
         mock.return_value = manager
@@ -57,7 +57,7 @@ async def test_get_connection_detail(client: AsyncClient) -> None:
 
 async def test_get_connection_not_found(client: AsyncClient) -> None:
     """Get connection returns 404 for unknown server."""
-    with patch("hecate.api.management.mcp.get_mcp_manager") as mock:
+    with patch("hecate.tools.api.mcp.get_mcp_manager") as mock:
         manager = MCPClientManager(health_check_interval=0)
         mock.return_value = manager
 
@@ -67,7 +67,7 @@ async def test_get_connection_not_found(client: AsyncClient) -> None:
 
 async def test_reconnect_connection(client: AsyncClient) -> None:
     """Manual reconnect resets pool and circuit breaker."""
-    with patch("hecate.api.management.mcp.get_mcp_manager") as mock:
+    with patch("hecate.tools.api.mcp.get_mcp_manager") as mock:
         manager = MCPClientManager(health_check_interval=0)
         manager.register_server("srv1", "http://localhost:8001", "http")
         mock.return_value = manager
@@ -79,7 +79,7 @@ async def test_reconnect_connection(client: AsyncClient) -> None:
 
 async def test_reconnect_connection_not_found(client: AsyncClient) -> None:
     """Reconnect returns 404 for unknown server."""
-    with patch("hecate.api.management.mcp.get_mcp_manager") as mock:
+    with patch("hecate.tools.api.mcp.get_mcp_manager") as mock:
         manager = MCPClientManager(health_check_interval=0)
         mock.return_value = manager
 
@@ -89,7 +89,7 @@ async def test_reconnect_connection_not_found(client: AsyncClient) -> None:
 
 async def test_sync_connection(client: AsyncClient) -> None:
     """Sync invalidates cache and re-discovers tools."""
-    with patch("hecate.api.management.mcp.get_mcp_manager") as mock:
+    with patch("hecate.tools.api.mcp.get_mcp_manager") as mock:
         manager = MCPClientManager(health_check_interval=0)
         manager.register_server("srv1", "http://localhost:8001", "http")
         mock.return_value = manager
@@ -106,7 +106,7 @@ async def test_sync_connection(client: AsyncClient) -> None:
 
 async def test_sync_connection_not_found(client: AsyncClient) -> None:
     """Sync returns 404 for unknown server."""
-    with patch("hecate.api.management.mcp.get_mcp_manager") as mock:
+    with patch("hecate.tools.api.mcp.get_mcp_manager") as mock:
         manager = MCPClientManager(health_check_interval=0)
         mock.return_value = manager
 

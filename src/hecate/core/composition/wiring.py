@@ -276,7 +276,7 @@ def start_monitoring() -> None:
 
 async def start_audit_batch_writer() -> None:
     """Start the audit log batch writer (DB bridge)."""
-    from hecate.api.middleware import set_audit_queue
+    from hecate.core.middleware.audit import set_audit_queue
     from hecate.ops.audit.store import AuditEvent, DatabaseAuditStore
     from hecate.ops.audit.writer import AuditBatchWriter
 
@@ -302,8 +302,8 @@ async def prewarm_sandbox_pool() -> None:
 
 def start_tool_decision_pipeline() -> None:
     """Wire the structured tool-decision event pipeline."""
-    from hecate.api.tool_decisions import set_tool_decision_service
     from hecate.core.config import settings
+    from hecate.ops.api.tool_decisions import set_tool_decision_service
     from hecate.ops.tool_decisions import ToolDecisionService
     from hecate.runtime.decision_sink import decision_emitter
 
@@ -318,7 +318,7 @@ def start_tool_decision_pipeline() -> None:
 
 def start_security_findings() -> None:
     """Attach the security finding persistence service."""
-    from hecate.api.security_findings import set_security_finding_service
+    from hecate.ops.api.security_findings import set_security_finding_service
     from hecate.ops.security.findings import SecurityFindingService
 
     set_security_finding_service(SecurityFindingService())

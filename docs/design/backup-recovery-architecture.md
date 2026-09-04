@@ -124,7 +124,7 @@ This makes backups queryable (`SELECT * FROM backup_records WHERE workspace_id =
 
 ## Backup API
 
-Backups are managed via the management API (`src/hecate/api/system/backup.py`):
+Backups are managed via the management API (`src/hecate/ops/api/backup.py`):
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -452,7 +452,7 @@ Default: 30 days hot + 90 days cold + indefinite archive for compliance-tagged b
 - `src/hecate/ops/backup/scheduler.py` — cron-style scheduler
 - `src/hecate/ops/backup/verification.py` — backup verification (restore dry-run)
 - `src/hecate/ops/backup/restore.py` — restore from backup
-- `src/hecate/api/system/backup.py` — Management API
+- `src/hecate/ops/api/backup.py` — Management API
 - `src/hecate/cli/backup_cli.py` — `hecate-migrate backup ...` commands
 
 ## Related documents
