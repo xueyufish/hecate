@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from hecate.api.management.model_providers import DEFAULT_CONFIG, _validate_config
+from hecate.enterprise.api.model_providers import DEFAULT_CONFIG, _validate_config
 
 
 class TestValidateConfig:

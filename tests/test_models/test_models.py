@@ -638,7 +638,7 @@ class TestPluginModelProvenance:
         db_session.add(plugin)
         await db_session.flush()
 
-        from hecate.api.management.plugins import PluginReadSchema
+        from hecate.studio.api.plugins import PluginReadSchema
 
         read = PluginReadSchema.model_validate(plugin)
         assert read.origin == "git:https://example.com/repo@abc123"

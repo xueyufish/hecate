@@ -107,7 +107,7 @@ class TestModelTest:
         with patch("hecate_llm.service._get_litellm") as mock_get_litellm:
             mock_get_litellm.return_value.acompletion = mock_completion
             with patch(
-                "hecate.api.management.model_providers.decrypt_api_key",
+                "hecate.enterprise.api.model_providers.decrypt_api_key",
                 return_value="sk-test",
             ):
                 response = await provider_client.post(

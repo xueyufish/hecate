@@ -112,7 +112,7 @@ class PluginService:
 
         # Register MCP server if plugin entry starts with mcp://
         if plugin.entry and plugin.entry.startswith("mcp://"):
-            from hecate.api.management.mcp import get_mcp_manager
+            from hecate.tools.api.mcp import get_mcp_manager
 
             manager = get_mcp_manager()
             endpoint = plugin.entry.removeprefix("mcp://")
@@ -137,7 +137,7 @@ class PluginService:
 
         # Unregister MCP server if plugin entry starts with mcp://
         if plugin.entry and plugin.entry.startswith("mcp://"):
-            from hecate.api.management.mcp import get_mcp_manager
+            from hecate.tools.api.mcp import get_mcp_manager
 
             manager = get_mcp_manager()
             manager.unregister_server(plugin.name)
@@ -681,7 +681,7 @@ class PluginService:
         if not active:
             return
 
-        from hecate.api.management.mcp import get_mcp_manager
+        from hecate.tools.api.mcp import get_mcp_manager
 
         manager = get_mcp_manager()
         ws = str(plugin.workspace_id) if plugin.workspace_id else None

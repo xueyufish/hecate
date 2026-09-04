@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from hecate.api.middleware import (
+from hecate.core.middleware.audit import (
     AuditMiddleware,
     _map_path_to_action,
     set_audit_queue,

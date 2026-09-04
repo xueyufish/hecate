@@ -74,11 +74,11 @@ async def test_list_agents_is_workspace_scoped(client, auth_context_b, second_wo
     """
     import json
 
-    from hecate.api.management.agents import (
-        router as _,  # noqa: F401  (imported to ensure router is registered on the app)
-    )
     from hecate.core.deps_workspace import get_auth_context
     from hecate.main import app
+    from hecate.studio.api.agents import (
+        router as _,  # noqa: F401  (imported to ensure router is registered on the app)
+    )
 
     # Capture the default workspace-A override the client fixture installed
     # so we can restore it after swapping to workspace B below.

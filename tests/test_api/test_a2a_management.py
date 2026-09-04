@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hecate.api.management.a2a import router
+from hecate.channel.api.a2a import router
 
 
 def test_a2a_management_router_exists() -> None:

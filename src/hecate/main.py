@@ -21,44 +21,12 @@ from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response as StarletteResponse
 
-from hecate.api.audit import router as audit_router
-from hecate.api.evaluation import router as evaluation_router
-from hecate.api.management.a2a import router as a2a_management_router
-from hecate.api.management.agent_health import router as agent_health_router
-from hecate.api.management.agent_templates import router as agent_templates_router
-from hecate.api.management.agents import router as agents_router
-from hecate.api.management.api_keys import router as api_keys_router
 from hecate.api.management.budget import router as budget_router
 from hecate.api.management.collaboration_patterns import router as collaboration_patterns_router
-from hecate.api.management.conversation_analytics import router as conversation_analytics_router
 from hecate.api.management.conversations import router as conversations_router
-from hecate.api.management.costs import router as costs_router
-from hecate.api.management.feature_flags import router as feature_flags_router
-from hecate.api.management.hooks import router as hooks_router
-from hecate.api.management.i18n import router as i18n_router
-from hecate.api.management.mcp import router as mcp_router
-from hecate.api.management.model_pricing import router as model_pricing_router
-from hecate.api.management.model_providers import router as model_providers_router
-from hecate.api.management.ops_center_overview import router as ops_center_overview_router
-from hecate.api.management.orchestration_templates import router as orchestration_templates_router
-from hecate.api.management.plugins import router as plugins_router
-from hecate.api.management.preflight import router as preflight_router
-from hecate.api.management.prompts import router as prompts_router
-from hecate.api.management.quotas import quotas_router
 from hecate.api.management.replay import router as replay_router
-from hecate.api.management.sessions import router as sessions_router
-from hecate.api.management.skill_registry import router as skill_registry_router
-from hecate.api.management.skills import router as skills_router
-from hecate.api.management.tool_analytics import router as tool_analytics_router
-from hecate.api.management.tool_cache import router as tool_cache_router
-from hecate.api.management.tool_policies import router as tool_policies_router
-from hecate.api.management.tools import router as tools_router
 from hecate.api.management.traces import router as traces_router
-from hecate.api.management.workflows import router as workflows_router
-from hecate.api.middleware import AuditMiddleware
-from hecate.api.schedules import router as schedules_router
-from hecate.api.security_findings import router as security_findings_router
-from hecate.api.tool_decisions import router as tool_decisions_router
+from hecate.channel.api.a2a import router as a2a_management_router
 from hecate.channel.api.v1.agents import router as agent_chat_router
 from hecate.channel.api.v1.chat import router as chat_router
 from hecate.channel.api.v1.models import router as models_router
@@ -77,8 +45,40 @@ from hecate.channel.management.alerts import (
 from hecate.channel.management.alerts import (
     silences_router as alert_silences_router,
 )
+from hecate.core.api.feature_flags import router as feature_flags_router
+from hecate.core.api.i18n import router as i18n_router
 from hecate.core.config import settings as _settings
 from hecate.core.database import engine
+from hecate.core.middleware.audit import AuditMiddleware
+from hecate.enterprise.api.api_keys import router as api_keys_router
+from hecate.enterprise.api.model_providers import router as model_providers_router
+from hecate.ops.api.agent_health import router as agent_health_router
+from hecate.ops.api.audit import router as audit_router
+from hecate.ops.api.conversation_analytics import router as conversation_analytics_router
+from hecate.ops.api.costs import router as costs_router
+from hecate.ops.api.evaluation import router as evaluation_router
+from hecate.ops.api.model_pricing import router as model_pricing_router
+from hecate.ops.api.ops_center_overview import router as ops_center_overview_router
+from hecate.ops.api.preflight import router as preflight_router
+from hecate.ops.api.quotas import quotas_router
+from hecate.ops.api.schedules import router as schedules_router
+from hecate.ops.api.security_findings import router as security_findings_router
+from hecate.ops.api.tool_analytics import router as tool_analytics_router
+from hecate.ops.api.tool_decisions import router as tool_decisions_router
+from hecate.runtime.api.hooks import router as hooks_router
+from hecate.runtime.api.sessions import router as sessions_router
+from hecate.studio.api.agent_templates import router as agent_templates_router
+from hecate.studio.api.agents import router as agents_router
+from hecate.studio.api.orchestration_templates import router as orchestration_templates_router
+from hecate.studio.api.plugins import router as plugins_router
+from hecate.studio.api.prompts import router as prompts_router
+from hecate.studio.api.workflows import router as workflows_router
+from hecate.tools.api.mcp import router as mcp_router
+from hecate.tools.api.skill_registry import router as skill_registry_router
+from hecate.tools.api.skills import router as skills_router
+from hecate.tools.api.tool_cache import router as tool_cache_router
+from hecate.tools.api.tool_policies import router as tool_policies_router
+from hecate.tools.api.tools import router as tools_router
 
 logger = logging.getLogger(__name__)
 
@@ -386,7 +386,7 @@ async def metrics() -> PlainTextResponse:
 # /auth depends on hecate-enterprise (AuthService in hecate_enterprise.services.auth.service).
 # Lazy include so core-only installs (no enterprise wheel) don't fail at import.
 try:
-    from hecate.api.auth import router as auth_router
+    from hecate.enterprise.api.auth import router as auth_router
 
     app.include_router(auth_router, prefix="/api", tags=["auth"])
 except ImportError:
@@ -542,7 +542,7 @@ except ImportError:
     logger.warning("hecate-sandbox not installed; skipping environment routes")
 
 # Backup & Recovery API
-from hecate.api.system.backup import router as backup_router  # noqa: E402
+from hecate.ops.api.backup import router as backup_router  # noqa: E402
 
 app.include_router(backup_router, tags=["backup"])
 

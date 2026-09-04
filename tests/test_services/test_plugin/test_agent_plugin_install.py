@@ -87,7 +87,7 @@ class _FakeManager:
 @pytest.fixture
 def fake_mcp(monkeypatch: pytest.MonkeyPatch) -> _FakeManager:
     manager = _FakeManager()
-    import hecate.api.management.mcp as mcp_module
+    import hecate.tools.api.mcp as mcp_module
 
     monkeypatch.setattr(mcp_module, "get_mcp_manager", lambda: manager)
     return manager
