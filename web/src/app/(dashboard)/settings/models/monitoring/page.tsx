@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { LineChart } from "@/components/ui/line-chart";
 import { Activity, TrendingUp, AlertTriangle, DollarSign } from "lucide-react";
@@ -15,14 +14,14 @@ interface ModelOption {
   provider_name: string;
 }
 
-interface PerformancePoint {
+type PerformancePoint = {
   date: string;
   avg_latency: number;
   ttft: number;
   error_rate: number;
   request_count: number;
   cost: number;
-}
+};
 
 interface DriftResult {
   model_id: string;
@@ -34,7 +33,6 @@ interface DriftResult {
   severity: string;
 }
 
-const COLORS = ["hsl(var(--chart-1))", "hsl(var(--chart-2))", "hsl(var(--chart-3))", "hsl(var(--chart-4))", "hsl(var(--chart-5))"];
 
 export default function ModelMonitoringPage() {
   const [models, setModels] = useState<ModelOption[]>([]);

@@ -5,9 +5,8 @@ import { api } from "@/lib/api-client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BarChart } from "@/components/ui/bar-chart";
 import { LineChart } from "@/components/ui/line-chart";
-import { Wrench, TrendingUp, AlertTriangle, Clock, CheckCircle } from "lucide-react";
+import { Wrench, AlertTriangle, Clock, CheckCircle } from "lucide-react";
 
 interface Overview {
   total_executions: number;

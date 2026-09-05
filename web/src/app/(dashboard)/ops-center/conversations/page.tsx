@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart } from "@/components/ui/bar-chart";
 import { LineChart } from "@/components/ui/line-chart";
-import { MessageSquare, ThumbsUp, ThumbsDown, AlertTriangle, CheckCircle, TrendingUp } from "lucide-react";
+import { MessageSquare, ThumbsUp, AlertTriangle, TrendingUp } from "lucide-react";
 
 interface Overview {
   total_conversations: number;
@@ -230,6 +230,7 @@ export default function ConversationAnalyticsPage() {
             {topics.length > 0 ? (
               <BarChart
                 data={topics.map((t) => ({
+                  name: t.topic,
                   topic: t.topic,
                   count: t.count,
                 }))}

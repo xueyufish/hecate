@@ -68,6 +68,7 @@ describe("/embed/chat route", () => {
 
   it("expands to the chat window when the bubble is clicked", async () => {
     mockedApi.post.mockResolvedValue({ id: "created-conv" });
+    mockedApi.get.mockResolvedValue({ messages: [], agent_id: "agent-abc" });
 
     const user = userEvent.setup();
     render(<EmbedChatRoute />);

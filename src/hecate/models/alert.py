@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Boolean, Float, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -94,9 +94,9 @@ class AlertEventModel(BaseModel):
     rule_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     state: Mapped[str] = mapped_column(String(16), nullable=False, default=AlertState.PENDING)
     current_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    fired_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    resolved_at: Mapped[datetime | None] = mapped_column(nullable=True)
-    acked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     acked_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     escalation_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
@@ -109,8 +109,8 @@ class AlertSilenceModel(BaseModel):
 
     __tablename__ = "alert_silences"
 
-    start_at: Mapped[datetime] = mapped_column(nullable=False)
-    end_at: Mapped[datetime] = mapped_column(nullable=False)
+    start_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     matchers: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     created_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     reason: Mapped[str | None] = mapped_column(String(500), nullable=True)

@@ -1,19 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  applyNodeChanges,
-  applyEdgeChanges,
-  addEdge,
-  getBezierPath,
-  type Edge,
-  type EdgeProps,
-  type BaseEdge,
-} from "@xyflow/react";
+import { ReactFlow, Background, Controls, MiniMap, applyNodeChanges, applyEdgeChanges, addEdge, getBezierPath, type Edge, type EdgeProps } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { nodeTypeComponents } from "./node-types";
 import { EdgeTypeSelector } from "./edge-type-selector";
