@@ -78,7 +78,18 @@ export default function AgentDetailPage() {
             Export
           </button>
           <button
-            onClick={() => router.push(`/chat/${agentId}`)}
+            onClick={async () => {
+              // Create the conversation first: /chat/{id} expects a
+              // conversation id and resolves the agent from it.
+              try {
+                const conv = await api.post<{ id: string }>("/api/conversations", {
+                  agent_id: agentId,
+                });
+                router.push(`/chat/${conv.id}`);
+              } catch {
+                router.push(`/chat/${agentId}`);
+              }
+            }}
             className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground hover:bg-primary/90"
           >
             Start Chat

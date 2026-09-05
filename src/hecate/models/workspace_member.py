@@ -38,7 +38,12 @@ class WorkspaceMemberModel(BaseModel):
     user_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     role: Mapped[WorkspaceRole] = mapped_column(
-        Enum(WorkspaceRole, name="workspace_role", create_constraint=True),
+        Enum(
+            WorkspaceRole,
+            name="workspace_role",
+            create_constraint=True,
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
         default=WorkspaceRole.VIEWER,
     )

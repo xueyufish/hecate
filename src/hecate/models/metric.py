@@ -11,7 +11,7 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel as PydanticBase
-from sqlalchemy import Float, String
+from sqlalchemy import DateTime, Float, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -41,7 +41,7 @@ class MetricModel(BaseModel):
     value: Mapped[float] = mapped_column(Float, nullable=False)
     type: Mapped[str] = mapped_column(String(32), nullable=False, default=MetricType.COUNTER)
     tags: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
-    timestamp: Mapped[datetime] = mapped_column(nullable=False, index=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
 
 
 class MetricCreateSchema(PydanticBase):

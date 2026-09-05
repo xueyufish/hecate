@@ -28,8 +28,8 @@ export default function KnowledgePage() {
 
   useEffect(() => {
     api
-      .get<KB[]>("/api/knowledge-bases")
-      .then(setKBs)
+      .get<{ items?: KB[] }>("/api/knowledge-bases")
+      .then((res) => setKBs(res.items || []))
       .catch(() => setKBs([]))
       .finally(() => setLoading(false));
   }, []);

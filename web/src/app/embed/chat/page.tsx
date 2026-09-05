@@ -44,23 +44,19 @@ function EmbedChatPage() {
   }, [agentParam]);
 
   if (!agentParam) {
+    // A chat bubble cannot function without an agent — render the
+    // misconfiguration notice directly instead of the widget shell.
     return (
-      <WidgetBubble
-        agentId=""
-        conversationId={null}
-        surface={
-          <div
-            className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground"
-            data-testid="embed-no-agent-placeholder"
-          >
-            <p>
-              No agent specified. Append{" "}
-              <code className="rounded bg-muted px-1 py-0.5 text-xs">?agent=&lt;uuid&gt;</code>{" "}
-              to the URL.
-            </p>
-          </div>
-        }
-      />
+      <div
+        className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground"
+        data-testid="embed-no-agent-placeholder"
+      >
+        <p>
+          No agent specified. Append{" "}
+          <code className="rounded bg-muted px-1 py-0.5 text-xs">?agent=&lt;uuid&gt;</code>{" "}
+          to the URL.
+        </p>
+      </div>
     );
   }
 

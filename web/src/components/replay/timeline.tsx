@@ -1,8 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import type { ReplayEvent, ReplayGuardrailBlock, ReplayTimelineResponse } from "@/lib/api-client";
+import type { ReplayEvent, ReplayGuardrailBlock } from "@/lib/api-client";
 
 interface Props {
   events: ReplayEvent[];

@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import String
+from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -71,8 +71,8 @@ class TraceModel(BaseModel):
     usage: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     level: Mapped[str] = mapped_column(String(16), nullable=False, default=SpanLevel.DEFAULT)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default=SpanStatus.STARTED)
-    start_time: Mapped[datetime] = mapped_column(nullable=False)
-    end_time: Mapped[datetime | None] = mapped_column(nullable=True)
+    start_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class TraceCreateSchema(PydanticBase):

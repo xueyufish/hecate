@@ -238,6 +238,10 @@ class ScheduledTaskService:
 
         task.state = new_state.value
         await self._db.flush()
+        # Refresh the server-onupdate timestamp now: after commit it can
+        # only be loaded via a sync lazy refresh, which explodes with
+        # MissingGreenlet under asyncio (pydantic model_validate hits it).
+        await self._db.refresh(task)
         return task
 
     async def _catch_up_missed_runs(self, task: ScheduledTaskModel) -> None:

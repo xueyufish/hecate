@@ -42,7 +42,14 @@ class ApiKeyModel(BaseModel):
     key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)
     scope: Mapped[ApiKeyScope] = mapped_column(
-        Enum(ApiKeyScope, name="api_key_scope", create_constraint=True),
+        Enum(
+            ApiKeyScope,
+            name="api_key_scope",
+            create_constraint=True,
+            # Store enum *values* (lowercase) — the PG enum type was created
+            # with lowercase labels and SQLAlchemy otherwise binds by NAME.
+            values_callable=lambda e: [m.value for m in e],
+        ),
         nullable=False,
     )
     org_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)

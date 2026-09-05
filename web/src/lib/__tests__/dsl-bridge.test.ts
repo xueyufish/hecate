@@ -9,7 +9,7 @@ function makeDsl(overrides: Record<string, unknown> = {}) {
     nodes: {
       start: { type: "conversation" as const, config: { system_prompt: "Hello" } },
       end: { type: "conversation" as const, config: {} },
-    },
+    } as Record<string, { type: "conversation"; config: Record<string, unknown> }>,
     edges: [{ source: "start", target: "end" }],
     entry: "start",
     ...overrides,

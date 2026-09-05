@@ -7,12 +7,12 @@ window type, enforcement mode), and Pydantic CRUD schemas for API validation.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field, computed_field
-from sqlalchemy import Boolean, Float, Index, String
+from sqlalchemy import Boolean, DateTime, Float, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hecate.models.base import BaseModel
@@ -77,10 +77,12 @@ class QuotaUsageModel(BaseModel):
     __table_args__ = (Index("ix_quota_usage_quota_period", "quota_id", "period_start"),)
 
     quota_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
-    period_start: Mapped[datetime] = mapped_column(nullable=False)
-    period_end: Mapped[datetime] = mapped_column(nullable=False)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     used_value: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
-    last_updated: Mapped[datetime] = mapped_column(nullable=False, default=datetime.utcnow)
+    last_updated: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
     soft_limit_triggered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False, default=uuid.UUID("00000000-0000-0000-0000-000000000000")
