@@ -85,7 +85,7 @@ When you register an external MCP server with Hecate, the `MCPClientManager` (`s
 
 Once connected, `list_tools()` enumerates the server's tools, and `call_tool(server, tool, args)` invokes one. Discovered tools are persisted with `source="mcp"` plus `mcp_server` and `mcp_tool_name` so the registry can route later calls back to the originating server. Circuit breaker (`services/mcp/circuit_breaker.py`) and auth (`services/mcp/auth.py`) are layered on every call.
 
-Manage MCP servers at runtime via `GET/POST /api/mcp/...` (see `api/management/mcp.py`).
+Manage MCP servers at runtime via `GET/POST /api/mcp/...` (see `tools/api/mcp.py`).
 
 ### MCP Server (Hecate exposes its own capabilities)
 
@@ -118,7 +118,7 @@ The `AgentCard` (`a2a/types.py`) is the standard A2A discovery document. Cards m
 
 `A2AClient` (`a2a/client/client.py`) sends messages to remote A2A agents. `discover_agent_card()` (`a2a/client/discovery.py`) fetches and parses a remote `AgentCard` from its well-known URL. Push notifications from async remote agents are received at `POST /a2a/webhook` (`a2a/client/push.py`).
 
-Manage A2A keys and configuration via `GET/POST /api/a2a/...` (see `api/management/a2a.py`). For setup steps, see the [Enable A2A Server guide](../how-to/enable-a2a-server.md).
+Manage A2A keys and configuration via `GET/POST /api/a2a/...` (see `channel/api/a2a.py`). For setup steps, see the [Enable A2A Server guide](../how-to/enable-a2a-server.md).
 
 ---
 

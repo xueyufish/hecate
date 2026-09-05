@@ -49,7 +49,7 @@ The access token's claims encode the full tenant context of the current session.
 
 ### Local auth
 
-For deployments without SSO, `UserModel` (`models/user.py`) supports email + password authentication with bcrypt-hashed passwords (`services/auth/password.py`). The `sso_id` and `external_id` fields are reserved for SSO and SCIM linking — they are not used by the local auth flow.
+For deployments without SSO, `UserModel` (`models/user.py`) supports email + password authentication with bcrypt-hashed passwords (`enterprise/auth/password.py`). The `sso_id` and `external_id` fields are reserved for SSO and SCIM linking — they are not used by the local auth flow.
 
 ---
 
@@ -92,8 +92,8 @@ Hecate's auth layer is pluggable via `AuthProvider`. The built-in providers cove
 |----------|------|---------|
 | `APIKeyAuthProvider` | `auth/api_key_provider.py` | `hcat_*` API keys |
 | JWT validation | `services/auth/token.py` | `eyJ...` bearer tokens |
-| SSO handlers | `api/management/sso.py` | OIDC, SAML, LDAP flows |
-| SCIM endpoints | `api/management/scim_*.py` | User and group provisioning |
+| SSO handlers | `hecate_enterprise.auth.sso_routes` (enterprise wheel) | OIDC, SAML, LDAP flows |
+| SCIM endpoints | `hecate_enterprise.scim` (enterprise wheel) | User and group provisioning |
 
 For custom auth schemes (mTLS, signed request headers, proprietary tokens), implement `AuthProvider` and register it — the rest of the system treats the authenticated identity uniformly regardless of how it was established.
 

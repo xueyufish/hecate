@@ -24,7 +24,6 @@ from hecate.models.conversation import (
     ConversationModel,
     ConversationReadSchema,
 )
-from hecate.ops.ops_center.conversation_messages import project_conversation_messages
 from hecate.runtime.eventstore import EventStore
 
 router = APIRouter()
@@ -137,6 +136,8 @@ async def get_conversation(
     # A2 closure: messages are projected from the event log via
     # project_conversation_messages — the single read-side seam that
     # joins SessionModel.conversation_id → derive_session_messages.
+    from hecate.ops.ops_center.conversation_messages import project_conversation_messages
+
     messages = await project_conversation_messages(db, conversation_id, event_store)
 
     conv_data = ConversationReadSchema.model_validate(conversation).model_dump()

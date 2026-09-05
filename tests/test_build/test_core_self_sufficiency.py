@@ -56,7 +56,7 @@ CORE_MAIN_MODULES: tuple[str, ...] = (
     "hecate.core.database",
     "hecate.core.deps",
     "hecate.core.deps_workspace",
-    "hecate.api.management.budget",
+    "hecate.enterprise.api.budget",
     "hecate.channel.gateway.registration",
     "hecate.channel.api.v1.channels",
 )

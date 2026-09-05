@@ -97,7 +97,7 @@ See [Manage agent memory](../how-to/manage-agent-memory.md) for operational reci
 | `/api/security/findings/{id}/feedback` | Record true/false-positive feedback on a finding — used to tune DLP and other detectors |
 | `/api/audit` | Structured audit trail (every HTTP request, written asynchronously to PostgreSQL) |
 
-The DLP engine (see [DLP](../concepts/dlp.md)) runs inside the security hooks and the MCP egress filter, writing `dlp:`-prefixed findings. The findings query and feedback endpoints above are live; DLP policy CRUD endpoints (`/dlp/policies`, `/dlp/custom-regex`, `/dlp/dictionaries`, `/dlp/scan/test`) are implemented in `api/management/dlp.py` but not yet mounted.
+The DLP engine (see [DLP](../concepts/dlp.md)) runs inside the security hooks and the MCP egress filter, writing `dlp:`-prefixed findings. The findings query and feedback endpoints above are live; DLP policy CRUD endpoints (`/dlp/policies`, `/dlp/custom-regex`, `/dlp/dictionaries`, `/dlp/scan/test`) are implemented in `ops/api/dlp.py` but not yet mounted.
 
 ### Organizations and tenancy
 
