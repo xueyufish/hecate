@@ -76,7 +76,7 @@ def test_chat_message_suggested_questions_default():
 @pytest.mark.asyncio
 async def test_create_chat_completion_passes_opening_flags(client: AsyncClient):
     """Test that create_chat_completion passes generate_opening and generate_suggestions through the engine."""
-    with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
+    with patch("hecate.studio.workflows.execution_service.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
         mock_service.execute = AsyncMock(
             return_value={
@@ -104,7 +104,7 @@ async def test_create_chat_completion_passes_opening_flags(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_non_streaming_response_with_suggested_questions(client: AsyncClient):
     """Test that non-streaming response includes suggested_questions in ChatMessage."""
-    with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
+    with patch("hecate.studio.workflows.execution_service.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
         mock_service.execute = AsyncMock(
             return_value={
@@ -135,7 +135,7 @@ async def test_non_streaming_response_with_suggested_questions(client: AsyncClie
 @pytest.mark.asyncio
 async def test_non_streaming_response_without_suggested_questions(client: AsyncClient):
     """Test that non-streaming response without suggestions has null suggested_questions."""
-    with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
+    with patch("hecate.studio.workflows.execution_service.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
         mock_service.execute = AsyncMock(
             return_value={

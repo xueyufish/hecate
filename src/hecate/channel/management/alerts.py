@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from hecate.ops.alerts.service import AlertService
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
@@ -25,14 +28,22 @@ from hecate.models.alert import (
     NotificationChannelReadSchema,
     NotificationChannelUpdateSchema,
 )
-from hecate.ops.alerts.service import AlertService
-from hecate.ops.notification import NotificationDispatcher
 
 rules_router = APIRouter(tags=["alerts"])
 events_router = APIRouter(tags=["alerts"])
 silences_router = APIRouter(tags=["alerts"])
 channels_router = APIRouter(tags=["alerts"])
 escalation_policies_router = APIRouter(tags=["alerts"])
+
+
+def _alert_service(
+    db: AsyncSession,
+    workspace_id: str,
+) -> AlertService:
+    """Build the ops-domain alert service (lazy: sibling-domain access)."""
+    from hecate.ops.alerts.service import AlertService
+
+    return AlertService(db, workspace_id=workspace_id)
 
 
 # --- Alert Rules ---
@@ -45,7 +56,7 @@ async def create_rule(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> AlertRuleReadSchema:
     """Create a new alert rule."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     rule = await service.create_rule(**body.model_dump())
     await db.commit()
     return AlertRuleReadSchema.model_validate(rule)
@@ -58,7 +69,7 @@ async def list_rules(
     enabled_only: Annotated[bool, Query()] = False,
 ) -> list[AlertRuleReadSchema]:
     """List alert rules for the current workspace."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     rules = await service.list_rules(enabled_only=enabled_only)
     return [AlertRuleReadSchema.model_validate(r) for r in rules]
 
@@ -70,7 +81,7 @@ async def get_rule(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> AlertRuleReadSchema:
     """Get a single alert rule."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     rule = await service.get_rule(rule_id)
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -85,7 +96,7 @@ async def update_rule(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> AlertRuleReadSchema:
     """Update an alert rule."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     rule = await service.update_rule(rule_id, **body.model_dump(exclude_unset=True))
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -100,7 +111,7 @@ async def delete_rule(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Soft-delete an alert rule."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     if not await service.delete_rule(rule_id):
         raise HTTPException(status_code=404, detail="Rule not found")
     await db.commit()
@@ -117,7 +128,7 @@ async def list_events(
     rule_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> list[dict]:
     """List alert events with optional filters."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     events = await service.list_events(state=state, rule_id=rule_id)
     return [
         {
@@ -142,7 +153,7 @@ async def acknowledge_event(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Acknowledge an alert event."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     user_id = getattr(ctx, "user_id", None) or uuid.UUID(int=0)
     event = await service.acknowledge_event(event_id, user_id)
     if event is None:
@@ -161,7 +172,7 @@ async def create_silence(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> AlertSilenceReadSchema:
     """Create a silence window."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     silence = await service.create_silence(**body.model_dump())
     await db.commit()
     return AlertSilenceReadSchema.model_validate(silence)
@@ -174,7 +185,7 @@ async def list_silences(
     active: Annotated[bool, Query()] = False,
 ) -> list[AlertSilenceReadSchema]:
     """List silence windows."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     silences = await service.list_silences(active_only=active)
     return [AlertSilenceReadSchema.model_validate(s) for s in silences]
 
@@ -186,7 +197,7 @@ async def delete_silence(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete a silence window."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     if not await service.delete_silence(silence_id):
         raise HTTPException(status_code=404, detail="Silence not found")
     await db.commit()
@@ -202,7 +213,7 @@ async def create_channel(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> NotificationChannelReadSchema:
     """Create a notification channel."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     channel = await service.create_channel(**body.model_dump())
     await db.commit()
     return NotificationChannelReadSchema.model_validate(channel)
@@ -214,7 +225,7 @@ async def list_channels(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> list[NotificationChannelReadSchema]:
     """List notification channels."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     channels = await service.list_channels()
     return [NotificationChannelReadSchema.model_validate(ch) for ch in channels]
 
@@ -227,7 +238,7 @@ async def update_channel(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> NotificationChannelReadSchema:
     """Update a notification channel."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     channel = await service.update_channel(channel_id, **body.model_dump(exclude_unset=True))
     if channel is None:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -242,7 +253,7 @@ async def delete_channel(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete a notification channel."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     if not await service.delete_channel(channel_id):
         raise HTTPException(status_code=404, detail="Channel not found")
     await db.commit()
@@ -255,7 +266,7 @@ async def test_channel(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> dict:
     """Test a notification channel by sending a test alert."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     channel = await service.get_channel(channel_id)
     if channel is None:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -276,6 +287,8 @@ async def test_channel(
         current_value=1.0,
         fired_at=datetime.now(UTC),
     )
+    from hecate.ops.notification import NotificationDispatcher
+
     dispatcher = NotificationDispatcher()
     results = await dispatcher.dispatch(fake_event, fake_rule, [channel])
     return {"results": results}
@@ -293,7 +306,7 @@ async def create_policy(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> EscalationPolicyReadSchema:
     """Create an escalation policy."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     policy = await service.create_policy(**body.model_dump())
     await db.commit()
     return EscalationPolicyReadSchema.model_validate(policy)
@@ -305,7 +318,7 @@ async def list_policies(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> list[EscalationPolicyReadSchema]:
     """List escalation policies."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     policies = await service.list_policies()
     return [EscalationPolicyReadSchema.model_validate(p) for p in policies]
 
@@ -318,7 +331,7 @@ async def update_policy(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> EscalationPolicyReadSchema:
     """Update an escalation policy."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     policy = await service.update_policy(policy_id, **body.model_dump(exclude_unset=True))
     if policy is None:
         raise HTTPException(status_code=404, detail="Policy not found")
@@ -333,7 +346,7 @@ async def delete_policy(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> None:
     """Delete an escalation policy."""
-    service = AlertService(db, workspace_id=ctx.workspace_id)
+    service = _alert_service(db, ctx.workspace_id)
     if not await service.delete_policy(policy_id):
         raise HTTPException(status_code=404, detail="Policy not found")
     await db.commit()

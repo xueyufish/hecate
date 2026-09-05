@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
@@ -19,6 +19,9 @@ from hecate_llm.tool_calling import format_tools_for_llm, inject_tool_results, p
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from hecate.tools.tool.registry import ToolRegistry
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
@@ -32,9 +35,6 @@ from hecate.runtime.eventstore import EventStore
 from hecate.runtime.guardrail import GuardrailAction
 from hecate.runtime.middleware import Phase
 from hecate.runtime.session_state import SessionStateStore
-from hecate.studio.session_lock import session_lock_manager
-from hecate.studio.workflows.execution_service import WorkflowExecutionService
-from hecate.tools.tool.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +170,10 @@ async def create_chat_completion(
 
     if session_id:
         try:
+            # Lazy: studio is a sibling domain — cross-domain access is
+            # function-level only (no module-level structural coupling).
+            from hecate.studio.session_lock import session_lock_manager
+
             async with session_lock_manager.acquire(session_id) as lock_info:
                 result = await _process_chat(
                     request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store, dlp_scanner
@@ -399,6 +403,7 @@ async def _process_chat(
 
     if use_enhanced:
         from hecate.core.composition.runtime_port_adapter import create_runtime_port
+        from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
         tool_registry = _build_tool_registry(db)
 
@@ -697,6 +702,7 @@ def _build_tool_registry(db: AsyncSession) -> ToolRegistry:
     """
     from hecate.core.config import settings
     from hecate.tools.tool.builtin import BuiltInToolExecutor
+    from hecate.tools.tool.registry import ToolRegistry
     from hecate.tools.tool.search.factory import create_search_provider
 
     search_provider = create_search_provider(

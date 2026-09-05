@@ -65,19 +65,11 @@ ESTABLISHED_DOMAINS: dict[str, Path] = {
     "ops": SRC_ROOT / "ops",
 }
 
-# Other in-main-package domain directories, forbidden as sources for
-# top-level imports in any established domain (no cross-domain
-# structural coupling — same rule as test_layering_sandbox's sibling
-# rule). Phase R-complete adds entries here as new domains land.
-# `services` is included while it still exists — once F3 (services/
-# removal) lands, drop it from this list.
-OTHER_DOMAINS: tuple[str, ...] = (
-    "services",
-    "enterprise",
-    "channel",
-    "studio",
-    "ops",
-)
+# Note: cross-domain matching is keyed on ``ESTABLISHED_DOMAINS`` with the
+# scanned domain passed per call (see ``_is_other_domain_import``). The
+# former ``OTHER_DOMAINS`` tuple (bare-prefix match, minus the scanned
+# domain) never matched fully-qualified imports and silently disabled every
+# in-domain rule; ``services`` was dropped along with it (F3 landed in #119).
 
 
 def _iter_py(root: Path) -> list[Path]:
@@ -105,9 +97,9 @@ def _module_level_imports(path: Path) -> list[tuple[int, str]]:
                 for alias in child.names:
                     if top_level:
                         hits.append((child.lineno, alias.name))
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
                 _visit(child, top_level=False)
-            elif isinstance(child, (ast.If, ast.Try)):
+            elif isinstance(child, ast.If | ast.Try):
                 # `if TYPE_CHECKING:` guards are type-only; a top-level
                 # `if` / `try` still encloses the import — either way
                 # the import is not unconditional, so treat as lazy.
@@ -119,16 +111,45 @@ def _module_level_imports(path: Path) -> list[tuple[int, str]]:
     return hits
 
 
-def _is_other_domain_import(module: str) -> str | None:
-    """Return the domain prefix if ``module`` is a top-level import of another domain.
+def _is_other_domain_import(module: str, own_domain: str) -> str | None:
+    """Return the domain prefix if ``module`` imports a domain other than ``own_domain``.
 
-    Allowed self-imports (``tools.X`` inside ``tools/``) are skipped; the
-    AST scan only flags cross-domain references.
+    In-repo imports are fully qualified (``hecate.ops.alerts.service``),
+    so the ``hecate.`` package prefix is stripped before matching — a
+    bare-prefix comparison never matches and silently disables every
+    in-domain rule. Self-imports (``ops.*`` inside ``ops/``) are allowed;
+    the AST scan only flags cross-domain references. ``runtime`` is the
+    engine layer — every domain consumes it at module level, so it is
+    only ever flagged inside the runtime scan itself.
     """
-    for prefix in OTHER_DOMAINS:
-        if module == prefix or module.startswith(prefix + "."):
-            return prefix
-    return None
+    prefix = module.removeprefix("hecate.").split(".")[0]
+    if prefix not in ESTABLISHED_DOMAINS or prefix == own_domain or prefix == "runtime":
+        return None
+    return prefix
+
+
+class TestOtherDomainImportMatcher:
+    """Regression: fully-qualified imports must be flagged (guard was a no-op)."""
+
+    def test_fully_qualified_other_domain_import_is_flagged(self) -> None:
+        assert _is_other_domain_import("hecate.ops.alerts.service", "channel") == "ops"
+        assert _is_other_domain_import("hecate.studio.session_lock", "channel") == "studio"
+        assert _is_other_domain_import("hecate.tools.tool.registry", "channel") == "tools"
+
+    def test_bare_domain_prefix_is_still_flagged(self) -> None:
+        assert _is_other_domain_import("ops.audit", "studio") == "ops"
+        assert _is_other_domain_import("ops", "tools") == "ops"
+
+    def test_self_imports_are_allowed(self) -> None:
+        assert _is_other_domain_import("hecate.ops.alerts.service", "ops") is None
+        assert _is_other_domain_import("hecate.tools.tool.registry", "tools") is None
+
+    def test_core_runtime_and_external_modules_pass(self) -> None:
+        assert _is_other_domain_import("hecate.core.deps", "tools") is None
+        # runtime is the engine layer — consumable by every domain.
+        assert _is_other_domain_import("hecate.runtime.eventstore", "studio") is None
+        assert _is_other_domain_import("hecate.models.alert", "ops") is None
+        assert _is_other_domain_import("fastapi", "ops") is None
 
 
 class TestToolsDomainNeverImportsOtherDomains:
@@ -138,7 +159,7 @@ class TestToolsDomainNeverImportsOtherDomains:
         bad: list[str] = []
         for path in _iter_py(ESTABLISHED_DOMAINS["tools"]):
             for lineno, module in _module_level_imports(path):
-                other = _is_other_domain_import(module)
+                other = _is_other_domain_import(module, "tools")
                 if other is not None:
                     rel = path.relative_to(REPO_ROOT)
                     bad.append(f"{rel}:line {lineno}: from {module} import ...")
@@ -158,7 +179,7 @@ class TestRuntimeDomainNeverImportsBlockedPrefixes:
         bad: list[str] = []
         for path in _iter_py(ESTABLISHED_DOMAINS["runtime"]):
             for lineno, module in _module_level_imports(path):
-                other = _is_other_domain_import(module)
+                other = _is_other_domain_import(module, "runtime")
                 if other is not None:
                     rel = path.relative_to(REPO_ROOT)
                     bad.append(f"{rel}:line {lineno}: from {module} import ...")
@@ -205,7 +226,7 @@ class TestEnterpriseDomainNeverImportsOtherDomains:
         bad: list[str] = []
         for path in _iter_py(ESTABLISHED_DOMAINS["enterprise"]):
             for lineno, module in _module_level_imports(path):
-                other = _is_other_domain_import(module)
+                other = _is_other_domain_import(module, "enterprise")
                 if other is not None:
                     rel = path.relative_to(REPO_ROOT)
                     bad.append(f"{rel}:line {lineno}: from {module} import ...")
@@ -258,7 +279,7 @@ class TestChannelDomainNeverImportsOtherDomains:
         bad: list[str] = []
         for path in _iter_py(ESTABLISHED_DOMAINS["channel"]):
             for lineno, module in _module_level_imports(path):
-                other = _is_other_domain_import(module)
+                other = _is_other_domain_import(module, "channel")
                 if other is not None:
                     rel = path.relative_to(REPO_ROOT)
                     bad.append(f"{rel}:line {lineno}: from {module} import ...")
@@ -311,7 +332,7 @@ class TestStudioDomainNeverImportsOtherDomains:
         bad: list[str] = []
         for path in _iter_py(ESTABLISHED_DOMAINS["studio"]):
             for lineno, module in _module_level_imports(path):
-                other = _is_other_domain_import(module)
+                other = _is_other_domain_import(module, "studio")
                 if other is not None:
                     rel = path.relative_to(REPO_ROOT)
                     bad.append(f"{rel}:line {lineno}: from {module} import ...")
@@ -357,7 +378,7 @@ class TestOpsDomainNeverImportsOtherDomains:
         bad: list[str] = []
         for path in _iter_py(ESTABLISHED_DOMAINS["ops"]):
             for lineno, module in _module_level_imports(path):
-                other = _is_other_domain_import(module)
+                other = _is_other_domain_import(module, "ops")
                 if other is not None:
                     rel = path.relative_to(REPO_ROOT)
                     bad.append(f"{rel}:line {lineno}: from {module} import ...")

@@ -7,7 +7,6 @@ import logging
 import uuid
 from typing import Any
 
-from hecate.ops.security.findings_writer import FindingWriterAdapter, SecurityFindingWriter
 from hecate.runtime.guardrail import GuardrailAction, GuardrailResult, PostLLMHook
 from hecate.runtime.security.llm_guard import llm_guard_scanner
 
@@ -371,6 +370,10 @@ class OutputSecurityHook(PostLLMHook):
         if self._security_finding_writer is None:
             return
         try:
+            # Lazy: ops is a sibling domain — a module-level import would
+            # break runtime self-sufficiency (the hecate-runtime wheel).
+            from hecate.ops.security.findings_writer import FindingWriterAdapter, SecurityFindingWriter
+
             if isinstance(self._security_finding_writer, SecurityFindingWriter | FindingWriterAdapter):
                 await self._security_finding_writer.write(
                     entity_type=entity_type,

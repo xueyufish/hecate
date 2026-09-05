@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.session import SessionModel
 from hecate.runtime.eventstore import EventStore
-from hecate.studio.replay.assembler import derive_session_messages
 
 
 async def project_conversation_messages(
@@ -55,6 +54,10 @@ async def project_conversation_messages(
         from hecate.studio.event_state import create_event_store
 
         event_store = create_event_store(settings)
+
+    # Lazy: studio is a sibling domain — cross-domain access is
+    # function-level only (no module-level structural coupling).
+    from hecate.studio.replay.assembler import derive_session_messages
 
     messages: list[dict] = []
     for session in session_rows:
