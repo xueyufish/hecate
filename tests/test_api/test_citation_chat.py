@@ -47,7 +47,7 @@ async def test_chat_completions_without_kb_ids(client: AsyncClient) -> None:
 
 async def test_chat_completions_with_invalid_kb_ids(client: AsyncClient) -> None:
     """Test that invalid kb_ids are passed through (validation happens in execution service)."""
-    with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
+    with patch("hecate.studio.workflows.execution_service.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
         mock_service.execute = AsyncMock(
             return_value={
@@ -72,7 +72,7 @@ async def test_chat_completions_with_invalid_kb_ids(client: AsyncClient) -> None
 
 async def test_chat_completions_with_valid_kb_ids(client: AsyncClient) -> None:
     """Test that valid kb_ids are accepted and routed through WorkflowExecutionService."""
-    with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
+    with patch("hecate.studio.workflows.execution_service.WorkflowExecutionService") as mock_cls:
         mock_service = MagicMock()
         mock_service.execute = AsyncMock(
             return_value={

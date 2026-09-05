@@ -62,7 +62,7 @@ class TestChatRegression:
         assert response.status_code == 200
 
     async def test_with_kb_ids_enhanced_path(self, client):
-        with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        with patch("hecate.studio.workflows.execution_service.WorkflowExecutionService") as mock_cls:
             mock_service = MagicMock()
             mock_service.execute = AsyncMock(
                 return_value={
@@ -86,7 +86,7 @@ class TestChatRegression:
         assert data["choices"][0]["message"]["content"] == "Based on docs..."
 
     async def test_with_generate_opening_enhanced_path(self, client):
-        with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        with patch("hecate.studio.workflows.execution_service.WorkflowExecutionService") as mock_cls:
             mock_service = MagicMock()
             mock_service.execute = AsyncMock(
                 return_value={
@@ -112,7 +112,7 @@ class TestChatRegression:
         assert data["choices"][0]["message"]["suggested_questions"] == ["What can you do?"]
 
     async def test_with_generate_suggestions_enhanced_path(self, client):
-        with patch("hecate.channel.api.v1.chat.WorkflowExecutionService") as mock_cls:
+        with patch("hecate.studio.workflows.execution_service.WorkflowExecutionService") as mock_cls:
             mock_service = MagicMock()
             mock_service.execute = AsyncMock(
                 return_value={

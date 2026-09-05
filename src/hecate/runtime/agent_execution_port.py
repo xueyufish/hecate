@@ -14,10 +14,6 @@ from collections.abc import AsyncGenerator
 from typing import Any
 from uuid import UUID
 
-from hecate_ops.span_adapter import (
-    create_otel_span,
-    end_otel_span,
-)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,11 +29,6 @@ from hecate.runtime.guardrail import (
     PreLLMHook,
 )
 from hecate.runtime.ports import RuntimePort, SpanContext
-from hecate.studio.agents.handoff import (
-    inject_handoff_tools_from_targets,
-    is_handoff_tool_call,
-    validate_handoff_target_from_list,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +124,14 @@ class AgentExecutionPort(RuntimePort):
         if context is not None:
             handoff_targets = context.get("handoff_targets", [])
         if handoff_targets:
+            # Lazy: studio is a sibling domain — a module-level import would
+            # break runtime self-sufficiency (the hecate-runtime wheel).
+            from hecate.studio.agents.handoff import (
+                inject_handoff_tools_from_targets,
+                is_handoff_tool_call,
+                validate_handoff_target_from_list,
+            )
+
             handoff_desc = None
             if context is not None:
                 handoff_desc = context.get("handoff_description")
@@ -398,6 +397,10 @@ class AgentExecutionPort(RuntimePort):
         attributes: dict[str, Any] | None = None,
     ) -> SpanContext | None:
         """Create an observability span via the shared OTel adapter."""
+        # Lazy: hecate_ops is a workspace wheel — a module-level import
+        # would break runtime self-sufficiency (the hecate-runtime wheel).
+        from hecate_ops.span_adapter import create_otel_span
+
         return create_otel_span(name, parent_id=parent_id, attributes=attributes)
 
     async def end_span(
@@ -407,4 +410,6 @@ class AgentExecutionPort(RuntimePort):
         usage: dict[str, int] | None = None,
     ) -> None:
         """End an observability span via the shared OTel adapter."""
+        from hecate_ops.span_adapter import end_otel_span
+
         end_otel_span(span_id, output_data=output_data, usage=usage)

@@ -69,6 +69,13 @@ CORE_RUNTIME_MODULES: tuple[str, ...] = (
     "hecate.runtime.compiler",
     "hecate.runtime.pregel",
     "hecate.runtime.errors",
+    # Port adapter + security assembly bridge files. These historically
+    # escaped the probe (not on this allowlist) while carrying module-level
+    # sibling-domain imports; they now lazy-import siblings — keep them on
+    # the list so a regression resurfaces here, not only in the AST guard.
+    "hecate.runtime.agent_execution_port",
+    "hecate.runtime.security.egress",
+    "hecate.runtime.security.hooks.output_security",
 )
 
 # Optional in-main-package domains whose import is forbidden in the runtime
@@ -76,7 +83,6 @@ CORE_RUNTIME_MODULES: tuple[str, ...] = (
 # Tools is added by the tools/ domain-filling PR; enterprise, channel,
 # studio, ops by their respective domain PRs.
 BLOCKED_IN_MAIN_DOMAINS: tuple[str, ...] = (
-    "hecate.services",
     "hecate.tools",
     "hecate.enterprise",
     "hecate.channel",

@@ -8,14 +8,10 @@ via HTTP webhook, aiosmtplib email, or WebSocket broadcast.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from hecate.channel.notification import (
-    EmailNotificationAdapter,
-    NotificationChannelAdapter,
-    WebhookNotificationAdapter,
-    WebSocketNotificationAdapter,
-)
+if TYPE_CHECKING:
+    from hecate.channel.notification import NotificationChannelAdapter
 from hecate.core.config import settings
 from hecate.models.alert import AlertEventModel, AlertRuleModel, ChannelType, NotificationChannelModel
 
@@ -189,6 +185,14 @@ _RENDER_MAP: dict[str, Any] = {
 
 def _build_adapter_map(connection_manager: Any = None) -> dict[str, NotificationChannelAdapter]:
     """Build a map of channel type to NotificationChannelAdapter."""
+    # Lazy: channel is a sibling domain — cross-domain access is
+    # function-level only (no module-level structural coupling).
+    from hecate.channel.notification import (
+        EmailNotificationAdapter,
+        WebhookNotificationAdapter,
+        WebSocketNotificationAdapter,
+    )
+
     adapters: dict[str, NotificationChannelAdapter] = {}
 
     # Webhook adapters

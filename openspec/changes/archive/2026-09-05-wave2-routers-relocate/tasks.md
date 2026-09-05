@@ -57,12 +57,12 @@
 
 - [x] 9.1 research doc §1.4 主包行: delete "遗留 5 个跨域 router" note
 - [x] 9.2 research doc §1.1 分歧注 ⑧: delete (promise fully fulfilled)
-- [ ] 9.3 research doc §3.7 工期表: append this PR number after merge
+- [x] 9.3 research doc §3.7 工期表: append this PR number after merge
 - [x] 9.4 Grep git-tracked docs for stale `api/management/` references → fix (research doc exempt from git but update anyway)
 
 ## 10. Commit & PR
 
-- [ ] 10.1 Single commit `refactor(domain): relocate wave-2 routers — api/ layer disappears` with body covering: B decision, D2 framework correction, budget mount change (core-only behavior note: 404 instead of 503), conversation_messages outcome
-- [ ] 10.2 Push (user approval per AGENTS.md)
-- [ ] 10.3 Open PR; recommend Squash and merge; PR body notes the archive-commit ride-along at branch base (c1f118e)
-- [ ] 10.4 After merge: backfill PR number into research doc §3.7; `openspec archive wave2-routers-relocate`; delete local branch
+- [x] 10.1 Single commit `refactor(domain): relocate wave-2 routers — api/ layer disappears` with body covering: B decision, D2 framework correction, budget mount change (core-only behavior note: 404 instead of 503), conversation_messages outcome
+- [x] 10.2 Push (user approval per AGENTS.md)
+- [x] 10.3 Open PR; recommend Squash and merge; PR body notes the archive-commit ride-along at branch base (c1f118e)
+- [x] 10.4 After merge (PR #122, 9da3b54): backfilled PR number into research doc §3.7; `openspec archive wave2-routers-relocate`; delete local branch

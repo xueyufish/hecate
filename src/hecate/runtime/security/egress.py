@@ -27,10 +27,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from hecate.ops.dlp.result import DLPAction, DLPFinding
-from hecate.ops.dlp.scanner import DLPScanner
+if TYPE_CHECKING:
+    # ops is a sibling domain: annotations only here. The scanner is
+    # injected via guardrail assembly; the action enum is imported at
+    # its runtime use site in ``DLPEgressFilter.filter``.
+    from hecate.ops.dlp.result import DLPFinding
+    from hecate.ops.dlp.scanner import DLPScanner
 
 
 class EgressAction(StrEnum):
@@ -146,6 +150,8 @@ class DLPEgressFilter(EgressFilter):
             workspace_id=self._scope["workspace_id"],
             org_id=self._scope["org_id"],
         )
+
+        from hecate.ops.dlp.result import DLPAction
 
         if result.action == DLPAction.BLOCK:
             return EgressResult(

@@ -40,7 +40,6 @@ from hecate.core.deps_workspace import get_auth_context
 from hecate.models.agent import AgentModel
 from hecate.runtime.eventstore import EventStore
 from hecate.runtime.session_state import SessionStateStore
-from hecate.studio.session_lock import session_lock_manager
 
 router = APIRouter()
 
@@ -153,6 +152,10 @@ async def chat_completion_for_agent(
 
     if request.session_id:
         try:
+            # Lazy: studio is a sibling domain — cross-domain access is
+            # function-level only (no module-level structural coupling).
+            from hecate.studio.session_lock import session_lock_manager
+
             async with session_lock_manager.acquire(request.session_id) as lock_info:
                 result = await _process_chat(
                     chat_request,

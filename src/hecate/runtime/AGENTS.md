@@ -11,20 +11,28 @@ Guarded by `tests/test_runtime/test_runtime_self_sufficiency.py` (subprocess
 import probe — blocks transitive/lazy imports an AST scan cannot see) and
 `tests/test_layering_domain.py` (AST top-level import scan). Blocked prefixes:
 
-- `hecate.services` (legacy — the dir is deleted; prefix stays until the
-  guard is simplified), `hecate.tools`, `hecate.enterprise`, `hecate.channel`,
-  `hecate.studio`, `hecate.ops`
+- `hecate.tools`, `hecate.enterprise`, `hecate.channel`, `hecate.studio`,
+  `hecate.ops`
 - All workspace wheels: `hecate_ops`, `hecate_sandbox`, `hecate_memory`,
   `hecate_enterprise`, `hecate_llm`, `hecate_channel_slack`,
   `hecate_channel_feishu`
 
-Exactly **two** function-level lazy imports cross the domain boundary (the
-sanctioned exceptions — do not add more):
+Function-level lazy imports are the only sanctioned way to cross the domain
+boundary (module-level imports are rejected by the AST scan; the probe
+allowlist covers the files below — keep new bridge files on it):
 
 - `runtime/tool_access.py` → `hecate.tools.tool.shell_analysis`
   (content-aware shell gating)
 - `runtime/workers/coordinator_worker.py` →
   `hecate.studio.workflows.templates` (dynamic orchestration executor)
+- `runtime/agent_execution_port.py` → `hecate.studio.agents.handoff`
+  (handoff tool injection/validation in `agent_execute`)
+- `runtime/agent_execution_port.py` → `hecate_ops.span_adapter`
+  (create_span / end_span; wheel boundary — same rule)
+- `runtime/security/egress.py` → `hecate.ops.dlp.*` (scanner via DI +
+  TYPE_CHECKING annotations; action enum at its runtime use site)
+- `runtime/security/hooks/output_security.py` →
+  `hecate.ops.security.findings_writer` (isinstance dispatch)
 
 ## Extension point inventory
 
