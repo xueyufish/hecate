@@ -309,7 +309,6 @@ async def test_negotiation_graph_multi_round():
     config = build_negotiation_graph(
         proposer_model="test-model",
         responder_model="test-model",
-        max_rounds=5,
     )
     compiled = GraphCompiler().compile(config)
 

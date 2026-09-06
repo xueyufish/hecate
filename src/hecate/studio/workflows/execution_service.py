@@ -287,7 +287,6 @@ class WorkflowExecutionService:
         elif agent_mode == "three_layer":
             graph_config = build_three_layer_graph(
                 planner_model=model,
-                sub_agent_model=model,
             )
         elif agent_mode == "workflow":
             graph_config = await self._load_workflow_graph(workflow_id)
