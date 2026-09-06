@@ -240,7 +240,6 @@ class TestThreeLayerTemplate:
         """The template graph has 4 nodes with ``planner`` as the entry point (guard removed)."""
         config = build_three_layer_graph(
             planner_model="gpt-4o",
-            sub_agent_model="gpt-4o",
         )
         assert config.name == "three-layer-agent"
         assert len(config.nodes) == 4
@@ -251,7 +250,6 @@ class TestThreeLayerTemplate:
         """The template graph passes all compiler validation checks."""
         config = build_three_layer_graph(
             planner_model="gpt-4o",
-            sub_agent_model="gpt-4o",
         )
         compiler = GraphCompiler()
         compiled = compiler.compile(config)

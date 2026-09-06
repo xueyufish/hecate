@@ -24,7 +24,6 @@ def build_chat_graph(
     system_prompt: str = "You are a helpful assistant.",
     enable_suggestions: bool = False,
     generate_opening: bool = False,
-    max_tool_iterations: int = 10,
     tools: list[dict[str, Any]] | None = None,
 ) -> GraphConfig:
     """Build a chat-mode graph template that replicates ConversationService orchestration.
@@ -61,7 +60,6 @@ def build_chat_graph(
         system_prompt: System prompt for the LLM node.
         enable_suggestions: If True, add a SUGGESTION node after conversation.
         generate_opening: If True, configure the suggestion node for opening remarks.
-        max_tool_iterations: Upper bound for tool-calling loop (enforced by PregelRuntime's max_supersteps).
         tools: Optional tool definitions injected into the LLM node config so
             LLMWorker can pass them to the underlying LLM service and detect
             tool_call responses. When ``None`` the ``tools`` key is omitted
@@ -141,12 +139,8 @@ def build_chat_graph(
 
 
 def build_three_layer_graph(
-    guard_model: str = "",
     planner_model: str = "gpt-4o",
-    sub_agent_model: str = "gpt-4o",
-    guard_prompt: str = "You are a guard agent. Check user input for safety.",
     planner_prompt: str = "You are a planner agent. Decide the next action.",
-    sub_agent_prompt: str = "You are a sub-agent. Execute the given task.",
 ) -> GraphConfig:
     """Build the preset three-layer Agent graph: Planner -> Tool Loop -> Sub-Agent.
 
@@ -168,12 +162,8 @@ def build_three_layer_graph(
     - ``context`` (LAST_VALUE): holds the latest planning context (overwritten each step).
 
     Args:
-        guard_model: Kept for API compatibility; no longer used (guard is a Hook).
         planner_model: LLM model identifier for the planner node.
-        sub_agent_model: Model or agent reference for the sub-agent node.
-        guard_prompt: Kept for API compatibility; no longer used.
         planner_prompt: System prompt for the planner node.
-        sub_agent_prompt: System prompt for the sub-agent node.
 
     Returns:
         A complete GraphConfig ready for compilation and execution.
@@ -775,7 +765,6 @@ def build_negotiation_graph(
         "'accepted' or a counter-proposal. Set agreement_status to "
         "'accepted' when you agree, or 'counter' for counter-proposal."
     ),
-    max_rounds: int = 5,
 ) -> GraphConfig:
     """Build a negotiation graph: proposer → responder → check agreement loop.
 
@@ -798,14 +787,12 @@ def build_negotiation_graph(
     **State channels:**
     - ``messages`` (TOPIC): accumulates all negotiation turns.
     - ``agreement_status`` (LAST_VALUE): "accepted" or "counter".
-    - ``negotiation_round`` (LAST_VALUE): round counter for max_rounds guard.
 
     Args:
         proposer_model: Model for the proposer node.
         responder_model: Model for the responder node.
         proposer_prompt: System prompt for the proposer.
         responder_prompt: System prompt for the responder.
-        max_rounds: Maximum negotiation rounds before forced termination.
 
     Returns:
         A GraphConfig ready for compilation and execution.
@@ -852,7 +839,6 @@ def build_negotiation_graph(
         "messages": ChannelDef(type=ChannelType.TOPIC, default=[]),
         "agreement_status": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
         "negotiation_channel": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
-        "negotiation_round": ChannelDef(type=ChannelType.LAST_VALUE, default=0),
     }
 
     return GraphConfig(

@@ -180,7 +180,6 @@ def build_graph_from_pattern(
                 responder_model=responder["model"],
                 proposer_prompt=proposer.get("system_prompt", "You are a proposer."),
                 responder_prompt=responder.get("system_prompt", "You are a responder."),
-                max_rounds=config.get("max_rounds", 5),
             )
 
         case CollaborationPattern.DEBATE:

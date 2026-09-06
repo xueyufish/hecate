@@ -26,7 +26,6 @@ class TestNegotiationGraph:
         assert "messages" in graph.state
         assert "agreement_status" in graph.state
         assert "negotiation_channel" in graph.state
-        assert "negotiation_round" in graph.state
 
     def test_has_loop_edges(self) -> None:
         graph = build_negotiation_graph("gpt-4o", "gpt-4o")
@@ -50,7 +49,6 @@ class TestNegotiationGraph:
             "gpt-4o",
             proposer_prompt="Custom proposer",
             responder_prompt="Custom responder",
-            max_rounds=10,
         )
         assert graph.nodes["proposer"].config["system_prompt"] == "Custom proposer"
         assert graph.nodes["responder"].config["system_prompt"] == "Custom responder"
