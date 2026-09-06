@@ -14,6 +14,30 @@ The engine defines **15 extension interfaces** per [ADR-016](../design/adr/016-p
 
 ---
 
+## Terminology: Engine vs. Runtime
+
+Two terms are used with precise, distinct meanings across the codebase and docs:
+
+**Execution Engine** — the graph-execution mechanism: Pregel/BSP superstep loop, Channel System, Event Store (Log-as-Truth), Checkpoint Cache, Graph Compiler, and the Worker ABC. The engine is agent-agnostic: it executes any compiled Graph, including pure workflows with no LLM involvement. Industry usage matches this sense — "engine" denotes the mechanism that drives execution (graph engines, reasoning engines, orchestration engines).
+
+**Agent Runtime** — the `src/hecate/runtime/` domain as a whole: the execution engine plus the agent-execution semantics layered on top of it (production workers — LLM / Tool / Condition / Coordinator, retry, interrupt/approval, streaming modes, session state, multi-agent handoff). The domain directory is named after the capability it serves, consistent with the capability-named sibling domains (`tools/`, `studio/`, `ops/`).
+
+The containment is strict: **Engine ⊂ Runtime**. The engine executes graphs; the runtime domain makes those graphs behave like agents.
+
+Boundary notes (enforced by the domain self-sufficiency invariant):
+
+- Tool *invocation semantics* (access policy, approval, sandbox routing, result pairing) live in the runtime domain; tool *implementations and registries* live in the `tools/` domain behind `RuntimePort.tool_execute`.
+- In-window context budgeting (ContextEngine: selection, compression, offloading) lives here; cross-session memory stays outside behind `RuntimePort` conversation methods.
+- Model access, knowledge retrieval, and tracing persistence are port-seamed services, never runtime-domain imports.
+
+Naming discipline:
+
+- "Engine" always denotes a mechanism component — never the whole domain, and never a hosted service.
+- In the feature catalog, "Execution Engine" appears as the chain-start component while "Agent Runtime" names the assembled capability; the dependency chain is consistent with this split.
+- If a managed hosting/deployment service ships later, avoid naming it "Runtime" — industry usage strongly associates that word with managed hosting tiers (serverless agent hosting with session isolation). Prefer Hosting/Delivery vocabulary for it.
+
+---
+
 ## Overview
 
 The Hecate execution engine is a self-developed Pregel/BSP runtime that sits at the heart of the platform. It receives compiled Graphs from the Agent Studio, executes them following Google's Pregel superstep model, manages state through an event-sourced log (Log-as-Truth; checkpoints are materialized caches, not the source of truth — see [ADR-030](../design/adr/030-event-sourced-execution-state.md)), and emits streaming results back to the caller.
