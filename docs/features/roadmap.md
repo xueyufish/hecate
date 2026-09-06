@@ -16,9 +16,9 @@
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
 | **P3 Trustworthy** | 87 | 87/87 (100%) | **0** — closed |
-| **P4 Intelligent** | 148 | 25/148 (17%) | 123 |
+| **P4 Intelligent** | 151 | 25/151 (16%) | 126 |
 | **P5 Ecosystem** | 71 | 0/71 (0%) | 71 |
-| **Total** | **389** | **195/389 (50%)** | **194** |
+| **Total** | **392** | **195/392 (50%)** | **197** |
 
 > Row counts are physical feature-catalog rows (2026-08-22 basis; verified by grep). Prior figures (127/101/60, total 372) used audit-counting that predated the reclassification — see feature-catalog overview note for the reconciliation.
 
@@ -664,17 +664,33 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 > **Goal**: P4 intelligence features — Self-Learning, Agentic AI (RL, Prompt Optimization, Ontology Actions, OAG), Memory Intelligence. Make agents genuinely smart.
 >
 > **2026-08-22 reclassification**: Sprint 8 scope also absorbs the 48 items deferred from P3 (see feature-catalog → P4 → "Deferred from P3"): Evaluation Suite (7.2b-e/7.3/7.4/7.4a/7.5 + 8.10/8.12), Security remainder (9.5a/9.11/7.10/2.10b/7.7), Deployment & Ops (13.1/13.1a/13.1b/13.4/13.4b/13.17/13.18), Advanced KB (3.2.4/3.3.2/3.3.3/3.4.1), Canvas nodes (1.1.24/1.1.25), Memory (4.3a/4.14/4.15/4.16/4.17/4.25/4.21), AIP (6.16/6.18), Auth (11.16/11.17), 5.4a/5.8/5.9-enh, and 8 shipped-feature enhancements. Sequencing within Sprint 8 is open — no forced ordering inherited from P3.
+>
+> **2026-09-04 reorder (this change)**: Sprint 8 now opens with an **Opening Queue** of 4 items — all底座 ✅, all directly shippable or with shallow blockers — followed by the original three blocks as **Absorption Pool** (原 Sprint 8 块级，按原章节迁移；可在 Opening Queue 进展后择机启动), plus two appended blocks: Plugin Ecosystem (5.5d) and **Model Management (6.47/6.48, added 2026-09-06 from the AgentArts comparison — publish lifecycle pairs with 1.3.20's 提交/发布 semantics)**. The original chapter ordering was shaped by an earlier vision (deep intelligence first); it front-loaded two L-grade items (6.20 Ontology Action System, 6.22 OAG) that depend on the P5-deferred Knowledge Graph integration. Surfacing the Opening Queue first fixes a structural defect: 6.20 / 6.22 cannot close inside Sprint 8 in their current form (closure condition = P5 KG integration trigger). See change `openspec/changes/roadmap-p4-reorder/` for full rationale.
 
-### Self-Learning & Evolution
+### Sprint 8 Opening Queue
+
+Order is priority, not mandate — any change still goes through independent `/opsx:propose`. The 4 items are the closest-to-market, lowest-blocker subset of Sprint 8 scope, identified by re-grepping the catalog against AgentArts capability gaps (see `docs/research/2026-09-agentarts-product-comparison.md`).
+
+| # | Feature | Dependencies | Effort | Why first |
+|---|---------|------|--------|-----------|
+| 5.4a | MCP Gateway — REST/MCP multi-source tools unified to single endpoint, agent/workspace-scoped authz | FastMCP server ✅ + tool registry ✅ | M |底座 ✅; AgentArts 把网关做成组件库独立卡 ("重磅上新") — 市场验证独立产品价值 |
+| 7.2b / 7.2c / 7.2d / 7.2e / 7.3 / 7.4 / 7.4a | Evaluation Suite — AI-synth datasets, online+offline tasks, trace回流, eval report, workflow eval, human annotation, human calibration | 7.1 / 7.2 / 7.2a ✅ | M×6 + S |底座 ✅; AgentArts 评估页是产品完成度最高的面, Hecate 缺任务化/标注/报告三件 |
+| 2.6a + 1.1.21 + 1.3.10⊕6.23 (+6.49) | Multi-Agent Controller Family — central controller (2.6a), controller canvas (1.1.21), 5-Level Intent Recognition (6.23 merges 1.3.10), Intent Package Asset (6.49 — intent categories + sample utterances as few-shot evidence for the recognition engine) | 2.6 (same Sprint) + 2.7c intent routing ✅ | M×3 + M | AgentArts 控制器 = 子智能体/子工作流组合调度; 一族三编号跨 Sprint 8/9 收口为一个 change; 6.49 为 6.23 的配套数据面 |
+| 1.3.20 | Agent Versioning & Channel Publishing — agent-level versioning + channel binding (API/embed/feishu/slack/webhook 锁定版本快照); carries Resource Versioning (14.x) mechanism referenced by 5.9d / 3.5.12 / 7.5 | 1.1.9 ✅ + channels ✅ + 1.3.15 ✅ | M | 唯一规划外空白; AgentArts 把版本+渠道做成三种形态统一生命周期步骤 |
+
+### Absorption Pool (formerly Sprint 8 main body)
+
+> Items below are unchanged in scope; they were originally the visible chapter order. They remain Sprint 8 candidates and may launch after Opening Queue progress.
+
+#### Self-Learning & Evolution
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 1.3.5e | Hallucination Detection & Mitigation | PostLLMHook ✅ + ContextEngine | L |
 | 1.3.6 | Self-Learning Agent Runtime | 1.3.6a–d ✅ | M |
 | 1.3.6e | Self-Evolution Closed Loop | 1.3.6 ✅ | S |
-| 1.3.10 | Multi-Level Intent Recognition | LLM ✅ | M |
 
-### Agentic AI (Moved from P3)
+#### Agentic AI (Moved from P3)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
@@ -683,7 +699,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 6.20 | Ontology Action System | Knowledge Graph (P5 deferred — rebase on GraphRAG/LlamaIndex integration when triggered) | L |
 | 6.22 | OAG (Ontology-Augmented Generation) | 6.20 + RAG ✅ *(blocked by 6.20's P5 KG dependency)* | L |
 
-### Memory Intelligence
+#### Memory Intelligence
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
@@ -703,14 +719,27 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 |---|---------|------|--------|
 | 5.5d | Dual-Format Plugin Convergence & Export — Hecate-private plugin content migrates into `io.hecate/` namespace dir inside Agent Plugins packages (one package = conformant for all clients + deep-integration for Hecate); `hecate plugin export` packages workspace skills as Agent Plugins bundles; ZIP demoted to transport-only (directory/git-URL install) | 5.5c (P3) + 5.5b ✅ | M |
 
+### Model Management (NEW — AgentArts comparison pull-forward)
+
+> Publish lifecycle semantics pair with 1.3.20 (Agent Versioning) in the Opening Queue — same 提交/发布 pattern, different surface (model services vs agents). 6.48 is S-grade and may ride along with any Opening Queue change.
+
+| # | Feature | Dependencies | Effort |
+|---|---------|------|--------|
+| 6.47 | Model Service Publishing — wire 6.45 ✅ staging/promotion machinery into settings/models: publish state (draft → testing → published) on `model_registry`; unpublished models hidden from application reference surface (`/v1/models` → Create Agent dropdown) but still testable inline; publish button + status badge + filter | 6.45 ✅ | S |
+| 6.48 | Model Management Quick Wins — list-level search/filter (providers + models) + provider call-count wiring from existing traces/costs aggregates; pure frontend + one aggregation query | traces/costs ✅ | S |
+
 ### Milestone M8 (End of Sprint 8)
 
+> **Honest closure note (2026-09-04)**: M8 still includes the "Ontology Action System with writeback" and "OAG complete" items, but their closure condition is **P5 Knowledge Graph integration trigger**, not Sprint 8 internal delivery. These two lines stay in M8 for plan consistency, but do not block Sprint 8's other Opening Queue deliverables — when P5 KG integration fires, the 6.20 / 6.22 closure is backfilled into M8 (and into whichever Sprint hosts that trigger). All other M8 lines are unaffected.
+
+- [ ] **Opening Queue** shipped: MCP Gateway (5.4a), Evaluation Suite tasks (7.2b-e/7.3/7.4/7.4a), Controller Family (2.6a+1.1.21+1.3.10⊕6.23+6.49), Agent Versioning (1.3.20)
+- [ ] Model Service Publishing (6.47) + Quick Wins (6.48) operational
 - [ ] Hallucination detection operational
 - [ ] Self-Learning loop operational
 - [ ] Agentic RL Framework with data flywheel
 - [ ] Prompt Self-Optimization with ACE/GEPA
-- [ ] Ontology Action System with writeback
-- [ ] OAG complete (RAG + Logic + Actions)
+- [ ] Ontology Action System with writeback *(closure = P5 KG integration trigger; backfilled when triggered)*
+- [ ] OAG complete (RAG + Logic + Actions) *(closure = P5 KG integration trigger; backfilled when triggered)*
 - [ ] Sleep-time Memory Consolidation operational
 - [ ] LLM-Managed Memory with self-management
 - [ ] All memory intelligence features delivered
@@ -738,7 +767,6 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 2.5 | Peer Selection (Selector) | Multi-Agent ✅ | M |
 | 2.5a | Expert Panel Deliberation | 2.5 | M |
 | 2.6 | Inter-Agent Communication | Multi-Agent ✅ | M |
-| 2.6a | Multi-Agent Central Controller | 2.6 | M |
 | 2.11 | Agent Team Templates | Graph template ✅ | M |
 | 2.13 | ACP (Agent Client Protocol) Support (NEW) — external coding agents (Claude Code, Codex, Gemini CLI) as worker nodes in Hecate orchestration; subagent provider seam (in-process/fork/ACP); complements A2A (agent-to-agent) — ACP is host-to-coding-agent | A2A ✅ | M |
 | 13.15 | Distributed Team Orchestration | A2A ✅ (P3) | M |
@@ -749,7 +777,6 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 |---|---------|------|--------|
 | 1.3.5i ✅ | Deterministic Hooks (Lifecycle Events) | Settings system | M |
 | 1.3.11 | Asynchronous Execution API Mode | Streaming ✅ + Session ✅ | M |
-| 6.23 | 5-Level Intent Recognition | LLM ✅ | M |
 | 6.24 | Object Log & Decision Log | EventStore ✅ | M |
 | 6.25 | Object History Analysis | EventStore ✅ | M |
 | 6.26 | Simulation Environment | Ontology Actions (6.20) ✅ | L |
@@ -769,8 +796,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 1.1.21 | Multi-Agent Controller Canvas | 2.6a | M |
-| 1.1.22 | Orchestration Mode Switching | 1.1.21 | M |
+| 1.1.22 | Orchestration Mode Switching | 1.1.21 (Sprint 8 Opening Queue) | M |
 | 1.1.23 | Execution State Visualization | Canvas ✅ | M |
 | 1.1.26 | Object CRUD Node | KG Construction (P5 deferred — rebase on integration when triggered) | M |
 | 1.1.27 | Side-by-side Chat + Canvas | 1.1.23 | M |
@@ -785,7 +811,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ### Milestone M9 (End of Sprint 9)
 
-- [ ] P4 = 96/96 (100%) — re-scope basis (100 features incl. 4 done; 3.5.5/3.1.8 deferred P5, 11.11/2.13/8.21/13.20/6.27a added)
+- [ ] P4 = 99/99 (100%) — re-scope basis (103 features incl. 4 done; 3.5.5/3.1.8 deferred P5, 11.11/2.13/8.21/13.20/6.27a added; 6.47/6.48/6.49 added 2026-09-06 AgentArts pull-forward)
 - [ ] GraphRAG Query Engine with Global/Local/Hybrid search (rebased on P5 KG integration when triggered)
 - [ ] Agentic RAG with iterative retrieval
 - [ ] Temporal Memory with time-aware retrieval
@@ -796,7 +822,6 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 - [ ] Distributed Team Orchestration functional
 - [ ] Deterministic Hooks with lifecycle events
 - [ ] Asynchronous Execution API operational
-- [ ] 5-Level Intent Recognition with controller evolution
 - [ ] Simulation Environment for safe verification
 - [ ] Computer-use (6.27a) for GUI automation — browser half delivered in P3 as 6.27
 - [ ] Voice Agent Pipeline with barge-in (11.11, moved from P5)
@@ -986,7 +1011,7 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 | **M6: P3 Security & Ops** | Month 12 | Ops Center (Dashboard + Agent Health + Conversation Analytics + Tool Execution Analytics + CI/CD Gating + Agent Catalog Governance); Security (DLP + Runtime Protection + Red Teaming); Plugin System; Deployment infrastructure (SaaS + Canary + Horizontal Scaling + Backup) |
 | **M7: P3 Complete** | Month 14 | P3 re-scoped 125/125 (100%); Event-Sourced State (log-as-truth + DeltaChannel); Dynamic Orchestration; Run Replay Phase 1; Browser Automation Tool; Skill Provider Registry; Advanced RAG (Reranking + Incremental + Quality Eval); Multi-Channel Wave 1 (11.2 simplified ✅ + 11.3 ✅ + 11.9 Slack ✅); Evaluation Suite (7.6a/b dropped); Canvas (Human Input/Form + Trigger; 1.1.18-20 deferred); Memory Enhancement |
 | **M8: P4 Intelligence** | Month 16 | Hallucination Detection operational; Self-Learning loop; Agentic RL Framework; Prompt Self-Optimization; Ontology Action System; OAG complete; Sleep-time Memory Consolidation; LLM-Managed Memory; Memory Intelligence features |
-| **M9: P4 Complete** | Month 18 | P4 96/96 remaining (100%); GraphRAG Query Engine (P5-trigger); Agentic RAG; Temporal Memory; Lazy GraphRAG (P5-trigger); Peer Selection; Agent Team Templates; ACP Support (2.13); Distributed Team Orchestration; Deterministic Hooks; Asynchronous Execution API; 5-Level Intent Recognition; Simulation Environment; Computer-use (6.27a); Voice Agent Pipeline (11.11); DataAgent; VibeCoding; Multi-Stream Modes; Projection Registry (8.21) + Atomic File Locks (13.20); Canvas Intelligence |
+| **M9: P4 Complete** | Month 18 | P4 99/99 remaining (100%); GraphRAG Query Engine (P5-trigger); Agentic RAG; Temporal Memory; Lazy GraphRAG (P5-trigger); Peer Selection; Agent Team Templates; ACP Support (2.13); Distributed Team Orchestration; Deterministic Hooks; Asynchronous Execution API; 5-Level Intent Recognition; Simulation Environment; Computer-use (6.27a); Voice Agent Pipeline (11.11); DataAgent; VibeCoding; Multi-Stream Modes; Projection Registry (8.21) + Atomic File Locks (13.20); Canvas Intelligence; Model Service Publishing (6.47) + Quick Wins (6.48); Intent Package Asset (6.49) |
 | **M10: P5 Complete** | Month 20 | P5 46/46 (100%); Asset Marketplace; Partner Monetization; Industry Templates; PyPI SDK; End-User App; Mobile GUI; EU AI Act Compliance; Knowledge Graph Visualization; Ontology tools; Voice/Vision; Edge/Lite; Plugin Security; Agentic Resource Discovery; All P5 features delivered |
 
 ---
@@ -1026,7 +1051,7 @@ Security → Sandbox Executor → Sandbox Pool → Event Store → Tracing → M
 Authentication → Authorization → Multi-Tenant → Tenant Isolation
 Multi-Agent → A2A Protocol (2.10) → Signed Agent Cards (2.10a) → Conflict Handling → Skill Registry → Mutual Embedding
 MCP Client → MCP Server Mode → MCP Streamable HTTP (5.4b) → MCP Server Registry & Connection Management (5.4c) → MCP Gateway → Plugin System (5.5, via 5.5a) → Tool Permission
-Skill Loading → Skill Versioning (5.9d) → Resource Versioning
+Skill Loading → Skill Versioning (5.9d) → Resource Versioning → **1.3.20 Agent Versioning** *(carries the 14.x versioning substrate that 5.9d, 3.5.12, and 7.5 all reference)*
 Knowledge Graph Construction (3.5.1) → Graph Database Integration (3.5.2) → Community Detection (3.5.3) *(P5 deferred)*
 Memory Isolation (4.6) → Memory Importance Scoring (4.14) → Multi-Signal Fusion Retrieval (4.15)
 LLM-Managed Memory (4.16) → Memory Pressure Alert (4.17) → ContextEngine Integration
@@ -1092,6 +1117,9 @@ P3 Deployment (13.0-13.4) + Data Backup (13.5) + Version Upgrade (13.6) → Envi
 P3 Cost Dashboard (8.3) → Budget Management & Cost Governance (10.7)
 P3 AB Testing (7.4) + P3 Evaluators (7.2) → Testing Center / Sandbox (7.9)
 P3 Model Management (6.8-6.13) → Model Catalog (6.44) → Model Lifecycle Manager (6.45) → Model Governance (6.46-P5)
+Model Lifecycle Manager (6.45 ✅) → Model Service Publishing (6.47) → published-only application reference surface
+Traces/Costs (8.x ✅) → Provider Call-Count Wiring (6.48)
+Intent Recognition (6.23) → Intent Package Asset (6.49) → few-shot classification evidence
 P3 Model Deployment (6.1) → Self-Hosted Inference (6.5) → Managed Model Deployment (G5)
 P3 Model Classification (6.11) → Multi-Modal Model Classification (G6)
 P3 Fine-Tuning (6.6) → Fine-Tuning Pipeline (G7)
