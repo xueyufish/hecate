@@ -1,6 +1,19 @@
-# runtime/ — execution engine domain
+# runtime/ — agent runtime domain
 
-The runtime domain is the execution engine (renamed from `engine/` in PR #117).
+The runtime domain implements the agent runtime: the execution engine plus the
+agent-execution semantics layered on top of it (renamed from `engine/` when the
+domain scope grew beyond the bare engine). Terms are used with fixed meanings:
+
+- **Execution engine** — the graph-execution mechanism: Pregel/BSP superstep
+  loop, ChannelManager, EventStore, CheckpointStore, compiler, Worker ABC.
+  Agent-agnostic; also executes pure workflows.
+- **Agent runtime** — engine + agent-execution semantics: production workers
+  (LLM / Tool / Condition / Coordinator), retry, interrupt/approval, streaming
+  modes, session state, handoff. Containment: engine ⊂ runtime.
+
+Full definition and naming discipline: `docs/design/engine-design.md`
+("Terminology: Engine vs. Runtime").
+
 Zero external dependencies on other domains and workspace wheels — pinned by a
 subprocess probe. `__init__.py` is deliberately empty: import directly from
 submodules (`from hecate.runtime.pregel import PregelRuntime`).
