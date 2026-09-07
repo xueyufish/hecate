@@ -34,7 +34,10 @@ copy_worktreeinclude_files() {
     [[ -f "${include_file}" ]] || return 0
     while IFS= read -r path; do
         [[ -z "${path}" || "${path}" == \#* ]] && continue
-        [[ -e "${REPO_ROOT}/${path}" ]] && mkdir -p "${wt_path}/$(dirname "${path}")" && cp -a "${REPO_ROOT}/${path}" "${wt_path}/${path}"
+        if [[ -e "${REPO_ROOT}/${path}" ]]; then
+            mkdir -p "${wt_path}/$(dirname "${path}")"
+            cp -a "${REPO_ROOT}/${path}" "${wt_path}/${path}"
+        fi
     done < "${include_file}"
 }
 
