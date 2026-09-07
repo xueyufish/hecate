@@ -23,6 +23,7 @@ Task-oriented recipes for specific problems. Each guide is self-contained — ju
 ## Operations
 
 - **[Deploy to production](deploy-production.md)** — Docker Compose, blue-green zero-downtime, Kubernetes, horizontal scaling, and backup/restore with PITR.
+- **[Deploy without internet access](deploy-offline.md)** — build a verifiable offline bundle (images, wheels, local LLM weights) and load it on an air-gapped host.
 - **[Configure backup and recovery](deploy-production.md#backup-and-recovery)** — scheduled backups, verification, and restore.
 - **[Monitor with OpenTelemetry and Prometheus](monitor-opentelemetry.md)** — distributed tracing, Prometheus metrics, structured logging, Kubernetes-style health probes, and trace inspection.
 - **[Scale horizontally](deploy-production.md#horizontal-scaling)** — Redis session state store, multi-replica deployment.

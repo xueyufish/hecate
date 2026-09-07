@@ -7,6 +7,7 @@ and PregelRuntime for unified graph-based execution.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -748,9 +749,14 @@ async def _execute_tool_calls(
     """
     from hecate.runtime.tool_access import AccessDecision
 
-    results: list[dict[str, Any]] = []
     risk_overrides = risk_overrides or {}
-    for tc in tool_calls:
+
+    async def _execute_one(tc: dict[str, Any]) -> dict[str, Any]:
+        """Run guardrails + execution for a single tool call.
+
+        Independent for each call so the outer caller can dispatch all calls
+        concurrently (see ``asyncio.gather`` below).
+        """
         # Path-A guardrail evaluation (T0.2): same five-layer policy the
         # ToolWorker uses, kept consistent with the production chat surface.
         if access_policy is not None:
@@ -768,14 +774,11 @@ async def _execute_tool_calls(
             # tool_call_id is refused without re-running the policy pipeline.
             tc_id = tc.get("id", "")
             if denial_tracker is not None and tc_id and denial_tracker.is_denied(tc_id):
-                results.append(
-                    {
-                        "tool_call_id": tc_id,
-                        "result": "Tool denied by access policy",
-                        "is_error": True,
-                    }
-                )
-                continue
+                return {
+                    "tool_call_id": tc_id,
+                    "result": "Tool denied by access policy",
+                    "is_error": True,
+                }
             # T1.5: pre-tool chain runs before access policy. When the chain
             # BLOCKs, the policy is skipped — chain decision is authoritative.
             pre_chain = (middleware_chains or {}).get(Phase.TOOL_PRE_EXECUTE)
@@ -790,14 +793,11 @@ async def _execute_tool_calls(
                 if pre_decision.action == GuardrailAction.BLOCK:
                     if denial_tracker is not None and tc_id:
                         denial_tracker.deny(tc_id)
-                    results.append(
-                        {
-                            "tool_call_id": tc["id"],
-                            "result": f"Tool blocked: {pre_decision.reason}",
-                            "is_error": True,
-                        }
-                    )
-                    continue
+                    return {
+                        "tool_call_id": tc["id"],
+                        "result": f"Tool blocked: {pre_decision.reason}",
+                        "is_error": True,
+                    }
             tool_meta = {
                 "name": tc_name,
                 "risk_level": risk_level,
@@ -813,26 +813,20 @@ async def _execute_tool_calls(
             if decision == AccessDecision.DENY:
                 if denial_tracker is not None and tc_id:
                     denial_tracker.deny(tc_id)
-                results.append(
-                    {
-                        "tool_call_id": tc["id"],
-                        "result": "Tool denied by access policy",
-                        "is_error": True,
-                    }
-                )
-                continue
+                return {
+                    "tool_call_id": tc["id"],
+                    "result": "Tool denied by access policy",
+                    "is_error": True,
+                }
             if decision == AccessDecision.REQUIRE_APPROVAL:
                 if approval_callback is None:
                     if denial_tracker is not None and tc_id:
                         denial_tracker.deny(tc_id)
-                    results.append(
-                        {
-                            "tool_call_id": tc["id"],
-                            "result": "Tool requires approval but no callback configured",
-                            "is_error": True,
-                        }
-                    )
-                    continue
+                    return {
+                        "tool_call_id": tc["id"],
+                        "result": "Tool requires approval but no callback configured",
+                        "is_error": True,
+                    }
                 approval = await approval_callback.request_approval(
                     tool_name=tc_name,
                     arguments=tc_args,
@@ -842,24 +836,23 @@ async def _execute_tool_calls(
                 if not approval.approved:
                     if denial_tracker is not None and tc_id:
                         denial_tracker.deny(tc_id)
-                    results.append(
-                        {
-                            "tool_call_id": tc["id"],
-                            "result": f"Tool call rejected: {approval.reason}",
-                            "is_error": True,
-                        }
-                    )
-                    continue
+                    return {
+                        "tool_call_id": tc["id"],
+                        "result": f"Tool call rejected: {approval.reason}",
+                        "is_error": True,
+                    }
         try:
             result = await tool_registry.execute(
                 tc["name"],
                 tc.get("arguments") or {},
                 context={"session_id": session_id or ""},
             )
-            results.append({"tool_call_id": tc["id"], "result": result, "is_error": False})
+            return {"tool_call_id": tc["id"], "result": result, "is_error": False}
         except Exception as exc:
             logger.warning("Tool '%s' execution failed: %s", tc["name"], exc)
-            results.append({"tool_call_id": tc["id"], "result": str(exc), "is_error": True})
+            return {"tool_call_id": tc["id"], "result": str(exc), "is_error": True}
+
+    results: list[dict[str, Any]] = await asyncio.gather(*(_execute_one(tc) for tc in tool_calls))
     return results
 
 

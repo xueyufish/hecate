@@ -1,7 +1,8 @@
 """Factory for creating the configured vector store backend.
 
 Reads ``VECTOR_STORE_TYPE`` from settings and returns the appropriate
-``VectorStore`` instance.  Supported backends: ``qdrant``, ``chroma``.
+``VectorStore`` instance.  Supported backends: ``qdrant``, ``chroma``,
+``milvus``, ``weaviate``.
 """
 
 from __future__ import annotations
@@ -31,5 +32,19 @@ def get_vector_store() -> VectorStore:
             from hecate_memory.rag.chroma_store import ChromaVectorStore
 
             return ChromaVectorStore(persist_dir=settings.CHROMA_PERSIST_DIR)
+        case "milvus":
+            from hecate_memory.rag.milvus_store import MilvusVectorStore
+
+            return MilvusVectorStore(uri=settings.MILVUS_URI, token=settings.MILVUS_TOKEN)
+        case "weaviate":
+            from hecate_memory.rag.weaviate_store import WeaviateVectorStore
+
+            return WeaviateVectorStore(
+                url=settings.WEAVIATE_URL,
+                grpc_host=settings.WEAVIATE_GRPC_HOST,
+                api_key=settings.WEAVIATE_API_KEY,
+            )
         case other:
-            raise ValueError(f"Unsupported VECTOR_STORE_TYPE: {other!r}. Supported types: 'qdrant', 'chroma'.")
+            raise ValueError(
+                f"Unsupported VECTOR_STORE_TYPE: {other!r}. Supported types: 'qdrant', 'chroma', 'milvus', 'weaviate'."
+            )

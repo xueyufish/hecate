@@ -53,9 +53,11 @@ class Settings(BaseSettings):
     Configuration groups:
 
     - **Database**: ``DATABASE_URL`` — async PostgreSQL connection string.
-    - **Vector Store**: ``VECTOR_STORE_TYPE`` — backend selector (``qdrant``
-      or ``chroma``); ``QDRANT_URL``, ``QDRANT_API_KEY`` for Qdrant;
-      ``CHROMA_PERSIST_DIR`` for Chroma.
+    - **Vector Store**: ``VECTOR_STORE_TYPE`` — backend selector (``qdrant``,
+      ``chroma``, ``milvus``, or ``weaviate``); ``QDRANT_URL``,
+      ``QDRANT_API_KEY`` for Qdrant; ``CHROMA_PERSIST_DIR`` for Chroma;
+      ``MILVUS_URI``, ``MILVUS_TOKEN`` for Milvus; ``WEAVIATE_URL``,
+      ``WEAVIATE_GRPC_HOST``, ``WEAVIATE_API_KEY`` for Weaviate.
     - **Object Storage**: ``MINIO_URL``, ``MINIO_ACCESS_KEY``,
       ``MINIO_SECRET_KEY``, ``MINIO_BUCKET`` — MinIO/S3-compatible storage
       for uploaded files and parsed documents.
@@ -111,6 +113,11 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_API_KEY: str = ""
     CHROMA_PERSIST_DIR: str = "./data/chroma"
+    MILVUS_URI: str = "http://localhost:19530"
+    MILVUS_TOKEN: str = ""
+    WEAVIATE_URL: str = "http://localhost:8080"
+    WEAVIATE_GRPC_HOST: str = "localhost:50051"
+    WEAVIATE_API_KEY: str = ""
 
     MINIO_URL: str = "localhost:9000"
     MINIO_ACCESS_KEY: str = ""

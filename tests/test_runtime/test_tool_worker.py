@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+from hecate.runtime.evidence import EvidenceTracker
 from hecate.runtime.guardrail import GuardrailAction, GuardrailResult
 from hecate.runtime.workers.tool_worker import ToolWorker
 
@@ -431,3 +432,193 @@ class TestToolWorkerAccessPolicy:
             },
         )
         port.tool_execute.assert_called_once()
+
+
+class TestParallelToolExecution:
+    """1.3.2 — multiple tool calls in one assistant turn execute concurrently."""
+
+    async def test_multiple_calls_dispatched_concurrently(self) -> None:
+        """N parallel calls complete in wall-clock time of one slow call."""
+        import asyncio
+        import time
+
+        delays = [0.05, 0.05, 0.05]
+        in_flight = 0
+        peak_in_flight = 0
+        lock = asyncio.Lock()
+
+        async def _slow(name, args, context):
+            nonlocal in_flight, peak_in_flight
+            async with lock:
+                in_flight += 1
+                peak_in_flight = max(peak_in_flight, in_flight)
+            try:
+                await asyncio.sleep(delays[hash(name) % len(delays)])
+                return f"result-{name}"
+            finally:
+                async with lock:
+                    in_flight -= 1
+
+        port = MagicMock()
+        port.tool_execute = AsyncMock(side_effect=_slow)
+        port.create_span = AsyncMock(return_value=None)
+        port.end_span = AsyncMock(return_value=None)
+        worker = ToolWorker(port=port)
+
+        start = time.monotonic()
+        result = await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {"id": "tc_a", "function": {"name": "a", "arguments": {}}},
+                            {"id": "tc_b", "function": {"name": "b", "arguments": {}}},
+                            {"id": "tc_c", "function": {"name": "c", "arguments": {}}},
+                        ],
+                    }
+                ]
+            },
+        )
+        elapsed = time.monotonic() - start
+
+        # If sequential, total = 3 * 0.05 = ~0.15s. Parallel target: ~0.05s.
+        # Allow generous headroom for CI jitter but still demonstrate speedup.
+        assert elapsed < 0.12, f"Tool calls ran sequentially (elapsed={elapsed:.3f}s)"
+        assert port.tool_execute.call_count == 3
+        # The three calls should overlap in time — peak concurrency is 3
+        # (all three awaiting asyncio.sleep simultaneously).
+        assert peak_in_flight >= 2, f"Calls did not overlap (peak={peak_in_flight})"
+        # Result ordering matches input ordering regardless of completion order.
+        results = result.channel_updates["messages"]
+        assert [r["tool_call_id"] for r in results] == ["tc_a", "tc_b", "tc_c"]
+
+    async def test_parallel_calls_preserve_result_ordering(self) -> None:
+        """``asyncio.gather`` returns results in submission order even when
+        individual tasks complete out-of-order."""
+        port = MagicMock()
+        port.tool_execute = AsyncMock(side_effect=_sleeper_then)
+        port.create_span = AsyncMock(return_value=None)
+        port.end_span = AsyncMock(return_value=None)
+        worker = ToolWorker(port=port)
+
+        result = await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            # submitted order: fast, slow, medium — completion
+                            # order will differ; output order must still match input.
+                            {"id": "tc_fast", "function": {"name": "fast", "arguments": {}}},
+                            {"id": "tc_slow", "function": {"name": "slow", "arguments": {}}},
+                            {"id": "tc_med", "function": {"name": "med", "arguments": {}}},
+                        ],
+                    }
+                ]
+            },
+        )
+        ids = [m["tool_call_id"] for m in result.channel_updates["messages"]]
+        contents = [m["content"] for m in result.channel_updates["messages"]]
+        assert ids == ["tc_fast", "tc_slow", "tc_med"]
+        assert contents == ["ok-fast", "ok-slow", "ok-med"]
+
+
+async def _sleeper_then(name: str, args: dict | None = None, context: dict | None = None) -> str:
+    """Return after a name-dependent delay so out-of-order completion is reliable."""
+    import asyncio
+
+    delays = {"fast": 0.001, "med": 0.02, "slow": 0.04}
+    await asyncio.sleep(delays.get(name, 0))
+    return f"ok-{name}"
+
+
+class TestEvidenceCapture:
+    """ToolWorker captures tool outcomes into the run's EvidenceTracker (4.8)."""
+
+    async def test_successful_tool_call_captured(self) -> None:
+        port = _make_port("search results")
+        worker = ToolWorker(port=port)
+        tracker = EvidenceTracker(session_id="s1")
+        await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{"id": "tc_1", "function": {"name": "search", "arguments": {"q": "x"}}}],
+                    }
+                ]
+            },
+            execution_context={"evidence_tracker": tracker, "session_id": "s1", "superstep": 1},
+        )
+        assert len(tracker) == 1
+        record = tracker.records[0]
+        assert record.tool_name == "search"
+        assert record.is_error is False
+        assert record.provenance == {"node_id": "tool", "superstep": 1}
+
+    async def test_failed_tool_call_captured_as_error(self) -> None:
+        port = _make_port()
+        port.tool_execute = AsyncMock(side_effect=RuntimeError("boom"))
+        worker = ToolWorker(port=port)
+        tracker = EvidenceTracker()
+        await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{"id": "tc_1", "function": {"name": "search", "arguments": {}}}],
+                    }
+                ]
+            },
+            execution_context={"evidence_tracker": tracker, "session_id": "s1", "superstep": 0},
+        )
+        assert len(tracker) == 1
+        assert tracker.records[0].is_error is True
+
+    async def test_repeated_call_boosts_prior_evidence(self) -> None:
+        port = _make_port("same result")
+        worker = ToolWorker(port=port)
+        tracker = EvidenceTracker()
+        tool_calls = [{"id": "tc_1", "function": {"name": "search", "arguments": {"q": "x"}}}]
+        messages = [{"role": "assistant", "content": "", "tool_calls": tool_calls}]
+        ctx = {"evidence_tracker": tracker, "session_id": "s1", "superstep": 0}
+        for turn in range(2):
+            tool_calls[0]["id"] = f"tc_{turn}"
+            await worker.execute(
+                node_id="tool", node_config={}, channel_snapshot={"messages": messages}, execution_context=ctx
+            )
+        assert len(tracker) == 2
+        assert tracker.records[0].references == 2
+        assert tracker.records[0].importance == 0.7
+
+    async def test_no_tracker_is_noop(self) -> None:
+        port = _make_port("ok")
+        worker = ToolWorker(port=port)
+        result = await worker.execute(
+            node_id="tool",
+            node_config={},
+            channel_snapshot={
+                "messages": [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [{"id": "tc_1", "function": {"name": "search", "arguments": {}}}],
+                    }
+                ]
+            },
+            execution_context=None,
+        )
+        assert result.error is None

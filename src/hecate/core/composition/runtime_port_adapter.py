@@ -270,6 +270,61 @@ class _ProductionRuntimePort(RuntimePort):
         )
         return await port.agent_execute(agent_id, messages, channel_snapshot, context, agent_definition)
 
+    async def context_assemble(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None,
+        session_id: UUID,
+        model: str = "gpt-4o",
+    ) -> dict:
+        """Assemble context with provider-specific shaping (4.11).
+
+        Applies the shaping strategy resolved from the model name so each
+        provider receives a conversation shape it accepts (system-message
+        consolidation for Claude, orphan tool-message dropping for OpenAI).
+        """
+        from hecate.runtime.context_shaping import shape_context
+
+        shaped_messages, shaped_tools, strategy = shape_context(messages, tools, model)
+        return {
+            "messages": shaped_messages,
+            "tools": shaped_tools,
+            "metadata": {"shaping_strategy": strategy},
+        }
+
+    async def evidence_query(
+        self,
+        session_id: UUID,
+        min_importance: float | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Query persisted evidence records for a session (4.8)."""
+        from sqlalchemy import select
+
+        from hecate.models.evidence import EvidenceModel
+
+        stmt = select(EvidenceModel).where(EvidenceModel.session_id == session_id)
+        if min_importance is not None:
+            stmt = stmt.where(EvidenceModel.importance >= min_importance)
+        stmt = stmt.order_by(EvidenceModel.created_at.desc()).limit(limit)
+        rows = (await self._db.execute(stmt)).scalars().all()
+        return [
+            {
+                "id": str(row.id),
+                "session_id": str(row.session_id),
+                "tool_name": row.tool_name,
+                "tool_arguments": row.tool_arguments,
+                "raw_content": row.raw_content,
+                "normalized_content": row.normalized_content,
+                "is_error": row.is_error,
+                "importance": row.importance,
+                "source_type": row.source_type,
+                "provenance": row.provenance,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+
 
 def create_runtime_port(
     db: AsyncSession,

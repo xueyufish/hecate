@@ -23,6 +23,7 @@ from hecate.runtime.guardrail import (
     PreLLMHook,
 )
 from hecate.runtime.ports import RuntimePort
+from hecate.runtime.task_phase import TaskPhase, detect_task_phase
 from hecate.runtime.tool_gate import ToolGateEvaluator
 from hecate.runtime.types import WorkerResult
 from hecate.runtime.worker import Worker
@@ -32,6 +33,51 @@ logger = logging.getLogger(__name__)
 _DEFAULT_BUDGET = 8000
 _DEFAULT_TOOL_RESULT_LIMIT = 2000
 _TRUNCATION_INDICATOR = "\n[... truncated]"
+
+
+def _consume_resume_value(messages: list[dict[str, Any]], channel_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    """Inject the human-supplied ``_resume_value`` (HITL correction) into the message stream.
+
+    The Pregel runtime writes the value a human returned during an interrupt
+    pause into the ``_resume_value`` channel (see ``PregelRuntime._restore_from_checkpoint``).
+    This helper materializes that value as user-role messages so the next LLM
+    superstep treats it as a normal conversation turn — that's "result correction":
+    a human can rewrite the agent's pending tool call's arguments, supply an
+    answer to a clarification prompt, or annotate the agent's intermediate
+    output.
+
+    Accepted shapes for ``_resume_value``:
+      * ``str`` → wrapped as ``{"role": "user", "content": <str>}``
+      * ``{"role": ..., "content": ...}`` → injected as a single message
+      * ``{"messages": [...]}`` → the list is appended
+      * ``list[...]`` of message dicts → appended verbatim
+
+    The function returns a new messages list (does not mutate the snapshot)
+    and signals to the caller that ``_resume_value`` was consumed so the
+    channel write can be cleared; otherwise the value would re-inject on
+    every subsequent superstep.
+    """
+    resume_value = channel_snapshot.get("_resume_value")
+    if resume_value is None:
+        return messages
+
+    new_messages: list[dict[str, Any]] = list(messages)
+    if isinstance(resume_value, str):
+        new_messages.append({"role": "user", "content": resume_value})
+    elif isinstance(resume_value, dict):
+        if "messages" in resume_value and isinstance(resume_value["messages"], list):
+            new_messages.extend(resume_value["messages"])
+        elif "role" in resume_value and "content" in resume_value:
+            new_messages.append(resume_value)
+        else:
+            # Unknown dict shape — keep the agent deterministic by surfacing
+            # the correction attempt as a plain user message.
+            new_messages.append({"role": "user", "content": str(resume_value)})
+    elif isinstance(resume_value, list):
+        new_messages.extend(resume_value)
+    else:
+        new_messages.append({"role": "user", "content": str(resume_value)})
+    return new_messages
 
 
 def _estimate_message_tokens(message: dict[str, Any], chars_per_token: int = 4) -> int:
@@ -115,6 +161,98 @@ def _resolve_budget(node_config: dict, execution_context: dict | None) -> int:
     return _DEFAULT_BUDGET
 
 
+def _hard_truncate_message(msg: dict[str, Any], budget: int, ctx_engine: Any) -> dict[str, Any]:
+    """Force a single oversized message under the token budget."""
+    content = msg.get("content")
+    if not isinstance(content, str) or not content:
+        return {**msg, "content": "[truncated]"}
+    char_limit = max(1, budget * 3)
+    truncated = content[:char_limit]
+    while truncated and ctx_engine.estimate_tokens([{**msg, "content": truncated}]) > budget:
+        truncated = truncated[: len(truncated) // 2]
+    return {**msg, "content": truncated + "\n…[emergency truncated]"}
+
+
+def _emergency_truncate(
+    messages: list[dict[str, Any]],
+    budget: int,
+    ctx_engine: Any,
+) -> list[dict[str, Any]]:
+    """Final degradation level: hard-truncate the conversation to fit.
+
+    Newest messages are kept first; system messages survive regardless.
+    Individually oversized messages get their string content cut down.
+    Order of the survivors is preserved.
+    """
+    if not messages:
+        return []
+
+    kept: list[dict[str, Any]] = []
+    used = 0
+    for msg in reversed(messages):
+        if msg.get("role") == "system":
+            kept.append(msg)
+            continue
+        tokens = ctx_engine.estimate_tokens([msg])
+        if tokens > budget:
+            truncated = _hard_truncate_message(msg, budget - used if budget > used else 1, ctx_engine)
+            kept.append(truncated)
+            used = budget
+            continue
+        if used + tokens > budget:
+            continue
+        kept.append(msg)
+        used += tokens
+    kept.reverse()
+    return kept
+
+
+async def _emit_budget_snapshot(
+    *,
+    execution_context: dict[str, Any] | None,
+    node_id: str,
+    budget: int,
+    tokens_before: int,
+    tokens_after: int,
+    messages_before: int,
+    messages_after: int,
+    levels: list[str],
+) -> None:
+    """Persist a token-budget degradation snapshot (4.10) to the EventStore.
+
+    Emitted as a fold-skipped CUSTOM event so the degradation trail is
+    queryable from the execution log without affecting channel state.
+    """
+    if not execution_context:
+        return
+    event_store = execution_context.get("event_store")
+    if event_store is None:
+        return
+    try:
+        from hecate.runtime.eventstore import Event, EventType
+
+        await event_store.append(
+            Event(
+                session_id=execution_context["session_id"],
+                superstep=execution_context.get("superstep", 0),
+                event_type=EventType.CUSTOM,
+                node_id=node_id,
+                trace_id=execution_context.get("trace_id"),
+                payload={
+                    "event_name": "BUDGET_SNAPSHOT",
+                    "budget": budget,
+                    "tokens_before": tokens_before,
+                    "tokens_after": tokens_after,
+                    "messages_before": messages_before,
+                    "messages_after": messages_after,
+                    "levels": levels,
+                },
+            )
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("Budget snapshot emission failed on node '%s'", node_id, exc_info=True)
+
+
 class LLMWorker(Worker):
     """Worker that executes CONVERSATION-type nodes with full context engineering.
 
@@ -154,6 +292,7 @@ class LLMWorker(Worker):
         messages: list[dict[str, Any]],
         node_config: dict,
         execution_context: dict | None,
+        node_id: str = "",
     ) -> list[dict[str, Any]]:
         """Apply context pipeline when ContextEngine is available.
 
@@ -189,12 +328,17 @@ class LLMWorker(Worker):
         if estimated <= budget:
             return filtered
 
-        # Step 3: message selection (keeps most-recent window that fits budget)
-        selected = ctx_engine.select_messages(filtered, budget)
+        levels: list[str] = []
 
-        # Step 4: context offloading — preserve dropped messages to environment
-        # so the agent can read_file them later. Done before compression (step 5)
-        # because compression is lossy; offload is not.
+        # Level 1 — DROP: message selection (keeps most-recent window that
+        # fits budget)
+        selected = ctx_engine.select_messages(filtered, budget)
+        if len(selected) < len(filtered):
+            levels.append("drop")
+
+        # Preservation step (not a degradation level): offload dropped
+        # messages to the environment so the agent can read_file them later.
+        # Runs before COMPRESS because compression is lossy; offload is not.
         offloader: Any | None = execution_context.get("context_offloader") if execution_context else None
         if (
             offloader is not None
@@ -218,9 +362,27 @@ class LLMWorker(Worker):
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Context offload failed, falling back to compress: %s", e)
 
-        # Step 5: compression as last resort
+        # Level 2 — COMPRESS: lossy reduction as the second degradation level
         if ctx_engine.estimate_tokens(selected) > budget:
             selected = ctx_engine.compress(selected)
+            levels.append("compress")
+
+        # Level 3 — EMERGENCY: hard truncation when still over budget
+        if ctx_engine.estimate_tokens(selected) > budget:
+            selected = _emergency_truncate(selected, budget, ctx_engine)
+            levels.append("emergency")
+
+        if levels:
+            await _emit_budget_snapshot(
+                execution_context=execution_context,
+                node_id=node_id,
+                budget=budget,
+                tokens_before=estimated,
+                tokens_after=ctx_engine.estimate_tokens(selected),
+                messages_before=len(filtered),
+                messages_after=len(selected),
+                levels=levels,
+            )
 
         return selected
 
@@ -229,11 +391,14 @@ class LLMWorker(Worker):
         tools: Any,
         execution_context: dict | None,
         channel_snapshot: dict,
+        task_phase: TaskPhase | None = None,
     ) -> Any:
         """Filter tools based on available_when expressions.
 
         Builds a flat context dict from execution_context and channel_snapshot,
-        then delegates to ToolGateEvaluator.filter_tools().
+        then delegates to ToolGateEvaluator.filter_tools(). The detected task
+        phase (4.9) is published as ``task_phase`` so gate expressions can
+        gate tools per conversation phase.
 
         Returns the original tools list unchanged if tools is not a list.
         """
@@ -246,6 +411,8 @@ class LLMWorker(Worker):
         context.update(channel_snapshot)
         if "_user_id" in context:
             context["user_id"] = context.pop("_user_id")
+        if task_phase is not None:
+            context["task_phase"] = task_phase.value
 
         return self._tool_gate.filter_tools(tools, context)
 
@@ -258,9 +425,16 @@ class LLMWorker(Worker):
     ) -> WorkerResult:
         """Execute a non-streaming LLM call with full context engineering."""
         messages = channel_snapshot.get("messages", [])
+        # HITL result-correction: materialise ``_resume_value`` (the value the
+        # human returned to the interrupt) as user-role message(s). Cleared
+        # after consumption so subsequent turns don't re-inject it.
+        consume_resume = "_resume_value" in channel_snapshot
+        if consume_resume:
+            messages = _consume_resume_value(messages, channel_snapshot)
         model = node_config.get("model", "gpt-4o")
+        task_phase = detect_task_phase(messages, channel_snapshot)
         tools = node_config.get("tools")
-        tools = self._filter_tools(tools, execution_context, channel_snapshot)
+        tools = self._filter_tools(tools, execution_context, channel_snapshot, task_phase=task_phase)
         session_id = channel_snapshot.get("_session_id")
         agent_id = channel_snapshot.get("_agent_id")
 
@@ -272,14 +446,12 @@ class LLMWorker(Worker):
         )
         if pre_result.action == GuardrailAction.BLOCK:
             logger.info("PreLLMHook blocked LLM call on node '%s': %s", node_id, pre_result.reason)
-            return WorkerResult(
-                node_id=node_id,
-                channel_updates={
-                    "messages": [
-                        {"role": "assistant", "content": f"I cannot process this request: {pre_result.reason}"}
-                    ],
-                },
-            )
+            blocked_updates: dict[str, Any] = {
+                "messages": [{"role": "assistant", "content": f"I cannot process this request: {pre_result.reason}"}],
+            }
+            if consume_resume:
+                blocked_updates["_resume_value"] = None
+            return WorkerResult(node_id=node_id, channel_updates=blocked_updates)
         if pre_result.action == GuardrailAction.SANITIZE:
             if pre_result.modified_data and "messages" in pre_result.modified_data:
                 messages = pre_result.modified_data["messages"]
@@ -290,7 +462,7 @@ class LLMWorker(Worker):
                 )
 
         # Context pipeline (non-destructive message filtering)
-        messages = await self._apply_context_pipeline(messages, node_config, execution_context)
+        messages = await self._apply_context_pipeline(messages, node_config, execution_context, node_id)
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -306,6 +478,7 @@ class LLMWorker(Worker):
             "model": model,
             "gen_ai.request.model": model,
             "message_count": len(shaped_messages),
+            "task_phase": task_phase.value,
         }
         prompt_id = node_config.get("prompt_id")
         prompt_version = node_config.get("prompt_version")
@@ -340,6 +513,7 @@ class LLMWorker(Worker):
                         "messages": shaped_messages,
                         "tools": shaped_tools,
                         "message_count": len(shaped_messages),
+                        "task_phase": task_phase.value,
                         "prompt_id": str(prompt_id) if prompt_id is not None else None,
                         "prompt_version": prompt_version,
                         "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
@@ -426,14 +600,12 @@ class LLMWorker(Worker):
         )
         if post_result.action == GuardrailAction.BLOCK:
             logger.info("PostLLMHook blocked response on node '%s': %s", node_id, post_result.reason)
-            return WorkerResult(
-                node_id=node_id,
-                channel_updates={
-                    "messages": [
-                        {"role": "assistant", "content": "I cannot provide that response due to safety policy."}
-                    ],
-                },
-            )
+            post_blocked_updates: dict[str, Any] = {
+                "messages": [{"role": "assistant", "content": "I cannot provide that response due to safety policy."}],
+            }
+            if consume_resume:
+                post_blocked_updates["_resume_value"] = None
+            return WorkerResult(node_id=node_id, channel_updates=post_blocked_updates)
         if post_result.action == GuardrailAction.SANITIZE:
             if post_result.modified_data and "response" in post_result.modified_data:
                 response_dict = post_result.modified_data["response"]
@@ -454,6 +626,10 @@ class LLMWorker(Worker):
         else:
             updates["_has_tool_call"] = False
 
+        if consume_resume:
+            # Clear the consumed resume value so subsequent turns don't re-inject it.
+            updates["_resume_value"] = None
+
         return WorkerResult(node_id=node_id, channel_updates=updates)
 
     async def execute_stream(
@@ -465,9 +641,15 @@ class LLMWorker(Worker):
     ) -> AsyncGenerator[dict[str, Any] | WorkerResult, None]:
         """Execute a streaming LLM call, yielding tokens before final result."""
         messages = channel_snapshot.get("messages", [])
+        # HITL result-correction: same as execute() — materialise the
+        # human-supplied resume value as user-role messages before the LLM call.
+        consume_resume = "_resume_value" in channel_snapshot
+        if consume_resume:
+            messages = _consume_resume_value(messages, channel_snapshot)
         model = node_config.get("model", "gpt-4o")
+        task_phase = detect_task_phase(messages, channel_snapshot)
         tools = node_config.get("tools")
-        tools = self._filter_tools(tools, execution_context, channel_snapshot)
+        tools = self._filter_tools(tools, execution_context, channel_snapshot, task_phase=task_phase)
         session_id = channel_snapshot.get("_session_id")
         agent_id = channel_snapshot.get("_agent_id")
 
@@ -479,13 +661,14 @@ class LLMWorker(Worker):
         )
         if pre_result.action == GuardrailAction.BLOCK:
             logger.info("PreLLMHook blocked LLM call on node '%s': %s", node_id, pre_result.reason)
+            blocked_updates: dict[str, Any] = {
+                "messages": [{"role": "assistant", "content": f"I cannot process this request: {pre_result.reason}"}],
+            }
+            if consume_resume:
+                blocked_updates["_resume_value"] = None
             yield WorkerResult(
                 node_id=node_id,
-                channel_updates={
-                    "messages": [
-                        {"role": "assistant", "content": f"I cannot process this request: {pre_result.reason}"}
-                    ],
-                },
+                channel_updates=blocked_updates,
             )
             return
         if pre_result.action == GuardrailAction.SANITIZE:
@@ -498,7 +681,7 @@ class LLMWorker(Worker):
                 )
 
         # Context pipeline (non-destructive message filtering)
-        messages = await self._apply_context_pipeline(messages, node_config, execution_context)
+        messages = await self._apply_context_pipeline(messages, node_config, execution_context, node_id)
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -512,7 +695,12 @@ class LLMWorker(Worker):
 
         span_ctx = await self._port.create_span(
             name=f"llm_stream:{node_id}",
-            attributes={"model": model, "gen_ai.request.model": model, "message_count": len(shaped_messages)},
+            attributes={
+                "model": model,
+                "gen_ai.request.model": model,
+                "message_count": len(shaped_messages),
+                "task_phase": task_phase.value,
+            },
         )
 
         llm_start = time.monotonic()
@@ -587,14 +775,12 @@ class LLMWorker(Worker):
         )
         if post_result.action == GuardrailAction.BLOCK:
             logger.info("PostLLMHook blocked response on node '%s': %s", node_id, post_result.reason)
-            yield WorkerResult(
-                node_id=node_id,
-                channel_updates={
-                    "messages": [
-                        {"role": "assistant", "content": "I cannot provide that response due to safety policy."}
-                    ],
-                },
-            )
+            stream_post_blocked_updates: dict[str, Any] = {
+                "messages": [{"role": "assistant", "content": "I cannot provide that response due to safety policy."}],
+            }
+            if consume_resume:
+                stream_post_blocked_updates["_resume_value"] = None
+            yield WorkerResult(node_id=node_id, channel_updates=stream_post_blocked_updates)
             return
         if post_result.action == GuardrailAction.SANITIZE:
             if post_result.modified_data and "response" in post_result.modified_data:
@@ -615,5 +801,8 @@ class LLMWorker(Worker):
             updates["_has_tool_call"] = True
         else:
             updates["_has_tool_call"] = False
+
+        if consume_resume:
+            updates["_resume_value"] = None
 
         yield WorkerResult(node_id=node_id, channel_updates=updates)
