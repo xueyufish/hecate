@@ -666,6 +666,8 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 > **2026-08-22 reclassification**: Sprint 8 scope also absorbs the 48 items deferred from P3 (see feature-catalog → P4 → "Deferred from P3"): Evaluation Suite (7.2b-e/7.3/7.4/7.4a/7.5 + 8.10/8.12), Security remainder (9.5a/9.11/7.10/2.10b/7.7), Deployment & Ops (13.1/13.1a/13.1b/13.4/13.4b/13.17/13.18), Advanced KB (3.2.4/3.3.2/3.3.3/3.4.1), Canvas nodes (1.1.24/1.1.25), Memory (4.3a/4.14/4.15/4.16/4.17/4.25/4.21), AIP (6.16/6.18), Auth (11.16/11.17), 5.4a/5.8/5.9-enh, and 8 shipped-feature enhancements. Sequencing within Sprint 8 is open — no forced ordering inherited from P3.
 >
 > **2026-09-04 reorder (this change)**: Sprint 8 now opens with an **Opening Queue** of 4 items — all底座 ✅, all directly shippable or with shallow blockers — followed by the original three blocks as **Absorption Pool** (原 Sprint 8 块级，按原章节迁移；可在 Opening Queue 进展后择机启动), plus two appended blocks: Plugin Ecosystem (5.5d) and **Model Management (6.47/6.48, added 2026-09-06 from the AgentArts comparison — publish lifecycle pairs with 1.3.20's 提交/发布 semantics)**. The original chapter ordering was shaped by an earlier vision (deep intelligence first); it front-loaded two L-grade items (6.20 Ontology Action System, 6.22 OAG) that depend on the P5-deferred Knowledge Graph integration. Surfacing the Opening Queue first fixes a structural defect: 6.20 / 6.22 cannot close inside Sprint 8 in their current form (closure condition = P5 KG integration trigger). See change `openspec/changes/roadmap-p4-reorder/` for full rationale.
+>
+> **2026-09-07 addition (this change)**: an **Engine Parity** block (1.3.21, from the deer-flow/LangGraph engine comparison) is appended after Model Management. Sequenced inside Sprint 8 — not Sprint 9 — because Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18 debug stream modes, 5.11 parallel research) sit on its outputs; internal order ①declarative interrupts → ②time-travel resume → ③dynamic fan-out.
 
 ### Sprint 8 Opening Queue
 
@@ -728,12 +730,28 @@ Order is priority, not mandate — any change still goes through independent `/o
 | 6.47 | Model Service Publishing — wire 6.45 ✅ staging/promotion machinery into settings/models: publish state (draft → testing → published) on `model_registry`; unpublished models hidden from application reference surface (`/v1/models` → Create Agent dropdown) but still testable inline; publish button + status badge + filter | 6.45 ✅ | S |
 | 6.48 | Model Management Quick Wins — list-level search/filter (providers + models) + provider call-count wiring from existing traces/costs aggregates; pure frontend + one aggregation query | traces/costs ✅ | S |
 
+### Engine Parity (NEW — 2026-09-07 deer-flow/LangGraph engine comparison)
+
+> Source: engine-level diff of Hecate's Pregel vs LangGraph (deer-flow's inherited engine), recorded as catalog row **1.3.21**. deer-flow itself uses almost none of these (v1 research loop = sequential `Command(goto)` cycles, zero `Send()`; v2 retreats to single-agent + middleware) — the gaps are vs the **engine**, not the app. Also carries Hecate's 5 confirmed leads (log-as-truth, self-hosted replay, tenant/governance plane, pluggable conflict resolution, coordinator isolation) — no parity anxiety; this is targeted catch-up on 3 items.
+>
+> **Why Sprint 8** (not Sprint 9): Sprint 9 consumers depend on it — 6.26 E5 what-if checkpoint branching needs ②; 8.20's upgrade from read-only replay toward executable time-travel needs ②; 11.18 debug/tasks stream modes and 5.11 Deep Research parallel collection sit on ③'s fan-out machinery. **Order ①→②→③**: smallest first; ② reuses the existing 1.3.19 `fold_session` machinery (only the execute-path exposure is new); ③ is the largest and benefits from ①'s test breakpoints and ②'s checkpoint anchoring.
+
+| Order | Item | Dependencies | Effort | Unblocks |
+|---|---|---|---|---|
+| ① first | 1.3.21① Declarative interrupts — compile-time `interrupt_before`/`interrupt_after` node lists + `remaining_steps` signal in execution_context (graceful degradation before MaxSuperstepsError) | Command/interrupt ✅ | S | HITL plan-review flows without worker-authored interrupts; G7 inspector breakpoints |
+| ② second | 1.3.21② Time-travel resume + update_state — `CheckpointStore.load(checkpoint_id)` + `execute(resume_from=…)` restoring from any historical checkpoint via log fold; state-mutation entry for re-planning | 1.3.19 ✅ (`fold_session` already rebuilds state at any log_version) | M | 6.26 E5 what-if branching; 8.20 executable replay; HITL re-plan flows |
+| ③ third | 1.3.21③ Send-style dynamic fan-out — conditional edges return N runtime dispatch packets (per-slice state, sub-channel + ConflictResolver merge); generalizes the static FAN_OUT branch table | FAN_OUT/MERGE ✅ + 13.10 ConflictResolver ✅ | M/L | 5.11 Deep Research parallel collection; map-reduce aggregation patterns |
+| ride-along | 1.3.21 sub-items — node-level CachePolicy (TTL + key_func on CONVERSATION/KNOWLEDGE nodes) + pluggable ACCUMULATOR reducers (beyond built-in `add`) | 5.7 tool-cache pattern ✅ | S | Expensive KB/LLM node caching; custom merge semantics |
+
+> Deliberately **not** in scope (research conclusion, see 1.3.21 row): Functional API (`@entrypoint`/`@task`) — GraphDSL covers the expression; delta-checkpoint cache layer — log-as-truth + materialized checkpoints is the stronger answer. Stream-mode parity (debug/tasks/checkpoints) stays in 11.18; inspector UI stays in G7 (1.1.23); cross-thread store stays in 4.23.
+
 ### Milestone M8 (End of Sprint 8)
 
 > **Honest closure note (2026-09-04)**: M8 still includes the "Ontology Action System with writeback" and "OAG complete" items, but their closure condition is **P5 Knowledge Graph integration trigger**, not Sprint 8 internal delivery. These two lines stay in M8 for plan consistency, but do not block Sprint 8's other Opening Queue deliverables — when P5 KG integration fires, the 6.20 / 6.22 closure is backfilled into M8 (and into whichever Sprint hosts that trigger). All other M8 lines are unaffected.
 
 - [ ] **Opening Queue** shipped: MCP Gateway (5.4a), Evaluation Suite tasks (7.2b-e/7.3/7.4/7.4a), Controller Family (2.6a+1.1.21+1.3.10⊕6.23+6.49), Agent Versioning (1.3.20)
 - [ ] Model Service Publishing (6.47) + Quick Wins (6.48) operational
+- [ ] Engine Parity (1.3.21): declarative interrupts (①) + time-travel resume (②) + dynamic fan-out (③) operational — unblocks Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18/5.11 fan-out)
 - [ ] Hallucination detection operational
 - [ ] Self-Learning loop operational
 - [ ] Agentic RL Framework with data flywheel
@@ -811,7 +829,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 ### Milestone M9 (End of Sprint 9)
 
-- [ ] P4 = 99/99 (100%) — re-scope basis (103 features incl. 4 done; 3.5.5/3.1.8 deferred P5, 11.11/2.13/8.21/13.20/6.27a added; 6.47/6.48/6.49 added 2026-09-06 AgentArts pull-forward)
+- [ ] P4 complete — 138 physical rows (grep basis, re-aligned 2026-09-07; includes the 48 P3-deferred reclassification + 11.11/2.13/8.21/13.20/6.27a + 6.47/6.48/6.49 AgentArts pull-forward + 1.3.21 engine parity; 22 done at Sprint 8 start)
 - [ ] GraphRAG Query Engine with Global/Local/Hybrid search (rebased on P5 KG integration when triggered)
 - [ ] Agentic RAG with iterative retrieval
 - [ ] Temporal Memory with time-aware retrieval
@@ -1109,6 +1127,7 @@ CLI Tools → VibeCoding (6.29) → File IO + Command Execution + Code Execution
 Ontology Actions (P3) → Fine-Grained Permissions (6.30) → Object/Attribute/Row-Level Access Control
 Docker (1.3.15a) → gVisor Enhanced Sandbox (6.32) → Kata Containers (6.32a) → Firecracker microVM (6.40) → WASM Runtime (6.41)
 Pregel Runtime → Multi-Stream Modes (11.18) → values/updates/messages/debug
+Engine Parity (1.3.21, Sprint 8): Declarative Interrupts (①) → Time-Travel Resume (②) → Dynamic Fan-out (③) → Sprint 9 consumers: What-If Checkpoint Branching (6.26 E5) + executable 8.20 replay + Deep Research (5.11) parallel collection
 Knowledge Graph (3.5.1-3.5.3, P5 deferred) → Object CRUD Node (1.1.26) → Ontology-Native Canvas Development
 Execution State Visualization (1.1.23) → Side-by-side Chat+Canvas (1.1.27) → Integrated Dev/Test View
 Streaming → Asynchronous Execution API (1.3.11) → Long-Running Workflow Support
