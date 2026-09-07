@@ -30,12 +30,26 @@ class KnowledgeBaseService:
     - Re-indexing existing collections with sparse vectors
     """
 
+    @staticmethod
+    async def _chunk(text: str, metadata: dict[str, Any], strategy: str | None) -> list[Any]:
+        """Chunk text with an optional strategy override (catalog 3.2.6)."""
+        if strategy:
+            from hecate_memory.rag.chunker import ChunkingStrategy, TextChunker
+
+            chunker = TextChunker(strategy=ChunkingStrategy(strategy))
+            if strategy == ChunkingStrategy.SEMANTIC.value:
+                chunker._embedding_service = embedding_service
+                return await chunker.chunk_text_async(text, metadata)
+            return chunker.chunk_text(text, metadata)
+        return text_chunker.chunk_text(text, metadata)
+
     async def ingest_document(
         self,
         file_path: str,
         collection_name: str,
         metadata: dict[str, Any] | None = None,
         workspace_id: str | None = None,
+        chunking_strategy: str | None = None,
     ) -> dict[str, Any]:
         """Ingest a document into the knowledge base.
 
@@ -44,6 +58,9 @@ class KnowledgeBaseService:
             collection_name: Vector store collection name.
             metadata: Optional metadata to attach to chunks.
             workspace_id: Optional workspace ID for tenant isolation.
+            chunking_strategy: Optional chunking strategy override (catalog
+                3.2.6): ``auto`` | ``character`` | ``separator`` | ``semantic``.
+                Defaults to the singleton chunker (character-based).
 
         Returns:
             dict with ingestion results (chunk_count, etc.).
@@ -52,7 +69,7 @@ class KnowledgeBaseService:
         if not text:
             return {"chunk_count": 0, "error": "No text extracted"}
 
-        chunks = text_chunker.chunk_text(text, metadata or {})
+        chunks = await self._chunk(text, metadata or {}, chunking_strategy)
         if not chunks:
             return {"chunk_count": 0, "error": "No chunks generated"}
 
@@ -92,6 +109,7 @@ class KnowledgeBaseService:
         collection_name: str,
         metadata: dict[str, Any] | None = None,
         workspace_id: str | None = None,
+        chunking_strategy: str | None = None,
     ) -> dict[str, Any]:
         """Ingest pre-extracted text into the knowledge base.
 
@@ -100,6 +118,9 @@ class KnowledgeBaseService:
             collection_name: Vector store collection name.
             metadata: Optional metadata to attach to chunks.
             workspace_id: Optional workspace ID for tenant isolation.
+            chunking_strategy: Optional chunking strategy override (catalog
+                3.2.6): ``auto`` | ``character`` | ``separator`` | ``semantic``.
+                Defaults to the singleton chunker (character-based).
 
         Returns:
             dict with ingestion results (chunk_count, etc.).
@@ -107,7 +128,7 @@ class KnowledgeBaseService:
         if not text:
             return {"chunk_count": 0, "error": "No text provided"}
 
-        chunks = text_chunker.chunk_text(text, metadata or {})
+        chunks = await self._chunk(text, metadata or {}, chunking_strategy)
         if not chunks:
             return {"chunk_count": 0, "error": "No chunks generated"}
 

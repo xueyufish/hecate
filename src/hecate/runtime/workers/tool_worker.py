@@ -4,10 +4,17 @@ Parses tool calls from the messages channel, invokes PreToolHook before
 execution, executes tools via RuntimePort, invokes PostToolHook after
 execution, captures evidence, and writes tool result messages back to
 channel_updates.
+
+When the assistant proposes more than one tool call in a single turn, the
+worker dispatches them concurrently via ``asyncio.gather`` so independent
+calls (e.g. parallel searches) finish in the wall-clock time of the slowest
+one. Result ordering is preserved — the channel receives one ``tool`` result
+per call in the same order as the LLM emitted them.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -131,14 +138,44 @@ class ToolWorker(Worker):
                 channel_updates={"messages": []},
             )
 
-        tool_results: list[dict[str, Any]] = []
-        for tc in tool_calls:
-            result = await self._execute_single_tool(tc, channel_snapshot, execution_context)
-            tool_results.append(result)
+        tool_results: list[dict[str, Any]] = await asyncio.gather(
+            *(self._execute_single_tool(tc, channel_snapshot, execution_context, node_id) for tc in tool_calls)
+        )
 
         return WorkerResult(
             node_id=node_id,
             channel_updates={"messages": tool_results},
+        )
+
+    def _capture_evidence(
+        self,
+        *,
+        execution_context: dict | None,
+        node_id: str,
+        name: str,
+        arguments: dict,
+        result: Any,
+        is_error: bool,
+    ) -> None:
+        """Capture one tool outcome into the run's EvidenceTracker (4.8).
+
+        Best-effort by tracker contract; a no-op when no tracker is wired
+        into the execution context.
+        """
+        if not execution_context:
+            return
+        tracker = execution_context.get("evidence_tracker")
+        if tracker is None:
+            return
+        existing = tracker.match_existing(name, arguments)
+        tracker.capture(
+            tool_name=name,
+            arguments=arguments,
+            raw_content=result if isinstance(result, (str, dict)) else str(result),
+            is_error=is_error,
+            node_id=node_id,
+            superstep=execution_context.get("superstep", 0),
+            reused=existing is not None,
         )
 
     def _extract_tool_calls(self, messages: list[dict]) -> list[dict]:
@@ -203,12 +240,15 @@ class ToolWorker(Worker):
         tool_call: dict,
         context: dict,
         execution_context: dict | None = None,
+        node_id: str = "",
     ) -> dict[str, Any]:
         """Execute a single tool call with pre/post hooks.
 
         Args:
             tool_call: Dict with id, function/name, function/arguments.
             context: Channel snapshot for hook context.
+            execution_context: Optional runtime execution context.
+            node_id: Graph node dispatching this call (evidence provenance).
 
         Returns:
             Tool result message dict.
@@ -241,6 +281,14 @@ class ToolWorker(Worker):
                     reason="access_policy_deny",
                     source="tool_access_policy",
                 )
+                self._capture_evidence(
+                    execution_context=execution_context,
+                    node_id=node_id,
+                    name=name,
+                    arguments=arguments,
+                    result="Tool denied by access policy",
+                    is_error=True,
+                )
                 return {
                     "role": "tool",
                     "tool_call_id": tc_id,
@@ -271,6 +319,14 @@ class ToolWorker(Worker):
                     context=context,
                 )
                 if not approval.approved:
+                    self._capture_evidence(
+                        execution_context=execution_context,
+                        node_id=node_id,
+                        name=name,
+                        arguments=arguments,
+                        result=f"Tool call rejected: {approval.reason}",
+                        is_error=True,
+                    )
                     return {
                         "role": "tool",
                         "tool_call_id": tc_id,
@@ -383,6 +439,14 @@ class ToolWorker(Worker):
             logger.warning("Tool '%s' execution failed: %s", name, e)
             if span_ctx:
                 await self._port.end_span(span_ctx.span_id, output_data={"error": str(e)})
+            self._capture_evidence(
+                execution_context=execution_context,
+                node_id=node_id,
+                name=name,
+                arguments=arguments,
+                result=str(e),
+                is_error=True,
+            )
             return {
                 "role": "tool",
                 "tool_call_id": tc_id,
@@ -464,6 +528,14 @@ class ToolWorker(Worker):
                 else:
                     logger.warning("SANITIZE without modified_data for tool '%s'", name)
 
+        self._capture_evidence(
+            execution_context=execution_context,
+            node_id=node_id,
+            name=name,
+            arguments=arguments,
+            result=result,
+            is_error=False,
+        )
         return {
             "role": "tool",
             "tool_call_id": tc_id,

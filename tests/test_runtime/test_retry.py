@@ -320,3 +320,30 @@ class TestDefaultRetryStrategy:
         assert new.base_delay == 2.0
         assert new.max_delay == 60.0
         assert new.multiplier == 3.0
+
+    def test_with_config_swaps_error_classifier(self) -> None:
+        """Per-node retry config must be able to swap the error classifier."""
+
+        class _NeverRetryClassifier(ErrorClassifier):
+            def is_retryable_exception(self, error: Exception) -> bool:
+                return False
+
+        permissive = ErrorClassifier()
+        base = DefaultRetryStrategy(error_classifier=permissive)
+        # permissive classifier: default — retries TimeoutError ("timeout" keyword)
+        assert base.should_retry(TimeoutError("upstream timeout"), attempt=0) is True
+
+        overridden = base.with_config(error_classifier=_NeverRetryClassifier())
+        assert overridden.should_retry(TimeoutError("upstream timeout"), attempt=0) is False
+
+        # original instance is untouched
+        assert base.should_retry(TimeoutError("upstream timeout"), attempt=0) is True
+        # and is the same object we passed in
+        assert overridden._classifier is not permissive
+        assert overridden._classifier.__class__.__name__ == "_NeverRetryClassifier"
+
+    def test_with_config_preserves_classifier_when_omitted(self) -> None:
+        classifier = ErrorClassifier()
+        strategy = DefaultRetryStrategy(error_classifier=classifier)
+        new = strategy.with_config(max_attempts=5)
+        assert new._classifier is classifier

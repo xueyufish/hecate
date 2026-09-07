@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal
+  namespace: hecate
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: temporal}
+  template:
+    metadata:
+      labels: {app: temporal}
+    spec:
+      containers:
+        - name: temporal
+          image: temporalio/auto-setup:latest
+          ports: [{containerPort: 7233}]
+          env:
+            - {name: DB, value: postgresql12}
+            - {name: DB_PORT, value: "5432"}
+            - {name: POSTGRES_USER, value: hecate}
+            - {name: POSTGRES_PWD, value: hecate}
+            - {name: POSTGRES_SEEDS, value: postgres}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal
+  namespace: hecate
+spec:
+  selector: {app: temporal}
+  ports: [{port: 7233, targetPort: 7233}]

@@ -1,0 +1,22 @@
+# Migration Job — mirrors the compose `hecate-migrate` service. The app
+# Deployment waits for this Job to complete via an initContainer-style check
+# (kubectl rollout restart of the app after a fresh install runs migrations
+# automatically because the Job completes before the Deployment's init gate).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hecate-migrate
+  namespace: hecate
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels: {app: hecate-migrate}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: hecate/hecate:latest
+          command: ["alembic", "upgrade", "head"]
+          env:
+            - {name: DATABASE_URL, value: "postgresql+asyncpg://hecate:hecate@postgres:5432/hecate"}

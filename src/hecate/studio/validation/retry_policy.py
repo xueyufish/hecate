@@ -366,11 +366,15 @@ class DefaultRetryStrategy(RetryStrategy):
         return delay * (0.5 + random.random())  # noqa: S311
 
     def with_config(self, **overrides: Any) -> DefaultRetryStrategy:
-        """Create a new strategy with merged configuration overrides."""
+        """Create a new strategy with merged configuration overrides.
+
+        Passing ``error_classifier=<classifier>`` swaps the classifier on the
+        returned instance; omitting it preserves the current one.
+        """
         return DefaultRetryStrategy(
             max_attempts=overrides.get("max_attempts", self.max_attempts),
             base_delay=overrides.get("base_delay", self.base_delay),
             max_delay=overrides.get("max_delay", self.max_delay),
             multiplier=overrides.get("multiplier", self.multiplier),
-            error_classifier=self._classifier,
+            error_classifier=overrides.get("error_classifier", self._classifier),
         )

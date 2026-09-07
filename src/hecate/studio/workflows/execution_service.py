@@ -23,8 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 from hecate.runtime.checkpoint import InMemoryCheckpointStore
 from hecate.runtime.compiler import GraphCompiler
-from hecate.runtime.context import InMemoryContextEngine
+from hecate.runtime.context import PriorityContextEngine
 from hecate.runtime.eventstore import EventStore
+from hecate.runtime.evidence import EvidenceTracker
 from hecate.runtime.guardrail import (
     PostLLMHook,
     PostToolHook,
@@ -360,22 +361,29 @@ class WorkflowExecutionService:
                     threshold_tokens=settings.CONTEXT_OFFLOAD_THRESHOLD_TOKENS,
                 )
 
+        evidence_tracker = EvidenceTracker(session_id=session_id)
+
         runtime = PregelRuntime(
             graph=compiled,
             worker=composite,
             checkpoint_store=checkpoint_store,
             max_supersteps=max_iterations * 3 + 5,
-            context_engine=InMemoryContextEngine(),
+            context_engine=PriorityContextEngine(),
             context_offloader=context_offloader,
             environment=agent_env,
+            evidence_tracker=evidence_tracker,
         )
 
         stream_mode = StreamMode.MESSAGES if stream else StreamMode.VALUES
 
         if stream:
-            return self._stream_execute(runtime, session_id, initial_input, stream_mode, execution_mode, agent_state)
+            return self._persist_evidence(
+                evidence_tracker,
+                self._stream_execute(runtime, session_id, initial_input, stream_mode, execution_mode, agent_state),
+            )
 
         response = await self._non_stream_execute(runtime, session_id, initial_input, execution_mode)
+        await self._persist_evidence_rows(evidence_tracker)
         # Save AgentState after non-streaming execution (single atomic snapshot)
         if agent_state is not None and user_id is not None:
             await self._persist_session_state(
@@ -500,6 +508,53 @@ class WorkflowExecutionService:
                 org_id=org_id,
                 user_id=user_id,
             )
+
+    async def _persist_evidence(
+        self,
+        tracker: EvidenceTracker,
+        event_stream: AsyncGenerator[dict[str, Any], None],
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Yield streaming events through, then persist evidence afterwards."""
+        async for event in event_stream:
+            yield event
+        await self._persist_evidence_rows(tracker)
+
+    async def _persist_evidence_rows(self, tracker: EvidenceTracker | None) -> None:
+        """Persist captured evidence (4.8) as ``EvidenceModel`` rows.
+
+        Best-effort: evidence persistence must never fail the run. Rows are
+        written on the request-scoped session owned by the caller; when no
+        session is available the snapshot is dropped (tracker contract).
+        """
+        if tracker is None or len(tracker) == 0 or self._db is None:
+            return
+        try:
+            from hecate.models.evidence import EvidenceModel
+
+            session_uuid: uuid.UUID | None
+            try:
+                session_uuid = uuid.UUID(tracker.session_id)
+            except ValueError:
+                session_uuid = None
+            if session_uuid is None:
+                return
+            for record in tracker.snapshot():
+                self._db.add(
+                    EvidenceModel(
+                        session_id=session_uuid,
+                        tool_name=record.tool_name,
+                        tool_arguments=record.tool_arguments,
+                        raw_content=record.raw_content,
+                        normalized_content=record.normalized_content,
+                        is_error=record.is_error,
+                        importance=record.importance,
+                        source_type=record.source_type,
+                        provenance=record.provenance,
+                    )
+                )
+            await self._db.flush()
+        except Exception:
+            logger.warning("Evidence persistence failed — dropping snapshot", exc_info=True)
 
     async def _persist_session_state(
         self,

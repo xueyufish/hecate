@@ -445,3 +445,265 @@ class TestLLMWorkerToolCallDetection:
         assert result.channel_updates["messages"][0]["content"] == "plain text"
         assert port._invoke_tracker.call_args is not None
         assert port._invoke_tracker.structured_call_args is None
+
+
+class TestResumeValueInjection:
+    """1.3.4 — HITL result correction routes ``_resume_value`` into the next LLM call."""
+
+    async def test_string_resume_value_injected_as_user_message(self) -> None:
+        """Plain string resume becomes a user-role message."""
+        port = _make_port(["ack"])
+        worker = LLMWorker(port=port)
+        result = await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o"},
+            channel_snapshot={
+                "messages": [{"role": "user", "content": "earlier turn"}],
+                "_resume_value": "Use 50ms not 100ms — I corrected the timeout",
+            },
+        )
+        # The injected message is the one passed to context_assemble / llm_invoke.
+        args, kwargs = port._invoke_tracker.call_args
+        sent_messages = kwargs.get("messages") or (args[0] if args else [])
+        # The corrected message must be the LAST user-role message — earlier turns
+        # are kept verbatim above it.
+        user_messages = [m for m in sent_messages if m.get("role") == "user"]
+        assert user_messages[-1]["content"] == "Use 50ms not 100ms — I corrected the timeout"
+        # And the resume value is cleared so it does not re-inject on the next turn.
+        assert result.channel_updates.get("_resume_value") is None
+
+    async def test_dict_with_messages_key_appended(self) -> None:
+        port = _make_port(["ok"])
+        worker = LLMWorker(port=port)
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o"},
+            channel_snapshot={
+                "messages": [{"role": "user", "content": "earlier turn"}],
+                "_resume_value": {
+                    "messages": [
+                        {"role": "assistant", "content": "(human rewrite)"},
+                        {"role": "user", "content": "Use 50ms not 100ms"},
+                    ]
+                },
+            },
+        )
+        args, kwargs = port._invoke_tracker.call_args
+        sent_messages = kwargs.get("messages") or (args[0] if args else [])
+        roles = [m.get("role") for m in sent_messages]
+        contents = [m.get("content") for m in sent_messages]
+        assert roles[-2:] == ["assistant", "user"]
+        assert "(human rewrite)" in contents[-2]
+        assert "Use 50ms not 100ms" in contents[-1]
+
+    async def test_resume_value_absent_means_no_injection(self) -> None:
+        """No _resume_value → no extra user messages injected."""
+        port = _make_port(["ok"])
+        worker = LLMWorker(port=port)
+        result = await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o"},
+            channel_snapshot={
+                "messages": [{"role": "user", "content": "only this"}],
+            },
+        )
+        args, kwargs = port._invoke_tracker.call_args
+        sent_messages = kwargs.get("messages") or (args[0] if args else [])
+        assert len(sent_messages) == 1
+        # No clear when there was no resume value to consume.
+        assert "_resume_value" not in result.channel_updates
+
+    async def test_streaming_resume_value_injected(self) -> None:
+        """execute_stream also honours _resume_value."""
+        port = _make_port(["stream-ack"])
+        worker = LLMWorker(port=port)
+        events = []
+        async for event in worker.execute_stream(
+            node_id="llm",
+            node_config={"model": "gpt-4o"},
+            channel_snapshot={
+                "messages": [{"role": "user", "content": "earlier"}],
+                "_resume_value": "corrected value",
+            },
+        ):
+            events.append(event)
+        final = next(e for e in events if not isinstance(e, dict))
+        assert final.channel_updates.get("_resume_value") is None
+        # Verify the LLM call received the corrected message
+        args, kwargs = port._invoke_tracker.call_args
+        sent_messages = kwargs.get("messages") or (args[0] if args else [])
+        user_messages = [m for m in sent_messages if m.get("role") == "user"]
+        assert user_messages[-1]["content"] == "corrected value"
+
+    async def test_resume_value_with_pre_llm_block_clears_value(self) -> None:
+        """Even when PreLLMHook blocks the call, _resume_value is cleared so it
+        does not persist into the next turn."""
+        from hecate.runtime.guardrail import PreLLMHook
+
+        class BlockOnceHook(PreLLMHook):
+            def __init__(self):
+                self.calls = 0
+
+            async def on_pre_llm_call(self, **kwargs):
+                self.calls += 1
+                return GuardrailResult(action=GuardrailAction.BLOCK, reason="blocked")
+
+        pre_hook = BlockOnceHook()
+        port = _make_port(["ignored"])
+        worker = LLMWorker(port=port, pre_llm_hook=pre_hook)
+        result = await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o"},
+            channel_snapshot={
+                "messages": [{"role": "user", "content": "earlier"}],
+                "_resume_value": "should be cleared even on block",
+            },
+        )
+        # The blocked refusal message is emitted; resume_value is cleared.
+        assert result.channel_updates["messages"][0]["content"].startswith("I cannot process")
+        assert result.channel_updates.get("_resume_value") is None
+
+
+class _RecordingEventStore:
+    """Minimal event store recording appended events."""
+
+    def __init__(self) -> None:
+        self.events: list = []
+
+    async def append(self, event) -> None:
+        self.events.append(event)
+
+    async def get_version(self, session_id) -> int:
+        return len(self.events)
+
+
+class _OverBudgetEngine:
+    """ContextEngine that never gets under budget — drives all degradation levels."""
+
+    def select_messages(self, history, budget):
+        return list(history)
+
+    def compress(self, messages):
+        return list(messages)
+
+    def estimate_tokens(self, messages):
+        return 10_000 if messages else 0
+
+
+class TestTokenBudgetGovernance:
+    """Three-level degradation ladder + budget snapshot persistence (4.10)."""
+
+    async def test_under_budget_is_noop(self) -> None:
+        messages = [{"role": "user", "content": "hi"}]
+        result = await LLMWorker._apply_context_pipeline(
+            messages,
+            {"max_tokens": 10_000},
+            None,
+        )
+        assert result == messages
+
+    async def test_no_context_engine_is_noop(self) -> None:
+        messages = [{"role": "user", "content": "hi" * 10_000}]
+        result = await LLMWorker._apply_context_pipeline(messages, {}, {"context_budget": 10})
+        assert result == messages
+
+    async def test_drop_level_selection(self) -> None:
+        from hecate.runtime.context import InMemoryContextEngine
+
+        messages = [{"role": "user", "content": "x" * 200} for _ in range(20)]
+        ctx = {"context_budget": 100, "context_engine": InMemoryContextEngine()}
+        result = await LLMWorker._apply_context_pipeline(messages, {}, ctx)
+        assert len(result) < len(messages)
+        assert result == messages[-len(result) :]
+
+    async def test_emergency_level_and_snapshot_event(self) -> None:
+        event_store = _RecordingEventStore()
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": "newer"},
+        ]
+        ctx = {
+            "context_budget": 50,
+            "context_engine": _OverBudgetEngine(),
+            "event_store": event_store,
+            "session_id": "s1",
+            "superstep": 3,
+        }
+        result = await LLMWorker._apply_context_pipeline(messages, {}, ctx)
+        assert result  # survivors exist
+        snapshots = [e for e in event_store.events if e.payload.get("event_name") == "BUDGET_SNAPSHOT"]
+        assert len(snapshots) == 1
+        payload = snapshots[0].payload
+        assert payload["budget"] == 50
+        assert "compress" in payload["levels"]
+        assert "emergency" in payload["levels"]
+        assert payload["tokens_before"] == 10_000
+        assert snapshots[0].session_id == "s1"
+        assert snapshots[0].superstep == 3
+
+    async def test_emergency_truncate_keeps_system(self) -> None:
+        from hecate.runtime.context import InMemoryContextEngine
+
+        engine = InMemoryContextEngine()
+        messages = [
+            {"role": "system", "content": "keep me"},
+            {"role": "user", "content": "old" * 500},
+            {"role": "user", "content": "new"},
+        ]
+        from hecate.runtime.workers.llm_worker import _emergency_truncate
+
+        result = _emergency_truncate(messages, 30, engine)
+        assert any(m.get("role") == "system" for m in result)
+        assert engine.estimate_tokens(result) <= 30 + 30  # suffix overhead tolerance
+
+
+class TestTaskPhaseDetection:
+    """Task phase wiring: gate context + span attributes (4.9)."""
+
+    def _capturing_gate(self):
+        class _Gate:
+            def __init__(self) -> None:
+                self.seen: dict | None = None
+
+            def filter_tools(self, tools, context):
+                self.seen = context
+                return tools
+
+        return _Gate()
+
+    async def test_phase_reaches_tool_gate_context(self) -> None:
+        port = _make_port(["ok"])
+        worker = LLMWorker(port=port)
+        gate = self._capturing_gate()
+        worker._tool_gate = gate
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": [{"type": "function", "function": {"name": "t"}}]},
+            channel_snapshot={"messages": [{"role": "user", "content": "please verify the result"}]},
+        )
+        assert gate.seen is not None
+        assert gate.seen["task_phase"] == "verify"
+
+    async def test_phase_recorded_on_span(self) -> None:
+        port = _make_port(["ok"])
+        worker = LLMWorker(port=port)
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o"},
+            channel_snapshot={"messages": [{"role": "user", "content": "go implement it now"}]},
+        )
+        attributes = port.create_span.call_args.kwargs["attributes"]
+        assert attributes["task_phase"] == "execute"
+
+    async def test_phase_defaults_to_explore(self) -> None:
+        port = _make_port(["ok"])
+        worker = LLMWorker(port=port)
+        gate = self._capturing_gate()
+        worker._tool_gate = gate
+        await worker.execute(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": [{"type": "function", "function": {"name": "t"}}]},
+            channel_snapshot={"messages": [{"role": "user", "content": "hello there"}]},
+        )
+        assert gate.seen["task_phase"] == "explore"

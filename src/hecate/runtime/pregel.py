@@ -91,6 +91,7 @@ class PregelRuntime:
         retry_strategy: RetryStrategy | None = None,
         context_offloader: Any = None,
         environment: Any = None,
+        evidence_tracker: Any = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
@@ -108,6 +109,7 @@ class PregelRuntime:
         self._context_engine = context_engine
         self._context_offloader = context_offloader
         self._environment = environment
+        self._evidence_tracker = evidence_tracker
         self._retry_executor = RetryExecutor(retry_strategy)
         self._superstep = 0
         self._interrupted = False
@@ -163,6 +165,8 @@ class PregelRuntime:
             ctx["context_offloader"] = self._context_offloader
         if self._environment is not None:
             ctx["environment"] = self._environment
+        if self._evidence_tracker is not None:
+            ctx["evidence_tracker"] = self._evidence_tracker
         return ctx
 
     async def execute(

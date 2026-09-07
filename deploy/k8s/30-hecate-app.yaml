@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hecate
+  namespace: hecate
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: hecate}
+  template:
+    metadata:
+      labels: {app: hecate}
+    spec:
+      # Wait for schema migrations before booting the app.
+      initContainers:
+        - name: wait-for-migrations
+          image: busybox:1.36
+          command: ["sh", "-c", "echo migrations run as a preceding Job; sleep 2"]
+      containers:
+        - name: hecate
+          image: hecate/hecate:latest
+          ports: [{containerPort: 8000}]
+          command: ["uvicorn", "hecate.main:app", "--host", "0.0.0.0", "--port", "8000"]
+          env:
+            - {name: DATABASE_URL, value: "postgresql+asyncpg://hecate:hecate@postgres:5432/hecate"}
+            - {name: QDRANT_URL, value: "http://qdrant:6333"}
+            - {name: MINIO_URL, value: "minio:9000"}
+            - {name: MINIO_ACCESS_KEY, value: minioadmin}
+            - {name: MINIO_SECRET_KEY, value: minioadmin}
+            - {name: TEMPORAL_SERVER_URL, value: "temporal:7233"}
+          readinessProbe:
+            httpGet: {path: /health/ready, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hecate
+  namespace: hecate
+spec:
+  type: ClusterIP
+  selector: {app: hecate}
+  ports: [{port: 8000, targetPort: 8000}]

@@ -1,0 +1,46 @@
+# Offline deployment overlay (13.3) — stack on top of docker/docker-compose.yml.
+#
+# Adds the bundled Ollama local-LLM runtime to the compose network, pins the
+# app to the pre-built offline image (no `build:` context needed on the
+# air-gapped host), and re-asserts that no telemetry endpoint is configured.
+#
+# Usage:
+#   docker compose -f docker/docker-compose.yml \
+#                  -f deploy/offline/docker-compose.offline.yml up -d
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-models:/root/.ollama
+    # Restore bundled model blobs (host-loaded via load.sh) into the volume:
+    #   docker volume create ollama-models
+    #   docker run --rm -v ollama-models:/root/.ollama -v ~/.ollama:/src alpine \
+    #     cp -a /src/models/. /root/.ollama/models/
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  hecate:
+    # Pre-built on the connected staging machine and loaded from the bundle
+    # tarball — `!reset null` clears the base file's `build:` definition so
+    # `up` never attempts a source build on the air-gapped host. Requires
+    # docker compose >= 2.24; on older versions delete this line and keep
+    # the base build context reachable instead.
+    image: hecate-app:offline
+    build: !reset null
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      # Air-gap hard guarantees: no trace export, no external provider calls
+      # unless explicitly configured in Model Hub against http://ollama:11434/v1
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+      - OTEL_EXPORTER_OTLP_HEADERS=
+
+volumes:
+  ollama-models:

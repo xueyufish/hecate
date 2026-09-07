@@ -236,7 +236,7 @@ class TestGetVectorStoreFactory:
         assert isinstance(store, ChromaVectorStore)
 
     def test_raises_on_unknown_type(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("hecate_memory.rag.factory.settings.VECTOR_STORE_TYPE", "milvus")
+        monkeypatch.setattr("hecate_memory.rag.factory.settings.VECTOR_STORE_TYPE", "faiss")
         from hecate_memory.rag.factory import get_vector_store
 
         with pytest.raises(ValueError, match="Unsupported VECTOR_STORE_TYPE"):

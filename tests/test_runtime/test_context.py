@@ -1,4 +1,4 @@
-"""Tests for the ContextEngine abstract interface and InMemoryContextEngine.
+"""Tests for the ContextEngine abstract interface and its implementations.
 
 Validates the pluggable context management contract:
 
@@ -6,13 +6,15 @@ Validates the pluggable context management contract:
 - InMemoryContextEngine.select_messages keeps recent messages within budget.
 - InMemoryContextEngine.compress removes oldest messages.
 - InMemoryContextEngine.estimate_tokens uses character-based estimation.
+- PriorityContextEngine (4.12) selects by importance, always keeping system
+  messages and the newest user message, preserving conversation order.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from hecate.runtime.context import ContextEngine, InMemoryContextEngine
+from hecate.runtime.context import ContextEngine, InMemoryContextEngine, PriorityContextEngine
 
 # --- ContextEngine ABC ---
 
@@ -138,3 +140,83 @@ def test_estimate_tokens_handles_none_content(engine: InMemoryContextEngine):
     messages = [{"role": "assistant", "content": None}]
     result = engine.estimate_tokens(messages)
     assert result >= 0
+
+
+# --- PriorityContextEngine (4.12 Message Prioritization) ---
+
+
+@pytest.fixture
+def priority_engine() -> PriorityContextEngine:
+    return PriorityContextEngine()
+
+
+def test_priority_select_keeps_system_and_newest_user(priority_engine: PriorityContextEngine):
+    """System messages and the newest user message survive tight budgets."""
+    messages = [
+        {"role": "system", "content": "x" * 400},
+        {"role": "user", "content": "old question"},
+        {"role": "assistant", "content": "old answer"},
+        {"role": "user", "content": "latest question"},
+    ]
+    result = priority_engine.select_messages(messages, budget=250)
+    assert messages[0] in result
+    assert messages[3] in result
+
+
+def test_priority_select_fits_budget(priority_engine: PriorityContextEngine):
+    messages = [{"role": "user", "content": "x" * 400 + f" {i}"} for i in range(20)]
+    result = priority_engine.select_messages(messages, budget=200)
+    assert priority_engine.estimate_tokens(result) <= 200 + 5
+
+
+def test_priority_select_prefers_recent_over_old(priority_engine: PriorityContextEngine):
+    """With a tight budget, recent messages win over stale ones."""
+    messages = [
+        {"role": "user", "content": "ancient" + " " * 200},
+        {"role": "user", "content": "recent"},
+    ]
+    result = priority_engine.select_messages(messages, budget=50)
+    assert messages[1] in result
+
+
+def test_priority_select_preserves_order(priority_engine: PriorityContextEngine):
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "a"},
+        {"role": "assistant", "content": "b"},
+        {"role": "user", "content": "c"},
+    ]
+    result = priority_engine.select_messages(messages, budget=10_000)
+    assert result == messages
+
+
+def test_priority_select_empty_and_zero_budget(priority_engine: PriorityContextEngine):
+    assert priority_engine.select_messages([], budget=100) == []
+    assert priority_engine.select_messages([{"role": "user", "content": "x"}], budget=0) == []
+
+
+def test_priority_compress_keeps_half(priority_engine: PriorityContextEngine):
+    messages = _make_messages(10)
+    result = priority_engine.compress(messages)
+    assert len(result) == 5
+    assert result == [m for m in messages if m in result]
+
+
+def test_priority_compress_never_empties(priority_engine: PriorityContextEngine):
+    messages = _make_messages(2)
+    assert len(priority_engine.compress(messages)) == 2
+
+
+def test_priority_penalizes_failed_tool_results(priority_engine: PriorityContextEngine):
+    """Failed tool results score lower than successful ones of the same age."""
+    ok = {"role": "tool", "content": "all good"}
+    bad = {"role": "tool", "content": "Error: connection refused"}
+    engine = PriorityContextEngine()
+    ok_score = engine._score(5, ok, 10)
+    bad_score = engine._score(5, bad, 10)
+    assert bad_score < ok_score
+
+
+def test_priority_select_non_dict_entries_ignored(priority_engine: PriorityContextEngine):
+    result = priority_engine.select_messages(["junk", {"role": "user", "content": "real"}], budget=100)
+    assert result == [{"role": "user", "content": "real"}]
