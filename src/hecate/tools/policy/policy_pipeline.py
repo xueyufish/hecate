@@ -143,24 +143,24 @@ class ToolPolicyPipeline:
             hidden = False
             for layer in self._layers:
                 decision = layer.evaluate(tool, context)
-            if decision in (PolicyDecision.HIDE, PolicyDecision.DENY):
-                logger.debug(
-                    "Visibility: layer '%s' hid/denied tool '%s'",
-                    layer.name,
-                    tool.name,
-                )
-                decision_emitter.emit(
-                    decision_emitter.build_event(
-                        agent_id=context.agent_id,
-                        workspace_id=context.workspace_id,
-                        tool_name=tool.name,
-                        decision=decision.value,
-                        reason=f"Hidden by layer '{layer.name}' during visibility evaluation",
-                        layer_results=[{"layer": layer.name, "decision": decision.value}],
+                if decision in (PolicyDecision.HIDE, PolicyDecision.DENY):
+                    logger.debug(
+                        "Visibility: layer '%s' hid/denied tool '%s'",
+                        layer.name,
+                        tool.name,
                     )
-                )
-                hidden = True
-                break
+                    decision_emitter.emit(
+                        decision_emitter.build_event(
+                            agent_id=context.agent_id,
+                            workspace_id=context.workspace_id,
+                            tool_name=tool.name,
+                            decision=decision.value,
+                            reason=f"Hidden by layer '{layer.name}' during visibility evaluation",
+                            layer_results=[{"layer": layer.name, "decision": decision.value}],
+                        )
+                    )
+                    hidden = True
+                    break
             if not hidden:
                 visible.append(tool_def)
         return visible

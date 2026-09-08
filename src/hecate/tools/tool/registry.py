@@ -17,6 +17,7 @@ from hecate.models.tool import ToolModel
 from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS, BuiltInToolExecutor
 
 if TYPE_CHECKING:
+    from hecate.tools.gateway.executor import RestToolExecutor
     from hecate.tools.mcp.connection import MCPClientManager
     from hecate.tools.tool.cache import ToolCache
 
@@ -32,6 +33,10 @@ class ToolRegistry:
         db: Async database session for non-builtin tool lookups.
         builtin_executor: The built-in tool executor instance.
         mcp_manager: Optional MCP client manager for routing MCP tool calls.
+        cache: Optional tool result cache.
+        rest_executor: Optional gateway REST executor for ``source="rest"``
+            tools; required only when rest tools are executed through this
+            registry.
     """
 
     def __init__(
@@ -40,11 +45,13 @@ class ToolRegistry:
         builtin_executor: BuiltInToolExecutor,
         mcp_manager: MCPClientManager | None = None,
         cache: ToolCache | None = None,
+        rest_executor: RestToolExecutor | None = None,
     ) -> None:
         self._db = db
         self._builtin = builtin_executor
         self._mcp_manager = mcp_manager
         self._cache = cache
+        self._rest_executor = rest_executor
         self._builtin_names: set[str] = set(BUILTIN_TOOL_DEFINITIONS.keys())
 
     async def execute(
@@ -102,6 +109,21 @@ class ToolRegistry:
                 args,
                 context,
                 lambda: self._mcp_manager.call_tool(server_name, mcp_tool_name, args),
+                tool,
+            )
+        if tool.source == "rest":
+            from hecate.models.gateway_target import GatewayTargetModel
+
+            target = await self._db.get(GatewayTargetModel, tool.target_id) if tool.target_id is not None else None
+            if target is None or target.deleted or not target.is_active:
+                raise ValueError(f"Gateway target unavailable for tool '{name}'")
+            if self._rest_executor is None:
+                raise RuntimeError("REST executor not configured in ToolRegistry")
+            return await self._maybe_cache(
+                name,
+                args,
+                context,
+                lambda: self._rest_executor.execute(tool, target, args),
                 tool,
             )
         raise ValueError(f"Unknown tool source: {tool.source!r} for tool '{name}'")

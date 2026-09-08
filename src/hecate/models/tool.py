@@ -38,6 +38,8 @@ class ToolModel(BaseModel):
     - **mcp_server** / **mcp_tool_name** — for ``"mcp"`` source tools,
       these fields identify the originating MCP server and the tool name on
       that server. ``None`` for non-MCP tools.
+    - **target_id** — for ``"rest"`` source tools, the originating
+      :class:`GatewayTargetModel` row. ``None`` for non-gateway tools.
     """
 
     __tablename__ = "tools"
@@ -57,6 +59,7 @@ class ToolModel(BaseModel):
     sandbox_config: Mapped[dict] = mapped_column(JSON, default=dict)
     mcp_server: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mcp_tool_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     available_when: Mapped[str | None] = mapped_column(String(500), nullable=True)
     cacheable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     cache_ttl: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -112,6 +115,7 @@ class ToolReadSchema(PydanticBase):
     sandbox_config: dict
     mcp_server: str | None
     mcp_tool_name: str | None
+    target_id: uuid.UUID | None = None
     available_when: str | None
     cacheable: bool | None
     cache_ttl: int | None
