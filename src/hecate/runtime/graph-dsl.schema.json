@@ -196,6 +196,16 @@
     "entry": {
       "type": "string",
       "description": "Entry point node ID"
+    },
+    "interrupt_before": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Node IDs where execution pauses before the node runs (declarative interrupts; conversational mode only)"
+    },
+    "interrupt_after": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Node IDs where execution pauses after the node completes (declarative interrupts; conversational mode only)"
     }
   }
 }

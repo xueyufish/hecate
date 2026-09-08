@@ -222,6 +222,10 @@ class GraphConfig:
         nodes: node configurations keyed by node ID.
         edges: ordered list of directed edges.
         entry: the node ID where execution begins.
+        interrupt_before: node IDs whose superstep pauses before dispatch
+            (declarative interrupts; empty means none).
+        interrupt_after: node IDs whose superstep pauses after their writes
+            are committed (declarative interrupts; empty means none).
     """
 
     version: str = "1.0"
@@ -230,6 +234,8 @@ class GraphConfig:
     nodes: dict[str, NodeConfig] = field(default_factory=dict)
     edges: list[Edge] = field(default_factory=list)
     entry: str = ""
+    interrupt_before: list[str] = field(default_factory=list)
+    interrupt_after: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -264,6 +270,10 @@ class CompiledGraph:
         entry_point: the node ID where execution begins.
         name: human-readable graph name.
         channel_access: per-node channel read/write access boundaries.
+        interrupt_before: node IDs whose superstep pauses before dispatch
+            (declarative interrupts; empty means none).
+        interrupt_after: node IDs whose superstep pauses after their writes
+            are committed (declarative interrupts; empty means none).
     """
 
     nodes: dict[str, NodeConfig]
@@ -272,6 +282,8 @@ class CompiledGraph:
     entry_point: str
     name: str = ""
     channel_access: dict[str, ChannelAccess] = field(default_factory=dict)
+    interrupt_before: list[str] = field(default_factory=list)
+    interrupt_after: list[str] = field(default_factory=list)
 
     def to_json(self) -> dict:
         """Serialize the compiled graph to a JSON-compatible dict.
@@ -296,4 +308,6 @@ class CompiledGraph:
                 for e in self.edges
             ],
             "entry": self.entry_point,
+            "interrupt_before": list(self.interrupt_before),
+            "interrupt_after": list(self.interrupt_after),
         }

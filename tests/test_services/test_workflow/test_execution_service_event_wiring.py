@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 
 from hecate.runtime.eventstore import EventStore, InMemoryEventStore
 from hecate.runtime.session_state import SessionState
+from hecate.runtime.types import StreamMode
 from hecate.studio.workflows.execution_service import WorkflowExecutionService, _sync_event_position
 
 
@@ -83,3 +84,76 @@ async def test_sync_event_position_uses_provided_session_id():
     state = SessionState(agent_state={})
     result = await _sync_event_position(state, store, target_session)
     assert result.event_position == 1
+
+
+class _UpdateRecordingDB:
+    """AsyncSession stub that records executed statements."""
+
+    def __init__(self) -> None:
+        self.statements: list[object] = []
+
+    async def execute(self, stmt: object) -> None:
+        self.statements.append(stmt)
+
+    async def flush(self) -> None:
+        pass
+
+
+class _FakeRuntime:
+    """Duck-typed PregelRuntime: replays a fixed event stream from execute()."""
+
+    def __init__(self, events: list[dict]) -> None:
+        self._events = events
+
+    async def execute(self, **_kwargs):
+        for event in self._events:
+            yield event
+
+
+class TestInterruptSessionStatusWiring:
+    """1.3.21①: the interrupt event flips the session row to ``interrupted``."""
+
+    def _service_with_db(self) -> tuple[WorkflowExecutionService, _UpdateRecordingDB]:
+        db = _UpdateRecordingDB()
+        svc = WorkflowExecutionService(port=MagicMock(), db=db)
+        return svc, db
+
+    async def test_mark_session_interrupted_writes_status(self):
+        svc, db = self._service_with_db()
+        session_id = uuid.uuid4()
+        await svc._mark_session_interrupted(session_id)
+
+        assert len(db.statements) == 1
+        params = db.statements[0].compile().params
+        assert params["status"] == "interrupted"
+
+    async def test_mark_session_interrupted_noop_without_db(self):
+        svc = WorkflowExecutionService(port=MagicMock(), db=None)
+        await svc._mark_session_interrupted(uuid.uuid4())  # must not raise
+
+    async def test_non_stream_execute_marks_interrupted_on_interrupt_event(self):
+        svc, db = self._service_with_db()
+        session_id = uuid.uuid4()
+        runtime = _FakeRuntime(
+            [
+                {"type": "values", "state": {}},
+                {"type": "interrupt", "value": {"kind": "declarative"}},
+                {"type": "values", "state": {}},
+            ]
+        )
+        await svc._non_stream_execute(runtime, session_id, {}, execution_mode="conversational")
+        assert len(db.statements) == 1
+
+    async def test_non_stream_execute_skips_status_flip_in_task_mode(self):
+        svc, db = self._service_with_db()
+        runtime = _FakeRuntime([{"type": "interrupt", "value": {"kind": "declarative"}}])
+        await svc._non_stream_execute(runtime, uuid.uuid4(), {}, execution_mode="task")
+        assert db.statements == []
+
+    async def test_stream_execute_marks_interrupted_on_interrupt_event(self):
+        svc, db = self._service_with_db()
+        session_id = uuid.uuid4()
+        runtime = _FakeRuntime([{"type": "interrupt", "value": {"kind": "declarative"}}])
+        events = [e async for e in svc._stream_execute(runtime, session_id, {}, StreamMode.VALUES, "conversational")]
+        assert events == [{"type": "interrupt", "value": {"kind": "declarative"}}]
+        assert len(db.statements) == 1

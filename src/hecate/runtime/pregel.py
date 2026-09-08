@@ -116,6 +116,13 @@ class PregelRuntime:
         self._interrupt_value: Any = None
         self._interrupted_node: str | None = None
         self._interrupt_updates: dict = {}
+        # Descriptor of the interrupt being resumed, loaded from the event log
+        # (checkpoint metadata fallback when no event store is wired). Payloads
+        # without ``kind`` are legacy worker-authored interrupts.
+        self._interrupt_descriptor: dict | None = None
+        # One-shot set of nodes that resume executes without re-triggering
+        # their own interrupt_before pause (the pause was already consumed).
+        self._resume_skip_before: set[str] = set()
 
         for name, defn in graph.channels.items():
             self._channel_manager.register(name, defn)
@@ -149,11 +156,130 @@ class PregelRuntime:
         except Exception:
             return 0
 
+    def _declarative_descriptor(self, session_id: uuid.UUID, phase: str, nodes: list[str]) -> dict:
+        """Build the structured descriptor carried by declarative INTERRUPT events.
+
+        Field shape is the contract (design D11): flat keys, additively
+        extendable, never renamed.
+        """
+        return {
+            "kind": "declarative",
+            "phase": phase,
+            "nodes": list(nodes),
+            "interrupt_id": f"{session_id}:{uuid.uuid4()}",
+            "superstep": self._superstep,
+            "remaining_steps": self._max_supersteps - self._superstep,
+        }
+
+    def _interrupt_checkpoint_metadata(self, descriptor: dict) -> dict:
+        """Checkpoint metadata for a declarative pause (fast-path info only —
+        resume derivation reads the descriptor from the event log). The caller
+        merges in the current ``log_version``."""
+        return {
+            "interrupted": True,
+            "interrupt_kind": "declarative",
+            "interrupt_phase": descriptor["phase"],
+            "interrupt_nodes": descriptor["nodes"],
+            "interrupt_id": descriptor["interrupt_id"],
+        }
+
+    async def _emit_turn_end_interrupt(self, session_id: uuid.UUID, trace_id: str | None) -> None:
+        """T0.5: close the TURN_START/TURN_END audit pair on an interrupt pause."""
+        from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
+        await self._emit(
+            session_id,
+            EventType.TURN_END,
+            payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION, "reason": "interrupt"},
+            trace_id=trace_id,
+        )
+
+    async def _append_write_batch(
+        self,
+        session_id: uuid.UUID,
+        trace_id: str | None,
+        pending_writes: list[tuple[str, Any, str | None]],
+        *,
+        commit_event: EventType,
+        commit_node_id: str | None = None,
+        commit_payload: dict | None = None,
+    ) -> None:
+        """Batch-append channel-write events followed by the step's commit event.
+
+        WAL ordering: writes are logged BEFORE being applied to channels. The
+        commit event (STEP_END for a regular superstep, INTERRUPT when the
+        superstep ends in a pause) closes the batch; on append failure the
+        entire superstep fails.
+        """
+        if self._event_store is None:
+            return
+        batch_events: list[Event] = []
+        from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
+        from hecate.runtime.replay.logpolicy import should_log_channel
+
+        for _node_id, channel_updates, _node_id_repeat in pending_writes:
+            if not channel_updates:
+                continue
+            for ch_name, ch_value in channel_updates.items():
+                if not should_log_channel(ch_name):
+                    continue
+                batch_events.append(
+                    Event(
+                        session_id=session_id,
+                        superstep=self._superstep,
+                        event_type=EventType.CHANNEL_WRITE,
+                        node_id=_node_id,
+                        payload={
+                            "channel": ch_name,
+                            "value": ch_value,
+                            "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                        },
+                        trace_id=trace_id,
+                    )
+                )
+        # STEP_END is only meaningful as a commit point for logged writes (kept
+        # from the original semantics); an INTERRUPT commit point is always
+        # emitted, even with no loggable writes — the resume gate reads it.
+        if batch_events or commit_event == EventType.INTERRUPT:
+            batch_events.append(
+                Event(
+                    session_id=session_id,
+                    superstep=self._superstep,
+                    event_type=commit_event,
+                    node_id=commit_node_id,
+                    payload=commit_payload or {},
+                    trace_id=trace_id,
+                )
+            )
+            await self._event_store.append_batch(batch_events)
+
+    async def _append_eviction_events(self, session_id: uuid.UUID, trace_id: str | None) -> None:
+        """Append any pending channel-eviction records to the event log."""
+        eviction_records = self._channel_manager.consume_pending_evictions()
+        if self._event_store is not None and eviction_records:
+            from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
+            eviction_events = [
+                Event(
+                    session_id=session_id,
+                    superstep=self._superstep,
+                    event_type=EventType.EVICTION,
+                    payload={
+                        **rec,
+                        "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                    },
+                    trace_id=trace_id,
+                )
+                for rec in eviction_records
+            ]
+            await self._event_store.append_batch(eviction_events)
+
     def _execution_context(self, session_id: uuid.UUID, trace_id: str | None = None) -> dict:
         """Build execution context dict for worker dispatch."""
         ctx: dict[str, Any] = {
             "session_id": session_id,
             "superstep": self._superstep,
+            "remaining_steps": self._max_supersteps - self._superstep,
             "event_store": self._event_store,
             "trace_id": trace_id,
         }
@@ -327,8 +453,48 @@ class PregelRuntime:
             context = {"superstep": self._superstep, "channel_snapshot": snapshot}
             scheduled_nodes = self._scheduler.select_next(current_nodes, context)
 
+            # Declarative interrupt_before: pause the whole superstep before any
+            # node is dispatched. No writes occurred this step, so the INTERRUPT
+            # event alone is the commit point. Nodes coming out of a before
+            # pause run once without re-triggering their own pause (one-shot).
+            before_hits = [
+                n for n in scheduled_nodes if n in self._graph.interrupt_before and n not in self._resume_skip_before
+            ]
+            self._resume_skip_before = set()
+            if before_hits:
+                descriptor = self._declarative_descriptor(session_id, "before", scheduled_nodes)
+                await self._emit(
+                    session_id,
+                    EventType.INTERRUPT,
+                    node_id=before_hits[0],
+                    payload=descriptor,
+                    trace_id=trace_id,
+                )
+                if execution_mode == "conversational":
+                    await self._checkpoint_store.save(
+                        session_id=session_id,
+                        superstep=self._superstep,
+                        node_id=before_hits[0],
+                        channel_state=self._channel_manager.snapshot(),
+                        metadata={
+                            **self._interrupt_checkpoint_metadata(descriptor),
+                            "log_version": await self._current_log_version(session_id),
+                        },
+                    )
+                self._interrupted = True
+                self._interrupt_value = descriptor
+                self._interrupted_node = before_hits[0]
+                self._interrupt_updates = {}
+                yield {"type": "interrupt", "value": descriptor}
+                await self._emit_turn_end_interrupt(session_id, trace_id)
+                return
+
             results: list[WorkerResult] = []
             execution_context = self._execution_context(session_id, trace_id=trace_id)
+            # FAN_OUT dispatch runs inside the node's superstep, and branch
+            # WorkerResults carry branch node IDs — track the fan-out node itself
+            # so interrupt_after can target it.
+            fan_out_dispatched: list[str] = []
 
             for node_id in scheduled_nodes:
                 node = self._graph.nodes.get(node_id)
@@ -345,6 +511,7 @@ class PregelRuntime:
                 )
 
                 if node_type == NodeType.FAN_OUT:
+                    fan_out_dispatched.append(node_id)
                     fan_out_results = await self._dispatch_fan_out(
                         node_id, node, snapshot, execution_context=execution_context
                     )
@@ -391,8 +558,8 @@ class PregelRuntime:
                     )
                     results.append(result)
 
-            interrupted = False
             pending_writes: list[tuple[str, Any, str | None]] = []
+            worker_interrupt: WorkerResult | None = None
             for result in results:
                 await self._emit(
                     session_id,
@@ -411,114 +578,111 @@ class PregelRuntime:
                     )
                     raise result.error
                 if result.command:
-                    if result.command.is_interrupt():
-                        self._interrupted = True
-                        self._interrupt_value = result.command.interrupt
-                        self._interrupted_node = result.node_id
-                        self._apply_writes(result.channel_updates, node_id=result.node_id)
-                        await self._emit(
-                            session_id,
-                            EventType.INTERRUPT,
-                            node_id=result.node_id,
-                            payload={"interrupt_value_type": type(self._interrupt_value).__name__},
-                            trace_id=trace_id,
-                        )
-                        if execution_mode == "conversational":
-                            await self._checkpoint_store.save(
-                                session_id=session_id,
-                                superstep=self._superstep,
-                                node_id=result.node_id,
-                                channel_state=self._channel_manager.snapshot(),
-                                metadata={
-                                    "interrupted": True,
-                                    "interrupt_value": self._interrupt_value,
-                                    "interrupt_updates": result.channel_updates,
-                                    "log_version": await self._current_log_version(session_id),
-                                },
-                            )
-                        yield {"type": "interrupt", "value": self._interrupt_value}
-                        interrupted = True
-                        break
-                    if result.command.update:
+                    if result.command.is_interrupt() and worker_interrupt is None:
+                        # Keep collecting: sibling nodes' writes in this superstep
+                        # must still be committed before the pause (commit-point
+                        # rule — the cache may never run ahead of the log). The
+                        # interrupting result's own writes join pending_writes
+                        # via the fall-through below.
+                        worker_interrupt = result
+                    elif result.command.update:
                         self._apply_writes(result.command.update, node_id=result.node_id)
-                if not self._interrupted:
-                    pending_writes.append((result.node_id, result.channel_updates, result.node_id))
+                pending_writes.append((result.node_id, result.channel_updates, result.node_id))
 
-            if interrupted:
-                # T0.5: emit TURN_END before yielding the interrupt event so the
-                # pair is logged adjacent to INTERRUPT. Falls through to the
-                # post-loop TURN_END only when the loop exits via while-condition
-                # exhaustion; here we return early with a paired TURN_END emitted
-                # inline below.
-                await self._emit(
+            executed_nodes = [r.node_id for r in results] + fan_out_dispatched
+            after_hits = [n for n in executed_nodes if n in self._graph.interrupt_after]
+
+            if worker_interrupt is not None:
+                # Worker-authored interrupt: commit the full superstep's writes
+                # with the INTERRUPT event as commit point, then checkpoint,
+                # yield, and close the turn.
+                descriptor = {
+                    "kind": "worker",
+                    "nodes": [worker_interrupt.node_id],
+                    "interrupt_id": f"{session_id}:{uuid.uuid4()}",
+                    "superstep": self._superstep,
+                    "remaining_steps": self._max_supersteps - self._superstep,
+                    "interrupt_value_type": type(worker_interrupt.command.interrupt).__name__,
+                }
+                await self._append_write_batch(
                     session_id,
-                    EventType.TURN_END,
-                    payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION, "reason": "interrupt"},
-                    trace_id=trace_id,
+                    trace_id,
+                    pending_writes,
+                    commit_event=EventType.INTERRUPT,
+                    commit_node_id=worker_interrupt.node_id,
+                    commit_payload=descriptor,
                 )
+                for _node_id, channel_updates, _node_id_repeat in pending_writes:
+                    self._apply_writes(channel_updates, node_id=_node_id)
+                await self._append_eviction_events(session_id, trace_id)
+                self._interrupted = True
+                self._interrupt_value = worker_interrupt.command.interrupt
+                self._interrupted_node = worker_interrupt.node_id
+                self._interrupt_updates = worker_interrupt.channel_updates
+                if execution_mode == "conversational":
+                    await self._checkpoint_store.save(
+                        session_id=session_id,
+                        superstep=self._superstep,
+                        node_id=worker_interrupt.node_id,
+                        channel_state=self._channel_manager.snapshot(),
+                        metadata={
+                            "interrupted": True,
+                            "interrupt_value": self._interrupt_value,
+                            "interrupt_updates": self._interrupt_updates,
+                            "log_version": await self._current_log_version(session_id),
+                        },
+                    )
+                yield {"type": "interrupt", "value": self._interrupt_value}
+                await self._emit_turn_end_interrupt(session_id, trace_id)
                 return
 
             # WAL ordering: batch-append channel-write events (with adjudicated values
-            # + log_schema_version marker) BEFORE applying them to channels. On append
-            # failure the entire superstep fails (consistent with today’s
-            # per-superstep checkpoint semantics).
-            if self._event_store is not None and pending_writes:
-                batch_events: list[Event] = []
-                from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
-                from hecate.runtime.replay.logpolicy import should_log_channel
-
-                for _node_id, channel_updates, _node_id_repeat in pending_writes:
-                    if not channel_updates:
-                        continue
-                    for ch_name, ch_value in channel_updates.items():
-                        if not should_log_channel(ch_name):
-                            continue
-                        batch_events.append(
-                            Event(
-                                session_id=session_id,
-                                superstep=self._superstep,
-                                event_type=EventType.CHANNEL_WRITE,
-                                node_id=_node_id,
-                                payload={
-                                    "channel": ch_name,
-                                    "value": ch_value,
-                                    "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
-                                },
-                                trace_id=trace_id,
-                            )
-                        )
-                if batch_events:
-                    batch_events.append(
-                        Event(
-                            session_id=session_id,
-                            superstep=self._superstep,
-                            event_type=EventType.STEP_END,
-                            trace_id=trace_id,
-                        )
-                    )
-                    await self._event_store.append_batch(batch_events)
-
+            # + log_schema_version marker) BEFORE applying them to channels. The
+            # commit event (STEP_END, or INTERRUPT for a declarative pause) closes
+            # the batch as a commit point.
+            await self._append_write_batch(
+                session_id,
+                trace_id,
+                pending_writes,
+                commit_event=EventType.STEP_END,
+            )
             for _node_id, channel_updates, _node_id_repeat in pending_writes:
                 self._apply_writes(channel_updates, node_id=_node_id)
 
-            eviction_records = self._channel_manager.consume_pending_evictions()
-            if self._event_store is not None and eviction_records:
-                from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
+            await self._append_eviction_events(session_id, trace_id)
 
-                eviction_events = [
-                    Event(
+            if after_hits:
+                # Declarative interrupt_after: all writes are committed; pause
+                # here instead of the regular superstep close-out. Descriptor
+                # nodes mirror regular edge resolution (result-producing nodes;
+                # the structural FAN_OUT node's out-edges would re-dispatch
+                # branches on resume).
+                descriptor = self._declarative_descriptor(session_id, "after", [r.node_id for r in results])
+                await self._emit(
+                    session_id,
+                    EventType.INTERRUPT,
+                    node_id=after_hits[0],
+                    payload=descriptor,
+                    trace_id=trace_id,
+                )
+                if execution_mode == "conversational":
+                    await self._checkpoint_store.save(
                         session_id=session_id,
                         superstep=self._superstep,
-                        event_type=EventType.EVICTION,
-                        payload={
-                            **rec,
-                            "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                        node_id=after_hits[0],
+                        channel_state=self._channel_manager.snapshot(),
+                        metadata={
+                            **self._interrupt_checkpoint_metadata(descriptor),
+                            "log_version": await self._current_log_version(session_id),
                         },
-                        trace_id=trace_id,
                     )
-                    for rec in eviction_records
-                ]
-                await self._event_store.append_batch(eviction_events)
+                self._interrupted = True
+                self._interrupt_value = descriptor
+                self._interrupted_node = after_hits[0]
+                self._interrupt_updates = {}
+                yield {"type": "interrupt", "value": descriptor}
+                await self._emit_turn_end_interrupt(session_id, trace_id)
+                return
 
             if execution_mode == "conversational":
                 await self._checkpoint_store.save(
@@ -597,12 +761,54 @@ class PregelRuntime:
             except NonReplayablePrefix:
                 pass
 
+        # Interrupt descriptor is log-derived (log-as-truth): the last INTERRUPT
+        # event's payload decides how resume resolves the next node set. Checkpoint
+        # metadata is only a fallback when no event store is wired.
+        self._interrupt_descriptor = await self._load_interrupt_descriptor(session_id, checkpoint)
+        if (
+            self._interrupt_descriptor
+            and self._interrupt_descriptor.get("kind") == "declarative"
+            and self._interrupt_descriptor.get("phase") == "before"
+        ):
+            self._resume_skip_before = {n for n in self._interrupt_descriptor.get("nodes", []) if n}
+        else:
+            self._resume_skip_before = set()
+
         self._interrupted = False
         self._interrupt_value = None
         if resume_value is not None:
             self._channel_manager.write("_resume_value", resume_value)
 
         await self._assert_projection_equivalent(session_id)
+
+    async def _load_interrupt_descriptor(self, session_id: uuid.UUID, checkpoint: dict | None) -> dict | None:
+        """Load the descriptor of the interrupt being resumed.
+
+        Reads the last ``INTERRUPT`` event payload from the event log when one
+        is wired; falls back to the declarative-pause fields in checkpoint
+        metadata otherwise. Legacy worker events without ``kind`` return their
+        payload as-is, which the resume resolution treats as worker-authored.
+        """
+        if self._event_store is not None:
+            try:
+                events = await self._event_store.get_events(session_id)
+            except Exception:
+                events = []
+            for event in reversed(events):
+                if event.event_type == EventType.INTERRUPT:
+                    payload = dict(event.payload or {})
+                    if not payload.get("nodes"):
+                        payload["nodes"] = [event.node_id] if event.node_id else []
+                    return payload
+            return None
+        meta = (checkpoint or {}).get("metadata", {})
+        if meta.get("interrupt_kind") == "declarative":
+            return {
+                "kind": "declarative",
+                "phase": meta.get("interrupt_phase"),
+                "nodes": meta.get("interrupt_nodes", []),
+            }
+        return None
 
     async def _assert_projection_equivalent(self, session_id: uuid.UUID) -> None:
         """Mechanism 3: runtime invariant — projection(log) ≢ snapshot must fail-stop.
@@ -733,15 +939,48 @@ class PregelRuntime:
     def _resolve_next_nodes_after_interrupt(self) -> list[str]:
         """Determine the next nodes to execute after restoring from an interrupt checkpoint.
 
-        Looks up all edges whose source is the interrupted node. For conditional
-        edges (dict-valued targets), uses the ``_route`` key from ``_interrupt_updates``
-        to select the correct branch. Falls back to the entry point if no edges
-        are found and one is defined.
+        Declarative interrupts (descriptor from the last INTERRUPT event): a
+        ``before`` pause never ran its superstep, so the paused nodes execute
+        themselves; an ``after`` pause continues from the union of out-edges of
+        all nodes executed in the interrupting superstep (conditional edges
+        resolve against the restored ``_route`` channel — writes were committed
+        before the pause).
+
+        Worker-authored interrupts (no ``kind`` in the payload): unchanged —
+        follow the interrupted node's out-edges, using the ``_route`` key from
+        ``_interrupt_updates`` for conditional edges. Falls back to the entry
+        point if no edges are found and one is defined.
 
         Returns:
             A deduplicated list of node IDs to execute next, or an empty list
             if the edge leads to ``__end__``.
         """
+        descriptor = self._interrupt_descriptor
+        if descriptor and descriptor.get("kind") == "declarative":
+            nodes = [n for n in descriptor.get("nodes", []) if n]
+            if descriptor.get("phase") == "before":
+                return list(dict.fromkeys(nodes))
+            resolved: list[str] = []
+            snapshot = self._channel_manager.snapshot()
+            for source in nodes:
+                for edge in self._graph.edges:
+                    if edge.source != source:
+                        continue
+                    if isinstance(edge.target, str):
+                        resolved.append(edge.target)
+                    elif isinstance(edge.target, dict):
+                        route_key = str(snapshot.get("_route", "true"))
+                        target = self._resolve_conditional_target(edge.target, route_key)
+                        if target:
+                            resolved.append(target)
+            if "__end__" in resolved:
+                return []
+            if resolved:
+                return list(dict.fromkeys(resolved))
+            if self._graph.entry_point:
+                return [self._graph.entry_point]
+            return []
+
         if self._interrupted_node is None:
             return [self._graph.entry_point] if self._graph.entry_point else []
         next_nodes: list[str] = []

@@ -53,7 +53,7 @@ class GraphCompiler:
         Args:
             config: The parsed graph configuration to compile.
             execution_mode: "conversational" or "task". Task mode forbids
-                SUGGESTION nodes.
+                SUGGESTION nodes and declarative interrupt lists.
 
         Returns:
             A CompiledGraph ready for execution.
@@ -65,6 +65,7 @@ class GraphCompiler:
         self._validate_edges(config)
         self._validate_handoff_edges(config)
         self._validate_fan_out_merge(config)
+        self._validate_interrupt_lists(config)
         self._validate_execution_mode(config, execution_mode)
         self._validate_channel_access(config)
         self._validate_routing_config(config)
@@ -81,10 +82,29 @@ class GraphCompiler:
             entry_point=config.entry,
             name=config.name,
             channel_access=channel_access,
+            interrupt_before=list(config.interrupt_before),
+            interrupt_after=list(config.interrupt_after),
         )
         for optimization_pass in self._passes:
             graph = optimization_pass.optimize(graph)
         return graph
+
+    def _validate_interrupt_lists(self, config: GraphConfig) -> None:
+        """Validate that declarative interrupt lists reference declared nodes.
+
+        Args:
+            config: The parsed graph configuration.
+
+        Raises:
+            GraphValidationError: if either list references an undeclared node ID.
+        """
+        for list_name in ("interrupt_before", "interrupt_after"):
+            for node_id in getattr(config, list_name):
+                if node_id not in config.nodes:
+                    raise GraphValidationError(
+                        f"{list_name} references non-existent node '{node_id}'",
+                        field=list_name,
+                    )
 
     def _validate_channel_access(self, config: GraphConfig) -> None:
         """Warn when nodes declare channel access for channels not in graph state."""
@@ -313,14 +333,17 @@ class GraphCompiler:
         """Validate node restrictions based on execution mode.
 
         Task mode forbids SUGGESTION nodes (interaction nodes that require
-        user presence). Conversational mode allows all node types.
+        user presence) and declarative interrupt lists (pausing requires
+        checkpointing, which task mode does not provide). Conversational
+        mode allows all node types and both lists.
 
         Args:
             config: The parsed graph configuration.
             execution_mode: "conversational" or "task".
 
         Raises:
-            GraphValidationError: if task mode contains forbidden node types.
+            GraphValidationError: if task mode contains forbidden node types
+                or non-empty interrupt lists.
         """
         if execution_mode != "task":
             return
@@ -333,6 +356,13 @@ class GraphCompiler:
                 raise GraphValidationError(
                     f"{node.type.value} nodes are forbidden in task mode workflows",
                     field=f"nodes[{node_id}]",
+                )
+
+        for list_name in ("interrupt_before", "interrupt_after"):
+            if getattr(config, list_name):
+                raise GraphValidationError(
+                    f"declarative interrupts are forbidden in task mode ({list_name} is non-empty)",
+                    field=list_name,
                 )
 
     def _detect_unreachable(self, config: GraphConfig) -> list[str]:

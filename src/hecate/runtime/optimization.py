@@ -70,6 +70,8 @@ class DeadNodeElimination(OptimizationPass):
             channels=graph.channels,
             entry_point=graph.entry_point,
             name=graph.name,
+            interrupt_before=graph.interrupt_before,
+            interrupt_after=graph.interrupt_after,
         )
 
     def _find_reachable(self, graph: CompiledGraph) -> set[str]:
@@ -145,6 +147,8 @@ class ParallelBranchDetection(OptimizationPass):
             channels=graph.channels,
             entry_point=graph.entry_point,
             name=graph.name,
+            interrupt_before=graph.interrupt_before,
+            interrupt_after=graph.interrupt_after,
         )
         new_graph.metadata["parallel_branches"] = parallel_groups
         return new_graph

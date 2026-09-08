@@ -1,3 +1,20 @@
+## ADDED Requirements
+
+### Requirement: Declarative interrupt lists
+The Graph DSL document SHALL accept optional top-level `interrupt_before` and `interrupt_after` arrays of node IDs. `parse_graph()` SHALL propagate both lists into the parsed graph configuration, the compiler SHALL carry them onto the compiled graph, and `CompiledGraph.to_json()` SHALL roundtrip both lists so persisted graph definitions keep their interrupt configuration. Absent lists SHALL behave as empty（不产生任何暂停点）。
+
+#### Scenario: Parse and compile with interrupt lists
+- **WHEN** a DSL document declares `"interrupt_before": ["review_gate"], "interrupt_after": ["planner"]` and both node IDs exist
+- **THEN** the parser SHALL accept the document and the compiled graph SHALL expose both lists for the runtime
+
+#### Scenario: to_json roundtrips interrupt lists
+- **WHEN** a compiled graph carrying `interrupt_before` / `interrupt_after` is serialized via `to_json()` and re-parsed
+- **THEN** both lists SHALL be preserved unchanged
+
+#### Scenario: Absent lists default to empty
+- **WHEN** a DSL document omits both `interrupt_before` and `interrupt_after`
+- **THEN** parsing and compilation SHALL succeed and the compiled graph SHALL carry empty lists
+
 ## MODIFIED Requirements
 
 ### Requirement: Compiler validates entry point, edges, and handoff cycles
@@ -70,49 +87,3 @@ The `GraphCompiler.compile()` SHALL perform validation stages before producing a
 #### Scenario: Channel access warnings logged
 - **WHEN** a node declares `channels.readable: ["nonexistent"]` and "nonexistent" is not in graph `state`
 - **THEN** the compiler SHALL log a WARNING about undeclared channel access
-
-## ADDED Requirements
-
-### Requirement: Declarative interrupt lists
-The Graph DSL document SHALL accept optional top-level `interrupt_before` and `interrupt_after` arrays of node IDs. `parse_graph()` SHALL propagate both lists into the parsed graph configuration, the compiler SHALL carry them onto the compiled graph, and `CompiledGraph.to_json()` SHALL roundtrip both lists so persisted graph definitions keep their interrupt configuration. Absent lists SHALL behave as empty（不产生任何暂停点）。
-
-#### Scenario: Parse and compile with interrupt lists
-- **WHEN** a DSL document declares `"interrupt_before": ["review_gate"], "interrupt_after": ["planner"]` and both node IDs exist
-- **THEN** the parser SHALL accept the document and the compiled graph SHALL expose both lists for the runtime
-
-#### Scenario: to_json roundtrips interrupt lists
-- **WHEN** a compiled graph carrying `interrupt_before` / `interrupt_after` is serialized via `to_json()` and re-parsed
-- **THEN** both lists SHALL be preserved unchanged
-
-#### Scenario: Absent lists default to empty
-- **WHEN** a DSL document omits both `interrupt_before` and `interrupt_after`
-- **THEN** parsing and compilation SHALL succeed and the compiled graph SHALL carry empty lists
-
-## MODIFIED Requirements
-
-### Requirement: Graph DSL parser validates against JSON Schema
-The `parse_graph()` function SHALL accept a JSON string or dict and validate it against `schemas/graph-dsl.schema.json`. The schema SHALL include `"persistent"` as an optional boolean property on channel definitions. The parser SHALL auto-migrate deprecated `"persistent_topic"` to `"topic"` with `persistent=True`. The schema SHALL also support `routing_mode` and `routing_config` fields on CONDITION node config, and `"dynamic_handoff"` as a valid edge trigger value.
-
-#### Scenario: Persistent channel in JSON
-- **WHEN** `parse_graph()` encounters a channel definition with `"type": "topic", "persistent": true`
-- **THEN** it SHALL create `ChannelDef(type=ChannelType.TOPIC, persistent=True)`
-
-#### Scenario: Deprecated persistent_topic
-- **WHEN** `parse_graph()` encounters `"type": "persistent_topic"`
-- **THEN** it SHALL create `ChannelDef(type=ChannelType.TOPIC, persistent=True)` and log a deprecation warning
-
-#### Scenario: Custom registered type
-- **WHEN** `parse_graph()` encounters `"type": "priority_queue"` and "priority_queue" is registered in ChannelTypeRegistry
-- **THEN** it SHALL create `ChannelDef(type=ChannelType("priority_queue"))` without error
-
-#### Scenario: Unknown type
-- **WHEN** `parse_graph()` encounters `"type": "unknown"` and "unknown" is NOT in the registry
-- **THEN** it SHALL raise `GraphValidationError` with field pointing to the channel type
-
-#### Scenario: Routing mode in DSL
-- **WHEN** `parse_graph()` encounters a CONDITION node with `routing_mode: "intent"` and `routing_config`
-- **THEN** it SHALL parse the routing config into the NodeConfig without error
-
-#### Scenario: Dynamic handoff trigger in DSL
-- **WHEN** `parse_graph()` encounters an edge with `trigger: "dynamic_handoff"`
-- **THEN** the resulting `Edge` SHALL have `trigger="dynamic_handoff"` set
