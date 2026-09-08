@@ -147,6 +147,8 @@ class Settings(BaseSettings):
     MCP_TOOL_CACHE_TTL: int = 300
     MCP_CIRCUIT_BREAKER_THRESHOLD: int = 5
     MCP_CIRCUIT_BREAKER_RECOVERY_TIMEOUT: int = 30
+    # MCP Gateway (5.4a) — federated tool catalog on /mcp
+    GATEWAY_ENABLED: bool = False
 
     TOOL_CACHE_ENABLED: bool = True
     TOOL_CACHE_DEFAULT_TTL: int = 300

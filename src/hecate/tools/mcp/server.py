@@ -23,14 +23,51 @@ from hecate.tools.mcp.session_manager import MCPSessionManager
 logger = logging.getLogger(__name__)
 
 
-def create_mcp_server() -> FastMCP:
+def _maybe_attach_gateway(mcp: FastMCP, gateway_enabled: bool | None) -> None:
+    """Attach the MCP Gateway middleware when the gateway is enabled.
+
+    With the gateway on, ``tools/list`` becomes caller-scoped (first-party
+    ∪ federated, filtered through the policy pipeline) and ``tools/call``
+    is authorized and routed for federated names.
+    """
+    from hecate.core.config import settings
+
+    if not (gateway_enabled if gateway_enabled is not None else settings.GATEWAY_ENABLED):
+        return
+
+    from hecate.tools.api.mcp import get_mcp_manager
+    from hecate.tools.gateway.authz import GatewayAuthorizer
+    from hecate.tools.gateway.executor import RestToolExecutor
+    from hecate.tools.gateway.federation import FederatedCatalog
+    from hecate.tools.gateway.middleware import GatewayMiddleware
+
+    manager = get_mcp_manager()
+    executor = RestToolExecutor(timeout=settings.MCP_REQUEST_TIMEOUT)
+    catalog = FederatedCatalog(
+        db_session_factory=async_session_factory,
+        mcp_manager=manager,
+        executor=executor,
+    )
+    mcp.add_middleware(GatewayMiddleware(catalog, GatewayAuthorizer()))
+    logger.info("MCP Gateway middleware attached (federated catalog active)")
+
+
+def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
     """Create and configure the Hecate MCP Server.
+
+    Args:
+        gateway_enabled: Force the MCP Gateway middleware on/off; ``None``
+            (default) follows the ``GATEWAY_ENABLED`` setting. When on, the
+            server's tool catalog becomes caller-scoped and federates
+            gateway targets (rest projections + external MCP servers).
 
     Returns:
         A ``FastMCP`` instance with all tools, resources, and prompts registered.
     """
     mcp = FastMCP("hecate-mcp-server")
     session_mgr = MCPSessionManager()
+
+    _maybe_attach_gateway(mcp, gateway_enabled)
 
     # ----------------------------------------------------------------
     # AGENT RUNTIME TOOLS

@@ -72,6 +72,7 @@ from hecate.studio.api.prompts import router as prompts_router
 from hecate.studio.api.replay import router as replay_router
 from hecate.studio.api.sessions import router as sessions_router
 from hecate.studio.api.workflows import router as workflows_router
+from hecate.tools.api.gateway import router as gateway_router
 from hecate.tools.api.mcp import router as mcp_router
 from hecate.tools.api.skill_registry import router as skill_registry_router
 from hecate.tools.api.skills import router as skills_router
@@ -533,6 +534,7 @@ app.include_router(conversation_analytics_router)
 app.include_router(ops_center_overview_router)
 app.include_router(plugins_router)
 app.include_router(mcp_router)
+app.include_router(gateway_router)
 app.include_router(tool_policies_router)
 app.include_router(tool_cache_router)
 app.include_router(hooks_router)
