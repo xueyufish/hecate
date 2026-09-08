@@ -395,6 +395,28 @@ class WorkflowExecutionService:
             )
         return response
 
+    async def _mark_session_interrupted(self, session_id: uuid.UUID) -> None:
+        """Event-driven session status wiring (1.3.19 requirement, delivered with
+        1.3.21①): flip the session row to ``interrupted`` when the engine yields
+        an interrupt event, so the resume endpoint's state gate can pass. Resume
+        back to ``active`` is owned by the resume endpoint. Best-effort: the
+        event log stays the source of truth for interrupt state, so a missing
+        row or DB hiccup is logged, not raised.
+        """
+        if self._db is None:
+            return
+        try:
+            from sqlalchemy import update
+
+            from hecate.models.session import SessionModel
+
+            await self._db.execute(
+                update(SessionModel).where(SessionModel.id == session_id).values(status="interrupted")
+            )
+            await self._db.flush()
+        except Exception:
+            logger.warning("failed_to_mark_session_interrupted", exc_info=True, extra={"session_id": str(session_id)})
+
     async def _non_stream_execute(
         self,
         runtime: PregelRuntime,
@@ -422,6 +444,8 @@ class WorkflowExecutionService:
         ):
             if event.get("type") == "values":
                 final_state = event.get("state", {})
+            elif event.get("type") == "interrupt" and execution_mode == "conversational":
+                await self._mark_session_interrupted(session_id)
 
         messages = final_state.get("messages", [])
         content = ""
@@ -483,6 +507,8 @@ class WorkflowExecutionService:
                 stream_mode=stream_mode,
                 execution_mode=execution_mode,
             ):
+                if event.get("type") == "interrupt" and execution_mode == "conversational":
+                    await self._mark_session_interrupted(session_id)
                 yield event
         except BaseException as exc:
             # Best-effort save on disconnect; swallow save failures so the

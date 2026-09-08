@@ -161,3 +161,73 @@ def test_resume_endpoint_accepts_when_only_session_row_exists_with_interrupted()
         json={"resume_value": "approve"},
     )
     assert response.status_code == 200
+
+
+def test_resume_endpoint_accepts_engine_generated_declarative_interrupt() -> None:
+    """End-to-end (1.3.21①): a declarative interrupt produced by the engine
+    writes a real event log; the resume endpoint's log gate accepts it exactly
+    like a worker-authored interrupt (same EventType.INTERRUPT).
+    """
+    from hecate.runtime.checkpoint import InMemoryCheckpointStore
+    from hecate.runtime.compiler import GraphCompiler
+    from hecate.runtime.pregel import PregelRuntime
+    from hecate.runtime.types import (
+        ChannelDef,
+        ChannelType,
+        Edge,
+        GraphConfig,
+        NodeConfig,
+        NodeType,
+        WorkerResult,
+    )
+    from hecate.runtime.worker import Worker
+
+    class _EchoWorker(Worker):
+        async def execute(
+            self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
+        ) -> WorkerResult:
+            return WorkerResult(node_id=node_id, channel_updates={"messages": [f"{node_id}_output"]})
+
+    async def setup() -> tuple[InMemoryEventStore, uuid.UUID]:
+        store = InMemoryEventStore()
+        sid = uuid.uuid4()
+        config = GraphConfig(
+            name="resume-e2e",
+            nodes={
+                "A": NodeConfig(id="A", type=NodeType.CONVERSATION, config={}),
+                "B": NodeConfig(id="B", type=NodeType.CONVERSATION, config={}),
+            },
+            edges=[
+                Edge(source="A", target="B"),
+                Edge(source="B", target="__end__"),
+            ],
+            state={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+            entry="A",
+            interrupt_after=["A"],
+        )
+        runtime = PregelRuntime(
+            GraphCompiler().compile(config),
+            _EchoWorker(),
+            InMemoryCheckpointStore(),
+            event_store=store,
+        )
+        async for _event in runtime.execute(sid, initial_input={"messages": ["hi"]}):
+            pass
+        return store, sid
+
+    store, sid = asyncio.run(setup())
+
+    # The engine really paused with a declarative descriptor in the log.
+    events = asyncio.run(store.get_events(sid))
+    interrupt_events = [e for e in events if e.event_type == EventType.INTERRUPT]
+    assert len(interrupt_events) == 1
+    assert interrupt_events[0].payload["kind"] == "declarative"
+    assert interrupt_events[0].payload["phase"] == "after"
+
+    client = _client(store)
+    response = client.post(
+        f"/api/sessions/{sid}/resume",
+        json={"resume_value": "approve"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "active"

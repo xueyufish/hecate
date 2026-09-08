@@ -738,7 +738,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 | Order | Item | Dependencies | Effort | Unblocks |
 |---|---|---|---|---|
-| ① first | 1.3.21① Declarative interrupts — compile-time `interrupt_before`/`interrupt_after` node lists + `remaining_steps` signal in execution_context (graceful degradation before MaxSuperstepsError) | Command/interrupt ✅ | S | HITL plan-review flows without worker-authored interrupts; G7 inspector breakpoints |
+| ① first ✅ | 1.3.21① Declarative interrupts — compile-time `interrupt_before`/`interrupt_after` node lists + `remaining_steps` signal in execution_context (graceful degradation before MaxSuperstepsError) | Command/interrupt ✅ | S | HITL plan-review flows without worker-authored interrupts; G7 inspector breakpoints. 已交付(2026-09-08,change `openspec/changes/archive/2026-09-08-declarative-interrupts/`):整步暂停 + 日志推导 phase-aware resume + WAL 提交序修复 + session status 接线,HITL 端到端可达;细节见 feature-catalog 1.3.21 行。② 的 checkpoint 锚点已就位(phase 描述符即 ② 要折叠的形状) |
 | ② second | 1.3.21② Time-travel resume + update_state — `CheckpointStore.load(checkpoint_id)` + `execute(resume_from=…)` restoring from any historical checkpoint via log fold; state-mutation entry for re-planning | 1.3.19 ✅ (`fold_session` already rebuilds state at any log_version) | M | 6.26 E5 what-if branching; 8.20 executable replay; HITL re-plan flows |
 | ③ third | 1.3.21③ Send-style dynamic fan-out — conditional edges return N runtime dispatch packets (per-slice state, sub-channel + ConflictResolver merge); generalizes the static FAN_OUT branch table | FAN_OUT/MERGE ✅ + 13.10 ConflictResolver ✅ | M/L | 5.11 Deep Research parallel collection; map-reduce aggregation patterns |
 | ride-along | 1.3.21 sub-items — node-level CachePolicy (TTL + key_func on CONVERSATION/KNOWLEDGE nodes) + pluggable ACCUMULATOR reducers (beyond built-in `add`) | 5.7 tool-cache pattern ✅ | S | Expensive KB/LLM node caching; custom merge semantics |
@@ -751,7 +751,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 - [ ] **Opening Queue** shipped: MCP Gateway (5.4a ✅), Evaluation Suite tasks (7.2b-e/7.3/7.4/7.4a), Controller Family (2.6a+1.1.21+1.3.10⊕6.23+6.49), Agent Versioning (1.3.20)
 - [ ] Model Service Publishing (6.47) + Quick Wins (6.48) operational
-- [ ] Engine Parity (1.3.21): declarative interrupts (①) + time-travel resume (②) + dynamic fan-out (③) operational — unblocks Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18/5.11 fan-out)
+- [ ] Engine Parity (1.3.21): declarative interrupts (① ✅ 2026-09-08) + time-travel resume (②) + dynamic fan-out (③) operational — unblocks Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18/5.11 fan-out)
 - [ ] Hallucination detection operational
 - [ ] Self-Learning loop operational
 - [ ] Agentic RL Framework with data flywheel

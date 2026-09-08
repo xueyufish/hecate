@@ -143,4 +143,6 @@ def parse_graph(raw: str | dict) -> GraphConfig:
         nodes=nodes,
         edges=edges,
         entry=data.get("entry", ""),
+        interrupt_before=list(data.get("interrupt_before", [])),
+        interrupt_after=list(data.get("interrupt_after", [])),
     )
