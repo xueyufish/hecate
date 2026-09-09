@@ -24,7 +24,7 @@ from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 from hecate.runtime.checkpoint import InMemoryCheckpointStore
 from hecate.runtime.compiler import GraphCompiler
 from hecate.runtime.context import PriorityContextEngine
-from hecate.runtime.eventstore import EventStore
+from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventStore, EventType
 from hecate.runtime.evidence import EvidenceTracker
 from hecate.runtime.guardrail import (
     PostLLMHook,
@@ -53,6 +53,18 @@ logger = logging.getLogger(__name__)
 _LOCK_MAX_RETRIES = 3
 _LOCK_RETRY_MIN_S = 0.02
 _LOCK_RETRY_MAX_S = 0.150
+
+
+class TurnInFlightError(Exception):
+    """update_state refused: the session has an in-flight turn (HTTP 409)."""
+
+
+class InvalidStateChannelError(ValueError):
+    """update_state/fork target channel is not loggable graph state (HTTP 422)."""
+
+
+class InvalidForkAnchorError(ValueError):
+    """fork anchor is unusable: bad version, empty log, or missing session (HTTP 422/404)."""
 
 
 async def _sync_event_position(
@@ -733,3 +745,364 @@ class WorkflowExecutionService:
             raise ValueError(msg)
 
         return parse_graph(version.graph_dsl)
+
+    # ------------------------------------------------------------------
+    # 1.3.21② time-travel: commit points, update_state, fork
+    # ------------------------------------------------------------------
+
+    async def list_commit_points(self, session_id: uuid.UUID, limit: int = 20) -> list[dict[str, Any]]:
+        """List log-derived resumable anchors for a session, newest first.
+
+        The anchor set is derived purely from the event log (STEP_END /
+        INTERRUPT / FORK events); the checkpoint cache is never consulted.
+        """
+        if self._event_store is None:
+            return []
+        events = await self._event_store.get_events(session_id)
+        anchors: list[dict[str, Any]] = []
+        for event in reversed(events):
+            etype = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+            if etype in {EventType.STEP_END.value, EventType.INTERRUPT.value, EventType.FORK.value}:
+                anchors.append(
+                    {
+                        "log_version": event.version,
+                        "kind": etype,
+                        "node_id": event.node_id,
+                        "superstep": event.superstep,
+                        "created_at": event.timestamp.isoformat() if event.timestamp else None,
+                        "source": (event.payload or {}).get("source"),
+                    }
+                )
+                if len(anchors) >= limit:
+                    break
+        return anchors
+
+    async def update_state(
+        self,
+        session_id: uuid.UUID,
+        values: dict[str, Any],
+        actor: str = "api",
+        model: str | None = None,
+        workflow_id: uuid.UUID | None = None,
+    ) -> dict[str, Any]:
+        """Append-recorded state mutation (update_state equivalent).
+
+        Gate: an unclosed TURN without a subsequent ERROR event means an
+        execution is in flight — refuse. The mutation batch is WAL-ordered
+        (append before apply-via-fold) and closed by a
+        ``STEP_END(source="update_state")`` commit point.
+        """
+        if self._event_store is None:
+            msg = "update_state requires a wired EventStore"
+            raise ValueError(msg)
+        events = await self._event_store.get_events(session_id)
+        if _has_open_turn(events):
+            msg = "session has an in-flight turn (unclosed TURN_START without ERROR)"
+            raise TurnInFlightError(msg)
+
+        session = await self._resolve_session_row(session_id)
+        compiled, _ = await self._build_continuation_graph(session, model=model, workflow_id=workflow_id)
+        from hecate.runtime.replay.logpolicy import should_log_channel
+
+        for name in values:
+            if not should_log_channel(name) or name not in compiled.channels:
+                msg = f"channel '{name}' is not a loggable state channel of the session's graph"
+                raise InvalidStateChannelError(msg)
+
+        await self._append_state_mutation(session_id, values, actor, superstep=events[-1].superstep if events else 0)
+
+        # Response state is log truth: refetch and fold.
+        events_after = await self._event_store.get_events(session_id)
+        folded = _fold_state(compiled, events_after)
+        return {"channel_state": folded, "log_version": events_after[-1].version if events_after else 0}
+
+    async def fork_session(
+        self,
+        parent_session_id: uuid.UUID,
+        at_version: int,
+        updates: dict[str, Any] | None = None,
+        actor: str = "api",
+        model: str | None = None,
+        workflow_id: uuid.UUID | None = None,
+        tools: list[dict] | None = None,
+        kb_ids: list[str] | None = None,
+        user_id: str | uuid.UUID | None = None,
+    ) -> dict[str, Any]:
+        """Create a child session from a historical commit point and run it.
+
+        The parent log is never touched (read-only fold). The child session's
+        log bootstraps with a single FORK snapshot event (self-contained
+        state + lineage + derived next_nodes), optionally followed by an
+        update_state batch, then execution continues from the FORK
+        continuation. Per design D7, re-dispatched nodes re-execute their
+        side effects — nothing is rolled back or deduplicated.
+        """
+        if self._event_store is None:
+            msg = "fork requires a wired EventStore"
+            raise ValueError(msg)
+        session = await self._resolve_session_row(parent_session_id)
+        if session is None:
+            msg = "parent session not found"
+            raise InvalidForkAnchorError(msg)
+
+        parent_events = await self._event_store.get_events(parent_session_id)
+        if not parent_events:
+            msg = "parent session has an empty event log"
+            raise InvalidForkAnchorError(msg)
+        tail = parent_events[-1].version
+        if at_version > tail:
+            msg = f"at_version {at_version} exceeds log tail {tail}"
+            raise InvalidForkAnchorError(msg)
+        effective = max((v for v in _commit_versions(parent_events) if v <= at_version), default=None)
+        if effective is None:
+            msg = f"no commit point at or below at_version {at_version}"
+            raise InvalidForkAnchorError(msg)
+
+        compiled, execution_mode = await self._build_continuation_graph(session, model=model, workflow_id=workflow_id)
+        from hecate.runtime.replay.continuation import derive_continuation
+
+        # Snapshot + continuation derive against a pristine runtime (the
+        # snapshot path folds into a fresh projection, never runtime state).
+        runtime = PregelRuntime(
+            graph=compiled,
+            worker=self._create_composite_worker(tools, kb_ids, None),
+            checkpoint_store=self._build_fork_checkpoint_store(user_id),
+            event_store=self._event_store,
+            context_engine=PriorityContextEngine(),
+        )
+        snap = await runtime.snapshot_at_version(parent_session_id, effective)
+        continuation = derive_continuation(
+            [e for e in parent_events if e.version <= effective], compiled, snap["channel_state"]
+        )
+
+        from hecate.models.session import SessionModel as _SessionModel
+
+        child = _SessionModel(
+            agent_id=session.agent_id,
+            status="active",
+            workspace_id=session.workspace_id,
+            metadata_={
+                "parent_session_id": str(parent_session_id),
+                "parent_log_version": effective,
+            },
+        )
+        if self._db is not None:
+            self._db.add(child)
+            await self._db.flush()
+            await self._db.refresh(child)
+
+        await self._event_store.append(
+            Event(
+                session_id=child.id,
+                superstep=snap["superstep"],
+                event_type=EventType.FORK,
+                payload={
+                    "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                    "parent_session_id": str(parent_session_id),
+                    "parent_log_version": effective,
+                    "channel_state": snap["channel_state"],
+                    "next_nodes": continuation.nodes,
+                    "superstep": snap["superstep"],
+                    "agent_id": str(session.agent_id),
+                },
+            )
+        )
+        if updates:
+            await self._append_state_mutation(child.id, updates, actor, superstep=snap["superstep"])
+
+        execution: dict[str, Any] | None = None
+        executed = False
+        if continuation.nodes:
+            child_tail = await self._event_store.get_version(child.id)
+            execution = await self._fork_run(runtime, child.id, child_tail, execution_mode, model)
+            executed = True
+
+        return {
+            "session_id": child.id,
+            "agent_id": child.agent_id,
+            "status": child.status,
+            "workspace_id": child.workspace_id,
+            "parent_session_id": str(parent_session_id),
+            "parent_log_version": effective,
+            "effective_version": effective,
+            "next_nodes": continuation.nodes,
+            "executed": executed,
+            "execution": execution,
+            "side_effects_note": (
+                "Re-dispatched nodes re-execute tools and external side effects; "
+                "effects from before the fork anchor are not rolled back."
+            ),
+        }
+
+    async def _fork_run(
+        self,
+        runtime: PregelRuntime,
+        session_id: uuid.UUID,
+        resume_from: int,
+        execution_mode: str,
+        model: str | None,
+    ) -> dict[str, Any]:
+        """Non-stream fork continuation: run from the FORK descriptor."""
+        final_state: dict[str, Any] = {}
+        async for event in runtime.execute(
+            session_id=session_id,
+            initial_input=None,
+            stream_mode=StreamMode.VALUES,
+            execution_mode=execution_mode,
+            resume_from=resume_from,
+        ):
+            if event.get("type") == "values":
+                final_state = event.get("state", {})
+            elif event.get("type") == "interrupt" and execution_mode == "conversational":
+                await self._mark_session_interrupted(session_id)
+        messages = final_state.get("messages", [])
+        content = ""
+        if messages:
+            last_msg = messages[-1] if isinstance(messages, list) else messages
+            if isinstance(last_msg, dict):
+                content = last_msg.get("content", "")
+        return {"content": content, "model": model or "gpt-4o", "usage": {}, "finish_reason": "stop"}
+
+    async def _append_state_mutation(
+        self, session_id: uuid.UUID, values: dict[str, Any], actor: str, superstep: int
+    ) -> None:
+        """Append one update_state batch: TURN pair around logged writes."""
+        batch = [
+            Event(
+                session_id=session_id,
+                superstep=superstep,
+                event_type=EventType.TURN_START,
+                payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION, "reason": "update_state", "actor": actor},
+            )
+        ]
+        for channel, value in values.items():
+            batch.append(
+                Event(
+                    session_id=session_id,
+                    superstep=superstep,
+                    event_type=EventType.CHANNEL_WRITE,
+                    payload={
+                        "channel": channel,
+                        "value": value,
+                        "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                        "source": "update_state",
+                        "actor": actor,
+                    },
+                )
+            )
+        batch.append(
+            Event(
+                session_id=session_id,
+                superstep=superstep,
+                event_type=EventType.STEP_END,
+                payload={"source": "update_state"},
+            )
+        )
+        batch.append(
+            Event(
+                session_id=session_id,
+                superstep=superstep,
+                event_type=EventType.TURN_END,
+                payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION},
+            )
+        )
+        await self._event_store.append_batch(batch)
+
+    async def _resolve_session_row(self, session_id: uuid.UUID) -> Any:
+        if self._db is None:
+            return None
+        from hecate.models.session import SessionModel
+
+        result = await self._db.execute(select(SessionModel).where(SessionModel.id == session_id))
+        return result.scalar_one_or_none()
+
+    async def _build_continuation_graph(
+        self,
+        session: Any,
+        model: str | None = None,
+        workflow_id: uuid.UUID | None = None,
+    ) -> tuple[Any, str]:
+        """Build the graph a fork/update runs against (design D8: the current
+        definition — agent persona for chat sessions, or the given workflow)."""
+        from hecate.studio.workflows.templates import build_chat_graph
+
+        if workflow_id is not None:
+            graph_config = await self._load_workflow_graph(workflow_id)
+            execution_mode = await self._load_workflow_mode(workflow_id)
+        else:
+            system_prompt = "You are a helpful assistant."
+            if session is not None and self._db is not None and session.agent_id:
+                from hecate.models.agent import AgentModel
+
+                result = await self._db.execute(
+                    select(AgentModel).where(AgentModel.id == session.agent_id, ~AgentModel.deleted)
+                )
+                agent = result.scalar_one_or_none()
+                if agent is not None and getattr(agent, "persona", None):
+                    system_prompt = agent.persona
+            graph_config = build_chat_graph(
+                model=model or "gpt-4o",
+                system_prompt=system_prompt,
+                enable_suggestions=False,
+                generate_opening=False,
+            )
+            execution_mode = "conversational"
+
+        compiled = GraphCompiler().compile(graph_config, execution_mode=execution_mode)
+        for _nid, ncfg in compiled.nodes.items():
+            ncfg.config["_node_type"] = ncfg.type.value
+        return compiled, execution_mode
+
+    def _build_fork_checkpoint_store(self, user_id: str | uuid.UUID | None) -> InMemoryCheckpointStore | Any:
+        """Checkpoint cache for a fork run (mirrors execute()'s wiring)."""
+        if self._checkpoint_store is None:
+            return InMemoryCheckpointStore()
+        from hecate.runtime.session_state_materializer import SessionStateMaterializer
+
+        tenant_uuid = uuid.UUID(str(user_id)) if user_id is not None else None
+        captured_user_id = tenant_uuid
+
+        def _tenant_provider() -> tuple[uuid.UUID, uuid.UUID] | None:
+            if captured_user_id is None:
+                return None
+            return captured_user_id, captured_user_id
+
+        return SessionStateMaterializer(
+            session_state_store=self._checkpoint_store,
+            tenant_context_provider=_tenant_provider,
+            event_store=self._event_store,
+        )
+
+
+def _has_open_turn(events: list[Any]) -> bool:
+    """True when an unclosed TURN is in flight (no TURN_END and no ERROR after it)."""
+    open_turn = False
+    for event in events:
+        etype = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+        if etype == EventType.TURN_START.value:
+            open_turn = True
+        elif etype == EventType.TURN_END.value:
+            open_turn = False
+        elif etype == EventType.ERROR.value and open_turn:
+            # Engine error paths intentionally skip TURN_END; the ERROR event
+            # marks the turn as crashed, not in flight.
+            open_turn = False
+    return open_turn
+
+
+def _commit_versions(events: list[Any]) -> list[int]:
+    from hecate.studio.replay.state_inspector import _select_commit_points
+
+    return _select_commit_points(events)
+
+
+def _fold_state(compiled: Any, events: list[Any]) -> dict[str, Any]:
+    """Fold events into a fresh channel manager registered from the graph."""
+    from hecate.runtime.channel import ChannelManager
+    from hecate.runtime.replay.logfold import fold_session
+
+    cm = ChannelManager()
+    for name, defn in compiled.channels.items():
+        cm.register(name, defn)
+    fold_session(cm, iter(events))
+    return cm.snapshot()

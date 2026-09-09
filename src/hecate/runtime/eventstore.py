@@ -62,6 +62,11 @@ class EventType(StrEnum):
     # exclude these (see ADR-030 §1 for the additive EventType contract).
     INJECTION_DETECTED = "INJECTION_DETECTED"
     PROMPT_LEAKAGE_DETECTED = "PROMPT_LEAKAGE_DETECTED"
+    # 1.3.21② time-travel — bootstrap event of a forked child session's log.
+    # Carries the folded parent state snapshot (channel_state), lineage
+    # (parent_session_id, parent_log_version), and the derived continuation
+    # (next_nodes). A commit point; fold hydrates from its payload.
+    FORK = "FORK"
 
 
 CURRENT_LOG_SCHEMA_VERSION: int = 2  # events without this marker are non-replayable (values never recorded)

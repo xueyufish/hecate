@@ -93,12 +93,14 @@ async def test_pregel_emits_value_carrying_channel_writes_and_step_end():
     channel_write_events = [e for e in persisted if e.event_type == EventType.CHANNEL_WRITE]
     step_end_events = [e for e in persisted if e.event_type == EventType.STEP_END]
 
-    assert len(channel_write_events) >= 2
+    assert len(channel_write_events) >= 3  # initial_input + one per node
     for event in channel_write_events:
         assert event.payload["log_schema_version"] == CURRENT_LOG_SCHEMA_VERSION
         assert event.payload["channel"] == "messages"
         assert "value" in event.payload
-    assert len(step_end_events) == 2
+    # initial_input commit (D11) + one per superstep
+    assert len(step_end_events) == 3
+    assert step_end_events[0].payload.get("source") == "initial_input"
 
 
 @pytest.mark.asyncio

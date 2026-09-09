@@ -40,6 +40,7 @@ from hecate.runtime.errors import MaxSuperstepsError
 from hecate.runtime.eventbus import EventBus
 from hecate.runtime.eventstore import Event, EventStore, EventType
 from hecate.runtime.eviction import EvictionPolicy, NoEviction
+from hecate.runtime.replay.continuation import Continuation
 from hecate.runtime.retry import RetryExecutor, RetryStrategy
 from hecate.runtime.scheduler import FIFOScheduler, SchedulerStrategy
 from hecate.runtime.types import (
@@ -303,12 +304,17 @@ class PregelRuntime:
         resume_value: Any = None,
         trace_id: str | None = None,
         execution_mode: str = "conversational",
+        resume_from: int | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Execute the graph and yield events based on the stream mode.
 
         **Initialization phase:**
         - If ``resume_value`` is provided, the runtime restores state from the
           last checkpoint and resolves the next nodes after the interrupt point.
+        - Else if ``resume_from`` is provided, the runtime folds the event log
+          up to that version and derives the continuation from the last commit
+          point (tail-only: the version MUST equal the current log tail —
+          historical points go through fork at the service layer).
         - Otherwise, ``initial_input`` is written to channels and execution
           starts from the graph's entry point.
 
@@ -334,6 +340,8 @@ class PregelRuntime:
             trace_id: Optional trace ID for observability span correlation.
             execution_mode: "conversational" or "task". Task mode disables checkpointing
                 and overrides MESSAGES stream mode to VALUES.
+            resume_from: Log version to fold up to before continuing (must equal
+                the current log tail; requires a wired EventStore).
 
         Yields:
             Dicts with ``"type"`` key: ``"interrupt"``, ``"update"``, or ``"values"``.
@@ -381,6 +389,7 @@ class PregelRuntime:
                     resume_value=resume_value,
                     trace_id=effective_trace_id,
                     execution_mode=execution_mode,
+                    resume_from=resume_from,
                 ):
                     yield event
                 return
@@ -393,6 +402,7 @@ class PregelRuntime:
             resume_value=resume_value,
             trace_id=effective_trace_id,
             execution_mode=execution_mode,
+            resume_from=resume_from,
         ):
             yield event
 
@@ -404,6 +414,7 @@ class PregelRuntime:
         resume_value: Any = None,
         trace_id: str | None = None,
         execution_mode: str = "conversational",
+        resume_from: int | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Inner execution logic, extracted from execute() for root span wrapping."""
         if resume_value is not None:
@@ -415,8 +426,31 @@ class PregelRuntime:
                 payload={"interrupted_node": self._interrupted_node},
                 trace_id=trace_id,
             )
+        elif resume_from is not None:
+            continuation = await self._restore_at_version(session_id, resume_from)
+            self._resume_skip_before = continuation.skip_before
+            current_nodes = continuation.nodes
         else:
             if initial_input:
+                # Log-as-truth (D11, 1.3.21②): initial_input writes MUST enter
+                # the WAL, or fold(log) loses every user-supplied value and
+                # the projection-equivalence check diverges from live state.
+                # LogPolicy-filtered channels only — control channels stay
+                # in-memory (re-injected per request). Committed by a
+                # STEP_END so a crash mid-turn rewinds to a consistent anchor
+                # (empty-executed STEP_END → derivation falls back to entry,
+                # restarting the turn with the input already in state).
+                from hecate.runtime.replay.logpolicy import should_log_channel
+
+                loggable = {key: value for key, value in initial_input.items() if should_log_channel(key)}
+                if loggable:
+                    await self._append_write_batch(
+                        session_id,
+                        trace_id,
+                        [("", loggable, None)],
+                        commit_event=EventType.STEP_END,
+                        commit_payload={"source": "initial_input"},
+                    )
                 for key, value in initial_input.items():
                     self._channel_manager.write(key, value)
             current_nodes = [self._graph.entry_point] if self._graph.entry_point else []
@@ -780,6 +814,80 @@ class PregelRuntime:
             self._channel_manager.write("_resume_value", resume_value)
 
         await self._assert_projection_equivalent(session_id)
+
+    def _fresh_projection(self) -> ChannelManager:
+        """Build an empty projection manager mirroring the runtime's channels.
+
+        NoEviction is intentional: evictions replay via their own EVICTION
+        events (same reasoning as ``_assert_projection_equivalent``) — an
+        eviction policy here would evict inline AND on replay.
+        """
+        projection = ChannelManager()
+        for name, channel in self._channel_manager._channels.items():
+            projection.register(name, channel.defn)
+        return projection
+
+    async def _restore_at_version(self, session_id: uuid.UUID, version: int) -> Continuation:
+        """Fold the log up to ``version`` and derive the continuation (tail-only).
+
+        Guard (1.3.21② spec): ``version`` MUST equal the current log tail —
+        this is the crash-recovery / fork-bootstrap path. Resuming a
+        historical point inside the same session would weave two timelines
+        into one linear log; the service layer must fork instead.
+        """
+        from hecate.runtime.replay.continuation import derive_continuation
+        from hecate.runtime.replay.logfold import fold_session
+
+        if self._event_store is None:
+            raise ValueError("resume_from requires a wired EventStore")
+        tail = await self._current_log_version(session_id)
+        if version != tail:
+            raise ValueError(
+                f"resume_from={version} is not the session log tail ({tail}); "
+                "historical resume must create a forked child session instead"
+            )
+
+        events = await self._event_store.get_events(session_id)
+        sliced = [e for e in events if e.version <= version]
+        projection = self._fresh_projection()
+        fold_session(projection, iter(sliced))
+        snapshot = projection.snapshot()
+        self._channel_manager.restore(snapshot)
+
+        self._superstep = sliced[-1].superstep if sliced else 0
+        self._interrupted = False
+        self._interrupt_value = None
+        self._interrupt_descriptor = None
+        self._interrupted_node = None
+
+        continuation = derive_continuation(sliced, self._graph, snapshot)
+        await self._assert_projection_equivalent(session_id)
+        return continuation
+
+    async def snapshot_at_version(self, session_id: uuid.UUID, version: int | None = None) -> dict:
+        """Fold the session log up to ``version`` into a fresh projection.
+
+        Read-only helper for the fork service: returns the log-policy-filtered
+        channel state (exactly the channels a FORK payload may carry), the
+        superstep counter, and the effective log version. ``version=None``
+        folds to the current tail.
+        """
+        from hecate.runtime.replay.logfold import fold_session
+        from hecate.runtime.replay.logpolicy import should_log_channel
+
+        if self._event_store is None:
+            raise ValueError("snapshot_at_version requires a wired EventStore")
+        events = await self._event_store.get_events(session_id)
+        target = version if version is not None else (events[-1].version if events else 0)
+        sliced = [e for e in events if e.version <= target]
+        projection = self._fresh_projection()
+        fold_session(projection, iter(sliced))
+        state = {k: v for k, v in projection.snapshot().items() if should_log_channel(k)}
+        return {
+            "channel_state": state,
+            "superstep": sliced[-1].superstep if sliced else 0,
+            "log_version": target,
+        }
 
     async def _load_interrupt_descriptor(self, session_id: uuid.UUID, checkpoint: dict | None) -> dict | None:
         """Load the descriptor of the interrupt being resumed.

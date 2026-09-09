@@ -139,27 +139,39 @@ The second request has memory of the first because both share the `session_id`. 
 
 ## Time-travel debugging
 
-Every materialized cache (checkpoint) is queryable, and the underlying event log is replayable. To inspect state at a past step:
+The event log is the source of truth and is replayable at any commit point; materialized checkpoints are discardable caches. To inspect state at a past step — and to continue execution from one:
 
 ```bash
-# List all checkpoints (materialized caches) for a session
-curl "http://localhost:8000/api/sessions/$SESSION_ID/checkpoints" \
+# List resumable anchors (STEP_END / INTERRUPT / FORK events), newest first.
+# Derived purely from the event log — identical with or without a warm cache.
+curl "http://localhost:8000/api/sessions/$SESSION_ID/commit-points" \
   -H "Authorization: Bearer $ADMIN_KEY"
 
-# Get a specific checkpoint's cached state
-curl "http://localhost:8000/api/sessions/$SESSION_ID/checkpoints/$CHECKPOINT_ID" \
+# Read-only: fold the log up to a version and return the state snapshot
+curl "http://localhost:8000/api/sessions/$SESSION_ID/replay/state?at_version=$VERSION" \
   -H "Authorization: Bearer $ADMIN_KEY"
 
-# Replay the event log from a checkpoint (creates new session forked from it)
-curl -X POST "http://localhost:8000/api/sessions/$SESSION_ID/replay/$CHECKPOINT_ID" \
-  -H "Authorization: Bearer $ADMIN_KEY"
+# Executable time travel: fork a child session at a commit point and run it
+# there. The parent log is never modified; re-dispatched nodes re-execute
+# their tools and side effects (nothing before the anchor is rolled back).
+curl -X POST "http://localhost:8000/api/sessions/$SESSION_ID/fork" \
+  -H "Authorization: Bearer $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"at_version\": $VERSION, \"updates\": {\"messages\": [\"revised plan\"]}}"
+
+# update_state: append-recorded state mutation on a paused or idle session
+curl -X POST "http://localhost:8000/api/sessions/$SESSION_ID/state" \
+  -H "Authorization: Bearer $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"values\": {\"messages\": [\"corrected fact\"]}}"
 ```
 
 Use cases:
 
 - **Debug**: "what was the agent thinking at step 7?" — inspect the `STEP_END` commit point
 - **Audit**: "prove what the LLM was told before it made decision X" — the event log is the source of truth
-- **Recovery**: "replay the log from checkpoint 42 if today's deploy broke" — cache + log tail replay
+- **What-if**: "what if the plan had been different at step 4?" — fork from that anchor with modified state
+- **HITL re-plan**: pause, patch state via update_state, then resume
 
 ---
 

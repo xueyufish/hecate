@@ -46,8 +46,12 @@ def fold_session(
     """Apply events sequentially to ``channel_manager``.
 
     Returns the version at which folding stopped. Raises
-    :class:`NonReplayablePrefix` when an event lacks the current
-    ``log_schema_version`` marker.
+    :class:`NonReplayablePrefix` when a **state-carrying** event
+    (``CHANNEL_WRITE`` / ``EVICTION`` / ``FORK``) lacks the current
+    ``log_schema_version`` marker — the marker guards replayability of
+    recorded values. Bookkeeping events the fold ignores (``CUSTOM``,
+    ``NODE_START``/``NODE_END``, ``STEP_END``, …) are skipped regardless
+    of marker presence, so full-log folds over real engine streams work.
 
     Channel writes go through ``channel_manager.write`` so they use the
     registered ``ChannelBehavior.write`` — the same fold function as live
@@ -55,10 +59,11 @@ def fold_session(
     """
     last_version = 0
     for event in events:
-        if event.payload.get("log_schema_version") != CURRENT_LOG_SCHEMA_VERSION:
-            raise NonReplayablePrefix(event.session_id, event.version)
-
         etype = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
+
+        state_carrying = etype in ("CHANNEL_WRITE", "EVICTION", "FORK")
+        if state_carrying and event.payload.get("log_schema_version") != CURRENT_LOG_SCHEMA_VERSION:
+            raise NonReplayablePrefix(event.session_id, event.version)
 
         if etype == "CHANNEL_WRITE":
             channel_manager.write(event.payload["channel"], event.payload["value"])
@@ -72,6 +77,17 @@ def fold_session(
             else:
                 remaining = current
             channel_manager.restore({ch: remaining})
+        elif etype == "FORK":
+            # 1.3.21② fork bootstrap: hydrate the snapshot wholesale (restore
+            # semantics, not write semantics). The snapshot is the child
+            # session's source of truth for the inherited prefix — later
+            # CHANNEL_WRITE events apply incrementally on top of it. Defensive
+            # filter: only channels the log could carry survive hydration.
+            from hecate.runtime.replay.logpolicy import should_log_channel
+
+            state = event.payload.get("channel_state") or {}
+            hydratable = {k: v for k, v in state.items() if should_log_channel(k)}
+            channel_manager.restore(hydratable)
 
         last_version = event.version
 
