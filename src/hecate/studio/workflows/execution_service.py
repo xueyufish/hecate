@@ -755,6 +755,10 @@ class WorkflowExecutionService:
 
         The anchor set is derived purely from the event log (STEP_END /
         INTERRUPT / FORK events); the checkpoint cache is never consulted.
+
+        STEP_END anchors from a fan-out superstep carry an extra
+        ``fanout`` segment (1.3.21③) so the 8.20 / 6.26-E5 consumers can
+        locate fan-out windows without re-folding the log.
         """
         if self._event_store is None:
             return []
@@ -763,16 +767,21 @@ class WorkflowExecutionService:
         for event in reversed(events):
             etype = event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
             if etype in {EventType.STEP_END.value, EventType.INTERRUPT.value, EventType.FORK.value}:
-                anchors.append(
-                    {
-                        "log_version": event.version,
-                        "kind": etype,
-                        "node_id": event.node_id,
-                        "superstep": event.superstep,
-                        "created_at": event.timestamp.isoformat() if event.timestamp else None,
-                        "source": (event.payload or {}).get("source"),
+                anchor = {
+                    "log_version": event.version,
+                    "kind": etype,
+                    "node_id": event.node_id,
+                    "superstep": event.superstep,
+                    "created_at": event.timestamp.isoformat() if event.timestamp else None,
+                    "source": (event.payload or {}).get("source"),
+                }
+                fanout_segments = (event.payload or {}).get("fanout")
+                if fanout_segments:
+                    anchor["fanout"] = {
+                        "packet_count": sum(len(seg.get("sub_channels") or {}) for seg in fanout_segments),
+                        "sources": [seg.get("source") for seg in fanout_segments],
                     }
-                )
+                anchors.append(anchor)
                 if len(anchors) >= limit:
                     break
         return anchors

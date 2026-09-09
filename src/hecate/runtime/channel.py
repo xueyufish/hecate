@@ -102,15 +102,28 @@ class TopicBehavior(ChannelBehavior):
 
 
 class AccumulatorBehavior(ChannelBehavior):
-    """Reduce semantics: values are combined via a reduce function."""
+    """Reduce semantics: values are combined via a named reducer function.
+
+    Reducer resolution (1.3.21③):
+
+    * ``defn.reduce_fn is None`` → overwrite (kept from legacy behavior;
+      tests lock this contract in ``test_channel_registry.py``).
+    * ``defn.reduce_fn`` names a registered reducer → the reducer combines
+      ``current`` with ``value``.
+    * ``defn.reduce_fn`` names an unregistered reducer → this method
+      raises :class:`UnknownReducerError`. The previous silent overwrite
+      fallback is removed: a misspelled reducer name should fail loud at
+      the first write, not silently truncate state.
+    """
 
     def initial_value(self, defn: ChannelDef) -> Any:
         return deepcopy(defn.initial) if defn.initial is not None else 0
 
     def write(self, current: Any, value: Any, defn: ChannelDef) -> Any:
-        if defn.reduce_fn == "add":
-            return (current or 0) + value
-        return value
+        if defn.reduce_fn is None:
+            return value
+        reducer = get_reducer(defn.reduce_fn)
+        return reducer(current, value)
 
     def is_evictable(self) -> bool:
         return False
@@ -167,6 +180,76 @@ register(ChannelType.LAST_VALUE, LastValueBehavior())
 register(ChannelType.TOPIC, TopicBehavior())
 register(ChannelType.ACCUMULATOR, AccumulatorBehavior())
 register(ChannelType.PERSISTENT_TOPIC, TopicBehavior())
+
+
+# ============================================================
+# Reducer registry (1.3.21③)
+# ============================================================
+
+
+class UnknownReducerError(Exception):
+    """Raised when an ACCUMULATOR channel references an unregistered reducer.
+
+    Distinct from :class:`ChannelTypeRegistry` ``KeyError`` so call sites can
+    distinguish "unknown channel type" from "unknown reducer name" without
+    parsing messages.
+    """
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(
+            f"ACCUMULATOR reducer '{name}' is not registered. "
+            "Register it via channel.register_reducer(name, fn) before compiling the graph."
+        )
+
+
+_REDUCERS: dict[str, Any] = {}
+
+
+def register_reducer(name: str, fn: Any) -> None:
+    """Register a named reducer for ACCUMULATOR channels.
+
+    Args:
+        name: The reducer name referenced by ``ChannelDef.reduce_fn``.
+        fn: A callable ``(current, value) -> merged``.
+    """
+    _REDUCERS[name] = fn
+    logger.debug(f"Registered accumulator reducer '{name}' → {fn}")
+
+
+def get_reducer(name: str) -> Any:
+    """Return the reducer registered under ``name``.
+
+    Raises:
+        UnknownReducerError: when no reducer is registered under ``name``.
+    """
+    if name not in _REDUCERS:
+        raise UnknownReducerError(name)
+    return _REDUCERS[name]
+
+
+def list_reducers() -> list[str]:
+    """Return the names of all registered reducers."""
+    return sorted(_REDUCERS)
+
+
+def _add_reducer(current: Any, value: Any) -> Any:
+    """Built-in numeric sum reducer."""
+    return (current or 0) + value
+
+
+def _append_reducer(current: Any, value: Any) -> Any:
+    """Built-in list-append reducer for map-reduce collection."""
+    if current is None:
+        current = []
+    if isinstance(value, list):
+        return [*current, *value]
+    return [*current, value]
+
+
+# Pre-register built-in reducers
+register_reducer("add", _add_reducer)
+register_reducer("append", _append_reducer)
 
 
 # ============================================================

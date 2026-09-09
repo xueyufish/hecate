@@ -15,6 +15,13 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+# Engine-wide fan-out ceilings. Defaults may be overridden by graph config or
+# per-node ``fanout.max_fanout``; the absolute cap cannot be exceeded and acts
+# as the platform-level guardrail.
+DEFAULT_MAX_FANOUT_PER_DISPATCH: int = 64
+DEFAULT_MAX_INVOCATIONS_PER_SUPERSTEP: int = 256
+ABSOLUTE_MAX_FANOUT: int = 1024
+
 
 class RoutingMode(StrEnum):
     """Routing mode for CONDITION nodes.
@@ -311,3 +318,55 @@ class CompiledGraph:
             "interrupt_before": list(self.interrupt_before),
             "interrupt_after": list(self.interrupt_after),
         }
+
+
+@dataclass
+class DispatchPacket:
+    """One runtime dispatch packet for dynamic fan-out (1.3.21③).
+
+    A planner (CONDITION node with a ``fanout`` config) emits a list of these
+    into the ``_dispatch`` channel. Each packet names the target node and
+    carries the per-branch state slice that becomes the branch's input.
+
+    Both fields are intentionally JSON-serializable — the plan flows through
+    the WAL as a plain ``CHANNEL_WRITE`` payload. This avoids the
+    LangGraph-Send-style serialization pitfall (Send objects are not
+    msgpack-friendly and historically broke checkpointers).
+    """
+
+    node: str
+    state: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class InvocationIdentity:
+    """Identity attached to each scheduled invocation for branch disambiguation.
+
+    ``fanout_source`` is the node that emitted the dispatch plan (or
+    ``None`` for non-fanout invocations). ``branch_index`` is the 0-based
+    offset within that source's packet list — distinct calls of the same
+    target node under one planner share ``fanout_source`` but have
+    distinct ``branch_index`` values.
+    """
+
+    fanout_source: str | None
+    branch_index: int
+
+
+@dataclass(frozen=True)
+class Invocation:
+    """One scheduled unit of work for the next superstep.
+
+    ``target`` is the node to dispatch. ``identity`` distinguishes parallel
+    invocations of the same target (branching identity in NODE events).
+    ``sub_channel`` is the name of the per-invocation sub-channel the
+    engine writes the seed state into (None for non-fanout invocations).
+
+    The type replaces the previous ``list[str]`` next-nodes view while
+    keeping the static fan-out path bit-identical (a single invocation
+    per branch, identity.fanout_source=None).
+    """
+
+    target: str
+    identity: InvocationIdentity
+    sub_channel: str | None = None

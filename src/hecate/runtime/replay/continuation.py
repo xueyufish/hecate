@@ -109,7 +109,9 @@ def derive_continuation(
         events: Session events (already sliced to the target version).
         graph: The compiled graph the continuation dispatches against.
         channel_state: Folded channel snapshot at the target version; the
-            ``_route`` value from it arbitrates conditional edges.
+            ``_route`` value from it arbitrates conditional edges. 1.3.21③
+            also reads ``_dispatch`` here when the planner belongs to the
+            last anchored executed list.
 
     Returns:
         The resolved :class:`Continuation`.
@@ -132,6 +134,8 @@ def derive_continuation(
             anchors.append((etype, payload, event.node_id, list(executed)))
             executed = []
 
+    condition_node_ids = {nid for nid, n in graph.nodes.items() if n.type.value == "condition"}
+
     for etype, payload, node_id, executed_nodes in reversed(anchors):
         if etype == EventType.STEP_END and payload.get("source") == "update_state":
             # State-mutation closer: not execution progress — keep looking.
@@ -142,7 +146,26 @@ def derive_continuation(
             if not payload.get("nodes") and node_id:
                 payload["nodes"] = [node_id]
             return _interrupt_continuation(payload, node_id, graph, route_value)
-        # STEP_END at tail: continue from the completed nodes' out-edges.
+        # STEP_END at tail: dynamic fan-out plan overrides static edge walk
+        # when the planner (a CONDITION node) ran in the anchored superstep
+        # (1.3.21③). Stale plans left in ``_dispatch`` from older supersteps
+        # SHALL NOT be adopted — the planner must have run in the last
+        # anchored superstep for the plan to be live. We approximate the
+        # planner as any CONDITION node in the executed list; multi-planner
+        # supersteps inherit the legacy last-writer-wins contract documented
+        # in design D1.
+        dispatch_plan = channel_state.get("_dispatch")
+        if etype == EventType.STEP_END and isinstance(dispatch_plan, list) and dispatch_plan:
+            live_planners = {n for n in executed_nodes if n in condition_node_ids}
+            if live_planners:
+                live_targets = [
+                    packet.get("node")
+                    for packet in dispatch_plan
+                    if isinstance(packet, dict) and isinstance(packet.get("node"), str)
+                ]
+                live_targets = [t for t in live_targets if t]
+                if live_targets:
+                    return Continuation(nodes=list(dict.fromkeys(live_targets)))
         resolved = resolve_out_edges(graph, executed_nodes, route_value)
         if resolved is None:
             return Continuation()
