@@ -16,11 +16,11 @@ from hecate.runtime.replay.logfold import fold_session
 
 
 def _select_commit_points(events: list[Event]) -> list[int]:
-    """Return the set of versions where ``STEP_END`` (or ``INTERRUPT``) anchors."""
+    """Return the set of versions where ``STEP_END``/``INTERRUPT``/``FORK`` anchors."""
     commit_points: set[int] = set()
     for ev in events:
         etype = ev.event_type.value if hasattr(ev.event_type, "value") else str(ev.event_type)
-        if etype in {EventType.STEP_END.value, EventType.INTERRUPT.value}:
+        if etype in {EventType.STEP_END.value, EventType.INTERRUPT.value, EventType.FORK.value}:
             commit_points.add(ev.version)
     return sorted(commit_points)
 

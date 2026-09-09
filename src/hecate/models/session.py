@@ -89,5 +89,9 @@ class SessionReadSchema(PydanticBase):
     workspace_id: uuid.UUID
     source_channel: str | None = None
     metadata: dict = Field(validation_alias="metadata_")
+    # Fork lineage (1.3.21②): populated from metadata by the API layer;
+    # None for sessions that were not created by a fork.
+    parent_session_id: str | None = None
+    parent_log_version: int | None = None
     created_at: datetime
     updated_at: datetime

@@ -94,6 +94,23 @@ Use the **State Inspector** slider on the right panel:
 - **`404` (session not found)** — usually a stale link or wrong workspace scope. The replay endpoint enforces tenant isolation (you cannot replay across workspaces).
 - **`422 NON_REPLAYABLE_PREFIX`** — the log contains events written with a schema version below the current one. This is rare in production but can appear after major engine upgrades; the response includes `stopped_at_version` so you know where the replay breaks.
 
+### From inspection to execution: fork a commit point
+
+The inspector is read-only; to *run* from a historical point, fork it. `GET /api/sessions/{id}/commit-points` lists the resumable anchors, then `POST /api/sessions/{id}/fork` creates a **child session** that continues execution at the anchor with optionally modified state:
+
+```bash
+curl -X POST "http://localhost:8000/api/sessions/$SESSION_ID/fork" \
+  -H "Authorization: Bearer $ADMIN_KEY" -H "Content-Type: application/json" \
+  -d '{"at_version": 42, "updates": {"messages": ["alternative plan"]}}'
+```
+
+Semantics worth knowing before you press the button:
+
+- The **parent log is never modified** — the fork is a new session whose log bootstraps with a single `FORK` snapshot event (self-contained state + lineage). List a parent's branches with `GET /api/sessions?parent_session_id=$ID`.
+- `at_version` snaps down to the nearest commit point at or below it; the response reports the `effective_version` it actually used.
+- **Side effects re-execute**: re-dispatched nodes call their tools again. Nothing that happened before the anchor is rolled back — if a tool sent an email before step 4, forking from step 3 and re-running will send it again. This is what makes what-if analysis possible, and what makes it dangerous on side-effect-heavy graphs.
+- For paused (interrupted) sessions, patching state **in place** is often enough — `POST /api/sessions/{id}/state` appends an audited `update_state` batch and the existing resume flow picks it up; no fork needed.
+
 ---
 
 ## 6. Use the API directly
