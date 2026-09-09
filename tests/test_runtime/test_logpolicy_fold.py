@@ -55,6 +55,69 @@ def test_logpolicy_route_explicitly_included():
     assert should_log_channel("_route") is True
 
 
+def test_logpolicy_dispatch_explicitly_included():
+    """1.3.21③: the dynamic fan-out plan must survive replay (T2b)."""
+    assert should_log_channel("_dispatch") is True
+
+
+def test_fold_rebuilds_fanout_subchannels_from_step_end_payload():
+    """1.3.21③ T2b: STEP_END ``fanout`` segment rebuilds branch sub-channels."""
+    from hecate.runtime.replay.logfold import _apply_fanout_segments
+
+    cm = _make_manager(("messages", ChannelType.TOPIC))
+    cm.register("_fanout__planner__idx0", ChannelDef(type=ChannelType.LAST_VALUE))
+    cm.register("_fanout__planner__idx1", ChannelDef(type=ChannelType.LAST_VALUE))
+    _apply_fanout_segments(
+        cm,
+        [
+            {
+                "source": "planner",
+                "dynamic": True,
+                "sub_channels": {
+                    "idx0": {"messages": ["branch-0"]},
+                    "idx1": {"messages": ["branch-1"]},
+                },
+            }
+        ],
+    )
+    assert cm.read("_fanout__planner__idx0") == {"messages": ["branch-0"]}
+    assert cm.read("_fanout__planner__idx1") == {"messages": ["branch-1"]}
+
+
+def test_fold_step_end_with_fanout_segment_rehydrates_branches():
+    """End-to-end fold over a real event stream with a STEP_END fanout payload."""
+    from hecate.runtime.channel import ChannelManager
+    from hecate.runtime.types import ChannelDef, ChannelType
+
+    sid = uuid.uuid4()
+    cm = ChannelManager()
+    cm.register("messages", ChannelDef(type=ChannelType.TOPIC))
+    cm.register("_fanout__static__b_a", ChannelDef(type=ChannelType.LAST_VALUE))
+    cm.register("_fanout__static__b_b", ChannelDef(type=ChannelType.LAST_VALUE))
+
+    events = [
+        _make_event(sid, 1, EventType.NODE_START, node_id="static"),
+        _make_event(
+            sid,
+            1,
+            EventType.STEP_END,
+            fanout=[
+                {
+                    "source": "static",
+                    "dynamic": False,
+                    "sub_channels": {
+                        "b_a": {"messages": ["from-a"]},
+                        "b_b": {"messages": ["from-b"]},
+                    },
+                }
+            ],
+        ),
+    ]
+    fold_session(cm, iter(events))
+    assert cm.read("_fanout__static__b_a") == {"messages": ["from-a"]}
+    assert cm.read("_fanout__static__b_b") == {"messages": ["from-b"]}
+
+
 # --- Fold machine ---
 
 

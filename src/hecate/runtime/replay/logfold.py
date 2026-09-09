@@ -45,17 +45,17 @@ def fold_session(
 ) -> int:
     """Apply events sequentially to ``channel_manager``.
 
-    Returns the version at which folding stopped. Raises
-    :class:`NonReplayablePrefix` when a **state-carrying** event
-    (``CHANNEL_WRITE`` / ``EVICTION`` / ``FORK``) lacks the current
-    ``log_schema_version`` marker — the marker guards replayability of
-    recorded values. Bookkeeping events the fold ignores (``CUSTOM``,
-    ``NODE_START``/``NODE_END``, ``STEP_END``, …) are skipped regardless
-    of marker presence, so full-log folds over real engine streams work.
+        Returns the version at which folding stopped. Raises
+        :class:`NonReplayablePrefix` when a **state-carrying** event
+        (``CHANNEL_WRITE`` / ``EVICTION`` / ``FORK``) lacks the current
+        ``log_schema_version`` marker — the marker guards replayability of
+        recorded values. Bookkeeping events the fold ignores (``CUSTOM``,
+        ``NODE_START``/``NODE_END``, ``STEP_END``, …) are skipped regardless
+        of marker presence, so full-log folds over real engine streams work.
 
     Channel writes go through ``channel_manager.write`` so they use the
-    registered ``ChannelBehavior.write`` — the same fold function as live
-    mutation. This prevents projection drift between live and replay paths.
+        registered ``ChannelBehavior.write`` — the same fold function as live
+        mutation. This prevents projection drift between live and replay paths.
     """
     last_version = 0
     for event in events:
@@ -63,7 +63,7 @@ def fold_session(
 
         state_carrying = etype in ("CHANNEL_WRITE", "EVICTION", "FORK")
         if state_carrying and event.payload.get("log_schema_version") != CURRENT_LOG_SCHEMA_VERSION:
-            raise NonReplayablePrefix(event.session_id, event.version)
+            raise NonReplayablePrefixError(event.session_id, event.version)
 
         if etype == "CHANNEL_WRITE":
             channel_manager.write(event.payload["channel"], event.payload["value"])
@@ -88,10 +88,33 @@ def fold_session(
             state = event.payload.get("channel_state") or {}
             hydratable = {k: v for k, v in state.items() if should_log_channel(k)}
             channel_manager.restore(hydratable)
+        elif etype == "STEP_END":
+            # 1.3.21③ T2b: STEP_END carries a ``fanout`` segment with branch
+            # sub-channel values. Replay rebuilds the sub-channels here so
+            # log-only recovery and fork payloads preserve branch outputs.
+            fanout_segments = (event.payload or {}).get("fanout")
+            if fanout_segments:
+                _apply_fanout_segments(channel_manager, fanout_segments)
 
         last_version = event.version
 
     return last_version
+
+
+def _apply_fanout_segments(channel_manager: ChannelManager, segments: list) -> None:
+    """Rehydrate ``_fanout__*`` sub-channels from a STEP_END ``fanout`` segment.
+
+    The segment was emitted by ``PregelRuntime._build_fanout_commit_payload``
+    right before the STEP_END commit. Sub-channel names are constructed as
+    ``_fanout__{source}__{suffix}`` where ``suffix`` is the branch ID
+    (static) or ``idx{i}`` (dynamic).
+    """
+    for segment in segments:
+        source = segment.get("source", "")
+        sub_channels = segment.get("sub_channels") or {}
+        for suffix, value in sub_channels.items():
+            name = f"_fanout__{source}__{suffix}"
+            channel_manager.restore({name: value})
 
 
 async def fold_session_from_store(

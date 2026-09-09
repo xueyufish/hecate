@@ -71,6 +71,8 @@ class GraphCompiler:
         self._validate_routing_config(config)
         self._validate_agent_invocation_mode(config)
         self._validate_agent_handoff_config(config)
+        self._validate_accumulator_reducers(config)
+        self._validate_fanout_configs(config)
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
@@ -206,6 +208,94 @@ class GraphCompiler:
                     f"AGENT node '{node_id}' has invalid handoff.context_mode '{context_mode}'. "
                     f"Must be one of: {', '.join(sorted(valid_modes))}",
                     field=f"nodes[{node_id}].config.handoff.context_mode",
+                )
+
+    def _validate_accumulator_reducers(self, config: GraphConfig) -> None:
+        """Validate ACCUMULATOR channels name registered reducers (1.3.21③).
+
+        Channels with ``reduce_fn is None`` keep the legacy overwrite semantics;
+        channels with a non-None name must resolve to a registered reducer or
+        compilation fails (the silent-overwrite fallback is removed).
+
+        Raises:
+            GraphValidationError: if any ACCUMULATOR channel names an
+                unregistered reducer.
+        """
+        from hecate.runtime.channel import UnknownReducerError, get_reducer
+
+        for name, ch_def in config.state.items():
+            if ch_def.type.value != "accumulator":
+                continue
+            if ch_def.reduce_fn is None:
+                continue
+            try:
+                get_reducer(ch_def.reduce_fn)
+            except UnknownReducerError as exc:
+                raise GraphValidationError(
+                    f"ACCUMULATOR channel '{name}' references unknown reducer '{ch_def.reduce_fn}': {exc}",
+                    field=f"state[{name}].reduce",
+                ) from exc
+
+    def _validate_fanout_configs(self, config: GraphConfig) -> None:
+        """Validate ``fanout`` configuration on CONDITION nodes (1.3.21③).
+
+        Required fields, target existence, and max_fanout shape are all
+        checked here so runtime errors stay limited to data-shape problems
+        (over channel emptiness, target node type mismatch).
+
+        Raises:
+            GraphValidationError: if a fanout declaration is malformed.
+        """
+        from hecate.runtime.types import NodeType
+
+        node_ids = set(config.nodes.keys())
+        state_channels = set(config.state.keys())
+        for node_id, node in config.nodes.items():
+            fanout = node.config.get("fanout")
+            if fanout is None:
+                continue
+            if node.type != NodeType.CONDITION:
+                raise GraphValidationError(
+                    f"Node '{node_id}' declares fanout but type is '{node.type.value}'; "
+                    "fanout is only allowed on CONDITION nodes",
+                    field=f"nodes[{node_id}].config.fanout",
+                )
+            if not isinstance(fanout, dict):
+                raise GraphValidationError(
+                    f"fanout config on '{node_id}' must be an object, got {type(fanout).__name__}",
+                    field=f"nodes[{node_id}].config.fanout",
+                )
+            over = fanout.get("over")
+            target = fanout.get("target")
+            state_key = fanout.get("state_key")
+            missing = [k for k in ("over", "target", "state_key") if not fanout.get(k)]
+            if missing:
+                raise GraphValidationError(
+                    f"fanout config on '{node_id}' missing required field(s): {', '.join(missing)}",
+                    field=f"nodes[{node_id}].config.fanout",
+                )
+            if over not in state_channels:
+                raise GraphValidationError(
+                    f"fanout.over '{over}' on '{node_id}' is not declared in graph state",
+                    field=f"nodes[{node_id}].config.fanout.over",
+                )
+            if target not in node_ids:
+                raise GraphValidationError(
+                    f"fanout.target '{target}' on '{node_id}' is not a declared node",
+                    field=f"nodes[{node_id}].config.fanout.target",
+                )
+            if not isinstance(state_key, str) or not state_key:
+                raise GraphValidationError(
+                    f"fanout.state_key on '{node_id}' must be a non-empty string",
+                    field=f"nodes[{node_id}].config.fanout.state_key",
+                )
+            max_fanout = fanout.get("max_fanout")
+            if max_fanout is not None and (
+                not isinstance(max_fanout, int) or isinstance(max_fanout, bool) or max_fanout <= 0
+            ):
+                raise GraphValidationError(
+                    f"fanout.max_fanout on '{node_id}' must be a positive integer, got {max_fanout!r}",
+                    field=f"nodes[{node_id}].config.fanout.max_fanout",
                 )
 
     def _build_channel_access(self, config: GraphConfig) -> dict[str, ChannelAccess]:

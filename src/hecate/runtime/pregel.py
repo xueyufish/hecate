@@ -44,12 +44,36 @@ from hecate.runtime.replay.continuation import Continuation
 from hecate.runtime.retry import RetryExecutor, RetryStrategy
 from hecate.runtime.scheduler import FIFOScheduler, SchedulerStrategy
 from hecate.runtime.types import (
+    ABSOLUTE_MAX_FANOUT,
+    DEFAULT_MAX_FANOUT_PER_DISPATCH,
+    DEFAULT_MAX_INVOCATIONS_PER_SUPERSTEP,
+    ChannelDef,
+    ChannelType,
     CompiledGraph,
+    DispatchPacket,
+    Invocation,
+    InvocationIdentity,
     NodeType,
     StreamMode,
     WorkerResult,
 )
 from hecate.runtime.worker import DirectWorkerPool, Worker, WorkerPool
+
+
+class FanoutLimitError(Exception):
+    """Raised when a planner would exceed an engine-level fan-out ceiling.
+
+    Failure mode is fail-closed: the engine emits the offending packet count
+    and the violated ceiling so the planner can self-correct. Existing graphs
+    that stay under the ceiling are unaffected.
+    """
+
+    def __init__(self, scope: str, requested: int, ceiling: int) -> None:
+        self.scope = scope
+        self.requested = requested
+        self.ceiling = ceiling
+        super().__init__(f"Fan-out limit exceeded at {scope}: requested {requested}, ceiling {ceiling}")
+
 
 if TYPE_CHECKING:
     from hecate.runtime.temporal.conflict import ConflictResolver
@@ -124,9 +148,25 @@ class PregelRuntime:
         # One-shot set of nodes that resume executes without re-triggering
         # their own interrupt_before pause (the pause was already consumed).
         self._resume_skip_before: set[str] = set()
+        # Per-superstep: maps each dynamic Invocation to its planner's
+        # packet.state — used by the dynamic dispatcher to seed sub-channels.
+        # Initialized inside the superstep loop.
+        self._pending_packet_state: dict[Invocation, dict[str, Any]] = {}
+        self._pending_invocations_by_target: dict[str, list[Invocation]] = {}
+        # Per-superstep: session_id + trace_id stashed for branch-level
+        # NODE_START/NODE_END emission inside the dynamic dispatcher.
+        self._session_id_for_event: Any = None
+        self._current_trace_id: str | None = None
 
         for name, defn in graph.channels.items():
             self._channel_manager.register(name, defn)
+
+        # 1.3.21③: register the engine-owned control channels. They are
+        # not in ``graph.channels`` (the planner is just a CONDITION node
+        # that happens to write ``_dispatch``) but they must exist in the
+        # channel manager so writes actually land on them — otherwise the
+        # logpolicy exemption is moot (no channel == nothing to log).
+        self._channel_manager.register("_dispatch", ChannelDef(type=ChannelType.LAST_VALUE, default=None))
 
     async def _emit(
         self,
@@ -529,6 +569,20 @@ class PregelRuntime:
             # WorkerResults carry branch node IDs — track the fan-out node itself
             # so interrupt_after can target it.
             fan_out_dispatched: list[str] = []
+            # Planners that triggered dynamic fan-out this superstep — used
+            # to enrich the STEP_END commit payload (T2b fanout segment).
+            dynamic_dispatched_planners: list[str] = []
+            # Planner writes for the current superstep — captured after the
+            # dispatch loop finishes but used here to seed per-invocation
+            # sub-channels (1.3.21③ dynamic path). Pre-populated from the
+            # previous superstep's snapshot so subsequent supersteps' planners
+            # can resolve without waiting for the commit cycle.
+            self._pending_dispatch_state: dict[str, list[dict[str, Any]]] = {}
+            # Guard against the dispatch loop firing the same planner's
+            # dynamic fan-out more than once per superstep (the FIFO
+            # scheduler may emit the target node N times in a row when N
+            # packets share it).
+            self._dynamic_dispatched_in_superstep: set[str] = set()
 
             for node_id in scheduled_nodes:
                 node = self._graph.nodes.get(node_id)
@@ -536,6 +590,73 @@ class PregelRuntime:
                     continue
 
                 node_type = getattr(node, "type", None)
+                invocations = self._pending_invocations_by_target.get(node_id, [])
+                dynamic_invocations = [inv for inv in invocations if inv.identity.fanout_source is not None]
+
+                if dynamic_invocations:
+                    # 1.3.21③ dynamic path: dispatch each invocation in
+                    # parallel with its seeded sub-channel. The structural
+                    # target node is invoked once per branch — unlike
+                    # static FAN_OUT, the engine does not visit the planner
+                    # node itself (the planner's result carries the plan).
+                    planner_id = dynamic_invocations[0].identity.fanout_source
+                    # Guard against the scheduler emitting the same target
+                    # multiple times in one superstep (e.g. when N packets
+                    # share a target). Dispatching only on the first hit
+                    # prevents N² branch invocations — see #dynamic-loop
+                    # regression test.
+                    if planner_id in self._dynamic_dispatched_in_superstep:
+                        continue
+                    self._dynamic_dispatched_in_superstep.add(planner_id)
+                    dynamic_dispatched_planners.append(planner_id)
+                    # 1.3.21③ dynamic path: dispatch each invocation in
+                    # parallel with its seeded sub-channel. The structural
+                    # target node is invoked once per branch — unlike
+                    # static FAN_OUT, the engine does not visit the planner
+                    # node itself (the planner's result carries the plan).
+                    self._session_id_for_event = session_id
+                    self._current_trace_id = trace_id
+                    # Rebuild per-invocation packet state from the planner's
+                    # original _dispatch write — applied to channels at the
+                    # previous superstep's commit, so it's part of snapshot.
+                    planner_dispatch = snapshot.get("_dispatch") or []
+                    if not isinstance(planner_dispatch, list):
+                        planner_dispatch = []
+                    inv_packet_state: dict[Invocation, dict[str, Any]] = {}
+                    for inv, raw in zip(dynamic_invocations, planner_dispatch, strict=False):
+                        if isinstance(raw, dict) and isinstance(raw.get("state"), dict):
+                            inv_packet_state[inv] = raw["state"]
+                    self._pending_packet_state = inv_packet_state
+                    fan_out_results = await self._dispatch_dynamic_fan_out(
+                        planner_id,
+                        node,
+                        dynamic_invocations,
+                        snapshot,
+                        execution_context=execution_context,
+                    )
+                    results.extend(fan_out_results)
+                    # Emit the planner's own NODE_START/NODE_END markers so
+                    # callers observing a planner still see a complete frame.
+                    await self._emit(
+                        session_id,
+                        EventType.NODE_START,
+                        node_id=planner_id,
+                        payload={
+                            "node_type": NodeType.CONDITION.value,
+                            "fanout_source": True,
+                            "branch_count": len(dynamic_invocations),
+                        },
+                        trace_id=trace_id,
+                    )
+                    await self._emit(
+                        session_id,
+                        EventType.NODE_END,
+                        node_id=planner_id,
+                        payload={"success": True, "fanout_source": True},
+                        trace_id=trace_id,
+                    )
+                    continue
+
                 await self._emit(
                     session_id,
                     EventType.NODE_START,
@@ -674,11 +795,13 @@ class PregelRuntime:
             # + log_schema_version marker) BEFORE applying them to channels. The
             # commit event (STEP_END, or INTERRUPT for a declarative pause) closes
             # the batch as a commit point.
+            fanout_payload = self._build_fanout_commit_payload(fan_out_dispatched, dynamic_dispatched_planners)
             await self._append_write_batch(
                 session_id,
                 trace_id,
                 pending_writes,
                 commit_event=EventType.STEP_END,
+                commit_payload=fanout_payload,
             )
             for _node_id, channel_updates, _node_id_repeat in pending_writes:
                 self._apply_writes(channel_updates, node_id=_node_id)
@@ -692,13 +815,24 @@ class PregelRuntime:
                 # the structural FAN_OUT node's out-edges would re-dispatch
                 # branches on resume).
                 descriptor = self._declarative_descriptor(session_id, "after", [r.node_id for r in results])
-                await self._emit(
+                # WAL-order: append CHANNEL_WRITE events with the INTERRUPT
+                # as commit point before applying them to channels (matches
+                # the worker_interrupt path's ordering). Without this the
+                # post-pause snapshot diverges from fold(log) and the
+                # projection-equivalent invariant fails on resume.
+                await self._append_write_batch(
                     session_id,
-                    EventType.INTERRUPT,
-                    node_id=after_hits[0],
-                    payload=descriptor,
-                    trace_id=trace_id,
+                    trace_id,
+                    pending_writes,
+                    commit_event=EventType.INTERRUPT,
+                    commit_node_id=after_hits[0],
+                    commit_payload=descriptor,
                 )
+                for _node_id, channel_updates, _node_id_repeat in pending_writes:
+                    self._apply_writes(channel_updates, node_id=_node_id)
+                await self._append_eviction_events(session_id, trace_id)
+                # Note: _append_write_batch already emitted the INTERRUPT
+                # event as the commit-point closer, so no extra _emit here.
                 if execution_mode == "conversational":
                     await self._checkpoint_store.save(
                         session_id=session_id,
@@ -741,7 +875,23 @@ class PregelRuntime:
             elif stream_mode in (StreamMode.VALUES, StreamMode.MESSAGES):
                 yield {"type": "values", "state": self._channel_manager.snapshot()}
 
-            current_nodes = self._resolve_next_nodes(results)
+            invocations = self._resolve_next_nodes(results)
+            self._enforce_superstep_invocation_cap(invocations)
+            # Stash per-node invocation list so the dispatch loop knows the
+            # branch identity (dynamic fan-out) and seed payload for each
+            # scheduled target. Static invocations map to a single-entry list.
+            self._pending_invocations_by_target = {}
+            for inv in invocations:
+                self._pending_invocations_by_target.setdefault(inv.target, []).append(inv)
+            # Clear the planner's _dispatch write after the superstep
+            # consumes it — the plan is "spent" once the engine has resolved
+            # it into invocations. Without this, sessions on a long-lived
+            # runtime accumulate stale plans on the TOPIC channel (the
+            # session-isolated log retains the full history for replay/fork
+            # via the WAL, so this in-memory clear is safe).
+            if any(r.channel_updates.get("_dispatch") is not None for r in results):
+                self._channel_manager.restore({"_dispatch": None})
+            current_nodes = [inv.target for inv in invocations]
 
         # T0.5: TURN_END at natural loop exit (covered by while condition).
         # Interrupt path emits its own TURN_END before returning; this catch-all
@@ -1109,35 +1259,214 @@ class PregelRuntime:
             return [self._graph.entry_point]
         return []
 
-    def _resolve_next_nodes(self, results: list[WorkerResult]) -> list[str]:
-        """Determine the next set of nodes to execute based on edges and commands.
+    def _resolve_next_nodes(self, results: list[WorkerResult]) -> list[Invocation]:
+        """Determine the next invocations to execute based on edges and commands.
 
-        For each worker result, checks if a ``Command(goto=...)`` was returned
-        (explicit routing). If not, looks up all edges whose source matches the
-        completed node. For conditional edges, reads the ``_route`` key from the
-        worker's channel_updates to select the correct branch.
+        Per 1.3.21③, the dispatch unit is now an :class:`Invocation` (target +
+        identity + optional sub-channel). Three input paths feed it:
+
+        1. ``Command(goto=...)`` from a worker — single invocation.
+        2. ``_dispatch`` channel write from a planner node — N invocations,
+           each carrying the planner's branch_index and a per-call sub-channel.
+        3. Static edge resolution — each completed node's outgoing edges
+           produce one invocation per resolved target. Conditional edges
+           resolve against the worker's ``_route`` channel write (kept
+           unchanged from the legacy semantics). Static invocations carry
+           ``identity.fanout_source = None`` and an empty sub-channel.
+
+        Priority mirrors the legacy goto-first ordering: a single result with
+        both ``Command(goto)`` and ``_dispatch`` SHALL be resolved via goto
+        (the more explicit signal); ``_dispatch`` is the planner's "soft
+        goto". Both paths log a debug-level note when they coexist.
 
         Returns:
-            A deduplicated list of node IDs to execute next, or an empty list
-            if any edge leads to ``__end__``.
+            An ordered list of invocations. The list is deduplicated only on
+            the *static* branch — dynamic invocations are preserved as-is so
+            that N calls of the same target reach the scheduler. The caller
+            is responsible for fan-out limit checks before scheduling.
         """
-        next_nodes: list[str] = []
+        invocations: list[Invocation] = []
+        next_targets_dedup: list[str] = []
         for result in results:
+            # --- 1.3.21③ dynamic path: planner wrote _dispatch ---
+            dispatch = result.channel_updates.get("_dispatch")
+            if dispatch is not None:
+                if result.command and result.command.is_goto():
+                    logger.debug(
+                        "_resolve_next_nodes: result from '%s' has goto and _dispatch; "
+                        "goto takes precedence, _dispatch ignored",
+                        result.node_id,
+                    )
+                else:
+                    packets = self._validate_dispatch_packets(result.node_id, dispatch)
+                    for idx, packet in enumerate(packets):
+                        invocations.append(
+                            Invocation(
+                                target=packet.node,
+                                identity=InvocationIdentity(fanout_source=result.node_id, branch_index=idx),
+                                sub_channel=f"_fanout__{result.node_id}__idx{idx}",
+                            )
+                        )
+                    continue  # dispatch takes the slot, skip static edge walk
+
+            # --- legacy Command(goto) ---
             if result.command and result.command.is_goto():
-                next_nodes.append(result.command.goto)
+                target = result.command.goto
+                if target not in next_targets_dedup:
+                    next_targets_dedup.append(target)
+                    invocations.append(
+                        Invocation(
+                            target=target,
+                            identity=InvocationIdentity(fanout_source=None, branch_index=-1),
+                        )
+                    )
                 continue
+
+            # --- legacy static edge resolution ---
             for edge in self._graph.edges:
-                if edge.source == result.node_id:
-                    if isinstance(edge.target, str):
-                        next_nodes.append(edge.target)
-                    elif isinstance(edge.target, dict):
-                        route_key = str(result.channel_updates.get("_route", "true"))
-                        target = self._resolve_conditional_target(edge.target, route_key)
-                        if target:
-                            next_nodes.append(target)
-        if "__end__" in next_nodes:
+                if edge.source != result.node_id:
+                    continue
+                if isinstance(edge.target, str):
+                    target = edge.target
+                elif isinstance(edge.target, dict):
+                    route_key = str(result.channel_updates.get("_route", "true"))
+                    target = self._resolve_conditional_target(edge.target, route_key)
+                    if not target:
+                        continue
+                else:
+                    continue
+                if target not in next_targets_dedup:
+                    next_targets_dedup.append(target)
+                    invocations.append(
+                        Invocation(
+                            target=target,
+                            identity=InvocationIdentity(fanout_source=None, branch_index=-1),
+                        )
+                    )
+        if "__end__" in next_targets_dedup:
             return []
-        return list(dict.fromkeys(next_nodes))
+        return invocations
+
+    def _validate_dispatch_packets(self, source_id: str, raw: Any) -> list[DispatchPacket]:
+        """Parse + validate the planner's ``_dispatch`` write.
+
+        Each planner is responsible for emitting a list of ``DispatchPacket``
+        (dict with ``node`` and optional ``state``). Anything else is a
+        planner contract violation and fails the superstep loud rather than
+        silently dropping the dispatch.
+
+        Engine-level fan-out ceilings are enforced here (D6). Per-node
+        ``max_fanout`` (from the planner node config) trims the engine
+        default; the absolute platform cap is the final guard.
+        """
+        if not isinstance(raw, list):
+            raise FanoutLimitError(
+                scope=f"planner:{source_id}",
+                requested=0,
+                ceiling=DEFAULT_MAX_FANOUT_PER_DISPATCH,
+            )
+        source_node = self._graph.nodes.get(source_id)
+        per_node_cap = DEFAULT_MAX_FANOUT_PER_DISPATCH
+        if source_node is not None:
+            fanout_cfg = source_node.config.get("fanout") or {}
+            per_node_cap = int(fanout_cfg.get("max_fanout", per_node_cap))
+        per_node_cap = min(per_node_cap, ABSOLUTE_MAX_FANOUT)
+
+        if len(raw) > per_node_cap:
+            raise FanoutLimitError(
+                scope=f"planner:{source_id}:per_node",
+                requested=len(raw),
+                ceiling=per_node_cap,
+            )
+        if len(raw) > ABSOLUTE_MAX_FANOUT:
+            raise FanoutLimitError(
+                scope=f"planner:{source_id}:absolute",
+                requested=len(raw),
+                ceiling=ABSOLUTE_MAX_FANOUT,
+            )
+
+        packets: list[DispatchPacket] = []
+        node_ids = set(self._graph.nodes.keys())
+        for i, item in enumerate(raw):
+            if not isinstance(item, dict):
+                raise FanoutLimitError(
+                    scope=f"planner:{source_id}:packet_shape",
+                    requested=0,
+                    ceiling=0,
+                )
+            target = item.get("node")
+            if not isinstance(target, str) or target not in node_ids:
+                raise FanoutLimitError(
+                    scope=f"planner:{source_id}:unknown_target[{i}]",
+                    requested=0,
+                    ceiling=0,
+                )
+            state = item.get("state") or {}
+            if not isinstance(state, dict):
+                raise FanoutLimitError(
+                    scope=f"planner:{source_id}:state_shape[{i}]",
+                    requested=0,
+                    ceiling=0,
+                )
+            packets.append(DispatchPacket(node=target, state=state))
+        return packets
+
+    def _enforce_superstep_invocation_cap(self, invocations: list[Invocation]) -> None:
+        """Enforce superstep-wide invocation ceiling (D6)."""
+        if len(invocations) > DEFAULT_MAX_INVOCATIONS_PER_SUPERSTEP:
+            raise FanoutLimitError(
+                scope="superstep",
+                requested=len(invocations),
+                ceiling=DEFAULT_MAX_INVOCATIONS_PER_SUPERSTEP,
+            )
+
+    def _build_fanout_commit_payload(
+        self,
+        static_fan_out_dispatched: list[str],
+        dynamic_planners_dispatched: list[str],
+    ) -> dict[str, Any]:
+        """Enrich STEP_END commit_payload with fanout branch outputs (T2b).
+
+        Both static FAN_OUT and dynamic (1.3.21③) paths funnel through this
+        helper: the engine reads the corresponding ``_fanout__*`` sub-channels
+        out of the in-memory channel manager (which already holds the
+        branch results from this superstep) and bakes them into the STEP_END
+        payload. ``fold_session`` rebuilds sub-channels from this payload
+        during replay / fork / log-only recovery — closing the T2b gap.
+
+        The payload is empty when no fan-out ran in this superstep; the
+        STEP_END is unchanged for non-fanout supersteps.
+        """
+        segments: list[dict[str, Any]] = []
+        for fan_out_id in static_fan_out_dispatched:
+            segments.append(self._snapshot_fanout_subchannels(fan_out_id, dynamic=False))
+        for planner_id in dynamic_planners_dispatched:
+            segments.append(self._snapshot_fanout_subchannels(planner_id, dynamic=True))
+        if not segments:
+            return {}
+        return {"fanout": segments}
+
+    def _snapshot_fanout_subchannels(self, source_id: str, dynamic: bool) -> dict[str, Any]:
+        """Snapshot all ``_fanout__{source}__*`` sub-channels.
+
+        For static FAN_OUT the suffix is the branch node ID; for dynamic
+        fan-out the suffix is ``idx{i}``. Sub-channels that are not
+        registered (e.g. a branch crashed before any sub-channel was written)
+        are recorded as ``None`` so the fold path can detect and skip them.
+        """
+        prefix = f"_fanout__{source_id}__"
+        snapshot = self._channel_manager.snapshot()
+        entries: dict[str, Any] = {}
+        for name, value in snapshot.items():
+            if not name.startswith(prefix):
+                continue
+            suffix = name[len(prefix) :]
+            entries[suffix] = value
+        return {
+            "source": source_id,
+            "dynamic": dynamic,
+            "sub_channels": entries,
+        }
 
     @property
     def is_interrupted(self) -> bool:
@@ -1174,6 +1503,134 @@ class PregelRuntime:
             )
             if result.resolved:
                 self._channel_manager.write(k, result.final_value, node_id=node_id)
+
+    async def _dispatch_dynamic_fan_out(
+        self,
+        planner_id: str,
+        target_node: Any,
+        invocations: list[Invocation],
+        snapshot: dict,
+        execution_context: dict | None = None,
+    ) -> list[WorkerResult]:
+        """Dispatch dynamic-fan-out invocations in one superstep (1.3.21③).
+
+        For every invocation the engine:
+
+        1. Seeds the invocation's sub-channel (``_fanout__{planner}__idx{i}``)
+           with the planner's packet state. The seed runs before any branch
+           worker is dispatched so the worker reads the slice from its own
+           sub-channel — branches never see each other's payloads.
+        2. Dispatches the same target node with the per-call sub-channel name
+           carried in ``execution_context`` so the worker can read its slice.
+        3. Writes the result back into the invocation's sub-channel on
+           success; on error, honors ``on_branch_error`` (``fail_fast``
+           default keeps existing behavior; ``collect`` records the failure
+           locally and lets the rest of the batch finish).
+        """
+        from hecate.runtime.types import ChannelDef, ChannelType
+
+        planner_node = self._graph.nodes.get(planner_id)
+        error_mode = "fail_fast"
+        if planner_node is not None:
+            error_mode = planner_node.config.get("on_branch_error", "fail_fast")
+
+        # Per-invocation packet state lives on the runtime instance, set by
+        # the dispatch loop in the same superstep. Falling back to {} is a
+        # defense-in-depth: if the dispatch loop forgets to populate it, the
+        # branch just runs without a slice (still correct, just less useful).
+        packet_state_by_inv: dict[Invocation, dict[str, Any]] = getattr(self, "_pending_packet_state", {})
+
+        # Pre-register and seed all sub-channels before any worker runs so
+        # branch isolation is guaranteed at the channel layer.
+        for inv in invocations:
+            if inv.sub_channel is None:  # defensive: dynamic invocations always carry sub_channel
+                continue
+            self._channel_manager.register(inv.sub_channel, ChannelDef(type=ChannelType.LAST_VALUE))
+            self._channel_manager.write(inv.sub_channel, packet_state_by_inv.get(inv, {}))
+
+        async def run_invocation(inv: Invocation) -> WorkerResult:
+            branch_payload = packet_state_by_inv.get(inv, {})
+            branch_execution_context = {
+                **(execution_context or {}),
+                "_fanout_sub_channel": inv.sub_channel,
+                "_fanout_planner": inv.identity.fanout_source,
+                "_fanout_branch_index": inv.identity.branch_index,
+                "_fanout_branch_payload": branch_payload,
+            }
+            return await self._pool.dispatch(
+                self._worker,
+                inv.target,
+                target_node.config,
+                snapshot,
+                execution_context=branch_execution_context,
+            )
+
+        # Emit branch NODE_START markers before fan-out so consumers see the
+        # full frame for each invocation.
+        for inv in invocations:
+            await self._emit(
+                self._session_id_for_event,
+                EventType.NODE_START,
+                node_id=inv.target,
+                payload={
+                    "node_type": getattr(target_node.type, "value", None),
+                    "fanout_source": inv.identity.fanout_source,
+                    "branch_index": inv.identity.branch_index,
+                },
+                trace_id=self._current_trace_id,
+            )
+
+        branch_results = await asyncio.gather(*[run_invocation(inv) for inv in invocations])
+
+        out: list[WorkerResult] = []
+        for inv, result in zip(invocations, branch_results, strict=True):
+            await self._emit(
+                self._session_id_for_event,
+                EventType.NODE_END,
+                node_id=inv.target,
+                payload={
+                    "success": result.error is None,
+                    "fanout_source": inv.identity.fanout_source,
+                    "branch_index": inv.identity.branch_index,
+                },
+                trace_id=self._current_trace_id,
+            )
+            if result.error is None:
+                if inv.sub_channel is not None:
+                    self._channel_manager.write(inv.sub_channel, result.channel_updates)
+                out.append(result)
+            elif error_mode == "collect":
+                if inv.sub_channel is not None:
+                    self._channel_manager.write(
+                        inv.sub_channel,
+                        {
+                            "__branch_error__": {
+                                "type": type(result.error).__name__,
+                                "message": str(result.error),
+                            }
+                        },
+                    )
+                # Return a clean result (no .error) so the superstep driver
+                # does not re-raise. The error is observable via the
+                # sub-channel contents, which downstream MERGE / consumers
+                # can introspect.
+                out.append(
+                    WorkerResult(
+                        node_id=result.node_id,
+                        channel_updates=result.channel_updates,
+                        command=result.command,
+                    )
+                )
+            else:
+                # fail_fast default — preserve legacy raise-on-error contract.
+                out.append(result)
+
+        if error_mode == "fail_fast":
+            for r in out:
+                if r.error is not None:
+                    raise r.error
+
+        return out
 
     async def _dispatch_fan_out(
         self,
@@ -1233,15 +1690,23 @@ class PregelRuntime:
     def _execute_merge(self, node_id: str, node: Any) -> WorkerResult:
         """Aggregate results from all branches of a preceding FAN_OUT.
 
-        Reads all branch sub-channels, combines them into a dict keyed by
-        branch node ID, and writes the result to the configured output channel.
+        Two aggregation modes (1.3.21③):
+
+        * Static FAN_OUT source — the source node's ``branches`` config is
+          authoritative; ``{branch_id: sub_channel_value}`` is the legacy
+          contract and remains unchanged.
+        * Dynamic fan-out source — the source is a planner node that wrote
+          ``_dispatch``. We resolve the dispatch plan from the folded
+          channel state and read each invocation's sub-channel by its
+          ``branch_index`` suffix (``idx{i}``). The aggregated result keys
+          branches by ``branch_index`` (the per-call identity).
 
         Args:
             node_id: The MERGE node ID.
             node: The NodeConfig for the MERGE node.
 
         Returns:
-            WorkerResult with the aggregated output.
+            WorkerResult with the aggregated output on ``output_channel``.
         """
         fan_out_source: str = node.config.get("fan_out_source", "")
         output_channel: str = node.config.get("output_channel", "merged_output")
@@ -1250,12 +1715,31 @@ class PregelRuntime:
         if source_node is None:
             return WorkerResult(node_id=node_id, error=RuntimeError(f"FAN_OUT source '{fan_out_source}' not found"))
 
-        branches: list[str] = source_node.config.get("branches", [])
+        snapshot = self._channel_manager.snapshot()
+        is_dynamic = bool(source_node.config.get("fanout"))
         aggregated: dict[str, Any] = {}
-        for branch_id in branches:
-            sub_channel = f"_fanout__{fan_out_source}__{branch_id}"
-            value = self._channel_manager.snapshot().get(sub_channel)
-            aggregated[branch_id] = value
+
+        if is_dynamic:
+            # Discover branches by scanning the snapshot for sub-channels
+            # matching the planner's fanout prefix. The planner's
+            # ``_dispatch`` write may have been cleared by the engine after
+            # consumption (it served its role when resolving the next
+            # superstep), but the per-call sub-channels persist in the
+            # channel manager and are the canonical source of branch output.
+            prefix = f"_fanout__{fan_out_source}__idx"
+            for name, value in snapshot.items():
+                if not name.startswith(prefix):
+                    continue
+                suffix = name[len(prefix) :]
+                # Defensive: only accept integer-suffixed sub-channels.
+                if not suffix.isdigit():
+                    continue
+                aggregated[suffix] = value
+        else:
+            branches: list[str] = source_node.config.get("branches", [])
+            for branch_id in branches:
+                sub_channel = f"_fanout__{fan_out_source}__{branch_id}"
+                aggregated[branch_id] = snapshot.get(sub_channel)
 
         return WorkerResult(
             node_id=node_id,

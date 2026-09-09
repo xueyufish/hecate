@@ -98,3 +98,69 @@ class TestConditionWorker:
             channel_snapshot={},
         )
         assert result.channel_updates["messages"] == []
+
+
+class TestConditionWorkerFanout:
+    """Dynamic fan-out plan emission (1.3.21③)."""
+
+    async def test_fanout_emits_dispatch_per_over_element(self, worker: ConditionWorker) -> None:
+        result = await worker.execute(
+            node_id="plan",
+            node_config={
+                "fanout": {
+                    "over": "queries",
+                    "target": "collect",
+                    "state_key": "query",
+                }
+            },
+            channel_snapshot={"queries": ["q1", "q2", "q3"]},
+        )
+        assert result.channel_updates["_dispatch"] == [
+            {"node": "collect", "state": {"query": "q1"}},
+            {"node": "collect", "state": {"query": "q2"}},
+            {"node": "collect", "state": {"query": "q3"}},
+        ]
+        # fan-out replaces the conditional _route write for this superstep.
+        assert "_route" not in result.channel_updates
+
+    async def test_fanout_empty_over_emits_no_dispatch(self, worker: ConditionWorker) -> None:
+        result = await worker.execute(
+            node_id="plan",
+            node_config={
+                "fanout": {
+                    "over": "queries",
+                    "target": "collect",
+                    "state_key": "query",
+                }
+            },
+            channel_snapshot={"queries": []},
+        )
+        assert result.channel_updates["_dispatch"] == []
+
+    async def test_fanout_missing_over_channel_is_zero_dispatch(self, worker: ConditionWorker) -> None:
+        result = await worker.execute(
+            node_id="plan",
+            node_config={
+                "fanout": {
+                    "over": "queries",
+                    "target": "collect",
+                    "state_key": "query",
+                }
+            },
+            channel_snapshot={},
+        )
+        assert result.channel_updates["_dispatch"] == []
+
+    async def test_fanout_scalar_over_treated_as_one_element(self, worker: ConditionWorker) -> None:
+        result = await worker.execute(
+            node_id="plan",
+            node_config={
+                "fanout": {
+                    "over": "single_query",
+                    "target": "collect",
+                    "state_key": "query",
+                }
+            },
+            channel_snapshot={"single_query": "only"},
+        )
+        assert result.channel_updates["_dispatch"] == [{"node": "collect", "state": {"query": "only"}}]

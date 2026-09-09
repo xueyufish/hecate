@@ -275,6 +275,128 @@ def test_derive_from_fork_payload():
     assert cont.skip_before == set()
 
 
+def test_derive_dynamic_fanout_plan_adopted_when_planner_in_executed():
+    """1.3.21③: STEP_END with planner in executed + dispatch plan wins over static edges."""
+    # The graph needs a CONDITION node (planner) so the live-planner guard
+    # passes. Build a minimal one inline.
+    from hecate.runtime.types import CompiledGraph, NodeConfig, NodeType
+
+    graph = CompiledGraph(
+        nodes={
+            "planner": NodeConfig(id="planner", type=NodeType.CONDITION, config={}),
+            "branch": NodeConfig(id="branch", type=NodeType.CONVERSATION, config={}),
+        },
+        edges=[],
+        channels={},
+        entry_point="planner",
+    )
+    sid = uuid.uuid4()
+    cont = derive_continuation(
+        _events(
+            sid,
+            [
+                (EventType.NODE_END, None, "planner", 1),
+                (EventType.STEP_END, {}, None, 1),
+            ],
+        ),
+        graph,
+        {
+            "_dispatch": [
+                {"node": "branch"},
+                {"node": "branch"},
+            ],
+            "_route": "true",
+        },
+    )
+    assert cont.nodes == ["branch"]
+
+
+def test_derive_stale_dispatch_plan_ignored():
+    """1.3.21③: dispatch plan left over from an older superstep SHALL NOT fire."""
+    graph = _linear_graph()
+    sid = uuid.uuid4()
+    cont = derive_continuation(
+        _events(
+            sid,
+            [
+                (EventType.NODE_END, None, "unrelated", 1),
+                (EventType.STEP_END, {}, None, 1),
+            ],
+        ),
+        graph,
+        {
+            "_dispatch": [{"node": "ghost"}],
+            "_route": "true",
+        },
+    )
+    # No live planner in executed list → static out-edges win (none here →
+    # empty continuation; the legacy fallback is to the entry point).
+    assert cont.nodes == ["a"]
+
+
+async def test_commit_points_exposes_fanout_metadata():
+    """1.3.21③ STEP_END fanout segment surfaces in commit-points."""
+    from hecate.studio.workflows.execution_service import WorkflowExecutionService
+
+    # Build a minimal service: only event_store is exercised here.
+    class _StubService:
+        _event_store = None
+
+    # The list_commit_points method lives on the service instance; it only
+    # touches _event_store. Patch in our store.
+
+    sid = uuid.uuid4()
+    store = InMemoryEventStore()
+    # Emit a planner superstep with a fanout segment.
+    from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
+    await store.append(
+        Event(
+            session_id=sid,
+            superstep=1,
+            event_type=EventType.NODE_END,
+            node_id="planner",
+            payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION},
+        )
+    )
+    await store.append(
+        Event(
+            session_id=sid,
+            superstep=1,
+            event_type=EventType.STEP_END,
+            node_id=None,
+            payload={
+                "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                "fanout": [
+                    {
+                        "source": "planner",
+                        "dynamic": True,
+                        "sub_channels": {"idx0": {}, "idx1": {}},
+                    }
+                ],
+            },
+        )
+    )
+
+    svc = WorkflowExecutionService.__new__(WorkflowExecutionService)
+    svc._event_store = store
+    svc._session_repo = None
+    svc._graph_version_repo = None
+    svc._compiled_graph_cache = None
+    svc._checkpoint_store = None
+    svc._conflict_resolver = None
+    svc._harness_engine = None
+    svc._streaming_repo = None
+
+    anchors = await svc.list_commit_points(sid)
+    assert len(anchors) == 1
+    anchor = anchors[0]
+    assert anchor["kind"] == "STEP_END"
+    assert "fanout" in anchor
+    assert anchor["fanout"]["packet_count"] == 2
+    assert anchor["fanout"]["sources"] == ["planner"]
+
+
 def test_derive_from_step_end_node_outedges():
     graph = _linear_graph()
     sid = uuid.uuid4()

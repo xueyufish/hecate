@@ -12,9 +12,13 @@ from hecate.runtime.channel import (
     ChannelBehavior,
     LastValueBehavior,
     TopicBehavior,
+    UnknownReducerError,
     get,
+    get_reducer,
+    list_reducers,
     list_types,
     register,
+    register_reducer,
 )
 from hecate.runtime.types import ChannelDef, ChannelType
 
@@ -118,6 +122,106 @@ class TestAccumulatorBehavior:
         behavior = AccumulatorBehavior()
         defn = ChannelDef(type=ChannelType.ACCUMULATOR, reduce_fn=None)
         assert behavior.write(5, 3, defn) == 3
+
+    def test_write_unknown_named_reducer_raises(self) -> None:
+        behavior = AccumulatorBehavior()
+        defn = ChannelDef(type=ChannelType.ACCUMULATOR, reduce_fn="concat")
+        with pytest.raises(UnknownReducerError, match="concat"):
+            behavior.write(5, 3, defn)
+
+    def test_write_registered_custom_reducer_applies(self) -> None:
+        register_reducer("_test_merge_dicts", lambda current, value: {**(current or {}), **value})
+        try:
+            behavior = AccumulatorBehavior()
+            defn = ChannelDef(type=ChannelType.ACCUMULATOR, reduce_fn="_test_merge_dicts")
+            assert behavior.write({"a": 1}, {"b": 2}, defn) == {"a": 1, "b": 2}
+        finally:
+            from hecate.runtime.channel import _REDUCERS
+
+            _REDUCERS.pop("_test_merge_dicts", None)
+
+    def test_append_reducer_collects_branch_outputs(self) -> None:
+        behavior = AccumulatorBehavior()
+        defn = ChannelDef(type=ChannelType.ACCUMULATOR, reduce_fn="append")
+        assert behavior.write([1, 2], 3, defn) == [1, 2, 3]
+        assert behavior.write([1, 2], [3, 4], defn) == [1, 2, 3, 4]
+        assert behavior.write(None, ["x"], defn) == ["x"]
+
+
+class TestReducerRegistry:
+    """Tests for the named-reducer registry (1.3.21③)."""
+
+    def test_built_in_reducers_listed(self) -> None:
+        names = list_reducers()
+        assert "add" in names
+        assert "append" in names
+
+    def test_get_reducer_unknown_raises(self) -> None:
+        with pytest.raises(UnknownReducerError, match="nope"):
+            get_reducer("nope")
+
+    def test_register_then_resolve(self) -> None:
+        register_reducer("_test_reducer", lambda c, v: v)
+        try:
+            assert get_reducer("_test_reducer")("old", "new") == "new"
+        finally:
+            from hecate.runtime.channel import _REDUCERS
+
+            _REDUCERS.pop("_test_reducer", None)
+
+    def test_compile_rejects_unknown_reducer(self) -> None:
+        from hecate.runtime.compiler import GraphCompiler
+        from hecate.runtime.errors import GraphValidationError
+        from hecate.runtime.types import (
+            ChannelDef,
+            ChannelType,
+            Edge,
+            GraphConfig,
+            NodeConfig,
+            NodeType,
+        )
+
+        config = GraphConfig(
+            name="bad",
+            state={"score": ChannelDef(type=ChannelType.ACCUMULATOR, reduce_fn="undefined_reducer")},
+            nodes={
+                "start": NodeConfig(id="start", type=NodeType.CONDITION, config={}),
+            },
+            edges=[Edge(source="start", target="__end__")],
+            entry="start",
+        )
+        with pytest.raises(GraphValidationError, match="undefined_reducer"):
+            GraphCompiler().compile(config)
+
+    def test_compile_accepts_registered_custom_reducer(self) -> None:
+        from hecate.runtime.compiler import GraphCompiler
+        from hecate.runtime.types import (
+            ChannelDef,
+            ChannelType,
+            CompiledGraph,
+            Edge,
+            GraphConfig,
+            NodeConfig,
+            NodeType,
+        )
+
+        register_reducer("_test_compile_reducer", lambda c, v: (c or 0) + v)
+        try:
+            config = GraphConfig(
+                name="ok",
+                state={"score": ChannelDef(type=ChannelType.ACCUMULATOR, reduce_fn="_test_compile_reducer")},
+                nodes={
+                    "start": NodeConfig(id="start", type=NodeType.CONDITION, config={}),
+                },
+                edges=[Edge(source="start", target="__end__")],
+                entry="start",
+            )
+            compiled: CompiledGraph = GraphCompiler().compile(config)
+            assert "score" in compiled.channels
+        finally:
+            from hecate.runtime.channel import _REDUCERS
+
+            _REDUCERS.pop("_test_compile_reducer", None)
 
     def test_is_evictable_false(self) -> None:
         behavior = AccumulatorBehavior()

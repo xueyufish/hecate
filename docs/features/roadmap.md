@@ -740,7 +740,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 |---|---|---|---|---|
 | ① first ✅ | 1.3.21① Declarative interrupts — compile-time `interrupt_before`/`interrupt_after` node lists + `remaining_steps` signal in execution_context (graceful degradation before MaxSuperstepsError) | Command/interrupt ✅ | S | HITL plan-review flows without worker-authored interrupts; G7 inspector breakpoints. 已交付(2026-09-08,change `openspec/changes/archive/2026-09-08-declarative-interrupts/`):整步暂停 + 日志推导 phase-aware resume + WAL 提交序修复 + session status 接线,HITL 端到端可达;细节见 feature-catalog 1.3.21 行。② 的 checkpoint 锚点已就位(phase 描述符即 ② 要折叠的形状) |
 | ② second ✅ | 1.3.21② Time-travel resume + update_state — 已交付(2026-09-09,change `openspec/changes/archive/2026-09-09-time-travel-resume/`):锚点为日志提交点(刻意偏离本表原文的 `CheckpointStore.load(checkpoint_id)`——生产 store 无历史,ADR-030 缓存可弃);`GET /commit-points` + `POST /fork`(子会话 FORK 快照引导,父日志零侵入)+ `POST /state`(追加记录式修改);引擎 `resume_from` tail-only 守卫;顺带修复 initial_input 从未入 WAL 的投影等价空转缺陷(D11)。细节见 feature-catalog 1.3.21 行 | 1.3.19 ✅ | M | 6.26 E5 what-if branching; 8.20 executable replay; HITL re-plan flows |
-| ③ third | 1.3.21③ Send-style dynamic fan-out — conditional edges return N runtime dispatch packets (per-slice state, sub-channel + ConflictResolver merge); generalizes the static FAN_OUT branch table | FAN_OUT/MERGE ✅ + 13.10 ConflictResolver ✅ | M/L | 5.11 Deep Research parallel collection; map-reduce aggregation patterns |
+| ③ third ✅ | 1.3.21③ Send-style dynamic fan-out — 已交付(2026-09-09,change `openspec/changes/archive/2026-09-09-dynamic-fanout/`):CONDITION + `fanout` DSL 块(`over` 通道逐元素生成 `_dispatch` 包,`target`/`state_key`/`max_fanout` 编译期校验);引擎调度单元升级为 `Invocation`(同子节点同 superstep 并行 N 次,语义去重被刻意保留);`_dispatch` 受日志控制通道 + STEP_END `fanout` 段(折叠重建子通道)闭合 T2b 不变式(`FORK` 载荷保真,缓存缺失 log-only 恢复后 MERGE 正确);`continuation.py` `_dispatch` 采纳规则带 live-planner 守卫;分层扇出上限(节点 64/superstep 256,绝对 1024)fail-closed;per-branch 容错粒度(`on_branch_error: fail_fast | collect`);`_execute_merge` 动态分支聚合(按 `branch_index`)+ 静态路径回归;可插拔 ACCUMULATOR reducer(模块级 `_REDUCERS` 注册表 + 内建 `add`/`append` + 未知名编译期报错);①+②+③ 闭环——planner ∈ `interrupt_after` 实现 HITL 计划评审,target ∈ `interrupt_before` 整批预中断。`on_branch_error` collect 模式 + planner 的 `_dispatch` 写入属 executor `AgentExecute` 依赖项。细节见 feature-catalog 1.3.21 行 | FAN_OUT/MERGE ✅ + 13.10 ConflictResolver ✅ | M/L | 5.11 Deep Research parallel collection; map-reduce aggregation patterns; what-if fork across fanout window (T2b closure) |
 | ride-along | 1.3.21 sub-items — node-level CachePolicy (TTL + key_func on CONVERSATION/KNOWLEDGE nodes) + pluggable ACCUMULATOR reducers (beyond built-in `add`) | 5.7 tool-cache pattern ✅ | S | Expensive KB/LLM node caching; custom merge semantics |
 
 > Deliberately **not** in scope (research conclusion, see 1.3.21 row): Functional API (`@entrypoint`/`@task`) — GraphDSL covers the expression; delta-checkpoint cache layer — log-as-truth + materialized checkpoints is the stronger answer. Stream-mode parity (debug/tasks/checkpoints) stays in 11.18; inspector UI stays in G7 (1.1.23); cross-thread store stays in 4.23.
@@ -753,7 +753,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 - [ ] **Opening Queue** shipped: MCP Gateway (5.4a ✅), Evaluation Suite tasks (7.2b-e/7.3/7.4/7.4a), Controller Family (2.6a+1.1.21+1.3.10⊕6.23+6.49), Agent Versioning (1.3.20)
 - [ ] Model Service Publishing (6.47) + Quick Wins (6.48) operational
-- [ ] Engine Parity (1.3.21): declarative interrupts (① ✅ 2026-09-08) + time-travel resume (② ✅ 2026-09-09) + dynamic fan-out (③) operational — unblocks Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18/5.11 fan-out)
+- [x] Engine Parity (1.3.21): declarative interrupts (① ✅ 2026-09-08) + time-travel resume (② ✅ 2026-09-09) + dynamic fan-out (③ ✅ 2026-09-09) operational — unblocks Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18/5.11 fan-out)
 - [ ] Hallucination detection operational
 - [ ] Self-Learning loop operational
 - [ ] Agentic RL Framework with data flywheel
@@ -1129,7 +1129,7 @@ CLI Tools → VibeCoding (6.29) → File IO + Command Execution + Code Execution
 Ontology Actions (P3) → Fine-Grained Permissions (6.30) → Object/Attribute/Row-Level Access Control
 Docker (1.3.15a) → gVisor Enhanced Sandbox (6.32) → Kata Containers (6.32a) → Firecracker microVM (6.40) → WASM Runtime (6.41)
 Pregel Runtime → Multi-Stream Modes (11.18) → values/updates/messages/debug
-Engine Parity (1.3.21, Sprint 8): Declarative Interrupts (①) → Time-Travel Resume (②) → Dynamic Fan-out (③) → Sprint 9 consumers: What-If Checkpoint Branching (6.26 E5) + executable 8.20 replay + Deep Research (5.11) parallel collection
+Engine Parity (1.3.21, Sprint 8, 收官 2026-09-09): Declarative Interrupts (① ✅) → Time-Travel Resume (② ✅) → Dynamic Fan-out (③ ✅) → Sprint 9 consumers: What-If Checkpoint Branching (6.26 E5) + executable 8.20 replay + Deep Research (5.11) parallel collection
 Knowledge Graph (3.5.1-3.5.3, P5 deferred) → Object CRUD Node (1.1.26) → Ontology-Native Canvas Development
 Execution State Visualization (1.1.23) → Side-by-side Chat+Canvas (1.1.27) → Integrated Dev/Test View
 Streaming → Asynchronous Execution API (1.3.11) → Long-Running Workflow Support

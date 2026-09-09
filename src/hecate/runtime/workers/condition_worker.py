@@ -26,6 +26,12 @@ class ConditionWorker(Worker):
 
     The result is written as ``_route`` in channel_updates: either ``"true"``
     or ``"false"``, matching the conditional edge target keys in the graph.
+
+    Dynamic fan-out (1.3.21③): a CONDITION node may declare a ``fanout``
+    block (``{"over": <channel>, "target": <node>, "state_key": <key>,
+    "max_fanout": <int>}``). When set, the worker emits one ``DispatchPacket``
+    per element of the over channel into ``_dispatch`` and clears ``_route``
+    (the fan-out plan replaces the conditional edge walk for this superstep).
     """
 
     async def execute(
@@ -35,16 +41,34 @@ class ConditionWorker(Worker):
         channel_snapshot: dict,
         execution_context: dict | None = None,
     ) -> WorkerResult:
-        expression = node_config.get("expression", "")
-        route_value = self._evaluate(expression, channel_snapshot)
+        updates: dict[str, Any] = {"messages": []}
+        fanout_cfg = node_config.get("fanout")
+        if fanout_cfg:
+            updates["_dispatch"] = self._build_dispatch(fanout_cfg, channel_snapshot)
+            return WorkerResult(node_id=node_id, channel_updates=updates)
 
-        return WorkerResult(
-            node_id=node_id,
-            channel_updates={
-                "_route": route_value,
-                "messages": [],
-            },
-        )
+        expression = node_config.get("expression", "")
+        updates["_route"] = self._evaluate(expression, channel_snapshot)
+        return WorkerResult(node_id=node_id, channel_updates=updates)
+
+    def _build_dispatch(self, fanout_cfg: dict[str, Any], channel_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+        """Read the over channel and emit one dispatch packet per element.
+
+        The over channel's value is expected to be a list (or any iterable).
+        Scalar values are treated as a one-element sequence; missing / None is
+        an empty sequence (zero dispatches — see spec scenario).
+        """
+        over = fanout_cfg.get("over", "")
+        target = fanout_cfg.get("target", "")
+        state_key = fanout_cfg.get("state_key", "")
+        value = channel_snapshot.get(over)
+        if value is None:
+            items: list[Any] = []
+        elif isinstance(value, list):
+            items = value
+        else:
+            items = [value]
+        return [{"node": target, "state": {state_key: item}} for item in items]
 
     def _evaluate(self, expression: str, state: dict[str, Any]) -> str:
         """Evaluate an expression against channel state.

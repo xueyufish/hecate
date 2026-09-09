@@ -43,10 +43,16 @@ def should_log_channel(name: str) -> bool:
       * underscore-prefixed control channels (re-injected at restore by services)
       * ``sys.``-prefixed control channels (engine-controlled, regenerated per request)
 
-    Special case: ``_route`` is explicitly NOT excluded — condition-edge routing
-    is part of fold correctness and must survive replay.
+    Special cases — explicitly logged:
+      * ``_route``: condition-edge routing is part of fold correctness.
+      * ``_dispatch``: 1.3.21③ dynamic fan-out plan. Treated like ``_route``
+        so the plan survives replay / fork / crash recovery. Branches read
+        their slices from per-call sub-channels (which remain ephemeral);
+        only the plan itself is fold-relevant.
     """
     if name == "_route":
+        return True
+    if name == "_dispatch":
         return True
     if name in _EPHEMERAL:
         return False
