@@ -187,7 +187,9 @@ class ChannelDef:
         type: the ChannelType determining write semantics.
         default: initial value set when the channel is first registered.
         initial: starting value for ACCUMULATOR channels (e.g., 0 for "add").
-        reduce_fn: reduction function name (currently only "add" is supported).
+        reduce_fn: reduction function name resolved against the registry in
+            ``channel.py`` (built-ins "add" and "append"; register more via
+            ``channel.register_reducer`` — unknown names fail compilation).
         persistent: whether the channel persists across sessions (checkpoint).
             This is orthogonal to write semantics — any type can be persistent.
     """
@@ -255,12 +257,20 @@ class WorkerResult:
             For TOPIC channels, values are appended; for LAST_VALUE, overwritten.
         command: optional control instruction (goto, interrupt, return).
         error: if set, the runtime will raise this error instead of applying updates.
+        cache_hit: whether this result was served from the node cache
+            (1.3.21IV). False for normally executed nodes; the engine copies
+            the flag into the NODE_END ``cached`` marker on both paths so hit
+            and miss trajectories differ only in the marker values.
+        cache_key: the derived cache key hash for cache-policy nodes
+            (``None`` when the node has no policy or missed).
     """
 
     node_id: str
     channel_updates: dict[str, Any] = field(default_factory=dict)
     command: Command | None = None
     error: Exception | None = None
+    cache_hit: bool = False
+    cache_key: str | None = None
 
 
 @dataclass
