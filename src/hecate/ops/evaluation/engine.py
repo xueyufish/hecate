@@ -74,21 +74,37 @@ class EvaluationEngine:
         dataset_id: uuid.UUID,
         answer_source: AnswerSource = AnswerSource.MANUAL,
         tags: list[str] | None = None,
+        agent_id: uuid.UUID | None = None,
+        run: EvaluationRunModel | None = None,
+        summary_config: dict | None = None,
     ) -> EvaluationRunResult:
         """Execute all evaluators against all items in a dataset.
 
-        Creates an ``EvaluationRunModel`` record, iterates over items and
+        Creates an ``EvaluationRunModel`` record (or reuses the passed-in
+        ``run`` row for task-triggered runs), iterates over items and
         evaluators in nested loops, catches per-item-per-evaluator errors,
-        persists scores, and computes per-metric averages.
+        persists scores, computes per-metric averages, and — when
+        ``summary_config`` is provided — writes a pass/fail ``summary``
+        onto the run row.
 
         Args:
             evaluators: List of evaluator instances to run.
             dataset_id: UUID of the dataset to evaluate.
             answer_source: How to obtain generated answers — manual (from items),
-                pipeline (run RAG), or auto (fallback).
+                pipeline (run RAG), auto (fallback), or agent (invoke the
+                agent under test).
             tags: Optional tag filter (OR semantics). When provided, only
                 items whose ``tags`` JSON array contains any of the
                 specified values are scored.
+            agent_id: The agent under test, required when ``answer_source``
+                is ``AGENT`` — one ``RuntimePort.agent_execute`` call per
+                item lacking a stored answer.
+            run: Pre-created run row to reuse (task-triggered runs carry
+                ``task_id``); a fresh row is created when omitted.
+            summary_config: Optional task-run aggregation config —
+                ``{"threshold": float, "baseline_run_id": uuid,
+                "regression_threshold": float}``. When present, the run's
+                ``summary`` JSON column is populated on completion.
 
         Returns:
             Aggregated :class:`EvaluationRunResult` with scores and averages.
@@ -97,13 +113,18 @@ class EvaluationEngine:
             Exception: Re-raises any unhandled error after marking the run as
                 failed in the database.
         """
-        run = EvaluationRunModel(
-            dataset_id=dataset_id,
-            status=RunStatus.RUNNING.value,
-            evaluator_configs=[e.name for e in evaluators],
-        )
-        self.db.add(run)
-        await self.db.flush()
+        if answer_source == AnswerSource.AGENT and agent_id is None:
+            msg = "answer_source='agent' requires agent_id"
+            raise ValueError(msg)
+
+        if run is None:
+            run = EvaluationRunModel(
+                dataset_id=dataset_id,
+                status=RunStatus.RUNNING.value,
+                evaluator_configs=[e.name for e in evaluators],
+            )
+            self.db.add(run)
+            await self.db.flush()
 
         run.started_at = datetime.now(UTC)
         await self.db.flush()
@@ -128,18 +149,55 @@ class EvaluationEngine:
             with Timer() as total_timer:
                 for item in items:
                     generated = item.generated_answer or ""
+                    item_score_list: list[Score] = []
 
-                    if answer_source in (AnswerSource.PIPELINE, AnswerSource.AUTO) and not generated:
-                        generated = await self._generate_answer_via_pipeline(item.query, item.context or [])
+                    needs_generation = not generated and answer_source is not AnswerSource.MANUAL
+                    if needs_generation:
+                        if answer_source == AnswerSource.AGENT:
+                            try:
+                                generated = await self._generate_answer_via_agent(item.query, agent_id)
+                            except Exception as e:
+                                # Isolate the failure to this item: record an
+                                # error score per evaluator, keep sibling
+                                # items scoring.
+                                logger.error(
+                                    "Agent %s failed to answer item %s: %s",
+                                    agent_id,
+                                    item.id,
+                                    e,
+                                )
+                                for evaluator in evaluators:
+                                    item_score_list.append(
+                                        Score(
+                                            metric_name=evaluator.name,
+                                            value=-1.0,
+                                            reasoning=f"Agent invocation failed: {e}",
+                                            source="llm_judge",
+                                        )
+                                    )
+                                item_scores[str(item.id)] = item_score_list
+                                for score in item_score_list:
+                                    self.db.add(
+                                        EvaluationScoreModel(
+                                            run_id=run.id,
+                                            item_id=item.id,
+                                            metric_name=score.metric_name,
+                                            value=score.value,
+                                            reasoning=score.reasoning,
+                                            source=score.source,
+                                        )
+                                    )
+                                continue
+                        else:
+                            generated = await self._generate_answer_via_pipeline(item.query, item.context or [])
 
                     eval_input = EvalInput(
                         query=item.query,
                         retrieved_contexts=item.context or [],
                         generated_answer=generated,
                         expected_answer=item.expected_answer,
+                        agent_id=agent_id if answer_source == AnswerSource.AGENT else None,
                     )
-
-                    item_score_list: list[Score] = []
 
                     for evaluator in evaluators:
                         try:
@@ -187,6 +245,14 @@ class EvaluationEngine:
                 if values:
                     metric_averages[metric_name] = sum(values) / len(values)
 
+            if summary_config is not None:
+                run.summary = await self._build_summary(
+                    total_items=len(items),
+                    item_scores=item_scores,
+                    metric_averages=metric_averages,
+                    summary_config=summary_config,
+                )
+
             # Mark run as completed
             run.status = RunStatus.COMPLETED.value
             run.completed_at = datetime.now(UTC)
@@ -206,6 +272,121 @@ class EvaluationEngine:
             run.completed_at = datetime.now(UTC)
             await self.db.flush()
             raise
+
+    async def _generate_answer_via_agent(
+        self,
+        query: str,
+        agent_id: uuid.UUID,
+    ) -> str:
+        """Generate an answer by invoking the agent under test.
+
+        One non-streaming ``RuntimePort.agent_execute`` call per item. The
+        port adapter is resolved lazily through the composition factory to
+        avoid a composition-root import at module load.
+
+        Args:
+            query: The item query, sent as a single user message.
+            agent_id: The agent under test.
+
+        Returns:
+            The agent's final response text (may be empty on an empty reply).
+
+        Raises:
+            Exception: Any invocation failure propagates so the caller can
+                record per-item error scores.
+        """
+        from hecate.core.composition.runtime_port_adapter import make_runtime_port
+
+        port = make_runtime_port()
+        response = await port.agent_execute(
+            agent_id=agent_id,
+            messages=[{"role": "user", "content": query}],
+            channel_snapshot={},
+        )
+        return str(response.get("response") or "").strip()
+
+    async def _build_summary(
+        self,
+        total_items: int,
+        item_scores: dict[str, list[Score]],
+        metric_averages: dict[str, float],
+        summary_config: dict,
+    ) -> dict:
+        """Compute the task-run ``summary`` JSON for an evaluation run.
+
+        Pass/fail requires ``threshold``; regression flags require
+        ``baseline_run_id`` (metric regressed when the candidate average
+        dropped more than ``regression_threshold`` — default 5% — below
+        the baseline average).
+        """
+        threshold = summary_config.get("threshold")
+        passed_items: int | None = None
+        failed_items: int | None = None
+        pass_rate: float | None = None
+
+        if threshold is not None:
+            passed_items = 0
+            failed_items = 0
+            for scores in item_scores.values():
+                values = [s.value for s in scores]
+                if values and all(v >= threshold for v in values):
+                    passed_items += 1
+                else:
+                    failed_items += 1
+            pass_rate = (passed_items / total_items) if total_items else 0.0
+
+        baseline_run_id = summary_config.get("baseline_run_id")
+        delta = float(summary_config.get("regression_threshold", 0.05))
+        regressions: list[dict] = []
+        if baseline_run_id:
+            regressions = await self._compute_regressions(
+                uuid.UUID(str(baseline_run_id)),
+                metric_averages,
+                delta,
+            )
+
+        return {
+            "total_items": total_items,
+            "passed_items": passed_items,
+            "failed_items": failed_items,
+            "pass_rate": pass_rate,
+            "metric_averages": metric_averages,
+            "regressions": regressions,
+        }
+
+    async def _compute_regressions(
+        self,
+        baseline_run_id: uuid.UUID,
+        metric_averages: dict[str, float],
+        delta: float,
+    ) -> list[dict]:
+        """Flag metrics whose candidate average regressed versus a baseline run."""
+        stmt = select(EvaluationScoreModel.metric_name, EvaluationScoreModel.value).where(
+            EvaluationScoreModel.run_id == baseline_run_id,
+            EvaluationScoreModel.value >= 0,
+        )
+        rows = (await self.db.execute(stmt)).all()
+
+        baseline_values: dict[str, list[float]] = {}
+        for metric_name, value in rows:
+            baseline_values.setdefault(metric_name, []).append(value)
+        baseline_averages = {k: sum(v) / len(v) for k, v in baseline_values.items()}
+
+        regressions: list[dict] = []
+        for metric_name, baseline in baseline_averages.items():
+            candidate = metric_averages.get(metric_name)
+            if candidate is None:
+                continue
+            if candidate < baseline * (1.0 - delta):
+                regressions.append(
+                    {
+                        "metric_name": metric_name,
+                        "baseline": baseline,
+                        "candidate": candidate,
+                        "drop": baseline - candidate,
+                    }
+                )
+        return regressions
 
     async def _generate_answer_via_pipeline(
         self,

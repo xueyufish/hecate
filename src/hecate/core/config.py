@@ -185,6 +185,11 @@ class Settings(BaseSettings):
     META_AGENTS_ENABLED: bool = False
     META_AGENTS_INTERVAL_SECONDS: int = 3600
 
+    # Online evaluation scoring (7.2c): always-on LLM-as-Judge sampling of
+    # production traces. Metered LLM cost — keep off until a workspace opts in.
+    EVALUATION_ONLINE_SCORING_ENABLED: bool = False
+    EVALUATION_ONLINE_POLL_INTERVAL_SECONDS: float = 30.0
+
     # SIEM Export Pipeline (8.7): security event export to external SIEM.
     SIEM_ENABLED: bool = False
     SIEM_EXPORTERS: str = ""  # comma-separated: "webhook,syslog,ocsf"
