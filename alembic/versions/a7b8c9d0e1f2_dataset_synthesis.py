@@ -1,7 +1,7 @@
 """add tags column to evaluation_items + dataset_synthesis_jobs table
 
 Revision ID: a7b8c9d0e1f2
-Revises: z4f5a6b7c8d9
+Revises: b7c8d9e0f1a2
 Create Date: 2026-09-10
 
 Adds:
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a7b8c9d0e1f2"
-down_revision: str = "z4f5a6b7c8d9"
+down_revision: str = "b7c8d9e0f1a2"
 branch_labels: str | None = None
 depends_on: str | None = None
 
