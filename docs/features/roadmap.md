@@ -597,7 +597,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 7.2a | 40+ Built-in Evaluators ✅（OE8/OE9 增强 → P4） | Evaluation ✅ | L |
-| 7.2b | AI-Synthesized Evaluation Dataset → P4 | 7.2a ✅ | M |
+| 7.2b | AI-Synthesized Evaluation Dataset ✅（2026-09-10） | 7.2a ✅ | M |
 | 7.2c | Online/Offline Evaluation Tasks → P4 | 7.2a ✅ | M |
 | 7.2d | Trace Backflow Dataset → P4 | 7.2a ✅ | S |
 | 7.2e | Evaluation Report Dashboard → P4 | 7.2a ✅ | M |
@@ -676,7 +676,8 @@ Order is priority, not mandate — any change still goes through independent `/o
 | # | Feature | Dependencies | Effort | Why first |
 |---|---------|------|--------|-----------|
 | 5.4a ✅ | MCP Gateway — REST/MCP multi-source tools unified to single endpoint, agent/workspace-scoped authz | FastMCP server ✅ + tool registry ✅ | M |底座 ✅; AgentArts 把网关做成组件库独立卡 ("重磅上新") — 市场验证独立产品价值。已交付（`GATEWAY_ENABLED` flag 门控，见 feature-catalog 5.4a 行） |
-| 7.2b / 7.2c / 7.2d / 7.2e / 7.3 / 7.4 / 7.4a | Evaluation Suite — AI-synth datasets, online+offline tasks, trace回流, eval report, workflow eval, human annotation, human calibration | 7.1 / 7.2 / 7.2a ✅ | M×6 + S |底座 ✅; AgentArts 评估页是产品完成度最高的面, Hecate 缺任务化/标注/报告三件 |
+| 7.2b ✅ (2026-09-10) | AI-Synthesized Evaluation Dataset — generation / evolution / adversarial strategies, sync/async job lifecycle, dedupe+quality+DLP filter pipeline, dataset `tags` provenance | 7.1 / 7.2 / 7.2a ✅ | M |底座 ✅; 已交付 (archive `2026-09-10-ai-synthesized-evaluation-dataset`)。Sibling items (7.2c/7.2d/7.2e/7.3/7.4/7.4a) remain on Opening Queue |
+| 7.2c / 7.2d / 7.2e / 7.3 / 7.4 / 7.4a | Evaluation Suite — online+offline tasks, trace回流, eval report, workflow eval, human annotation, human calibration | 7.1 / 7.2 / 7.2a ✅ | M×5 + S |底座 ✅; AgentArts 评估页是产品完成度最高的面, Hecate 缺任务化/标注/报告三件 |
 | 2.6a + 1.1.21 + 1.3.10⊕6.23 (+6.49) | Multi-Agent Controller Family — central controller (2.6a), controller canvas (1.1.21), 5-Level Intent Recognition (6.23 merges 1.3.10), Intent Package Asset (6.49 — intent categories + sample utterances as few-shot evidence for the recognition engine) | 2.6 (same Sprint) + 2.7c intent routing ✅ | M×3 + M | AgentArts 控制器 = 子智能体/子工作流组合调度; 一族三编号跨 Sprint 8/9 收口为一个 change; 6.49 为 6.23 的配套数据面 |
 | 1.3.20 | Agent Versioning & Channel Publishing — agent-level versioning + channel binding (API/embed/feishu/slack/webhook 锁定版本快照); carries Resource Versioning (14.x) mechanism referenced by 5.9d / 3.5.12 / 7.5 | 1.1.9 ✅ + channels ✅ + 1.3.15 ✅ | M | 唯一规划外空白; AgentArts 把版本+渠道做成三种形态统一生命周期步骤 |
 
@@ -751,7 +752,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 > **Honest closure note (2026-09-04)**: M8 still includes the "Ontology Action System with writeback" and "OAG complete" items, but their closure condition is **P5 Knowledge Graph integration trigger**, not Sprint 8 internal delivery. These two lines stay in M8 for plan consistency, but do not block Sprint 8's other Opening Queue deliverables — when P5 KG integration fires, the 6.20 / 6.22 closure is backfilled into M8 (and into whichever Sprint hosts that trigger). All other M8 lines are unaffected.
 
-- [ ] **Opening Queue** shipped: MCP Gateway (5.4a ✅), Evaluation Suite tasks (7.2b-e/7.3/7.4/7.4a), Controller Family (2.6a+1.1.21+1.3.10⊕6.23+6.49), Agent Versioning (1.3.20)
+- [-] **Opening Queue** shipped: MCP Gateway (5.4a ✅), Evaluation Suite tasks (7.2b ✅ 2026-09-10 — archived `2026-09-10-ai-synthesized-evaluation-dataset`; 7.2c/7.2d/7.2e/7.3/7.4/7.4a still pending), Controller Family (2.6a+1.1.21+1.3.10⊕6.23+6.49), Agent Versioning (1.3.20)
 - [ ] Model Service Publishing (6.47) + Quick Wins (6.48) operational
 - [x] Engine Parity (1.3.21): declarative interrupts (① ✅ 2026-09-08) + time-travel resume (② ✅ 2026-09-09) + dynamic fan-out (③ ✅ 2026-09-09) operational — unblocks Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18/5.11 fan-out)
 - [ ] Hallucination detection operational

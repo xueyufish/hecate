@@ -1,11 +1,3 @@
-# Capability: evaluation-dataset
-
-> Synced from archive of change `ai-synthesized-evaluation-dataset`. The
-> previous spec described fields (`version`, `baseline_run_id`, `is_locked`,
-> `default_threshold`, `assertions`) that were never implemented. The
-> MODIFIED delta replaces the spec with what is actually shipped in this
-> change and explicitly defers the unimplemented fields to a follow-up.
-
 ## MODIFIED Requirements
 
 ### Requirement: Dataset item management

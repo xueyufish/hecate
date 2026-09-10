@@ -571,7 +571,7 @@ CheckpointStore → Distributed Session State Store (13.4a) ✅ (5/5) → Horizo
 
 | # | Feature | Domain | Description | Effort |
 |---|---------|--------|-------------|--------|
-| 7.2b | AI-Synthesized Evaluation Dataset | Evaluation & Testing | LLM auto-synthesizes evaluation datasets from seed data, adversarial + security-compliance samples | M |
+| 7.2b | AI-Synthesized Evaluation Dataset ✅ | Evaluation & Testing | LLM auto-synthesizes evaluation datasets from seed data, adversarial + security-compliance samples. **Shipped 2026-09-10** (archive `openspec/changes/archive/2026-09-10-ai-synthesized-evaluation-dataset/`): 16 built-in evaluators (scope four-layer taxonomy) + AI dataset synthesis pipeline (generation / evolution / adversarial × 5 OWASP-anchored intents) + sync/async job lifecycle + filter pipeline (embedding dedupe with ngram fallback, quality critic LLM, DLP scan) + dataset `tags` column for provenance. Single registration path via `PluginRegistry` (consolidated dual registry). | M |
 | 7.2c | Online/Offline Evaluation Tasks | Evaluation & Testing | Online real-time sampling + offline batch evaluation (Trace/Model/Root/Tool granularity); OE3 production online scoring | M |
 | 7.2d | Trace Backflow Dataset | Evaluation & Testing | Production Trace data flows back to evaluation datasets | S |
 | 7.2e | Evaluation Report Dashboard | Evaluation & Testing | Automated evaluation reports: success rate, score distribution, dimension charts | M |

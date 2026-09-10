@@ -87,6 +87,7 @@ class EvaluationItemModel(BaseModel):
     generated_answer: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     context: Mapped[list | None] = mapped_column(JSON, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
@@ -223,6 +224,7 @@ class EvaluationItemCreateSchema(PydanticBase):
     generated_answer: str | None = None
     context: list[str] | None = None
     metadata: dict | None = Field(None, alias="metadata_")
+    tags: list[str] | None = None
 
 
 class EvaluationItemReadSchema(PydanticBase):
@@ -238,6 +240,7 @@ class EvaluationItemReadSchema(PydanticBase):
     context: list | None
     workspace_id: uuid.UUID
     metadata: dict | None = Field(validation_alias="metadata_")
+    tags: list[str] | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -255,6 +258,7 @@ class EvaluationRunCreateSchema(PydanticBase):
     dataset_id: uuid.UUID
     evaluators: list[str] = Field(..., min_length=1)
     answer_source: str = Field("manual", pattern="^(manual|pipeline|auto)$")
+    tags: list[str] | None = None
 
 
 class EvaluationRunReadSchema(PydanticBase):

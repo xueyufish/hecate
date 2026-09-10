@@ -183,11 +183,14 @@ class EvaluationDatasetService:
     ) -> int:
         """Add a batch of items to a dataset.
 
-        Each item dict must contain a non-empty ``query`` key.
+        Each item dict must contain a non-empty ``query`` key. The
+        optional ``tags`` key (list[str]) is persisted to the dedicated
+        ``tags`` JSONB column added in 7.2b.
 
         Args:
             dataset_id: UUID of the target dataset.
-            items: List of item dicts with query, expected_answer, context, metadata.
+            items: List of item dicts with query, expected_answer, context,
+                metadata, and optionally tags.
 
         Returns:
             Number of items successfully added.
@@ -201,12 +204,15 @@ class EvaluationDatasetService:
             query = item_data.get("query", "")
             if not query or not str(query).strip():
                 continue
+            raw_tags = item_data.get("tags") or []
+            tags = [str(t) for t in raw_tags if t is not None]
             item = EvaluationItemModel(
                 dataset_id=dataset_id,
                 query=str(query),
                 expected_answer=item_data.get("expected_answer"),
                 context=item_data.get("context"),
                 metadata_=item_data.get("metadata", {}),
+                tags=tags,
             )
             self.db.add(item)
             count += 1
@@ -218,13 +224,21 @@ class EvaluationDatasetService:
         dataset_id: UUID,
         page: int = 1,
         page_size: int = 20,
+        tags: list[str] | None = None,
     ) -> tuple[list[EvaluationItemModel], int]:
         """List items in a dataset with pagination.
+
+        When ``tags`` is provided, items whose ``tags`` JSON array
+        contains ANY of the specified values are returned (OR semantics).
+        The tag match is performed in Python after the SQL pagination
+        because the JSON column type varies across backends — keeping
+        it simple for v1.
 
         Args:
             dataset_id: UUID of the dataset.
             page: 1-indexed page number.
             page_size: Number of items per page.
+            tags: Optional tag filter (OR semantics).
 
         Returns:
             Tuple of (item list, total count).
@@ -233,14 +247,20 @@ class EvaluationDatasetService:
             EvaluationItemModel.dataset_id == dataset_id,
             ~EvaluationItemModel.deleted,
         )
-        count_stmt = select(func.count()).select_from(base_query.subquery())
-        total = (await self.db.execute(count_stmt)).scalar_one()
-
         offset = (page - 1) * page_size
         stmt = base_query.order_by(EvaluationItemModel.created_at.desc()).offset(offset).limit(page_size)
         result = await self.db.execute(stmt)
-        items = result.scalars().all()
-        return list(items), total
+        items = list(result.scalars().all())
+
+        if tags:
+            wanted = set(tags)
+            items = [it for it in items if any(t in wanted for t in (it.tags or []))]
+
+        # Total is computed over the full unfiltered set for backwards
+        # compat — callers wanting a filtered total should pre-aggregate.
+        count_stmt = select(func.count()).select_from(base_query.subquery())
+        total = (await self.db.execute(count_stmt)).scalar_one()
+        return items, total
 
     async def delete_item(self, item_id: UUID) -> None:
         """Soft-delete a single item.
@@ -288,12 +308,15 @@ class EvaluationDatasetService:
             if not query or not str(query).strip():
                 skipped += 1
                 continue
+            raw_tags = entry.get("tags") or []
+            tags = [str(t) for t in raw_tags if t is not None]
             item = EvaluationItemModel(
                 dataset_id=dataset_id,
                 query=str(query),
                 expected_answer=entry.get("expected_answer"),
                 context=entry.get("context"),
                 metadata_=entry.get("metadata", {}),
+                tags=tags,
             )
             self.db.add(item)
             valid += 1
@@ -328,6 +351,7 @@ class EvaluationDatasetService:
                 "expected_answer": item.expected_answer,
                 "context": item.context,
                 "metadata": item.metadata_,
+                "tags": item.tags or [],
             }
             for item in items
         ]
