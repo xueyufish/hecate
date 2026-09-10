@@ -17,7 +17,7 @@ The Ops Center follows a **composition architecture** — it is not a new micros
 
 ![Ops Center L2](images/ops-center-l2.png)
 
-1. **Backend Services** — Observability (tracing, monitoring, metrics, logging), Evaluation (41 evaluators, datasets, regression), Deployment (canary, environments), Cost (token tracking, budget), Security (audit, compliance), and Management (API keys, webhooks)
+1. **Backend Services** — Observability (tracing, monitoring, metrics, logging), Evaluation (16 evaluators, datasets, regression), Deployment (canary, environments), Cost (token tracking, budget), Security (audit, compliance), and Management (API keys, webhooks)
 2. **Ops Center Gateway** — Aggregation API layer that provides composite endpoints, RBAC filtering at request level, and viewport data assembly across multiple services
 3. **Admin Console** — React-based frontend with role-based dashboard personalization, widget registry, and per-component data freshness strategies
 
@@ -214,7 +214,7 @@ Each conversation receives an automated quality score computed from three dimens
 | **Helpfulness** | Did the response solve the user's problem? | 0.0 – 1.0 |
 | **Completeness** | Did the response cover all aspects of the query? | 0.0 – 1.0 |
 
-The composite quality score is a weighted average (configurable per agent). Scores are computed by LLM-based evaluators (part of the 41 built-in evaluators) running asynchronously after conversation completion.
+The composite quality score is a weighted average (configurable per agent). Scores are computed by LLM-based evaluators (part of the 16 built-in evaluators) running asynchronously after conversation completion.
 
 ### User Satisfaction Tracking
 
@@ -240,7 +240,7 @@ Low-quality conversations are flagged for review. The RCA view provides:
 
 ### Evaluation Engine
 
-The Ops Center leverages Hecate's 41 built-in evaluators covering three assessment domains:
+The Ops Center leverages Hecate's 16 built-in evaluators covering three assessment domains:
 
 | Domain | Evaluators | Purpose |
 |--------|-----------|---------|

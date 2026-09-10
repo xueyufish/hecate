@@ -19,7 +19,7 @@ Hecate's engine layer is designed to have **zero external dependencies** (except
 - Different scheduling strategies (FIFO vs priority vs deadline-aware)
 - Different authentication (JWT today, OAuth2/mTLS tomorrow)
 - Different notification channels (Email today, Slack/DingTalk tomorrow)
-- Custom evaluation metrics (the 41 built-ins don't cover your domain)
+- Custom evaluation metrics (the 16 built-ins don't cover your domain)
 
 Extension points are the **controlled escape hatches** that let deployments customize Hecate without forking it, without coupling the engine to specific implementations, and without breaking the upgrade path.
 
@@ -262,7 +262,7 @@ class EvaluatorBase(ABC):
     async def evaluate(self, input: EvalInput) -> EvalOutput: ...
 ```
 
-**Built-in**: 41 evaluators (faithfulness, relevance, hallucination detection, etc.). **Custom**: implement `EvaluatorBase` and register via `PluginManifest(type="evaluator", ...)`.
+**Built-in**: 16 evaluators (faithfulness, relevance, hallucination detection, etc.). **Custom**: implement `EvaluatorBase` and register via `PluginManifest(type="evaluator", ...)`.
 
 ### 2. `ChannelBase`
 

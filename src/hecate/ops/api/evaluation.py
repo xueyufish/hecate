@@ -15,9 +15,18 @@ Provides CRUD operations for evaluation datasets, items, and runs:
 - ``GET /api/evaluation/runs/{run_id}`` — Get run with summary stats
 - ``GET /api/evaluation/runs/{run_id}/scores`` — Get scores for a run
 
-Built-in evaluators: correctness, relevancy, completeness,
+Built-in evaluators (16 total, 9 LLM-as-Judge + 7 deterministic): correctness,
+relevancy, completeness, contains, exact_match, is_json, regex_match,
 tool_call_accuracy, task_completion, context_precision, context_recall,
-faithfulness, answer_relevancy (RAG evaluators require ragas).
+faithfulness, answer_relevancy, refusal, harmfulness, pii_leakage. The
+RAG four require the optional ``ragas`` dependency.
+
+Evaluator class resolution goes through ``engine.get_evaluator_class``
+which reads the module-private class index populated by
+``register_evaluators`` at startup. There is no parallel dict in this
+module — the PluginRegistry is the sole source of truth, and the class
+index is a sidecar for callers that need ``class`` rather than
+``instance``.
 """
 
 from __future__ import annotations
@@ -26,7 +35,7 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,7 +56,7 @@ from hecate.models.evaluation import (
     EvaluationScoreReadSchema,
 )
 from hecate.ops.evaluation.dataset_service import EvaluationDatasetService
-from hecate.ops.evaluation.engine import EvaluationEngine
+from hecate.ops.evaluation.engine import EvaluationEngine, get_evaluator_class
 from hecate.ops.evaluation.evaluator import Evaluator
 from hecate.ops.evaluation.types import AnswerSource
 
@@ -55,44 +64,72 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/evaluation", tags=["evaluation"])
 
-# Registry of built-in evaluators keyed by name.
-_EVALUATOR_REGISTRY: dict[str, type[Evaluator]] = {}
+
+# Scope → source mapping for the 16 built-in evaluators. The class index
+# (``engine._EVALUATOR_CLASS_REGISTRY``) and PluginRegistry manifests
+# both report ``name``/``version``/``description``; this mapping is the
+# single source of truth for the four-scope taxonomy that the spec
+# exposes via ``GET /api/evaluation/evaluators?scope=<scope>``.
+_EVALUATOR_SCOPE_META: dict[str, tuple[str, str]] = {
+    # result (5 LLM-judge + 4 deterministic = 9 total but only the 7 in this scope tree)
+    "correctness": ("result", "llm_judge"),
+    "relevancy": ("result", "llm_judge"),
+    "completeness": ("result", "llm_judge"),
+    "contains": ("result", "deterministic"),
+    "exact_match": ("result", "deterministic"),
+    "is_json": ("result", "deterministic"),
+    "regex_match": ("result", "deterministic"),
+    # process
+    "tool_call_accuracy": ("process", "llm_judge"),
+    "task_completion": ("process", "llm_judge"),
+    # rag (ragas optional)
+    "context_precision": ("rag", "ragas"),
+    "context_recall": ("rag", "ragas"),
+    "faithfulness": ("rag", "ragas"),
+    "answer_relevancy": ("rag", "ragas"),
+    # safety
+    "refusal": ("safety", "llm_judge"),
+    "harmfulness": ("safety", "llm_judge"),
+    "pii_leakage": ("safety", "deterministic"),
+}
 
 
-def _get_evaluator_registry() -> dict[str, type[Evaluator]]:
-    """Lazily populate and return the evaluator registry."""
-    if not _EVALUATOR_REGISTRY:
-        from hecate.ops.evaluation.agent_evaluators import (
-            CompletenessEvaluator,
-            CorrectnessEvaluator,
-            RelevancyEvaluator,
-            TaskCompletionEvaluator,
-            ToolCallAccuracyEvaluator,
+@router.get("/evaluators")
+async def list_evaluators(
+    request: Request,
+    scope: Annotated[str | None, Query(pattern="^(result|process|rag|safety)$")] = None,
+) -> dict:
+    """List registered built-in evaluators.
+
+    Grouped by ``scope`` (result / process / rag / safety) when no
+    filter is supplied; otherwise only the requested scope is returned.
+    Each entry includes ``name``, ``scope``, ``source``, ``version``,
+    and ``description``. The total enumerator count is the count of
+    names registered via ``register_evaluators`` at startup (typically
+    16 minus rag evaluators skipped when ragas is missing).
+    """
+    plugin_registry = getattr(request.app.state, "plugin_registry", None)
+    items: list[dict] = []
+    for name, (eval_scope, source) in _EVALUATOR_SCOPE_META.items():
+        if scope and eval_scope != scope:
+            continue
+        description = ""
+        version = "1.0.0"
+        if plugin_registry is not None:
+            manifest = plugin_registry.get_manifest("evaluator", name)
+            if manifest is not None:
+                description = manifest.description
+                version = manifest.version
+        items.append(
+            {
+                "name": name,
+                "scope": eval_scope,
+                "source": source,
+                "version": version,
+                "description": description,
+            }
         )
-
-        _EVALUATOR_REGISTRY["correctness"] = CorrectnessEvaluator
-        _EVALUATOR_REGISTRY["relevancy"] = RelevancyEvaluator
-        _EVALUATOR_REGISTRY["completeness"] = CompletenessEvaluator
-        _EVALUATOR_REGISTRY["tool_call_accuracy"] = ToolCallAccuracyEvaluator
-        _EVALUATOR_REGISTRY["task_completion"] = TaskCompletionEvaluator
-
-        # RAG evaluators are optional — only register if ragas is available
-        try:
-            from hecate.ops.evaluation.rag_evaluators import (
-                AnswerRelevancyEvaluator,
-                ContextPrecisionEvaluator,
-                ContextRecallEvaluator,
-                FaithfulnessEvaluator,
-            )
-
-            _EVALUATOR_REGISTRY["context_precision"] = ContextPrecisionEvaluator
-            _EVALUATOR_REGISTRY["context_recall"] = ContextRecallEvaluator
-            _EVALUATOR_REGISTRY["faithfulness"] = FaithfulnessEvaluator
-            _EVALUATOR_REGISTRY["answer_relevancy"] = AnswerRelevancyEvaluator
-        except ImportError:
-            logger.debug("Ragas not installed — RAG evaluators unavailable")
-
-    return _EVALUATOR_REGISTRY
+    return {"items": items, "total": len(items)}
 
 
 async def _get_dataset_or_404(
@@ -222,11 +259,17 @@ async def list_items(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    tags: Annotated[list[str] | None, Query()] = None,
 ) -> dict:
-    """List items in an evaluation dataset with pagination."""
+    """List items in an evaluation dataset with pagination.
+
+    When ``tags`` is supplied (comma-separated or repeated query
+    parameter), only items whose ``tags`` JSON array contains ANY of the
+    specified values are returned (OR semantics).
+    """
     await _get_dataset_or_404(dataset_id, db)
     svc = EvaluationDatasetService(db)
-    items, total = await svc.list_items(dataset_id, page=page, page_size=page_size)
+    items, total = await svc.list_items(dataset_id, page=page, page_size=page_size, tags=tags)
     return {
         "items": [EvaluationItemReadSchema.model_validate(item).model_dump(by_alias=True) for item in items],
         "total": total,
@@ -254,6 +297,19 @@ async def delete_item(
 # ---------------------------------------------------------------------------
 
 
+def _list_evaluator_names() -> list[str]:
+    """Enumerate registered evaluator names for error messages.
+
+    Imports the class index lazily to avoid a circular import at module
+    load time. Returns an empty list when registration has not yet run.
+    """
+    from hecate.ops.evaluation.engine import (
+        _EVALUATOR_CLASS_REGISTRY,  # noqa: PLC0415  (intentional lazy)
+    )
+
+    return list(_EVALUATOR_CLASS_REGISTRY.keys())
+
+
 @router.post("/runs", status_code=status.HTTP_201_CREATED)
 async def create_run(
     data: EvaluationRunCreateSchema,
@@ -264,19 +320,19 @@ async def create_run(
     # Validate dataset exists
     await _get_dataset_or_404(data.dataset_id, db)
 
-    # Resolve evaluators from names
-    registry = _get_evaluator_registry()
+    # Resolve evaluators from names via the engine's class index
     evaluators: list[Evaluator] = []
     for name in data.evaluators:
-        cls = registry.get(name)
+        cls = get_evaluator_class(name)
         if cls is None:
+            available = sorted(_list_evaluator_names())
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={
                     "error": {
                         "code": "INVALID_EVALUATOR",
                         "message": f"Unknown evaluator: {name!r}",
-                        "details": {"available": list(registry.keys())},
+                        "details": {"available": available},
                     }
                 },
             )
@@ -284,7 +340,7 @@ async def create_run(
 
     engine = EvaluationEngine(db)
     source = AnswerSource(data.answer_source)
-    result = await engine.run(evaluators, data.dataset_id, answer_source=source)
+    result = await engine.run(evaluators, data.dataset_id, answer_source=source, tags=data.tags)
 
     # Convert result to API response
     return {

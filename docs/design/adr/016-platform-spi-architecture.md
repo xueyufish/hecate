@@ -37,7 +37,7 @@ These are platform-level interfaces for deployment customization, managed throug
 
 | Extension Point | Purpose | Built-in Implementations |
 |----------------|---------|--------------------------|
-| Evaluator | Evaluation metric interface | 41 built-in evaluators |
+| Evaluator | Evaluation metric interface | 16 built-in evaluators |
 | Channel | External channel adapter | REST, CLI (WebSocket planned) |
 | AuthProvider | Authentication provider | JWT, APIKey (OAuth2, mTLS planned) |
 | Notifier | Notification delivery | Email, Webhook (Slack, DingTalk planned) |

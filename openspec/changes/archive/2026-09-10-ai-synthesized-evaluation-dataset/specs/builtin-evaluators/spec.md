@@ -1,13 +1,7 @@
-# Capability: builtin-evaluators
-
-> Synced from archive of change `ai-synthesized-evaluation-dataset`. The
-> previous spec described 41 evaluators that were never implemented; the
-> MODIFIED delta replaces the spec with the 16 actually-shipped evaluators.
-
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: Built-in evaluator scope and naming
-The system SHALL ship 16 built-in evaluators organized by scope into four categories: Result Layer (output quality, 7 evaluators), Process Layer (tool and reasoning correctness, 2 evaluators), RAG Layer (retrieval-augmented generation quality, 4 evaluators), and Safety Layer (security and compliance, 3 evaluators). Each evaluator SHALL declare its scope via a `scope` class attribute taking one of `"result"` / `"process"` / `"rag"` / `"safety"`. The system SHALL use the canonical short names listed below as both the registry key and the `name` property of each evaluator class.
+The system SHALL ship 16 built-in evaluators organized by scope into four categories: Result Layer (output quality, 5 evaluators), Process Layer (tool and reasoning correctness, 2 evaluators), RAG Layer (retrieval-augmented generation quality, 4 evaluators), and Safety Layer (security and compliance, 5 evaluators). Each evaluator SHALL declare its scope via a `scope` class attribute taking one of `"result"` / `"process"` / `"rag"` / `"safety"`. The system SHALL use the canonical short names listed below as both the registry key and the `name` property of each evaluator class.
 
 | Scope | Canonical Name | Type | Source |
 |-------|----------------|------|--------|
@@ -38,7 +32,7 @@ The system SHALL ship 16 built-in evaluators organized by scope into four catego
 
 #### Scenario: Total evaluator count is 16
 - **WHEN** the evaluator registry is enumerated at startup
-- **THEN** the registry SHALL contain exactly 16 evaluators (7 result + 2 process + 4 rag + 3 safety)
+- **THEN** the registry SHALL contain exactly 16 evaluators (5 result + 2 process + 4 rag + 5 safety)
 
 ### Requirement: Single registration path via PluginRegistry
 The system SHALL register evaluators through exactly one path: the existing `register_evaluators(registry: PluginRegistry)` function in `ops/evaluation/engine.py`, called at application startup. The `PluginRegistry` instance SHALL be the authoritative store, holding both the evaluator instance and a `PluginManifest(type="evaluator", name=<canonical_name>, version="1.0.0", description=<description>)`. The system SHALL additionally expose a module-private class index `_EVALUATOR_CLASS_REGISTRY: dict[str, type[Evaluator]]` written by `register_evaluators` for API consumers that need the class (not instance) for deferred instantiation. The `api/evaluation.py` module SHALL NOT maintain its own parallel dict.
@@ -67,7 +61,7 @@ The system SHALL attempt to import ragas at registration time. When ragas is not
 - **THEN** the registry SHALL contain exactly 12 evaluators (the 4 rag evaluators skipped); a warning log SHALL be emitted listing the skipped names
 
 ### Requirement: Deterministic evaluators have no LLM dependency
-The five deterministic evaluators (`contains`, `exact_match`, `is_json`, `regex_match`, `pii_leakage`) SHALL NOT invoke any LLM call. They SHALL execute in sub-millisecond time on a single item. They SHALL set `Score.source="deterministic"` on their output.
+The four deterministic evaluators (`contains`, `exact_match`, `is_json`, `regex_match`) plus `pii_leakage` SHALL NOT invoke any LLM call. They SHALL execute in sub-millisecond time on a single item. They SHALL set `Score.source="deterministic"` on their output.
 
 #### Scenario: Contains evaluator with substring match
 - **WHEN** the `contains` evaluator is called with `generated_answer="RAG stands for Retrieval Augmented Generation"` and expected substring `"Retrieval"`
