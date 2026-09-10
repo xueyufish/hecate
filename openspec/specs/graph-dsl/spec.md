@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: Compiler validates entry point, edges, and handoff cycles
-The `GraphCompiler.compile()` SHALL perform validation stages before producing a `CompiledGraph`: entry point, edges, handoff cycles, fan-out/merge structural constraints, execution-mode-aware node restrictions, channel access validation, routing config validation, and declarative interrupt list validation（列表引用的 node ID 必须存在）。When `execution_mode="task"` is passed to compile(), the compiler SHALL reject graphs containing SUGGESTION node types or non-empty `interrupt_before`/`interrupt_after` lists by raising `GraphValidationError`.
+The `GraphCompiler.compile()` SHALL perform validation stages before producing a `CompiledGraph`: entry point, edges, handoff cycles, fan-out/merge structural constraints, execution-mode-aware node restrictions, channel access validation, routing config validation, declarative interrupt list validation（列表引用的 node ID 必须存在），and node cache policy validation（`key_func` 引用的函数必须已注册）。When `execution_mode="task"` is passed to compile(), the compiler SHALL reject graphs containing SUGGESTION node types or non-empty `interrupt_before`/`interrupt_after` lists by raising `GraphValidationError`.
 
 #### Scenario: Entry point not found
 - **WHEN** the declared entry point references a non-existent node
@@ -70,6 +70,14 @@ The `GraphCompiler.compile()` SHALL perform validation stages before producing a
 #### Scenario: Channel access warnings logged
 - **WHEN** a node declares `channels.readable: ["nonexistent"]` and "nonexistent" is not in graph `state`
 - **THEN** the compiler SHALL log a WARNING about undeclared channel access
+
+#### Scenario: Cache key_func references unregistered function
+- **WHEN** a node declares `"cache": {"ttl": 300, "key_func": "ghost_key"}` and no key function is registered under `ghost_key`
+- **THEN** the compiler SHALL raise `GraphValidationError` indicating the unknown key function name（与未知 reducer 名同款 fail loud）
+
+#### Scenario: Cache declared on any node type is accepted
+- **WHEN** a conversation node, a knowledge-retrieval node, and a tool-call node each declare a valid `cache` block
+- **THEN** the compiler SHALL accept all three without type-based rejection（纯度判断归作者，见 cache 语义需求）
 
 ## ADDED Requirements
 
@@ -141,6 +149,23 @@ Graph DSL SHALL 支持在 CONDITION 节点配置 `fanout` 声明动态扇出:`{"
 - **WHEN** `fanout.over` 引用未在图 state 声明的通道
 - **THEN** 编译 SHALL 失败,错误信息 SHALL 指明 `fanout.over` 字段
 
+### Requirement: Node cache policy block
+The Graph DSL document SHALL accept an optional per-node `cache` config object carrying `ttl`（必填，正整数秒）and `key_func`（可选，具名函数名）。`parse_graph()` SHALL propagate the block into the parsed node configuration, and `CompiledGraph.to_json()` SHALL roundtrip it so persisted graph definitions keep their cache policies. Nodes without a `cache` block SHALL behave exactly as before（永不查询缓存）。Caching SHALL be opt-in per node with no node-type restriction: any node type MAY declare a `cache` block and the author owns the purity judgment（命中会跳过该节点的全部执行，含副作用）。
+
+#### Scenario: Parse and compile with cache block
+- **WHEN** a node declares `"cache": {"ttl": 300}` and another declares `"cache": {"ttl": 600, "key_func": "kb_query_key"}`
+- **THEN** the parser SHALL accept both and the compiled graph SHALL carry the corresponding cache policies
+
+#### Scenario: to_json roundtrips cache block
+- **WHEN** a compiled graph carrying node `cache` blocks is serialized via `to_json()` and re-parsed
+- **THEN** every cache policy SHALL be preserved unchanged
+
+#### Scenario: Absent cache block means no caching
+- **WHEN** a node config omits `cache`
+- **THEN** parsing and compilation SHALL succeed and the node SHALL never consult the cache at runtime
+
+#### Scenario: Invalid ttl rejected
+- **WHEN** a node declares `"cache": {}`（缺 ttl）or `"cache": {"ttl": 0}` or `"cache": {"ttl": -5}` or a non-integer ttl
+- **THEN** the DSL SHALL reject the document with `GraphValidationError` indicating the cache path
 
 ## Requirements
-

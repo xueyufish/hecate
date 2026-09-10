@@ -40,6 +40,12 @@ from hecate.runtime.errors import MaxSuperstepsError
 from hecate.runtime.eventbus import EventBus
 from hecate.runtime.eventstore import Event, EventStore, EventType
 from hecate.runtime.eviction import EvictionPolicy, NoEviction
+from hecate.runtime.node_cache import (
+    CachePolicy,
+    InMemoryNodeCache,
+    derive_cache_key,
+    short_key_hash,
+)
 from hecate.runtime.replay.continuation import Continuation
 from hecate.runtime.retry import RetryExecutor, RetryStrategy
 from hecate.runtime.scheduler import FIFOScheduler, SchedulerStrategy
@@ -117,6 +123,7 @@ class PregelRuntime:
         context_offloader: Any = None,
         environment: Any = None,
         evidence_tracker: Any = None,
+        node_cache: InMemoryNodeCache | None = None,
     ) -> None:
         self._graph = graph
         self._worker = worker
@@ -136,6 +143,12 @@ class PregelRuntime:
         self._environment = environment
         self._evidence_tracker = evidence_tracker
         self._retry_executor = RetryExecutor(retry_strategy)
+        # 1.3.21IV node cache: default is a per-runtime instance (session-
+        # scope hits inside one execution loop still work); pass a shared
+        # instance to serve tenant-scoped entries across sessions.
+        self._node_cache = node_cache or InMemoryNodeCache()
+        # Tenant identity for tenant-scoped cache keys (set per execute()).
+        self._tenant_id: str | None = None
         self._superstep = 0
         self._interrupted = False
         self._interrupt_value: Any = None
@@ -336,6 +349,67 @@ class PregelRuntime:
             ctx["evidence_tracker"] = self._evidence_tracker
         return ctx
 
+    def _cache_policy_for(self, node_id: str) -> CachePolicy | None:
+        """Return the parsed cache policy for a node, or None (zero queries)."""
+        node = self._graph.nodes.get(node_id)
+        if node is None:
+            return None
+        raw = node.config.get("cache")
+        if not raw:
+            return None
+        return CachePolicy.from_config(raw)
+
+    def _consult_node_cache(
+        self,
+        policy: CachePolicy,
+        node_id: str,
+        node_config: dict,
+        snapshot: dict,
+        session_id: uuid.UUID,
+        branch_slice: dict | None = None,
+    ) -> tuple[WorkerResult | None, str, str]:
+        """Look up a node result in the cache.
+
+        Returns ``(hit_or_none, full_key, key_hash)`` — the fabricated
+        ``WorkerResult`` on a hit (worker will be skipped), the full key for
+        the miss-path store, and the short hash for NODE_END markers.
+        """
+        readable: list[str] | None = None
+        access = self._graph.channel_access.get(node_id)
+        if access is not None and access.readable:
+            readable = sorted(access.readable)
+        key = derive_cache_key(
+            policy,
+            node_id,
+            node_config,
+            snapshot,
+            session_id=session_id,
+            tenant_id=self._tenant_id,
+            readable=readable,
+            branch_slice=branch_slice,
+        )
+        key_hash = short_key_hash(key)
+        cached = self._node_cache.get(key, ttl=policy.ttl)
+        if cached is None:
+            return None, key, key_hash
+        logger.debug("node cache hit for '%s' (key=%s)", node_id, key_hash)
+        return (
+            WorkerResult(node_id=node_id, channel_updates=cached, cache_hit=True, cache_key=key_hash),
+            key,
+            key_hash,
+        )
+
+    def _record_node_cache_miss(self, policy: CachePolicy, key: str, key_hash: str, result: WorkerResult) -> None:
+        """Decorate a miss result and store it (successful, command-free only).
+
+        Results carrying ``command`` (interrupt/goto) or ``error`` are never
+        cached — control flow and failures must re-execute.
+        """
+        result.cache_hit = False
+        result.cache_key = key_hash
+        if result.error is None and result.command is None:
+            self._node_cache.set(key, result.channel_updates)
+
     async def execute(
         self,
         session_id: uuid.UUID,
@@ -345,6 +419,7 @@ class PregelRuntime:
         trace_id: str | None = None,
         execution_mode: str = "conversational",
         resume_from: int | None = None,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Execute the graph and yield events based on the stream mode.
 
@@ -382,6 +457,9 @@ class PregelRuntime:
                 and overrides MESSAGES stream mode to VALUES.
             resume_from: Log version to fold up to before continuing (must equal
                 the current log tail; requires a wired EventStore).
+            tenant_id: Tenant identity for tenant-scoped node cache keys
+                (1.3.21IV). Required when any node declares ``cache.scope="tenant"``;
+                omitted tenant context fails those nodes closed at dispatch.
 
         Yields:
             Dicts with ``"type"`` key: ``"interrupt"``, ``"update"``, or ``"values"``.
@@ -430,6 +508,7 @@ class PregelRuntime:
                     trace_id=effective_trace_id,
                     execution_mode=execution_mode,
                     resume_from=resume_from,
+                    tenant_id=tenant_id,
                 ):
                     yield event
                 return
@@ -443,6 +522,7 @@ class PregelRuntime:
             trace_id=effective_trace_id,
             execution_mode=execution_mode,
             resume_from=resume_from,
+            tenant_id=tenant_id,
         ):
             yield event
 
@@ -455,8 +535,10 @@ class PregelRuntime:
         trace_id: str | None = None,
         execution_mode: str = "conversational",
         resume_from: int | None = None,
+        tenant_id: str | None = None,
     ) -> AsyncGenerator[dict, None]:
         """Inner execution logic, extracted from execute() for root span wrapping."""
+        self._tenant_id = tenant_id
         if resume_value is not None:
             await self._restore_from_checkpoint(session_id, resume_value)
             current_nodes = self._resolve_next_nodes_after_interrupt()
@@ -652,7 +734,7 @@ class PregelRuntime:
                         session_id,
                         EventType.NODE_END,
                         node_id=planner_id,
-                        payload={"success": True, "fanout_source": True},
+                        payload={"success": True, "fanout_source": True, "cached": False, "cache_key": None},
                         trace_id=trace_id,
                     )
                     continue
@@ -664,6 +746,23 @@ class PregelRuntime:
                     payload={"node_type": str(node_type) if node_type else None},
                     trace_id=trace_id,
                 )
+
+                # 1.3.21IV node cache seam: consult before dispatching a
+                # cache-policy node. A hit fabricates the WorkerResult and
+                # skips the worker entirely (all dispatch modalities — the
+                # hit yields no message chunks, which is byte-identical to
+                # a normal execution of any non-streaming worker). Misses
+                # execute normally and store before the WAL commit.
+                cache_policy = self._cache_policy_for(node_id)
+                cache_key: str | None = None
+                cache_key_hash: str | None = None
+                if cache_policy is not None:
+                    cached_result, cache_key, cache_key_hash = self._consult_node_cache(
+                        cache_policy, node_id, node.config, snapshot, session_id
+                    )
+                    if cached_result is not None:
+                        results.append(cached_result)
+                        continue
 
                 if node_type == NodeType.FAN_OUT:
                     fan_out_dispatched.append(node_id)
@@ -691,6 +790,7 @@ class PregelRuntime:
                     node_execution_context = {**execution_context, "handoff_targets": handoff_targets}
 
                 if stream_mode == StreamMode.MESSAGES:
+                    stream_result: WorkerResult | None = None
                     async for item in retry_executor.execute_stream(
                         self._worker.execute_stream,
                         node_id,
@@ -699,9 +799,12 @@ class PregelRuntime:
                         execution_context=node_execution_context,
                     ):
                         if isinstance(item, WorkerResult):
+                            stream_result = item
                             results.append(item)
                         elif isinstance(item, dict):
                             yield {"type": "message", "content": item.get("content", "")}
+                    if cache_policy is not None and stream_result is not None:
+                        self._record_node_cache_miss(cache_policy, cache_key, cache_key_hash, stream_result)
                 else:
                     result = await retry_executor.execute(
                         self._pool.dispatch,
@@ -711,6 +814,8 @@ class PregelRuntime:
                         snapshot,
                         execution_context=node_execution_context,
                     )
+                    if cache_policy is not None:
+                        self._record_node_cache_miss(cache_policy, cache_key, cache_key_hash, result)
                     results.append(result)
 
             pending_writes: list[tuple[str, Any, str | None]] = []
@@ -720,7 +825,12 @@ class PregelRuntime:
                     session_id,
                     EventType.NODE_END,
                     node_id=result.node_id,
-                    payload={"success": result.error is None, "has_command": result.command is not None},
+                    payload={
+                        "success": result.error is None,
+                        "has_command": result.command is not None,
+                        "cached": result.cache_hit,
+                        "cache_key": result.cache_key,
+                    },
                     trace_id=trace_id,
                 )
                 if result.error:
@@ -1557,6 +1667,30 @@ class PregelRuntime:
                 "_fanout_branch_index": inv.identity.branch_index,
                 "_fanout_branch_payload": branch_payload,
             }
+            # 1.3.21IV: the packet state IS the branch input slice — identical
+            # slices hash to identical keys (dedup stays v1-accepted: parallel
+            # misses all execute, no coalescing).
+            policy = self._cache_policy_for(inv.target)
+            if policy is not None:
+                cached, full_key, key_hash = self._consult_node_cache(
+                    policy,
+                    inv.target,
+                    target_node.config,
+                    snapshot,
+                    session_id=self._session_id_for_event,
+                    branch_slice=branch_payload,
+                )
+                if cached is not None:
+                    return cached
+                result = await self._pool.dispatch(
+                    self._worker,
+                    inv.target,
+                    target_node.config,
+                    snapshot,
+                    execution_context=branch_execution_context,
+                )
+                self._record_node_cache_miss(policy, full_key, key_hash, result)
+                return result
             return await self._pool.dispatch(
                 self._worker,
                 inv.target,
@@ -1592,6 +1726,8 @@ class PregelRuntime:
                     "success": result.error is None,
                     "fanout_source": inv.identity.fanout_source,
                     "branch_index": inv.identity.branch_index,
+                    "cached": result.cache_hit,
+                    "cache_key": result.cache_key,
                 },
                 trace_id=self._current_trace_id,
             )
@@ -1667,15 +1803,39 @@ class PregelRuntime:
             branch_node = self._graph.nodes.get(branch_id)
             if branch_node is None:
                 return WorkerResult(node_id=branch_id, error=RuntimeError(f"Branch node '{branch_id}' not found"))
-            result = await self._pool.dispatch(
-                self._worker,
-                branch_id,
-                branch_node.config,
-                snapshot,
-                execution_context=execution_context,
-            )
+            # 1.3.21IV: branches share the pre-dispatch snapshot as input —
+            # identical readable slices may hit (v1: parallel misses all
+            # execute, stampede accepted).
+            policy = self._cache_policy_for(branch_id)
+            if policy is not None:
+                cached, full_key, key_hash = self._consult_node_cache(
+                    policy,
+                    branch_id,
+                    branch_node.config,
+                    snapshot,
+                    session_id=execution_context.get("session_id") if execution_context else None,
+                )
+                if cached is not None:
+                    result = cached
+                else:
+                    result = await self._pool.dispatch(
+                        self._worker,
+                        branch_id,
+                        branch_node.config,
+                        snapshot,
+                        execution_context=execution_context,
+                    )
+                    self._record_node_cache_miss(policy, full_key, key_hash, result)
+            else:
+                result = await self._pool.dispatch(
+                    self._worker,
+                    branch_id,
+                    branch_node.config,
+                    snapshot,
+                    execution_context=execution_context,
+                )
+            sub_channel = f"_fanout__{node_id}__{branch_id}"
             if result.error is None:
-                sub_channel = f"_fanout__{node_id}__{branch_id}"
                 self._channel_manager.write(sub_channel, result.channel_updates)
             return result
 

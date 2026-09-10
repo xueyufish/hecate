@@ -73,6 +73,7 @@ class GraphCompiler:
         self._validate_agent_handoff_config(config)
         self._validate_accumulator_reducers(config)
         self._validate_fanout_configs(config)
+        self._validate_node_cache_configs(config)
         unreachable = self._detect_unreachable(config)
         if unreachable:
             logger.warning("Unreachable nodes detected: %s", ", ".join(unreachable))
@@ -297,6 +298,57 @@ class GraphCompiler:
                     f"fanout.max_fanout on '{node_id}' must be a positive integer, got {max_fanout!r}",
                     field=f"nodes[{node_id}].config.fanout.max_fanout",
                 )
+
+    def _validate_node_cache_configs(self, config: GraphConfig) -> None:
+        """Validate ``cache`` blocks on nodes (1.3.21IV).
+
+        The JSON schema rejects malformed blocks at parse time; this stage
+        covers GraphConfig construction that bypassed the schema (shape,
+        ttl positivity, scope value) and the registry-dependent check the
+        schema cannot do: ``key_func`` must name a registered function.
+
+        Raises:
+            GraphValidationError: if a cache declaration is malformed or
+                references an unregistered key function.
+        """
+        from hecate.runtime.node_cache import CachePolicy, UnknownKeyFuncError, get_node_key_func
+
+        for node_id, node in config.nodes.items():
+            raw = node.config.get("cache")
+            if raw is None:
+                continue
+            if not isinstance(raw, dict):
+                raise GraphValidationError(
+                    f"cache config on '{node_id}' must be an object, got {type(raw).__name__}",
+                    field=f"nodes[{node_id}].config.cache",
+                )
+            try:
+                policy = CachePolicy.from_config(raw)
+            except (KeyError, TypeError, ValueError) as exc:
+                raise GraphValidationError(
+                    f"invalid cache config on '{node_id}': {exc} "
+                    "(ttl is required and must be a positive integer; "
+                    "scope must be 'session' or 'tenant')",
+                    field=f"nodes[{node_id}].config.cache",
+                ) from exc
+            if policy.ttl <= 0:
+                raise GraphValidationError(
+                    f"cache.ttl on '{node_id}' must be a positive integer, got {policy.ttl!r}",
+                    field=f"nodes[{node_id}].config.cache.ttl",
+                )
+            if policy.scope not in ("session", "tenant"):
+                raise GraphValidationError(
+                    f"cache.scope on '{node_id}' must be 'session' or 'tenant', got {policy.scope!r}",
+                    field=f"nodes[{node_id}].config.cache.scope",
+                )
+            if policy.key_func is not None:
+                try:
+                    get_node_key_func(policy.key_func)
+                except UnknownKeyFuncError as exc:
+                    raise GraphValidationError(
+                        f"cache.key_func on '{node_id}' references unknown key function '{policy.key_func}': {exc}",
+                        field=f"nodes[{node_id}].config.cache.key_func",
+                    ) from exc
 
     def _build_channel_access(self, config: GraphConfig) -> dict[str, ChannelAccess]:
         """Build per-node channel access map from node configurations."""
