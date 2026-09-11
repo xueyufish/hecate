@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
-import { Bot, Database, LogOut, Settings, Share2, Activity, DollarSign, Gauge, Users, MessageSquare, Puzzle } from "lucide-react";
+import { Bot, ClipboardCheck, Database, LogOut, Settings, Share2, Activity, DollarSign, Gauge, Users, MessageSquare, Puzzle } from "lucide-react";
 
 export function Sidebar() {
   const { userEmail, logout } = useAuth();
@@ -76,6 +76,13 @@ export function Sidebar() {
         >
           <MessageSquare className="h-4 w-4" />
           Conversations
+        </Link>
+        <Link
+          href="/ops-center/evaluation"
+          className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+        >
+          <ClipboardCheck className="h-4 w-4" />
+          Evaluation
         </Link>
         <Link
           href="/plugins"

@@ -279,3 +279,222 @@ export const replayApi: ReplayApi = {
     return api.get<SessionDetail>(`/api/sessions/${sessionId}`);
   },
 };
+
+// Evaluation report dashboard (7.2e) types and methods.
+
+export interface OverviewReport {
+  window_start: string;
+  window_end: string;
+  quality: {
+    offline_pass_rate: number | null;
+    offline_runs_counted: number;
+    online_avg_score: number | null;
+  };
+  volume: { completed_runs: number; online_scored: number };
+  coverage: {
+    active_datasets: number;
+    median_items: number | null;
+    low_sample_run_ratio: number;
+  };
+  error_rate: { total_scores: number; error_count: number; ratio: number };
+}
+
+export interface TrendPoint {
+  bucket: string;
+  value: number;
+  count: number;
+}
+
+export interface TrendSeries {
+  group_id: string;
+  kind: "offline" | "online";
+  metric: string;
+  points: TrendPoint[];
+}
+
+export interface TrendsReport {
+  dimension: string;
+  bucket: string;
+  series: TrendSeries[];
+}
+
+export interface HistogramBin {
+  lower: number;
+  upper: number;
+  count: number;
+}
+
+export interface MetricDistribution {
+  metric_name: string;
+  bins: HistogramBin[];
+  count: number;
+  error_count: number;
+  mean: number | null;
+  min: number | null;
+  max: number | null;
+}
+
+export interface DistributionsReport {
+  scope: "run" | "task";
+  scope_id: string;
+  metrics: MetricDistribution[];
+}
+
+export interface BreakdownMetric {
+  metric_name: string;
+  avg: number;
+  count: number;
+}
+
+export interface BreakdownGroup {
+  key: string;
+  metrics: BreakdownMetric[];
+}
+
+export interface BreakdownsReport {
+  group_by: string;
+  groups: BreakdownGroup[];
+  total: number;
+}
+
+export interface SessionRollupItem {
+  session_id: string;
+  agent_id: string | null;
+  trace_count: number;
+  last_scored_at: string;
+  metrics: BreakdownMetric[];
+}
+
+export interface SessionRollupReport {
+  items: SessionRollupItem[];
+  total: number;
+}
+
+export interface RunListItem {
+  id: string;
+  dataset_id: string;
+  status: string;
+  summary: Record<string, unknown> | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface RunScoreItem {
+  id: string;
+  run_id: string;
+  item_id: string;
+  metric_name: string;
+  value: number;
+  reasoning: string | null;
+  source: string;
+  created_at: string;
+}
+
+export interface RunCompareMetric {
+  metric: string;
+  baseline_avg: number;
+  candidate_avg: number;
+  delta: number;
+  is_regression: boolean;
+}
+
+export interface RunCompareResult {
+  baseline_run_id: string;
+  candidate_run_id: string;
+  metrics: RunCompareMetric[];
+  token_usage_delta: number;
+  latency_delta_ms: number;
+  cost_delta: number | null;
+  dataset_drift: { changed_item_ids: string[] } | null;
+  node_drift: { session_id: string }[] | null;
+  overall_regressed: boolean;
+}
+
+export interface OnlineTaskListItem {
+  id: string;
+  name: string;
+  status: string;
+  metrics: { scanned?: number; sampled?: number; scored?: number; errors?: number };
+  config: { sampling_rate?: number; max_traces_per_cycle?: number; agent_id?: string };
+}
+
+export interface EvaluationApi {
+  getOverview(window?: { start_date?: string; end_date?: string }): Promise<OverviewReport>;
+  getTrends(params: {
+    dimension: string;
+    bucket?: string;
+    metric_name?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<TrendsReport>;
+  getDistributions(params: { run_id?: string; task_id?: string; metric_name?: string }): Promise<DistributionsReport>;
+  getBreakdowns(params: {
+    group_by: string;
+    metric_name?: string;
+    start_date?: string;
+    end_date?: string;
+  }): Promise<BreakdownsReport>;
+  getSessions(params: {
+    task_id?: string;
+    start_date?: string;
+    end_date?: string;
+    page?: number;
+    page_size?: number;
+  }): Promise<SessionRollupReport>;
+  listRuns(): Promise<{ items: RunListItem[]; total: number }>;
+  listRunScores(runId: string): Promise<{ items: RunScoreItem[]; total: number }>;
+  listOnlineTasks(): Promise<{ items: OnlineTaskListItem[]; total: number }>;
+  compareRuns(baselineRunId: string, candidateRunId: string): Promise<RunCompareResult>;
+}
+
+export const evaluationApi: EvaluationApi = {
+  async getOverview(window = {}) {
+    const params = new URLSearchParams(
+      Object.entries(window).filter(([, v]) => v !== undefined) as [string, string][]
+    );
+    return api.get<OverviewReport>(`/api/evaluation/reports/overview?${params}`);
+  },
+  async getTrends(params) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]
+    );
+    return api.get<TrendsReport>(`/api/evaluation/reports/trends?${qs}`);
+  },
+  async getDistributions(params) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]
+    );
+    return api.get<DistributionsReport>(`/api/evaluation/reports/distributions?${qs}`);
+  },
+  async getBreakdowns(params) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]
+    );
+    return api.get<BreakdownsReport>(`/api/evaluation/reports/breakdowns?${qs}`);
+  },
+  async getSessions(params) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]
+    );
+    return api.get<SessionRollupReport>(`/api/evaluation/reports/sessions?${qs}`);
+  },
+  async listRuns() {
+    return api.get<{ items: RunListItem[]; total: number }>(`/api/evaluation/runs?page_size=100`);
+  },
+  async listRunScores(runId) {
+    return api.get<{ items: RunScoreItem[]; total: number }>(
+      `/api/evaluation/runs/${runId}/scores?page_size=100`
+    );
+  },
+  async listOnlineTasks() {
+    return api.get<{ items: OnlineTaskListItem[]; total: number }>(
+      `/api/evaluation/tasks?task_type=online&page_size=100`
+    );
+  },
+  async compareRuns(baselineRunId, candidateRunId) {
+    return api.post<RunCompareResult>(`/api/evaluation/runs/compare`, {
+      baseline_run_id: baselineRunId,
+      candidate_run_id: candidateRunId,
+    });
+  },
+};
