@@ -26,11 +26,14 @@ class AnswerSource(StrEnum):
     - **MANUAL** — answers are pre-populated in ``EvaluationItem.generated_answer``
     - **PIPELINE** — run the RAG pipeline to generate answers at evaluation time
     - **AUTO** — use pre-populated answers when available, otherwise run the pipeline
+    - **AGENT** — invoke the agent under test (one call per item) when answers
+      are not pre-populated; requires the task to carry an ``agent_id``
     """
 
     MANUAL = "manual"
     PIPELINE = "pipeline"
     AUTO = "auto"
+    AGENT = "agent"
 
 
 @dataclass
@@ -95,6 +98,14 @@ class EvalInput:
         expected_answer: Ground-truth answer for comparison (optional).
         tool_calls: Tool invocations made by the agent (optional).
         metadata: Arbitrary metadata attached to this evaluation item.
+        conversation_history: Full prior conversation turns for multi-turn
+            evaluators (optional; list of ``{"role", "content"}`` dicts).
+        system_prompt: The agent's system prompt, for instruction-following
+            evaluation (optional).
+        agent_id: The agent under test, when the input was produced by a
+            specific agent (optional).
+        session_id: The execution session the input originated from
+            (optional).
     """
 
     query: str
@@ -103,6 +114,10 @@ class EvalInput:
     expected_answer: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    conversation_history: list[dict[str, Any]] | None = None
+    system_prompt: str | None = None
+    agent_id: uuid.UUID | None = None
+    session_id: uuid.UUID | None = None
 
 
 @dataclass

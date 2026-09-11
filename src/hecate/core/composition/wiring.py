@@ -349,6 +349,26 @@ async def start_siem_export(app: FastAPI) -> None:
     logger.info("SIEM export pipeline started")
 
 
+async def start_online_evaluation_worker(app: FastAPI) -> None:
+    """Start the online evaluation scoring worker when its flag is set.
+
+    Metered LLM cost (production-traffic sampling + LLM-as-Judge) — the
+    worker stays off unless ``EVALUATION_ONLINE_SCORING_ENABLED`` is set.
+    """
+    from hecate.core.config import settings
+    from hecate.ops.evaluation.tasks.online_worker import OnlineEvaluationWorker
+
+    if not settings.EVALUATION_ONLINE_SCORING_ENABLED:
+        app.state.online_evaluation_worker = None
+        return
+    worker = OnlineEvaluationWorker(
+        poll_interval_seconds=settings.EVALUATION_ONLINE_POLL_INTERVAL_SECONDS,
+    )
+    app.state.online_evaluation_worker = worker
+    await worker.start()
+    logger.info("Online evaluation worker started")
+
+
 # ---------------------------------------------------------------------------
 # Composition — the single FastAPI lifespan entry point.
 # ---------------------------------------------------------------------------
@@ -380,11 +400,18 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
     start_tool_decision_pipeline()
     start_security_findings()
     await start_siem_export(app)
+    await start_online_evaluation_worker(app)
 
     try:
         yield
     finally:
         # Shutdown — reverse order.
+        online_evaluation_worker = getattr(app.state, "online_evaluation_worker", None)
+        if online_evaluation_worker is not None:
+            try:
+                await online_evaluation_worker.stop()
+            except Exception:
+                logger.exception("Online evaluation worker shutdown failed")
         siem_collector = getattr(app.state, "siem_collector", None)
         if siem_collector is not None:
             try:

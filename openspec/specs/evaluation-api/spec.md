@@ -28,7 +28,7 @@ The system SHALL expose `POST /api/evaluation/regression/run` that accepts `data
 ## MODIFIED Requirements
 
 ### Requirement: Evaluation run API
-The system SHALL expose REST endpoints at `/api/evaluation/runs` for creating and retrieving evaluation runs. Runs SHALL support optional `tags` parameter for tag-filtered evaluation. The run response SHALL include pass/fail statistics when assertions or thresholds are configured.
+The system SHALL expose REST endpoints at `/api/evaluation/runs` for creating and retrieving evaluation runs. Runs SHALL support optional `tags` parameter for tag-filtered evaluation. Runs MAY be linked to an evaluation task via a nullable `task_id`; the run response SHALL include `task_id` (null for request-triggered runs) and a `summary` object (`total_items`, `passed_items`, `failed_items`, `pass_rate`, `metric_averages`, `regressions`) when pass/fail statistics have been computed. The run listing endpoint SHALL support an optional `task_id` query filter.
 
 #### Scenario: Create evaluation run
 - **WHEN** a POST request is sent to `/api/evaluation/runs` with `{"dataset_id": "...", "evaluators": ["faithfulness", "context_precision"]}`
@@ -45,3 +45,7 @@ The system SHALL expose REST endpoints at `/api/evaluation/runs` for creating an
 #### Scenario: Get run scores
 - **WHEN** a GET request is sent to `/api/evaluation/runs/{id}/scores`
 - **THEN** the API SHALL return all individual scores for the run, grouped by evaluator metric
+
+#### Scenario: List runs filtered by task
+- **WHEN** a GET request is sent to `/api/evaluation/runs?task_id={task_id}`
+- **THEN** only runs linked to that evaluation task SHALL be returned

@@ -175,6 +175,7 @@ known-third-party = ["alembic", "pytest", "sqlalchemy"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S607", "S105"]
+"scripts/**" = ["S101"]
 "tests/test_services/test_browser/test_integration.py" = ["S310"]
 "alembic/versions/**" = ["S608"]
 "src/hecate/models/alert.py" = ["S105"]

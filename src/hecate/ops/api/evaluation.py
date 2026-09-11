@@ -364,13 +364,16 @@ async def list_runs(
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     dataset_id: uuid.UUID | None = None,
+    task_id: uuid.UUID | None = None,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
-    """List evaluation runs with optional dataset filter."""
+    """List evaluation runs with optional dataset/task filters."""
     base_query = select(EvaluationRunModel).where(~EvaluationRunModel.deleted)
     if dataset_id:
         base_query = base_query.where(EvaluationRunModel.dataset_id == dataset_id)
+    if task_id:
+        base_query = base_query.where(EvaluationRunModel.task_id == task_id)
 
     count_stmt = select(func.count()).select_from(base_query.subquery())
     total = (await db.execute(count_stmt)).scalar_one()
