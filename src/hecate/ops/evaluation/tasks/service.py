@@ -30,6 +30,9 @@ from hecate.ops.evaluation.engine import get_evaluator_class
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MAX_TRACES_PER_CYCLE = 50
+_DEFAULT_REPETITIONS = 1
+_DEFAULT_MAX_TOTAL_EXECUTIONS = 1000
+_DEFAULT_MAX_IN_FLIGHT = 4
 
 
 class EvaluationTaskNotFoundError(LookupError):
@@ -45,6 +48,8 @@ def build_task_config(data: Any) -> dict:
 
     Only the fields relevant to the declared ``task_type`` are kept, so
     clients cannot smuggle online fields into offline tasks or vice versa.
+    Workflow answer-source fields (7.3) are stored under the offline branch
+    and ignored for online tasks.
     """
     config: dict = {}
     if data.task_type == TaskType.OFFLINE.value:
@@ -65,6 +70,17 @@ def build_task_config(data: Any) -> dict:
             config["agent_id"] = str(data.agent_id)
         if answer_source == "agent" and data.agent_id is None:
             raise EvaluationTaskValidationError('answer_source="agent" requires agent_id (the agent under test)')
+        if answer_source == "workflow":
+            if data.workflow_id is None:
+                raise EvaluationTaskValidationError('answer_source="workflow" requires workflow_id')
+            config["workflow_id"] = str(data.workflow_id)
+            if data.workflow_version is not None:
+                config["workflow_version"] = data.workflow_version
+            config["repetitions"] = data.repetitions if data.repetitions is not None else _DEFAULT_REPETITIONS
+            config["max_total_executions"] = (
+                data.max_total_executions if data.max_total_executions is not None else _DEFAULT_MAX_TOTAL_EXECUTIONS
+            )
+            config["max_in_flight"] = data.max_in_flight if data.max_in_flight is not None else _DEFAULT_MAX_IN_FLIGHT
     else:
         if data.agent_id is None:
             raise EvaluationTaskValidationError("online tasks require agent_id")
@@ -82,6 +98,11 @@ def validate_task(task: EvaluationTaskModel) -> None:
     Used on create, update, and enable — the enable path re-checks evaluator
     resolvability because the registry can change between create and enable
     (e.g. an optional dependency went missing at startup).
+
+    The workflow-answer-source branch checks that ``workflow_id`` is set
+    when ``answer_source == "workflow"``; deeper workflow existence /
+    version resolvability is re-checked at run start inside the runner
+    (registry-style: startup vs trigger may diverge).
     """
     for name in task.evaluator_configs or []:
         if get_evaluator_class(name) is None:
@@ -99,6 +120,18 @@ def validate_task(task: EvaluationTaskModel) -> None:
             raise EvaluationTaskValidationError("offline tasks require dataset_id")
         if config.get("answer_source") == "agent" and not config.get("agent_id"):
             raise EvaluationTaskValidationError('answer_source="agent" requires agent_id (the agent under test)')
+        if config.get("answer_source") == "workflow":
+            if not config.get("workflow_id"):
+                raise EvaluationTaskValidationError('answer_source="workflow" requires workflow_id')
+            repetitions = config.get("repetitions")
+            if not isinstance(repetitions, int) or repetitions < 1:
+                raise EvaluationTaskValidationError("workflow tasks require repetitions >= 1")
+            max_total = config.get("max_total_executions")
+            if not isinstance(max_total, int) or max_total < 1:
+                raise EvaluationTaskValidationError("workflow tasks require max_total_executions >= 1")
+            max_in_flight = config.get("max_in_flight")
+            if not isinstance(max_in_flight, int) or max_in_flight < 1:
+                raise EvaluationTaskValidationError("workflow tasks require max_in_flight >= 1")
 
 
 class EvaluationTaskService:
@@ -194,6 +227,11 @@ class EvaluationTaskService:
             "agent_id": data.agent_id,
             "sampling_rate": data.sampling_rate,
             "max_traces_per_cycle": data.max_traces_per_cycle,
+            "workflow_id": data.workflow_id,
+            "workflow_version": data.workflow_version,
+            "repetitions": data.repetitions,
+            "max_total_executions": data.max_total_executions,
+            "max_in_flight": data.max_in_flight,
         }
 
         if data.name is not None:
@@ -216,6 +254,11 @@ class EvaluationTaskService:
                     "agent_id",
                     "sampling_rate",
                     "max_traces_per_cycle",
+                    "workflow_id",
+                    "workflow_version",
+                    "repetitions",
+                    "max_total_executions",
+                    "max_in_flight",
                 )
             )
             or data.evaluators is not None
@@ -241,6 +284,13 @@ class EvaluationTaskService:
                 max_traces_per_cycle=_first_value(
                     merged_data["max_traces_per_cycle"], stored.get("max_traces_per_cycle")
                 ),
+                workflow_id=_first_uuid(merged_data["workflow_id"], stored.get("workflow_id")),
+                workflow_version=_first_value(merged_data["workflow_version"], stored.get("workflow_version")),
+                repetitions=_first_value(merged_data["repetitions"], stored.get("repetitions")),
+                max_total_executions=_first_value(
+                    merged_data["max_total_executions"], stored.get("max_total_executions")
+                ),
+                max_in_flight=_first_value(merged_data["max_in_flight"], stored.get("max_in_flight")),
             )
 
             task.evaluator_configs = list(merged.evaluators)
@@ -298,13 +348,19 @@ class EvaluationTaskService:
             raise EvaluationTaskValidationError("task is disabled")
         validate_task(task)
 
-        run = EvaluationRunModel(
-            dataset_id=uuid.UUID(str(task.config["dataset_id"])),
-            task_id=task.id,
-            evaluator_configs=list(task.evaluator_configs or []),
-            status=RunStatus.PENDING.value,
-            workspace_id=task.workspace_id,
-        )
+        run_kwargs: dict = {
+            "dataset_id": uuid.UUID(str(task.config["dataset_id"])),
+            "task_id": task.id,
+            "evaluator_configs": list(task.evaluator_configs or []),
+            "status": RunStatus.PENDING.value,
+            "workspace_id": task.workspace_id,
+        }
+        if task.config.get("answer_source") == "workflow":
+            run_kwargs["workflow_id"] = uuid.UUID(str(task.config["workflow_id"]))
+            if task.config.get("workflow_version") is not None:
+                run_kwargs["workflow_version"] = int(task.config["workflow_version"])
+            run_kwargs["repetitions"] = int(task.config.get("repetitions", _DEFAULT_REPETITIONS))
+        run = EvaluationRunModel(**run_kwargs)
         self.db.add(run)
         await self.db.flush()
         return run

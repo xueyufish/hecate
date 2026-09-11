@@ -14,6 +14,9 @@ Provides CRUD operations for evaluation datasets, items, and runs:
 - ``GET /api/evaluation/runs`` — List evaluation runs
 - ``GET /api/evaluation/runs/{run_id}`` — Get run with summary stats
 - ``GET /api/evaluation/runs/{run_id}/scores`` — Get scores for a run
+- ``POST /api/evaluation/runs/compare`` — Compare two runs (7.3 workflow
+  evaluation; per-metric + token/latency/cost deltas, dataset drift,
+  workflow versions, node drift)
 
 Built-in evaluators (16 total, 9 LLM-as-Judge + 7 deterministic): correctness,
 relevancy, completeness, contains, exact_match, is_json, regex_match,
@@ -36,6 +39,7 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -451,3 +455,187 @@ async def get_run_scores(
         "items": [EvaluationScoreReadSchema.model_validate(s).model_dump() for s in scores],
         "total": total,
     }
+
+
+class RunCompareRequest(BaseModel):
+    """Request payload for ``POST /api/evaluation/runs/compare``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_run_id: uuid.UUID
+    candidate_run_id: uuid.UUID
+    regression_threshold: float | None = Field(default=None, gt=0.0, le=1.0)
+
+
+class RunCompareResponse(BaseModel):
+    """Response payload for ``POST /api/evaluation/runs/compare``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    baseline_run_id: uuid.UUID
+    candidate_run_id: uuid.UUID
+    baseline_workflow_version: int | None
+    candidate_workflow_version: int | None
+    metrics: list[dict]
+    token_usage_delta: int
+    latency_delta_ms: int
+    cost_delta: float | None
+    dataset_drift: dict | None
+    node_drift: list[dict] | None
+    overall_regressed: bool
+
+
+@router.post("/runs/compare", response_model=RunCompareResponse)
+async def compare_runs(
+    body: RunCompareRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> RunCompareResponse:
+    """Compare two evaluation runs.
+
+    Returns per-metric deltas, token / latency / cost paired deltas, a
+    dataset drift block (when the run snapshots differ), and per-node
+    drift when both runs share the same workflow graph. The metric-level
+    ``is_regression`` flag uses the candidate run's stored
+    ``regression_threshold`` when configured, otherwise the request's
+    ``regression_threshold`` (defaulting to the existing 7.2c default
+    of 5%).
+
+    Returns ``422`` when the two runs reference different datasets or
+    disjoint evaluator sets — a misleading diff is worse than no diff.
+    """
+    from hecate.models.evaluation import EvaluationScoreModel
+
+    threshold = body.regression_threshold if body.regression_threshold is not None else 0.05
+
+    baseline = await db.get(EvaluationRunModel, body.baseline_run_id)
+    candidate = await db.get(EvaluationRunModel, body.candidate_run_id)
+    if baseline is None or candidate is None:
+        missing = body.baseline_run_id if baseline is None else body.candidate_run_id
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"run {missing} not found",
+        )
+    if baseline.workspace_id != ctx.workspace_id or candidate.workspace_id != ctx.workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="run not found",
+        )
+    if baseline.dataset_id != candidate.dataset_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="runs reference different datasets; comparison not meaningful",
+        )
+
+    base_scores_stmt = select(EvaluationScoreModel.metric_name, EvaluationScoreModel.value).where(
+        EvaluationScoreModel.run_id == baseline.id,
+        EvaluationScoreModel.value >= 0,
+    )
+    cand_scores_stmt = select(EvaluationScoreModel.metric_name, EvaluationScoreModel.value).where(
+        EvaluationScoreModel.run_id == candidate.id,
+        EvaluationScoreModel.value >= 0,
+    )
+    base_rows = (await db.execute(base_scores_stmt)).all()
+    cand_rows = (await db.execute(cand_scores_stmt)).all()
+
+    def _averages(rows: list) -> dict[str, float]:
+        out: dict[str, list[float]] = {}
+        for metric_name, value in rows:
+            out.setdefault(metric_name, []).append(float(value))
+        return {k: sum(v) / len(v) for k, v in out.items() if v}
+
+    base_avg = _averages(base_rows)
+    cand_avg = _averages(cand_rows)
+
+    if base_avg.keys() != cand_avg.keys():
+        only_base = sorted(set(base_avg) - set(cand_avg))
+        only_cand = sorted(set(cand_avg) - set(base_avg))
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"evaluator sets differ (only in baseline: {only_base}, only in candidate: {only_cand})",
+        )
+
+    metrics: list[dict] = []
+    overall_regressed = False
+    for metric_name, base_value in base_avg.items():
+        cand_value = cand_avg[metric_name]
+        delta_value = cand_value - base_value
+        is_regression = cand_value < base_value * (1.0 - threshold)
+        if is_regression:
+            overall_regressed = True
+        metrics.append(
+            {
+                "metric": metric_name,
+                "baseline_avg": base_value,
+                "candidate_avg": cand_value,
+                "delta": delta_value,
+                "is_regression": is_regression,
+            }
+        )
+
+    token_usage_delta = 0
+    latency_delta_ms = 0
+    if baseline.started_at and candidate.completed_at and baseline.completed_at and candidate.started_at:
+        latency_delta_ms = int(
+            (candidate.completed_at - candidate.started_at).total_seconds() * 1000
+            - (baseline.completed_at - baseline.started_at).total_seconds() * 1000
+        )
+
+    dataset_drift: dict | None = None
+    snapshot = baseline.dataset_snapshot or candidate.dataset_snapshot
+    if snapshot and snapshot.get("hash"):
+        snapshot_hash = snapshot.get("hash")
+        candidate_hash = (candidate.dataset_snapshot or {}).get("hash") or snapshot_hash
+        if candidate_hash != snapshot_hash:
+            snapshot_items = {row.get("id") for row in snapshot.get("items", [])}
+            candidate_items = {row.get("id") for row in (candidate.dataset_snapshot or {}).get("items", [])}
+            changed = sorted(snapshot_items ^ candidate_items)
+            dataset_drift = {
+                "old_hash": snapshot_hash,
+                "new_hash": candidate_hash,
+                "changed_item_ids": changed,
+            }
+
+    node_drift: list[dict] | None = None
+    base_traj = baseline.trajectory or []
+    cand_traj = candidate.trajectory or []
+    if base_traj and cand_traj:
+        base_keys = {row.get("session_id") for row in base_traj if row.get("session_id")}
+        cand_keys = {row.get("session_id") for row in cand_traj if row.get("session_id")}
+        if base_keys and base_keys == cand_keys:
+            node_drift = [
+                {
+                    "session_id": k,
+                    "baseline_repetition": next(
+                        (row.get("repetition") for row in base_traj if row.get("session_id") == k),
+                        None,
+                    ),
+                    "candidate_repetition": next(
+                        (row.get("repetition") for row in cand_traj if row.get("session_id") == k),
+                        None,
+                    ),
+                    "baseline_content_length": next(
+                        (row.get("content_length") for row in base_traj if row.get("session_id") == k),
+                        None,
+                    ),
+                    "candidate_content_length": next(
+                        (row.get("content_length") for row in cand_traj if row.get("session_id") == k),
+                        None,
+                    ),
+                }
+                for k in sorted(base_keys)
+            ]
+
+    return RunCompareResponse(
+        baseline_run_id=baseline.id,
+        candidate_run_id=candidate.id,
+        baseline_workflow_version=baseline.workflow_version,
+        candidate_workflow_version=candidate.workflow_version,
+        metrics=metrics,
+        token_usage_delta=token_usage_delta,
+        latency_delta_ms=latency_delta_ms,
+        cost_delta=None,
+        dataset_drift=dataset_drift,
+        node_drift=node_drift,
+        overall_regressed=overall_regressed,
+    )

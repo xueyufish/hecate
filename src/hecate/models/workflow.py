@@ -190,7 +190,14 @@ class WorkflowVersionReadSchema(PydanticBase):
 
 
 class WorkflowDetailSchema(PydanticBase):
-    """Schema for reading workflow with current version details."""
+    """Schema for reading workflow with current version details.
+
+    The ``evaluation_report`` field is populated only on the publish
+    response (7.3) — it summarizes the latest evaluation run for the
+    publishing version, including a comparison block against the
+    currently-published version's most recent run. ``None`` on every
+    other read path so existing consumers are unaffected.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -205,6 +212,7 @@ class WorkflowDetailSchema(PydanticBase):
     deleted: bool | None = False
     deleted_at: datetime | None
     version: WorkflowVersionReadSchema | None = None
+    evaluation_report: dict | None = None
 
 
 class WorkflowRunReadSchema(PydanticBase):

@@ -168,3 +168,151 @@ def runs(
     client = HecateClient(get_profile_name())
     result = client.get(f"/api/workflows/{workflow_id}/runs")
     display_result(result, get_output_format(), title="Workflow Runs")
+
+
+# --- 7.3 Workflow Evaluation -------------------------------------------------
+
+eval_app = typer.Typer(no_args_is_help=True, help="Workflow evaluation commands")
+
+
+@eval_app.command("run")
+def eval_run(
+    workflow_id: Annotated[str, typer.Option("--workflow-id", help="Workflow UUID")],
+    dataset_id: Annotated[str, typer.Option("--dataset", help="Dataset UUID")],
+    workflow_version: Annotated[
+        int | None,
+        typer.Option("--workflow-version", help="Pinned workflow version"),
+    ] = None,
+    repetitions: Annotated[
+        int | None,
+        typer.Option("--repetitions", help="Repetitions per item (default 1)"),
+    ] = None,
+    baseline_run_id: Annotated[
+        str | None,
+        typer.Option("--baseline-run-id", help="Baseline run id to compare against"),
+    ] = None,
+    evaluators: Annotated[
+        str | None,
+        typer.Option(
+            "--evaluators",
+            help="Comma-separated registered evaluator names",
+        ),
+    ] = None,
+    threshold: Annotated[
+        float | None,
+        typer.Option("--threshold", help="Per-evaluator pass threshold"),
+    ] = None,
+    regression_threshold: Annotated[
+        float | None,
+        typer.Option("--regression-threshold", help="Regression delta fraction"),
+    ] = None,
+    poll_timeout: Annotated[
+        int,
+        typer.Option("--poll-timeout", help="Seconds to wait for run completion"),
+    ] = 600,
+    poll_interval: Annotated[
+        int,
+        typer.Option("--poll-interval", help="Seconds between status polls"),
+    ] = 3,
+) -> None:
+    """Trigger a workflow evaluation run and stream its result.
+
+    Exit codes: 0 = passed (no regression and no drift), 2 = dataset drift
+    warning, 3 = regression detected. The CLI does NOT post PR comments;
+    CI consumers render the JSON payload themselves.
+    """
+    client = HecateClient(get_profile_name())
+    if not evaluators:
+        typer.echo("Error: --evaluators is required (comma-separated names)", err=True)
+        raise typer.Exit(2)
+
+    evaluators_list = [name.strip() for name in evaluators.split(",") if name.strip()]
+    version = workflow_version if workflow_version is not None else 0
+    body: dict = {
+        "workflow_id": workflow_id,
+        "dataset_id": dataset_id,
+        "evaluators": evaluators_list,
+    }
+    if threshold is not None:
+        body["threshold"] = threshold
+    if baseline_run_id:
+        body["baseline_run_id"] = baseline_run_id
+    if regression_threshold is not None:
+        body["regression_threshold"] = regression_threshold
+    if repetitions is not None:
+        body["repetitions"] = repetitions
+
+    trigger = client.post(
+        f"/api/evaluation/workflow-evaluations/{version}/runs",
+        json=body,
+    )
+    if not isinstance(trigger, dict) or "run_id" not in trigger:
+        typer.echo(json_lib.dumps(trigger, indent=2))
+        raise typer.Exit(3)
+    run_id = trigger["run_id"]
+
+    deadline = poll_timeout
+    polled: dict = {}
+    while deadline > 0:
+        polled = client.get(f"/api/evaluation/runs/{run_id}")
+        status = (polled.get("status") or "").lower() if isinstance(polled, dict) else ""
+        if status in ("completed", "failed"):
+            break
+        deadline -= poll_interval
+        import time as _time
+
+        _time.sleep(poll_interval)
+    else:
+        polled = polled or {"status": "timeout", "run_id": run_id}
+
+    candidate_id = polled.get("id") or run_id
+    payload: dict = {"run_id": candidate_id, "raw": polled}
+
+    dataset_drift = ((polled.get("summary") or {}).get("dataset_drift")) if isinstance(polled, dict) else None
+    regressions = ((polled.get("summary") or {}).get("regressions")) if isinstance(polled, dict) else None
+    has_regressions = bool(regressions)
+    has_drift = bool(dataset_drift)
+    payload["dataset_drift"] = dataset_drift
+    payload["regressions"] = regressions or []
+    payload["warnings"] = []
+    payload["passed"] = (polled.get("status") == "completed") and not has_regressions
+
+    if baseline_run_id:
+        try:
+            diff = client.post(
+                "/api/evaluation/runs/compare",
+                json={
+                    "baseline_run_id": baseline_run_id,
+                    "candidate_run_id": candidate_id,
+                },
+            )
+        except Exception as exc:  # request failure → still emit the diff section
+            diff = {"error": str(exc)}
+        payload["comparison"] = diff
+        if isinstance(diff, dict):
+            if diff.get("overall_regressed"):
+                has_regressions = True
+            drift_raw = diff.get("dataset_drift")
+            dataset_drift_compare = drift_raw if isinstance(drift_raw, dict) and drift_raw else {}
+            if dataset_drift_compare:
+                has_drift = True
+
+    if has_drift:
+        payload["warnings"].append(
+            {
+                "code": "dataset_drift",
+                "message": "dataset snapshot hash differs from current dataset hash",
+            }
+        )
+    if not payload["passed"]:
+        payload["passed"] = False
+
+    typer.echo(json_lib.dumps(payload, indent=2, default=str))
+
+    if has_regressions:
+        raise typer.Exit(3)
+    if has_drift:
+        raise typer.Exit(2)
+
+
+app.add_typer(eval_app, name="eval")
