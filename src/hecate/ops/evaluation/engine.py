@@ -13,6 +13,7 @@ Use :func:`get_evaluator_class` for the public lookup.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -77,6 +78,10 @@ class EvaluationEngine:
         agent_id: uuid.UUID | None = None,
         run: EvaluationRunModel | None = None,
         summary_config: dict | None = None,
+        workflow_id: uuid.UUID | None = None,
+        workflow_version: int | None = None,
+        repetitions: int = 1,
+        max_in_flight: int = 1,
     ) -> EvaluationRunResult:
         """Execute all evaluators against all items in a dataset.
 
@@ -91,8 +96,9 @@ class EvaluationEngine:
             evaluators: List of evaluator instances to run.
             dataset_id: UUID of the dataset to evaluate.
             answer_source: How to obtain generated answers — manual (from items),
-                pipeline (run RAG), auto (fallback), or agent (invoke the
-                agent under test).
+                pipeline (run RAG), auto (fallback), agent (invoke the agent
+                under test), or workflow (execute the workflow under test
+                end-to-end via ``WorkflowExecutionService``).
             tags: Optional tag filter (OR semantics). When provided, only
                 items whose ``tags`` JSON array contains any of the
                 specified values are scored.
@@ -105,6 +111,15 @@ class EvaluationEngine:
                 ``{"threshold": float, "baseline_run_id": uuid,
                 "regression_threshold": float}``. When present, the run's
                 ``summary`` JSON column is populated on completion.
+            workflow_id: The workflow under test, required when
+                ``answer_source`` is ``WORKFLOW``. Pinned at run start.
+            workflow_version: Optional explicit version number; when
+                omitted the workflow's current latest version is resolved
+                at run start and locked onto the run row.
+            repetitions: How many times each item is executed. ``1`` by
+                default; only meaningful for ``WORKFLOW`` answer sources
+                (per the 7.3 spec). When ``>1`` the run summary exposes
+                ``consistency_rate`` in addition to ``pass_rate``.
 
         Returns:
             Aggregated :class:`EvaluationRunResult` with scores and averages.
@@ -116,6 +131,13 @@ class EvaluationEngine:
         if answer_source == AnswerSource.AGENT and agent_id is None:
             msg = "answer_source='agent' requires agent_id"
             raise ValueError(msg)
+        if answer_source == AnswerSource.WORKFLOW:
+            if workflow_id is None:
+                msg = "answer_source='workflow' requires workflow_id"
+                raise ValueError(msg)
+            if repetitions < 1:
+                msg = "repetitions must be >= 1"
+                raise ValueError(msg)
 
         if run is None:
             run = EvaluationRunModel(
@@ -124,6 +146,17 @@ class EvaluationEngine:
                 evaluator_configs=[e.name for e in evaluators],
             )
             self.db.add(run)
+            await self.db.flush()
+
+        if answer_source == AnswerSource.WORKFLOW:
+            # Pin workflow_version once on the run row so downstream consumers
+            # (diff, summary, publish report) see the same value the
+            # engine actually executed against.
+            if workflow_version is not None:
+                run.workflow_version = workflow_version
+            elif run.workflow_version is None:
+                run.workflow_version = await self._resolve_latest_workflow_version(workflow_id)
+            run.repetitions = repetitions
             await self.db.flush()
 
         run.started_at = datetime.now(UTC)
@@ -145,97 +178,56 @@ class EvaluationEngine:
 
             item_scores: dict[str, list[Score]] = {}
             all_metric_values: dict[str, list[float]] = {}
+            trajectory: list[dict] = []
+
+            concurrency = max(1, max_in_flight) if answer_source == AnswerSource.WORKFLOW else 1
+            semaphore = asyncio.Semaphore(concurrency) if concurrency > 1 else None
 
             with Timer() as total_timer:
-                for item in items:
-                    generated = item.generated_answer or ""
-                    item_score_list: list[Score] = []
-
-                    needs_generation = not generated and answer_source is not AnswerSource.MANUAL
-                    if needs_generation:
-                        if answer_source == AnswerSource.AGENT:
-                            try:
-                                generated = await self._generate_answer_via_agent(item.query, agent_id)
-                            except Exception as e:
-                                # Isolate the failure to this item: record an
-                                # error score per evaluator, keep sibling
-                                # items scoring.
-                                logger.error(
-                                    "Agent %s failed to answer item %s: %s",
-                                    agent_id,
-                                    item.id,
-                                    e,
-                                )
-                                for evaluator in evaluators:
-                                    item_score_list.append(
-                                        Score(
-                                            metric_name=evaluator.name,
-                                            value=-1.0,
-                                            reasoning=f"Agent invocation failed: {e}",
-                                            source="llm_judge",
-                                        )
-                                    )
-                                item_scores[str(item.id)] = item_score_list
-                                for score in item_score_list:
-                                    self.db.add(
-                                        EvaluationScoreModel(
-                                            run_id=run.id,
-                                            item_id=item.id,
-                                            metric_name=score.metric_name,
-                                            value=score.value,
-                                            reasoning=score.reasoning,
-                                            source=score.source,
-                                        )
-                                    )
-                                continue
-                        else:
-                            generated = await self._generate_answer_via_pipeline(item.query, item.context or [])
-
-                    eval_input = EvalInput(
-                        query=item.query,
-                        retrieved_contexts=item.context or [],
-                        generated_answer=generated,
-                        expected_answer=item.expected_answer,
-                        agent_id=agent_id if answer_source == AnswerSource.AGENT else None,
-                    )
-
-                    for evaluator in evaluators:
-                        try:
-                            output = await evaluator.evaluate(eval_input)
-                            for score in output.scores:
-                                item_score_list.append(score)
-                        except Exception as e:
-                            logger.error(
-                                "Evaluator %s failed on item %s: %s",
-                                evaluator.name,
-                                item.id,
-                                e,
-                            )
-                            error_score = Score(
-                                metric_name=evaluator.name,
-                                value=-1.0,
-                                reasoning=f"Evaluator error: {e}",
-                                source="llm_judge",
-                            )
-                            item_score_list.append(error_score)
-
-                    item_scores[str(item.id)] = item_score_list
-
-                    # Persist scores to database
-                    for score in item_score_list:
-                        score_model = EvaluationScoreModel(
-                            run_id=run.id,
-                            item_id=item.id,
-                            metric_name=score.metric_name,
-                            value=score.value,
-                            reasoning=score.reasoning,
-                            source=score.source,
+                if semaphore is None:
+                    for item in items:
+                        scores, traj = await self._process_item(
+                            item=item,
+                            evaluators=evaluators,
+                            answer_source=answer_source,
+                            agent_id=agent_id,
+                            workflow_id=workflow_id,
+                            workflow_version=run.workflow_version,
+                            repetitions=repetitions,
+                            run=run,
                         )
-                        self.db.add(score_model)
-
-                        # Track for averages (exclude error scores)
-                        if score.value >= 0:
-                            all_metric_values.setdefault(score.metric_name, []).append(score.value)
+                        item_scores[str(item.id)] = scores
+                        if traj:
+                            trajectory.extend(traj)
+                        for score in scores:
+                            if score.value >= 0:
+                                all_metric_values.setdefault(score.metric_name, []).append(score.value)
+                else:
+                    tasks = [
+                        asyncio.create_task(
+                            self._process_item(
+                                item=item,
+                                evaluators=evaluators,
+                                answer_source=answer_source,
+                                agent_id=agent_id,
+                                workflow_id=workflow_id,
+                                workflow_version=run.workflow_version,
+                                repetitions=repetitions,
+                                run=run,
+                                semaphore=semaphore,
+                            )
+                        )
+                        for item in items
+                    ]
+                    results = await asyncio.gather(*tasks, return_exceptions=False)
+                    for item, result in zip(items, results, strict=True):
+                        scores, traj = result
+                        item_scores[str(item.id)] = scores
+                        if traj:
+                            trajectory.extend(traj)
+                        for score in scores:
+                            if score.value >= 0:
+                                all_metric_values.setdefault(score.metric_name, []).append(score.value)
 
             await self.db.flush()
 
@@ -251,7 +243,11 @@ class EvaluationEngine:
                     item_scores=item_scores,
                     metric_averages=metric_averages,
                     summary_config=summary_config,
+                    repetitions=repetitions,
                 )
+
+            if answer_source == AnswerSource.WORKFLOW:
+                run.trajectory = trajectory
 
             # Mark run as completed
             run.status = RunStatus.COMPLETED.value
@@ -305,12 +301,151 @@ class EvaluationEngine:
         )
         return str(response.get("response") or "").strip()
 
+    async def _process_item(
+        self,
+        item: EvaluationItemModel,
+        evaluators: list[Evaluator],
+        answer_source: AnswerSource,
+        agent_id: uuid.UUID | None,
+        workflow_id: uuid.UUID | None,
+        workflow_version: int | None,
+        repetitions: int,
+        run: EvaluationRunModel,
+        semaphore: asyncio.Semaphore | None = None,
+    ) -> tuple[list[Score], list[dict]]:
+        """Process a single dataset item: generate the answer and score it.
+
+        Returns the list of per-evaluator scores (one per evaluator, with
+        ``value=-1.0`` for errors) and any trajectory rows collected from
+        a workflow execution. Errors are isolated to the item — sibling
+        items keep scoring.
+
+        When ``semaphore`` is provided, the answer-generation phase is
+        gated so that at most ``semaphore`` value invocations run
+        concurrently; the rest of the per-item work runs after the gate
+        is released. This bounds real workflow executions against the
+        task's ``max_in_flight`` setting (7.3).
+        """
+        item_score_list: list[Score] = []
+        trajectory_rows: list[dict] = []
+        # Keep the 7.2c agent-path message contract verbatim; only the
+        # workflow path (7.3) introduces a new prefix.
+        if answer_source == AnswerSource.AGENT:
+            failure_prefix = "Agent invocation failed"
+        elif answer_source == AnswerSource.WORKFLOW:
+            failure_prefix = "Workflow execution failed"
+        else:
+            failure_prefix = "Pipeline answer generation failed"
+
+        async def _gen() -> str:
+            if answer_source == AnswerSource.AGENT:
+                return await self._generate_answer_via_agent(item.query, agent_id)
+            if answer_source == AnswerSource.WORKFLOW:
+                content, traj = await self._generate_answer_via_workflow(
+                    query=item.query,
+                    workflow_id=workflow_id,
+                    workflow_version=workflow_version,
+                    item_id=item.id,
+                    repetitions=repetitions,
+                )
+                trajectory_rows.extend(traj)
+                return content
+            return await self._generate_answer_via_pipeline(item.query, item.context or [])
+
+        generated = item.generated_answer or ""
+        if not generated and answer_source is not AnswerSource.MANUAL:
+            if semaphore is not None:
+                async with semaphore:
+                    try:
+                        generated = await _gen()
+                    except Exception as e:
+                        logger.error(
+                            "Answer source %s failed on item %s: %s",
+                            answer_source.value,
+                            item.id,
+                            e,
+                        )
+                        for evaluator in evaluators:
+                            item_score_list.append(
+                                Score(
+                                    metric_name=evaluator.name,
+                                    value=-1.0,
+                                    reasoning=f"{failure_prefix}: {e}",
+                                    source="llm_judge",
+                                )
+                            )
+                        return item_score_list, trajectory_rows
+            else:
+                try:
+                    generated = await _gen()
+                except Exception as e:
+                    logger.error(
+                        "Answer source %s failed on item %s: %s",
+                        answer_source.value,
+                        item.id,
+                        e,
+                    )
+                    for evaluator in evaluators:
+                        item_score_list.append(
+                            Score(
+                                metric_name=evaluator.name,
+                                value=-1.0,
+                                reasoning=f"{failure_prefix}: {e}",
+                                source="llm_judge",
+                            )
+                        )
+                    return item_score_list, trajectory_rows
+
+        eval_input = EvalInput(
+            query=item.query,
+            retrieved_contexts=item.context or [],
+            generated_answer=generated,
+            expected_answer=item.expected_answer,
+            agent_id=agent_id if answer_source == AnswerSource.AGENT else None,
+        )
+
+        for evaluator in evaluators:
+            try:
+                output = await evaluator.evaluate(eval_input)
+                for score in output.scores:
+                    item_score_list.append(score)
+            except Exception as e:
+                logger.error(
+                    "Evaluator %s failed on item %s: %s",
+                    evaluator.name,
+                    item.id,
+                    e,
+                )
+                item_score_list.append(
+                    Score(
+                        metric_name=evaluator.name,
+                        value=-1.0,
+                        reasoning=f"Evaluator error: {e}",
+                        source="llm_judge",
+                    )
+                )
+
+        for score in item_score_list:
+            self.db.add(
+                EvaluationScoreModel(
+                    run_id=run.id,
+                    item_id=item.id,
+                    metric_name=score.metric_name,
+                    value=score.value,
+                    reasoning=score.reasoning,
+                    source=score.source,
+                )
+            )
+
+        return item_score_list, trajectory_rows
+
     async def _build_summary(
         self,
         total_items: int,
         item_scores: dict[str, list[Score]],
         metric_averages: dict[str, float],
         summary_config: dict,
+        repetitions: int = 1,
     ) -> dict:
         """Compute the task-run ``summary`` JSON for an evaluation run.
 
@@ -318,22 +453,34 @@ class EvaluationEngine:
         ``baseline_run_id`` (metric regressed when the candidate average
         dropped more than ``regression_threshold`` — default 5% — below
         the baseline average).
+
+        When ``repetitions > 1`` the summary also exposes
+        ``consistency_rate``: the fraction of items where every
+        repetition meets the threshold (Anthropic ``pass^k`` semantics).
+        ``consistency_rate`` is intentionally omitted when
+        ``repetitions == 1``.
         """
         threshold = summary_config.get("threshold")
         passed_items: int | None = None
         failed_items: int | None = None
         pass_rate: float | None = None
+        consistency_rate: float | None = None
 
         if threshold is not None:
             passed_items = 0
             failed_items = 0
+            consistency_passed = 0
             for scores in item_scores.values():
                 values = [s.value for s in scores]
-                if values and all(v >= threshold for v in values):
+                meets_threshold = bool(values) and all(v >= threshold for v in values)
+                if meets_threshold:
                     passed_items += 1
+                    consistency_passed += 1
                 else:
                     failed_items += 1
             pass_rate = (passed_items / total_items) if total_items else 0.0
+            if repetitions > 1 and total_items:
+                consistency_rate = consistency_passed / total_items
 
         baseline_run_id = summary_config.get("baseline_run_id")
         delta = float(summary_config.get("regression_threshold", 0.05))
@@ -345,7 +492,7 @@ class EvaluationEngine:
                 delta,
             )
 
-        return {
+        summary: dict = {
             "total_items": total_items,
             "passed_items": passed_items,
             "failed_items": failed_items,
@@ -353,6 +500,10 @@ class EvaluationEngine:
             "metric_averages": metric_averages,
             "regressions": regressions,
         }
+        if repetitions > 1:
+            summary["repetitions"] = repetitions
+            summary["consistency_rate"] = consistency_rate
+        return summary
 
     async def _compute_regressions(
         self,
@@ -428,6 +579,101 @@ class EvaluationEngine:
         except Exception as e:
             logger.warning("Pipeline answer generation failed: %s", e)
             return ""
+
+    async def _generate_answer_via_workflow(
+        self,
+        query: str,
+        workflow_id: uuid.UUID,
+        workflow_version: int | None,
+        item_id: uuid.UUID,
+        repetitions: int,
+    ) -> tuple[str, list[dict]]:
+        """Generate an answer by executing the workflow under test.
+
+        One non-streaming ``WorkflowExecutionService.execute`` invocation
+        per repetition; the final repetition's ``content`` is the item's
+        ``generated_answer``. Per-node execution data (node id, type,
+        status, duration, error) is collected into ``trajectory`` rows
+        indexed by ``(item_id, repetition_index)`` so downstream diff /
+        trajectory views can correlate.
+
+        The studio service is imported lazily inside the function so the
+        ops domain stays runtime-clean (per
+        ``tests/test_layering_domain.py``); the runtime request path is
+        never touched.
+
+        Args:
+            query: The dataset item query.
+            workflow_id: The workflow under test.
+            workflow_version: The locked workflow version (resolved by
+                ``run`` before invocation; ``None`` only when the run row
+                was created without a pinned version — defensive).
+            item_id: Dataset item UUID (used to tag trajectory rows).
+            repetitions: How many times to execute the workflow for this
+                item. ``>=1``.
+
+        Returns:
+            Tuple of (generated_answer, trajectory_rows).
+
+        Raises:
+            Exception: Any invocation failure propagates so the caller can
+                record per-item error scores.
+        """
+        from hecate.core.composition.runtime_port_adapter import make_runtime_port
+        from hecate.studio.workflows.execution_service import WorkflowExecutionService
+
+        port = make_runtime_port()
+        service = WorkflowExecutionService(port=port, db=self.db)
+
+        last_content = ""
+        trajectory_rows: list[dict] = []
+
+        for rep in range(1, repetitions + 1):
+            session_id = uuid.uuid4()
+            result = await service.execute(
+                agent_mode="workflow",
+                workflow_id=workflow_id,
+                session_id=session_id,
+                messages=[{"role": "user", "content": query}],
+                stream=False,
+            )
+            content = str((result or {}).get("content") or "").strip()
+            last_content = content
+            trajectory_rows.append(
+                {
+                    "item_id": str(item_id),
+                    "repetition": rep,
+                    "session_id": str(session_id),
+                    "workflow_id": str(workflow_id),
+                    "workflow_version": workflow_version,
+                    "content_length": len(content),
+                    "purpose": "workflow_evaluation",
+                }
+            )
+
+        return last_content, trajectory_rows
+
+    async def _resolve_latest_workflow_version(
+        self,
+        workflow_id: uuid.UUID,
+    ) -> int | None:
+        """Resolve a workflow's current latest version number.
+
+        Reads ``WorkflowModel.current_version`` for the given workflow id;
+        returns ``None`` when the workflow does not exist (the run row
+        remains with ``workflow_version=NULL`` and downstream consumers
+        surface this as a configuration error).
+        """
+        from hecate.models.workflow import WorkflowModel
+
+        stmt = select(WorkflowModel.current_version).where(
+            WorkflowModel.id == workflow_id,
+            ~WorkflowModel.deleted,
+        )
+        row = (await self.db.execute(stmt)).first()
+        if row is None or row[0] is None:
+            return None
+        return int(row[0])
 
 
 def register_evaluators(registry: PluginRegistry) -> int:

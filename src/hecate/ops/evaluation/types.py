@@ -28,12 +28,17 @@ class AnswerSource(StrEnum):
     - **AUTO** — use pre-populated answers when available, otherwise run the pipeline
     - **AGENT** — invoke the agent under test (one call per item) when answers
       are not pre-populated; requires the task to carry an ``agent_id``
+    - **WORKFLOW** — invoke the workflow under test end-to-end (one call per
+      item per repetition) when answers are not pre-populated; requires the
+      task to carry a ``workflow_id`` and optional ``workflow_version``.
+      Introduced in 7.3 (Workflow Evaluation).
     """
 
     MANUAL = "manual"
     PIPELINE = "pipeline"
     AUTO = "auto"
     AGENT = "agent"
+    WORKFLOW = "workflow"
 
 
 @dataclass

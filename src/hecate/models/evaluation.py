@@ -18,7 +18,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import DateTime, Float, Index, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -142,6 +142,13 @@ class EvaluationRunModel(BaseModel):
     - **summary** — nullable JSON: pass/fail aggregation computed for task
       runs when a ``threshold`` is configured
     - **started_at** / **completed_at** — timing markers for the run
+    - **workflow_id** / **workflow_version** — populated when ``answer_source``
+      is ``workflow`` (7.3); ``workflow_version`` is locked at run start.
+    - **dataset_snapshot** — JSON snapshot of dataset items + content hash,
+      captured at run start so regression comparison remains meaningful
+      even if the dataset is edited between runs.
+    - **repetitions** — number of times each item was executed; ``>=1``.
+      When ``>1`` the run summary also exposes ``consistency_rate``.
     """
 
     __tablename__ = "evaluation_runs"
@@ -153,6 +160,11 @@ class EvaluationRunModel(BaseModel):
     summary: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
+    workflow_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dataset_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    repetitions: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    trajectory: Mapped[list | None] = mapped_column(JSON, nullable=True, default=None)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
@@ -407,6 +419,11 @@ class EvaluationRunReadSchema(PydanticBase):
     summary: dict | None = None
     started_at: datetime | None
     completed_at: datetime | None
+    workflow_id: uuid.UUID | None = None
+    workflow_version: int | None = None
+    dataset_snapshot: dict | None = None
+    repetitions: int | None = None
+    trajectory: list | None = None
     workspace_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -455,11 +472,17 @@ class EvaluationTaskCreateSchema(PydanticBase):
     evaluators: list[str] = Field(..., min_length=1)
     # Offline-only fields
     dataset_id: uuid.UUID | None = None
-    answer_source: str | None = Field(None, pattern="^(manual|pipeline|agent)$")
+    answer_source: str | None = Field(None, pattern="^(manual|pipeline|agent|workflow)$")
     threshold: float | None = Field(None, ge=0.0, le=1.0)
     baseline_run_id: uuid.UUID | None = None
     regression_threshold: float | None = Field(None, gt=0.0, le=1.0)
     tags: list[str] | None = None
+    # Workflow answer source fields (7.3)
+    workflow_id: uuid.UUID | None = None
+    workflow_version: int | None = Field(None, ge=1)
+    repetitions: int | None = Field(None, ge=1, le=100)
+    max_total_executions: int | None = Field(None, ge=1, le=1_000_000)
+    max_in_flight: int | None = Field(None, ge=1, le=64)
     # Online-only fields
     agent_id: uuid.UUID | None = None
     sampling_rate: float | None = Field(None, gt=0.0, le=1.0)
@@ -476,11 +499,16 @@ class EvaluationTaskUpdateSchema(PydanticBase):
     status: str | None = Field(None, pattern="^(active|disabled)$")
     evaluators: list[str] | None = Field(None, min_length=1)
     dataset_id: uuid.UUID | None = None
-    answer_source: str | None = Field(None, pattern="^(manual|pipeline|agent)$")
+    answer_source: str | None = Field(None, pattern="^(manual|pipeline|agent|workflow)$")
     threshold: float | None = Field(None, ge=0.0, le=1.0)
     baseline_run_id: uuid.UUID | None = None
     regression_threshold: float | None = Field(None, gt=0.0, le=1.0)
     tags: list[str] | None = None
+    workflow_id: uuid.UUID | None = None
+    workflow_version: int | None = Field(None, ge=1)
+    repetitions: int | None = Field(None, ge=1, le=100)
+    max_total_executions: int | None = Field(None, ge=1, le=1_000_000)
+    max_in_flight: int | None = Field(None, ge=1, le=64)
     agent_id: uuid.UUID | None = None
     sampling_rate: float | None = Field(None, gt=0.0, le=1.0)
     max_traces_per_cycle: int | None = Field(None, ge=1, le=10_000)

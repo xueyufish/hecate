@@ -5,18 +5,27 @@ Mirrors the synthesis-job lifecycle (``queued → running → completed/failed``
 persists a ``queued`` run row and commits, then hands off here; the spawned
 task reopens the run, executes the task's evaluators against its dataset via
 :class:`EvaluationEngine`, and commits the terminal state.
+
+7.3 (Workflow Evaluation) additions: pre-flight cost guardrail check
+(``items × repetitions ≤ max_total_executions``), dataset snapshot freeze at
+run start, workflow answer-source plumbing into the engine, and dataset
+drift summary appended to the run row on completion.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.evaluation import (
+    EvaluationItemModel,
     EvaluationRunModel,
     EvaluationTaskModel,
     RunStatus,
@@ -26,6 +35,10 @@ from hecate.ops.evaluation.evaluator import Evaluator
 from hecate.ops.evaluation.types import AnswerSource
 
 logger = logging.getLogger(__name__)
+
+
+class CostGuardrailExceededError(ValueError):
+    """Pre-flight refusal when ``items × repetitions`` exceeds the cap."""
 
 
 class OfflineTaskRunner:
@@ -69,23 +82,144 @@ class OfflineTaskRunner:
                     raise RuntimeError("no evaluators could be resolved: " + ", ".join(task.evaluator_configs or []))
 
                 config = task.config or {}
+                answer_source = AnswerSource(config.get("answer_source") or "manual")
+                repetitions = int(config.get("repetitions") or 1)
+                max_total = int(config.get("max_total_executions") or 1000)
+
+                item_count = await self._count_items(run.dataset_id)
+                if item_count * repetitions > max_total:
+                    raise CostGuardrailExceededError(
+                        f"cost guardrail: {item_count} items x {repetitions} repetitions = "
+                        f"{item_count * repetitions} > max_total_executions={max_total}"
+                    )
+
+                snapshot, snapshot_hash = await self._snapshot_dataset(run.dataset_id)
+                run.dataset_snapshot = {
+                    "items": snapshot,
+                    "hash": snapshot_hash,
+                    "captured_at": datetime.now(UTC).isoformat(),
+                }
+                await session.flush()
+
                 engine = EvaluationEngine(session)
-                await engine.run(
-                    evaluators,
-                    dataset_id=run.dataset_id,
-                    answer_source=AnswerSource(config.get("answer_source") or "manual"),
-                    tags=config.get("tags"),
-                    agent_id=uuid.UUID(str(config["agent_id"])) if config.get("agent_id") else None,
-                    run=run,
-                    summary_config=self._summary_config(task),
-                )
+                run_kwargs = {
+                    "evaluators": evaluators,
+                    "dataset_id": run.dataset_id,
+                    "answer_source": answer_source,
+                    "tags": config.get("tags"),
+                    "agent_id": uuid.UUID(str(config["agent_id"])) if config.get("agent_id") else None,
+                    "run": run,
+                    "summary_config": self._summary_config(task),
+                    "repetitions": repetitions,
+                }
+                if answer_source == AnswerSource.WORKFLOW:
+                    run_kwargs["workflow_id"] = uuid.UUID(str(config["workflow_id"]))
+                    if config.get("workflow_version") is not None:
+                        run_kwargs["workflow_version"] = int(config["workflow_version"])
+                    run_kwargs["max_in_flight"] = int(config.get("max_in_flight") or 4)
+
+                await engine.run(**run_kwargs)
                 # engine.run marked the run completed; persist its scores + summary
+                await self._append_dataset_drift(run, session)
+                await session.commit()
+            except CostGuardrailExceededError as e:
+                logger.warning("Task run %s rejected by cost guardrail: %s", run_id, e)
+                run.status = RunStatus.FAILED.value
+                run.summary = {
+                    "error": "cost_guardrail_exceeded",
+                    "message": str(e),
+                }
+                run.completed_at = datetime.now(UTC)
                 await session.commit()
             except Exception:  # noqa: BLE001 — surface error state on the run row
                 logger.exception("Task run %s failed", run_id)
                 run.status = RunStatus.FAILED.value
                 run.completed_at = datetime.now(UTC)
                 await session.commit()
+
+    async def _count_items(self, dataset_id: uuid.UUID) -> int:
+        stmt = (
+            select(func.count())
+            .select_from(EvaluationItemModel)
+            .where(
+                EvaluationItemModel.dataset_id == dataset_id,
+                ~EvaluationItemModel.deleted,
+            )
+        )
+        return int((await self.db.execute(stmt)).scalar_one() or 0)
+
+    async def _snapshot_dataset(self, dataset_id: uuid.UUID) -> tuple[list[dict], str]:
+        """Return a canonical-JSON snapshot of every dataset item + content hash.
+
+        The snapshot is taken on the runner's own session (already opened
+        by ``_execute``); this is intentionally called after
+        ``CostGuardrailExceededError`` so a guardrail-rejected run does
+        not pollute the run's ``dataset_snapshot`` column.
+        """
+        stmt = (
+            select(EvaluationItemModel)
+            .where(
+                EvaluationItemModel.dataset_id == dataset_id,
+                ~EvaluationItemModel.deleted,
+            )
+            .order_by(EvaluationItemModel.created_at.asc(), EvaluationItemModel.id.asc())
+        )
+        items = list((await self.db.execute(stmt)).scalars().all())
+
+        snapshot: list[dict] = []
+        for item in items:
+            snapshot.append(
+                {
+                    "id": str(item.id),
+                    "query": item.query,
+                    "expected_answer": item.expected_answer,
+                    "context": item.context or [],
+                    "tags": list(item.tags or []),
+                    "metadata": dict(item.metadata_ or {}),
+                }
+            )
+
+        canonical = json.dumps(snapshot, sort_keys=True, ensure_ascii=False, default=str)
+        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return snapshot, digest
+
+    async def _append_dataset_drift(self, run: EvaluationRunModel, session: AsyncSession) -> None:
+        """Compute the post-run dataset hash vs the snapshot hash.
+
+        Writes a ``dataset_drift`` block into ``run.summary`` when the
+        hashes diverge. Called by ``_execute`` after the engine finishes
+        so the diff reflects the dataset as it stands at run completion
+        (the snapshot already locked what the run consumed).
+        """
+        if run.dataset_snapshot is None:
+            return
+        snapshot_hash = run.dataset_snapshot.get("hash")
+        if not snapshot_hash:
+            return
+
+        # Re-count + re-hash against the live dataset using a fresh read.
+        # We use a separate session-bound query because the runner already
+        # has an open session by the time we are called.
+        _, current_hash = await self._snapshot_dataset(run.dataset_id)
+
+        if current_hash == snapshot_hash:
+            return
+
+        snapshot_items = {row["id"] for row in run.dataset_snapshot.get("items", [])}
+        live_stmt = select(EvaluationItemModel.id).where(
+            EvaluationItemModel.dataset_id == run.dataset_id,
+            ~EvaluationItemModel.deleted,
+        )
+        live_ids = {str(row[0]) for row in (await session.execute(live_stmt)).all()}
+        changed = sorted(snapshot_items ^ live_ids)
+
+        summary = dict(run.summary or {})
+        summary["dataset_drift"] = {
+            "snapshot_hash": snapshot_hash,
+            "current_hash": current_hash,
+            "changed_item_ids": changed,
+        }
+        run.summary = summary
 
     def _resolve_evaluators(self, task: EvaluationTaskModel) -> list[Evaluator]:
         """Instantiate the task's evaluators, skipping unresolvable names.

@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.models.evaluation import EvaluationRunModel
 from hecate.models.workflow import (
     WorkflowCreateSchema,
     WorkflowDetailSchema,
@@ -386,6 +387,90 @@ class WorkflowService:
         except GraphValidationError as e:
             return {"valid": False, "errors": [str(e)]}
 
+    async def _build_evaluation_report(
+        self,
+        workflow_id: uuid.UUID,
+        publishing_version: int,
+        previously_published_version: int | None,
+    ) -> dict | None:
+        """Assemble the publish-time evaluation report (7.3).
+
+        Returns ``None`` when there is no evaluation run for the
+        publishing version (the spec says the field is informational —
+        publish succeeds either way).
+
+        When the previously published version also has a recent run,
+        the report includes a ``comparison_to_published`` block built
+        by reusing :func:`_compare_runs`-equivalent SQL.
+        """
+        latest = (
+            await self.db.execute(
+                select(EvaluationRunModel)
+                .where(
+                    EvaluationRunModel.workflow_id == workflow_id,
+                    EvaluationRunModel.workflow_version == publishing_version,
+                    EvaluationRunModel.status == "completed",
+                    ~EvaluationRunModel.deleted,
+                )
+                .order_by(EvaluationRunModel.completed_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if latest is None:
+            return {"evaluation_status": "no_run_for_version", "publishing_version": publishing_version}
+
+        report: dict = {
+            "run_id": str(latest.id),
+            "publishing_version": publishing_version,
+            "pass_rate": (latest.summary or {}).get("pass_rate"),
+            "consistency_rate": (latest.summary or {}).get("consistency_rate"),
+            "metric_averages": (latest.summary or {}).get("metric_averages") or {},
+        }
+
+        if previously_published_version is not None and previously_published_version != publishing_version:
+            prev = (
+                await self.db.execute(
+                    select(EvaluationRunModel)
+                    .where(
+                        EvaluationRunModel.workflow_id == workflow_id,
+                        EvaluationRunModel.workflow_version == previously_published_version,
+                        EvaluationRunModel.status == "completed",
+                        ~EvaluationRunModel.deleted,
+                    )
+                    .order_by(EvaluationRunModel.completed_at.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if prev is not None:
+                prev_avg = (prev.summary or {}).get("metric_averages") or {}
+                cand_avg = report["metric_averages"]
+                comparison: list[dict] = []
+                for metric, cand in cand_avg.items():
+                    base = prev_avg.get(metric)
+                    if base is None:
+                        continue
+                    comparison.append(
+                        {
+                            "metric": metric,
+                            "baseline_avg": base,
+                            "candidate_avg": cand,
+                            "delta": cand - base,
+                            "is_regression": cand < base * 0.95,
+                        }
+                    )
+                report["comparison_to_published"] = {
+                    "baseline_run_id": str(prev.id),
+                    "baseline_version": previously_published_version,
+                    "metrics": comparison,
+                }
+            else:
+                report["comparison_to_published"] = {"evaluation_status": "no_baseline"}
+        else:
+            report["comparison_to_published"] = {"evaluation_status": "no_baseline"}
+
+        return report
+
     async def publish_version(
         self,
         workflow_id: uuid.UUID,
@@ -429,12 +514,19 @@ class WorkflowService:
         if "production" not in (target.labels or []):
             target.labels = list(target.labels or []) + ["production"]
 
+        previous_published = workflow.published_version
         workflow.published_version = version
         await self.db.flush()
 
         logger.info(f"Published version {version} for workflow {workflow_id}")
 
-        return await self.get_workflow(workflow_id)
+        detail = await self.get_workflow(workflow_id)
+        detail.evaluation_report = await self._build_evaluation_report(
+            workflow_id=workflow_id,
+            publishing_version=version,
+            previously_published_version=previous_published,
+        )
+        return detail
 
     async def get_version_by_label(
         self,
