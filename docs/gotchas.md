@@ -34,3 +34,20 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
 - **mypy** runs `strict=true` but many error codes are disabled in
   `pyproject.toml` — not truly strict. Do not assume a passing mypy run means
   full strict coverage.
+
+## Evaluation scores (7.4/7.4a)
+
+- **evaluation_task_scores is a shared ledger** — automated rows carry
+  `task_id`, human annotation rows have `task_id=NULL` (+ `source="human"`,
+  `annotator_id`). Idempotency is a *partial* unique index
+  (`WHERE task_id IS NOT NULL`), so multiple human rows for the same
+  target+metric are legal; the service upserts per
+  `(annotator_id, target_id, metric_name)` instead of relying on the DB.
+- **Categorical annotations** store the category string in `value_label`
+  and its index in `value` (the column is Float) — dashboards wanting the
+  label must resolve via the queue's `metric_defs.categories`.
+- **Report reconciliation** — overview/trends/distributions/session-rollup
+  aggregate *reconciled* values: the latest human override
+  (`overrides_score_id`) replaces the superseded automated row, and the
+  override's `created_at` is the effective time (its trend bucket). The
+  breakdowns endpoint is deliberately raw (`group_by=source` shows both).

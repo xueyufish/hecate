@@ -1,15 +1,25 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Gauge } from "lucide-react";
+import { ChevronDown, ChevronRight, Gauge, ListPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart } from "@/components/ui/bar-chart";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  AnnotationQueue,
   BreakdownsReport,
   evaluationApi,
   OnlineTaskListItem,
   SessionRollupItem,
+  SessionTrace,
 } from "@/lib/api-client";
 
 const COLORS = [
@@ -51,6 +61,102 @@ function BudgetStrip({ task }: { task: OnlineTaskListItem }) {
         sampled {sampled}
         {cap !== undefined ? ` / cap ${cap} per cycle` : ""} · scored {scored} · errors {errors}
       </span>
+    </div>
+  );
+}
+
+/** Entry point: enqueue this session's traces into an annotation queue (7.4). */
+function AddToQueuePanel({ sessionId }: { sessionId: string }) {
+  const [open, setOpen] = useState(false);
+  const [queues, setQueues] = useState<AnnotationQueue[]>([]);
+  const [queueId, setQueueId] = useState<string>("");
+  const [traces, setTraces] = useState<SessionTrace[] | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [message, setMessage] = useState<string | null>(null);
+
+  const toggle = async () => {
+    if (!open) {
+      try {
+        const res = await evaluationApi.listAnnotationQueues();
+        setQueues(res.items);
+        setQueueId(res.items[0]?.id ?? "");
+      } catch {
+        setQueues([]);
+      }
+      try {
+        setTraces(await evaluationApi.listSessionTraces(sessionId));
+      } catch {
+        setTraces([]);
+      }
+      setSelected(new Set());
+      setMessage(null);
+    }
+    setOpen(!open);
+  };
+
+  const add = async () => {
+    if (!queueId || selected.size === 0) return;
+    const result = await evaluationApi.addAnnotationQueueItems(queueId, [...selected]);
+    setMessage(
+      `added ${result.created} · already queued ${result.already_present.length} · rejected ${result.rejected.length}`
+    );
+  };
+
+  return (
+    <div className="mt-2 border-t pt-2">
+      <Button variant="outline" size="sm" onClick={toggle}>
+        <ListPlus className="mr-1 h-3 w-3" /> Add to annotation queue
+      </Button>
+      {open && (
+        <div className="mt-2 space-y-2">
+          {queues.length === 0 ? (
+            <div className="text-xs text-muted-foreground">No annotation queues — create one first.</div>
+          ) : (
+            <>
+              <Select value={queueId} onValueChange={setQueueId}>
+                <SelectTrigger className="w-64">
+                  <SelectValue placeholder="pick a queue" />
+                </SelectTrigger>
+                <SelectContent>
+                  {queues.map((q) => (
+                    <SelectItem key={q.id} value={q.id}>
+                      {q.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {traces === null ? (
+                <div className="text-xs text-muted-foreground">Loading traces…</div>
+              ) : traces.length === 0 ? (
+                <div className="text-xs text-muted-foreground">No root traces in this session.</div>
+              ) : (
+                <div className="max-h-32 space-y-1 overflow-y-auto">
+                  {traces.map((t) => (
+                    <label key={t.id} className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(t.id)}
+                        onChange={(e) => {
+                          const next = new Set(selected);
+                          if (e.target.checked) next.add(t.id);
+                          else next.delete(t.id);
+                          setSelected(next);
+                        }}
+                      />
+                      <span className="font-mono">{t.trace_id.slice(0, 8)}</span>
+                      <span className="text-muted-foreground">{t.status}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <Button size="sm" variant="outline" onClick={add} disabled={selected.size === 0}>
+                Add {selected.size || ""} to queue
+              </Button>
+            </>
+          )}
+          {message && <div className="text-xs text-muted-foreground">{message}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -184,6 +290,7 @@ export function OnlineView({ startDate, endDate }: OnlineViewProps) {
                         <div>All scores for this session errored out.</div>
                       )}
                       <div className="mt-1 font-mono">session {session.session_id}</div>
+                      <AddToQueuePanel sessionId={session.session_id} />
                     </div>
                   )}
                 </div>
