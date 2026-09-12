@@ -403,6 +403,38 @@ class AnnotationQueueItemModel(BaseModel):
     )
 
 
+class EvaluationBackflowRuleModel(BaseModel):
+    """ORM model for an automated trace-backflow rule (7.2d).
+
+    A rule selects scored production traces of one **online** evaluation task
+    by score-band filters and materializes them into one evaluation dataset
+    when explicitly triggered (no cron, no worker hook). Filters combine with
+    AND semantics: a trace qualifies when every filter matches its latest
+    score for that metric. ``metadata_`` carries a ``last_run`` summary
+    (``{at, created, skipped}``) for observability.
+
+    Materialized items are attributed via ``metadata_.backflow.trace_id`` and
+    dedupe against the human-annotation path (``metadata_.annotation.trace_id``)
+    — see :mod:`hecate.ops.evaluation.trace_dedup`.
+    """
+
+    __tablename__ = "evaluation_backflow_rules"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    task_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    dataset_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    filters: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    limit: Mapped[int] = mapped_column(Integer, nullable=False, default=500, server_default="500")
+    max_turns: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict, server_default="{}")
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
+
+    __table_args__ = (Index("idx_eval_backflow_rules_workspace", "workspace_id", "deleted"),)
+
+
 # ---------------------------------------------------------------------------
 # Pydantic Schemas — Dataset
 # ---------------------------------------------------------------------------
@@ -720,5 +752,71 @@ class AnnotationQueueItemReadSchema(PydanticBase):
     completed_by: uuid.UUID | None
     completed_at: datetime | None
     workspace_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Pydantic Schemas — Backflow rules (7.2d)
+# ---------------------------------------------------------------------------
+
+
+class BackflowScoreFilterSchema(PydanticBase):
+    """One score-band filter; a trace matches when its latest score for the
+    metric falls inside the (inclusive) band. Multiple filters combine with
+    AND semantics at the service layer."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    metric_name: str = Field(..., min_length=1, max_length=100)
+    min_score: float | None = Field(None, ge=-1.0, le=1.0)
+    max_score: float | None = Field(None, ge=-1.0, le=1.0)
+
+
+class EvaluationBackflowRuleCreateSchema(PydanticBase):
+    """Request schema for creating a backflow rule.
+
+    Cross-field rules (score band order, referenced task is online, dataset
+    exists, workspace-unique name) are enforced by the service layer so the
+    error messages can name the offending fields.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=255)
+    task_id: uuid.UUID
+    dataset_id: uuid.UUID
+    filters: list[BackflowScoreFilterSchema] = Field(..., min_length=1)
+    limit: int = Field(500, ge=1, le=10_000)
+    max_turns: int | None = Field(None, ge=1, le=10_000)
+
+
+class EvaluationBackflowRuleUpdateSchema(PydanticBase):
+    """Schema for updating a backflow rule. All fields optional."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(None, min_length=1, max_length=255)
+    task_id: uuid.UUID | None = None
+    dataset_id: uuid.UUID | None = None
+    filters: list[BackflowScoreFilterSchema] | None = Field(None, min_length=1)
+    limit: int | None = Field(None, ge=1, le=10_000)
+    max_turns: int | None = Field(None, ge=1, le=10_000)
+
+
+class EvaluationBackflowRuleReadSchema(PydanticBase):
+    """Schema for reading backflow rule data."""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: uuid.UUID
+    name: str
+    task_id: uuid.UUID
+    dataset_id: uuid.UUID
+    filters: list
+    limit: int
+    max_turns: int | None
+    workspace_id: uuid.UUID
+    metadata: dict | None = Field(validation_alias="metadata_")
     created_at: datetime
     updated_at: datetime
