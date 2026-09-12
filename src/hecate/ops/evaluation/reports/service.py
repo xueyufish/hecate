@@ -18,6 +18,12 @@ Conventions (openspec change ``evaluation-report-dashboard``):
 - **Offline trends** derive from ``evaluation_runs.summary`` (pass_rate was
   computed at completion) instead of scanning ``evaluation_scores``, which
   has no ``created_at`` index.
+- **Reconciliation (7.4a)** — online aggregations (overview quality/volume,
+  online trends, online distributions, session rollup) use reconciled
+  values: the latest human override replaces the automated row it
+  supersedes, the overridden automated row and non-override human rows do
+  not contribute. The override's ``created_at`` is the effective time (its
+  value lands in its own bucket). The breakdowns endpoint stays raw.
 """
 
 from __future__ import annotations
@@ -49,6 +55,10 @@ _MAX_HOUR_WINDOW_DAYS = 30
 _LOW_SAMPLE_ITEM_THRESHOLD = 20
 _ERROR_SENTINEL = -1.0
 _HISTOGRAM_BIN_COUNT = 10
+_HUMAN_SOURCE = "human"
+_RECONCILIATION_NOTE = (
+    "Online averages use reconciled values: the latest human override replaces the superseded automated score."
+)
 
 BreakdownDimension = str  # "agent" | "task" | "session" | "source"
 TrendDimension = str  # "dataset" | "workflow" | "agent"
@@ -71,6 +81,7 @@ class QualityCardSchema(PydanticBase):
     offline_pass_rate: float | None = None
     offline_runs_counted: int = 0
     online_avg_score: float | None = None
+    note: str | None = None
 
 
 class VolumeCardSchema(PydanticBase):
@@ -183,6 +194,19 @@ class ReportWindow:
     end: datetime
 
 
+@dataclass(frozen=True)
+class ReconciledScore:
+    """One effective online score record after override reconciliation."""
+
+    target_id: uuid.UUID
+    metric_name: str
+    value: float
+    effective_at: datetime
+    session_id: uuid.UUID | None
+    agent_id: uuid.UUID | None
+    task_id: uuid.UUID | None
+
+
 def _as_utc(value: datetime) -> datetime:
     """Normalize a datetime to aware UTC; naive values are assumed UTC."""
     if value.tzinfo is None:
@@ -275,12 +299,15 @@ class EvaluationReportService:
         offline_total, offline_errors, _offline_avg = await self._score_stats(
             EvaluationScoreModel, workspace_id, window
         )
-        online_total, online_errors, online_avg = await self._score_stats(
+        raw_online_total, raw_online_errors, _raw_online_avg = await self._score_stats(
             EvaluationTaskScoreModel, workspace_id, window
         )
+        reconciled = await self._reconciled_online_rows(workspace_id, window=window)
+        online_values = [r.value for r in reconciled if r.value != _ERROR_SENTINEL]
+        online_avg = _mean(online_values)
 
-        total_scores = offline_total + online_total
-        error_count = offline_errors + online_errors
+        total_scores = offline_total + raw_online_total
+        error_count = offline_errors + raw_online_errors
         error_ratio = round(error_count / total_scores, 4) if total_scores else 0.0
 
         dataset_ids = {run.dataset_id for run in runs}
@@ -295,10 +322,11 @@ class EvaluationReportService:
                 offline_pass_rate=_mean(pass_rates),
                 offline_runs_counted=len(pass_rates),
                 online_avg_score=online_avg,
+                note=_RECONCILIATION_NOTE if online_values else None,
             ),
             volume=VolumeCardSchema(
                 completed_runs=len(runs),
-                online_scored=online_total - online_errors,
+                online_scored=len(online_values),
             ),
             coverage=CoverageCardSchema(
                 active_datasets=len(dataset_ids),
@@ -338,6 +366,88 @@ class EvaluationReportService:
         errors = int(row[1] or 0)
         avg = round(float(row[2]), 4) if row[2] is not None else None
         return total, errors, avg
+
+    async def _reconciled_online_rows(
+        self,
+        workspace_id: uuid.UUID,
+        window: ReportWindow | None = None,
+        task_id: uuid.UUID | None = None,
+        agent_id: uuid.UUID | None = None,
+        metric_name: str | None = None,
+    ) -> list[ReconciledScore]:
+        """Effective online score records after override reconciliation.
+
+        Each automated row yields one record with its own value and time,
+        unless a human override supersedes it — then the record carries the
+        override's value and the override's ``created_at`` as the effective
+        time (its value lands in its own trend bucket). Non-override human
+        rows never contribute. Window/task/agent/metric filters apply to
+        the effective record.
+        """
+        conditions: list[Any] = [
+            EvaluationTaskScoreModel.workspace_id == workspace_id,
+            ~EvaluationTaskScoreModel.deleted,
+        ]
+        if task_id is not None:
+            conditions.append(EvaluationTaskScoreModel.task_id == task_id)
+        if agent_id is not None:
+            conditions.append(EvaluationTaskScoreModel.agent_id == agent_id)
+        if metric_name is not None:
+            conditions.append(EvaluationTaskScoreModel.metric_name == metric_name)
+        automated = (
+            (
+                await self.db.execute(
+                    select(EvaluationTaskScoreModel).where(
+                        *conditions,
+                        EvaluationTaskScoreModel.source != _HUMAN_SOURCE,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        override_conditions: list[Any] = [
+            EvaluationTaskScoreModel.workspace_id == workspace_id,
+            ~EvaluationTaskScoreModel.deleted,
+            EvaluationTaskScoreModel.source == _HUMAN_SOURCE,
+            EvaluationTaskScoreModel.overrides_score_id.is_not(None),
+        ]
+        if metric_name is not None:
+            override_conditions.append(EvaluationTaskScoreModel.metric_name == metric_name)
+        override_rows = (
+            (await self.db.execute(select(EvaluationTaskScoreModel).where(*override_conditions))).scalars().all()
+        )
+        latest_override: dict[uuid.UUID, EvaluationTaskScoreModel] = {}
+        for row in override_rows:
+            if row.overrides_score_id is None:
+                continue
+            current = latest_override.get(row.overrides_score_id)
+            if current is None or row.created_at > current.created_at:
+                latest_override[row.overrides_score_id] = row
+
+        records: list[ReconciledScore] = []
+        for row in automated:
+            override = latest_override.get(row.id)
+            value = float(override.value) if override is not None else float(row.value)
+            effective_at = override.created_at if override is not None else row.created_at
+            records.append(
+                ReconciledScore(
+                    target_id=row.target_id,
+                    metric_name=row.metric_name,
+                    value=value,
+                    effective_at=effective_at,
+                    session_id=row.session_id,
+                    agent_id=row.agent_id,
+                    task_id=row.task_id,
+                )
+            )
+
+        if window is not None:
+            start = _naive_utc(window.start)
+            end = _naive_utc(window.end)
+            records = [r for r in records if start <= _naive_utc(r.effective_at) <= end]
+        return records
 
     async def _dataset_item_counts(
         self,
@@ -427,30 +537,19 @@ class EvaluationReportService:
         bucket: str,
         metric_name: str | None,
     ) -> list[TrendSeriesSchema]:
-        """Per-agent per-metric score averages over time (dimension=agent)."""
-        start_cond, end_cond = _in_window(EvaluationTaskScoreModel.created_at, window)
-        conditions: list[Any] = [
-            EvaluationTaskScoreModel.workspace_id == workspace_id,
-            ~EvaluationTaskScoreModel.deleted,
-            EvaluationTaskScoreModel.agent_id.is_not(None),
-            EvaluationTaskScoreModel.value != _ERROR_SENTINEL,
-            start_cond,
-            end_cond,
-        ]
-        if metric_name is not None:
-            conditions.append(EvaluationTaskScoreModel.metric_name == metric_name)
-        rows = await self.db.execute(
-            select(
-                EvaluationTaskScoreModel.agent_id,
-                EvaluationTaskScoreModel.metric_name,
-                EvaluationTaskScoreModel.created_at,
-                EvaluationTaskScoreModel.value,
-            ).where(*conditions)
+        """Per-agent per-metric reconciled score averages over time (dimension=agent)."""
+        records = await self._reconciled_online_rows(
+            workspace_id, window=window, agent_id=None, metric_name=metric_name
         )
-        # One series per (agent, metric) pair keeps distinct metrics separate.
+        # One series per (agent, metric) pair keeps distinct metrics separate;
+        # overridden records land in the override's bucket (effective time).
         pair_buckets: dict[tuple[str, str], dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
-        for agent_id, metric, created_at, value in rows.all():
-            pair_buckets[(str(agent_id), metric)][_bucket_key(created_at, bucket)].append(float(value))
+        for record in records:
+            if record.agent_id is None or record.value == _ERROR_SENTINEL:
+                continue
+            pair_buckets[(str(record.agent_id), record.metric_name)][_bucket_key(record.effective_at, bucket)].append(
+                record.value
+            )
 
         return [
             TrendSeriesSchema(
@@ -511,14 +610,8 @@ class EvaluationReportService:
             ).scalar_one_or_none()
             if task is None:
                 raise EvaluationReportNotFoundError(str(task_id))
-            rows = await self.db.execute(
-                select(EvaluationTaskScoreModel.metric_name, EvaluationTaskScoreModel.value).where(
-                    EvaluationTaskScoreModel.workspace_id == workspace_id,
-                    EvaluationTaskScoreModel.task_id == task_id,
-                    ~EvaluationTaskScoreModel.deleted,
-                )
-            )
-            return self._histogram_report("task", task_id, rows, metric_name)
+            records = await self._reconciled_online_rows(workspace_id, task_id=task_id)
+            return self._histogram_report("task", task_id, [(r.metric_name, r.value) for r in records], metric_name)
 
         raise EvaluationReportValidationError("exactly one of run_id or task_id is required")
 
@@ -532,7 +625,7 @@ class EvaluationReportService:
         """Bin (metric, value) rows into per-metric histograms, errors counted apart."""
         by_metric: dict[str, list[float]] = defaultdict(list)
         errors: dict[str, int] = defaultdict(int)
-        for metric, value in rows.all():
+        for metric, value in rows:
             if value == _ERROR_SENTINEL:
                 errors[metric] += 1
             else:
@@ -618,68 +711,54 @@ class EvaluationReportService:
         page: int = 1,
         page_size: int = 20,
     ) -> SessionRollupReportSchema:
-        """Roll online task scores up to session granularity, newest-scored first."""
+        """Roll reconciled online scores up to session granularity, newest-first."""
         window = resolve_window(start_date, end_date)
-        start_cond, end_cond = _in_window(EvaluationTaskScoreModel.created_at, window)
-        conditions: list[Any] = [
-            EvaluationTaskScoreModel.workspace_id == workspace_id,
-            ~EvaluationTaskScoreModel.deleted,
-            EvaluationTaskScoreModel.session_id.is_not(None),
-            start_cond,
-            end_cond,
+        records = [
+            r
+            for r in await self._reconciled_online_rows(workspace_id, window=window, task_id=task_id)
+            if r.session_id is not None
         ]
-        if task_id is not None:
-            conditions.append(EvaluationTaskScoreModel.task_id == task_id)
 
-        session_rows = await self.db.execute(
-            select(
-                EvaluationTaskScoreModel.session_id,
-                func.max(EvaluationTaskScoreModel.agent_id),
-                func.count(func.distinct(EvaluationTaskScoreModel.target_id)),
-                func.max(EvaluationTaskScoreModel.created_at),
+        session_meta: dict[uuid.UUID, dict[str, Any]] = {}
+        metric_values: dict[uuid.UUID, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        for record in records:
+            session_id = record.session_id
+            if session_id is None:
+                continue
+            meta = session_meta.setdefault(
+                session_id,
+                {"agent_id": record.agent_id, "trace_ids": set(), "last": record.effective_at},
             )
-            .where(*conditions)
-            .group_by(EvaluationTaskScoreModel.session_id)
-            .order_by(func.max(EvaluationTaskScoreModel.created_at).desc())
-        )
-        all_sessions = list(session_rows.all())
-        total = len(all_sessions)
+            meta["trace_ids"].add(record.target_id)
+            if record.effective_at > meta["last"]:
+                meta["last"] = record.effective_at
+            if meta["agent_id"] is None and record.agent_id is not None:
+                meta["agent_id"] = record.agent_id
+            if record.value != _ERROR_SENTINEL:
+                metric_values[session_id][record.metric_name].append(record.value)
+
+        ordered = sorted(session_meta.items(), key=lambda kv: kv[1]["last"], reverse=True)
+        total = len(ordered)
 
         offset = (page - 1) * page_size
-        page_sessions = all_sessions[offset : offset + page_size]
-        if not page_sessions:
-            return SessionRollupReportSchema(items=[], total=total)
-
-        page_ids = [row[0] for row in page_sessions]
-        metric_rows = await self.db.execute(
-            select(
-                EvaluationTaskScoreModel.session_id,
-                EvaluationTaskScoreModel.metric_name,
-                func.avg(EvaluationTaskScoreModel.value),
-                func.count(),
-            )
-            .where(
-                *conditions,
-                EvaluationTaskScoreModel.session_id.in_(page_ids),
-                EvaluationTaskScoreModel.value != _ERROR_SENTINEL,
-            )
-            .group_by(EvaluationTaskScoreModel.session_id, EvaluationTaskScoreModel.metric_name)
-        )
-        metrics_by_session: dict[uuid.UUID, list[BreakdownMetricSchema]] = defaultdict(list)
-        for session_id, metric, avg, count in metric_rows.all():
-            metrics_by_session[session_id].append(
-                BreakdownMetricSchema(metric_name=metric, avg=round(float(avg), 4), count=int(count))
-            )
+        page_sessions = ordered[offset : offset + page_size]
 
         items = [
             SessionRollupItemSchema(
-                session_id=row[0],
-                agent_id=row[1],
-                trace_count=int(row[2]),
-                last_scored_at=row[3],
-                metrics=sorted(metrics_by_session.get(row[0], []), key=lambda m: m.metric_name),
+                session_id=session_id,
+                agent_id=meta["agent_id"],
+                trace_count=len(meta["trace_ids"]),
+                last_scored_at=meta["last"],
+                metrics=[
+                    BreakdownMetricSchema(
+                        metric_name=metric,
+                        avg=round(sum(values) / len(values), 4),
+                        count=len(values),
+                    )
+                    for metric, values in sorted(metric_values.get(session_id, {}).items())
+                ],
             )
-            for row in page_sessions
+            for session_id, meta in page_sessions
         ]
         return SessionRollupReportSchema(items=items, total=total)
 

@@ -1,8 +1,4 @@
-## Purpose
-
-Evaluation report dashboard: on-demand aggregation APIs over existing evaluation data (offline runs/scores, online task scores, and human annotation scores), plus an ops-center page that visualizes quality, trends, distributions, comparisons, session-level rollups, human annotation queues, and machine-vs-human calibration. Online aggregations apply a human-override reconciliation rule (latest override replaces the superseded automated value, override creation time is the effective time); the breakdowns endpoint stays raw so `group_by=source` continues to expose both sides.
-
-## Requirements
+## ADDED Requirements
 
 ### Requirement: Human override reconciliation
 Report aggregations over target-typed scores SHALL use reconciled values: for each `(target_id, metric_name)`, if a human row with `overrides_score_id` exists, the latest such human row's value SHALL replace the overridden automated row's value; the overridden automated row and non-override human rows SHALL NOT additionally contribute to aggregates. Aggregations that reconcile: the overview quality/volume cards, the online trends series, the score distributions histograms, and the session rollup. The breakdowns endpoint SHALL be exempt — it SHALL keep reporting raw per-source values so `group_by=source` continues to expose human and automated rows side by side.
@@ -30,6 +26,8 @@ The evaluation page SHALL include a Calibration view that renders, per metric: p
 - **WHEN** no paired machine-human samples exist in the selected window
 - **THEN** the view displays an empty state with guidance instead of empty charts
 
+## MODIFIED Requirements
+
 ### Requirement: Overview report endpoint
 The system SHALL expose `GET /api/evaluation/reports/overview` that aggregates four card metrics over a time window (query params `start_date`/`end_date`, default last 30 days): quality (pass rate aggregated from completed offline run summaries plus average online task score computed over reconciled score values), volume (completed offline run count plus online scored-trace count), coverage (active dataset count, median items per active dataset, and the low-sample run ratio), and evaluation error rate (fraction of scores with the error sentinel value `-1.0` across both offline scores and online task scores).
 
@@ -44,20 +42,6 @@ The system SHALL expose `GET /api/evaluation/reports/overview` that aggregates f
 #### Scenario: Empty workspace returns zeroed payload
 - **WHEN** the workspace has no evaluation data in the window
 - **THEN** the endpoint returns 200 with zeroed/empty card payloads (no error)
-
-### Requirement: Coverage card low-sample ratio
-The coverage payload SHALL include the fraction of completed offline runs in the window whose dataset has fewer than 20 items ("low-sample run ratio"), counting dataset items at query time.
-
-#### Scenario: Low-sample runs counted
-- **WHEN** 3 completed runs exist in the window, 1 of them on a dataset with 8 items and 2 on datasets with 50 items
-- **THEN** the low-sample run ratio is `0.3333` (rounded to 4 decimal places)
-
-### Requirement: Workspace isolation on report endpoints
-All report endpoints SHALL scope every aggregation to the caller's workspace; scores, runs, tasks, and datasets from other workspaces SHALL NOT be included.
-
-#### Scenario: No cross-workspace leakage
-- **WHEN** workspace A requests the overview while workspace B has 5 completed runs
-- **THEN** the response reflects only workspace A data
 
 ### Requirement: Trends endpoint
 The system SHALL expose `GET /api/evaluation/reports/trends` returning per-bucket timeseries for a selectable dimension (`dataset`, `workflow`, or `agent`) and bucket size (`day` or `hour`, default `day`), within the requested window. Offline series aggregate `pass_rate` from completed run summaries bucketed by completion time; online series aggregate average reconciled score value per metric bucketed by score creation time, restricted to the selected agent when `dimension=agent`.
@@ -85,17 +69,6 @@ The system SHALL expose `GET /api/evaluation/reports/distributions` returning pe
 - **WHEN** an online trace has an automated score of `0.35` overridden by a human row of `0.9`
 - **THEN** the online histogram for that metric counts the trace once in bin `[0.9, 1.0]`
 
-### Requirement: Breakdowns endpoint
-The system SHALL expose `GET /api/evaluation/reports/breakdowns` for online task scores with `group_by` (`agent`, `task`, `session`, or `source`) returning per-group per-metric averages and counts, filterable by `metric_name` and the standard window.
-
-#### Scenario: Group by source
-- **WHEN** online scores exist from sources `llm_judge` (2 scores, avg 0.8) and `human` (1 score, 0.4)
-- **THEN** `group_by=source` returns one row per source with those averages and counts
-
-#### Scenario: Group by agent
-- **WHEN** `group_by=agent` is requested and scores link to 2 distinct agents
-- **THEN** the response returns one row per agent with per-metric averages
-
 ### Requirement: Session rollup endpoint
 The system SHALL expose `GET /api/evaluation/reports/sessions` that rolls online task scores up to session granularity using reconciled score values: per session, the per-metric average, scored trace count, owning agent, and last-scored time, ordered by last-scored time descending, paginated.
 
@@ -121,35 +94,3 @@ The system SHALL provide an evaluation page at `/ops-center/evaluation` with six
 #### Scenario: Empty state
 - **WHEN** the workspace has no evaluation data
 - **THEN** the page displays a "No evaluation data" empty state with guidance instead of empty charts
-
-### Requirement: Run report view
-The Run Report view SHALL let the user select a completed run and display per-metric score distributions, a low-score item list (lowest scores first) where each row reveals the score's `reasoning` on click, and a `source` indicator (`llm_judge` / `deterministic` / `human`) visually distinguishing score origin.
-
-#### Scenario: Drill into a low score
-- **WHEN** the user clicks a score row in the low-score list
-- **THEN** the row expands to show the evaluator reasoning text and the source badge
-
-### Requirement: Compare view
-The Compare view SHALL let the user select two runs and render the existing run-comparison API result: per-metric deltas, paired token/latency/cost deltas, and dataset/node drift indicators.
-
-#### Scenario: Comparison renders deltas
-- **WHEN** the user selects a baseline and a candidate run and submits
-- **THEN** the view shows per-metric delta values, paired token/latency/cost deltas, and a drift badge when `dataset_drift` is present in the response
-
-### Requirement: Online Quality view
-The Online Quality view SHALL display, per online task: a sampling-budget strip (sampled/scored/error counters against the task's configured `sampling_rate` and `max_traces_per_cycle`), an agent × metric score chart, and a session list that navigates to the session drill-down with the session's scores.
-
-#### Scenario: Budget strip from task metrics
-- **WHEN** an online task has counters `sampled=120` with `max_traces_per_cycle=50` configured
-- **THEN** the strip shows the counters and the configured cap
-
-#### Scenario: Session drill-down
-- **WHEN** the user clicks a session in the Online Quality session list
-- **THEN** the view shows that session's per-metric scores
-
-### Requirement: Ops Center sidebar navigation entry
-The sidebar SHALL include an "Evaluation" navigation entry under the Ops Center section linking to `/ops-center/evaluation`.
-
-#### Scenario: Sidebar shows Evaluation entry
-- **WHEN** the dashboard sidebar renders
-- **THEN** "Evaluation" appears as an Ops Center navigation item linking to `/ops-center/evaluation`

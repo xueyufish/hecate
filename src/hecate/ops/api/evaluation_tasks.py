@@ -230,6 +230,7 @@ async def list_scores(
     session_id: uuid.UUID | None = None,
     metric_name: str | None = None,
     score_status: Annotated[str | None, Query(alias="status", pattern="^(completed|error)$")] = None,
+    source: str | None = Query(None, max_length=20),
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> dict:
@@ -242,6 +243,7 @@ async def list_scores(
         session_id=session_id,
         metric_name=metric_name,
         status=score_status,
+        source=source,
         page=page,
         page_size=page_size,
     )

@@ -418,6 +418,106 @@ export interface OnlineTaskListItem {
   config: { sampling_rate?: number; max_traces_per_cycle?: number; agent_id?: string };
 }
 
+export interface AnnotationMetricDef {
+  name: string;
+  data_type: "numeric" | "categorical" | "boolean";
+  min?: number;
+  max?: number;
+  categories?: string[];
+}
+
+export interface AnnotationQueue {
+  id: string;
+  name: string;
+  description: string | null;
+  instructions: string | null;
+  metric_defs: AnnotationMetricDef[];
+  assigned_user_ids: string[];
+  workspace_id: string;
+  created_at: string;
+  updated_at: string;
+  counts?: Record<string, number>;
+}
+
+export interface AnnotationQueueItem {
+  id: string;
+  queue_id: string;
+  target_type: string;
+  target_id: string;
+  status: "pending" | "claimed" | "completed" | "skipped";
+  added_by: string | null;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  completed_by: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface AnnotationSuggestion {
+  metric_name: string;
+  value: number;
+  source: string;
+  reasoning: string | null;
+  score_id: string;
+}
+
+export interface AnnotationItemDetail {
+  item: AnnotationQueueItem;
+  queue: AnnotationQueue;
+  trace: {
+    id: string;
+    trace_id: string;
+    session_id: string | null;
+    status: string;
+    start_time: string;
+    end_time: string | null;
+  } | null;
+  projection: {
+    messages: { role: string; content: string }[];
+    tool_calls: { name: string; args: unknown; tool_call_id: string }[];
+  } | null;
+  suggestions: AnnotationSuggestion[];
+}
+
+export interface AnnotationEntryPayload {
+  metric_name: string;
+  value?: number;
+  value_label?: string;
+  overrides_score_id?: string;
+  reason_code?: string;
+  justification?: string;
+}
+
+export interface CalibrationHeatmapCell {
+  machine_bin: number;
+  human_bin: number;
+  count: number;
+}
+
+export interface CalibrationMetric {
+  metric_name: string;
+  pair_count: number;
+  agreement_rate: number | null;
+  mae: number | null;
+  kappa: number | null;
+  data_mode: "numeric" | "categorical";
+  machine_only_count: number;
+  human_only_count: number;
+  heatmap: CalibrationHeatmapCell[];
+}
+
+export interface CalibrationReport {
+  metrics: CalibrationMetric[];
+}
+
+export interface SessionTrace {
+  id: string;
+  trace_id: string;
+  session_id: string | null;
+  status: string;
+  start_time: string;
+}
+
 export interface EvaluationApi {
   getOverview(window?: { start_date?: string; end_date?: string }): Promise<OverviewReport>;
   getTrends(params: {
@@ -445,6 +545,37 @@ export interface EvaluationApi {
   listRunScores(runId: string): Promise<{ items: RunScoreItem[]; total: number }>;
   listOnlineTasks(): Promise<{ items: OnlineTaskListItem[]; total: number }>;
   compareRuns(baselineRunId: string, candidateRunId: string): Promise<RunCompareResult>;
+  // Annotation queues (7.4) + calibration (7.4a)
+  listAnnotationQueues(): Promise<{ items: AnnotationQueue[]; total: number }>;
+  createAnnotationQueue(payload: {
+    name: string;
+    instructions?: string;
+    metric_defs: AnnotationMetricDef[];
+  }): Promise<AnnotationQueue>;
+  deleteAnnotationQueue(queueId: string): Promise<void>;
+  listAnnotationQueueItems(queueId: string, status?: string): Promise<{ items: AnnotationQueueItem[]; total: number }>;
+  addAnnotationQueueItems(
+    queueId: string,
+    targetIds: string[]
+  ): Promise<{ created: number; already_present: string[]; rejected: { target_id: string; reason: string }[] }>;
+  addAnnotationQueueItemsFromTask(
+    queueId: string,
+    payload: { task_id: string; metric_name?: string; min_score?: number; max_score?: number; limit?: number }
+  ): Promise<{ created: number; skipped_existing: number; candidates: number; limit: number }>;
+  getAnnotationQueueItemDetail(queueId: string, itemId: string): Promise<AnnotationItemDetail>;
+  claimAnnotationQueueItem(queueId: string, itemId: string): Promise<AnnotationQueueItem>;
+  skipAnnotationQueueItem(queueId: string, itemId: string): Promise<AnnotationQueueItem>;
+  submitAnnotationQueueItem(
+    queueId: string,
+    itemId: string,
+    annotations: AnnotationEntryPayload[]
+  ): Promise<AnnotationQueueItem>;
+  pushAnnotationQueueToDataset(
+    queueId: string,
+    payload: { dataset_id?: string; dataset_name?: string; item_ids?: string[] }
+  ): Promise<{ created: number; skipped: number; dataset_id: string }>;
+  getCalibration(params?: { start_date?: string; end_date?: string; metric_name?: string }): Promise<CalibrationReport>;
+  listSessionTraces(sessionId: string): Promise<SessionTrace[]>;
 }
 
 export const evaluationApi: EvaluationApi = {
@@ -496,5 +627,52 @@ export const evaluationApi: EvaluationApi = {
       baseline_run_id: baselineRunId,
       candidate_run_id: candidateRunId,
     });
+  },
+  async listAnnotationQueues() {
+    return api.get<{ items: AnnotationQueue[]; total: number }>(`/api/evaluation/annotation-queues?page_size=100`);
+  },
+  async createAnnotationQueue(payload) {
+    return api.post<AnnotationQueue>(`/api/evaluation/annotation-queues`, payload);
+  },
+  async deleteAnnotationQueue(queueId) {
+    await api.delete(`/api/evaluation/annotation-queues/${queueId}`);
+  },
+  async listAnnotationQueueItems(queueId, status) {
+    const qs = new URLSearchParams(status ? { status } : {});
+    return api.get<{ items: AnnotationQueueItem[]; total: number }>(
+      `/api/evaluation/annotation-queues/${queueId}/items?${qs}`
+    );
+  },
+  async addAnnotationQueueItems(queueId, targetIds) {
+    return api.post(`/api/evaluation/annotation-queues/${queueId}/items`, { target_ids: targetIds });
+  },
+  async addAnnotationQueueItemsFromTask(queueId, payload) {
+    return api.post(`/api/evaluation/annotation-queues/${queueId}/items/from-task`, payload);
+  },
+  async getAnnotationQueueItemDetail(queueId, itemId) {
+    return api.get<AnnotationItemDetail>(`/api/evaluation/annotation-queues/${queueId}/items/${itemId}`);
+  },
+  async claimAnnotationQueueItem(queueId, itemId) {
+    return api.post<AnnotationQueueItem>(`/api/evaluation/annotation-queues/${queueId}/items/${itemId}/claim`);
+  },
+  async skipAnnotationQueueItem(queueId, itemId) {
+    return api.post<AnnotationQueueItem>(`/api/evaluation/annotation-queues/${queueId}/items/${itemId}/skip`);
+  },
+  async submitAnnotationQueueItem(queueId, itemId, annotations) {
+    return api.post<AnnotationQueueItem>(`/api/evaluation/annotation-queues/${queueId}/items/${itemId}/submit`, {
+      annotations,
+    });
+  },
+  async pushAnnotationQueueToDataset(queueId, payload) {
+    return api.post(`/api/evaluation/annotation-queues/${queueId}/push-dataset`, payload);
+  },
+  async getCalibration(params = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]
+    );
+    return api.get<CalibrationReport>(`/api/evaluation/calibration?${qs}`);
+  },
+  async listSessionTraces(sessionId) {
+    return api.get<SessionTrace[]>(`/api/traces?session_id=${sessionId}&limit=50`);
   },
 };

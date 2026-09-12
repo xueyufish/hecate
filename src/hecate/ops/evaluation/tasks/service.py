@@ -394,6 +394,7 @@ class EvaluationTaskService:
         session_id: uuid.UUID | None = None,
         metric_name: str | None = None,
         status: str | None = None,
+        source: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[EvaluationTaskScoreModel], int]:
@@ -412,6 +413,8 @@ class EvaluationTaskService:
             conditions.append(EvaluationTaskScoreModel.metric_name == metric_name)
         if status is not None:
             conditions.append(EvaluationTaskScoreModel.status == status)
+        if source is not None:
+            conditions.append(EvaluationTaskScoreModel.source == source)
         base_query = select(EvaluationTaskScoreModel).where(*conditions)
 
         count_stmt = select(func.count()).select_from(base_query.subquery())

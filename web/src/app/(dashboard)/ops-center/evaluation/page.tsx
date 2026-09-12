@@ -9,16 +9,22 @@ import { OverviewView } from "@/components/evaluation/overview-view";
 import { OnlineView } from "@/components/evaluation/online-view";
 import { RunReportView } from "@/components/evaluation/run-report-view";
 import { CompareView } from "@/components/evaluation/compare-view";
+import { AnnotationsView } from "@/components/evaluation/annotations-view";
+import { CalibrationView } from "@/components/evaluation/calibration-view";
 import { evaluationApi, OverviewReport } from "@/lib/api-client";
 
-const TABS = ["overview", "online", "runs", "compare"] as const;
+const TABS = ["overview", "online", "runs", "compare", "annotations", "calibration"] as const;
 type Tab = (typeof TABS)[number];
+
+const DATA_TABS: Tab[] = ["overview", "online", "runs", "compare"];
 
 const TAB_LABELS: Record<Tab, string> = {
   overview: "Overview",
   online: "Online Quality",
   runs: "Run Report",
   compare: "Compare",
+  annotations: "Annotation",
+  calibration: "Calibration",
 };
 
 export default function EvaluationPage() {
@@ -77,7 +83,23 @@ export default function EvaluationPage() {
         </div>
       </div>
 
-      {!loading && !hasData ? (
+      <div className="flex gap-1 border-b">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            className={`rounded-t-md px-4 py-2 text-sm ${
+              tab === t
+                ? "border-b-2 border-primary font-medium text-primary"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+            onClick={() => setTab(t)}
+          >
+            {TAB_LABELS[t]}
+          </button>
+        ))}
+      </div>
+
+      {!loading && !hasData && DATA_TABS.includes(tab) ? (
         <Card>
           <CardContent className="py-12 text-center">
             <ClipboardCheck className="mx-auto mb-4 h-12 w-12 text-muted-foreground" />
@@ -90,22 +112,6 @@ export default function EvaluationPage() {
         </Card>
       ) : (
         <>
-          <div className="flex gap-1 border-b">
-            {TABS.map((t) => (
-              <button
-                key={t}
-                className={`rounded-t-md px-4 py-2 text-sm ${
-                  tab === t
-                    ? "border-b-2 border-primary font-medium text-primary"
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
-                onClick={() => setTab(t)}
-              >
-                {TAB_LABELS[t]}
-              </button>
-            ))}
-          </div>
-
           {overview && (
             <>
               <div className={tab === "overview" ? "" : "hidden"}>
@@ -122,6 +128,12 @@ export default function EvaluationPage() {
               </div>
             </>
           )}
+          <div className={tab === "annotations" ? "" : "hidden"}>
+            <AnnotationsView />
+          </div>
+          <div className={tab === "calibration" ? "" : "hidden"}>
+            <CalibrationView startDate={dateRange().start} endDate={dateRange().end} />
+          </div>
         </>
       )}
     </div>

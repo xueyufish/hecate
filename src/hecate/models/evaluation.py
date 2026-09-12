@@ -8,6 +8,9 @@ Defines the persistence layer and API schemas for the evaluation system:
 - **EvaluationScoreModel** — individual score from one evaluator on one item
 - **EvaluationTaskModel** — reusable evaluation task (offline batch / online sampler)
 - **EvaluationTaskScoreModel** — target-typed score produced by an online task
+  or a human annotation (7.4/7.4a)
+- **AnnotationQueueModel** / **AnnotationQueueItemModel** — human annotation
+  worklists over production traces
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import DateTime, Float, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -57,6 +60,15 @@ class TaskScoreStatus(enum.StrEnum):
 
     COMPLETED = "completed"
     ERROR = "error"
+
+
+class QueueItemStatus(enum.StrEnum):
+    """Lifecycle states for an annotation queue item (7.4)."""
+
+    PENDING = "pending"
+    CLAIMED = "claimed"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +271,7 @@ class EvaluationTaskModel(BaseModel):
 
 
 class EvaluationTaskScoreModel(BaseModel):
-    """ORM model for target-typed scores produced by online evaluation tasks.
+    """ORM model for target-typed scores (automated + human).
 
     Each record scores one evaluation metric against one production target
     (v1: a root trace). Granularity breakdowns (Model / Root-Agent / Tool)
@@ -269,7 +281,8 @@ class EvaluationTaskScoreModel(BaseModel):
 
     Key fields:
 
-    - **task_id** — the online task that produced this score
+    - **task_id** — the online task that produced this score; ``NULL`` for
+      human annotation rows (7.4)
     - **target_type** — v1 always ``trace`` (``session`` / ``span`` / ``tool``
       reserved for later increments)
     - **target_id** — the scored entity's identifier (``traces.id``)
@@ -277,22 +290,102 @@ class EvaluationTaskScoreModel(BaseModel):
     - **status** — ``completed`` or ``error`` (error scores keep ``value=-1.0``
       and the failure reason in ``reasoning``)
 
-    Idempotency: the unique constraint on
-    ``(task_id, target_type, target_id, metric_name)`` makes rescans no-ops.
+    Human rows (``source="human"``) additionally carry ``annotator_id``, an
+    optional ``overrides_score_id`` (pointer to the superseded automated row,
+    7.4a), ``reason_code`` and ``value_label`` (categorical/boolean
+    annotations store the category string here and its index in ``value``).
+
+    Idempotency: a partial unique index on
+    ``(task_id, target_type, target_id, metric_name) WHERE task_id IS NOT
+    NULL`` makes automated rescans no-ops; human rows are exempt (they upsert
+    per ``(annotator_id, target_id, metric_name)`` at the service layer).
     """
 
     __tablename__ = "evaluation_task_scores"
 
-    task_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    task_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     target_type: Mapped[str] = mapped_column(String(20), nullable=False, default="trace")
     target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     session_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     agent_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     metric_name: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[float] = mapped_column(Float, nullable=False)
+    value_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="llm_judge")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=TaskScoreStatus.COMPLETED.value)
+    annotator_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    overrides_score_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    reason_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_eval_task_scores_idempotency",
+            "task_id",
+            "target_type",
+            "target_id",
+            "metric_name",
+            unique=True,
+            postgresql_where=text("task_id IS NOT NULL"),
+            sqlite_where=text("task_id IS NOT NULL"),
+        ),
+        Index("idx_eval_task_scores_task", "task_id"),
+        Index("idx_eval_task_scores_target", "target_id"),
+        Index("idx_eval_task_scores_session", "session_id"),
+        Index("idx_eval_task_scores_workspace", "workspace_id", "deleted"),
+        Index("idx_eval_task_scores_human", "target_id", "metric_name", "source"),
+    )
+
+
+class AnnotationQueueModel(BaseModel):
+    """ORM model for a human annotation queue (7.4).
+
+    A named worklist of production traces that reviewers label and score.
+    ``metric_defs`` constrains the annotation form: each definition has a
+    ``name`` (unique within the queue), a ``data_type`` (``numeric`` with
+    ``min``/``max``, ``categorical`` with ``categories``, or ``boolean``).
+    ``assigned_user_ids`` — when non-empty — restricts who may claim items.
+    """
+
+    __tablename__ = "annotation_queues"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metric_defs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    assigned_user_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
+
+    __table_args__ = (Index("idx_annotation_queues_workspace", "workspace_id", "deleted"),)
+
+
+class AnnotationQueueItemModel(BaseModel):
+    """ORM model for one annotated target inside an annotation queue.
+
+    Each item references one root trace (``target_type="trace"`` v1) and
+    moves through ``pending → claimed → completed | skipped``. A trace may
+    appear in a queue at most once (unique constraint). Attribution fields
+    (``added_by`` / ``claimed_by`` / ``completed_by``) record who did what.
+    """
+
+    __tablename__ = "annotation_queue_items"
+
+    queue_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    target_type: Mapped[str] = mapped_column(String(20), nullable=False, default="trace")
+    target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default=QueueItemStatus.PENDING.value)
+    added_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    claimed_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
@@ -300,16 +393,13 @@ class EvaluationTaskScoreModel(BaseModel):
 
     __table_args__ = (
         UniqueConstraint(
-            "task_id",
+            "queue_id",
             "target_type",
             "target_id",
-            "metric_name",
-            name="uq_eval_task_scores_idempotency",
+            name="uq_annotation_queue_items_target",
         ),
-        Index("idx_eval_task_scores_task", "task_id"),
-        Index("idx_eval_task_scores_target", "target_id"),
-        Index("idx_eval_task_scores_session", "session_id"),
-        Index("idx_eval_task_scores_workspace", "workspace_id", "deleted"),
+        Index("idx_annotation_queue_items_status", "queue_id", "status", "deleted"),
+        Index("idx_annotation_queue_items_workspace", "workspace_id", "deleted"),
     )
 
 
@@ -534,20 +624,101 @@ class EvaluationTaskReadSchema(PydanticBase):
 
 
 class EvaluationTaskScoreReadSchema(PydanticBase):
-    """Schema for reading target-typed online evaluation scores."""
+    """Schema for reading target-typed scores (automated + human)."""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    task_id: uuid.UUID
+    task_id: uuid.UUID | None = None
     target_type: str
     target_id: uuid.UUID
     session_id: uuid.UUID | None
     agent_id: uuid.UUID | None
     metric_name: str
     value: float
+    value_label: str | None = None
     reasoning: str | None
     source: str
     status: str
+    annotator_id: uuid.UUID | None = None
+    overrides_score_id: uuid.UUID | None = None
+    reason_code: str | None = None
     workspace_id: uuid.UUID
     created_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Pydantic Schemas — Annotation queues (7.4)
+# ---------------------------------------------------------------------------
+
+
+class AnnotationMetricDefSchema(PydanticBase):
+    """One annotation metric definition constraining the annotation form."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=100)
+    data_type: str = Field(..., pattern="^(numeric|categorical|boolean)$")
+    min: float | None = Field(None, ge=-1_000_000.0, le=1_000_000.0)
+    max: float | None = Field(None, ge=-1_000_000.0, le=1_000_000.0)
+    categories: list[str] | None = Field(None, min_length=1, max_length=50)
+
+
+class AnnotationQueueCreateSchema(PydanticBase):
+    """Request schema for creating an annotation queue."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=2000)
+    instructions: str | None = Field(None, max_length=5000)
+    metric_defs: list[AnnotationMetricDefSchema] = Field(..., min_length=1)
+    assigned_user_ids: list[uuid.UUID] | None = None
+
+
+class AnnotationQueueUpdateSchema(PydanticBase):
+    """Schema for updating an annotation queue. All fields optional."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=2000)
+    instructions: str | None = Field(None, max_length=5000)
+    metric_defs: list[AnnotationMetricDefSchema] | None = Field(None, min_length=1)
+    assigned_user_ids: list[uuid.UUID] | None = None
+
+
+class AnnotationQueueReadSchema(PydanticBase):
+    """Schema for reading annotation queue data."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    description: str | None
+    instructions: str | None
+    metric_defs: list
+    assigned_user_ids: list
+    workspace_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class AnnotationQueueItemReadSchema(PydanticBase):
+    """Schema for reading an annotation queue item."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    queue_id: uuid.UUID
+    target_type: str
+    target_id: uuid.UUID
+    status: str
+    added_by: uuid.UUID | None
+    claimed_by: uuid.UUID | None
+    claimed_at: datetime | None
+    completed_by: uuid.UUID | None
+    completed_at: datetime | None
+    workspace_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
