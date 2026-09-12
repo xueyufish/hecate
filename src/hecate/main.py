@@ -53,6 +53,7 @@ from hecate.ops.api.conversation_analytics import router as conversation_analyti
 from hecate.ops.api.costs import router as costs_router
 from hecate.ops.api.evaluation import router as evaluation_router
 from hecate.ops.api.evaluation_annotations import router as evaluation_annotations_router
+from hecate.ops.api.evaluation_backflow import router as evaluation_backflow_router
 from hecate.ops.api.evaluation_reports import router as evaluation_reports_router
 from hecate.ops.api.evaluation_tasks import router as evaluation_tasks_router
 from hecate.ops.api.model_pricing import router as model_pricing_router
@@ -411,6 +412,7 @@ app.include_router(evaluation_router, prefix="/api", tags=["evaluation"])
 app.include_router(synthesis_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_tasks_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_annotations_router, prefix="/api", tags=["evaluation"])
+app.include_router(evaluation_backflow_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_reports_router, prefix="/api", tags=["evaluation"])
 app.include_router(chat_router, prefix="/v1", tags=["chat"])
 app.include_router(models_router, prefix="/v1", tags=["models"])

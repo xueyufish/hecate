@@ -32,6 +32,7 @@ from hecate.models.evaluation import (
 from hecate.models.session import SessionModel
 from hecate.ops.evaluation.dataset_service import EvaluationDatasetService
 from hecate.ops.evaluation.tasks.trace_input import build_eval_input
+from hecate.ops.evaluation.trace_dedup import dataset_trace_ids
 
 logger = logging.getLogger(__name__)
 
@@ -886,18 +887,9 @@ class AnnotationService:
         )
 
     async def _dataset_trace_ids(self, dataset_id: uuid.UUID) -> set[str]:
-        rows = await self.db.execute(
-            select(EvaluationItemModel.metadata_).where(
-                EvaluationItemModel.dataset_id == dataset_id,
-                ~EvaluationItemModel.deleted,
-            )
-        )
-        trace_ids: set[str] = set()
-        for (metadata,) in rows.all():
-            annotation = (metadata or {}).get("annotation") if isinstance(metadata, dict) else None
-            if isinstance(annotation, dict) and annotation.get("trace_id"):
-                trace_ids.add(str(annotation["trace_id"]))
-        return trace_ids
+        # Shared helper reads both attribution keys, so a trace materialized
+        # by the automated backflow path (7.2d) blocks a duplicate here too.
+        return await dataset_trace_ids(self.db, dataset_id)
 
     async def _human_labels(self, target_id: uuid.UUID) -> list[dict[str, Any]]:
         rows = await self.db.execute(
