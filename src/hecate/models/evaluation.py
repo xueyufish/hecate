@@ -173,7 +173,12 @@ class EvaluationRunModel(BaseModel):
       is ``workflow`` (7.3); ``workflow_version`` is locked at run start.
     - **dataset_snapshot** — JSON snapshot of dataset items + content hash,
       captured at run start so regression comparison remains meaningful
-      even if the dataset is edited between runs.
+      even if the dataset is edited between runs. Version-bound runs
+      (7.3b) copy the named version's frozen items here instead of
+      freezing the live dataset.
+    - **dataset_version_id** — nullable link to the named dataset version
+      the run was pinned to (7.3b); ``NULL`` for runs that froze the live
+      dataset.
     - **repetitions** — number of times each item was executed; ``>=1``.
       When ``>1`` the run summary also exposes ``consistency_rate``.
     """
@@ -182,6 +187,7 @@ class EvaluationRunModel(BaseModel):
 
     dataset_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
     task_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    dataset_version_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, index=True)
     evaluator_configs: Mapped[list] = mapped_column(JSON, default=list)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default=RunStatus.PENDING.value)
     summary: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
@@ -418,6 +424,47 @@ class AnnotationQueueItemModel(BaseModel):
     )
 
 
+class EvaluationDatasetVersionModel(BaseModel):
+    """ORM model for a named, immutable dataset version (7.3b).
+
+    A version freezes a dataset's item set at creation time — the same
+    canonical serialization and content hash a run dataset snapshot
+    uses, promoted to a first-class object runs can be pinned against.
+
+    Key fields:
+
+    - **dataset_id** — the source dataset; versions never move datasets
+    - **name** — unique within the dataset (soft-deleted rows keep the
+      name reserved, so a name always means the same frozen content)
+    - **items** — frozen item dicts in the run-snapshot shape
+    - **content_hash** — sha256 over the content-field projection, shared
+      implementation with :meth:`OfflineTaskRunner._snapshot_dataset`
+    - **created_by** — server-filled from the authenticated user
+
+    Versions are immutable: there is no update path. Deletion is a soft
+    delete; runs that referenced the version are unaffected because runs
+    carry their own embedded snapshot copy.
+    """
+
+    __tablename__ = "evaluation_dataset_versions"
+
+    dataset_id: Mapped[uuid.UUID] = mapped_column(nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    items: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("dataset_id", "name", name="uq_eval_dataset_versions_name"),
+        Index("idx_eval_dataset_versions_workspace", "workspace_id", "deleted"),
+    )
+
+
 class EvaluationBackflowRuleModel(BaseModel):
     """ORM model for an automated trace-backflow rule (7.2d).
 
@@ -584,9 +631,46 @@ class EvaluationRunReadSchema(PydanticBase):
     completed_at: datetime | None
     workflow_id: uuid.UUID | None = None
     workflow_version: int | None = None
+    dataset_version_id: uuid.UUID | None = None
     dataset_snapshot: dict | None = None
     repetitions: int | None = None
     trajectory: list | None = None
+    workspace_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Pydantic Schemas — Dataset versions (7.3b)
+# ---------------------------------------------------------------------------
+
+
+class EvaluationDatasetVersionCreateSchema(PydanticBase):
+    """Request schema for freezing the current live items as a named version.
+
+    The name is a label, not an ordered semver — clients should not read
+    ordering into it. ``content_hash`` and ``items`` are server-computed
+    and cannot be supplied.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=2000)
+
+
+class EvaluationDatasetVersionReadSchema(PydanticBase):
+    """Schema for reading a named dataset version (items included)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    dataset_id: uuid.UUID
+    name: str
+    description: str | None
+    items: list
+    content_hash: str
+    created_by: uuid.UUID | None = None
     workspace_id: uuid.UUID
     created_at: datetime
     updated_at: datetime

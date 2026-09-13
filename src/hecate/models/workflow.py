@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel as PydanticBase
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 from sqlalchemy import ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -34,6 +34,10 @@ class WorkflowModel(BaseModel):
       ``"task"`` for single-shot headless execution.
     - **published_version** — version number currently published to production,
       or ``None`` if never published.
+    - **evaluation_gate** — nullable JSON publish-gate configuration (7.3a);
+      ``NULL`` = gate off. Shape: ``{"mode": "warn"|"require", "min_pass_rate",
+      "block_on_regression", "block_on_drift", "require_run",
+      "require_dataset_version"}``.
     """
 
     __tablename__ = "workflows"
@@ -46,6 +50,7 @@ class WorkflowModel(BaseModel):
     current_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     execution_mode: Mapped[str] = mapped_column(String(20), nullable=False, default="conversational")
     published_version: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    evaluation_gate: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
 
     __table_args__ = (Index("idx_workflows_workspace", "workspace_id", "deleted"),)
 
@@ -134,6 +139,38 @@ class WorkflowRunModel(BaseModel):
 # --- Pydantic Schemas ---
 
 
+class EvaluationGateConfigSchema(PydanticBase):
+    """Publish evaluation gate configuration (7.3a).
+
+    ``mode="warn"`` computes and reports the gate verdict without blocking;
+    ``mode="require"`` rejects the publish with 409 when any enabled signal
+    fails. A require-mode configuration must enable at least one signal —
+    a gate that gates nothing is rejected at configuration time.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: str = Field(..., pattern="^(warn|require)$")
+    min_pass_rate: float | None = Field(None, ge=0.0, le=1.0)
+    block_on_regression: bool = False
+    block_on_drift: bool = False
+    require_run: bool = False
+    require_dataset_version: bool = False
+
+    @model_validator(mode="after")
+    def _require_mode_needs_a_signal(self) -> EvaluationGateConfigSchema:
+        if self.mode == "require" and not (
+            self.min_pass_rate is not None
+            or self.block_on_regression
+            or self.block_on_drift
+            or self.require_run
+            or self.require_dataset_version
+        ):
+            msg = "evaluation_gate mode='require' needs at least one enabled signal"
+            raise ValueError(msg)
+        return self
+
+
 class WorkflowCreateSchema(PydanticBase):
     """Schema for creating a new workflow."""
 
@@ -146,7 +183,12 @@ class WorkflowCreateSchema(PydanticBase):
 
 
 class WorkflowUpdateSchema(PydanticBase):
-    """Schema for updating an existing workflow."""
+    """Schema for updating an existing workflow.
+
+    ``evaluation_gate`` accepts a full gate configuration or ``None``.
+    Passing ``None`` explicitly clears the gate (turns it off); omitting
+    the field leaves the stored configuration untouched.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -154,6 +196,7 @@ class WorkflowUpdateSchema(PydanticBase):
     graph_dsl: dict[str, Any] | None = Field(None, description="Updated graph DSL definition")
     change_summary: str = Field(default="", max_length=1000)
     execution_mode: str | None = Field(None, pattern="^(conversational|task)$")
+    evaluation_gate: EvaluationGateConfigSchema | None = None
 
 
 class WorkflowReadSchema(PydanticBase):
@@ -167,6 +210,7 @@ class WorkflowReadSchema(PydanticBase):
     current_version: int
     execution_mode: str
     published_version: int | None
+    evaluation_gate: dict | None = None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
@@ -213,6 +257,7 @@ class WorkflowDetailSchema(PydanticBase):
     deleted_at: datetime | None
     version: WorkflowVersionReadSchema | None = None
     evaluation_report: dict | None = None
+    evaluation_gate: dict | None = None
 
 
 class WorkflowRunReadSchema(PydanticBase):

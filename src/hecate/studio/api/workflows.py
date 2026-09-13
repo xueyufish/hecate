@@ -32,7 +32,10 @@ from hecate.models.workflow import (
     WorkflowUpdateSchema,
 )
 from hecate.studio.workflows.graph_dsl import GraphValidationError
-from hecate.studio.workflows.service import WorkflowService
+from hecate.studio.workflows.service import (
+    PublishEvaluationGateBlockedError,
+    WorkflowService,
+)
 from hecate.studio.workflows.test_runner import WorkflowTestRunner
 
 router = APIRouter()
@@ -250,12 +253,21 @@ async def publish_workflow_version(
     version: int,
     db: Annotated[AsyncSession, Depends(get_db)],
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    body: dict | None = None,
 ) -> dict:
-    """Publish a specific workflow version to production.
+    """Publish a specific workflow version to production (7.3 + 7.3a).
+
+    The optional JSON body ``{"force": true}`` overrides a require-mode
+    evaluation gate; the bypass is recorded in the audit log with the
+    acting user. With a gate configured in ``mode=require``, a failed
+    signal returns 409 ``EVALUATION_GATE_BLOCKED`` carrying the gate
+    verdict and the full evaluation report. With ``mode=warn`` or no
+    gate configured, publish always succeeds.
 
     Args:
         workflow_id: The UUID of the workflow.
         version: The version number to publish.
+        body: Optional request body — ``{"force": true}`` to bypass.
         db: The async database session.
         ctx: The authenticated context.
 
@@ -263,17 +275,41 @@ async def publish_workflow_version(
         dict: The updated workflow data.
 
     Raises:
-        HTTPException: 404 if workflow or version not found.
+        HTTPException: 404 if workflow or version not found; 409 if the
+            require-mode gate rejects the publish.
     """
     service = WorkflowService(db)
+    force = bool((body or {}).get("force") or False)
     try:
-        result = await service.publish_version(workflow_id, version)
-        return result.model_dump()
+        result = await service.publish_version(
+            workflow_id,
+            version,
+            force=force,
+            actor_user_id=ctx.user_id,
+        )
+    except PublishEvaluationGateBlockedError as exc:
+        # Serialize the gate result to a plain dict so FastAPI's JSON
+        # encoder can carry it in the 409 envelope; the dataclass is
+        # not JSON-serializable by default.
+        from dataclasses import asdict
+
+        gate_dict = asdict(exc.gate_result)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "EVALUATION_GATE_BLOCKED",
+                    "message": str(exc),
+                    "details": {"gate": gate_dict, "evaluation_report": exc.report},
+                }
+            },
+        ) from exc
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": {"code": "NOT_FOUND", "message": str(e), "details": None}},
         ) from e
+    return result.model_dump()
 
 
 @router.get("/workflows/{workflow_id}/diff")

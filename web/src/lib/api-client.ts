@@ -116,6 +116,13 @@ class ApiClient {
     return this.request<T>(path, { method: "DELETE" });
   }
 
+  async patch<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>(path, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
   async *stream(
     path: string,
     body: {
@@ -518,6 +525,68 @@ export interface SessionTrace {
   start_time: string;
 }
 
+/** 7.3b: a frozen, named snapshot of a dataset's item set. */
+export interface DatasetVersion {
+  id: string;
+  dataset_id: string;
+  name: string;
+  description: string | null;
+  items: EvaluationItem[];
+  content_hash: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatasetVersionListEntry {
+  id: string;
+  dataset_id: string;
+  name: string;
+  description: string | null;
+  content_hash: string;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DatasetVersionDiffResult {
+  base: { kind: string; version_id: string; name: string; content_hash: string };
+  target: {
+    kind: string;
+    version_id?: string;
+    name?: string;
+    content_hash: string;
+  };
+  added: Array[];
+  removed: Array[];
+  changed: Array<{ item_id: string; fields: Record<string, { base: unknown; target: unknown }> }>;
+}
+
+export interface EvaluationItem {
+  id: string;
+  dataset_id: string;
+  query: string;
+  expected_answer: string | null;
+  generated_answer: string | null;
+  context: string[] | null;
+  tags: string[] | null;
+  known_bad: boolean;
+  known_bad_reason: string | null;
+  known_bad_marked_by: string | null;
+  known_bad_marked_at: string | null;
+  known_bad_expires_at: string | null;
+  created_at: string;
+}
+
+export interface EvaluationGateConfig {
+  mode: "off" | "warn" | "require";
+  min_pass_rate?: number | null;
+  block_on_regression?: boolean;
+  block_on_drift?: boolean;
+  require_run?: boolean;
+  require_dataset_version?: boolean;
+}
+
 export interface EvaluationApi {
   getOverview(window?: { start_date?: string; end_date?: string }): Promise<OverviewReport>;
   getTrends(params: {
@@ -576,6 +645,39 @@ export interface EvaluationApi {
   ): Promise<{ created: number; skipped: number; dataset_id: string }>;
   getCalibration(params?: { start_date?: string; end_date?: string; metric_name?: string }): Promise<CalibrationReport>;
   listSessionTraces(sessionId: string): Promise<SessionTrace[]>;
+  // 7.3b: dataset versions
+  listDatasetVersions(
+    datasetId: string,
+    params?: { page?: number; page_size?: number }
+  ): Promise<{ items: DatasetVersionListEntry[]; total: number }>;
+  createDatasetVersion(
+    datasetId: string,
+    payload: { name: string; description?: string | null }
+  ): Promise<DatasetVersion>;
+  getDatasetVersion(datasetId: string, versionId: string): Promise<DatasetVersion>;
+  deleteDatasetVersion(datasetId: string, versionId: string): Promise<void>;
+  checkoutDatasetVersion(
+    datasetId: string,
+    versionId: string
+  ): Promise<{ added: number; removed: number; changed: number; live_items_after: number }>;
+  diffDatasetVersion(
+    datasetId: string,
+    versionId: string,
+    against: string
+  ): Promise<DatasetVersionDiffResult>;
+  // 7.3c: known-bad item marking UI
+  markItemKnownBad(
+    datasetId: string,
+    itemId: string,
+    payload: { known_bad: boolean; known_bad_reason?: string | null; known_bad_expires_at?: string | null }
+  ): Promise<EvaluationItem>;
+  // 7.3a: publish evaluation gate
+  updateWorkflowGate(workflowId: string, gate: EvaluationGateConfig | null): Promise<unknown>;
+  publishWorkflowVersion(
+    workflowId: string,
+    version: number,
+    body?: { force?: boolean }
+  ): Promise<unknown>;
 }
 
 export const evaluationApi: EvaluationApi = {
@@ -674,5 +776,57 @@ export const evaluationApi: EvaluationApi = {
   },
   async listSessionTraces(sessionId) {
     return api.get<SessionTrace[]>(`/api/traces?session_id=${sessionId}&limit=50`);
+  },
+  // 7.3b: dataset versions
+  async listDatasetVersions(datasetId, params = {}) {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]
+    );
+    return api.get<{ items: DatasetVersionListEntry[]; total: number }>(
+      `/api/evaluation/datasets/${datasetId}/versions?${qs}`
+    );
+  },
+  async createDatasetVersion(datasetId, payload) {
+    return api.post<DatasetVersion>(
+      `/api/evaluation/datasets/${datasetId}/versions`,
+      payload,
+    );
+  },
+  async getDatasetVersion(datasetId, versionId) {
+    return api.get<DatasetVersion>(
+      `/api/evaluation/datasets/${datasetId}/versions/${versionId}`,
+    );
+  },
+  async deleteDatasetVersion(datasetId, versionId) {
+    return api.delete(
+      `/api/evaluation/datasets/${datasetId}/versions/${versionId}`,
+    );
+  },
+  async checkoutDatasetVersion(datasetId, versionId) {
+    return api.post<{ added: number; removed: number; changed: number; live_items_after: number }>(
+      `/api/evaluation/datasets/${datasetId}/versions/${versionId}/checkout`,
+    );
+  },
+  async diffDatasetVersion(datasetId, versionId, against) {
+    return api.get<DatasetVersionDiffResult>(
+      `/api/evaluation/datasets/${datasetId}/versions/${versionId}/diff?against=${encodeURIComponent(against)}`,
+    );
+  },
+  // 7.3c: known-bad item marking
+  async markItemKnownBad(datasetId, itemId, payload) {
+    return api.patch<EvaluationItem>(
+      `/api/evaluation/datasets/${datasetId}/items/${itemId}`,
+      payload,
+    );
+  },
+  // 7.3a: publish evaluation gate
+  async updateWorkflowGate(workflowId, gate) {
+    return api.put<unknown>(`/api/workflows/${workflowId}`, { evaluation_gate: gate });
+  },
+  async publishWorkflowVersion(workflowId, version, body) {
+    return api.post<unknown>(
+      `/api/workflows/${workflowId}/publish/${version}`,
+      body,
+    );
   },
 };
