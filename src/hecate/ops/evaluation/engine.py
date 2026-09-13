@@ -82,6 +82,7 @@ class EvaluationEngine:
         workflow_version: int | None = None,
         repetitions: int = 1,
         max_in_flight: int = 1,
+        items_override: list[EvaluationItemModel] | None = None,
     ) -> EvaluationRunResult:
         """Execute all evaluators against all items in a dataset.
 
@@ -120,6 +121,11 @@ class EvaluationEngine:
                 default; only meaningful for ``WORKFLOW`` answer sources
                 (per the 7.3 spec). When ``>1`` the run summary exposes
                 ``consistency_rate`` in addition to ``pass_rate``.
+            items_override: Optional item list to execute instead of the
+                dataset's live items (7.3b version-bound runs — the
+                runner rehydrates the named version's frozen items).
+                When provided, the tag filter does not apply: the frozen
+                set is authoritative.
 
         Returns:
             Aggregated :class:`EvaluationRunResult` with scores and averages.
@@ -163,18 +169,24 @@ class EvaluationEngine:
         await self.db.flush()
 
         try:
-            # Fetch all non-deleted items for the dataset
-            stmt = select(EvaluationItemModel).where(
-                EvaluationItemModel.dataset_id == dataset_id,
-                ~EvaluationItemModel.deleted,
-            )
-            result = await self.db.execute(stmt)
-            items = list(result.scalars().all())
+            # Fetch all non-deleted items for the dataset, or use the
+            # caller-supplied frozen set (7.3b version-bound runs — the
+            # named version is authoritative, so neither the live query
+            # nor the tag filter applies).
+            if items_override is not None:
+                items = list(items_override)
+            else:
+                stmt = select(EvaluationItemModel).where(
+                    EvaluationItemModel.dataset_id == dataset_id,
+                    ~EvaluationItemModel.deleted,
+                )
+                result = await self.db.execute(stmt)
+                items = list(result.scalars().all())
 
-            # Apply tag filter (Python-side; see comment in dataset_service)
-            if tags:
-                wanted = set(tags)
-                items = [it for it in items if any(t in wanted for t in (it.tags or []))]
+                # Apply tag filter (Python-side; see comment in dataset_service)
+                if tags:
+                    wanted = set(tags)
+                    items = [it for it in items if any(t in wanted for t in (it.tags or []))]
 
             item_scores: dict[str, list[Score]] = {}
             all_metric_values: dict[str, list[float]] = {}
@@ -542,6 +554,12 @@ class EvaluationEngine:
             "regressions": regressions,
             "exempted_items": len([iid for iid in exempted if iid in item_scores]),
         }
+        # Persist the effective threshold so downstream consumers (notably
+        # the publish gate) can recompute per-item pass semantics from the
+        # recorded scores without re-reading the task config. Omitted when
+        # no threshold was configured for this run.
+        if threshold is not None:
+            summary["threshold"] = float(threshold)
         if known_bad_passed:
             summary["known_bad_passed_item_ids"] = known_bad_passed
         if repetitions > 1:

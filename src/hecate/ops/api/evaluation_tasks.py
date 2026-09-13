@@ -267,6 +267,11 @@ class WorkflowEvaluationTriggerRequest(BaseModel):
     repetitions: int | None = Field(default=None, ge=1, le=100)
     max_total_executions: int | None = Field(default=None, ge=1, le=1_000_000)
     max_in_flight: int | None = Field(default=None, ge=1, le=64)
+    # 7.3b: pin the run to a named dataset version. When present, the
+    # runner freezes and executes the version's items rather than the
+    # live dataset; trigger rejects unknown / foreign-workspace versions
+    # without creating the run row.
+    dataset_version_id: uuid.UUID | None = None
 
 
 @router.post(
@@ -343,21 +348,50 @@ async def trigger_workflow_evaluation(
         config = build_task_config(payload)
         repetitions = int(config.get("repetitions", 1))
         max_total = int(config.get("max_total_executions", 1000))
-        from hecate.models.evaluation import EvaluationItemModel
+        from hecate.models.evaluation import (
+            EvaluationDatasetVersionModel,
+            EvaluationItemModel,
+        )
 
-        item_count = int(
-            (
+        # Version binding (7.3b): when supplied, the run is pinned to a
+        # named version. The version must exist, belong to the request's
+        # workspace, and belong to the same dataset — trigger rejects
+        # otherwise without creating a run row. Item count for the
+        # guardrail comes from the frozen version, not the live dataset.
+        dataset_version_id = body.dataset_version_id
+        version_row = None
+        if dataset_version_id is not None:
+            version_row = (
                 await db.execute(
-                    sa_select(func.count())
-                    .select_from(EvaluationItemModel)
-                    .where(
-                        EvaluationItemModel.dataset_id == body.dataset_id,
-                        ~EvaluationItemModel.deleted,
+                    sa_select(EvaluationDatasetVersionModel).where(
+                        EvaluationDatasetVersionModel.id == dataset_version_id,
+                        ~EvaluationDatasetVersionModel.deleted,
                     )
                 )
-            ).scalar_one()
-            or 0
-        )
+            ).scalar_one_or_none()
+            if version_row is None:
+                raise _not_found()
+            if ctx.workspace_id is not None and version_row.workspace_id != ctx.workspace_id:
+                raise _not_found()
+            if version_row.dataset_id != body.dataset_id:
+                raise _validation_error("dataset_version_id does not belong to the request's dataset")
+
+        if dataset_version_id is not None:
+            item_count = len(version_row.items or [])
+        else:
+            item_count = int(
+                (
+                    await db.execute(
+                        sa_select(func.count())
+                        .select_from(EvaluationItemModel)
+                        .where(
+                            EvaluationItemModel.dataset_id == body.dataset_id,
+                            ~EvaluationItemModel.deleted,
+                        )
+                    )
+                ).scalar_one()
+                or 0
+            )
         if item_count * repetitions > max_total:
             raise CostGuardrailExceededError(
                 f"cost guardrail: {item_count} items x {repetitions} repetitions = "
@@ -386,6 +420,7 @@ async def trigger_workflow_evaluation(
 
     run = EvaluationRunModel(
         dataset_id=body.dataset_id,
+        dataset_version_id=dataset_version_id,
         task_id=task.id,
         evaluator_configs=list(body.evaluators),
         workflow_id=body.workflow_id,

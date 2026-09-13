@@ -15,8 +15,6 @@ drift summary appended to the run row on completion.
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -25,6 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.evaluation import (
+    EvaluationDatasetVersionModel,
     EvaluationItemModel,
     EvaluationRunModel,
     EvaluationTaskModel,
@@ -32,6 +31,7 @@ from hecate.models.evaluation import (
 )
 from hecate.ops.evaluation.engine import EvaluationEngine, get_evaluator_class
 from hecate.ops.evaluation.evaluator import Evaluator
+from hecate.ops.evaluation.snapshot import build_snapshot
 from hecate.ops.evaluation.types import AnswerSource
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,31 @@ logger = logging.getLogger(__name__)
 
 class CostGuardrailExceededError(ValueError):
     """Pre-flight refusal when ``items × repetitions`` exceeds the cap."""
+
+
+def _items_from_snapshot(entries: list[dict], dataset_id: uuid.UUID) -> list[EvaluationItemModel]:
+    """Rehydrate transient item objects from frozen snapshot entries (7.3b).
+
+    The returned instances are never added to a session — the engine only
+    reads their attributes and persists scores keyed by the frozen item
+    ids. ``generated_answer`` is deliberately not carried (snapshots never
+    store it), so the answer source regenerates on every run.
+    """
+    items: list[EvaluationItemModel] = []
+    for entry in entries:
+        items.append(
+            EvaluationItemModel(
+                id=uuid.UUID(str(entry["id"])),
+                dataset_id=dataset_id,
+                query=str(entry.get("query") or ""),
+                expected_answer=entry.get("expected_answer"),
+                context=entry.get("context") or [],
+                tags=list(entry.get("tags") or []),
+                metadata_=dict(entry.get("metadata") or {}),
+                known_bad=bool(entry.get("known_bad")),
+            )
+        )
+    return items
 
 
 class OfflineTaskRunner:
@@ -86,19 +111,41 @@ class OfflineTaskRunner:
                 repetitions = int(config.get("repetitions") or 1)
                 max_total = int(config.get("max_total_executions") or 1000)
 
-                item_count = await self._count_items(run.dataset_id)
+                # Version-bound run (7.3b): snapshot and execution both come
+                # from the frozen named version — the live dataset plays no
+                # part, so live edits cannot leak into the run.
+                version = None
+                if run.dataset_version_id is not None:
+                    version = await session.get(EvaluationDatasetVersionModel, run.dataset_version_id)
+                    if version is None or version.deleted:
+                        raise RuntimeError(f"dataset version {run.dataset_version_id} not found for run {run_id}")
+
+                if version is not None:
+                    item_count = len(version.items or [])
+                else:
+                    item_count = await self._count_items(run.dataset_id)
                 if item_count * repetitions > max_total:
                     raise CostGuardrailExceededError(
                         f"cost guardrail: {item_count} items x {repetitions} repetitions = "
                         f"{item_count * repetitions} > max_total_executions={max_total}"
                     )
 
-                snapshot, snapshot_hash = await self._snapshot_dataset(run.dataset_id)
-                run.dataset_snapshot = {
-                    "items": snapshot,
-                    "hash": snapshot_hash,
-                    "captured_at": datetime.now(UTC).isoformat(),
-                }
+                if version is not None:
+                    frozen_items = list(version.items or [])
+                    run.dataset_snapshot = {
+                        "items": frozen_items,
+                        "hash": str(version.content_hash),
+                        "captured_at": datetime.now(UTC).isoformat(),
+                        "dataset_version_id": str(version.id),
+                        "dataset_version_name": version.name,
+                    }
+                else:
+                    snapshot, snapshot_hash = await self._snapshot_dataset(run.dataset_id)
+                    run.dataset_snapshot = {
+                        "items": snapshot,
+                        "hash": snapshot_hash,
+                        "captured_at": datetime.now(UTC).isoformat(),
+                    }
                 await session.flush()
 
                 engine = EvaluationEngine(session)
@@ -112,6 +159,8 @@ class OfflineTaskRunner:
                     "summary_config": self._summary_config(task),
                     "repetitions": repetitions,
                 }
+                if version is not None:
+                    run_kwargs["items_override"] = _items_from_snapshot(frozen_items, run.dataset_id)
                 if answer_source == AnswerSource.WORKFLOW:
                     run_kwargs["workflow_id"] = uuid.UUID(str(config["workflow_id"]))
                     if config.get("workflow_version") is not None:
@@ -151,10 +200,12 @@ class OfflineTaskRunner:
     async def _snapshot_dataset(self, dataset_id: uuid.UUID) -> tuple[list[dict], str]:
         """Return a canonical-JSON snapshot of every dataset item + content hash.
 
-        The snapshot is taken on the runner's own session (already opened
-        by ``_execute``); this is intentionally called after
-        ``CostGuardrailExceededError`` so a guardrail-rejected run does
-        not pollute the run's ``dataset_snapshot`` column.
+        Serialization and hashing live in :mod:`hecate.ops.evaluation.snapshot`
+        — shared with named dataset versions (7.3b) so a version's
+        ``content_hash`` always equals the hash the same items produce here.
+        This is intentionally called after ``CostGuardrailExceededError`` so a
+        guardrail-rejected run does not pollute the run's
+        ``dataset_snapshot`` column.
         """
         stmt = (
             select(EvaluationItemModel)
@@ -165,34 +216,7 @@ class OfflineTaskRunner:
             .order_by(EvaluationItemModel.created_at.asc(), EvaluationItemModel.id.asc())
         )
         items = list((await self.db.execute(stmt)).scalars().all())
-
-        snapshot: list[dict] = []
-        for item in items:
-            entry = {
-                "id": str(item.id),
-                "query": item.query,
-                "expected_answer": item.expected_answer,
-                "context": item.context or [],
-                "tags": list(item.tags or []),
-                "metadata": dict(item.metadata_ or {}),
-            }
-            # Known-bad markers ride on the snapshot item only when set
-            # (7.3c) so unmarked items serialize byte-identically to the
-            # pre-7.3c format. They are metadata, not evaluation content:
-            # the hash below is computed over the content fields only,
-            # which is why marking never fires dataset_drift.
-            if item.known_bad:
-                entry["known_bad"] = True
-                entry["known_bad_reason"] = item.known_bad_reason
-                entry["known_bad_marked_at"] = (
-                    item.known_bad_marked_at.isoformat() if item.known_bad_marked_at else None
-                )
-            snapshot.append(entry)
-
-        content_view = [{k: v for k, v in entry.items() if not k.startswith("known_bad")} for entry in snapshot]
-        canonical = json.dumps(content_view, sort_keys=True, ensure_ascii=False, default=str)
-        digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        return snapshot, digest
+        return build_snapshot(items)
 
     async def _append_dataset_drift(self, run: EvaluationRunModel, session: AsyncSession) -> None:
         """Compute the post-run dataset hash vs the snapshot hash.
@@ -200,9 +224,13 @@ class OfflineTaskRunner:
         Writes a ``dataset_drift`` block into ``run.summary`` when the
         hashes diverge. Called by ``_execute`` after the engine finishes
         so the diff reflects the dataset as it stands at run completion
-        (the snapshot already locked what the run consumed).
+        (the snapshot already locked what the run consumed). Version-bound
+        runs (7.3b) never drift: their snapshot hash is the frozen
+        version's hash, so a live-edit comparison would be meaningless.
         """
         if run.dataset_snapshot is None:
+            return
+        if run.dataset_version_id is not None:
             return
         snapshot_hash = run.dataset_snapshot.get("hash")
         if not snapshot_hash:

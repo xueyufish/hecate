@@ -191,6 +191,13 @@ def eval_run(
         str | None,
         typer.Option("--baseline-run-id", help="Baseline run id to compare against"),
     ] = None,
+    dataset_version_id: Annotated[
+        str | None,
+        typer.Option(
+            "--dataset-version-id",
+            help="Pin the run to a named dataset version (7.3b)",
+        ),
+    ] = None,
     evaluators: Annotated[
         str | None,
         typer.Option(
@@ -241,6 +248,8 @@ def eval_run(
         body["regression_threshold"] = regression_threshold
     if repetitions is not None:
         body["repetitions"] = repetitions
+    if dataset_version_id:
+        body["dataset_version_id"] = dataset_version_id
 
     trigger = client.post(
         f"/api/evaluation/workflow-evaluations/{version}/runs",
@@ -267,6 +276,15 @@ def eval_run(
 
     candidate_id = polled.get("id") or run_id
     payload: dict = {"run_id": candidate_id, "raw": polled}
+
+    # Surface the version binding (7.3b) when present so CI logs show
+    # which dataset contract the run was pinned to.
+    snapshot_meta = polled.get("dataset_snapshot") if isinstance(polled, dict) else None
+    if isinstance(snapshot_meta, dict):
+        version_id = snapshot_meta.get("dataset_version_id")
+        if version_id:
+            payload["dataset_version_id"] = version_id
+            payload["dataset_version_name"] = snapshot_meta.get("dataset_version_name")
 
     dataset_drift = ((polled.get("summary") or {}).get("dataset_drift")) if isinstance(polled, dict) else None
     regressions = ((polled.get("summary") or {}).get("regressions")) if isinstance(polled, dict) else None
