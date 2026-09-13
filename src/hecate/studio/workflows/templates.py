@@ -126,6 +126,9 @@ def build_chat_graph(
         "_agent_id": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
         "_user_id": ChannelDef(type=ChannelType.LAST_VALUE, default=""),
         "_turn_index": ChannelDef(type=ChannelType.LAST_VALUE, default=0),
+        # 2.6a controller — durable L3 session-intent state written by
+        # ControllerWorker ({"goal", "turn_labels", "workflow_label"}).
+        "_intent_state": ChannelDef(type=ChannelType.LAST_VALUE, default=None),
     }
 
     return GraphConfig(

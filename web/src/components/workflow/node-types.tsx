@@ -3,6 +3,7 @@
 import { memo } from "react";
 import {
   Bot,
+  Compass,
   GitBranch,
   Wrench,
   Users,
@@ -66,6 +67,11 @@ const TYPE_STYLES: Record<
     border: "border-slate-300",
     icon: <GitMerge className="h-4 w-4 text-slate-600" />,
   },
+  controller: {
+    bg: "bg-amber-50",
+    border: "border-amber-300",
+    icon: <Compass className="h-4 w-4 text-amber-700" />,
+  },
 };
 
 export const ConversationNode = memo(function ConversationNode(props: NodeProps) {
@@ -104,6 +110,32 @@ export const KnowledgeRetrievalNode = memo(function KnowledgeRetrievalNode(
 });
 export const VariableSetNode = memo(function VariableSetNode(props: NodeProps) {
   return <WorkflowNodeBase {...props} typeKey="variable-set" />;
+});
+export const ControllerNode = memo(function ControllerNode(props: NodeProps) {
+  const mapping = (props.data.config?.category_targets as Record<string, string>) || {};
+  const packageName = ((props.data.config?.intent_package as Record<string, unknown>) || {})
+    .package_id as string | undefined;
+  const defaultTarget = props.data.config?.default_workflow as string | undefined;
+  const mappedCount = Object.keys(mapping).length;
+  return (
+    <WorkflowNodeBase {...props} typeKey="controller">
+      <div className="flex flex-col gap-0.5 mt-1">
+        {packageName && (
+          <span className="text-[10px] text-muted-foreground font-mono truncate">
+            pkg: {packageName.slice(0, 8)}...
+          </span>
+        )}
+        <span className="text-[10px] text-muted-foreground">
+          {mappedCount} intent{mappedCount === 1 ? "" : "s"} mapped
+        </span>
+        {defaultTarget && (
+          <span className="inline-flex self-start rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+            default → {defaultTarget}
+          </span>
+        )}
+      </div>
+    </WorkflowNodeBase>
+  );
 });
 export const FanOutNode = memo(function FanOutNode(props: NodeProps) {
   const branches = props.data.config?.branches as string[] | undefined;
@@ -174,4 +206,5 @@ export const nodeTypeComponents = {
   merge: MergeNode,
   start: StartNode,
   end: EndNode,
+  controller: ControllerNode,
 };

@@ -32,6 +32,11 @@ class AnswerSource(StrEnum):
       item per repetition) when answers are not pre-populated; requires the
       task to carry a ``workflow_id`` and optional ``workflow_version``.
       Introduced in 7.3 (Workflow Evaluation).
+    - **INTENT** — classify the item query with the intent recognition
+      engine (6.23) against a published intent package; the recognized
+      label is the generated answer, compared against the expected
+      category. Requires the task to carry ``intent_package`` (``{
+      "package_id", "version_id"?}``). Introduced in 6.49.
     """
 
     MANUAL = "manual"
@@ -39,6 +44,7 @@ class AnswerSource(StrEnum):
     AUTO = "auto"
     AGENT = "agent"
     WORKFLOW = "workflow"
+    INTENT = "intent"
 
 
 @dataclass

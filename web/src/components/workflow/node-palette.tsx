@@ -2,6 +2,7 @@
 
 import {
   Bot,
+  Compass,
   GitBranch,
   GitFork,
   GitMerge,
@@ -14,6 +15,7 @@ import {
 const PALETTE_ITEMS = [
   { type: "conversation", label: "Conversation", icon: Bot, color: "text-blue-600" },
   { type: "condition", label: "Condition", icon: GitBranch, color: "text-yellow-600" },
+  { type: "controller", label: "Controller", icon: Compass, color: "text-amber-700" },
   { type: "tool-call", label: "Tool Call", icon: Wrench, color: "text-purple-600" },
   { type: "agent", label: "Agent", icon: Users, color: "text-green-600" },
   {

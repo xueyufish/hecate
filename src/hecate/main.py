@@ -72,6 +72,7 @@ from hecate.studio.api.agent_templates import router as agent_templates_router
 from hecate.studio.api.agents import router as agents_router
 from hecate.studio.api.collaboration_patterns import router as collaboration_patterns_router
 from hecate.studio.api.conversations import router as conversations_router
+from hecate.studio.api.intent_packages import router as intent_packages_router
 from hecate.studio.api.orchestration_templates import router as orchestration_templates_router
 from hecate.studio.api.plugins import router as plugins_router
 from hecate.studio.api.prompts import router as prompts_router
@@ -430,6 +431,7 @@ app.include_router(orchestration_templates_router, prefix="/api", tags=["orchest
 app.include_router(collaboration_patterns_router, prefix="/api", tags=["collaboration-patterns"])
 app.include_router(agent_templates_router, prefix="/api", tags=["agent-templates"])
 app.include_router(prompts_router, prefix="/api", tags=["prompts"])
+app.include_router(intent_packages_router, prefix="/api", tags=["intent-packages"])
 app.include_router(model_providers_router, prefix="/api", tags=["model-providers"])
 
 # Memory + knowledge routes moved to hecate-memory in PR2.1. Lazy mount

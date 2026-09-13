@@ -67,6 +67,12 @@ class EventType(StrEnum):
     # (parent_session_id, parent_log_version), and the derived continuation
     # (next_nodes). A commit point; fold hydrates from its payload.
     FORK = "FORK"
+    # 6.23 intent recognition — INTENT_RECOGNIZED is appended once per
+    # recognition (layered result, decision source, cache-hit flag, evidence
+    # version reference); CONTROLLER_ROUTED once per controller routing
+    # decision. Additive; LogPolicy does NOT exclude these (ADR-030 §1).
+    INTENT_RECOGNIZED = "INTENT_RECOGNIZED"
+    CONTROLLER_ROUTED = "CONTROLLER_ROUTED"
 
 
 CURRENT_LOG_SCHEMA_VERSION: int = 2  # events without this marker are non-replayable (values never recorded)

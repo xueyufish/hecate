@@ -82,6 +82,11 @@ class SessionState(BaseModel):
     agent_state: dict[str, Any] = Field(default_factory=dict)
     event_position: int = Field(default=0, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # 6.23 L3 session intent — durable recognition state: {"goal": str | None,
+    # "turn_labels": [str], "workflow_label": str | None}. Restores with the
+    # session so sticky routing survives replica moves without re-deriving
+    # past turns.
+    intent: dict[str, Any] = Field(default_factory=dict)
 
 
 class SessionNotFoundError(ValueError):

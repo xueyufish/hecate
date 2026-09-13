@@ -38,6 +38,7 @@ from hecate.models import (  # noqa: F401
     evaluation,
     evidence,
     gateway_target,
+    intent_package,
     knowledge,
     memory,
     metric,

@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from hecate.runtime.routing import evaluate_routing
 
 
 class MockEnginePort:
-    """Stub RuntimePort for LLM-dependent routing tests."""
+    """Stub RuntimePort for LLM-dependent routing tests.
+
+    Implements the real ``RuntimePort.llm_invoke(messages, config)`` token
+    stream; the collected text is the canned response.
+    """
 
     def __init__(self, response: str = "") -> None:
         self._response = response
 
-    async def llm_invoke(self, prompt: str, **kwargs: Any) -> str:
-        return self._response
+    async def llm_invoke(self, messages: list[dict], config: dict):
+        yield self._response
 
 
 class TestConditionRouting:

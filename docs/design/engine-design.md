@@ -461,17 +461,17 @@ The simulation environment builds on the existing Docker sandbox and checkpoint 
 
 ---
 
-## 5-Level Intent Recognition (Planned)
+## 5-Level Intent Recognition (shipped, 6.23 ⊕ 1.3.10)
 
-The **5-Level Intent Recognition** system provides hierarchical understanding of user intent:
+The **5-Level Intent Recognition** system provides hierarchical understanding of user intent. The engine lives in `src/hecate/runtime/intent/` and is consumed by the CONTROLLER node (2.6a) and the package-backed INTENT routing mode (2.7c upgrade):
 
-1. **Atomic Intent** — Single user query (e.g., "show me the report")
-2. **Workflow Intent** — Multi-step complex task (e.g., "generate quarterly report and send to stakeholders")
-3. **Session Intent** — Overall dialogue goal (e.g., "analyze Q4 performance")
-4. **Domain Intent** — Business domain context (e.g., "financial analysis")
-5. **Meta Intent** — Platform-level intent (e.g., "optimize agent performance")
+1. **Atomic Intent** (L1) — Single user query ("show me the report"), classified through an ordered fast-path stack: decision cache → package patterns → few-shot evidence (published intent package, 6.49) → LLM structured-output fallback. The recognition model is configurable independently of the workflow execution model (plan ≠ execute, the AgentCore pattern).
+2. **Workflow Intent** (L2) — Multi-step complex task ("generate quarterly report and send to stakeholders"), activated by a consistent multi-turn window or an explicit multi-step cue.
+3. **Session Intent** (L3) — Overall dialogue goal ("analyze Q4 performance"), persisted in `SessionState.intent` and merged per turn: explicit shift cue or LLM shift verdict replaces the goal; a persistent mismatch drifts it; otherwise routing stays sticky.
+4. **Domain Intent** (L4) — Business domain context ("financial analysis"), an optional label carried on the category itself; the result surfaces it with no extra model call.
+5. **Meta Intent** (L5) — Platform-level intent is **not a recognition level**: it is a deterministic policy boundary. Categories flagged `policy_gated` route only through the approval path regardless of recognition output (cached or otherwise) — industry precedent (hooks, `disable-model-invocation`, Cedar policies) is uniformly deterministic, never an LLM classifier. "Five levels" names the architecture; L5 is the policy layer.
 
-Each level informs the next, enabling more accurate routing and context gathering.
+Supporting semantics: decisions are cached keyed by (normalized utterance, evidence version, context fingerprint) — publishing a package version rotates the key space; recognition outcomes are appended to the EventStore as additive `INTENT_RECOGNIZED` / `CONTROLLER_ROUTED` events (never containing evidence payloads or raw utterances); runtime consumes evidence only from **published** versions via the injected `IntentEvidencePort` (composition-root provider in `core/composition/intent_evidence.py`), and a studio-side outage degrades recognition to the fallback-label path instead of failing the turn.
 
 ---
 

@@ -156,11 +156,48 @@ function DynamicHandoffEdge({
   );
 }
 
+function IntentMappingEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+}: EdgeProps) {
+  const [edgePath, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+  });
+  return (
+    <>
+      <path
+        id={id}
+        className="react-flow__edge-path"
+        d={edgePath}
+        strokeWidth={2}
+        stroke="#0d9488"
+        fill="none"
+      />
+      <text
+        x={labelX}
+        y={labelY - 8}
+        textAnchor="middle"
+        dominantBaseline="middle"
+        className="text-[10px] fill-teal-700"
+      >
+        ⤷ intent
+      </text>
+    </>
+  );
+}
+
 const edgeTypes = {
   handoff: HandoffEdge,
   conditional: ConditionalEdge,
   fanout: FanOutEdge,
   dynamic_handoff: DynamicHandoffEdge,
+  intent_mapping: IntentMappingEdge,
 };
 
 export default function CanvasArea({
@@ -192,7 +229,7 @@ export default function CanvasArea({
   );
 
   function handleEdgeTypeSelect(
-    type: "default" | "handoff" | "conditional" | "dynamic_handoff",
+    type: "default" | "handoff" | "conditional" | "dynamic_handoff" | "intent_mapping",
     label?: string
   ) {
     if (!edgeSelector) return;
@@ -230,6 +267,13 @@ export default function CanvasArea({
         label: "Dynamic Handoff",
         data: { edgeType: "dynamic_handoff" },
       },
+      intent_mapping: {
+        animated: false,
+        type: "intent_mapping",
+        style: { stroke: "#0d9488", strokeWidth: 2 },
+        label: "Intent",
+        data: { edgeType: "intent_mapping" },
+      },
     };
 
     if (isExistingEdge) {
@@ -250,6 +294,23 @@ export default function CanvasArea({
       const isHandoff = params.sourceHandle === "handoff";
       const targetNode = nodes.find((n: any) => n.id === params.target);
       const isFanOut = targetNode?.type === "fan-out";
+      const sourceNodeForConnect = nodes.find((n: any) => n.id === params.source);
+      const isController = sourceNodeForConnect?.type === "controller";
+
+      if (isController) {
+        // Controller out-edges are intent mappings by default; the plain
+        // (default-workflow) edge can be chosen afterwards via the selector.
+        const newEdge = {
+          ...params,
+          animated: false,
+          type: "intent_mapping",
+          style: { stroke: "#0d9488", strokeWidth: 2 },
+          label: "Intent",
+          data: { edgeType: "intent_mapping" },
+        };
+        onEdgesChange(addEdge(newEdge, edges));
+        return;
+      }
 
       if (isHandoff) {
         const newEdge: Edge = {
@@ -309,6 +370,9 @@ export default function CanvasArea({
     }
     if (edgeType === "fanout") {
       return { ...edge, type: "fanout", animated: false };
+    }
+    if (edgeType === "intent_mapping") {
+      return { ...edge, type: "intent_mapping", animated: false };
     }
     const sourceNode = nodes.find((n: any) => n.id === edge.source);
     if (sourceNode?.type === "fan-out") {

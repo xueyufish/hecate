@@ -121,6 +121,10 @@ class WorkflowService:
         # Validate and compile the graph DSL
         graph_config = parse_graph(data.graph_dsl)
         compiled = self.compiler.compile(graph_config, execution_mode=data.execution_mode)
+        # 6.23/6.49: intent package references must resolve in this workspace.
+        from hecate.studio.intent_packages.validation import validate_graph_intent_references
+
+        await validate_graph_intent_references(self.db, graph_config, workspace_id)
 
         # Create workflow
         workflow = WorkflowModel(
@@ -248,6 +252,10 @@ class WorkflowService:
         if data.graph_dsl is not None:
             graph_config = parse_graph(data.graph_dsl)
             compiled = self.compiler.compile(graph_config, execution_mode=workflow.execution_mode)
+            # 6.23/6.49: intent package references must resolve in this workspace.
+            from hecate.studio.intent_packages.validation import validate_graph_intent_references
+
+            await validate_graph_intent_references(self.db, graph_config, workflow.workspace_id)
 
             new_version_num = workflow.current_version + 1
             version = WorkflowVersionModel(

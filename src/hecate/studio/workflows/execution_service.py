@@ -98,6 +98,7 @@ class _CompositeWorker:
         knowledge_worker: KnowledgeWorker,
         suggestion_worker: SuggestionWorker,
         variable_worker: VariableSetWorker,
+        controller_worker: Any | None = None,
     ) -> None:
         self._llm = llm_worker
         self._tool = tool_worker
@@ -106,6 +107,7 @@ class _CompositeWorker:
         self._knowledge = knowledge_worker
         self._suggestion = suggestion_worker
         self._variable = variable_worker
+        self._controller = controller_worker
         self._workers_by_type: dict[str, Any] = {
             "conversation": self._llm,
             "tool-call": self._tool,
@@ -114,6 +116,7 @@ class _CompositeWorker:
             "knowledge-retrieval": self._knowledge,
             "suggestion": self._suggestion,
             "variable-set": self._variable,
+            "controller": self._controller,
         }
 
     def _get_worker(self, node_type_value: str) -> Any:
@@ -687,6 +690,15 @@ class WorkflowExecutionService:
         )
         condition_worker = ConditionWorker()
         variable_worker = VariableSetWorker()
+        # 2.6a controller — evidence provider wired from the composition
+        # root; the runtime worker itself stays studio-free.
+        from hecate.core.composition.intent_evidence import create_intent_evidence_port
+        from hecate.runtime.workers.controller_worker import ControllerWorker
+
+        controller_worker = ControllerWorker(
+            port=self._port,
+            evidence_port=create_intent_evidence_port(),
+        )
 
         return _CompositeWorker(
             llm_worker=llm_worker,
@@ -696,6 +708,7 @@ class WorkflowExecutionService:
             knowledge_worker=knowledge_worker,
             suggestion_worker=suggestion_worker,
             variable_worker=variable_worker,
+            controller_worker=controller_worker,
         )
 
     async def _load_workflow_mode(self, workflow_id: uuid.UUID) -> str:

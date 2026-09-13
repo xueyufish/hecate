@@ -4,7 +4,10 @@ import { useState, useRef, useEffect } from "react";
 
 interface EdgeTypeSelectorProps {
   position: { x: number; y: number };
-  onSelect: (type: "default" | "handoff" | "conditional" | "dynamic_handoff", label?: string) => void;
+  onSelect: (
+    type: "default" | "handoff" | "conditional" | "dynamic_handoff" | "intent_mapping",
+    label?: string
+  ) => void;
   onCancel: () => void;
 }
 
@@ -37,6 +40,13 @@ const EDGE_TYPES = [
     color: "#7c3aed",
     style: "dashdot",
   },
+  {
+    type: "intent_mapping" as const,
+    label: "Intent Mapping",
+    description: "Solid teal (controller)",
+    color: "#0d9488",
+    style: "solid",
+  },
 ];
 
 export function EdgeTypeSelector({
@@ -58,7 +68,9 @@ export function EdgeTypeSelector({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onCancel]);
 
-  function handleSelect(type: "default" | "handoff" | "conditional" | "dynamic_handoff") {
+  function handleSelect(
+    type: "default" | "handoff" | "conditional" | "dynamic_handoff" | "intent_mapping"
+  ) {
     if (type === "conditional") {
       setShowLabelInput(true);
       return;
