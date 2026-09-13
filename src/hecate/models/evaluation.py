@@ -116,6 +116,16 @@ class EvaluationItemModel(BaseModel):
     - **expected_answer** — ground-truth answer for comparison
     - **context** — relevant context passages for RAG evaluation
     - **metadata_** — JSON column for arbitrary item-level metadata
+    - **known_bad** — exemption marker: the item is known to be broken (bad
+      expected answer, stale fixture, ...). Known-bad items still execute and
+      still record scores, but run aggregation excludes them from pass_rate /
+      consistency_rate denominators (7.3c)
+    - **known_bad_reason** — required when ``known_bad`` is true; why the item
+      is exempt
+    - **known_bad_marked_by** / **known_bad_marked_at** — audit provenance,
+      filled server-side when the mark is set
+    - **known_bad_expires_at** — reserved for future expiry-based re-review;
+      no logic reads it yet
     """
 
     __tablename__ = "evaluation_items"
@@ -127,6 +137,11 @@ class EvaluationItemModel(BaseModel):
     context: Mapped[list | None] = mapped_column(JSON, nullable=True)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    known_bad: Mapped[bool] = mapped_column(nullable=False, default=False, server_default="false")
+    known_bad_reason: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    known_bad_marked_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    known_bad_marked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    known_bad_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False,
         default=lambda: uuid.UUID("00000000-0000-0000-0000-000000000000"),
@@ -482,7 +497,12 @@ class EvaluationDatasetReadSchema(PydanticBase):
 
 
 class EvaluationItemCreateSchema(PydanticBase):
-    """Schema for creating evaluation dataset items."""
+    """Schema for creating evaluation dataset items.
+
+    Known-bad marker fields are intentionally absent: items are created
+    unmarked, and exemption is applied afterwards through the dedicated
+    item update API (7.3c) so provenance is always server-recorded.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -492,6 +512,22 @@ class EvaluationItemCreateSchema(PydanticBase):
     context: list[str] | None = None
     metadata: dict | None = Field(None, alias="metadata_")
     tags: list[str] | None = None
+
+
+class EvaluationItemUpdateSchema(PydanticBase):
+    """Schema for updating the known-bad exemption state of an item (7.3c).
+
+    ``known_bad`` is required: the update API is the marking path, not a
+    generic item-content editor. ``known_bad_marked_by`` and
+    ``known_bad_marked_at`` are server-managed provenance and cannot be
+    set by clients.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    known_bad: bool
+    known_bad_reason: str | None = None
+    known_bad_expires_at: datetime | None = None
 
 
 class EvaluationItemReadSchema(PydanticBase):
@@ -508,6 +544,11 @@ class EvaluationItemReadSchema(PydanticBase):
     workspace_id: uuid.UUID
     metadata: dict | None = Field(validation_alias="metadata_")
     tags: list[str] | None = None
+    known_bad: bool = False
+    known_bad_reason: str | None = None
+    known_bad_marked_by: uuid.UUID | None = None
+    known_bad_marked_at: datetime | None = None
+    known_bad_expires_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

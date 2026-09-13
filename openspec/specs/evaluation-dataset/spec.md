@@ -5,23 +5,25 @@
 > `default_threshold`, `assertions`) that were never implemented. The
 > MODIFIED delta replaces the spec with what is actually shipped in this
 > change and explicitly defers the unimplemented fields to a follow-up.
+> Later sync: `known-bad-exemption` (7.3c) added the known-bad exemption
+> marker fields, the marking requirement, and exemption-status filtering.
 
 ## MODIFIED Requirements
 
 ### Requirement: Dataset item management
-The system SHALL provide methods to add, list, update, and remove items within a dataset. Each item SHALL contain: `query: str`, `expected_answer: str | None`, `context: list[str] | None`, `metadata: dict | None`, `tags: list[str] | None`. Items SHALL be persisted with the `tags` field stored as a JSON column on `EvaluationItemModel`. The `tags` field SHALL be retrievable in `EvaluationItemReadSchema` and round-trip through JSON import/export.
+The system SHALL provide methods to add, list, update, and remove items within a dataset. Each item SHALL contain: `query: str`, `expected_answer: str | None`, `context: list[str] | None`, `metadata: dict | None`, `tags: list[str] | None`, `known_bad: bool` (default `False`), `known_bad_reason: str | None`, `known_bad_marked_by: UUID | None`, `known_bad_marked_at: datetime | None`, and `known_bad_expires_at: datetime | None`. Items SHALL be persisted with the `tags` field stored as a JSON column on `EvaluationItemModel`. The `tags` field and the known-bad marker fields SHALL be retrievable in `EvaluationItemReadSchema`, and both SHALL round-trip through JSON import/export.
 
 #### Scenario: Add items with tags
 - **WHEN** a user adds a batch of items where each item has `tags=["smoke", "regression"]`
-- **THEN** the system SHALL validate each item has a non-empty `query` field, persist all items including their tags as JSON, and return the count of added items
+- **THEN** the system SHALL validate each item has a non-empty `query` field, persist all items including their tags as JSON, and return the count of added items; items SHALL be persisted with `known_bad` defaulting to `False` and all known-bad marker fields defaulting to `None`
 
 #### Scenario: List items with pagination
 - **WHEN** a user lists items in a dataset with page and page_size parameters
-- **THEN** the system SHALL return items ordered by creation time with total count, including the `tags` field per item
+- **THEN** the system SHALL return items ordered by creation time with total count, including the `tags` field and the known-bad marker fields per item
 
 #### Scenario: Tags round-trip through export and import
 - **WHEN** a dataset with tagged items is exported to JSON and then re-imported
-- **THEN** the imported items SHALL retain the same `tags` values
+- **THEN** the imported items SHALL retain the same `tags` values, and every item's known-bad marker fields (`known_bad_reason`, `known_bad_marked_by`, `known_bad_marked_at`, `known_bad_expires_at`) SHALL be preserved exactly
 
 ### Requirement: Tag-filtered dataset queries
 The system SHALL support filtering items by tags when listing items within a dataset. The filter SHALL match items whose `tags` JSON array contains ANY of the specified tags (OR semantics). The filter SHALL be exposed via the existing `EvaluationItemService.list_items(dataset_id, tags: list[str] | None, page, page_size)` method.
@@ -77,3 +79,28 @@ The system SHALL provide an `EvaluationDatasetService` with async methods: `crea
 #### Scenario: Delete dataset with items
 - **WHEN** a user deletes a dataset that contains evaluation items
 - **THEN** the system SHALL cascade-delete all associated items and return success
+
+## ADDED Requirements
+
+### Requirement: Known-bad exemption marking
+The system SHALL allow marking a dataset item as known-bad (exempt) and clearing the mark through the dataset item update API. Setting `known_bad=true` SHALL require a non-empty `known_bad_reason`. When the mark is set, the service SHALL fill `known_bad_marked_by` with the current authenticated user's id and `known_bad_marked_at` with the current server timestamp; clients SHALL NOT be able to set the provenance fields directly. Clearing the mark (`known_bad=false`) SHALL reset `known_bad_reason`, `known_bad_marked_by`, `known_bad_marked_at`, and `known_bad_expires_at` to `None`. Listing items SHALL support filtering by exemption status. `known_bad_expires_at` is a reserved field: v1 SHALL persist it but SHALL NOT enforce any expiry behavior.
+
+#### Scenario: Mark an item known-bad with reason
+- **WHEN** an item is updated with `known_bad=true` and a non-empty `known_bad_reason`
+- **THEN** the item is persisted with `known_bad=true`, the supplied reason, and server-filled `known_bad_marked_by` / `known_bad_marked_at`
+
+#### Scenario: Mark without reason is rejected
+- **WHEN** an item is updated with `known_bad=true` and no `known_bad_reason` (or an empty one)
+- **THEN** the request SHALL be rejected with a validation error and the item SHALL remain unchanged
+
+#### Scenario: Clear the mark resets provenance
+- **WHEN** a known-bad item is updated with `known_bad=false`
+- **THEN** `known_bad_reason`, `known_bad_marked_by`, `known_bad_marked_at`, and `known_bad_expires_at` are all reset to `None`
+
+#### Scenario: Filter items by exemption status
+- **WHEN** items are listed with an exemption-status filter (only known-bad / only active)
+- **THEN** only matching items are returned; without the filter all items are returned
+
+#### Scenario: Import/export round-trips exemption
+- **WHEN** a dataset containing known-bad items is exported and re-imported
+- **THEN** the re-imported items carry identical exemption markers without requiring re-marking

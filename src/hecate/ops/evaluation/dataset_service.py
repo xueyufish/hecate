@@ -19,6 +19,28 @@ from hecate.models.evaluation import EvaluationDatasetModel, EvaluationItemModel
 logger = logging.getLogger(__name__)
 
 
+def _coerce_uuid(value: object) -> UUID | None:
+    """Coerce an exported UUID string back to UUID; malformed input → None."""
+    if value is None:
+        return None
+    try:
+        return UUID(str(value))
+    except ValueError:
+        return None
+
+
+def _coerce_datetime(value: object) -> datetime | None:
+    """Coerce an exported ISO datetime string back to datetime; bad input → None."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+
+
 class EvaluationDatasetService:
     """Manage evaluation datasets and their items.
 
@@ -225,6 +247,7 @@ class EvaluationDatasetService:
         page: int = 1,
         page_size: int = 20,
         tags: list[str] | None = None,
+        known_bad: bool | None = None,
     ) -> tuple[list[EvaluationItemModel], int]:
         """List items in a dataset with pagination.
 
@@ -234,19 +257,27 @@ class EvaluationDatasetService:
         because the JSON column type varies across backends — keeping
         it simple for v1.
 
+        When ``known_bad`` is provided, only items matching that
+        exemption state are returned; the filter is applied in SQL so
+        both the page and the total reflect it.
+
         Args:
             dataset_id: UUID of the dataset.
             page: 1-indexed page number.
             page_size: Number of items per page.
             tags: Optional tag filter (OR semantics).
+            known_bad: Optional exemption-status filter (7.3c).
 
         Returns:
             Tuple of (item list, total count).
         """
-        base_query = select(EvaluationItemModel).where(
+        conditions = [
             EvaluationItemModel.dataset_id == dataset_id,
             ~EvaluationItemModel.deleted,
-        )
+        ]
+        if known_bad is not None:
+            conditions.append(EvaluationItemModel.known_bad == known_bad)
+        base_query = select(EvaluationItemModel).where(*conditions)
         offset = (page - 1) * page_size
         stmt = base_query.order_by(EvaluationItemModel.created_at.desc()).offset(offset).limit(page_size)
         result = await self.db.execute(stmt)
@@ -285,6 +316,67 @@ class EvaluationDatasetService:
         item.deleted_at = datetime.now(UTC)
         await self.db.flush()
 
+    async def update_item(
+        self,
+        item_id: UUID,
+        *,
+        known_bad: bool,
+        marked_by: UUID,
+        known_bad_reason: str | None = None,
+        known_bad_expires_at: datetime | None = None,
+    ) -> EvaluationItemModel:
+        """Set or clear an item's known-bad exemption mark (7.3c).
+
+        Marking requires a non-empty ``known_bad_reason``; provenance
+        (``marked_by`` / ``marked_at``) is always filled server-side so
+        the audit trail cannot be spoofed by clients. Clearing resets
+        the reason, provenance, and the reserved expiry field.
+
+        Args:
+            item_id: UUID of the item to update.
+            known_bad: The exemption state to apply.
+            marked_by: Authenticated user applying the change.
+            known_bad_reason: Why the item is exempt (required when marking).
+            known_bad_expires_at: Reserved expiry hint; stored, not enforced.
+
+        Returns:
+            The updated item model.
+
+        Raises:
+            ValueError: If the item is not found, or the mark is set
+                without a non-empty reason.
+        """
+        result = await self.db.execute(
+            select(EvaluationItemModel).where(
+                EvaluationItemModel.id == item_id,
+                ~EvaluationItemModel.deleted,
+            )
+        )
+        item = result.scalar_one_or_none()
+        if item is None:
+            msg = f"Item {item_id} not found"
+            raise ValueError(msg)
+
+        if known_bad:
+            if not known_bad_reason or not str(known_bad_reason).strip():
+                msg = "known_bad_reason is required when marking an item known-bad"
+                raise ValueError(msg)
+            item.known_bad = True
+            item.known_bad_reason = str(known_bad_reason)
+            item.known_bad_marked_by = marked_by
+            item.known_bad_marked_at = datetime.now(UTC)
+            item.known_bad_expires_at = known_bad_expires_at
+        else:
+            item.known_bad = False
+            item.known_bad_reason = None
+            item.known_bad_marked_by = None
+            item.known_bad_marked_at = None
+            item.known_bad_expires_at = None
+
+        await self.db.flush()
+        await self.db.refresh(item)
+        return item
+
     async def import_json(
         self,
         dataset_id: UUID,
@@ -317,6 +409,17 @@ class EvaluationDatasetService:
                 context=entry.get("context"),
                 metadata_=entry.get("metadata", {}),
                 tags=tags,
+                # Import is a copy operation, not a fresh human marking:
+                # marker fields round-trip as-is; entries missing them
+                # import as unmarked. The reason-required rule is a
+                # marking-API concern (see update_item). Exported values
+                # are JSON scalars (ISO strings / UUID strings) and are
+                # normalized back to column types here.
+                known_bad=bool(entry.get("known_bad") or False),
+                known_bad_reason=entry.get("known_bad_reason"),
+                known_bad_marked_by=_coerce_uuid(entry.get("known_bad_marked_by")),
+                known_bad_marked_at=_coerce_datetime(entry.get("known_bad_marked_at")),
+                known_bad_expires_at=_coerce_datetime(entry.get("known_bad_expires_at")),
             )
             self.db.add(item)
             valid += 1
@@ -352,6 +455,11 @@ class EvaluationDatasetService:
                 "context": item.context,
                 "metadata": item.metadata_,
                 "tags": item.tags or [],
+                "known_bad": item.known_bad,
+                "known_bad_reason": item.known_bad_reason,
+                "known_bad_marked_by": str(item.known_bad_marked_by) if item.known_bad_marked_by else None,
+                "known_bad_marked_at": item.known_bad_marked_at.isoformat() if item.known_bad_marked_at else None,
+                "known_bad_expires_at": item.known_bad_expires_at.isoformat() if item.known_bad_expires_at else None,
             }
             for item in items
         ]

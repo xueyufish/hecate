@@ -180,6 +180,16 @@ class EvaluationEngine:
             all_metric_values: dict[str, list[float]] = {}
             trajectory: list[dict] = []
 
+            # 7.3c: known-bad items still execute and record scores but are
+            # excluded from aggregation. Task runs read the exemption set
+            # from their frozen dataset snapshot; request-triggered runs
+            # (no snapshot) use the items as loaded at run start — both are
+            # "state at run start", so completed runs never change retroactively.
+            if run.dataset_snapshot is not None:
+                exempted_item_ids = self._snapshot_exempted_ids(run.dataset_snapshot)
+            else:
+                exempted_item_ids = {str(it.id) for it in items if it.known_bad}
+
             concurrency = max(1, max_in_flight) if answer_source == AnswerSource.WORKFLOW else 1
             semaphore = asyncio.Semaphore(concurrency) if concurrency > 1 else None
 
@@ -200,7 +210,7 @@ class EvaluationEngine:
                         if traj:
                             trajectory.extend(traj)
                         for score in scores:
-                            if score.value >= 0:
+                            if score.value >= 0 and str(item.id) not in exempted_item_ids:
                                 all_metric_values.setdefault(score.metric_name, []).append(score.value)
                 else:
                     tasks = [
@@ -226,7 +236,7 @@ class EvaluationEngine:
                         if traj:
                             trajectory.extend(traj)
                         for score in scores:
-                            if score.value >= 0:
+                            if score.value >= 0 and str(item.id) not in exempted_item_ids:
                                 all_metric_values.setdefault(score.metric_name, []).append(score.value)
 
             await self.db.flush()
@@ -244,6 +254,7 @@ class EvaluationEngine:
                     metric_averages=metric_averages,
                     summary_config=summary_config,
                     repetitions=repetitions,
+                    exempted_item_ids=exempted_item_ids,
                 )
 
             if answer_source == AnswerSource.WORKFLOW:
@@ -439,6 +450,13 @@ class EvaluationEngine:
 
         return item_score_list, trajectory_rows
 
+    @staticmethod
+    def _snapshot_exempted_ids(snapshot: dict | None) -> set[str]:
+        """Known-bad item ids recorded in a run's frozen dataset snapshot (7.3c)."""
+        if not snapshot:
+            return set()
+        return {str(entry["id"]) for entry in snapshot.get("items", []) if entry.get("known_bad")}
+
     async def _build_summary(
         self,
         total_items: int,
@@ -446,6 +464,7 @@ class EvaluationEngine:
         metric_averages: dict[str, float],
         summary_config: dict,
         repetitions: int = 1,
+        exempted_item_ids: set[str] | None = None,
     ) -> dict:
         """Compute the task-run ``summary`` JSON for an evaluation run.
 
@@ -459,18 +478,30 @@ class EvaluationEngine:
         repetition meets the threshold (Anthropic ``pass^k`` semantics).
         ``consistency_rate`` is intentionally omitted when
         ``repetitions == 1``.
+
+        Known-bad items (7.3c) are excluded from the numerator and the
+        denominator of ``pass_rate`` / ``consistency_rate`` even though
+        their scores were recorded. The summary surfaces how many items
+        were excluded (``exempted_items``) and which exempted items met
+        their threshold anyway (``known_bad_passed_item_ids``) — a
+        "dataset healed" hint, never an automatic un-exemption.
         """
         threshold = summary_config.get("threshold")
+        exempted = exempted_item_ids or set()
+        active_scores = {item_id: scores for item_id, scores in item_scores.items() if item_id not in exempted}
+        active_total = len(active_scores)
+
         passed_items: int | None = None
         failed_items: int | None = None
         pass_rate: float | None = None
         consistency_rate: float | None = None
+        known_bad_passed: list[str] = []
 
         if threshold is not None:
             passed_items = 0
             failed_items = 0
             consistency_passed = 0
-            for scores in item_scores.values():
+            for _item_id, scores in active_scores.items():
                 values = [s.value for s in scores]
                 meets_threshold = bool(values) and all(v >= threshold for v in values)
                 if meets_threshold:
@@ -478,9 +509,19 @@ class EvaluationEngine:
                     consistency_passed += 1
                 else:
                     failed_items += 1
-            pass_rate = (passed_items / total_items) if total_items else 0.0
-            if repetitions > 1 and total_items:
-                consistency_rate = consistency_passed / total_items
+            pass_rate = (passed_items / active_total) if active_total else 0.0
+            if repetitions > 1 and active_total:
+                consistency_rate = consistency_passed / active_total
+
+            # "Dataset healed" hint: exempted items whose every repetition
+            # met the threshold. Reported only — the exemption stays.
+            for item_id in exempted:
+                scores = item_scores.get(item_id)
+                if not scores:
+                    continue
+                if all(s.value >= threshold for s in scores):
+                    known_bad_passed.append(item_id)
+            known_bad_passed.sort()
 
         baseline_run_id = summary_config.get("baseline_run_id")
         delta = float(summary_config.get("regression_threshold", 0.05))
@@ -499,7 +540,10 @@ class EvaluationEngine:
             "pass_rate": pass_rate,
             "metric_averages": metric_averages,
             "regressions": regressions,
+            "exempted_items": len([iid for iid in exempted if iid in item_scores]),
         }
+        if known_bad_passed:
+            summary["known_bad_passed_item_ids"] = known_bad_passed
         if repetitions > 1:
             summary["repetitions"] = repetitions
             summary["consistency_rate"] = consistency_rate
@@ -511,15 +555,30 @@ class EvaluationEngine:
         metric_averages: dict[str, float],
         delta: float,
     ) -> list[dict]:
-        """Flag metrics whose candidate average regressed versus a baseline run."""
-        stmt = select(EvaluationScoreModel.metric_name, EvaluationScoreModel.value).where(
+        """Flag metrics whose candidate average regressed versus a baseline run.
+
+        Both sides operate on known-bad-excluded averages (7.3c): the
+        candidate's ``metric_averages`` arrive pre-excluded from
+        :meth:`run`, and the baseline's scores are filtered by the
+        baseline run's own frozen snapshot exemption set.
+        """
+        baseline_result = await self.db.get(EvaluationRunModel, baseline_run_id)
+        baseline_exempted = self._snapshot_exempted_ids(baseline_result.dataset_snapshot if baseline_result else None)
+
+        stmt = select(
+            EvaluationScoreModel.item_id,
+            EvaluationScoreModel.metric_name,
+            EvaluationScoreModel.value,
+        ).where(
             EvaluationScoreModel.run_id == baseline_run_id,
             EvaluationScoreModel.value >= 0,
         )
         rows = (await self.db.execute(stmt)).all()
 
         baseline_values: dict[str, list[float]] = {}
-        for metric_name, value in rows:
+        for item_id, metric_name, value in rows:
+            if str(item_id) in baseline_exempted:
+                continue
             baseline_values.setdefault(metric_name, []).append(value)
         baseline_averages = {k: sum(v) / len(v) for k, v in baseline_values.items()}
 
