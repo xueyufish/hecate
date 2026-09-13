@@ -52,7 +52,9 @@ from hecate.models.evaluation import (
     EvaluationDatasetReadSchema,
     EvaluationDatasetUpdateSchema,
     EvaluationItemCreateSchema,
+    EvaluationItemModel,
     EvaluationItemReadSchema,
+    EvaluationItemUpdateSchema,
     EvaluationRunCreateSchema,
     EvaluationRunModel,
     EvaluationRunReadSchema,
@@ -154,6 +156,28 @@ async def _get_dataset_or_404(
             detail={"error": {"code": "NOT_FOUND", "message": "Dataset not found", "details": None}},
         )
     return ds
+
+
+async def _get_item_or_404(
+    dataset_id: uuid.UUID,
+    item_id: uuid.UUID,
+    db: AsyncSession,
+) -> EvaluationItemModel:
+    """Look up an evaluation item within a dataset or raise 404."""
+    result = await db.execute(
+        select(EvaluationItemModel).where(
+            EvaluationItemModel.id == item_id,
+            EvaluationItemModel.dataset_id == dataset_id,
+            ~EvaluationItemModel.deleted,
+        )
+    )
+    item = result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "Item not found", "details": None}},
+        )
+    return item
 
 
 # ---------------------------------------------------------------------------
@@ -264,20 +288,61 @@ async def list_items(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     tags: Annotated[list[str] | None, Query()] = None,
+    known_bad: Annotated[bool | None, Query()] = None,
 ) -> dict:
     """List items in an evaluation dataset with pagination.
 
     When ``tags`` is supplied (comma-separated or repeated query
     parameter), only items whose ``tags`` JSON array contains ANY of the
-    specified values are returned (OR semantics).
+    specified values are returned (OR semantics). When ``known_bad`` is
+    supplied, only items matching that exemption state are returned
+    (7.3c).
     """
     await _get_dataset_or_404(dataset_id, db)
     svc = EvaluationDatasetService(db)
-    items, total = await svc.list_items(dataset_id, page=page, page_size=page_size, tags=tags)
+    items, total = await svc.list_items(dataset_id, page=page, page_size=page_size, tags=tags, known_bad=known_bad)
     return {
         "items": [EvaluationItemReadSchema.model_validate(item).model_dump(by_alias=True) for item in items],
         "total": total,
     }
+
+
+@router.patch("/datasets/{dataset_id}/items/{item_id}")
+async def update_item(
+    dataset_id: uuid.UUID,
+    item_id: uuid.UUID,
+    data: EvaluationItemUpdateSchema,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Update an item's known-bad exemption state (7.3c).
+
+    Marking requires a non-empty ``known_bad_reason``; provenance is
+    filled server-side from the authenticated user. Clearing the mark
+    resets reason, provenance, and the reserved expiry field.
+    """
+    await _get_item_or_404(dataset_id, item_id, db)
+    svc = EvaluationDatasetService(db)
+    try:
+        item = await svc.update_item(
+            item_id,
+            known_bad=data.known_bad,
+            known_bad_reason=data.known_bad_reason,
+            known_bad_expires_at=data.known_bad_expires_at,
+            marked_by=ctx.user_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": {
+                    "code": "INVALID_EXEMPTION",
+                    "message": str(exc),
+                    "details": None,
+                }
+            },
+        ) from exc
+    return EvaluationItemReadSchema.model_validate(item).model_dump(by_alias=True)
 
 
 @router.delete(

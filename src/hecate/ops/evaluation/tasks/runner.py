@@ -168,18 +168,29 @@ class OfflineTaskRunner:
 
         snapshot: list[dict] = []
         for item in items:
-            snapshot.append(
-                {
-                    "id": str(item.id),
-                    "query": item.query,
-                    "expected_answer": item.expected_answer,
-                    "context": item.context or [],
-                    "tags": list(item.tags or []),
-                    "metadata": dict(item.metadata_ or {}),
-                }
-            )
+            entry = {
+                "id": str(item.id),
+                "query": item.query,
+                "expected_answer": item.expected_answer,
+                "context": item.context or [],
+                "tags": list(item.tags or []),
+                "metadata": dict(item.metadata_ or {}),
+            }
+            # Known-bad markers ride on the snapshot item only when set
+            # (7.3c) so unmarked items serialize byte-identically to the
+            # pre-7.3c format. They are metadata, not evaluation content:
+            # the hash below is computed over the content fields only,
+            # which is why marking never fires dataset_drift.
+            if item.known_bad:
+                entry["known_bad"] = True
+                entry["known_bad_reason"] = item.known_bad_reason
+                entry["known_bad_marked_at"] = (
+                    item.known_bad_marked_at.isoformat() if item.known_bad_marked_at else None
+                )
+            snapshot.append(entry)
 
-        canonical = json.dumps(snapshot, sort_keys=True, ensure_ascii=False, default=str)
+        content_view = [{k: v for k, v in entry.items() if not k.startswith("known_bad")} for entry in snapshot]
+        canonical = json.dumps(content_view, sort_keys=True, ensure_ascii=False, default=str)
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         return snapshot, digest
 
