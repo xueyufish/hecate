@@ -557,8 +557,8 @@ export interface DatasetVersionDiffResult {
     name?: string;
     content_hash: string;
   };
-  added: Array[];
-  removed: Array[];
+  added: Array<Record<string, unknown>>;
+  removed: Array<Record<string, unknown>>;
   changed: Array<{ item_id: string; fields: Record<string, { base: unknown; target: unknown }> }>;
 }
 
@@ -780,7 +780,9 @@ export const evaluationApi: EvaluationApi = {
   // 7.3b: dataset versions
   async listDatasetVersions(datasetId, params = {}) {
     const qs = new URLSearchParams(
-      Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]
+      Object.entries(params)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, String(v)]) as [string, string][]
     );
     return api.get<{ items: DatasetVersionListEntry[]; total: number }>(
       `/api/evaluation/datasets/${datasetId}/versions?${qs}`
@@ -829,4 +831,61 @@ export const evaluationApi: EvaluationApi = {
       body,
     );
   },
+};
+
+// Agent versioning & channel publishing (1.3.20).
+
+import type {
+  AgentVersion,
+  AgentVersionDrift,
+  AgentVersionStatus,
+  ChannelEntry,
+  VersionDiff,
+} from "./api-types";
+
+export const agentVersionsApi = {
+  list: (agentId: string) => api.get<{ items: AgentVersion[]; total: number }>(`/api/agents/${agentId}/versions`),
+  get: (agentId: string, version: number) => api.get<AgentVersion>(`/api/agents/${agentId}/versions/${version}`),
+  status: (agentId: string) => api.get<AgentVersionStatus>(`/api/agents/${agentId}/version-status`),
+  commit: (agentId: string, body: { name?: string; change_summary?: string }) =>
+    api.post<AgentVersion>(`/api/agents/${agentId}/versions/commit`, body),
+  publish: (agentId: string, version: number, force = false) =>
+    api.post<AgentVersion>(`/api/agents/${agentId}/publish/${version}`, force ? { force: true } : {}),
+  rollback: (agentId: string, version: number) =>
+    api.post<AgentVersion>(`/api/agents/${agentId}/rollback/${version}`),
+  diff: (agentId: string, v1: number, v2: number) =>
+    api.get<VersionDiff>(`/api/agents/${agentId}/diff?v1=${v1}&v2=${v2}`),
+  drift: (agentId: string, version: number) =>
+    api.get<AgentVersionDrift>(`/api/agents/${agentId}/versions/${version}/drift`),
+  rename: (agentId: string, version: number, body: { name?: string; change_summary?: string }) =>
+    api.patch<AgentVersion>(`/api/agents/${agentId}/versions/${version}`, body),
+  remove: (agentId: string, version: number) =>
+    api.delete<void>(`/api/agents/${agentId}/versions/${version}`),
+};
+
+export interface ChannelCreateInput {
+  name: string;
+  type: ChannelEntry["type"];
+  agent_id: string;
+  bind_mode?: ChannelEntry["bind_mode"];
+  pinned_version?: number | null;
+  config?: Record<string, unknown>;
+}
+
+export const channelsApi = {
+  list: (agentId?: string) =>
+    api.get<ChannelEntry[]>(`/api/channels${agentId ? `?agent_id=${agentId}` : ""}`),
+  get: (channelId: string) => api.get<ChannelEntry>(`/api/channels/${channelId}`),
+  create: (body: ChannelCreateInput) => api.post<ChannelEntry>("/api/channels", body),
+  update: (
+    channelId: string,
+    body: {
+      name?: string;
+      bind_mode?: ChannelEntry["bind_mode"];
+      pinned_version?: number | null;
+      config?: Record<string, unknown>;
+      status?: ChannelEntry["status"];
+    }
+  ) => api.put<ChannelEntry>(`/api/channels/${channelId}`, body),
+  remove: (channelId: string) => api.delete<void>(`/api/channels/${channelId}`),
 };

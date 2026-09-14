@@ -12,11 +12,12 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Index, String
+from sqlalchemy import Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
 from hecate.models.base import BaseModel
+from hecate.models.workflow import EvaluationGateConfigSchema
 
 
 class AgentModel(BaseModel):
@@ -38,6 +39,13 @@ class AgentModel(BaseModel):
       resource IDs that the agent can access at runtime.
     - **risk_level** — qualitative risk classification (e.g. ``"LOW"``,
       ``"MEDIUM"``, ``"HIGH"``) used by the guard layer.
+    - **published_version** — version number currently published to
+      channels, or ``None`` if never published (1.3.20). The live row is
+      always the editable draft; this pointer decides which immutable
+      ``agent_versions`` snapshot external callers resolve to.
+    - **evaluation_gate** — nullable JSON publish-gate configuration
+      (1.3.20; same shape as ``workflows.evaluation_gate``); ``NULL`` =
+      gate off.
     """
 
     __tablename__ = "agents"
@@ -59,6 +67,8 @@ class AgentModel(BaseModel):
     opening_remarks: Mapped[str | None] = mapped_column(nullable=True)
     enable_suggestions: Mapped[bool] = mapped_column(default=True)
     guardrail_config: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    published_version: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    evaluation_gate: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
 
     __table_args__ = (Index("idx_agents_workspace", "workspace_id", "deleted"),)
 
@@ -87,7 +97,12 @@ class AgentCreateSchema(PydanticBase):
 
 
 class AgentUpdateSchema(PydanticBase):
-    """Schema for updating an existing agent. All fields are optional."""
+    """Schema for updating an existing agent. All fields are optional.
+
+    ``evaluation_gate`` accepts a full gate configuration or ``None``.
+    Passing ``None`` explicitly clears the gate (turns it off); omitting
+    the field leaves the stored configuration untouched.
+    """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -102,6 +117,7 @@ class AgentUpdateSchema(PydanticBase):
     opening_remarks: str | None = None
     enable_suggestions: bool | None = None
     guardrail_config: dict | None = None
+    evaluation_gate: EvaluationGateConfigSchema | None = None
 
 
 class AgentReadSchema(PydanticBase):
@@ -123,6 +139,8 @@ class AgentReadSchema(PydanticBase):
     opening_remarks: str | None
     enable_suggestions: bool
     guardrail_config: dict | None = None
+    published_version: int | None = None
+    evaluation_gate: dict | None = None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
