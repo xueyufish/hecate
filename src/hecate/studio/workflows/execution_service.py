@@ -212,6 +212,9 @@ class WorkflowExecutionService:
         channel_id: str | None = None,
         channel_capabilities: object | None = None,
         workspace_id: uuid.UUID | None = None,
+        agent_version: int | None = None,
+        workflow_version: int | None = None,
+        version_selector: str = "published_preferred",
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute an agent through the unified graph engine.
 
@@ -240,6 +243,19 @@ class WorkflowExecutionService:
                 downstream rendering hooks. ``None`` for the API path.
             workspace_id: Optional workspace scope for tenant-aware
                 filtering. ``None`` for the OpenAI-compatible API path.
+            agent_version: Optional agent version number (1.3.20). When
+                set, the agent's persona/model/workflow binding come from
+                the frozen snapshot instead of the live row — the
+                channel-published invocation path.
+            workflow_version: Exact workflow version to execute (the
+                agent snapshot's pinned workflow version). Wins over
+                ``version_selector``.
+            version_selector: How to pick the workflow version when
+                ``workflow_version`` is not given (1.3.20):
+                ``"published_preferred"`` runs ``published_version`` and
+                falls back to the latest version for never-published
+                workflows; ``"latest_for_studio"`` always runs the latest
+                draft (workflow editor test-runs).
 
         Returns:
             Response dict (non-streaming) or AsyncGenerator (streaming).
@@ -259,19 +275,40 @@ class WorkflowExecutionService:
             from hecate.tools.skill.loader import SkillLoader
 
             agent_uuid = agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id))
-            result = await self._db.execute(
-                select(AgentModel).where(
-                    AgentModel.id == agent_uuid,
-                    ~AgentModel.deleted,
+            agent_workspace_id: uuid.UUID | None = None
+            if agent_version is not None:
+                # 1.3.20: the frozen snapshot supplies persona / model /
+                # workflow binding; unpinned resources (skills) still
+                # resolve live. The snapshot is authoritative over any
+                # caller-provided system_prompt.
+                from hecate.studio.agents.versioning import AgentVersionService
+
+                resolved = await AgentVersionService(self._db).resolve(agent_uuid, agent_version)
+                cfg = resolved.config
+                persona = cfg.get("persona") or "You are a helpful assistant."
+                snap_model = (cfg.get("model_config") or {}).get("model")
+                if snap_model:
+                    model = snap_model
+                if cfg.get("workflow_id") and not workflow_id:
+                    workflow_id = uuid.UUID(str(cfg["workflow_id"]))
+                workflow_version = workflow_version or resolved.workflow_version
+                agent_workspace_id = resolved.workspace_id
+            else:
+                result = await self._db.execute(
+                    select(AgentModel).where(
+                        AgentModel.id == agent_uuid,
+                        ~AgentModel.deleted,
+                    )
                 )
-            )
-            agent = result.scalar_one_or_none()
-            if agent is not None:
-                persona = agent.persona or "You are a helpful assistant."
+                agent = result.scalar_one_or_none()
+                if agent is not None:
+                    persona = agent.persona or "You are a helpful assistant."
+                    agent_workspace_id = agent.workspace_id
+            if agent_workspace_id is not None:
                 loader = SkillLoader(self._db)
                 skills_block = await loader.format_skills(
                     agent_id=agent_uuid,
-                    workspace_id=agent.workspace_id,
+                    workspace_id=agent_workspace_id,
                 )
                 system_prompt = f"{persona}\n\n{skills_block}" if skills_block else persona
 
@@ -305,7 +342,9 @@ class WorkflowExecutionService:
                 planner_model=model,
             )
         elif agent_mode == "workflow":
-            graph_config = await self._load_workflow_graph(workflow_id)
+            graph_config = await self._load_workflow_graph(
+                workflow_id, version=workflow_version, selector=version_selector
+            )
             execution_mode = await self._load_workflow_mode(workflow_id) if workflow_id else "conversational"
         else:
             msg = f"Unknown agent mode: {agent_mode}"
@@ -724,17 +763,37 @@ class WorkflowExecutionService:
         workflow = result.scalar_one_or_none()
         return workflow.execution_mode if workflow else "conversational"
 
-    async def _load_workflow_graph(self, workflow_id: uuid.UUID | None) -> Any:
+    async def _load_workflow_graph(
+        self,
+        workflow_id: uuid.UUID | None,
+        *,
+        version: int | None = None,
+        selector: str = "published_preferred",
+    ) -> Any:
         """Load a workflow's graph from the database.
+
+        Version selection (1.3.20):
+
+        - ``version`` — exact version (an agent snapshot's pinned
+          workflow reference); wins over ``selector``.
+        - ``selector="latest_for_studio"`` — highest version (workflow
+          editor test-runs exercise the draft).
+        - ``selector="published_preferred"`` (default) — the published
+          version when the workflow has one; never-published workflows
+          fall back to the latest version, preserving pre-versioning
+          behavior.
 
         Args:
             workflow_id: The workflow to load.
+            version: Exact version number to load, if pinned.
+            selector: Fallback selection policy.
 
         Returns:
             Parsed GraphConfig.
 
         Raises:
-            ValueError: If workflow_id is None or workflow has no version.
+            ValueError: If workflow_id is None, the db session is missing,
+                or the workflow has no version.
         """
         if workflow_id is None:
             msg = "workflow_id is required for workflow mode"
@@ -743,21 +802,24 @@ class WorkflowExecutionService:
             msg = "Database session required for workflow mode"
             raise ValueError(msg)
 
-        result = await self._db.execute(
-            select(WorkflowVersionModel)
-            .where(
-                WorkflowVersionModel.workflow_id == workflow_id,
-                ~WorkflowVersionModel.deleted,
-            )
-            .order_by(WorkflowVersionModel.version.desc())
-            .limit(1)
+        stmt = select(WorkflowVersionModel).where(
+            WorkflowVersionModel.workflow_id == workflow_id,
+            ~WorkflowVersionModel.deleted,
         )
-        version = result.scalar_one_or_none()
-        if version is None:
+        if version is not None:
+            stmt = stmt.where(WorkflowVersionModel.version == version)
+        elif selector == "published_preferred":
+            row = await self._db.execute(select(WorkflowModel.published_version).where(WorkflowModel.id == workflow_id))
+            published = row.scalar_one_or_none()
+            if published is not None:
+                stmt = stmt.where(WorkflowVersionModel.version == published)
+        result = await self._db.execute(stmt.order_by(WorkflowVersionModel.version.desc()).limit(1))
+        version_row = result.scalar_one_or_none()
+        if version_row is None:
             msg = f"Workflow {workflow_id} has no compiled version"
             raise ValueError(msg)
 
-        return parse_graph(version.graph_dsl)
+        return parse_graph(version_row.graph_dsl)
 
     # ------------------------------------------------------------------
     # 1.3.21② time-travel: commit points, update_state, fork

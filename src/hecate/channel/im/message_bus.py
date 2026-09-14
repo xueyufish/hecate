@@ -108,12 +108,15 @@ class IMMessageBus:
         chat_id: str,
         channel_capabilities: ChannelCapabilities,
         agent_id: Any | None = None,
+        agent_version: int | None = None,
     ) -> None:
         """Enqueue an inbound message for background processing.
 
         ``chat_id`` is the IM-platform identifier used by the adapter to
         route the response. ``workspace_id`` scopes the lookup performed by
-        the SessionRouter when it is invoked downstream.
+        the SessionRouter when it is invoked downstream. ``agent_id`` and
+        ``agent_version`` carry the publishing-channel resolution (1.3.20):
+        the version freezes the agent config for this message's execution.
         """
         if self._queue is None:
             raise RuntimeError("IMMessageBus.start() must be called before enqueue()")
@@ -124,6 +127,7 @@ class IMMessageBus:
             chat_id=chat_id,
             capabilities=channel_capabilities,
             agent_id=agent_id,
+            agent_version=agent_version,
         )
         await self._queue.put(envelope)
 
@@ -174,6 +178,7 @@ class IMMessageBus:
             result = await self._workflow_service.execute(
                 messages=messages,
                 agent_id=envelope.agent_id,
+                agent_version=envelope.agent_version,
                 session_id=None,
                 channel_id=envelope.message.channel_id,
                 channel_capabilities=envelope.capabilities,
@@ -272,6 +277,7 @@ class _Envelope:
 
     __slots__ = (
         "agent_id",
+        "agent_version",
         "adapter",
         "capabilities",
         "chat_id",
@@ -287,6 +293,7 @@ class _Envelope:
         chat_id: str,
         capabilities: ChannelCapabilities,
         agent_id: Any | None,
+        agent_version: int | None = None,
     ) -> None:
         self.message = message
         self.adapter = adapter
@@ -294,3 +301,4 @@ class _Envelope:
         self.chat_id = chat_id
         self.capabilities = capabilities
         self.agent_id = agent_id
+        self.agent_version = agent_version

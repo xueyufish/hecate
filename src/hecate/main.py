@@ -69,7 +69,9 @@ from hecate.ops.api.tool_decisions import router as tool_decisions_router
 from hecate.ops.api.traces import router as traces_router
 from hecate.runtime.api.hooks import router as hooks_router
 from hecate.studio.api.agent_templates import router as agent_templates_router
+from hecate.studio.api.agent_versions import router as agent_versions_router
 from hecate.studio.api.agents import router as agents_router
+from hecate.studio.api.channels import router as studio_channels_router
 from hecate.studio.api.collaboration_patterns import router as collaboration_patterns_router
 from hecate.studio.api.conversations import router as conversations_router
 from hecate.studio.api.intent_packages import router as intent_packages_router
@@ -421,6 +423,8 @@ app.include_router(chat_router, prefix="/v1", tags=["chat"])
 app.include_router(models_router, prefix="/v1", tags=["models"])
 app.include_router(agent_chat_router, prefix="/v1", tags=["agents"])
 app.include_router(agents_router, prefix="/api", tags=["agents"])
+app.include_router(agent_versions_router, prefix="/api", tags=["agents"])
+app.include_router(studio_channels_router, prefix="/api", tags=["channels"])
 app.include_router(replay_router, prefix="/api", tags=["replay"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])

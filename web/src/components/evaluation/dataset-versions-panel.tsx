@@ -253,7 +253,7 @@ function DiffView({ diff }: { diff: DatasetVersionDiffResult }) {
   );
 }
 
-function DiffCategory({ title, entries }: { title: string; entries: Array }) {
+function DiffCategory({ title, entries }: { title: string; entries: Array<Record<string, unknown>> }) {
   return (
     <div className="rounded border p-2">
       <div className="font-medium">

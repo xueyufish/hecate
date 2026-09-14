@@ -10,7 +10,7 @@ gate verdict; ``force=true`` overrides the gate with an audit entry.
 */
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ShieldCheck, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,6 @@ interface WorkflowDetail {
 
 export default function WorkflowPublishPage() {
   const params = useParams();
-  const router = useRouter();
   const workflowId = params.id as string;
 
   const [workflow, setWorkflow] = useState<WorkflowDetail | null>(null);

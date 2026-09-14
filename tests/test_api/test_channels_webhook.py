@@ -181,9 +181,30 @@ async def test_url_verification_challenge_is_echoed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_signed_payload_normalized_and_enqueued() -> None:
+async def test_signed_payload_normalized_and_enqueued(monkeypatch: pytest.MonkeyPatch) -> None:
     """A normal message payload is normalized via adapter.receive() and
-    enqueued into the MessageBus, returning 200."""
+    enqueued into the MessageBus, returning 200.
+
+    1.3.20: enqueueing requires a configured publishing channel — the
+    IM route resolution is stubbed here (its semantics are covered by
+    ``test_im_route_*`` below); this test keeps asserting normalization.
+    """
+    from hecate.channel.publishing import ResolvedChannelTarget
+
+    class _Channel:
+        name = "feishu-main"
+
+    async def _resolve_im_route(self: object, provider_name: str) -> object:
+        return ResolvedChannelTarget(
+            channel=_Channel(),  # type: ignore[arg-type]
+            agent_id=__import__("uuid").UUID(int=42),
+            resolved_version=1,
+        )
+
+    monkeypatch.setattr(
+        "hecate.channel.publishing.ChannelPublishingService.resolve_im_route",
+        _resolve_im_route,
+    )
     adapter = _StubAdapter(name="feishu")
     registry = PluginRegistry()
     registry.register(
@@ -210,8 +231,11 @@ async def test_signed_payload_normalized_and_enqueued() -> None:
         chat_id="",
         channel_capabilities=None,
         agent_id=None,
+        agent_version=None,
     ):
-        enqueue_calls.append((canonical_message, adapter, workspace_id, chat_id, channel_capabilities))
+        enqueue_calls.append(
+            (canonical_message, adapter, workspace_id, chat_id, channel_capabilities, agent_id, agent_version)
+        )
         # Don't actually queue to avoid running the consumer loop in tests.
 
     bus.enqueue = _spy  # type: ignore[assignment]
@@ -226,13 +250,15 @@ async def test_signed_payload_normalized_and_enqueued() -> None:
         assert resp.json() == {"ok": True}
         assert len(adapter.received) == 1
         assert len(enqueue_calls) == 1
-        canonical, captured_adapter, workspace_id, chat_id, caps = enqueue_calls[0]
+        canonical, captured_adapter, workspace_id, chat_id, caps, routed_agent, routed_version = enqueue_calls[0]
         assert captured_adapter is adapter
         assert canonical.channel_id == "feishu"
         assert canonical.user_id == "ou_abc"
         assert canonical.content.text == "hi"
         assert chat_id == "oc_chat"
         assert caps.markdown is True
+        assert routed_agent is not None and str(routed_agent).endswith("2a")
+        assert routed_version == 1
     finally:
         bus.enqueue = original_enqueue  # type: ignore[assignment]
 

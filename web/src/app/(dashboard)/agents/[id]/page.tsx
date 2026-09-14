@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api-client";
 import { Agent } from "@/lib/api-types";
 import { AgentConfigurator, AgentFormData } from "@/components/agent/agent-configurator";
+import { ChannelManager } from "@/components/agent/channel-manager";
+import { VersionPanel } from "@/components/agent/version-panel";
 import { AlertTriangle, Download } from "lucide-react";
 
 export default function AgentDetailPage() {
@@ -129,6 +131,9 @@ export default function AgentDetailPage() {
         submitLabel="Save Changes"
         agentId={agentId}
       />
+
+      <VersionPanel agentId={agentId} />
+      <ChannelManager agentId={agentId} />
     </div>
   );
 }
