@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { X, Radio, Wifi, Sparkles, Zap } from "lucide-react";
 import { ChannelSelector } from "./channel-selector";
+import { ControllerConfigSection } from "./controller-config";
 import { api } from "@/lib/api-client";
 
 interface ConfigPanelProps {
@@ -32,6 +33,7 @@ const TYPE_LABELS: Record<string, string> = {
   "variable-set": "Variable Set Node",
   "fan-out": "Fan-Out Node",
   merge: "Merge Node",
+  controller: "Controller Node",
 };
 
 export function ConfigPanel({
@@ -742,6 +744,13 @@ export function ConfigPanel({
               />
             </div>
           </>
+        )}
+        {node.type === "controller" && (
+          <ControllerConfigSection
+            config={config}
+            allNodes={allNodes}
+            onChange={(field, value) => handleChange(field, value)}
+          />
         )}
       </div>
     </div>

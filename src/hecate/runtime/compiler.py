@@ -16,6 +16,7 @@ from hecate.runtime.types import (
     ChannelAccess,
     CompiledGraph,
     GraphConfig,
+    NodeType,
     RoutingMode,
 )
 
@@ -69,6 +70,7 @@ class GraphCompiler:
         self._validate_execution_mode(config, execution_mode)
         self._validate_channel_access(config)
         self._validate_routing_config(config)
+        self._validate_controller_config(config)
         self._validate_agent_invocation_mode(config)
         self._validate_agent_handoff_config(config)
         self._validate_accumulator_reducers(config)
@@ -143,10 +145,19 @@ class GraphCompiler:
 
             if routing_mode == RoutingMode.INTENT:
                 intent_patterns = routing_config.get("intent_patterns", [])
-                if not intent_patterns:
+                intent_package = routing_config.get("intent_package")
+                # 6.23: package-backed form (intent_package + category_targets)
+                # or the legacy form (intent_patterns) — exactly one is required.
+                if not intent_patterns and not intent_package:
                     raise GraphValidationError(
                         f"CONDITION node '{node_id}' with routing_mode='intent' "
-                        f"requires routing_config.intent_patterns",
+                        f"requires routing_config.intent_patterns or routing_config.intent_package",
+                        field=f"nodes[{node_id}].config.routing_config",
+                    )
+                if intent_package and not routing_config.get("category_targets"):
+                    raise GraphValidationError(
+                        f"CONDITION node '{node_id}' with package-backed intent routing "
+                        f"requires routing_config.category_targets",
                         field=f"nodes[{node_id}].config.routing_config",
                     )
 
@@ -165,6 +176,50 @@ class GraphCompiler:
                             f"CONDITION node '{node_id}' candidate_agent '{candidate}' is not a declared node",
                             field=f"nodes[{node_id}].config.routing_config.candidate_agents",
                         )
+
+    def _validate_controller_config(self, config: GraphConfig) -> None:
+        """Validate shape-level configuration for CONTROLLER nodes (2.6a).
+
+        Shape only: the studio save path validates package/category
+        *existence* (it owns DB access). Here: required fields, non-empty
+        mapping, and route targets referencing declared nodes.
+
+        Raises:
+            GraphValidationError: on missing defaults, empty mappings, or
+                undeclared route targets.
+        """
+        for node_id, node in config.nodes.items():
+            if node.type != NodeType.CONTROLLER:
+                continue
+            category_targets = node.config.get("category_targets") or {}
+            if not category_targets:
+                raise GraphValidationError(
+                    f"CONTROLLER node '{node_id}' requires non-empty category_targets",
+                    field=f"nodes[{node_id}].config.category_targets",
+                )
+            default_workflow = node.config.get("default_workflow")
+            if not default_workflow:
+                raise GraphValidationError(
+                    f"CONTROLLER node '{node_id}' requires a default_workflow target",
+                    field=f"nodes[{node_id}].config.default_workflow",
+                )
+            if not node.config.get("intent_package"):
+                raise GraphValidationError(
+                    f"CONTROLLER node '{node_id}' requires an intent_package reference",
+                    field=f"nodes[{node_id}].config.intent_package",
+                )
+            node_ids = set(config.nodes.keys())
+            targets = dict(category_targets)
+            for role in ("start_workflow", "default_workflow", "end_workflow"):
+                target = node.config.get(role)
+                if target:
+                    targets[role] = target
+            for role, target in targets.items():
+                if target not in node_ids:
+                    raise GraphValidationError(
+                        f"CONTROLLER node '{node_id}' target '{target}' ({role}) is not a declared node",
+                        field=f"nodes[{node_id}].config.category_targets",
+                    )
 
     def _validate_agent_invocation_mode(self, config: GraphConfig) -> None:
         """Validate invocation_mode field on AGENT nodes.

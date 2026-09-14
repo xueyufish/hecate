@@ -51,3 +51,36 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   (`overrides_score_id`) replaces the superseded automated row, and the
   override's `created_at` is the effective time (its trend bucket). The
   breakdowns endpoint is deliberately raw (`group_by=source` shows both).
+
+## Intent recognition & packages (6.23/6.49/2.6a)
+
+- **Runtime never reads draft intent content** — evidence flows only from
+  *published* package versions through the injected `IntentEvidencePort`
+  (composition-root provider `core/composition/intent_evidence.py`). A
+  version pin resolves to that exact published row; an unpinned reference
+  resolves to `latest published`. If the port raises, recognition degrades
+  to the fallback-label LLM path and marks `evidence_available=false` — it
+  does NOT fail the turn.
+- **Decision cache keys bind the evidence version** —
+  `(normalized_utterance, package_version_id, context_fingerprint)`.
+  Publishing a new version rotates the key space; there is no invalidation
+  broadcast (by design). Do not add cache entries for failed
+  classifications — a fallback decision must not pin the failure for the
+  TTL.
+- **`_intent_state` is a real channel** — the controller persists session
+  intent via channel writes; reserved underscore channels are silently
+  SKIPPED if not declared. `build_base_chat_graph` declares
+  `_intent_state` (LAST_VALUE); graphs built outside that helper must
+  declare it too, or sticky routing silently degrades to per-turn
+  recognition with no goal memory.
+- **Deterministic freeze ordering uses `position`** — rows created in one
+  transaction share `created_at` (PostgreSQL `now()` is transaction-
+  scoped), so (created_at, id) ordering is NOT deterministic for the
+  content hash. Categories/samples carry an explicit `position`;
+  hash projections must preserve it.
+- **publish gate reads deterministic signals only** —
+  `latest_recognition_result` filters `source="deterministic"`; feeding it
+  LLM-judge or human scores is a design violation, not a rounding issue.
+- **No few-shot payload or raw utterance in events** — `INTENT_RECOGNIZED`
+  carries the utterance *fingerprint* and the evidence *reference*; putting
+  payloads into the event would leak package content into traces.

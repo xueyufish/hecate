@@ -92,6 +92,10 @@ class NodeType(StrEnum):
     FAN_OUT = "fan-out"
     MERGE = "merge"
     COORDINATOR = "coordinator"
+    # 2.6a multi-agent central controller — intent-driven session router:
+    # recognizes intent (6.23 engine) and writes ``_route`` to dispatch
+    # between mapped sub-workflow targets, start/default/end assignments.
+    CONTROLLER = "controller"
 
 
 class ChannelType(StrEnum):

@@ -166,6 +166,8 @@ class OfflineTaskRunner:
                     if config.get("workflow_version") is not None:
                         run_kwargs["workflow_version"] = int(config["workflow_version"])
                     run_kwargs["max_in_flight"] = int(config.get("max_in_flight") or 4)
+                if answer_source == AnswerSource.INTENT:
+                    run_kwargs["intent_package"] = config.get("intent_package")
 
                 await engine.run(**run_kwargs)
                 # engine.run marked the run completed; persist its scores + summary

@@ -16,9 +16,7 @@ from the hash, so marking never surfaces as ``dataset_drift``.
 
 from __future__ import annotations
 
-import hashlib
-import json
-
+from hecate.core.canonical_hash import canonical_content_hash
 from hecate.models.evaluation import EvaluationItemModel
 
 # Content fields the hash covers; everything else on a snapshot entry is
@@ -56,13 +54,7 @@ def content_view(entry: dict) -> dict:
 
 def compute_content_hash(entries: list[dict]) -> str:
     """Canonical-JSON sha256 over the content projection of snapshot entries."""
-    canonical = json.dumps(
-        [content_view(entry) for entry in entries],
-        sort_keys=True,
-        ensure_ascii=False,
-        default=str,
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return canonical_content_hash([content_view(entry) for entry in entries])
 
 
 def build_snapshot(items: list[EvaluationItemModel]) -> tuple[list[dict], str]:

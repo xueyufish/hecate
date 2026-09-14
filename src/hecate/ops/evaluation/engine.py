@@ -68,6 +68,9 @@ class EvaluationEngine:
 
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+        # 6.49: per-run evidence cache keyed by (package_id, version_id);
+        # False marks a failed resolution so we do not retry every item.
+        self._intent_evidence_cache: dict = {}
 
     async def run(
         self,
@@ -83,6 +86,7 @@ class EvaluationEngine:
         repetitions: int = 1,
         max_in_flight: int = 1,
         items_override: list[EvaluationItemModel] | None = None,
+        intent_package: dict | None = None,
     ) -> EvaluationRunResult:
         """Execute all evaluators against all items in a dataset.
 
@@ -144,6 +148,9 @@ class EvaluationEngine:
             if repetitions < 1:
                 msg = "repetitions must be >= 1"
                 raise ValueError(msg)
+        if answer_source == AnswerSource.INTENT and intent_package is None:
+            msg = "answer_source='intent' requires intent_package"
+            raise ValueError(msg)
 
         if run is None:
             run = EvaluationRunModel(
@@ -217,6 +224,7 @@ class EvaluationEngine:
                             workflow_version=run.workflow_version,
                             repetitions=repetitions,
                             run=run,
+                            intent_package=intent_package,
                         )
                         item_scores[str(item.id)] = scores
                         if traj:
@@ -237,6 +245,7 @@ class EvaluationEngine:
                                 repetitions=repetitions,
                                 run=run,
                                 semaphore=semaphore,
+                                intent_package=intent_package,
                             )
                         )
                         for item in items
@@ -324,6 +333,42 @@ class EvaluationEngine:
         )
         return str(response.get("response") or "").strip()
 
+    async def _generate_answer_via_intent(self, query: str, intent_package: dict) -> str:
+        """Classify the query with the intent recognition engine (6.49).
+
+        The recognized label becomes the generated answer; the exact-match
+        evaluator then compares it against the item's expected category.
+        Evidence resolves once per (package, version) pair and is cached on
+        the engine instance — task runs construct one engine per run, so a
+        run of N items costs one evidence load.
+
+        Raises:
+            Exception: Any recognition failure propagates so the caller can
+                record per-item error scores.
+        """
+        from hecate.core.composition.intent_evidence import create_intent_evidence_port
+        from hecate.runtime.intent.engine import IntentRecognitionEngine, resolve_evidence
+        from hecate.runtime.intent.types import IntentRequest
+
+        package_id = uuid.UUID(str(intent_package.get("package_id")))
+        pin = intent_package.get("version_id")
+        version_id = uuid.UUID(str(pin)) if pin else None
+        cache_key = (package_id, version_id)
+        evidence = self._intent_evidence_cache.get(cache_key)
+        if evidence is None and evidence is not False:
+            evidence = await resolve_evidence(create_intent_evidence_port(), package_id, version_id)
+            self._intent_evidence_cache[cache_key] = evidence or False
+
+        engine = IntentRecognitionEngine()
+        result = await engine.recognize(
+            IntentRequest(
+                query if (query := query) else query,
+                evidence=evidence if evidence is not False else None,
+                fallback_labels=tuple(intent_package.get("fallback_labels") or ()),
+            )
+        )
+        return result.atomic.label or ""
+
     async def _process_item(
         self,
         item: EvaluationItemModel,
@@ -335,6 +380,7 @@ class EvaluationEngine:
         repetitions: int,
         run: EvaluationRunModel,
         semaphore: asyncio.Semaphore | None = None,
+        intent_package: dict | None = None,
     ) -> tuple[list[Score], list[dict]]:
         """Process a single dataset item: generate the answer and score it.
 
@@ -363,6 +409,8 @@ class EvaluationEngine:
         async def _gen() -> str:
             if answer_source == AnswerSource.AGENT:
                 return await self._generate_answer_via_agent(item.query, agent_id)
+            if answer_source == AnswerSource.INTENT:
+                return await self._generate_answer_via_intent(item.query, intent_package or {})
             if answer_source == AnswerSource.WORKFLOW:
                 content, traj = await self._generate_answer_via_workflow(
                     query=item.query,
