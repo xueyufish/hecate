@@ -15,7 +15,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Trash2, Edit, Zap, ChevronDown, ChevronRight, FlaskConical, Loader2 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Plus, Trash2, Edit, Zap, ChevronDown, ChevronRight, FlaskConical, Loader2, Rocket, Undo2 } from "lucide-react";
 
 interface Provider {
   id: string;
@@ -24,6 +31,14 @@ interface Provider {
   status: string;
   is_enabled: boolean;
   model_count: number;
+  call_count_30d: number;
+  call_count_total: number;
+}
+
+interface ModelReference {
+  type: string;
+  id: string;
+  name: string;
 }
 
 interface Model {
@@ -39,6 +54,27 @@ interface Model {
   };
   is_custom: boolean;
   is_enabled: boolean;
+  is_published: boolean;
+  last_test_passed_at: string | null;
+}
+
+function getPublishState(m: Pick<Model, "is_published" | "last_test_passed_at">): "published" | "tested" | "unpublished" {
+  if (m.is_published) return "published";
+  if (m.last_test_passed_at) return "tested";
+  return "unpublished";
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err && typeof err === "object" && "error" in err) {
+    const apiErr = err as { error?: { message?: string; details?: { references?: ModelReference[] } } };
+    const refs = apiErr.error?.details?.references;
+    if (refs && refs.length > 0) {
+      const list = refs.map((r) => `${r.type} "${r.name}"`).join(", ");
+      return `Cannot delete: still referenced by ${list}`;
+    }
+    if (apiErr.error?.message) return apiErr.error.message;
+  }
+  return err instanceof Error ? err.message : "Operation failed";
 }
 
 function getCapabilityBadges(metadata?: Model["model_metadata"]): string[] {
@@ -75,6 +111,11 @@ export default function ModelsPage() {
   const [testing, setTesting] = useState<string | null>(null);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
   const [models, setModels] = useState<Record<string, Model[]>>({});
+  const [providerSearch, setProviderSearch] = useState("");
+  const [modelSearch, setModelSearch] = useState("");
+  const [publishFilter, setPublishFilter] = useState("all");
+  const [unmatchedCalls, setUnmatchedCalls] = useState({ recent: 0, total: 0 });
+  const [publishing, setPublishing] = useState<string | null>(null);
   const [showTestDialog, setShowTestDialog] = useState(false);
   const [testTarget, setTestTarget] = useState<Model | null>(null);
   const [testPrompt, setTestPrompt] = useState("Hello, respond with one sentence.");
@@ -88,8 +129,15 @@ export default function ModelsPage() {
 
   const fetchProviders = async () => {
     try {
-      const res = await api.get<{ items: Provider[] }>("/api/model-providers");
+      const params = providerSearch ? `?search=${encodeURIComponent(providerSearch)}` : "";
+      const res = await api.get<{ items: Provider[]; unmatched_call_count_30d?: number; unmatched_call_count_total?: number }>(
+        `/api/model-providers${params}`
+      );
       setProviders(res.items || []);
+      setUnmatchedCalls({
+        recent: res.unmatched_call_count_30d || 0,
+        total: res.unmatched_call_count_total || 0,
+      });
     } catch {
       setProviders([]);
     } finally {
@@ -99,7 +147,13 @@ export default function ModelsPage() {
 
   const fetchModels = async (providerId: string) => {
     try {
-      const res = await api.get<{ items: { provider_id: string; models: Model[] }[] }>("/api/models");
+      const params = new URLSearchParams();
+      if (modelSearch) params.set("search", modelSearch);
+      if (publishFilter !== "all") params.set("publish_state", publishFilter);
+      const qs = params.toString();
+      const res = await api.get<{ items: { provider_id: string; models: Model[] }[] }>(
+        `/api/models${qs ? `?${qs}` : ""}`
+      );
       const items = res.items || [];
       const group = items.find((g) => g.provider_id === providerId);
       setModels((prev) => ({ ...prev, [providerId]: group?.models || [] }));
@@ -111,6 +165,26 @@ export default function ModelsPage() {
   useEffect(() => {
     fetchProviders();
   }, []);
+
+  // Debounced refetch when the provider search input changes.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      fetchProviders();
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providerSearch]);
+
+  // Debounced refetch of the expanded provider's models on filter changes.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (expandedProvider) {
+        fetchModels(expandedProvider);
+      }
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modelSearch, publishFilter, expandedProvider]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -181,13 +255,50 @@ export default function ModelsPage() {
   };
 
   const toggleExpand = (providerId: string) => {
-    if (expandedProvider === providerId) {
-      setExpandedProvider(null);
-    } else {
-      setExpandedProvider(providerId);
-      if (!models[providerId]) {
-        fetchModels(providerId);
+    setExpandedProvider(expandedProvider === providerId ? null : providerId);
+  };
+
+  const handleTogglePublish = async (m: Model, providerId: string) => {
+    setPublishing(m.id);
+    try {
+      if (m.is_published) {
+        await api.post(`/api/models/${m.id}/unpublish`, {});
+      } else {
+        await api.post(`/api/models/${m.id}/publish`, {});
       }
+      fetchModels(providerId);
+    } catch (err) {
+      alert(getErrorMessage(err));
+    } finally {
+      setPublishing(null);
+    }
+  };
+
+  const handleDeleteModel = async (m: Model, providerId: string) => {
+    if (
+      !confirm(
+        "Delete this model? Deletion is refused while agents or workflows still reference it."
+      )
+    )
+      return;
+    try {
+      await api.delete(`/api/models/${m.id}`);
+      fetchModels(providerId);
+      fetchProviders();
+    } catch (err) {
+      alert(getErrorMessage(err));
+    }
+  };
+
+  const publishBadge = (m: Model) => {
+    const state = getPublishState(m);
+    switch (state) {
+      case "published":
+        return <Badge className="bg-green-100 text-green-800">Published</Badge>;
+      case "tested":
+        return <Badge className="bg-amber-100 text-amber-800">Test passed</Badge>;
+      default:
+        return <Badge className="bg-gray-100 text-gray-800">Unpublished</Badge>;
     }
   };
 
@@ -235,6 +346,21 @@ export default function ModelsPage() {
         </Button>
       </div>
 
+      <div className="flex items-center gap-3">
+        <Input
+          value={providerSearch}
+          onChange={(e) => setProviderSearch(e.target.value)}
+          placeholder="Search providers…"
+          className="max-w-xs"
+        />
+        {(unmatchedCalls.total > 0 || unmatchedCalls.recent > 0) && (
+          <span className="text-xs text-muted-foreground">
+            Unmatched calls (not tied to any registered model): {unmatchedCalls.recent} in 30d /{" "}
+            {unmatchedCalls.total} all-time
+          </span>
+        )}
+      </div>
+
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -244,13 +370,14 @@ export default function ModelsPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Models</TableHead>
+                <TableHead>Calls</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {providers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  <TableCell colSpan={6} className="text-center text-muted-foreground">
                     No providers yet, click &ldquo;Add Provider&rdquo; to get started
                   </TableCell>
                 </TableRow>
@@ -261,6 +388,7 @@ export default function ModelsPage() {
                       <TableCell>
                         <button
                           onClick={() => toggleExpand(p.id)}
+                          aria-label={`Toggle models for ${p.display_name}`}
                           className="text-muted-foreground hover:text-foreground"
                         >
                           {expandedProvider === p.id ? (
@@ -275,6 +403,12 @@ export default function ModelsPage() {
                         <Badge className={statusColor(p.status)}>{statusLabel(p.status)}</Badge>
                       </TableCell>
                       <TableCell>{p.model_count}</TableCell>
+                      <TableCell>
+                        <span className="text-sm">
+                          {p.call_count_30d}
+                          <span className="text-muted-foreground"> / {p.call_count_total}</span>
+                        </span>
+                      </TableCell>
                       <TableCell className="text-right space-x-2">
                         <Button
                           variant="outline"
@@ -311,27 +445,45 @@ export default function ModelsPage() {
                     </TableRow>
                     {expandedProvider === p.id && (
                       <TableRow key={`${p.id}-models`}>
-                        <TableCell colSpan={5} className="bg-muted/30 px-8 py-3">
+                        <TableCell colSpan={6} className="bg-muted/30 px-8 py-3">
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-medium text-muted-foreground">
                               Model List
                             </span>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setTargetProviderId(p.id);
-                                setModelForm({ model_id: "", display_name: "" });
-                                setShowModelDialog(true);
-                              }}
-                            >
-                              <Plus className="mr-1 h-3 w-3" />
-                               Add Model
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                value={modelSearch}
+                                onChange={(e) => setModelSearch(e.target.value)}
+                                placeholder="Search models…"
+                                className="h-8 w-44"
+                              />
+                              <Select value={publishFilter} onValueChange={setPublishFilter}>
+                                <SelectTrigger className="h-8 w-36">
+                                  <SelectValue placeholder="Publish state" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="all">All states</SelectItem>
+                                  <SelectItem value="published">Published</SelectItem>
+                                  <SelectItem value="unpublished">Unpublished</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setTargetProviderId(p.id);
+                                  setModelForm({ model_id: "", display_name: "" });
+                                  setShowModelDialog(true);
+                                }}
+                              >
+                                <Plus className="mr-1 h-3 w-3" />
+                                 Add Model
+                              </Button>
+                            </div>
                           </div>
                           {(models[p.id] || []).length === 0 ? (
                             <p className="text-sm text-muted-foreground py-2">
-                               No models yet, click &ldquo;Add Model&rdquo; to configure
+                               No models match the current filters, click &ldquo;Add Model&rdquo; to configure
                             </p>
                           ) : (
                             <Table>
@@ -340,11 +492,14 @@ export default function ModelsPage() {
                                     <TableHead>Model Name</TableHead>
                                     <TableHead>Type</TableHead>
                                     <TableHead>Capabilities</TableHead>
+                                    <TableHead>Publish State</TableHead>
                                     <TableHead className="text-right">Actions</TableHead>
                                   </TableRow>
                                 </TableHeader>
                               <TableBody>
-                                {(models[p.id] || []).map((m) => (
+                                {(models[p.id] || []).map((m) => {
+                                  const state = getPublishState(m);
+                                  return (
                                   <TableRow key={m.id}>
                                     <TableCell className="font-medium">
                                       {m.display_name}
@@ -359,6 +514,7 @@ export default function ModelsPage() {
                                         ))}
                                       </div>
                                     </TableCell>
+                                    <TableCell>{publishBadge(m)}</TableCell>
                                     <TableCell className="text-right">
                                       <Button
                                         variant="ghost"
@@ -374,9 +530,37 @@ export default function ModelsPage() {
                                         <FlaskConical className="mr-1 h-3 w-3" />
                                          Test
                                       </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        disabled={publishing === m.id || state === "unpublished"}
+                                        title={
+                                          state === "unpublished"
+                                            ? "Run the model test first — publishing requires a passed test"
+                                            : undefined
+                                        }
+                                        onClick={() => handleTogglePublish(m, p.id)}
+                                      >
+                                        {publishing === m.id ? (
+                                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                        ) : m.is_published ? (
+                                          <Undo2 className="mr-1 h-3 w-3" />
+                                        ) : (
+                                          <Rocket className="mr-1 h-3 w-3" />
+                                        )}
+                                        {m.is_published ? "Unpublish" : "Publish"}
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleDeleteModel(m, p.id)}
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                      </Button>
                                     </TableCell>
                                   </TableRow>
-                                ))}
+                                  );
+                                })}
                               </TableBody>
                             </Table>
                           )}

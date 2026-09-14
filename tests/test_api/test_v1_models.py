@@ -26,6 +26,29 @@ def models_client(client: AsyncClient) -> AsyncClient:  # noqa: ARG001
     app.dependency_overrides.pop(get_current_user_id, None)
 
 
+async def _publish_model(client: AsyncClient, model_uuid: str) -> None:
+    """Seed test evidence and publish the model (6.47 reference gating).
+
+    /v1/models only returns published models, so tests that assert
+    reference-surface visibility must publish first.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from hecate.models.model_provider import ModelRegistryModel
+    from tests.conftest import test_session_factory
+
+    async with test_session_factory() as session:
+        result = await session.execute(select(ModelRegistryModel).where(ModelRegistryModel.id == uuid.UUID(model_uuid)))
+        registry_model = result.scalar_one()
+        registry_model.last_test_passed_at = datetime.now(UTC)
+        await session.commit()
+
+    resp = await client.post(f"/api/models/{model_uuid}/publish")
+    assert resp.status_code == 200
+
+
 class TestListModels:
     async def test_list_models_no_providers_fallback(
         self,
@@ -64,6 +87,7 @@ class TestListModels:
             },
         )
         assert model_resp.status_code == 201
+        await _publish_model(models_client, model_resp.json()["id"])
 
         response = await models_client.get("/v1/models")
         assert response.status_code == 200
@@ -88,7 +112,7 @@ class TestListModels:
         )
         provider = provider_resp.json()
 
-        await models_client.post(
+        enabled_resp = await models_client.post(
             "/api/models",
             json={
                 "provider_id": provider["id"],
@@ -104,6 +128,8 @@ class TestListModels:
                 "display_name": "Disabled",
             },
         )
+        await _publish_model(models_client, enabled_resp.json()["id"])
+        await _publish_model(models_client, disabled_resp.json()["id"])
 
         await models_client.put(
             f"/api/models/{disabled_resp.json()['id']}",
@@ -130,7 +156,7 @@ class TestListModels:
         )
         provider = provider_resp.json()
 
-        await models_client.post(
+        glm_resp = await models_client.post(
             "/api/models",
             json={
                 "provider_id": provider["id"],
@@ -138,6 +164,7 @@ class TestListModels:
                 "display_name": "GLM-4",
             },
         )
+        await _publish_model(models_client, glm_resp.json()["id"])
 
         response = await models_client.get("/v1/models")
         result = response.json()

@@ -265,6 +265,7 @@ class AgentVersionService:
         config = snapshot_own_config(agent)
         pinned_refs = await self._build_pinned_refs(agent)
         ref_manifest = await self._build_ref_manifest(agent)
+        publish_warnings = await self._model_publish_warnings(agent)
 
         latest = await self.db.execute(
             select(func.max(AgentVersionModel.version)).where(
@@ -291,7 +292,12 @@ class AgentVersionService:
         await self.db.flush()
         await self.refresh_version(version)
         logger.info("Committed version %s for agent %s", next_version, agent_id)
-        return self._version_detail(version, agent.published_version)
+        detail = self._version_detail(version, agent.published_version)
+        if publish_warnings:
+            # Warn, never block (6.47): reference gating hides unpublished
+            # models from pickers but does not police existing bindings.
+            detail["warnings"] = publish_warnings
+        return detail
 
     async def list_versions(self, agent_id: uuid.UUID) -> list[dict[str, Any]]:
         """List an agent's versions, newest first, with publish flags."""
@@ -611,6 +617,29 @@ class AgentVersionService:
         return {"agent_id": uuid.UUID(str(record["agent_id"])), "version": version, "drifted": drifted}
 
     # --- internals -----------------------------------------------------------
+
+    async def _model_publish_warnings(self, agent: AgentModel) -> list[str]:
+        """Warn when the committed model exists in the registry but is unpublished (6.47).
+
+        Models absent from the registry (dynamic/gateway-discovered) carry no
+        publish state, so they are silently accepted — the warning is only for
+        rows the lifecycle explicitly gates.
+        """
+        model_name = (agent.model_config_db or {}).get("model")
+        if not isinstance(model_name, str) or not model_name:
+            return []
+        from hecate.models.model_provider import ModelRegistryModel
+
+        result = await self.db.execute(
+            select(ModelRegistryModel.is_published).where(
+                ModelRegistryModel.model_id == model_name,
+                ~ModelRegistryModel.deleted,
+            )
+        )
+        states = result.scalars().all()
+        if states and not any(states):
+            return [f"Model '{model_name}' is not published"]
+        return []
 
     async def _get_agent(self, agent_id: uuid.UUID) -> AgentModel:
         result = await self.db.execute(select(AgentModel).where(AgentModel.id == agent_id, ~AgentModel.deleted))

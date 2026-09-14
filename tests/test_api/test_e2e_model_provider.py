@@ -60,6 +60,22 @@ async def _seed_provider_and_model(
         },
     )
     assert model_resp.status_code == 201
+    model_uuid = model_resp.json()["id"]
+
+    # Publish the model to the reference surface (6.47): seed the test
+    # evidence, then run the explicit publish action.
+    from datetime import UTC, datetime
+
+    from hecate.models.model_provider import ModelRegistryModel
+
+    async with test_session_factory() as session:
+        result = await session.execute(select(ModelRegistryModel).where(ModelRegistryModel.id == uuid.UUID(model_uuid)))
+        registry_model = result.scalar_one()
+        registry_model.last_test_passed_at = datetime.now(UTC)
+        await session.commit()
+
+    publish_resp = await e2e_client.post(f"/api/models/{model_uuid}/publish")
+    assert publish_resp.status_code == 200
 
     # Set provider status to active
     async with test_session_factory() as session:
