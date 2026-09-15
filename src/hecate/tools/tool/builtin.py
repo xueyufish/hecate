@@ -43,6 +43,23 @@ BUILTIN_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "required": ["query"],
         },
     },
+    "load_skill": {
+        "description": (
+            "Load the full instructions of a skill advertised in your skills catalog. "
+            "Call this before applying a skill; the returned content is valid for the current run."
+        ),
+        "risk_level": "LOW",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "skill_name": {
+                    "type": "string",
+                    "description": "Name of the skill to load, exactly as advertised in the catalog",
+                },
+            },
+            "required": ["skill_name"],
+        },
+    },
     "read_file": {
         "description": ("Read the contents of a file at the given path relative to the workspace root."),
         "risk_level": "LOW",
@@ -285,12 +302,17 @@ class BuiltInToolExecutor:
         *,
         browser_session_manager: Any | None = None,
         allowed_domains: list[str] | None = None,
+        skill_loader: Any | None = None,
     ) -> None:
         self._search = search_provider
         self._workspace = Path(workspace_root).resolve()
         self._workspace.mkdir(parents=True, exist_ok=True)
         self._browser_session_manager = browser_session_manager
         self._allowed_domains = allowed_domains if allowed_domains is not None else []
+        # SkillLoader for the load_skill tool (L2 progressive disclosure).
+        # None in paths without agent context (e.g. the MCP server surface):
+        # load_skill then fails closed with an informative error.
+        self._skill_loader = skill_loader
 
     async def execute(self, name: str, args: dict[str, Any], context: dict[str, Any] | None = None) -> Any:
         """Execute a built-in tool by name.
@@ -301,7 +323,9 @@ class BuiltInToolExecutor:
             context: Optional execution context. For execute_code, may
                 contain ``_sandbox_volumes`` (dict[str, str]) for environment
                 mounting. For browser_* tools, may contain ``session_id``
-                (str) identifying the agent session.
+                (str) identifying the agent session. For load_skill, must
+                contain ``agent_id`` and ``workspace_id`` (UUID strings) so
+                the catalog membership check can be enforced.
 
         Returns:
             Tool-specific result.
@@ -315,6 +339,9 @@ class BuiltInToolExecutor:
         if name == "execute_code":
             return await self._execute_code(args, context)
 
+        if name == "load_skill":
+            return await self._load_skill(args, context)
+
         handler = {
             "web_search": self._web_search,
             "read_file": self._read_file,
@@ -324,6 +351,34 @@ class BuiltInToolExecutor:
         if handler is None:
             raise ValueError(f"Unknown built-in tool: {name!r}")
         return await handler(args)
+
+    async def _load_skill(self, args: dict[str, Any], context: dict[str, Any] | None) -> str:
+        """Serve full L2 skill content for an advertised skill."""
+        if self._skill_loader is None:
+            raise ValueError("load_skill is not available in this execution path")
+        context = context or {}
+        workspace_id = context.get("workspace_id")
+        agent_id = context.get("agent_id")
+        if not workspace_id or not agent_id:
+            raise ValueError("load_skill requires agent context (agent_id, workspace_id)")
+
+        import uuid as _uuid
+
+        from hecate.tools.skill.loader import SkillNotAdvertisedError
+
+        skill_name = str(args.get("skill_name", "")).strip()
+        if not skill_name:
+            raise ValueError("load_skill requires a non-empty skill_name")
+        session_id = context.get("session_id")
+        try:
+            return await self._skill_loader.load_skill_content(
+                skill_name,
+                _uuid.UUID(str(agent_id)),
+                _uuid.UUID(str(workspace_id)),
+                _uuid.UUID(str(session_id)) if session_id else None,
+            )
+        except SkillNotAdvertisedError as exc:
+            raise ValueError(str(exc)) from exc
 
     def _resolve_and_validate_path(self, rel_path: str) -> Path:
         resolved = (self._workspace / rel_path).resolve()

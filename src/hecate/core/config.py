@@ -185,6 +185,18 @@ class Settings(BaseSettings):
     META_AGENTS_ENABLED: bool = False
     META_AGENTS_INTERVAL_SECONDS: int = 3600
 
+    # Skill progressive disclosure (1.3.6f): L1 catalog in the system prompt,
+    # L2 full instructions via the load_skill tool. False restores the legacy
+    # inject-all-skills behaviour (rollout escape hatch).
+    SKILL_PROGRESSIVE_DISCLOSURE: bool = True
+
+    # Self-evolution closed loop (1.3.6f). Disabled by default: the loop is
+    # switched on per deployment after eval-gate review.
+    SKILL_EVOLUTION_ENABLED: bool = False
+    SKILL_EVOLUTION_QUALITY_THRESHOLD: float = 0.6
+    SKILL_EVOLUTION_ATTRIBUTION_MODEL: str = "gpt-4o-mini"
+    SKILL_EVOLUTION_RUN_LLM_CALL_LIMIT: int = 50
+
     # Online evaluation scoring (7.2c): always-on LLM-as-Judge sampling of
     # production traces. Metered LLM cost — keep off until a workspace opts in.
     EVALUATION_ONLINE_SCORING_ENABLED: bool = False

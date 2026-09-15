@@ -79,6 +79,7 @@ from hecate.studio.api.orchestration_templates import router as orchestration_te
 from hecate.studio.api.plugins import router as plugins_router
 from hecate.studio.api.prompts import router as prompts_router
 from hecate.studio.api.replay import router as replay_router
+from hecate.studio.api.self_evolution import router as self_evolution_router
 from hecate.studio.api.sessions import router as sessions_router
 from hecate.studio.api.workflows import router as workflows_router
 from hecate.tools.api.gateway import router as gateway_router
@@ -430,6 +431,7 @@ app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(skills_router, prefix="/api", tags=["skills"])
 app.include_router(conversations_router, prefix="/api", tags=["conversations"])
+app.include_router(self_evolution_router, prefix="/api", tags=["self-evolution"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])
 app.include_router(orchestration_templates_router, prefix="/api", tags=["orchestration-templates"])
 app.include_router(collaboration_patterns_router, prefix="/api", tags=["collaboration-patterns"])

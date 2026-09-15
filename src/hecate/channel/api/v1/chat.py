@@ -356,6 +356,8 @@ async def _process_chat(
                     approval_callback=bundle.approval_callback,
                     middleware_chains=bundle.middleware_chains,
                     denial_tracker=bundle.denial_tracker,
+                    agent_id=agent.id if agent is not None else None,
+                    workspace_id=agent.workspace_id if agent is not None else workspace_id,
                 ),
                 media_type="text/event-stream",
             )
@@ -375,6 +377,8 @@ async def _process_chat(
             approval_callback=bundle.approval_callback,
             middleware_chains=bundle.middleware_chains,
             denial_tracker=bundle.denial_tracker,
+            agent_id=agent.id if agent is not None else None,
+            workspace_id=agent.workspace_id if agent is not None else workspace_id,
         )
         if response is None:
             from fastapi import HTTPException
@@ -702,6 +706,7 @@ def _build_tool_registry(db: AsyncSession) -> ToolRegistry:
         A configured ToolRegistry.
     """
     from hecate.core.config import settings
+    from hecate.tools.skill.loader import SkillLoader
     from hecate.tools.tool.builtin import BuiltInToolExecutor
     from hecate.tools.tool.registry import ToolRegistry
     from hecate.tools.tool.search.factory import create_search_provider
@@ -713,6 +718,7 @@ def _build_tool_registry(db: AsyncSession) -> ToolRegistry:
     builtin_executor = BuiltInToolExecutor(
         search_provider=search_provider,
         workspace_root=settings.WORKSPACE_ROOT,
+        skill_loader=SkillLoader(db),
     )
     return ToolRegistry(db=db, builtin_executor=builtin_executor)
 
@@ -728,6 +734,8 @@ async def _execute_tool_calls(
     risk_overrides: dict[str, str] | None = None,
     middleware_chains: dict | None = None,
     denial_tracker: Any | None = None,
+    agent_id: Any | None = None,
+    workspace_id: Any | None = None,
 ) -> list[dict[str, Any]]:
     """Execute parsed tool calls, returning results for inject_tool_results.
 
@@ -841,11 +849,16 @@ async def _execute_tool_calls(
                         "result": f"Tool call rejected: {approval.reason}",
                         "is_error": True,
                     }
+        tool_context: dict[str, Any] = {"session_id": session_id or ""}
+        if agent_id is not None:
+            tool_context["agent_id"] = str(agent_id)
+        if workspace_id is not None:
+            tool_context["workspace_id"] = str(workspace_id)
         try:
             result = await tool_registry.execute(
                 tc["name"],
                 tc.get("arguments") or {},
-                context={"session_id": session_id or ""},
+                context=tool_context,
             )
             return {"tool_call_id": tc["id"], "result": result, "is_error": False}
         except Exception as exc:
@@ -876,6 +889,8 @@ async def _chat_with_tools(
     approval_callback: Any | None = None,
     middleware_chains: dict | None = None,
     denial_tracker: Any | None = None,
+    agent_id: Any | None = None,
+    workspace_id: Any | None = None,
 ) -> LLMResponse | None:
     """Run a non-streaming chat with a tool-calling loop.
 
@@ -908,6 +923,8 @@ async def _chat_with_tools(
             tool_rules=tool_rules,
             approval_callback=approval_callback,
             middleware_chains=middleware_chains,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
         )
         # Append the assistant tool-call message so the tool results are
         # well-formed (a tool message must follow its assistant tool_calls).
@@ -938,6 +955,8 @@ async def _stream_chat_with_tools(
     approval_callback: Any | None = None,
     middleware_chains: dict | None = None,
     denial_tracker: Any | None = None,
+    agent_id: Any | None = None,
+    workspace_id: Any | None = None,
 ):
     """Stream a chat with a tool-calling loop.
 
@@ -986,6 +1005,8 @@ async def _stream_chat_with_tools(
             tool_rules=tool_rules,
             approval_callback=approval_callback,
             middleware_chains=middleware_chains,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
         )
         # Append the assistant tool-call message so the tool results are
         # well-formed (a tool message must follow its assistant tool_calls).

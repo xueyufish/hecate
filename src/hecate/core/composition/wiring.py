@@ -194,11 +194,26 @@ async def start_meta_agents(app: FastAPI) -> None:
         scheduler = MetaAgentScheduler()
         scheduler.register("garbage_collector", _gc_tick, interval_seconds=interval)
         scheduler.register("compliance_checker", compliance_agent.run, interval_seconds=interval)
+
+        registered = ["garbage_collector", "compliance_checker"]
+        if settings.SKILL_EVOLUTION_ENABLED:
+            from hecate.studio.self_evolution.agent import EvolutionAgent
+
+            evolution_agent = EvolutionAgent()
+
+            async def _evolution_tick() -> None:
+                async with async_session_factory() as session:
+                    await evolution_agent.run(session)
+
+            scheduler.register("skill_evolution", _evolution_tick, interval_seconds=interval)
+            registered.append("skill_evolution")
+
         await scheduler.start()
         app.state.meta_scheduler = scheduler
         logger.info(
-            "Meta-agents started (interval=%ds): garbage_collector, compliance_checker",
+            "Meta-agents started (interval=%ds): %s",
             interval,
+            ", ".join(registered),
         )
     except Exception:
         logger.exception("Meta-agent startup failed; continuing without meta-agents")

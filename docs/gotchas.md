@@ -84,3 +84,17 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
 - **No few-shot payload or raw utterance in events** — `INTENT_RECOGNIZED`
   carries the utterance *fingerprint* and the evidence *reference*; putting
   payloads into the event would leak package content into traces.
+- **Skill loading is two-level (progressive disclosure, 1.3.6f)** —
+  `SkillLoader.format_skills()` returns an L1 catalog (name + description
+  per bound skill); full instructions (L2) are served on demand via the
+  `load_skill` built-in tool, which requires `agent_id`/`workspace_id` in
+  the tool context (chat path and ToolWorker thread them). Skills with
+  `auto_load=True` keep full injection and are excluded from the catalog.
+  Set `SKILL_PROGRESSIVE_DISCLOSURE=false` to restore the legacy
+  inject-everything behaviour.
+- **Learned skills are knowledge-only and human-gated** — candidates from
+  the evolution loop (`studio/self_evolution/`) are published as
+  `SkillModel` rows with `source="learned"` + provenance
+  (`learned_run_id`, `failure_category`) only after an explicit review
+  decision; generation rejects any draft containing fenced code blocks.
+  The loop is off unless `SKILL_EVOLUTION_ENABLED=true`.

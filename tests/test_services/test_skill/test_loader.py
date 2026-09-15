@@ -60,9 +60,11 @@ class TestSkillLoader:
         loader = SkillLoader(db_session)
         result = await loader.format_skills(agent.id, agent.workspace_id)
 
+        # Progressive disclosure: L1 catalog advertises name + description
         assert "<skills>" in result
-        assert '<skill name="code-review">' in result
-        assert "Check code quality" in result
+        assert '<skill name="code-review" description="Description for code-review"/>' in result
+        assert "Check code quality" not in result
+        assert "load_skill" in result
         assert "</skills>" in result
 
     async def test_format_skills_no_skills(self, db_session: AsyncSession) -> None:
@@ -89,6 +91,7 @@ class TestSkillLoader:
         result = await loader.format_skills(agent.id, agent.workspace_id)
 
         assert '<skill name="auto-skill">' in result
+        assert "Always loaded" in result
 
     async def test_xml_format(self, db_session: AsyncSession) -> None:
         await _create_skill(db_session, "test-skill", "Body text")
@@ -99,8 +102,8 @@ class TestSkillLoader:
 
         assert result.startswith("<skills>")
         assert result.endswith("</skills>")
-        assert '<skill name="test-skill">' in result
-        assert "</skill>" in result
+        assert '<skill name="test-skill" description=' in result
+        assert "</skills>" in result
 
     async def test_deduplication(self, db_session: AsyncSession) -> None:
         await _create_skill(db_session, "shared", "Shared skill", auto_load=True)

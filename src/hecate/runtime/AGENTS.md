@@ -83,8 +83,6 @@ RetryStrategy via RetryExecutor.
 - `replay/` — time-travel replay, logfold/loginvariants/logpolicy,
   orchestrator_validator
 - `temporal/` — Temporal distributed execution (temporal extra)
-- `self_improvement/` — FailureAnalyzer / ConstraintGenerator /
-  ConstraintInjector (moved from `services/harness/`)
 - `security/` — guardrail assembly (wiring; hook interfaces stay in the
   kernel `guardrail.py`)
 

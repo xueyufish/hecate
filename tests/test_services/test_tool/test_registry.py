@@ -77,16 +77,17 @@ class TestRegistryBuiltinRouting:
 class TestSeedBuiltinTools:
     async def test_seed_inserts_all_tools(self, db_session: Any) -> None:
         count = await seed_builtin_tools(db_session)
-        assert count == 11
+        assert count == 12
 
         from sqlalchemy import select
 
         result = await db_session.execute(select(ToolModel).where(ToolModel.source == "builtin"))
         tools = result.scalars().all()
-        assert len(tools) == 11
+        assert len(tools) == 12
         names = {t.name for t in tools}
         assert names == {
             "web_search",
+            "load_skill",
             "read_file",
             "write_file",
             "list_files",
@@ -101,7 +102,7 @@ class TestSeedBuiltinTools:
 
     async def test_seed_idempotent(self, db_session: Any) -> None:
         count1 = await seed_builtin_tools(db_session)
-        assert count1 == 11
+        assert count1 == 12
         count2 = await seed_builtin_tools(db_session)
         assert count2 == 0
 
