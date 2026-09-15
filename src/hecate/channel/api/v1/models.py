@@ -1,8 +1,10 @@
 """OpenAI-compatible models endpoint.
 
 Implements ``GET /v1/models`` following the OpenAI Models API format.
-Returns models from the database (model_registry) grouped by provider,
-with fallback to LiteLLM discovery when no providers are configured.
+Returns *published* models from the database (model_registry) grouped by
+provider — the application reference surface (6.47); unpublished models
+stay manageable and testable on the settings surface. Falls back to
+LiteLLM discovery when no providers are configured.
 """
 
 from __future__ import annotations
@@ -83,6 +85,7 @@ async def list_models(
             select(ModelRegistryModel).where(
                 ~ModelRegistryModel.deleted,
                 ModelRegistryModel.is_enabled.is_(True),
+                ModelRegistryModel.is_published.is_(True),
                 ModelRegistryModel.model_type == "chat",
             )
         )

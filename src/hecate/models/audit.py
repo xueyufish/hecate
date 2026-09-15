@@ -87,6 +87,8 @@ class AuditAction(enum.StrEnum):
     SYSTEM_RATE_LIMIT_TRIGGERED = "system.rate_limit.triggered"
     SYSTEM_MODEL_PROVIDER_CREATE = "system.model_provider.create"
     SYSTEM_MODEL_PROVIDER_DELETE = "system.model_provider.delete"
+    SYSTEM_MODEL_PUBLISH = "system.model.publish"
+    SYSTEM_MODEL_UNPUBLISH = "system.model.unpublish"
 
 
 # ---------------------------------------------------------------------------

@@ -52,6 +52,11 @@ class ModelRegistryModel(BaseModel):
     model_metadata: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     is_custom: Mapped[bool] = mapped_column(nullable=False, default=False)
     is_enabled: Mapped[bool] = mapped_column(nullable=False, default=True)
+    # Publish lifecycle (6.47): unpublished models are hidden from the
+    # application reference surface (/v1/models) but remain testable.
+    # "Tested" is derived from last_test_passed_at, never stored as a state.
+    is_published: Mapped[bool] = mapped_column(nullable=False, default=False)
+    last_test_passed_at: Mapped[datetime | None] = mapped_column(nullable=True, default=None)
 
     __table_args__ = (
         Index(
@@ -153,6 +158,8 @@ class ModelRegistryReadSchema(PydanticBase):
     model_metadata: dict
     is_custom: bool
     is_enabled: bool
+    is_published: bool
+    last_test_passed_at: datetime | None
     created_at: datetime
 
 

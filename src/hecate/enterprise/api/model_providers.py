@@ -1,11 +1,18 @@
 """Model Provider management API endpoints.
 
-Provides CRUD operations for model providers:
+Provides CRUD operations for model providers and the model registry:
 - ``POST /api/model-providers`` — Create a new provider
-- ``GET /api/model-providers`` — List all providers
+- ``GET /api/model-providers`` — List all providers (search, call counts)
 - ``PUT /api/model-providers/{id}`` — Update a provider
 - ``DELETE /api/model-providers/{id}`` — Delete a provider
 - ``POST /api/model-providers/{id}/test`` — Test connectivity
+- ``GET /api/models`` — List registered models (search, publish-state filter)
+- ``PUT /api/models/{model_id}`` — Update a registered model
+- ``DELETE /api/models/{model_id}`` — Delete (refused while referenced)
+- ``POST /api/models`` — Add a custom model
+- ``POST /api/models/test`` — Test a model (records pass evidence)
+- ``POST /api/models/{model_id}/publish`` — Publish (requires test evidence)
+- ``POST /api/models/{model_id}/unpublish`` — Unpublish (freely reversible)
 """
 
 from __future__ import annotations
@@ -13,15 +20,20 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from datetime import UTC, datetime
+from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db, verify_api_key
+from hecate.core.deps_workspace import get_auth_context
 from hecate.enterprise.auth.crypto import decrypt_api_key, encrypt_api_key
+from hecate.models.agent import AgentModel
+from hecate.models.audit import AuditAction, AuditLogModel
 from hecate.models.model_provider import (
     CustomModelCreateSchema,
     ModelProviderCreateSchema,
@@ -33,12 +45,17 @@ from hecate.models.model_provider import (
     ModelTestRequestSchema,
     ModelUpdateSchema,
 )
+from hecate.models.trace import TraceModel
+from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 DEFAULT_CONFIG = {"timeout": 30, "max_retries": 3, "rate_limit_rpm": 60}
+
+#: Rolling window for the provider call-count card (6.48).
+CALL_COUNT_WINDOW_DAYS = 30
 
 
 def _generate_provider_name(display_name: str) -> str:
@@ -79,6 +96,122 @@ def _validate_config(config: dict) -> None:
     rate_limit = config.get("rate_limit_rpm", 60)
     if not (1 <= rate_limit <= 10000):
         raise HTTPException(status_code=400, detail="rate_limit_rpm must be between 1 and 10000")
+
+
+async def _get_registry_model(db: AsyncSession, model_id: uuid.UUID) -> ModelRegistryModel:
+    """Fetch one non-deleted registry row or raise 404."""
+    result = await db.execute(
+        select(ModelRegistryModel).where(
+            ModelRegistryModel.id == model_id,
+            ~ModelRegistryModel.deleted,
+        )
+    )
+    model = result.scalar_one_or_none()
+    if model is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "Model not found", "details": None}},
+        )
+    return model
+
+
+async def _model_references(db: AsyncSession, model: ModelRegistryModel) -> list[dict]:
+    """Collect agents and workflows that reference the model (delete guard).
+
+    Agents match exactly on ``model_config->>'model'``; workflows match on
+    the model id appearing as a complete JSON string in any non-deleted
+    version's graph DSL (quoted-token match avoids prefix false positives).
+    """
+    references: list[dict] = []
+
+    agents_result = await db.execute(
+        select(AgentModel.id, AgentModel.name).where(
+            AgentModel.model_config_db["model"].as_string() == model.model_id,
+            ~AgentModel.deleted,
+        )
+    )
+    for agent_id, name in agents_result.all():
+        references.append({"type": "agent", "id": str(agent_id), "name": name})
+
+    workflow_result = await db.execute(
+        select(WorkflowModel.id, WorkflowModel.name)
+        .join(WorkflowVersionModel, WorkflowVersionModel.workflow_id == WorkflowModel.id)
+        .where(
+            cast(WorkflowVersionModel.graph_dsl, String).contains(f'"{model.model_id}"'),
+            ~WorkflowVersionModel.deleted,
+            ~WorkflowModel.deleted,
+        )
+        .distinct()
+    )
+    for workflow_id, name in workflow_result.all():
+        references.append({"type": "workflow", "id": str(workflow_id), "name": name})
+
+    return references
+
+
+async def _audit_model_action(
+    db: AsyncSession,
+    ctx: AuthContext,
+    action: AuditAction,
+    model: ModelRegistryModel,
+) -> None:
+    """Persist a publish/unpublish audit event (6.47)."""
+    db.add(
+        AuditLogModel(
+            org_id=ctx.org_id or uuid.UUID(int=0),
+            workspace_id=ctx.workspace_id,
+            user_id=ctx.user_id,
+            action=action.value,
+            resource_type="model",
+            resource_id=model.id,
+            success=True,
+            metadata_={"model_id": model.model_id},
+        )
+    )
+
+
+async def _provider_call_counts(db: AsyncSession) -> tuple[dict[uuid.UUID, dict[str, int]], dict[str, int]]:
+    """Aggregate invocation counts per provider from generation traces (6.48).
+
+    One grouped query over ``traces.metadata->>'model'`` carries both the
+    30-day rolling window and the all-time total; model names that map to no
+    registry row land in the unmatched bucket instead of being dropped.
+    """
+    model_expr = TraceModel.metadata_["model"].as_string()
+    cutoff = datetime.now(UTC) - timedelta(days=CALL_COUNT_WINDOW_DAYS)
+    counts_result = await db.execute(
+        select(
+            model_expr.label("model_name"),
+            func.count().label("total"),
+            func.count().filter(TraceModel.start_time >= cutoff).label("recent"),
+        )
+        .where(
+            TraceModel.type == "generation",
+            ~TraceModel.deleted,
+            model_expr.is_not(None),
+        )
+        .group_by(model_expr)
+    )
+
+    registry_result = await db.execute(
+        select(ModelRegistryModel.model_id, ModelRegistryModel.provider_id).where(~ModelRegistryModel.deleted)
+    )
+    model_to_providers: dict[str, set[uuid.UUID]] = defaultdict(set)
+    for model_name, provider_id in registry_result.all():
+        model_to_providers[model_name].add(provider_id)
+
+    per_provider: dict[uuid.UUID, dict[str, int]] = defaultdict(lambda: {"call_count_30d": 0, "call_count_total": 0})
+    unmatched = {"unmatched_call_count_30d": 0, "unmatched_call_count_total": 0}
+    for model_name, total, recent in counts_result.all():
+        provider_ids = model_to_providers.get(model_name)
+        if not provider_ids:
+            unmatched["unmatched_call_count_total"] += total
+            unmatched["unmatched_call_count_30d"] += recent
+            continue
+        for provider_id in provider_ids:
+            per_provider[provider_id]["call_count_total"] += total
+            per_provider[provider_id]["call_count_30d"] += recent
+    return per_provider, unmatched
 
 
 async def _discover_models(provider_name: str, api_key: str, base_url: str | None = None) -> list[dict]:
@@ -152,6 +285,7 @@ async def create_provider(
             capabilities={},
             is_custom=False,
             is_enabled=True,
+            is_published=False,
         )
         db.add(model)
 
@@ -167,8 +301,9 @@ async def create_provider(
 async def list_providers(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
+    search: str | None = None,
 ) -> dict:
-    """List all model providers with status and model count."""
+    """List all model providers with status, model count, and call counts."""
     stmt = (
         select(ModelProviderModel, func.count(ModelRegistryModel.id).label("model_count"))
         .outerjoin(
@@ -178,19 +313,31 @@ async def list_providers(
         .where(~ModelProviderModel.deleted)
         .group_by(ModelProviderModel.id)
     )
+    if search:
+        like = f"%{search}%"
+        stmt = stmt.where(
+            or_(
+                ModelProviderModel.name.ilike(like),
+                ModelProviderModel.display_name.ilike(like),
+            )
+        )
     result = await db.execute(stmt)
     rows = result.all()
 
+    per_provider_counts, unmatched = await _provider_call_counts(db)
+
     items = []
     for provider, model_count in rows:
+        counts = per_provider_counts.get(provider.id, {"call_count_30d": 0, "call_count_total": 0})
         items.append(
             {
                 **ModelProviderReadSchema.model_validate(provider).model_dump(),
                 "model_count": model_count or 0,
+                **counts,
             }
         )
 
-    return {"items": items, "total": len(items)}
+    return {"items": items, "total": len(items), **unmatched}
 
 
 @router.put("/model-providers/{provider_id}")
@@ -342,12 +489,33 @@ async def test_provider(
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     api_key: Annotated[str, Depends(verify_api_key)],
+    search: str | None = None,
+    publish_state: str | None = None,
 ) -> dict:
-    """List all registered models grouped by provider."""
+    """List registered models grouped by provider.
+
+    ``search`` matches model_id/display_name; ``publish_state`` filters on
+    the publish lifecycle ("published" / "unpublished" — the unpublished
+    bucket includes models whose test passed but were never published).
+    """
+    model_conditions = [~ModelRegistryModel.deleted]
+    if search:
+        like = f"%{search}%"
+        model_conditions.append(
+            or_(
+                ModelRegistryModel.model_id.ilike(like),
+                ModelRegistryModel.display_name.ilike(like),
+            )
+        )
+    if publish_state == "published":
+        model_conditions.append(ModelRegistryModel.is_published.is_(True))
+    elif publish_state == "unpublished":
+        model_conditions.append(ModelRegistryModel.is_published.is_(False))
+
     providers_result = await db.execute(select(ModelProviderModel).where(~ModelProviderModel.deleted))
     providers = {p.id: p for p in providers_result.scalars().all()}
 
-    models_result = await db.execute(select(ModelRegistryModel).where(~ModelRegistryModel.deleted))
+    models_result = await db.execute(select(ModelRegistryModel).where(*model_conditions))
     models = models_result.scalars().all()
 
     grouped: dict[str, dict] = {}
@@ -424,6 +592,7 @@ async def add_custom_model(
         capabilities={},
         is_custom=True,
         is_enabled=True,
+        is_published=False,
     )
     db.add(model)
     await db.flush()
@@ -468,6 +637,21 @@ async def test_model(
         error_msg = response.usage.get("error", "unknown") if isinstance(response.usage, dict) else "unknown"
         raise HTTPException(status_code=400, detail=error_msg) from None
 
+    # Record the pass evidence that gates publishing (6.47). Dynamic models
+    # resolved through no registry row stay evidence-less.
+    if provider is not None:
+        rows_result = await db.execute(
+            select(ModelRegistryModel).where(
+                ModelRegistryModel.model_id == data.model_id,
+                ModelRegistryModel.provider_id == provider.id,
+                ~ModelRegistryModel.deleted,
+            )
+        )
+        passed_at = datetime.now(UTC)
+        for row in rows_result.scalars().all():
+            row.last_test_passed_at = passed_at
+        await db.flush()
+
     return {
         "content": response.content,
         "model": response.model,
@@ -478,3 +662,86 @@ async def test_model(
         },
         "finish_reason": response.finish_reason,
     }
+
+
+@router.post("/models/{model_id}/publish")
+async def publish_model(
+    model_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Publish a registered model to the application reference surface.
+
+    Gated on model-test evidence: a model that never passed the inline test
+    cannot be published (409 ``MODEL_TEST_REQUIRED``). Publishing is the
+    explicit lifecycle action from the AgentArts-style 调测通过后发布 flow.
+    """
+    model = await _get_registry_model(db, model_id)
+    if model.last_test_passed_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "MODEL_TEST_REQUIRED",
+                    "message": f"Model '{model.model_id}' has not passed a test — run the model test before publishing",
+                    "details": None,
+                }
+            },
+        )
+
+    model.is_published = True
+    await _audit_model_action(db, ctx, AuditAction.SYSTEM_MODEL_PUBLISH, model)
+    await db.flush()
+    await db.refresh(model)
+    return ModelRegistryReadSchema.model_validate(model).model_dump()
+
+
+@router.post("/models/{model_id}/unpublish")
+async def unpublish_model(
+    model_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Remove a model from the application reference surface.
+
+    Freely reversible and unconditional: existing ``llm_config`` bindings
+    keep working (reference-only gating), and the model stays manageable
+    and testable on the settings surface.
+    """
+    model = await _get_registry_model(db, model_id)
+    model.is_published = False
+    await _audit_model_action(db, ctx, AuditAction.SYSTEM_MODEL_UNPUBLISH, model)
+    await db.flush()
+    await db.refresh(model)
+    return ModelRegistryReadSchema.model_validate(model).model_dump()
+
+
+@router.delete("/models/{model_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_model(
+    model_id: uuid.UUID,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    api_key: Annotated[str, Depends(verify_api_key)],
+) -> None:
+    """Soft-delete a registered model, refused while still referenced.
+
+    The in-use guard returns 409 ``MODEL_IN_USE`` with the referencing
+    agents/workflows so the caller can resolve bindings first instead of
+    silently breaking them at runtime.
+    """
+    model = await _get_registry_model(db, model_id)
+    references = await _model_references(db, model)
+    if references:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": {
+                    "code": "MODEL_IN_USE",
+                    "message": f"Model '{model.model_id}' is referenced by {len(references)} agent(s)/workflow(s)",
+                    "details": {"references": references},
+                }
+            },
+        )
+
+    model.deleted = True
+    model.deleted_at = datetime.now(UTC)
+    await db.flush()

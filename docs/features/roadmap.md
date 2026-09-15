@@ -728,8 +728,8 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 6.47 | Model Service Publishing — wire 6.45 ✅ staging/promotion machinery into settings/models: publish state (draft → testing → published) on `model_registry`; unpublished models hidden from application reference surface (`/v1/models` → Create Agent dropdown) but still testable inline; publish button + status badge + filter | 6.45 ✅ | S |
-| 6.48 | Model Management Quick Wins — list-level search/filter (providers + models) + provider call-count wiring from existing traces/costs aggregates; pure frontend + one aggregation query | traces/costs ✅ | S |
+| 6.47 ✅ (2026-09-14) | Model Service Publishing — wire 6.45 ✅ staging/promotion machinery into settings/models: publish state (draft → testing → published) on `model_registry`; unpublished models hidden from application reference surface (`/v1/models` → Create Agent dropdown) but still testable inline; publish button + status badge + filter (archive `2026-09-14-model-service-publishing`) | 6.45 ✅ | S |
+| 6.48 ✅ (2026-09-14) | Model Management Quick Wins — list-level search/filter (providers + models) + provider call-count wiring from existing traces/costs aggregates; pure frontend + one aggregation query (archive `2026-09-14-model-service-publishing`) | traces/costs ✅ | S |
 
 ### Engine Parity (NEW — 2026-09-07 deer-flow/LangGraph engine comparison)
 
@@ -753,7 +753,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 > **Honest closure note (2026-09-04)**: M8 still includes the "Ontology Action System with writeback" and "OAG complete" items, but their closure condition is **P5 Knowledge Graph integration trigger**, not Sprint 8 internal delivery. These two lines stay in M8 for plan consistency, but do not block Sprint 8's other Opening Queue deliverables — when P5 KG integration fires, the 6.20 / 6.22 closure is backfilled into M8 (and into whichever Sprint hosts that trigger). All other M8 lines are unaffected.
 
 - [x] **Opening Queue** shipped: MCP Gateway (5.4a ✅), Evaluation Suite tasks (7.2b ✅ 2026-09-10 — archived `2026-09-10-ai-synthesized-evaluation-dataset`; 7.2c ✅ 2026-09-11 — archived `2026-09-11-online-offline-evaluation-tasks`; 7.3 ✅ 2026-09-11 — archived `2026-09-11-workflow-evaluation`; 7.2e ✅ 2026-09-12 — archived `2026-09-12-evaluation-report-dashboard`; 7.4/7.4a ✅ 2026-09-12 — archived `2026-09-12-human-annotation-trace-backflow`; 7.2d ✅ 2026-09-12 — archived `2026-09-12-automated-trace-backflow`; 7.3c ✅ 2026-09-13 — archived `2026-09-13-known-bad-exemption`; 7.3a/7.3b ✅ 2026-09-13 — archived `2026-09-13-eval-publish-gate-versions`), Controller Family (2.6a+1.1.21+1.3.10⊕6.23+6.49 ✅ 2026-09-13 — archived `2026-09-13-intent-recognition`), Agent Versioning (1.3.20 ✅ 2026-09-14 — archived `2026-09-14-agent-versioning`)
-- [ ] Model Service Publishing (6.47) + Quick Wins (6.48) operational
+- [x] Model Service Publishing (6.47) + Quick Wins (6.48) ✅ 2026-09-14 — archived `2026-09-14-model-service-publishing`
 - [x] Engine Parity (1.3.21): declarative interrupts (① ✅ 2026-09-08) + time-travel resume (② ✅ 2026-09-09) + dynamic fan-out (③ ✅ 2026-09-09) operational — unblocks Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18/5.11 fan-out)
 - [ ] Hallucination detection operational
 - [ ] Self-Learning loop operational
@@ -1139,8 +1139,8 @@ P3 Deployment (13.0-13.4) + Data Backup (13.5) + Version Upgrade (13.6) → Envi
 P3 Cost Dashboard (8.3) → Budget Management & Cost Governance (10.7)
 P3 AB Testing (7.4) + P3 Evaluators (7.2) → Testing Center / Sandbox (7.9)
 P3 Model Management (6.8-6.13) → Model Catalog (6.44) → Model Lifecycle Manager (6.45) → Model Governance (6.46-P5)
-Model Lifecycle Manager (6.45 ✅) → Model Service Publishing (6.47) → published-only application reference surface
-Traces/Costs (8.x ✅) → Provider Call-Count Wiring (6.48)
+Model Lifecycle Manager (6.45 ✅) → Model Service Publishing (6.47 ✅) → published-only application reference surface
+Traces/Costs (8.x ✅) → Provider Call-Count Wiring (6.48 ✅)
 Intent Recognition (6.23 ✅) → Intent Package Asset (6.49 ✅) → few-shot classification evidence
 P3 Model Deployment (6.1) → Self-Hosted Inference (6.5) → Managed Model Deployment (G5)
 P3 Model Classification (6.11) → Multi-Modal Model Classification (G6)
