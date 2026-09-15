@@ -56,7 +56,12 @@ class TestAgentAnswerSource:
         agent_id = uuid.uuid4()
         captured: dict = {}
 
-        async def _fake_agent_query(query: str, invoked_agent_id: uuid.UUID) -> str:
+        async def _fake_agent_query(
+            query: str,
+            invoked_agent_id: uuid.UUID,
+            agent_definition: object = None,
+            rollout_capture: list | None = None,
+        ) -> str:
             captured["query"] = query
             captured["agent_id"] = invoked_agent_id
             return "X is a thing"

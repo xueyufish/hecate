@@ -60,6 +60,7 @@ from hecate.ops.api.evaluation_tasks import router as evaluation_tasks_router
 from hecate.ops.api.model_pricing import router as model_pricing_router
 from hecate.ops.api.ops_center_overview import router as ops_center_overview_router
 from hecate.ops.api.preflight import router as preflight_router
+from hecate.ops.api.prompt_optimization import router as prompt_optimization_router
 from hecate.ops.api.quotas import quotas_router
 from hecate.ops.api.schedules import router as schedules_router
 from hecate.ops.api.security_findings import router as security_findings_router
@@ -419,6 +420,7 @@ app.include_router(evaluation_tasks_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_annotations_router, prefix="/api", tags=["evaluation"])
 app.include_router(evaluation_backflow_router, prefix="/api", tags=["evaluation"])
 app.include_router(dataset_versions_router, prefix="/api", tags=["evaluation"])
+app.include_router(prompt_optimization_router, prefix="/api", tags=["prompt-optimization"])
 app.include_router(evaluation_reports_router, prefix="/api", tags=["evaluation"])
 app.include_router(chat_router, prefix="/v1", tags=["chat"])
 app.include_router(models_router, prefix="/v1", tags=["models"])

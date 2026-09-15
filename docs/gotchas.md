@@ -98,3 +98,13 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   (`learned_run_id`, `failure_category`) only after an explicit review
   decision; generation rejects any draft containing fenced code blocks.
   The loop is off unless `SKILL_EVOLUTION_ENABLED=true`.
+- **Prompt optimization never touches the production prompt** — the 6.19
+  loop (`ops/prompt_optimization/`) rolls out candidate templates through
+  `agent_execute(..., agent_definition.prompt_override)`; the agent's
+  persona is bypassed during rollouts, its tools/KBs/model config are not.
+  Rollout traces carry `metadata.optimization_run_id` / `candidate_id` so
+  prompt analytics can separate optimization traffic from production.
+  Candidates become real `PromptVersionModel` rows (with
+  `metadata_.source="prompt_optimization"` provenance, no labels) only
+  after explicit approval; the loop is off unless
+  `PROMPT_OPTIMIZATION_ENABLED=true`.

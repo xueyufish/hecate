@@ -639,7 +639,7 @@ CheckpointStore → Distributed Session State Store (13.4a) ✅ (5/5) → Horizo
 | # | Feature | Domain | Description | References |
 |---|---------|--------|-------------|------------|
 | 6.15 | Agentic RL Framework | Agent Intelligence | Data flywheel: trace collection → labeling → RL training → model update. Async RL framework, reward mechanisms (rule-based, generative, credit assignment), interaction environments, optimization algorithms. | AgentArts Agent Self-Optimization (formerly Versatile) |
-| 6.19 | Prompt Self-Optimization | Agent Intelligence | ACE/GEPA algorithm-based automatic prompt optimization against evaluation datasets, multi-round self-iteration to maximize effect metrics | AgentArts AgentStudio (formerly Versatile) |
+| 6.19 ✅ (2026-09-15) | Prompt Self-Optimization | Agent Intelligence | 评估数据集驱动的多轮 prompt 自优化闭环（编排层变更，底座全复用）：run 钉定 prompt 版本 + 被测 agent + 命名数据集版本（7.3b）+ train/val 切分；每轮以 `MutationStrategy`（裸名词 ABC，v1 内置 GEPA 式反思变异——逐 item 失败轨迹 + evaluator reasoning 作反思信号；明确不引入 gepa/DSPy 依赖，重开触发条件记录于 design D1）生成候选模板，经 Jinja2 完整性门（parse + 变量集合相等）后以 `agent_definition.prompt_override` 在真实 agent 上 rollout（persona 旁路，工具/KB/模型配置不变；保真度高于 Bedrock AdvPO/Vertex 的目标模型直跑模板）；接受门禁 = 主指标提升 ≥δ ∧ 确定性指标不回退（7.3a 哲学：确定性硬门、judge 软门），候选池 Pareto-lite（top-k + 单项最优入池，objective Pareto 为 v2 选择策略升级）；过门候选经内容安全扫描进入人审，批准发布为新 `PromptVersionModel`（provenance 写 `metadata_`、自动 commit_message、不自动打 label、回滚 = 既有版本/label 切换）。预算 light/medium/heavy 预设（2/10/100、5/25/400、10/50/1000：轮数/mutation 调用/rollout item）+ 显式覆盖 + 逐轮成本记账；停止条件 = 预算/最大轮数/连续 3 轮无过门（no_progress）/取消；rollout trace 带 run/candidate 标记可与生产 analytics 分离。`PROMPT_OPTIMIZATION_ENABLED` 默认关。**Archived**: `2026-09-15-prompt-self-optimization`. 业界对标（2026-09 调研，29 项目）：Bedrock AdvPO / Vertex AI Prompt Optimizer 的数据集驱动契约为产品基线，GEPA 为算法事实标准（Google adk optimize / MLflow / Opik 集成），人审门以 Braintrust pause-for-approval / Hermes write-approval 为范式；差异化 = 审批门禁 + 真实 agent rollout + 多租户预算隔离（AgentArts「应用自演进」公开面无闭环细节） ——调研沉淀 `docs/research/2026-09-prompt-optimization-practices-survey.md`（本地） | AgentArts AgentStudio (formerly Versatile), Amazon Bedrock AdvPO, Vertex AI Prompt Optimizer, GEPA (Agrawal et al. 2025), ACE (Stanford/SambaNova 2025), Braintrust Loop, Hermes-agent |
 | 6.20 | Ontology Action System | Knowledge Base/RAG | Define Actions (operations that modify objects/write back to systems), Agent executes via Action Tool. Supports manual/auto execution modes with pre-execution approval. | Palantir AIP Actions, AgentArts (fka Versatile) Ontology Orchestration |
 | 6.22 | OAG (Ontology-Augmented Generation) | Knowledge Base/RAG | RAG + Logic + Actions complete closed loop. LLM not only retrieves knowledge but also reasons and executes actions, writing back to source systems. | Palantir OAG |
 
@@ -821,7 +821,7 @@ SDK/CLI → Code Sandbox → Managed Runtime → NL2Agent → NL2Workflow
 Quality Signals + Evaluation → Self-Evolution Skill Loop (1.3.6f ✅) → Learned Skills → Agent Quality Flywheel
 Hallucination Detection → Self-Evolution Skill Loop (1.3.6f) → Intent Recognition → Deep Research
 Evaluation → Agentic RL Framework (6.15) → Data Flywheel → Model Optimization
-Evaluation → Prompt Self-Optimization (6.19) → ACE/GEPA Algorithm → Auto-Optimized Prompts
+Evaluation → Prompt Self-Optimization (6.19 ✅) → ACE/GEPA Algorithm → Auto-Optimized Prompts
 Knowledge Graph (3.5.1, P5 deferred) → Ontology Action System (6.20) → Object Actions → Writeback
 6.20 + RAG → OAG (6.22) → RAG + Logic + Actions Closed Loop
 A2A Protocol (P3) → Peer Selection → Agent Team Templates → Distributed Team Orchestration
