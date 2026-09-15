@@ -110,9 +110,10 @@ class TestUnknownTool:
 
 
 class TestToolDefinitions:
-    def test_all_11_tools_defined(self) -> None:
+    def test_all_12_tools_defined(self) -> None:
         expected = {
             "web_search",
+            "load_skill",
             "read_file",
             "write_file",
             "list_files",

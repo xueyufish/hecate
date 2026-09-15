@@ -61,6 +61,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 | **Multi-tenancy native** | ✅ Org → Workspace → RBAC | ✅ | ❌ Add-on | ✅ | ✅ | ✅ (AWS accounts) | ✅ |
 | **Visual canvas** | ✅ (`web/`) | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ (primary UX) |
 | **Engine-level extensibility** | ✅ many (multiple Core + SPI) | Plugins | Decorators | Limited | Limited | Bring your framework | Nodes |
+| **Self-evolution loop** | ✅ skill-package loop: eval-gate + human review before any learned skill persists (1.3.6f) | ❌ | ❌ | ❌ | Partial (frozen-weight whitepaper + observability) | ✅ prompt-optimization API (A/B + promote) | ❌ |
 | **Target user** | Engineers building internal agent platforms | Business / non-developers | Engineers prototyping | Mixed business + engineers | Enterprise admins | AWS-native engineers | Ops + IT |
 | **Pricing** | Free (self-host) | Free tier + cloud | Free (OSS) + paid platform | Enterprise | Per-conversation | Pay-per-use AWS | Free self-host + cloud |
 | **License** | MIT | Apache-2.0 + cloud | MIT (LangGraph) + proprietary (LangSmith) | Proprietary | Proprietary | Proprietary | Sustainable Use License |

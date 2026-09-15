@@ -1,4 +1,4 @@
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: SkillLoader resolves agent skills to formatted instructions
 The system SHALL provide a `SkillLoader` service that accepts an agent ID and workspace ID, queries the agent's `skills` list, loads matching `SkillModel` records by name within the workspace, and produces a two-level representation: an **L1 catalog** (per skill: name plus description, with instructions omitted) injected into the system context, and **L2 content** (full SKILL.md instructions) loaded only on demand. Skills with `source="plugin"` SHALL follow plugin-enabled gating as before: when the owning plugin is disabled or uninstalled-pending, the loader SHALL skip the skill with a warning and continue. Skills with `auto_load=True` SHALL keep their existing semantics: their full instructions (L2 content) are always injected, not just their catalog entry.
@@ -56,6 +56,8 @@ When skills are loaded for an agent, the L1 catalog SHALL be formatted as an XML
 #### Scenario: Agent with persona=None and skills
 - **WHEN** an agent has `persona=None` and `skills=["code-review"]`
 - **THEN** the system prompt SHALL be the default persona followed by the L1 catalog XML block
+
+## ADDED Requirements
 
 ### Requirement: On-demand L2 skill loading
 The system SHALL expose an on-demand loading mechanism by which the model can request the full content (L2) of an advertised skill by name during a run; the system SHALL inject the requested content as run-scoped context with provenance marking which skill was loaded. Requests for skills not in the agent's L1 catalog SHALL be rejected with an informative error.

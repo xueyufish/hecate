@@ -63,6 +63,10 @@ class SkillModel(BaseModel):
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("plugins.id", ondelete="CASCADE"), nullable=True, default=None
     )
+    # Learned-skill provenance (self-evolution loop): populated only when
+    # source == "learned" and the skill was published from a reviewed candidate.
+    learned_run_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    failure_category: Mapped[str | None] = mapped_column(String(50), nullable=True, default=None)
 
     __table_args__ = (
         Index(
@@ -138,6 +142,8 @@ class SkillReadSchema(PydanticBase):
     auto_load: bool
     origin: str | None = None
     plugin_id: uuid.UUID | None = None
+    learned_run_id: uuid.UUID | None = None
+    failure_category: str | None = None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False

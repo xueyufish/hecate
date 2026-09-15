@@ -416,10 +416,17 @@ class ToolWorker(Worker):
             )
         try:
             tool_start = time.monotonic()
+            # Thread agent/workspace attribution into tool context so
+            # agent-scoped builtin tools (load_skill) can enforce catalog
+            # membership; harmless keys for everything else.
+            tool_context: dict[str, Any] = dict(context) if context else {}
+            if execution_context:
+                tool_context.setdefault("agent_id", execution_context.get("agent_id"))
+                tool_context.setdefault("workspace_id", execution_context.get("workspace_id"))
             if use_sandbox:
                 from hecate.runtime.environment_volumes import resolve_environment_volumes
 
-                sandbox_context = dict(context) if context else {}
+                sandbox_context = tool_context
                 env = execution_context.get("environment") if execution_context else None
                 sandbox_context["_sandbox_volumes"] = resolve_environment_volumes(env)
                 if route_to_environment:
@@ -433,7 +440,7 @@ class ToolWorker(Worker):
                 result = await self._port.tool_execute(
                     name=name,
                     args=arguments,
-                    context=context,
+                    context=tool_context,
                 )
         except Exception as e:
             logger.warning("Tool '%s' execution failed: %s", name, e)

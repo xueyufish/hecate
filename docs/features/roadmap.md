@@ -16,9 +16,9 @@
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
 | **P3 Trustworthy** | 87 | 87/87 (100%) | **0** — closed |
-| **P4 Intelligent** | 151 | 25/151 (16%) | 126 |
+| **P4 Intelligent** | 152 | 26/152 (17%) | 126 |
 | **P5 Ecosystem** | 71 | 0/71 (0%) | 71 |
-| **Total** | **392** | **195/392 (50%)** | **197** |
+| **Total** | **393** | **196/393 (50%)** | **197** |
 
 > Row counts are physical feature-catalog rows (2026-08-22 basis; verified by grep). Prior figures (127/101/60, total 372) used audit-counting that predated the reclassification — see feature-catalog overview note for the reconciliation.
 
@@ -690,8 +690,8 @@ Order is priority, not mandate — any change still goes through independent `/o
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 1.3.5e | Hallucination Detection & Mitigation | PostLLMHook ✅ + ContextEngine | L |
-| 1.3.6 | Self-Learning Agent Runtime | 1.3.6a–d ✅ | M |
-| 1.3.6e | Self-Evolution Closed Loop | 1.3.6 ✅ | S |
+| 1.3.6f ✅ (2026-09-15) | Self-Evolution Skill Loop — quality-signal harvest → rule pre-filter + LLM attribution (AgentRx) → knowledge-only candidate skills (procedure/guardrails, structured deltas) → four-check eval gate → human review → publish as learned `SkillModel` → two-level L1/L2 injection → usage/quality feedback. `SKILL_EVOLUTION_ENABLED` flag-gated. Supersedes the retired 1.3.6/1.3.6a–e skeleton (orphan rule-based code, zero callers, no persistence) | EventStore ✅ + quality-scoring ✅ + evaluation framework ✅ + SKILL.md infra ✅ + MetaAgentScheduler ✅ | M |
+| 1.3.6 ⊕ / 1.3.6e ⊕ | Self-Learning Agent Runtime / Self-Evolution Closed Loop — superseded by 1.3.6f (skeleton retired 2026-09-15, see feature-catalog) | — | — |
 
 #### Agentic AI (Moved from P3)
 
@@ -756,7 +756,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 - [x] Model Service Publishing (6.47) + Quick Wins (6.48) ✅ 2026-09-14 — archived `2026-09-14-model-service-publishing`
 - [x] Engine Parity (1.3.21): declarative interrupts (① ✅ 2026-09-08) + time-travel resume (② ✅ 2026-09-09) + dynamic fan-out (③ ✅ 2026-09-09) operational — unblocks Sprint 9 consumers (6.26 E5 what-if branching, 8.20 executable replay, 11.18/5.11 fan-out)
 - [ ] Hallucination detection operational
-- [ ] Self-Learning loop operational
+- [x] Self-Learning loop operational (1.3.6f ✅ 2026-09-15 — archived `skill-evolution-loop`; skill-package closed loop supersedes the retired 1.3.6/1.3.6a–e skeleton; `SKILL_EVOLUTION_ENABLED` flag-gated)
 - [ ] Agentic RL Framework with data flywheel
 - [ ] Prompt Self-Optimization with ACE/GEPA
 - [ ] Ontology Action System with writeback *(closure = P5 KG integration trigger; backfilled when triggered)*
@@ -832,7 +832,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 ### Milestone M9 (End of Sprint 9)
 
-- [ ] P4 complete — 138 physical rows (grep basis, re-aligned 2026-09-07; includes the 48 P3-deferred reclassification + 11.11/2.13/8.21/13.20/6.27a + 6.47/6.48/6.49 AgentArts pull-forward + 1.3.21 engine parity; 22 done at Sprint 8 start)
+- [ ] P4 complete — 138 physical rows (grep basis, re-aligned 2026-09-07; includes the 48 P3-deferred reclassification + 11.11/2.13/8.21/13.20/6.27a + 6.47/6.48/6.49 AgentArts pull-forward + 1.3.21 engine parity + 1.3.6f skill loop (2026-09-15); 22 done at Sprint 8 start)
 - [ ] GraphRAG Query Engine with Global/Local/Hybrid search (rebased on P5 KG integration when triggered)
 - [ ] Agentic RAG with iterative retrieval
 - [ ] Temporal Memory with time-aware retrieval
