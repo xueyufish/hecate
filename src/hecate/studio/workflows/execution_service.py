@@ -191,6 +191,12 @@ class WorkflowExecutionService:
         self._approval_callback = approval_callback
         self._checkpoint_store = checkpoint_store
         self._event_store = event_store
+        # 4.13 context processor chain factory: resolves per-node policies
+        # (node > agent > model-capability > platform defaults) and caches
+        # chains per canonical hash so session-scoped latches persist.
+        from hecate.runtime.context_policy import ContextChainFactory
+
+        self._context_chain_factory = ContextChainFactory()
 
     async def execute(
         self,
@@ -423,6 +429,7 @@ class WorkflowExecutionService:
             checkpoint_store=checkpoint_store,
             max_supersteps=max_iterations * 3 + 5,
             context_engine=PriorityContextEngine(),
+            context_chain=self._context_chain_factory,
             context_offloader=context_offloader,
             environment=agent_env,
             evidence_tracker=evidence_tracker,
@@ -953,6 +960,7 @@ class WorkflowExecutionService:
             checkpoint_store=self._build_fork_checkpoint_store(user_id),
             event_store=self._event_store,
             context_engine=PriorityContextEngine(),
+            context_chain=self._context_chain_factory,
         )
         snap = await runtime.snapshot_at_version(parent_session_id, effective)
         continuation = derive_continuation(

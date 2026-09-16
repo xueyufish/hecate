@@ -1,57 +1,4 @@
-## ADDED Requirements
-
-### Requirement: ContextEngine ABC defines pluggable context management
-The engine SHALL define a `ContextEngine` ABC in `runtime/context.py` with methods: `select_messages`, `compress`, `estimate_tokens`.
-
-#### Scenario: Select messages within budget
-- **WHEN** `select_messages(history, budget)` is called with message history and token budget
-- **THEN** it SHALL return a list of messages that fit within the budget
-
-#### Scenario: Compress messages
-- **WHEN** `compress(messages)` is called with a list of messages
-- **THEN** it SHALL return a compressed version of the messages (fewer tokens)
-
-#### Scenario: Estimate token count
-- **WHEN** `estimate_tokens(messages)` is called with a list of messages
-- **THEN** it SHALL return an integer estimate of the total token count
-
-### Requirement: InMemoryContextEngine provides default implementation
-An `InMemoryContextEngine` SHALL implement ContextEngine using simple heuristics suitable for testing and single-machine deployment.
-
-#### Scenario: Select recent messages within budget
-- **WHEN** `select_messages(history, budget)` is called with 10 messages and budget allows 5
-- **THEN** it SHALL return the 5 most recent messages
-
-#### Scenario: Compress by truncating oldest
-- **WHEN** `compress(messages)` is called with messages exceeding threshold
-- **THEN** it SHALL return messages with oldest ones removed or summarized
-
-#### Scenario: Simple token estimation
-- **WHEN** `estimate_tokens(messages)` is called
-- **THEN** it SHALL return an estimate based on character count (approximately 4 chars per token)
-
-#### Scenario: Empty message list
-- **WHEN** `select_messages([], 1000)` is called
-- **THEN** it SHALL return `[]`
-
-#### Scenario: Zero budget
-- **WHEN** `select_messages(history, 0)` is called
-- **THEN** it SHALL return `[]`
-
-### Requirement: PregelRuntime accepts optional ContextEngine parameter
-
-PregelRuntime SHALL accept an optional `context_engine: ContextEngine | None` constructor parameter. When provided, PregelRuntime SHALL pass it to Workers via `execution_context["context_engine"]` on every superstep dispatch.
-
-#### Scenario: PregelRuntime with ContextEngine
-
-- **WHEN** PregelRuntime is constructed with a ContextEngine instance
-- **THEN** the execution_context dict passed to Workers SHALL contain key `"context_engine"` with the ContextEngine instance as its value
-
-#### Scenario: PregelRuntime without ContextEngine (backward compatible)
-
-- **WHEN** PregelRuntime is constructed without a context_engine parameter (or with None)
-- **THEN** the execution_context dict SHALL NOT contain key `"context_engine"`
-- **AND** all existing behavior SHALL remain unchanged
+## MODIFIED Requirements
 
 ### Requirement: LLMWorker applies context pipeline before LLM invocation
 
@@ -102,29 +49,6 @@ LLMWorker SHALL check execution_context for a configured context processor chain
 - **THEN** the chain SHALL apply compression on the `[stub + selected]` list
 - **AND** if the context still exceeds the budget after compression, the chain SHALL degrade the turn via controlled termination (strip pending tool calls, complete the invocation, surface `stop_reason="token_capped"`)
 
-### Requirement: Context pipeline is non-destructive
-
-The context pipeline SHALL NOT modify the channel snapshot, channel state, or checkpoint data. The filtered messages SHALL be a temporary copy used only for the current LLM invocation. The original `messages` list in the channel SHALL retain all messages. Offloaded files SHALL be additional artifacts stored in the environment — they do NOT replace or remove the channel's message history.
-
-#### Scenario: Channel messages unchanged after LLM call
-
-- **WHEN** LLMWorker applies the context pipeline, filtering messages from 100 to 20
-- **AND** the WorkerResult is applied to channels via `_apply_writes`
-- **THEN** the channel `messages` field SHALL contain the original 100 messages plus the new assistant message
-- **AND** no messages SHALL have been removed by the context pipeline
-
-#### Scenario: Checkpoint retains full message history
-
-- **WHEN** PregelRuntime saves a checkpoint after a superstep where context pipeline was applied
-- **THEN** the checkpoint SHALL contain the complete, unfiltered message history
-- **AND** restoring from this checkpoint SHALL provide access to all messages
-
-#### Scenario: Offload does not mutate channel messages
-
-- **WHEN** the offload step writes dropped messages to the environment
-- **THEN** the channel's `messages` list SHALL remain unchanged
-- **AND** the offloaded file SHALL be a separate copy stored in the environment filesystem
-
 ### Requirement: Token budget resolution priority
 
 The token budget for message selection SHALL be resolved in the following priority order:
@@ -157,20 +81,3 @@ The token budget for message selection SHALL be resolved in the following priori
 
 - **WHEN** no per-node config, runtime budget, or model-capability default is available
 - **THEN** the budget used for message selection SHALL be 8000
-
-### Requirement: Tool result truncation before message selection
-
-Before message selection, LLMWorker SHALL truncate individual tool result messages whose content exceeds `tool_result_limit` tokens (default 2000, configurable via `node_config.get("tool_result_limit")`). Truncation SHALL preserve the first N tokens of the tool result content and append a truncation indicator.
-
-#### Scenario: Oversized tool result truncated
-
-- **WHEN** a tool result message contains 5000 tokens of content
-- **AND** tool_result_limit is 2000
-- **THEN** the tool result content SHALL be truncated to approximately 2000 tokens
-- **AND** a truncation indicator SHALL be appended to signal that content was removed
-
-#### Scenario: Small tool result preserved
-
-- **WHEN** a tool result message contains 500 tokens of content
-- **AND** tool_result_limit is 2000
-- **THEN** the tool result content SHALL remain unchanged

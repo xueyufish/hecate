@@ -74,6 +74,24 @@ BUILTIN_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "required": ["path"],
         },
     },
+    "recall": {
+        "description": (
+            "Load a previously offloaded conversation block back into context by its "
+            "offload file path (from a '[Earlier conversation offloaded ...]' notice). "
+            "Returns the full offloaded messages as JSON."
+        ),
+        "risk_level": "LOW",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Offload file path from the offload notice (memory/sessions/.../offloaded_...json)",
+                },
+            },
+            "required": ["path"],
+        },
+    },
     "write_file": {
         "description": (
             "Write content to a file at the given path relative to the workspace root. "
@@ -342,6 +360,9 @@ class BuiltInToolExecutor:
         if name == "load_skill":
             return await self._load_skill(args, context)
 
+        if name == "recall":
+            return await self._recall(args, context)
+
         handler = {
             "web_search": self._web_search,
             "read_file": self._read_file,
@@ -379,6 +400,33 @@ class BuiltInToolExecutor:
             )
         except SkillNotAdvertisedError as exc:
             raise ValueError(str(exc)) from exc
+
+    async def _recall(self, args: dict[str, Any], context: dict[str, Any] | None) -> str:
+        """Reload an offloaded conversation block into context (4.13).
+
+        The agent environment rides the per-call tool context (threaded from
+        the runtime execution context by ToolWorker); read-only — never
+        mutates the channel history, checkpoints, or the offloaded file.
+        """
+        context = context or {}
+        environment = context.get("environment")
+        if environment is None:
+            raise ValueError("recall is not available in this execution path (no agent environment)")
+        session_id = context.get("session_id")
+        if not session_id:
+            raise ValueError("recall requires a session context")
+        path = str(args.get("path", "")).strip()
+        if not path:
+            raise ValueError("recall requires a non-empty path")
+        if not str(path).startswith(f"memory/sessions/{session_id}/"):
+            raise ValueError(f"recall path is not part of this session's offload storage: {path!r}")
+        if not await environment.exists(path):
+            raise FileNotFoundError(f"Offload file not found: {path}")
+        import json
+
+        raw = await environment.read_file(path)
+        messages = json.loads(raw.decode("utf-8"))
+        return json.dumps({"path": path, "messages": messages}, ensure_ascii=False, indent=2)
 
     def _resolve_and_validate_path(self, rel_path: str) -> Path:
         resolved = (self._workspace / rel_path).resolve()

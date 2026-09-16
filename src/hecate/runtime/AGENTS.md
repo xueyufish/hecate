@@ -56,6 +56,7 @@ allowlist covers the files below — keep new bridge files on it):
 | CheckpointStore | `checkpoint.py` | `InMemoryCheckpointStore` |
 | EventStore | `eventstore.py` | `InMemoryEventStore` |
 | ContextEngine | `context.py` | `InMemoryContextEngine` |
+| ContextProcessor chain (4.13) | `context_processors.py`; policy resolution in `context_policy.py` | default chain via `default_chain_processors()`; production assembly: `ContextChainFactory` in `WorkflowExecutionService` |
 | SchedulerStrategy | `scheduler.py` | `FIFOScheduler` |
 | EvictionPolicy | `eviction.py` | `NoEviction`, `SizeBasedEviction` |
 | OptimizationPass | `optimization.py` | `DeadNodeElimination`, `ParallelBranchDetection` |
@@ -73,10 +74,22 @@ allowlist covers the files below — keep new bridge files on it):
 `llm_invoke_structured` (the production adapter overrides the last to stream
 structured `tool_calls`).
 
-Wired today: ContextEngine (PregelRuntime execution_context), guardrail hooks +
+Wired today: ContextEngine (PregelRuntime execution_context), ContextProcessor
+chain (4.13 — `execution_context["context_chain"]`, resolved per node from
+`node_config["context_processors"]`; engine-only contexts run the default
+chain), guardrail hooks +
 middleware chains on both the Pregel path and the `channel/api/v1/chat.py`
 direct tool loop (assembled by `runtime/security/guardrail_assembly.py`), and
 RetryStrategy via RetryExecutor.
+
+Chain conventions (4.13): processors are runtime-internal extension points
+(plain noun + ABC, no `Port`/`Base` marker); they operate on atomic
+`ContextUnit`s (tool-call-linked messages never split); the
+`CompressionProcessor` has two backends — `projection` (default) and
+`surface_replacement` (normative schema in ADR-033, implementation sequenced).
+Registry trust boundary: only types in `PROCESSOR_REGISTRY` pass config
+validation (third-party code cannot enter the in-process T0 chain by naming
+itself in configuration).
 
 ## Companion modules
 

@@ -1,26 +1,4 @@
-## ADDED Requirements
-
-### Requirement: Budget Manager tracks token usage per session
-The system SHALL maintain a `BudgetManager` that tracks cumulative token usage per session and enforces a configurable token budget for the context window.
-
-#### Scenario: Budget allocation on session start
-- **WHEN** a new session is created for an agent with a configured context budget of 8000 tokens
-- **THEN** the budget manager SHALL allocate 8000 tokens as the session budget and begin tracking usage
-
-#### Scenario: Default budget when not configured
-- **WHEN** an agent has no explicit context budget configured
-- **THEN** the budget manager SHALL use a default budget based on the model's context window size minus 1024 tokens reserved for generation
-
-### Requirement: Budget check before LLM invocation
-The system SHALL compute the token count of the assembled context before each LLM call and trigger degradation if the count exceeds the session budget.
-
-#### Scenario: Context within budget
-- **WHEN** the assembled context token count is 6000 and the session budget is 8000
-- **THEN** the budget manager SHALL allow the context to pass through unchanged
-
-#### Scenario: Context exceeds budget triggers degradation
-- **WHEN** the assembled context token count is 9000 and the session budget is 8000
-- **THEN** the budget manager SHALL execute the degradation strategy to reduce the context to within budget
+## MODIFIED Requirements
 
 ### Requirement: Three-level degradation strategy
 

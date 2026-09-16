@@ -77,13 +77,13 @@ class TestRegistryBuiltinRouting:
 class TestSeedBuiltinTools:
     async def test_seed_inserts_all_tools(self, db_session: Any) -> None:
         count = await seed_builtin_tools(db_session)
-        assert count == 12
+        assert count == 13
 
         from sqlalchemy import select
 
         result = await db_session.execute(select(ToolModel).where(ToolModel.source == "builtin"))
         tools = result.scalars().all()
-        assert len(tools) == 12
+        assert len(tools) == 13
         names = {t.name for t in tools}
         assert names == {
             "web_search",
@@ -98,11 +98,12 @@ class TestSeedBuiltinTools:
             "browser_extract",
             "browser_screenshot",
             "browser_fill_form",
+            "recall",
         }
 
     async def test_seed_idempotent(self, db_session: Any) -> None:
         count1 = await seed_builtin_tools(db_session)
-        assert count1 == 12
+        assert count1 == 13
         count2 = await seed_builtin_tools(db_session)
         assert count2 == 0
 

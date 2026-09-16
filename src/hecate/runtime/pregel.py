@@ -119,6 +119,7 @@ class PregelRuntime:
         event_store: EventStore | None = None,
         event_bus: EventBus | None = None,
         context_engine: ContextEngine | None = None,
+        context_chain: Any = None,
         retry_strategy: RetryStrategy | None = None,
         context_offloader: Any = None,
         environment: Any = None,
@@ -139,6 +140,8 @@ class PregelRuntime:
         self._event_store = event_store
         self._event_bus = event_bus
         self._context_engine = context_engine
+        # 4.13 context processor chain (ContextChainFactory or chain).
+        self._context_chain = context_chain
         self._context_offloader = context_offloader
         self._environment = environment
         self._evidence_tracker = evidence_tracker
@@ -341,6 +344,8 @@ class PregelRuntime:
             ctx["event_bus"] = self._event_bus
         if self._context_engine is not None:
             ctx["context_engine"] = self._context_engine
+        if self._context_chain is not None:
+            ctx["context_chain"] = self._context_chain
         if self._context_offloader is not None:
             ctx["context_offloader"] = self._context_offloader
         if self._environment is not None:

@@ -164,7 +164,10 @@ class ContextOffloader:
             A message dict with ``role="system"`` and compact ``content``.
         """
         summary = ContextOffloader._heuristic_summary(messages)
-        retrieval_hint = f'Use read_file("{path}") to retrieve the full content.'
+        retrieval_hint = (
+            f'Use recall(path="{path}") to load the full conversation back into context, '
+            f'or read_file("{path}") to read the raw file.'
+        )
         content = f"[Earlier conversation offloaded to {path}. Topics: {summary}. {retrieval_hint}]"
         if len(content) > _STUB_MAX_CHARS:
             content = content[: _STUB_MAX_CHARS - 3] + "..."

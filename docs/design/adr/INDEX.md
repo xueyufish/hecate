@@ -20,6 +20,7 @@ The big-picture design that everything else builds on.
 | [ADR-029](029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture | Minimal kernel, four mounting planes, five isolation tiers |
 | [ADR-030](030-event-sourced-execution-state.md) | Event-Sourced Execution State (Log-as-Truth) | Event log as state source; WAL ordering; projection cache; 1.3.19 |
 | [ADR-031](031-web-widget-iframe-architecture.md) | Web Widget Iframe Architecture (Bypassing ChannelBase) | Widget scope boundary; iframe + employee JWT; defer anonymous to-C to P5 |
+| [ADR-033](033-context-compaction-surface-replacement.md) | LLM-Managed Context Compaction via Surface Replacement | Bracket events + shadowed ranges on the execution log; summary node in the fold; checkpoint source; 4.13 durable backend |
 
 ### ⚙️ Engine runtime
 
