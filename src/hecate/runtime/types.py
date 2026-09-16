@@ -267,6 +267,9 @@ class WorkerResult:
             and miss trajectories differ only in the marker values.
         cache_key: the derived cache key hash for cache-policy nodes
             (``None`` when the node has no policy or missed).
+        stop_reason: degradation signal from the context processor chain
+            (4.13) — ``"token_capped"`` when controlled termination fired;
+            ``None`` for normal completions.
     """
 
     node_id: str
@@ -275,6 +278,7 @@ class WorkerResult:
     error: Exception | None = None
     cache_hit: bool = False
     cache_key: str | None = None
+    stop_reason: str | None = None
 
 
 @dataclass

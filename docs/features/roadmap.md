@@ -16,9 +16,9 @@
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
 | **P3 Trustworthy** | 87 | 87/87 (100%) | **0** — closed |
-| **P4 Intelligent** | 152 | 26/152 (17%) | 126 |
+| **P4 Intelligent** | 152 | 27/152 (18%) | 125 |
 | **P5 Ecosystem** | 71 | 0/71 (0%) | 71 |
-| **Total** | **393** | **196/393 (50%)** | **197** |
+| **Total** | **393** | **197/393 (50%)** | **196** |
 
 > Row counts are physical feature-catalog rows (2026-08-22 basis; verified by grep). Prior figures (127/101/60, total 372) used audit-counting that predated the reclassification — see feature-catalog overview note for the reconciliation.
 
@@ -449,7 +449,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 1.3.16 ✅ | Agent State Separation | 1.3.15 ✅ | S |
 | 1.3.17 ✅ | Agent Invocation Mode (agent_execute pipeline parity + DSL invocation_mode) | 1.3.1 ✅ + 5.1 ✅ + 2.3d ✅ | M |
 | 1.3.15a ✅ | Environment Backend: Docker | 1.3.15 ✅ | M |
-| 1.3.15b ✅ | Context Offloading | 1.3.15 ✅ + 4.13 | S |
+| 1.3.15b ✅ | Context Offloading | 1.3.15 ✅ + 4.13 ✅ | S |
 | 1.3.15c ✅ | Sandbox Environment Mount | 1.3.15 ✅ + 9.4c ✅ | M |
 
 ### Deployment & Operations
@@ -707,7 +707,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 4.5 | Sleep-time Memory Consolidation | Memory System ✅ | M |
-| 4.13 | Context Engine Processor Chain (+ LLM-managed compaction via surface replacement — compaction events as checkpoint sources, per research) | ContextEngine ✅ + 1.3.19 | M |
+| 4.13 ✅ (2026-09-16) | Context Engine Processor Chain — 可插拔上下文处理器链（``ContextProcessorChain`` + ``context_policy`` 策略解析）：原子 tool-call 分组、TokenEstimator（provider anchor > legacy engine > 启发式）、预算告警 HintBlock、KV-cache 感知前缀保护 + ``cache_hint`` 经 4.11 shaping 渲染、窗口选择（安全区内 importance 排序）、offload + ``recall`` 工具、投影/表面替换压缩双后端接缝、执行器级 FailurePolicy（熔断/冷却/anti-thrash）、受控终止 ``token_capped`` 取代静默截断、策略解析 node > agent > model-capability > platform（fail-fast 校验 + canonical_hash 入 agent 版本化）、BUDGET_SNAPSHOT 词汇表增量（``warn``/``terminate``）。durable compaction（surface replacement 后端）schema 定于 ADR-033，实现另立后续 change（archive `2026-09-16-context-processor-chain`） | ContextEngine ✅ + 1.3.19 | M |
 | 4.16 | LLM-Managed Memory | ContextEngine ✅ | M |
 | 4.18 | Conversation Recall Storage | Memory System ✅ | M |
 | 4.19 | Self-Editing Memory | Memory System ✅ | M |

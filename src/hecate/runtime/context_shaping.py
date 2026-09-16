@@ -122,25 +122,54 @@ def _drop_orphan_tool_messages(messages: list[dict[str, Any]]) -> list[dict[str,
     return result
 
 
+def _strip_cache_hints(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove chain-internal ``cache_hint`` annotations (no native support).
+
+    Providers without prefix-cache breakpoint syntax must never see the
+    annotation key — it is a chain→shaping contract, not a wire field.
+    """
+    return [{k: v for k, v in msg.items() if k != "cache_hint"} for msg in messages]
+
+
+def _render_cache_hints(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Render ``cache_hint`` annotations into Anthropic ``cache_control`` blocks.
+
+    A message annotated by the KVCacheAwareProcessor (4.13) gets its string
+    content converted to a single text block carrying
+    ``cache_control: {"type": "ephemeral"}`` — the Anthropic cache breakpoint
+    syntax. The annotation key itself is always stripped.
+    """
+    result: list[dict[str, Any]] = []
+    for msg in messages:
+        hint = msg.get("cache_hint")
+        cleaned = {k: v for k, v in msg.items() if k != "cache_hint"}
+        if hint == "breakpoint" and msg.get("role") in ("user", "assistant") and isinstance(msg.get("content"), str):
+            cleaned["content"] = [
+                {"type": "text", "text": msg["content"], "cache_control": {"type": "ephemeral"}},
+            ]
+        result.append(cleaned)
+    return result
+
+
 class AnthropicShapingStrategy(ProviderShapingStrategy):
     """Shaping for Anthropic Claude models (single system block, no empties)."""
 
     def shape_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return _drop_empty_content(_consolidate_system(list(messages)))
+        return _drop_empty_content(_consolidate_system(_render_cache_hints(list(messages))))
 
 
 class OpenAIShapingStrategy(ProviderShapingStrategy):
     """Shaping for OpenAI-compatible models (no orphan tool messages)."""
 
     def shape_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return _drop_orphan_tool_messages(list(messages))
+        return _drop_orphan_tool_messages(_strip_cache_hints(list(messages)))
 
 
 class DefaultShapingStrategy(ProviderShapingStrategy):
     """Conservative baseline shaping for unrecognized providers."""
 
     def shape_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        return _drop_empty_content(list(messages))
+        return _drop_empty_content(_strip_cache_hints(list(messages)))
 
 
 _ANTHROPIC_PREFIXES = ("claude",)

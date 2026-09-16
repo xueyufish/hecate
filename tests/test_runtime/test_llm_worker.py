@@ -591,32 +591,44 @@ class _OverBudgetEngine:
 
 
 class TestTokenBudgetGovernance:
-    """Three-level degradation ladder + budget snapshot persistence (4.10)."""
+    """Degradation ladder + budget snapshot persistence (4.10 + 4.13 chain)."""
 
     async def test_under_budget_is_noop(self) -> None:
+        from hecate.runtime.context import InMemoryContextEngine
+        from hecate.runtime.workers.llm_worker import _run_context_pipeline
+
         messages = [{"role": "user", "content": "hi"}]
-        result = await LLMWorker._apply_context_pipeline(
+        report = await _run_context_pipeline(
             messages,
             {"max_tokens": 10_000},
-            None,
+            {"context_budget": 10_000, "context_engine": InMemoryContextEngine()},
         )
-        assert result == messages
+        assert report.messages == messages
+        assert report.levels == []
+        assert report.stop_reason is None
 
     async def test_no_context_engine_is_noop(self) -> None:
+        from hecate.runtime.workers.llm_worker import _run_context_pipeline
+
         messages = [{"role": "user", "content": "hi" * 10_000}]
-        result = await LLMWorker._apply_context_pipeline(messages, {}, {"context_budget": 10})
-        assert result == messages
+        report = await _run_context_pipeline(messages, {}, {"context_budget": 10})
+        assert report.messages == messages
 
     async def test_drop_level_selection(self) -> None:
         from hecate.runtime.context import InMemoryContextEngine
+        from hecate.runtime.workers.llm_worker import _run_context_pipeline
 
         messages = [{"role": "user", "content": "x" * 200} for _ in range(20)]
         ctx = {"context_budget": 100, "context_engine": InMemoryContextEngine()}
-        result = await LLMWorker._apply_context_pipeline(messages, {}, ctx)
-        assert len(result) < len(messages)
-        assert result == messages[-len(result) :]
+        report = await _run_context_pipeline(messages, {}, ctx)
+        assert len(report.messages) < len(messages)
+        assert report.messages == messages[-len(report.messages) :]
+        assert "drop" in report.levels
 
-    async def test_emergency_level_and_snapshot_event(self) -> None:
+    async def test_over_budget_all_levels_terminate_and_snapshot_event(self) -> None:
+        from hecate.runtime.context_processors import STOP_REASON_BUDGET_CAPPED
+        from hecate.runtime.workers.llm_worker import _run_context_pipeline
+
         event_store = _RecordingEventStore()
         messages = [
             {"role": "system", "content": "sys"},
@@ -630,32 +642,47 @@ class TestTokenBudgetGovernance:
             "session_id": "s1",
             "superstep": 3,
         }
-        result = await LLMWorker._apply_context_pipeline(messages, {}, ctx)
-        assert result  # survivors exist
+        report = await _run_context_pipeline(messages, {}, ctx, "n1")
+        assert report.messages  # survivors exist
+        assert report.stop_reason == STOP_REASON_BUDGET_CAPPED
         snapshots = [e for e in event_store.events if e.payload.get("event_name") == "BUDGET_SNAPSHOT"]
         assert len(snapshots) == 1
         payload = snapshots[0].payload
         assert payload["budget"] == 50
         assert "compress" in payload["levels"]
-        assert "emergency" in payload["levels"]
+        assert "terminate" in payload["levels"]
         assert payload["tokens_before"] == 10_000
+        assert payload["stop_reason"] == STOP_REASON_BUDGET_CAPPED
         assert snapshots[0].session_id == "s1"
         assert snapshots[0].superstep == 3
 
-    async def test_emergency_truncate_keeps_system(self) -> None:
-        from hecate.runtime.context import InMemoryContextEngine
+    async def test_terminate_keeps_system_and_newest_user(self) -> None:
+        """When compression drops pinned messages, termination re-inserts them."""
+        from hecate.runtime.context_processors import (
+            ChainContext,
+            ContextUnit,
+            HeuristicTokenEstimator,
+            TerminationProcessor,
+        )
 
-        engine = InMemoryContextEngine()
-        messages = [
-            {"role": "system", "content": "keep me"},
-            {"role": "user", "content": "old" * 500},
-            {"role": "user", "content": "new"},
+        originals = [
+            ContextUnit([{"role": "system", "content": "keep me"}]),
+            ContextUnit([{"role": "user", "content": "old"}]),
+            ContextUnit([{"role": "user", "content": "new"}]),
+            ContextUnit([{"role": "assistant", "content": "answer"}]),
         ]
-        from hecate.runtime.workers.llm_worker import _emergency_truncate
-
-        result = _emergency_truncate(messages, 30, engine)
-        assert any(m.get("role") == "system" for m in result)
-        assert engine.estimate_tokens(result) <= 30 + 30  # suffix overhead tolerance
+        # Post-compression projection lost the system and user units.
+        units = [originals[3]]
+        ctx = ChainContext(
+            budget=10,
+            estimator=HeuristicTokenEstimator(),
+            state={"original_units": list(originals)},
+        )
+        out, result = await TerminationProcessor().process(units, ctx)
+        roles = [m.get("role") for u in out for m in u.messages]
+        assert "system" in roles
+        assert "user" in roles
+        assert result.level == "terminate"
 
 
 class TestTaskPhaseDetection:

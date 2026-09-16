@@ -423,6 +423,11 @@ class ToolWorker(Worker):
             if execution_context:
                 tool_context.setdefault("agent_id", execution_context.get("agent_id"))
                 tool_context.setdefault("workspace_id", execution_context.get("workspace_id"))
+                # 4.13 recall tool: the agent environment + session id ride the
+                # per-call context so offloaded blocks can be reloaded read-only.
+                tool_context.setdefault("environment", execution_context.get("environment"))
+                if execution_context.get("session_id") is not None:
+                    tool_context.setdefault("session_id", str(execution_context.get("session_id")))
             if use_sandbox:
                 from hecate.runtime.environment_volumes import resolve_environment_volumes
 

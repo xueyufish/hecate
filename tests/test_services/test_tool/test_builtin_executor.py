@@ -110,7 +110,7 @@ class TestUnknownTool:
 
 
 class TestToolDefinitions:
-    def test_all_12_tools_defined(self) -> None:
+    def test_all_13_tools_defined(self) -> None:
         expected = {
             "web_search",
             "load_skill",
@@ -124,6 +124,7 @@ class TestToolDefinitions:
             "browser_extract",
             "browser_screenshot",
             "browser_fill_form",
+            "recall",
         }
         assert set(BUILTIN_TOOL_DEFINITIONS.keys()) == expected
 

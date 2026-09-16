@@ -13,7 +13,12 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from hecate.runtime.context import ContextEngine
+from hecate.runtime.context_processors import (
+    ChainReport,
+    ContextProcessorChain,
+    cache_hit_rate_from_usage,
+    default_chain_processors,
+)
 from hecate.runtime.eventstore import Event, EventType
 from hecate.runtime.guardrail import (
     GuardrailAction,
@@ -29,10 +34,6 @@ from hecate.runtime.types import WorkerResult
 from hecate.runtime.worker import Worker
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_BUDGET = 8000
-_DEFAULT_TOOL_RESULT_LIMIT = 2000
-_TRUNCATION_INDICATOR = "\n[... truncated]"
 
 
 def _consume_resume_value(messages: list[dict[str, Any]], channel_snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -97,72 +98,13 @@ def _estimate_message_tokens(message: dict[str, Any], chars_per_token: int = 4) 
     return max(1, chars // chars_per_token)
 
 
-def _truncate_tool_results(
-    messages: list[dict[str, Any]],
-    tool_result_limit: int,
-) -> list[dict[str, Any]]:
-    """Truncate oversized tool result content in messages.
-
-    Scans for messages with 'tool_calls' or 'role' == 'tool' whose content
-    exceeds the token limit. Returns a new list with truncated copies;
-    original messages are not modified.
-
-    Args:
-        messages: List of message dicts.
-        tool_result_limit: Maximum tokens per tool result.
-
-    Returns:
-        New list with truncated tool results where needed.
-    """
-    result: list[dict[str, Any]] = []
-    for msg in messages:
-        role = msg.get("role")
-        if role not in ("tool", "assistant"):
-            result.append(msg)
-            continue
-
-        content = msg.get("content", "")
-        if content is None or not isinstance(content, str):
-            result.append(msg)
-            continue
-
-        estimated = _estimate_message_tokens(msg)
-        if estimated <= tool_result_limit:
-            result.append(msg)
-            continue
-
-        char_limit = tool_result_limit * 4
-        truncated_content = content[:char_limit] + _TRUNCATION_INDICATOR
-        truncated_msg = {**msg, "content": truncated_content}
-        result.append(truncated_msg)
-
-    return result
-
-
-def _resolve_budget(node_config: dict, execution_context: dict | None) -> int:
-    """Resolve token budget with priority: node_config > execution_context > default.
-
-    Args:
-        node_config: Per-node configuration dict.
-        execution_context: Optional execution context from PregelRuntime.
-
-    Returns:
-        Token budget integer.
-    """
-    node_budget = node_config.get("max_tokens")
-    if node_budget is not None and isinstance(node_budget, int) and node_budget > 0:
-        return node_budget
-
-    if execution_context:
-        ctx_budget = execution_context.get("context_budget")
-        if ctx_budget is not None and isinstance(ctx_budget, int) and ctx_budget > 0:
-            return ctx_budget
-
-    return _DEFAULT_BUDGET
-
-
 def _hard_truncate_message(msg: dict[str, Any], budget: int, ctx_engine: Any) -> dict[str, Any]:
-    """Force a single oversized message under the token budget."""
+    """Force a single oversized message under the token budget.
+
+    Retained for direct ``ContextEngine`` consumers of the 4.10 ladder
+    helpers; the chain path replaces the emergency ladder with controlled
+    termination.
+    """
     content = msg.get("content")
     if not isinstance(content, str) or not content:
         return {**msg, "content": "[truncated]"}
@@ -207,50 +149,32 @@ def _emergency_truncate(
     return kept
 
 
-async def _emit_budget_snapshot(
-    *,
-    execution_context: dict[str, Any] | None,
-    node_id: str,
-    budget: int,
-    tokens_before: int,
-    tokens_after: int,
-    messages_before: int,
-    messages_after: int,
-    levels: list[str],
-) -> None:
-    """Persist a token-budget degradation snapshot (4.10) to the EventStore.
+async def _run_context_pipeline(
+    messages: list[dict[str, Any]],
+    node_config: dict[str, Any],
+    execution_context: dict | None,
+    node_id: str = "",
+) -> ChainReport:
+    """Project the conversation through the context processor chain (4.13).
 
-    Emitted as a fold-skipped CUSTOM event so the degradation trail is
-    queryable from the execution log without affecting channel state.
+    Resolution order:
+    - ``execution_context["context_chain"]`` — a ``ContextChainFactory``
+      (per-node policy, cached chains) or an already-built chain.
+    - Legacy engine-only: a ``ContextEngine`` without a chain runs the
+      default chain, which consumes the engine for selection/compression.
+    - Neither present: pass-through (no projection).
     """
     if not execution_context:
-        return
-    event_store = execution_context.get("event_store")
-    if event_store is None:
-        return
-    try:
-        from hecate.runtime.eventstore import Event, EventType
-
-        await event_store.append(
-            Event(
-                session_id=execution_context["session_id"],
-                superstep=execution_context.get("superstep", 0),
-                event_type=EventType.CUSTOM,
-                node_id=node_id,
-                trace_id=execution_context.get("trace_id"),
-                payload={
-                    "event_name": "BUDGET_SNAPSHOT",
-                    "budget": budget,
-                    "tokens_before": tokens_before,
-                    "tokens_after": tokens_after,
-                    "messages_before": messages_before,
-                    "messages_after": messages_after,
-                    "levels": levels,
-                },
-            )
-        )
-    except Exception:  # noqa: BLE001
-        logger.warning("Budget snapshot emission failed on node '%s'", node_id, exc_info=True)
+        return ChainReport(messages=list(messages))
+    chain = execution_context.get("context_chain")
+    engine = execution_context.get("context_engine")
+    if chain is None and engine is None:
+        return ChainReport(messages=list(messages))
+    if chain is None:
+        chain = ContextProcessorChain(default_chain_processors())
+    elif not isinstance(chain, ContextProcessorChain):
+        chain = chain.chain_for_node(node_config)
+    return await chain.apply(messages, node_config, execution_context, node_id)
 
 
 class LLMWorker(Worker):
@@ -286,105 +210,6 @@ class LLMWorker(Worker):
         # forward (T3.4 wraps the assembly facade to build it).
         self._middleware_chains = middleware_chains or {}
         self._tool_gate = ToolGateEvaluator()
-
-    @staticmethod
-    async def _apply_context_pipeline(
-        messages: list[dict[str, Any]],
-        node_config: dict,
-        execution_context: dict | None,
-        node_id: str = "",
-    ) -> list[dict[str, Any]]:
-        """Apply context pipeline when ContextEngine is available.
-
-        Non-destructive: returns a new filtered list. Does not modify
-        the original messages list or the channel snapshot.
-
-        Steps (5-step pipeline):
-        1. Tool result truncation (cap oversized outputs)
-        2. Token estimation against budget
-        3. Message selection (if over budget)
-        4. Context offloading (if offloader present and dropped tokens meet
-           threshold) — writes dropped messages to the environment filesystem
-           and replaces them with a compact reference stub. Offload happens
-           BEFORE compression so the agent can recover dropped content via
-           ``read_file``. Only proceeds when ``context_offloader`` is in the
-           execution_context and exposes ``is_enabled()`` / ``offload(...)``.
-        5. Compression (last resort, only if stub + selected still over budget)
-        """
-        ctx_engine: ContextEngine | None = None
-        if execution_context:
-            ctx_engine = execution_context.get("context_engine")
-        if ctx_engine is None:
-            return messages
-
-        tool_result_limit = node_config.get("tool_result_limit", _DEFAULT_TOOL_RESULT_LIMIT)
-        if not isinstance(tool_result_limit, int) or tool_result_limit <= 0:
-            tool_result_limit = _DEFAULT_TOOL_RESULT_LIMIT
-
-        filtered = _truncate_tool_results(messages, tool_result_limit)
-
-        budget = _resolve_budget(node_config, execution_context)
-        estimated = ctx_engine.estimate_tokens(filtered)
-        if estimated <= budget:
-            return filtered
-
-        levels: list[str] = []
-
-        # Level 1 — DROP: message selection (keeps most-recent window that
-        # fits budget)
-        selected = ctx_engine.select_messages(filtered, budget)
-        if len(selected) < len(filtered):
-            levels.append("drop")
-
-        # Preservation step (not a degradation level): offload dropped
-        # messages to the environment so the agent can read_file them later.
-        # Runs before COMPRESS because compression is lossy; offload is not.
-        offloader: Any | None = execution_context.get("context_offloader") if execution_context else None
-        if (
-            offloader is not None
-            and getattr(offloader, "is_enabled", lambda: False)()
-            and len(selected) < len(filtered)
-        ):
-            # select_messages preserves order and returns the suffix; the dropped
-            # block is the leading prefix of filtered.
-            dropped = filtered[: len(filtered) - len(selected)]
-            dropped_tokens = ctx_engine.estimate_tokens(dropped)
-            threshold = getattr(offloader, "threshold_tokens", 0)
-            if dropped_tokens >= threshold:
-                session_id = ""
-                if execution_context:
-                    raw_sid = execution_context.get("session_id")
-                    if raw_sid is not None:
-                        session_id = str(raw_sid)
-                try:
-                    stub = await offloader.offload(dropped, session_id)
-                    selected = [stub, *selected]
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Context offload failed, falling back to compress: %s", e)
-
-        # Level 2 — COMPRESS: lossy reduction as the second degradation level
-        if ctx_engine.estimate_tokens(selected) > budget:
-            selected = ctx_engine.compress(selected)
-            levels.append("compress")
-
-        # Level 3 — EMERGENCY: hard truncation when still over budget
-        if ctx_engine.estimate_tokens(selected) > budget:
-            selected = _emergency_truncate(selected, budget, ctx_engine)
-            levels.append("emergency")
-
-        if levels:
-            await _emit_budget_snapshot(
-                execution_context=execution_context,
-                node_id=node_id,
-                budget=budget,
-                tokens_before=estimated,
-                tokens_after=ctx_engine.estimate_tokens(selected),
-                messages_before=len(filtered),
-                messages_after=len(selected),
-                levels=levels,
-            )
-
-        return selected
 
     def _filter_tools(
         self,
@@ -461,8 +286,9 @@ class LLMWorker(Worker):
                     node_id,
                 )
 
-        # Context pipeline (non-destructive message filtering)
-        messages = await self._apply_context_pipeline(messages, node_config, execution_context, node_id)
+        # Context pipeline (non-destructive projection via the 4.13 chain)
+        chain_report = await _run_context_pipeline(messages, node_config, execution_context, node_id)
+        messages = chain_report.messages
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -497,6 +323,7 @@ class LLMWorker(Worker):
 
         full_response = ""
         structured_tool_calls: list[dict[str, Any]] | None = None
+        provider_usage: dict[str, Any] | None = None
         has_tools = bool(shaped_tools)
         if self._event_store and execution_context:
             from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
@@ -528,6 +355,8 @@ class LLMWorker(Worker):
                 ):
                     content = chunk.get("content")
                     chunk_tool_calls = chunk.get("tool_calls")
+                    if chunk.get("usage") and isinstance(chunk["usage"], dict):
+                        provider_usage = chunk["usage"]
                     if content:
                         if first_token_time is None:
                             first_token_time = time.monotonic()
@@ -572,13 +401,17 @@ class LLMWorker(Worker):
         if span_ctx:
             prompt_tokens = sum(_estimate_message_tokens(m) for m in shaped_messages)
             completion_tokens = len(full_response) // 4
+            span_output: dict[str, Any] = {
+                "response_length": len(full_response),
+                "ttft_ms": ttft_ms,
+                "total_latency_ms": total_latency_ms,
+            }
+            cache_rate = cache_hit_rate_from_usage(provider_usage)
+            if cache_rate is not None:
+                span_output["cache_hit_rate"] = cache_rate
             await self._port.end_span(
                 span_ctx.span_id,
-                output_data={
-                    "response_length": len(full_response),
-                    "ttft_ms": ttft_ms,
-                    "total_latency_ms": total_latency_ms,
-                },
+                output_data=span_output,
                 usage={
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
@@ -590,8 +423,16 @@ class LLMWorker(Worker):
             "content": full_response,
             "model": model,
         }
-        if structured_tool_calls:
+        if structured_tool_calls and chain_report.stop_reason is None:
+            # Controlled termination (4.13): pending tool calls are stripped so
+            # the agent loop finalizes without new tool invocations.
             response_dict["tool_calls"] = structured_tool_calls
+        elif structured_tool_calls:
+            logger.info(
+                "Token-capped termination on node '%s': suppressing %d pending tool calls",
+                node_id,
+                len(structured_tool_calls),
+            )
 
         # PostLLMHook
         post_result = await self._post_hook.on_post_llm_call(
@@ -630,7 +471,7 @@ class LLMWorker(Worker):
             # Clear the consumed resume value so subsequent turns don't re-inject it.
             updates["_resume_value"] = None
 
-        return WorkerResult(node_id=node_id, channel_updates=updates)
+        return WorkerResult(node_id=node_id, channel_updates=updates, stop_reason=chain_report.stop_reason)
 
     async def execute_stream(
         self,
@@ -680,8 +521,9 @@ class LLMWorker(Worker):
                     node_id,
                 )
 
-        # Context pipeline (non-destructive message filtering)
-        messages = await self._apply_context_pipeline(messages, node_config, execution_context, node_id)
+        # Context pipeline (non-destructive projection via the 4.13 chain)
+        chain_report = await _run_context_pipeline(messages, node_config, execution_context, node_id)
+        messages = chain_report.messages
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -708,6 +550,7 @@ class LLMWorker(Worker):
 
         full_response = ""
         structured_tool_calls: list[dict[str, Any]] | None = None
+        provider_usage: dict[str, Any] | None = None
         has_tools = bool(shaped_tools)
         try:
             if has_tools:
@@ -717,6 +560,8 @@ class LLMWorker(Worker):
                 ):
                     content = chunk.get("content")
                     chunk_tool_calls = chunk.get("tool_calls")
+                    if chunk.get("usage") and isinstance(chunk["usage"], dict):
+                        provider_usage = chunk["usage"]
                     if content:
                         if first_token_time is None:
                             first_token_time = time.monotonic()
@@ -747,13 +592,17 @@ class LLMWorker(Worker):
         if span_ctx:
             prompt_tokens = sum(_estimate_message_tokens(m) for m in shaped_messages)
             completion_tokens = len(full_response) // 4
+            span_output: dict[str, Any] = {
+                "response_length": len(full_response),
+                "ttft_ms": ttft_ms,
+                "total_latency_ms": total_latency_ms,
+            }
+            cache_rate = cache_hit_rate_from_usage(provider_usage)
+            if cache_rate is not None:
+                span_output["cache_hit_rate"] = cache_rate
             await self._port.end_span(
                 span_ctx.span_id,
-                output_data={
-                    "response_length": len(full_response),
-                    "ttft_ms": ttft_ms,
-                    "total_latency_ms": total_latency_ms,
-                },
+                output_data=span_output,
                 usage={
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
@@ -765,8 +614,16 @@ class LLMWorker(Worker):
             "content": full_response,
             "model": model,
         }
-        if structured_tool_calls:
+        if structured_tool_calls and chain_report.stop_reason is None:
+            # Controlled termination (4.13): pending tool calls are stripped so
+            # the agent loop finalizes without new tool invocations.
             response_dict["tool_calls"] = structured_tool_calls
+        elif structured_tool_calls:
+            logger.info(
+                "Token-capped termination on node '%s': suppressing %d pending tool calls",
+                node_id,
+                len(structured_tool_calls),
+            )
 
         # PostLLMHook
         post_result = await self._post_hook.on_post_llm_call(
@@ -805,4 +662,4 @@ class LLMWorker(Worker):
         if consume_resume:
             updates["_resume_value"] = None
 
-        yield WorkerResult(node_id=node_id, channel_updates=updates)
+        yield WorkerResult(node_id=node_id, channel_updates=updates, stop_reason=chain_report.stop_reason)
