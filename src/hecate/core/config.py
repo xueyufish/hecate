@@ -197,6 +197,11 @@ class Settings(BaseSettings):
     SKILL_EVOLUTION_ATTRIBUTION_MODEL: str = "gpt-4o-mini"
     SKILL_EVOLUTION_RUN_LLM_CALL_LIMIT: int = 50
 
+    # Prompt self-optimization (6.19). Disabled by default: dataset-driven
+    # prompt optimization burns real rollout + LLM budget, so deployments
+    # opt in explicitly after reviewing the cost accounting.
+    PROMPT_OPTIMIZATION_ENABLED: bool = False
+
     # Online evaluation scoring (7.2c): always-on LLM-as-Judge sampling of
     # production traces. Metered LLM cost — keep off until a workspace opts in.
     EVALUATION_ONLINE_SCORING_ENABLED: bool = False

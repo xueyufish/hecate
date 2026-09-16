@@ -17,6 +17,7 @@ import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,6 +88,8 @@ class EvaluationEngine:
         max_in_flight: int = 1,
         items_override: list[EvaluationItemModel] | None = None,
         intent_package: dict | None = None,
+        agent_definition: Any = None,
+        rollout_capture: list[dict] | None = None,
     ) -> EvaluationRunResult:
         """Execute all evaluators against all items in a dataset.
 
@@ -130,6 +133,14 @@ class EvaluationEngine:
                 runner rehydrates the named version's frozen items).
                 When provided, the tag filter does not apply: the frozen
                 set is authoritative.
+            agent_definition: Optional per-invocation override forwarded to
+                ``agent_execute`` on the ``agent`` answer source (6.19 —
+                the optimization pipeline injects candidate templates as
+                ``prompt_override``). ``None`` keeps production behavior.
+            rollout_capture: Optional list sink collecting one
+                ``{"item_id", "generated", "usage"}`` entry per agent
+                invocation (6.19 rollout accounting). The engine never
+                reads it back.
 
         Returns:
             Aggregated :class:`EvaluationRunResult` with scores and averages.
@@ -225,6 +236,8 @@ class EvaluationEngine:
                             repetitions=repetitions,
                             run=run,
                             intent_package=intent_package,
+                            agent_definition=agent_definition,
+                            rollout_capture=rollout_capture,
                         )
                         item_scores[str(item.id)] = scores
                         if traj:
@@ -246,6 +259,8 @@ class EvaluationEngine:
                                 run=run,
                                 semaphore=semaphore,
                                 intent_package=intent_package,
+                                agent_definition=agent_definition,
+                                rollout_capture=rollout_capture,
                             )
                         )
                         for item in items
@@ -305,6 +320,8 @@ class EvaluationEngine:
         self,
         query: str,
         agent_id: uuid.UUID,
+        agent_definition: Any | None = None,
+        rollout_capture: list[dict] | None = None,
     ) -> str:
         """Generate an answer by invoking the agent under test.
 
@@ -315,6 +332,14 @@ class EvaluationEngine:
         Args:
             query: The item query, sent as a single user message.
             agent_id: The agent under test.
+            agent_definition: Optional per-invocation override (e.g. the
+                prompt-optimization pipeline injects candidate templates as
+                ``prompt_override``); ``None`` keeps the agent's configured
+                behavior exactly as production sees it.
+            rollout_capture: Optional list sink; when provided, one entry
+                ``{"item_id", "generated", "usage"}`` is appended per call
+                so the caller can account rollout usage (6.19). The engine
+                itself never reads it back.
 
         Returns:
             The agent's final response text (may be empty on an empty reply).
@@ -330,8 +355,18 @@ class EvaluationEngine:
             agent_id=agent_id,
             messages=[{"role": "user", "content": query}],
             channel_snapshot={},
+            agent_definition=agent_definition,
         )
-        return str(response.get("response") or "").strip()
+        generated = str(response.get("response") or "").strip()
+        if rollout_capture is not None:
+            rollout_capture.append(
+                {
+                    "item_id": None,
+                    "generated": generated,
+                    "usage": response.get("usage") or {},
+                }
+            )
+        return generated
 
     async def _generate_answer_via_intent(self, query: str, intent_package: dict) -> str:
         """Classify the query with the intent recognition engine (6.49).
@@ -381,6 +416,8 @@ class EvaluationEngine:
         run: EvaluationRunModel,
         semaphore: asyncio.Semaphore | None = None,
         intent_package: dict | None = None,
+        agent_definition: Any | None = None,
+        rollout_capture: list[dict] | None = None,
     ) -> tuple[list[Score], list[dict]]:
         """Process a single dataset item: generate the answer and score it.
 
@@ -408,7 +445,15 @@ class EvaluationEngine:
 
         async def _gen() -> str:
             if answer_source == AnswerSource.AGENT:
-                return await self._generate_answer_via_agent(item.query, agent_id)
+                generated = await self._generate_answer_via_agent(
+                    item.query,
+                    agent_id,
+                    agent_definition=agent_definition,
+                    rollout_capture=rollout_capture,
+                )
+                if rollout_capture and rollout_capture[-1]["item_id"] is None:
+                    rollout_capture[-1]["item_id"] = str(item.id)
+                return generated
             if answer_source == AnswerSource.INTENT:
                 return await self._generate_answer_via_intent(item.query, intent_package or {})
             if answer_source == AnswerSource.WORKFLOW:

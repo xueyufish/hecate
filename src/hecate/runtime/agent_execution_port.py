@@ -99,8 +99,16 @@ class AgentExecutionPort(RuntimePort):
             agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"
         )
 
-        # Build system prompt from persona + skills
-        persona = agent.persona or "You are a helpful assistant."
+        # Build system prompt from persona + skills. A per-invocation
+        # prompt_override (top-level agent_definition, or the delegation
+        # context key written by AgentTool) replaces the agent's configured
+        # persona; tools / knowledge bases / model config stay unchanged.
+        prompt_override: str | None = None
+        if agent_definition is not None:
+            prompt_override = getattr(agent_definition, "prompt_override", None)
+        if prompt_override is None and context is not None:
+            prompt_override = context.get("prompt_override")
+        persona = prompt_override or agent.persona or "You are a helpful assistant."
         loader = SkillLoader(self._db)
         skills_block = await loader.format_skills(
             agent_id=agent_id,
