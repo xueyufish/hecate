@@ -19,6 +19,12 @@ import logging
 import time
 from typing import Any
 
+from hecate.runtime.citation_provenance import (
+    EVENT_NAME_REGISTERED,
+    EXECUTION_CONTEXT_KEY,
+    emit_citation_event,
+    mark_tool_result,
+)
 from hecate.runtime.eventstore import Event, EventType
 from hecate.runtime.guardrail import (
     GuardrailAction,
@@ -28,6 +34,7 @@ from hecate.runtime.guardrail import (
     PreToolHook,
 )
 from hecate.runtime.ports import RuntimePort
+from hecate.runtime.provenance_policy import resolve_citation_policy
 from hecate.runtime.tool_access import (
     AccessDecision,
     ApprovalCallback,
@@ -142,10 +149,64 @@ class ToolWorker(Worker):
             *(self._execute_single_tool(tc, channel_snapshot, execution_context, node_id) for tc in tool_calls)
         )
 
+        # 1.3.5e citation provenance: mark at the single choke point where
+        # tool results are written to history, so every result shape
+        # (success, error, sanitized) is treated uniformly.
+        await self._apply_citation_provenance(tool_results, node_config, execution_context, node_id)
+
         return WorkerResult(
             node_id=node_id,
             channel_updates={"messages": tool_results},
         )
+
+    async def _apply_citation_provenance(
+        self,
+        tool_results: list[dict[str, Any]],
+        node_config: dict,
+        execution_context: dict | None,
+        node_id: str,
+    ) -> None:
+        """Mark tool result messages with citation chunks (1.3.5e Stage 1).
+
+        No-op unless a citation provenance manager rides the execution
+        context and the resolved policy (node > agent) is enabled. String
+        content below the minimum size passes through unmarked; non-string
+        content passes through unmarked in this stage. The raw content is
+        not preserved on the message — the registry carries chunk texts, and
+        markers are plain text prefixes the providers accept.
+        """
+        if not execution_context:
+            return
+        manager = execution_context.get(EXECUTION_CONTEXT_KEY)
+        if manager is None:
+            return
+        policy = resolve_citation_policy(node_config, getattr(manager, "agent_policy", None))
+        if not policy.enabled:
+            return
+        registry = manager.registry_for(execution_context.get("session_id"))
+        for msg in tool_results:
+            content = msg.get("content")
+            if not isinstance(content, str) or not content:
+                continue
+            marked, entries = mark_tool_result(
+                content,
+                registry,
+                policy.chunk_granularity,
+                policy.min_chunk_chars,
+            )
+            if not entries:
+                continue
+            msg["content"] = marked
+            await emit_citation_event(
+                execution_context=execution_context,
+                node_id=node_id,
+                event_name=EVENT_NAME_REGISTERED,
+                payload={
+                    "tool_call_id": msg.get("tool_call_id"),
+                    "result_seq": entries[0].result_seq,
+                    "chunks": [e.as_dict() for e in entries],
+                },
+            )
 
     def _capture_evidence(
         self,

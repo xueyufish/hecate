@@ -108,3 +108,32 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   `metadata_.source="prompt_optimization"` provenance, no labels) only
   after explicit approval; the loop is off unless
   `PROMPT_OPTIMIZATION_ENABLED=true`.
+
+## Citation provenance (1.3.5e Stage 1)
+
+- **Markers live in channel state, raw content does not** — the ToolWorker
+  marks tool results at the single choke point in `execute()` (after
+  `asyncio.gather`), so the `【N-M】` prefixes are part of the persisted
+  message content. There is no `original_content` field: the registry
+  (`CitationProvenanceManager.registry_for(session_id)`) carries the chunk
+  texts, and rebuilds from `CITATION_REGISTERED` events after restarts.
+  Anything reading tool-result content programmatically must strip markers
+  via `MARKER_PATTERN`.
+- **Marker ids are bare in the registry, bracketed in text** — registry
+  keys are `"N-M"`; response text and citation maps carry `【N-M】`. Lookups
+  from scanned text must convert (`match.group(1)-group(2)`), not pass
+  `group(0)`.
+- **Uncited ratio is not a hallucination rate** — the risk signal counts
+  factual sentences without any marker (D8 heuristic denominator). It says
+  nothing about whether the cited chunks actually support the claim; that
+  is Stage 2 (entailment scoring). UI/docs must not label it as
+  hallucination detection.
+- **Instruction message is a normal user message** — `[citation_instructions]`
+  persists in history once and is re-appended transiently only when the
+  projection dropped it (presence check in LLMWorker). Do not move it into
+  the system prompt; the hints-never-touch-system-prompt rule applies.
+- **Budget warn hints are a known trade-off, not an oversight** — Hermes
+  deliberately removed context-pressure warnings because they caused
+  models to give up prematurely on long tasks. `BudgetWarnProcessor` keeps
+  them (spec'd behavior, once-per-crossing latch); if warn-hint artifacts
+  show up in agent quality, revisit before adding more hint types.

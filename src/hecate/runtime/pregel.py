@@ -124,6 +124,7 @@ class PregelRuntime:
         context_offloader: Any = None,
         environment: Any = None,
         evidence_tracker: Any = None,
+        citation_provenance: Any = None,
         node_cache: InMemoryNodeCache | None = None,
     ) -> None:
         self._graph = graph
@@ -145,6 +146,8 @@ class PregelRuntime:
         self._context_offloader = context_offloader
         self._environment = environment
         self._evidence_tracker = evidence_tracker
+        # 1.3.5e citation provenance (CitationProvenanceManager).
+        self._citation_provenance = citation_provenance
         self._retry_executor = RetryExecutor(retry_strategy)
         # 1.3.21IV node cache: default is a per-runtime instance (session-
         # scope hits inside one execution loop still work); pass a shared
@@ -352,6 +355,8 @@ class PregelRuntime:
             ctx["environment"] = self._environment
         if self._evidence_tracker is not None:
             ctx["evidence_tracker"] = self._evidence_tracker
+        if self._citation_provenance is not None:
+            ctx["citation_provenance"] = self._citation_provenance
         return ctx
 
     def _cache_policy_for(self, node_id: str) -> CachePolicy | None:

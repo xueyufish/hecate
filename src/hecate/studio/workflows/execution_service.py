@@ -197,6 +197,11 @@ class WorkflowExecutionService:
         from hecate.runtime.context_policy import ContextChainFactory
 
         self._context_chain_factory = ContextChainFactory()
+        # 1.3.5e citation provenance (Stage 1): per-session chunk registries,
+        # mirrored into every execution context via PregelRuntime.
+        from hecate.runtime.citation_provenance import CitationProvenanceManager
+
+        self._citation_provenance = CitationProvenanceManager()
 
     async def execute(
         self,
@@ -221,6 +226,7 @@ class WorkflowExecutionService:
         agent_version: int | None = None,
         workflow_version: int | None = None,
         version_selector: str = "published_preferred",
+        citation_provenance: dict | None = None,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute an agent through the unified graph engine.
 
@@ -262,6 +268,10 @@ class WorkflowExecutionService:
                 falls back to the latest version for never-published
                 workflows; ``"latest_for_studio"`` always runs the latest
                 draft (workflow editor test-runs).
+            citation_provenance: Optional 1.3.5e citation provenance policy
+                dict (``enabled``/``chunk_granularity``/``min_chunk_chars``)
+                applied to the chat conversation node. ``None`` keeps the
+                layer disabled; the runtime resolver validates fail-fast.
 
         Returns:
             Response dict (non-streaming) or AsyncGenerator (streaming).
@@ -342,6 +352,7 @@ class WorkflowExecutionService:
                 enable_suggestions=enable_suggestions or generate_opening,
                 generate_opening=generate_opening,
                 tools=tools,
+                citation_provenance=citation_provenance,
             )
         elif agent_mode == "three_layer":
             graph_config = build_three_layer_graph(
@@ -430,6 +441,7 @@ class WorkflowExecutionService:
             max_supersteps=max_iterations * 3 + 5,
             context_engine=PriorityContextEngine(),
             context_chain=self._context_chain_factory,
+            citation_provenance=self._citation_provenance,
             context_offloader=context_offloader,
             environment=agent_env,
             evidence_tracker=evidence_tracker,
@@ -961,6 +973,7 @@ class WorkflowExecutionService:
             event_store=self._event_store,
             context_engine=PriorityContextEngine(),
             context_chain=self._context_chain_factory,
+            citation_provenance=self._citation_provenance,
         )
         snap = await runtime.snapshot_at_version(parent_session_id, effective)
         continuation = derive_continuation(

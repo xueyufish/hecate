@@ -689,7 +689,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 1.3.5e | Hallucination Detection & Mitigation | PostLLMHook ✅ + ContextEngine | L |
+| 1.3.5e ◐ (Stage 1 ✅ 2026-09-17) | Hallucination Detection & Mitigation — Stage 1 citation provenance layer（工具结果写入时 `【N-M】` 带内标记 + session 级 append-only 注册表 + 响应回映射 + 引用率 warn 风险信号 + `CITATION_*` 审计事件，per-node 策略默认关闭）；Stage 2/3（蕴含打分、knowledge_query 兜底、block/warn/pass 处置）另行立 change | PostLLMHook ✅ + ContextEngine ✅ (4.13) | L |
 | 1.3.6f ✅ (2026-09-15) | Self-Evolution Skill Loop — quality-signal harvest → rule pre-filter + LLM attribution (AgentRx) → knowledge-only candidate skills (procedure/guardrails, structured deltas) → four-check eval gate → human review → publish as learned `SkillModel` → two-level L1/L2 injection → usage/quality feedback. `SKILL_EVOLUTION_ENABLED` flag-gated. Supersedes the retired 1.3.6/1.3.6a–e skeleton (orphan rule-based code, zero callers, no persistence) | EventStore ✅ + quality-scoring ✅ + evaluation framework ✅ + SKILL.md infra ✅ + MetaAgentScheduler ✅ | M |
 | 1.3.6 ⊕ / 1.3.6e ⊕ | Self-Learning Agent Runtime / Self-Evolution Closed Loop — superseded by 1.3.6f (skeleton retired 2026-09-15, see feature-catalog) | — | — |
 
