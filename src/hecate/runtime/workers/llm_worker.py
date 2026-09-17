@@ -13,6 +13,18 @@ import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from hecate.runtime.citation_provenance import (
+    CITATION_INSTRUCTION,
+    EVENT_NAME_MAP,
+    EVENT_NAME_RISK,
+    EXECUTION_CONTEXT_KEY,
+    INSTRUCTION_TAG,
+    MARKER_PATTERN,
+    RISK_LEVEL_WARN,
+    CitationBackMapper,
+    emit_citation_event,
+    uncited_ratio,
+)
 from hecate.runtime.context_processors import (
     ChainReport,
     ContextProcessorChain,
@@ -28,6 +40,7 @@ from hecate.runtime.guardrail import (
     PreLLMHook,
 )
 from hecate.runtime.ports import RuntimePort
+from hecate.runtime.provenance_policy import CitationPolicy, resolve_citation_policy
 from hecate.runtime.task_phase import TaskPhase, detect_task_phase
 from hecate.runtime.tool_gate import ToolGateEvaluator
 from hecate.runtime.types import WorkerResult
@@ -177,6 +190,112 @@ async def _run_context_pipeline(
     return await chain.apply(messages, node_config, execution_context, node_id)
 
 
+def _citation_components(
+    node_config: dict,
+    execution_context: dict | None,
+) -> tuple[CitationPolicy, Any] | None:
+    """Resolve (policy, registry) for citation provenance, or None when off.
+
+    Components come from the execution context's ``citation_provenance``
+    manager (1.3.5e Stage 1); policy resolves node > agent > disabled.
+    """
+    if not execution_context:
+        return None
+    manager = execution_context.get(EXECUTION_CONTEXT_KEY)
+    if manager is None:
+        return None
+    policy = resolve_citation_policy(node_config, getattr(manager, "agent_policy", None))
+    if not policy.enabled:
+        return None
+    return policy, manager.registry_for(execution_context.get("session_id"))
+
+
+def _messages_contain(messages: list[dict[str, Any]], tag: str) -> bool:
+    return any(isinstance(m.get("content"), str) and tag in m["content"] for m in messages)
+
+
+def _reconcile_truncated_chunks(projection: list[dict[str, Any]], registry: Any) -> None:
+    """Flag registered chunks shortened by projection truncation as partial.
+
+    Scoped to ``tool``-role messages: response text may cite markers without
+    carrying chunk text, and such citations are not evidence of truncation.
+    Chunk text that no longer appears intact between its marker and the next
+    marker means the chain's ``tool_result_truncation`` cut into it.
+    """
+    for msg in projection:
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        if not isinstance(content, str):
+            continue
+        matches = list(MARKER_PATTERN.finditer(content))
+        for i, match in enumerate(matches):
+            entry = registry.resolve(f"{match.group(1)}-{match.group(2)}")
+            if entry is None or entry.truncated:
+                continue
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+            if entry.text not in content[match.start() : end]:
+                registry.mark_truncated(f"{match.group(1)}-{match.group(2)}")
+
+
+async def _inject_citation_instruction(
+    history_messages: list[dict[str, Any]],
+    projection: list[dict[str, Any]],
+    execution_context: dict | None,
+    node_id: str,
+) -> dict[str, Any] | None:
+    """Append the citation instruction to the projection when absent (D9).
+
+    The instruction persists in history exactly once (returned so the caller
+    includes it in channel updates); when history carries it but the
+    projection dropped it (window selection / compression), a transient copy
+    is appended for this invocation only. Appending keeps the projection's
+    KV-cache-stable prefix untouched.
+    """
+    if _messages_contain(projection, INSTRUCTION_TAG):
+        return None
+    instruction = {"role": "user", "content": CITATION_INSTRUCTION}
+    projection.append(instruction)
+    if not _messages_contain(history_messages, INSTRUCTION_TAG):
+        return instruction
+    return None
+
+
+async def _apply_citation_backmap(
+    response_text: str,
+    components: tuple[CitationPolicy, Any],
+    execution_context: dict | None,
+    node_id: str,
+) -> dict[str, Any] | None:
+    """Back-map the delivered response to cited chunks and record the risk signal.
+
+    Observation-only: the returned metadata is attached to the assistant
+    message; the response text is never modified and no interception occurs.
+    """
+    _policy, registry = components
+    citation_map = CitationBackMapper().map_response(response_text, registry)
+    ratio, factual, uncited = uncited_ratio(response_text)
+    metadata = citation_map.as_dict()
+    await emit_citation_event(
+        execution_context=execution_context,
+        node_id=node_id,
+        event_name=EVENT_NAME_MAP,
+        payload={"citations": metadata},
+    )
+    await emit_citation_event(
+        execution_context=execution_context,
+        node_id=node_id,
+        event_name=EVENT_NAME_RISK,
+        payload={
+            "uncited_ratio": round(ratio, 4),
+            "factual_sentences": factual,
+            "uncited_sentences": uncited,
+            "level": RISK_LEVEL_WARN,
+        },
+    )
+    return metadata
+
+
 class LLMWorker(Worker):
     """Worker that executes CONVERSATION-type nodes with full context engineering.
 
@@ -287,8 +406,18 @@ class LLMWorker(Worker):
                 )
 
         # Context pipeline (non-destructive projection via the 4.13 chain)
+        history_messages = messages
         chain_report = await _run_context_pipeline(messages, node_config, execution_context, node_id)
         messages = chain_report.messages
+
+        # 1.3.5e citation provenance (Stage 1): observation-only layer.
+        citation = _citation_components(node_config, execution_context)
+        persisted_instruction: dict[str, Any] | None = None
+        if citation is not None:
+            persisted_instruction = await _inject_citation_instruction(
+                history_messages, messages, execution_context, node_id
+            )
+            _reconcile_truncated_chunks(messages, citation[1])
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -458,8 +587,18 @@ class LLMWorker(Worker):
                 )
 
         # Build channel updates
+        citations_metadata: dict[str, Any] | None = None
+        if citation is not None:
+            citations_metadata = await _apply_citation_backmap(full_response, citation, execution_context, node_id)
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": full_response}
-        updates: dict[str, Any] = {"messages": [assistant_msg]}
+        if citations_metadata is not None:
+            assistant_msg["citations"] = citations_metadata
+        update_messages: list[dict[str, Any]] = [assistant_msg]
+        if persisted_instruction is not None:
+            # Persist the instruction once so subsequent turns project it from
+            # history instead of re-injecting a transient copy (D9).
+            update_messages.insert(0, persisted_instruction)
+        updates: dict[str, Any] = {"messages": update_messages}
 
         if response_dict.get("tool_calls"):
             assistant_msg["tool_calls"] = response_dict["tool_calls"]
@@ -522,8 +661,18 @@ class LLMWorker(Worker):
                 )
 
         # Context pipeline (non-destructive projection via the 4.13 chain)
+        history_messages = messages
         chain_report = await _run_context_pipeline(messages, node_config, execution_context, node_id)
         messages = chain_report.messages
+
+        # 1.3.5e citation provenance (Stage 1): observation-only layer.
+        citation = _citation_components(node_config, execution_context)
+        persisted_instruction: dict[str, Any] | None = None
+        if citation is not None:
+            persisted_instruction = await _inject_citation_instruction(
+                history_messages, messages, execution_context, node_id
+            )
+            _reconcile_truncated_chunks(messages, citation[1])
 
         # Context assembly
         assembled = await self._port.context_assemble(
@@ -650,8 +799,18 @@ class LLMWorker(Worker):
                 )
 
         # Build final WorkerResult
+        citations_metadata: dict[str, Any] | None = None
+        if citation is not None:
+            citations_metadata = await _apply_citation_backmap(full_response, citation, execution_context, node_id)
         assistant_msg: dict[str, Any] = {"role": "assistant", "content": full_response}
-        updates: dict[str, Any] = {"messages": [assistant_msg]}
+        if citations_metadata is not None:
+            assistant_msg["citations"] = citations_metadata
+        update_messages: list[dict[str, Any]] = [assistant_msg]
+        if persisted_instruction is not None:
+            # Persist the instruction once so subsequent turns project it from
+            # history instead of re-injecting a transient copy (D9).
+            update_messages.insert(0, persisted_instruction)
+        updates: dict[str, Any] = {"messages": update_messages}
 
         if response_dict.get("tool_calls"):
             assistant_msg["tool_calls"] = response_dict["tool_calls"]

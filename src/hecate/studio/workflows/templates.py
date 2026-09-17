@@ -25,6 +25,7 @@ def build_chat_graph(
     enable_suggestions: bool = False,
     generate_opening: bool = False,
     tools: list[dict[str, Any]] | None = None,
+    citation_provenance: dict[str, Any] | None = None,
 ) -> GraphConfig:
     """Build a chat-mode graph template that replicates ConversationService orchestration.
 
@@ -75,6 +76,10 @@ def build_chat_graph(
     }
     if tools is not None:
         llm_config["tools"] = tools
+    if citation_provenance is not None:
+        # 1.3.5e: citation provenance policy on the conversation node —
+        # validated fail-fast by the runtime resolver, disabled by default.
+        llm_config["citation_provenance"] = citation_provenance
 
     nodes: dict[str, NodeConfig] = {
         "llm": NodeConfig(
