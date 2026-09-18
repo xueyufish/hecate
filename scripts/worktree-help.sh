@@ -24,6 +24,12 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 WT_ROOT_RAW="${HECATE_WORKTREE_ROOT:-${REPO_ROOT}/../.worktrees}"
 WT_ROOT="$(cd "${REPO_ROOT}" && cd "$(dirname "${WT_ROOT_RAW}")" && mkdir -p "$(basename "${WT_ROOT_RAW}")" && cd "$(basename "${WT_ROOT_RAW}")" && pwd)"
+# Git Bash pwd returns POSIX-style paths (/d/...) while 'git worktree list
+# --porcelain' reports Windows drive-letter paths (D:/...); normalize so the
+# prefix matching in 'list' works on Windows too.
+if command -v cygpath >/dev/null 2>&1; then
+    WT_ROOT="$(cygpath -m "${WT_ROOT}")"
+fi
 mkdir -p "${WT_ROOT}"
 
 cmd="${1:-help}"
