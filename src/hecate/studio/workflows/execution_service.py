@@ -165,6 +165,8 @@ class WorkflowExecutionService:
         access_policy: Any = None,
         approval_callback: Any = None,
         tool_policy_rules: list | None = None,
+        middleware_chains: dict | None = None,
+        grounding_scoring: Any = None,
     ) -> None:
         self._port = port
         self._db = db
@@ -179,6 +181,12 @@ class WorkflowExecutionService:
         # WorkflowExecutionService instance carries its agent's resolved
         # workspace + agent rule set. The chat path (api/v1/chat.py) builds
         # these via ``assemble_guardrails``.
+        # 1.3.5e Stage 2: LLM_RESPONSE middleware chains (chain takes
+        # precedence in LLMWorker; legacy hooks remain the fallback) and the
+        # agent-level grounding scoring policy mirrored into every
+        # execution context.
+        self._middleware_chains = middleware_chains or {}
+        self._grounding_scoring = grounding_scoring
         self._tool_policy_rules = tool_policy_rules or []
         if access_policy is not None:
             self._access_policy = access_policy
@@ -227,6 +235,7 @@ class WorkflowExecutionService:
         workflow_version: int | None = None,
         version_selector: str = "published_preferred",
         citation_provenance: dict | None = None,
+        grounding_scoring: dict | None = None,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute an agent through the unified graph engine.
 
@@ -353,6 +362,7 @@ class WorkflowExecutionService:
                 generate_opening=generate_opening,
                 tools=tools,
                 citation_provenance=citation_provenance,
+                grounding_scoring=grounding_scoring,
             )
         elif agent_mode == "three_layer":
             graph_config = build_three_layer_graph(
@@ -442,6 +452,7 @@ class WorkflowExecutionService:
             context_engine=PriorityContextEngine(),
             context_chain=self._context_chain_factory,
             citation_provenance=self._citation_provenance,
+            grounding_scoring=self._grounding_scoring,
             context_offloader=context_offloader,
             environment=agent_env,
             evidence_tracker=evidence_tracker,
@@ -732,6 +743,7 @@ class WorkflowExecutionService:
             port=self._port,
             pre_llm_hook=self._pre_llm_hook,
             post_llm_hook=self._post_llm_hook,
+            middleware_chains=self._middleware_chains,
         )
         tool_worker = ToolWorker(
             port=self._port,
@@ -974,6 +986,7 @@ class WorkflowExecutionService:
             context_engine=PriorityContextEngine(),
             context_chain=self._context_chain_factory,
             citation_provenance=self._citation_provenance,
+            grounding_scoring=self._grounding_scoring,
         )
         snap = await runtime.snapshot_at_version(parent_session_id, effective)
         continuation = derive_continuation(

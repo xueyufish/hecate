@@ -229,6 +229,11 @@ export interface ReplayGuardrailBlock {
   block_type: string;
 }
 
+export interface CitationBadge {
+  cited: string[];
+  unresolved: string[];
+}
+
 export interface ReplayTimelineResponse {
   traces: ReplayTraceSegment[];
   unattributed: ReplayEvent[];
@@ -236,6 +241,7 @@ export interface ReplayTimelineResponse {
   payload_truncated: boolean;
   guardrail_blocks: ReplayGuardrailBlock[];
   message_bodies: Record<string, unknown[]>;
+  citation_badges: Record<string, CitationBadge>;
   trace_enrichment: Record<string, ReplayTraceEnrichment>;
   payload_preview_chars: number;
 }

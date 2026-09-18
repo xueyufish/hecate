@@ -216,6 +216,62 @@ def derive_message_bodies(
     return result
 
 
+def derive_citation_badges(
+    events: list[Event],
+    trace_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Derive citation badge summaries for assistant messages (1.3.5e Stage 2).
+
+    Mirrors :func:`derive_message_bodies` correlation: for each
+    ``LLM_RESPONSE`` event, the assistant messages written to the messages
+    channel within the same node window are inspected for the citation map
+    metadata. Returns a mapping keyed by ``f"{trace_id}::{version}"``
+    (versions are unique per session, matching the guardrail-block keying)
+    with ``cited`` / ``unresolved`` marker lists; sessions without citation
+    provenance simply have no entries.
+    """
+    by_trace: dict[str, list[Event]] = {}
+    for ev in events:
+        if not _is_attributed(ev.trace_id):
+            continue
+        by_trace.setdefault(ev.trace_id, []).append(ev)
+
+    result: dict[str, dict[str, Any]] = {}
+    for trace_id in trace_ids:
+        trace_events = by_trace.get(trace_id, [])
+        for i, ev in enumerate(trace_events):
+            etype = ev.event_type.value if hasattr(ev.event_type, "value") else str(ev.event_type)
+            if etype != EventType.LLM_RESPONSE.value:
+                continue
+            same_node = ev.node_id
+            cited: list[str] = []
+            unresolved: list[str] = []
+            for later in trace_events[i + 1 :]:
+                if later.node_id != same_node:
+                    break
+                ltype = later.event_type.value if hasattr(later.event_type, "value") else str(later.event_type)
+                if ltype != EventType.CHANNEL_WRITE.value:
+                    continue
+                payload = later.payload or {}
+                if payload.get("channel") != "messages":
+                    continue
+                value = payload.get("value")
+                if not isinstance(value, dict) or value.get("role") != "assistant":
+                    continue
+                citations = value.get("citations")
+                if not isinstance(citations, dict):
+                    continue
+                for marker in citations.get("cited", []) or []:
+                    if marker not in cited:
+                        cited.append(str(marker))
+                for marker in citations.get("unresolved", []) or []:
+                    if marker not in unresolved:
+                        unresolved.append(str(marker))
+            if cited or unresolved:
+                result[f"{trace_id}::{ev.version}"] = {"cited": cited, "unresolved": unresolved}
+    return result
+
+
 def derive_guardrail_blocks(events: list[Event]) -> list[dict[str, Any]]:
     """Derive guardrail blocks from synthetic tool-role error messages.
 
