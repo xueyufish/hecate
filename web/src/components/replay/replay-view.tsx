@@ -79,6 +79,8 @@ export function ReplayView({ sessionId }: Props) {
           <Timeline
             events={visibleEvents}
             guards={timeline.guardrail_blocks}
+            citationBadges={timeline.citation_badges}
+            traceId={selectedTrace === "__unattributed__" ? null : selectedTrace}
             onSelectEvent={setSelectedEvent}
             selectedVersion={selectedEvent?.version ?? null}
           />

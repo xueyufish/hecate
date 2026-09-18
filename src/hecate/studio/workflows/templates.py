@@ -26,6 +26,7 @@ def build_chat_graph(
     generate_opening: bool = False,
     tools: list[dict[str, Any]] | None = None,
     citation_provenance: dict[str, Any] | None = None,
+    grounding_scoring: dict[str, Any] | None = None,
 ) -> GraphConfig:
     """Build a chat-mode graph template that replicates ConversationService orchestration.
 
@@ -80,6 +81,10 @@ def build_chat_graph(
         # 1.3.5e: citation provenance policy on the conversation node —
         # validated fail-fast by the runtime resolver, disabled by default.
         llm_config["citation_provenance"] = citation_provenance
+    if grounding_scoring is not None:
+        # 1.3.5e Stage 2: grounding scoring policy on the conversation node —
+        # validated fail-fast by the runtime resolver, disabled by default.
+        llm_config["grounding_scoring"] = grounding_scoring
 
     nodes: dict[str, NodeConfig] = {
         "llm": NodeConfig(

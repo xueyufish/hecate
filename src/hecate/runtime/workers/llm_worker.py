@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass
 from typing import Any
 
 from hecate.runtime.citation_provenance import (
@@ -32,6 +33,16 @@ from hecate.runtime.context_processors import (
     default_chain_processors,
 )
 from hecate.runtime.eventstore import Event, EventType
+from hecate.runtime.grounding_policy import GroundingPolicy, resolve_grounding_policy
+from hecate.runtime.grounding_scoring import (
+    EVENT_NAME_SCORE,
+    STAGE_ID,
+    score_response,
+    score_triggered,
+)
+from hecate.runtime.grounding_scoring import (
+    EXECUTION_CONTEXT_KEY as GROUNDING_CONTEXT_KEY,
+)
 from hecate.runtime.guardrail import (
     GuardrailAction,
     NoOpPostLLMHook,
@@ -39,6 +50,7 @@ from hecate.runtime.guardrail import (
     PostLLMHook,
     PreLLMHook,
 )
+from hecate.runtime.middleware import Chain, NextFn, Phase, StageDecision, StageHandler
 from hecate.runtime.ports import RuntimePort
 from hecate.runtime.provenance_policy import CitationPolicy, resolve_citation_policy
 from hecate.runtime.task_phase import TaskPhase, detect_task_phase
@@ -296,6 +308,89 @@ async def _apply_citation_backmap(
     return metadata
 
 
+def _grounding_components(
+    node_config: dict,
+    execution_context: dict | None,
+) -> tuple[GroundingPolicy, Any] | None:
+    """Resolve (policy, registry) for grounding scoring, or None when off.
+
+    The policy resolves node > agent-level (execution context) > disabled.
+    The citation registry supplies cited-chunk evidence; scoring works even
+    when provenance is disabled (every claim then goes through the
+    fallback/unverifiable path).
+    """
+    if not execution_context:
+        return None
+    policy = resolve_grounding_policy(node_config, execution_context.get(GROUNDING_CONTEXT_KEY))
+    if not policy.enabled:
+        return None
+    manager = execution_context.get(EXECUTION_CONTEXT_KEY)
+    registry = manager.registry_for(execution_context.get("session_id")) if manager is not None else None
+    return policy, registry
+
+
+async def _score_response_best_effort(
+    policy: GroundingPolicy,
+    registry: Any | None,
+    port: RuntimePort,
+    response_text: str,
+    default_model: str,
+    node_id: str,
+) -> dict[str, Any] | None:
+    """Score one response; failures degrade to no payload (never raise)."""
+    try:
+        return await score_response(policy, registry, port, response_text, default_model)
+    except Exception:  # noqa: BLE001 — observation layer must not fail the call
+        logger.warning("Grounding scoring failed on node '%s'", node_id, exc_info=True)
+        return None
+
+
+def _make_grounding_stage(
+    policy: GroundingPolicy,
+    registry: Any | None,
+    port: RuntimePort,
+    default_model: str,
+    node_id: str,
+    cell: dict[str, Any],
+) -> StageHandler:
+    """Build the LLM_RESPONSE scoring stage (observation-only, never short-circuits).
+
+    The stage runs after the guard stages so it scores the response that
+    will actually be delivered; results are handed back to the worker via
+    ``cell`` (the D8 metadata sidecar) for audit emission.
+    """
+
+    async def handler(data: Any, call_next: NextFn):
+        outcome = await call_next(data)
+        if outcome.blocked:
+            return outcome.decision, outcome.result
+        content = ""
+        if isinstance(outcome.result, dict) and isinstance(outcome.result.get("response"), dict):
+            content = outcome.result["response"].get("content") or ""
+        if isinstance(content, str) and content and score_triggered(policy, content):
+            payload = await _score_response_best_effort(policy, registry, port, content, default_model, node_id)
+            if payload is not None:
+                cell["payload"] = payload
+        return StageDecision.allow(stage_id=STAGE_ID), outcome.result
+
+    return handler
+
+
+@dataclass
+class _ResponseFinalization:
+    """Outcome of the post-LLM guard + scoring pipeline for one response."""
+
+    response_dict: dict[str, Any]
+    full_response: str
+    blocked_updates: dict[str, Any] | None = None
+    grounding_payload: dict[str, Any] | None = None
+
+
+async def _passthrough_handler(data: Any) -> Any:
+    """Terminal handler for the LLM_RESPONSE chain: the real response is the data."""
+    return data
+
+
 class LLMWorker(Worker):
     """Worker that executes CONVERSATION-type nodes with full context engineering.
 
@@ -359,6 +454,109 @@ class LLMWorker(Worker):
             context["task_phase"] = task_phase.value
 
         return self._tool_gate.filter_tools(tools, context)
+
+    async def _finalize_response(
+        self,
+        node_id: str,
+        response_dict: dict[str, Any],
+        shaped_messages: list[dict[str, Any]],
+        node_config: dict,
+        execution_context: dict | None,
+        consume_resume: bool,
+    ) -> _ResponseFinalization:
+        """Run the LLM_RESPONSE guard chain + grounding scoring (Stage 2).
+
+        The middleware chain takes precedence when wired (the legacy hook
+        participates via its adapter); the direct single-hook call remains
+        the fallback for legacy constructions. BLOCK/SANITIZE semantics and
+        the canned-message path are identical on both routes. The grounding
+        scoring stage is appended per invocation (never mutating the shared
+        chain) and only when the node policy enables and triggers it.
+        """
+        full_response = response_dict.get("content", "")
+        components = _grounding_components(node_config, execution_context)
+        cell: dict[str, Any] = {}
+        canned: dict[str, Any] = {
+            "messages": [{"role": "assistant", "content": "I cannot provide that response due to safety policy."}],
+        }
+        if consume_resume:
+            canned["_resume_value"] = None
+
+        post_chain = self._middleware_chains.get(Phase.LLM_RESPONSE)
+        if post_chain is not None:
+            chain = Chain(phase=Phase.LLM_RESPONSE, stages=list(post_chain.stages), handler=_passthrough_handler)
+            if components is not None:
+                policy, registry = components
+                chain.add_stage(
+                    STAGE_ID,
+                    _make_grounding_stage(
+                        policy,
+                        registry,
+                        self._port,
+                        node_config.get("model", "gpt-4o"),
+                        node_id,
+                        cell,
+                    ),
+                )
+            decision, result = await chain.run({"response": response_dict, "messages": shaped_messages})
+            if decision.action == GuardrailAction.BLOCK:
+                logger.info(
+                    "LLM_RESPONSE chain blocked response on node '%s': stage=%s reason=%s",
+                    node_id,
+                    decision.stage_id,
+                    decision.reason,
+                )
+                return _ResponseFinalization(
+                    response_dict=response_dict,
+                    full_response=full_response,
+                    blocked_updates=canned,
+                )
+            if isinstance(result, dict) and isinstance(result.get("response"), dict):
+                response_dict = result["response"]
+                full_response = response_dict.get("content", full_response)
+            return _ResponseFinalization(
+                response_dict=response_dict,
+                full_response=full_response,
+                grounding_payload=cell.get("payload"),
+            )
+
+        # Legacy single-hook fallback (behavior-pinned by guardrail tests).
+        post_result = await self._post_hook.on_post_llm_call(
+            response=response_dict,
+            messages=shaped_messages,
+        )
+        if post_result.action == GuardrailAction.BLOCK:
+            logger.info("PostLLMHook blocked response on node '%s': %s", node_id, post_result.reason)
+            return _ResponseFinalization(
+                response_dict=response_dict,
+                full_response=full_response,
+                blocked_updates=canned,
+            )
+        if post_result.action == GuardrailAction.SANITIZE:
+            if post_result.modified_data and "response" in post_result.modified_data:
+                response_dict = post_result.modified_data["response"]
+                full_response = response_dict.get("content", full_response)
+            else:
+                logger.warning(
+                    "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
+                    node_id,
+                )
+        grounding_payload: dict[str, Any] | None = None
+        if components is not None and full_response:
+            policy, registry = components
+            grounding_payload = await _score_response_best_effort(
+                policy,
+                registry,
+                self._port,
+                full_response,
+                node_config.get("model", "gpt-4o"),
+                node_id,
+            )
+        return _ResponseFinalization(
+            response_dict=response_dict,
+            full_response=full_response,
+            grounding_payload=grounding_payload,
+        )
 
     async def execute(
         self,
@@ -563,28 +761,27 @@ class LLMWorker(Worker):
                 len(structured_tool_calls),
             )
 
-        # PostLLMHook
-        post_result = await self._post_hook.on_post_llm_call(
-            response=response_dict,
-            messages=shaped_messages,
+        # LLM_RESPONSE guard chain + grounding scoring (Stage 2): chain takes
+        # precedence; the legacy single hook remains the fallback.
+        finalization = await self._finalize_response(
+            node_id=node_id,
+            response_dict=response_dict,
+            shaped_messages=shaped_messages,
+            node_config=node_config,
+            execution_context=execution_context,
+            consume_resume=consume_resume,
         )
-        if post_result.action == GuardrailAction.BLOCK:
-            logger.info("PostLLMHook blocked response on node '%s': %s", node_id, post_result.reason)
-            post_blocked_updates: dict[str, Any] = {
-                "messages": [{"role": "assistant", "content": "I cannot provide that response due to safety policy."}],
-            }
-            if consume_resume:
-                post_blocked_updates["_resume_value"] = None
-            return WorkerResult(node_id=node_id, channel_updates=post_blocked_updates)
-        if post_result.action == GuardrailAction.SANITIZE:
-            if post_result.modified_data and "response" in post_result.modified_data:
-                response_dict = post_result.modified_data["response"]
-                full_response = response_dict.get("content", full_response)
-            else:
-                logger.warning(
-                    "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
-                    node_id,
-                )
+        if finalization.blocked_updates is not None:
+            return WorkerResult(node_id=node_id, channel_updates=finalization.blocked_updates)
+        response_dict = finalization.response_dict
+        full_response = finalization.full_response
+        if finalization.grounding_payload is not None:
+            await emit_citation_event(
+                execution_context=execution_context,
+                node_id=node_id,
+                event_name=EVENT_NAME_SCORE,
+                payload=finalization.grounding_payload,
+            )
 
         # Build channel updates
         citations_metadata: dict[str, Any] | None = None
@@ -774,29 +971,29 @@ class LLMWorker(Worker):
                 len(structured_tool_calls),
             )
 
-        # PostLLMHook
-        post_result = await self._post_hook.on_post_llm_call(
-            response=response_dict,
-            messages=shaped_messages,
+        # LLM_RESPONSE guard chain + grounding scoring (Stage 2): tokens are
+        # already delivered above, so scoring here is post-delivery by
+        # construction — the observation contract holds without buffering.
+        finalization = await self._finalize_response(
+            node_id=node_id,
+            response_dict=response_dict,
+            shaped_messages=shaped_messages,
+            node_config=node_config,
+            execution_context=execution_context,
+            consume_resume=consume_resume,
         )
-        if post_result.action == GuardrailAction.BLOCK:
-            logger.info("PostLLMHook blocked response on node '%s': %s", node_id, post_result.reason)
-            stream_post_blocked_updates: dict[str, Any] = {
-                "messages": [{"role": "assistant", "content": "I cannot provide that response due to safety policy."}],
-            }
-            if consume_resume:
-                stream_post_blocked_updates["_resume_value"] = None
-            yield WorkerResult(node_id=node_id, channel_updates=stream_post_blocked_updates)
+        if finalization.blocked_updates is not None:
+            yield WorkerResult(node_id=node_id, channel_updates=finalization.blocked_updates)
             return
-        if post_result.action == GuardrailAction.SANITIZE:
-            if post_result.modified_data and "response" in post_result.modified_data:
-                response_dict = post_result.modified_data["response"]
-                full_response = response_dict.get("content", full_response)
-            else:
-                logger.warning(
-                    "SANITIZE returned without modified_data on node '%s', treating as ALLOW",
-                    node_id,
-                )
+        response_dict = finalization.response_dict
+        full_response = finalization.full_response
+        if finalization.grounding_payload is not None:
+            await emit_citation_event(
+                execution_context=execution_context,
+                node_id=node_id,
+                event_name=EVENT_NAME_SCORE,
+                payload=finalization.grounding_payload,
+            )
 
         # Build final WorkerResult
         citations_metadata: dict[str, Any] | None = None

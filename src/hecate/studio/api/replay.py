@@ -27,6 +27,7 @@ from hecate.runtime.replay.logfold import NonReplayablePrefix
 from hecate.studio.replay.assembler import (
     REPLAY_PAYLOAD_PREVIEW_CHARS,
     assemble_timeline,
+    derive_citation_badges,
     derive_guardrail_blocks,
     derive_message_bodies,
     enrich_traces,
@@ -92,12 +93,14 @@ async def get_replay_timeline(
     trace_ids = [seg["trace_id"] for seg in timeline["traces"]]
     bodies = derive_message_bodies(events, trace_ids)
     guardrails = derive_guardrail_blocks(events)
+    badges = derive_citation_badges(events, trace_ids)
     enrichment = await enrich_traces(events, db)
 
     return {
         **timeline,
         "guardrail_blocks": guardrails,
         "message_bodies": {f"{tid}::{eid}": msgs for (tid, eid), msgs in bodies.items()},
+        "citation_badges": badges,
         "trace_enrichment": enrichment,
         "payload_preview_chars": REPLAY_PAYLOAD_PREVIEW_CHARS,
     }

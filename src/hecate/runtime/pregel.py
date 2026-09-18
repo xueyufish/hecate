@@ -125,6 +125,7 @@ class PregelRuntime:
         environment: Any = None,
         evidence_tracker: Any = None,
         citation_provenance: Any = None,
+        grounding_scoring: Any = None,
         node_cache: InMemoryNodeCache | None = None,
     ) -> None:
         self._graph = graph
@@ -148,6 +149,8 @@ class PregelRuntime:
         self._evidence_tracker = evidence_tracker
         # 1.3.5e citation provenance (CitationProvenanceManager).
         self._citation_provenance = citation_provenance
+        # 1.3.5e Stage 2 grounding scoring (agent-level policy dict | None).
+        self._grounding_scoring = grounding_scoring
         self._retry_executor = RetryExecutor(retry_strategy)
         # 1.3.21IV node cache: default is a per-runtime instance (session-
         # scope hits inside one execution loop still work); pass a shared
@@ -357,6 +360,8 @@ class PregelRuntime:
             ctx["evidence_tracker"] = self._evidence_tracker
         if self._citation_provenance is not None:
             ctx["citation_provenance"] = self._citation_provenance
+        if self._grounding_scoring is not None:
+            ctx["grounding_scoring"] = self._grounding_scoring
         return ctx
 
     def _cache_policy_for(self, node_id: str) -> CachePolicy | None:

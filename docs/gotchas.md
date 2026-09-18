@@ -137,3 +137,36 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   models to give up prematurely on long tasks. `BudgetWarnProcessor` keeps
   them (spec'd behavior, once-per-crossing latch); if warn-hint artifacts
   show up in agent quality, revisit before adding more hint types.
+
+## Grounding scoring (1.3.5e Stage 2)
+
+- **Scoring is a heuristic, not a trust boundary** — the `GroundingScorer`
+  backends (LLM judge / HTTP NLI) produce advisory verdicts recorded in
+  `GROUNDING_SCORE` events. They never gate delivery: a contradicted
+  response is delivered exactly as generated. Any future enforcement lives
+  in the Stage 3 disposition layer and must be calibrated against the
+  `would_block` shadow data, never turned on from the scoring layer.
+- **Low confidence is never `contradicted`** — the red line in
+  `grounding_scoring.py`: contradiction requires the backend to report
+  explicit evidence disagreement. A binary-support NLI endpoint can never
+  produce `contradicted` (its `false` maps to `unverifiable`). Do not
+  "optimize" the mapping to treat weak support as contradiction.
+- **`would_block` has no behavioral effect** — it is a shadow disposition
+  (default thresholds are code constants; `shadow_thresholds` policy
+  section can override for calibration). Do not wire UI or delivery logic
+  to it until Stage 3 ships an opt-in disposition policy.
+- **Scoring works with provenance disabled** — `_grounding_components`
+  resolves the registry through the citation manager but tolerates its
+  absence: every claim then goes through the fallback/unverifiable path.
+  Enabling scoring without citation provenance gives much weaker evidence
+  acquisition, not an error.
+- **HTTP NLI endpoints are operator assets** — the platform never embeds a
+  model runtime; `backend: "http_nli"` POSTs `(claim, evidence)` pairs to
+  the configured endpoint (contract:
+  `docs/operations/grounding-nli-endpoint-contract.md`). Timeouts degrade
+  per-pair, never fail the invocation.
+- **The LLM_RESPONSE chain now runs in LLMWorker** — `_finalize_response`
+  executes the chain (legacy hook participates via its adapter) and appends
+  the scoring stage per invocation on a fresh `Chain` copy; the shared
+  chain object is never mutated. BLOCK/SANITIZE semantics are identical to
+  the legacy direct-hook path (pinned by tests).

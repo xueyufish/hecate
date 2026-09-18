@@ -1,11 +1,13 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { ReplayEvent, ReplayGuardrailBlock } from "@/lib/api-client";
+import type { CitationBadge, ReplayEvent, ReplayGuardrailBlock } from "@/lib/api-client";
 
 interface Props {
   events: ReplayEvent[];
   guards: ReplayGuardrailBlock[];
+  citationBadges?: Record<string, CitationBadge>;
+  traceId: string | null;
   onSelectEvent: (event: ReplayEvent) => void;
   selectedVersion: number | null;
 }
@@ -27,7 +29,7 @@ const EVENT_COLORS: Record<string, string> = {
   SUBGRAPH_END: "bg-indigo-50 text-indigo-600",
 };
 
-export function Timeline({ events, guards, onSelectEvent, selectedVersion }: Props) {
+export function Timeline({ events, guards, citationBadges, traceId, onSelectEvent, selectedVersion }: Props) {
   const guardByVersion = new Map<number, ReplayGuardrailBlock>();
   for (const g of guards) guardByVersion.set(g.version, g);
 
@@ -54,6 +56,26 @@ export function Timeline({ events, guards, onSelectEvent, selectedVersion }: Pro
                 <span className="text-xs text-gray-500">v{ev.version}</span>
                 <span className="text-xs text-gray-500">s{ev.superstep}</span>
                 {ev.node_id && <span className="text-xs text-gray-700">{ev.node_id}</span>}
+                {ev.event_type === "LLM_RESPONSE" && traceId && citationBadges && (
+                  (() => {
+                    const badge = citationBadges[`${traceId}::${ev.version}`];
+                    if (!badge) return null;
+                    const label =
+                      `【citations】${badge.cited.length} cited` +
+                      (badge.unresolved.length > 0 ? ` · ${badge.unresolved.length} unresolved` : "");
+                    const detail = [...badge.cited.map((m) => `✓ ${m}`), ...badge.unresolved.map((m) => `? ${m}`)].join(", ");
+                    return (
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded ml-auto ${
+                          badge.unresolved.length > 0 ? "bg-orange-100 text-orange-700" : "bg-sky-100 text-sky-700"
+                        }`}
+                        title={detail}
+                      >
+                        {label}
+                      </span>
+                    );
+                  })()
+                )}
                 {guard && (
                   <span className="text-xs px-2 py-0.5 rounded bg-red-100 text-red-700 ml-auto">
                     guardrail: {guard.reason}
