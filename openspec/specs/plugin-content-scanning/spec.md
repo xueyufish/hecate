@@ -2,7 +2,7 @@
 
 Deterministic install/enable-time content scanning for declarative (T4) agent-plugin packages: a rule engine detects prompt-injection patterns, invisible-Unicode smuggling, secret material, and permission-declaration risk in package content before it can reach agent context, with fail-closed verdicts, ops-console findings, and administrator acknowledgment.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Detection surface
 The scanner SHALL analyze package text content for five rule categories: (a) prompt-injection patterns via regex and heuristics (instruction-override phrasing, fake system-prompt or tool-result framing, exfiltration commands); (b) invisible-Unicode steganography; (c) secret material (private keys, API tokens, JWTs, connection strings); (d) `allowed-tools` pre-authorization audit — declared tool grants SHALL be reported as findings weighted by tool risk, not merely validated for well-formedness; (e) high-confidence suspicious URLs (paste-site domains, IP-literal endpoints, homograph-confusable domains). Full declared-versus-extracted domain reconciliation is out of scope for v1.
@@ -46,7 +46,7 @@ The scanner SHALL apply deterministic transform passes before pattern matching: 
 - **THEN** the decode pass produces no finding for that blob
 
 ### Requirement: File-role severity matrix
-Finding severity SHALL be assigned from rule-intrinsic severity combined with file role, where role reflects runtime exposure: skill frontmatter description and skill body (both injected into agent context by skill loading) and mcp.json credential values are highest-exposure roles; nested supporting files readable by agents on demand are medium; README and catalog-facing text are low. The severity matrix SHALL be fixed platform behavior, not per-package or per-workspace configuration.
+Finding severity SHALL be assigned from rule-intrinsic severity combined with file role, where role reflects runtime exposure: skill frontmatter description and skill body (both injected into agent context by skill loading) and mcp.json credential values are highest-exposure roles; nested supporting files readable by agents on demand are medium; README and catalog-facing text are low. Files under the Hecate namespace directory form additional roles: the namespace manifest (`plugin.yaml`) is a high-exposure role because its values feed permission and configuration decisions; namespace code files are a medium role — they execute only behind the platform-level T0 gates, and scanning provides defense-in-depth. The severity matrix SHALL be fixed platform behavior, not per-package or per-workspace configuration.
 
 #### Scenario: Same phrase tiered by location
 - **WHEN** the same medium-intrinsic injection phrase appears in a skill frontmatter description and in a README
@@ -55,6 +55,10 @@ Finding severity SHALL be assigned from rule-intrinsic severity combined with fi
 #### Scenario: Frontmatter smuggling treated as highest exposure
 - **WHEN** an invisible-Unicode smuggling run appears in a skill description field
 - **THEN** the finding receives the highest severity the rule set assigns
+
+#### Scenario: Namespace manifest findings ranked above namespace code
+- **WHEN** the same finding appears in `io.github.xueyufish/plugin.yaml` and in a Python file under the namespace directory
+- **THEN** the manifest occurrence receives the higher severity of the two namespace roles
 
 ### Requirement: Verdict computation
 Each scan SHALL produce exactly one verdict — allow, warn, or block — computed as the highest finding severity evaluated against a configurable blocking threshold: findings at or above the threshold yield block, remaining medium-or-higher findings yield warn, otherwise allow. The threshold SHALL be platform configuration defaulting to `high`.
@@ -163,3 +167,14 @@ Scanning SHALL be governed by platform configuration: the blocking severity thre
 #### Scenario: Kill switch still disables ingestion
 - **WHEN** the operator sets the ingestion master switch off
 - **THEN** installs are refused with a feature-disabled error
+
+### Requirement: Namespace permissions audit
+For a package carrying a Hecate namespace manifest, the scanner SHALL audit each `permissions` entry with the same rule set used for skill allowed-tools audit, attributing findings to the namespace-manifest role. The audit runs within the normal scan stage (install and enable-time rescan); a block verdict aborts the install per the existing fail-closed enforcement. A malformed permissions value SHALL produce a finding rather than being silently skipped.
+
+#### Scenario: Dangerous permission entry flagged
+- **WHEN** a namespace manifest declares a permissions entry matching a secret-exfiltration rule
+- **THEN** the scan produces a finding with the namespace-manifest role, contributing to the verdict per the threshold
+
+#### Scenario: Malformed permissions value produces finding
+- **WHEN** the namespace manifest's permissions value is not a list of strings
+- **THEN** the scanner records a finding describing the malformation instead of skipping the audit

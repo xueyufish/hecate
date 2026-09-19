@@ -124,6 +124,7 @@ class PluginService:
             )
         elif plugin.type == AGENT_PLUGIN_TYPE:
             await self._project_agent_plugin_mcp(plugin, register=True)
+            self._project_agent_plugin_code(plugin, register=True)
 
         return plugin
 
@@ -143,6 +144,7 @@ class PluginService:
             manager.unregister_server(plugin.name)
         elif plugin.type == AGENT_PLUGIN_TYPE:
             await self._project_agent_plugin_mcp(plugin, register=False)
+            self._project_agent_plugin_code(plugin, register=False)
 
         return plugin
 
@@ -364,12 +366,27 @@ class PluginService:
             # --- Classify + validate manifest ---
             kind = detect_package_kind(package_root)
             warnings: list[str] = []
+            namespace = None
             if kind == "agent-plugin":
                 result = validate_plugin_json(read_manifest(package_root))
                 warnings = list(result.warnings)
                 name = result.manifest["name"]
                 schema_version = result.schema_version
                 manifest_json = dict(result.manifest)
+
+                # --- Namespace convergence (5.5d): Hecate-private face ---
+                from hecate.core.plugin.dual_format import (
+                    NamespaceManifestError,
+                    check_namespace_extension_value,
+                    resolve_namespace,
+                )
+
+                check_namespace_extension_value(result.manifest, warnings)
+                try:
+                    namespace = resolve_namespace(package_root, result.manifest)
+                except NamespaceManifestError as e:
+                    # Malformed private face degrades to a plain agent-plugin.
+                    warnings.append(f"namespace manifest ignored: {e}")
             else:
                 # Virtual package: identity synthesized from directory name.
                 name = package_root.name
@@ -458,6 +475,35 @@ class PluginService:
                 if mcp_outcome.disabled_reason:
                     warnings.append(mcp_outcome.disabled_reason)
 
+            # --- Dual-format code component (5.5d): package tier = highest ---
+            # A namespace entry is a T0 surface: it requires a platform
+            # installer and passes the existing python-entry gate; anything
+            # less skips the component and keeps the declarative face.
+            code_status = "none"
+            ns_entry = namespace.manifest.entry if namespace is not None else ""
+            if namespace is not None and ns_entry:
+                code_allowed = workspace_id is None and installer is not None and installer in platform_installers
+                rejection: str | None = None
+                if code_allowed:
+                    try:
+                        validate_compatibility(namespace.manifest)
+                    except ValueError as e:
+                        rejection = str(e)
+                    if rejection is None:
+                        policy = PythonEntryPolicy(
+                            saas_mode=saas_mode,
+                            allowed_prefixes=tuple(settings.PLUGIN_PYTHON_ENTRY_ALLOWLIST),
+                        )
+                        rejection = check_python_entry(ns_entry, policy)
+                if code_allowed and rejection is None:
+                    code_status = "registered"
+                    inventory.add_code(namespace.manifest.type, "registered")
+                else:
+                    reason = rejection or "code entry requires platform installer (config allowlist)"
+                    code_status = "skipped"
+                    inventory.add_code(namespace.manifest.type, "skipped", reason)
+                    warnings.append(f"code component skipped: {reason}")
+
             # --- Content scan (5.13a): fail-closed verdict enforcement ---
             scan, _suppressed = await self._run_install_scan(package_root, descriptor.content_digest)
             if scan.verdict == "block":
@@ -502,10 +548,20 @@ class PluginService:
                 "components": {
                     "skills": inventory.skills,
                     "mcp_servers": self._mcp_inventory_entries(mcp_specs, stdio_allowed, mcp_outcome),
+                    "code": inventory.code,
                 },
                 "warnings": warnings,
                 "virtual": kind == "virtual",
             }
+            if namespace is not None:
+                plugin.manifest_["namespace"] = {
+                    "type": namespace.manifest.type,
+                    "entry": ns_entry,
+                    "permissions": list(namespace.manifest.permissions),
+                    "config_schema": namespace.manifest.config_schema,
+                    "metadata": namespace.metadata,
+                    "component_status": code_status,
+                }
             plugin.scan_result = self._scan_result_dict(scan, _suppressed)
             await self._db.flush()
 
@@ -543,11 +599,20 @@ class PluginService:
             if staging != package_root and staging.exists():
                 shutil.rmtree(staging, ignore_errors=True)
 
+            # Permitted code payload carries its own requirements.txt (legacy
+            # install semantics); SaaS mode skips the install internally.
+            if code_status == "registered":
+                from hecate.core.plugin.dual_format import NAMESPACE_DIR_NAME
+                from hecate.core.plugin.installer import _install_dependencies
+
+                _install_dependencies(final_dir / NAMESPACE_DIR_NAME)
+
             logger.info(
-                "Installed Agent Plugins package %r (%d skills, %d mcp servers)",
+                "Installed Agent Plugins package %r (%d skills, %d mcp servers, code=%s)",
                 name,
                 len(candidates),
                 len(inventory.mcp_servers),
+                code_status,
             )
             return plugin
         except Exception:
@@ -708,6 +773,41 @@ class PluginService:
                     args=args,
                 )
 
+    def _project_agent_plugin_code(self, plugin: PluginModel, register: bool) -> None:  # noqa: FBT001
+        """Load/unload a dual-format package's code component (5.5d).
+
+        Registration goes through the existing loader path (the T0 gate
+        runs inside ``load_namespace_plugin``) into the process-wide
+        dual-format registry; unload removes it. Failures log and degrade —
+        the declarative components stay projected.
+        """
+        ns = (plugin.manifest_ or {}).get("namespace") or {}
+        entry = ns.get("entry")
+        if not entry or ns.get("component_status") != "registered":
+            return
+        from hecate.core.config import settings
+        from hecate.core.plugin.loader import get_dual_format_registry, load_namespace_plugin
+
+        registry = get_dual_format_registry()
+        manifest = PluginManifest(
+            type=str(ns.get("type") or ""),
+            name=plugin.name,
+            version=str(plugin.version),
+            entry=str(entry),
+            permissions=tuple(ns.get("permissions") or ()),
+            config_schema=ns.get("config_schema"),
+        )
+        if not register:
+            registry.unregister(manifest.type, manifest.name)
+            return
+        pkg_dir = self._agent_plugins_root(settings.PLUGINS_DIR) / plugin.name
+        instance = load_namespace_plugin(pkg_dir, manifest, PythonEntryPolicy.from_settings(settings))
+        if instance is None:
+            logger.error("Code component of %s failed to load; not registered", plugin.name)
+            return
+        registry.register(manifest, instance)
+        logger.info("Registered dual-format code component %s (%s)", plugin.name, manifest.type)
+
     @staticmethod
     def _stdio_sandbox_argv(plugin_name: str, server: dict[str, Any]) -> tuple[str, list[str]]:
         """Build the fail-closed sandbox wrapper for a stdio entry."""
@@ -728,7 +828,8 @@ class PluginService:
             raise
 
     async def replay_agent_plugin_mcp(self) -> int:
-        """Startup replay: re-register MCP servers for enabled packages."""
+        """Startup replay: re-register MCP servers and code components of
+        enabled packages (MCP registrations and dual-format code load)."""
         stmt = select(PluginModel).where(
             PluginModel.type == AGENT_PLUGIN_TYPE,
             PluginModel.status == "enabled",
@@ -738,6 +839,7 @@ class PluginService:
         count = 0
         for plugin in result.scalars().all():
             await self._project_agent_plugin_mcp(plugin, register=True)
+            self._project_agent_plugin_code(plugin, register=True)
             count += 1
         return count
 

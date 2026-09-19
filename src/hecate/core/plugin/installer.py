@@ -50,6 +50,35 @@ def install_plugin(bundle_path: Path, plugins_dir: Path) -> str:
     return plugin_name
 
 
+def install_plugin_from_directory(source: Path, plugins_dir: Path) -> str:
+    """Install a legacy-layout plugin directory (directory/git source, 5.5d).
+
+    ZIP demotion: directory and git URLs are first-class install sources;
+    the tree is materialized by copying into ``plugins/<name>``, then
+    dependencies install exactly as for bundle installs. The source
+    location is never referenced after install completes.
+    """
+    manifest_path = source / "plugin.yaml"
+    if not manifest_path.is_file():
+        msg = f"No plugin.yaml in {source}"
+        raise ValueError(msg)
+    raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not raw.get("name"):
+        msg = "plugin.yaml must contain at least a 'name' field"
+        raise ValueError(msg)
+
+    plugin_name = str(raw["name"])
+    target = plugins_dir / plugin_name
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        logger.info("Upgrading plugin '%s' — overwriting existing directory", plugin_name)
+        shutil.rmtree(target)
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__", ".git"))
+    _install_dependencies(target)
+    logger.info("Installed plugin '%s' to %s", plugin_name, target)
+    return plugin_name
+
+
 def uninstall_plugin(plugin_name: str, plugins_dir: Path) -> bool:
     """Remove a plugin directory from *plugins_dir*.
 
@@ -88,8 +117,12 @@ def _install_dependencies(plugin_dir: Path) -> None:
         return
 
     logger.info("Installing dependencies from %s", req_file)
+    uv = shutil.which("uv")
+    if uv is None:
+        logger.warning("uv not found on PATH; skipping dependency install for %s", req_file)
+        return
     result = subprocess.run(  # noqa: S603
-        ["/usr/bin/env", "uv", "pip", "install", "-r", str(req_file)],
+        [uv, "pip", "install", "-r", str(req_file)],
         capture_output=True,
         text=True,
         check=False,

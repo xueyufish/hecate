@@ -170,3 +170,28 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   the scoring stage per invocation on a fresh `Chain` copy; the shared
   chain object is never mutated. BLOCK/SANITIZE semantics are identical to
   the legacy direct-hook path (pinned by tests).
+
+## Plugin namespace (dual format, 5.5d)
+
+- **The namespace is `io.github.xueyufish`** — single source of truth is
+  `AGENT_PLUGIN_NAMESPACE` in `core/plugin/dual_format.py`; the guard test
+  (`tests/test_plugin/test_dual_format.py::TestNamespaceGuard`) pins the
+  value. It is a **format identity, not configuration**: packages carry the
+  same namespace in every deployment, so it must never become a config
+  knob. Changing it invalidates already-distributed packages and requires
+  an explicit migration decision.
+- **Identity lives in plugin.json, not the namespace manifest** — the
+  namespace `plugin.yaml` may repeat `name`/`version` only when they match
+  plugin.json; a conflict rejects the package (replace-not-merge). The
+  packaging tool emits the namespace manifest without either field.
+- **The code payload lives inside the namespace directory** — entry modules
+  resolve with `<package>/io.github.xueyufish/` on `sys.path`
+  (`loader.load_namespace_plugin`). Root-level `discover_plugins` never
+  picks up dual-format packages (no `plugin.yaml` at root), so the enable
+  projection is the only load path — do not "fix" that asymmetry.
+- **Dual-format packages land as `agent-plugin` rows** — legacy
+  `.hecate-plugin` bundles (root `plugin.yaml`) keep the legacy installer
+  path; layout detection at install routes between them. A dual-format
+  package installed by a non-platform installer keeps its skills/MCP but
+  the code component is skipped with a recorded warning (mirror of the
+  stdio rule).

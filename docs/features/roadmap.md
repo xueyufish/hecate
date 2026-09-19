@@ -717,11 +717,11 @@ Order is priority, not mandate — any change still goes through independent `/o
 | 4.22 | Tool Memory | Memory System ✅ | M |
 | 4.23 | Cross-Thread Memory Store | Memory System ✅ | M |
 
-### Plugin Ecosystem (NEW — adjustment)
+### Plugin Ecosystem (NEW — adjustment，已交付 ✅ 2026-09-19)
 
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
-| 5.5d | Dual-Format Plugin Convergence & Export — Hecate-private plugin content migrates into `io.hecate/` namespace dir inside Agent Plugins packages (one package = conformant for all clients + deep-integration for Hecate); `hecate plugin export` packages workspace skills as Agent Plugins bundles; ZIP demoted to transport-only (directory/git-URL install) | 5.5c (P3) + 5.5b ✅ | M |
+| 5.5d ✅ | Dual-Format Plugin Convergence & Export — Hecate-private plugin content migrates into the `io.github.xueyufish/` namespace dir inside Agent Plugins packages (one package = conformant for all clients + deep-integration for Hecate); `hecate plugin export` packages workspace skills as Agent Plugins bundles; ZIP demoted to transport-only (directory/git-URL install). **Shipped 2026-09-19**（namespace 定案 `io.github.xueyufish`——`io.hecate` 已被他人注册；archive `openspec/changes/archive/2026-09-19-dual-format-plugin-convergence/`） | 5.5c ✅ + 5.5b ✅ | M |
 
 ### Model Management (NEW — AgentArts comparison pull-forward)
 

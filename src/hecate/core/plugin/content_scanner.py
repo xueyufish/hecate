@@ -31,6 +31,7 @@ from typing import Any
 import yaml
 
 from hecate.core.plugin.agent_plugins import ScanResult, ScanStage
+from hecate.core.plugin.dual_format import AGENT_PLUGIN_NAMESPACE
 
 SCANNER_VERSION = "rule-engine-1"
 
@@ -196,6 +197,25 @@ ROLE_SEVERITY_CAP: dict[str, dict[str, str]] = {
         "url": "medium",
         "oversize": "high",
     },
+    # Namespace manifest values feed permission and configuration
+    # decisions — high exposure like skill frontmatter. Namespace payload
+    # code executes only behind the T0 platform gates; scanning there is
+    # defense-in-depth (medium).
+    "namespace-manifest": {
+        "injection": "high",
+        "secret": "high",
+        "unicode": "high",
+        "tools-audit": "high",
+        "url": "medium",
+        "oversize": "high",
+    },
+    "namespace-code": {
+        "injection": "medium",
+        "secret": "medium",
+        "unicode": "medium",
+        "url": "low",
+        "oversize": "high",
+    },
     "nested": {
         "injection": "medium",
         "secret": "medium",
@@ -238,9 +258,15 @@ def classify_file(rel: Path) -> str:
 
     Returns ``"skill"`` for SKILL.md files (frontmatter and body are
     scanned under separate roles), or a concrete role for the rest.
+    Files under the Hecate namespace directory classify by depth: the
+    manifest is its own role, everything else in the directory is payload.
     """
     parts = rel.parts
     name = rel.name
+    if parts and parts[0] == AGENT_PLUGIN_NAMESPACE:
+        if len(parts) == 2 and name == "plugin.yaml":
+            return "namespace-manifest"
+        return "namespace-code"
     if name == "SKILL.md" and len(parts) >= 2:
         return "skill"
     if name == "mcp.json" and len(parts) == 1:
@@ -434,6 +460,8 @@ class ContentScanner:
             self._apply_rules(body, "skill-body", rel, "none", findings, dedup)
         else:
             self._apply_rules(text, role_class, rel, "none", findings, dedup)
+            if role_class == "namespace-manifest":
+                self._audit_namespace_permissions(text, rel, findings)
 
         normalized = unicodedata.normalize("NFKC", text)
         if normalized != text:
@@ -531,18 +559,10 @@ class ContentScanner:
                 )
             )
 
-    def _audit_allowed_tools(self, frontmatter: str, rel: str, findings: list[dict[str, Any]]) -> None:
-        try:
-            front = yaml.safe_load(frontmatter)
-        except yaml.YAMLError:
-            return
-        if not isinstance(front, dict):
-            return
-        allowed = front.get("allowed-tools") if "allowed-tools" in front else front.get("allowed_tools")
-        if allowed is None:
-            return
-        entries = [str(a) for a in allowed] if isinstance(allowed, list) else [str(allowed)]
-        cap = _cap("skill-frontmatter", "tools-audit")
+    def _audit_tool_entries(self, entries: list[str], role: str, rel: str, findings: list[dict[str, Any]]) -> None:
+        """Shared pre-authorization audit: skill allowed-tools and namespace
+        permissions run the same rule set (5.5d)."""
+        cap = _cap(role, "tools-audit")
 
         def _audit(rule_id: str, intrinsic: str, matched: list[str], description: str) -> None:
             if not matched:
@@ -581,6 +601,58 @@ class ContentScanner:
             [e for e in entries if any(k in e.lower() for k in _NET_TOOL_MARKERS)],
             "network access pre-authorization",
         )
+
+    def _audit_allowed_tools(self, frontmatter: str, rel: str, findings: list[dict[str, Any]]) -> None:
+        try:
+            front = yaml.safe_load(frontmatter)
+        except yaml.YAMLError:
+            return
+        if not isinstance(front, dict):
+            return
+        allowed = front.get("allowed-tools") if "allowed-tools" in front else front.get("allowed_tools")
+        if allowed is None:
+            return
+        entries = [str(a) for a in allowed] if isinstance(allowed, list) else [str(allowed)]
+        self._audit_tool_entries(entries, "skill-frontmatter", rel, findings)
+
+    def _audit_namespace_permissions(self, text: str, rel: str, findings: list[dict[str, Any]]) -> None:
+        """Audit namespace-manifest permissions with the allowed-tools rule
+        set (5.5d). A malformed permissions value produces a finding instead
+        of being silently skipped."""
+        try:
+            raw = yaml.safe_load(text)
+        except yaml.YAMLError:
+            findings.append(
+                _finding(
+                    "PERM-MALFORMED",
+                    "tools-audit",
+                    _cap("namespace-manifest", "tools-audit"),
+                    rel,
+                    None,
+                    "none",
+                    "unparseable namespace manifest",
+                    "malformed namespace manifest",
+                )
+            )
+            return
+        perms = raw.get("permissions") if isinstance(raw, dict) else None
+        if perms is None:
+            return
+        if not isinstance(perms, list) or not all(isinstance(p, str) for p in perms):
+            findings.append(
+                _finding(
+                    "PERM-MALFORMED",
+                    "tools-audit",
+                    _cap("namespace-manifest", "tools-audit"),
+                    rel,
+                    None,
+                    "none",
+                    "permissions is not a list of strings",
+                    "malformed permissions value",
+                )
+            )
+            return
+        self._audit_tool_entries(perms, "namespace-manifest", rel, findings)
 
 
 class RuleEngineScanStage(ScanStage):

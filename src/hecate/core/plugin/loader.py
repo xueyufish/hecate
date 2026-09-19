@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -11,12 +12,27 @@ from typing import Any
 import yaml
 
 from hecate.core.plugin.manifest import PluginManifest
+from hecate.core.plugin.registry import PluginRegistry
 
 logger = logging.getLogger(__name__)
 
 _PLATFORM_VERSION = "0.8.0"
 
 FIRST_PARTY_ROOT = "hecate"
+
+_dual_format_registry: PluginRegistry | None = None
+
+
+def get_dual_format_registry() -> PluginRegistry:
+    """Process-wide registry for dual-format code components (5.5d).
+
+    Enable/disable projections register and unregister here, mirroring the
+    module-level accessor pattern used by the MCP manager.
+    """
+    global _dual_format_registry
+    if _dual_format_registry is None:
+        _dual_format_registry = PluginRegistry()
+    return _dual_format_registry
 
 
 @dataclass(frozen=True)
@@ -186,6 +202,26 @@ def _validate_type(manifest: PluginManifest, plugin_instance: Any) -> list[str]:
     from hecate.core.plugin.validation import validate_api_surface
 
     return validate_api_surface(manifest.type, plugin_instance)
+
+
+def load_namespace_plugin(package_root: Path, manifest: PluginManifest, policy: PythonEntryPolicy) -> Any:
+    """Load a dual-format package's code component from its namespace payload.
+
+    The namespace directory is placed on the module search path so the
+    manifest's ``python:module:Class`` entry resolves against the payload
+    shipped inside the namespace directory. The T0 trust gate is consulted
+    before import; a rejected entry returns ``None`` (never raises).
+    """
+    from hecate.core.plugin.dual_format import NAMESPACE_DIR_NAME
+
+    rejection = check_python_entry(manifest.entry, policy)
+    if rejection is not None:
+        logger.error("Dual-format code component %s rejected by T0 policy: %s", manifest.name, rejection)
+        return None
+    ns_dir = package_root / NAMESPACE_DIR_NAME
+    if ns_dir.is_dir() and str(ns_dir) not in sys.path:
+        sys.path.insert(0, str(ns_dir))
+    return load_plugin(manifest, policy)
 
 
 def load_plugin(manifest: PluginManifest, policy: PythonEntryPolicy) -> Any:

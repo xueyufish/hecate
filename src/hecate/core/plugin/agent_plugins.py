@@ -25,7 +25,7 @@ import subprocess
 import tempfile
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
@@ -280,8 +280,16 @@ def materialize_from_zip(zip_path: Path, dest: Path) -> SourceDescriptor:
             if len(entries) > MAX_ZIP_ENTRIES:
                 raise AgentPluginValidationError(f"Zip has {len(entries)} entries; cap is {MAX_ZIP_ENTRIES}")
             for entry in entries:
-                entry_path = Path(entry)
-                if entry_path.is_absolute() or ".." in entry_path.parts:
+                # PurePosixPath semantics: on Windows, Path treats "/etc/x"
+                # as relative and misses drive letters — normalize first.
+                normalized = entry.replace("\\", "/")
+                entry_path = PurePosixPath(normalized)
+                if (
+                    normalized.startswith("/")
+                    or entry_path.drive
+                    or entry_path.is_absolute()
+                    or ".." in entry_path.parts
+                ):
                     raise AgentPluginValidationError(f"Unsafe zip entry: {entry}")
             zf.extractall(dest)
     except zipfile.BadZipFile as e:
@@ -709,6 +717,7 @@ class ComponentInventory:
 
     skills: list[dict[str, Any]] = field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
+    code: list[dict[str, Any]] = field(default_factory=list)
 
     def add_skill(self, name: str, status: str, reason: str | None = None) -> None:
         entry: dict[str, Any] = {"name": name, "status": status}
@@ -721,6 +730,12 @@ class ComponentInventory:
         if reason:
             entry["reason"] = reason
         self.mcp_servers.append(entry)
+
+    def add_code(self, plugin_type: str, status: str, reason: str | None = None) -> None:
+        entry: dict[str, Any] = {"name": plugin_type, "status": status}
+        if reason:
+            entry["reason"] = reason
+        self.code.append(entry)
 
 
 def staging_dir(base: Path, package_name: str) -> Path:
