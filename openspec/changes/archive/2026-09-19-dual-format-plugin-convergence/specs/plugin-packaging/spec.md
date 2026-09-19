@@ -1,8 +1,6 @@
-## Purpose
+# Spec Delta
 
-The `.hecate-plugin` bundle format for Hecate's deep-integration (P-tier) plugins: packaging a plugin directory into a distributable bundle, installing and uninstalling bundles (legacy ZIP plus directory/git sources), and the management surfaces (REST upload/delete, UI buttons) around installed plugins.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Plugin bundle format
 The system SHALL support two `.hecate-plugin` bundle layouts. The legacy layout is a ZIP archive whose root contains `plugin.yaml` plus Python source files and optional `requirements.txt`. The dual-format layout is a ZIP archive of an Agent Plugins 1.0 package: `plugin.json` at the root, optional `skills/` and `mcp.json`, and the Hecate namespace directory (`io.github.xueyufish/`) carrying `plugin.yaml` and any code payload. Packaging SHALL validate the source directory before creating the bundle: the legacy layout requires `plugin.yaml` with required fields at the root; the dual-format layout requires `plugin.json` plus a namespace manifest. Unpacking a `.hecate-plugin` file outside Hecate SHALL yield a valid Agent Plugins package for the dual-format layout.
@@ -27,71 +25,7 @@ The system SHALL support two `.hecate-plugin` bundle layouts. The legacy layout 
 - **WHEN** a dual-format `.hecate-plugin` bundle is unzipped to a directory
 - **THEN** the directory contains plugin.json at the root and validates as an Agent Plugins 1.0 package, with the Hecate manifest inside the namespace directory
 
-### Requirement: Plugin install from bundle
-The system SHALL support installing a `.hecate-plugin` bundle. Installation SHALL: extract the ZIP to the `plugins/` directory, install Python dependencies from `requirements.txt` via `uv pip install`, create or update a PluginModel record, and load the plugin via the existing PluginLoader.
-
-#### Scenario: Install new plugin
-- **WHEN** an administrator runs `hecate plugin install my-plugin.hecate-plugin`
-- **THEN** the system extracts the bundle to `plugins/my-plugin/`, installs dependencies, creates a PluginModel record, and the plugin appears in the plugin list
-
-#### Scenario: Install upgrades existing plugin
-- **WHEN** an administrator installs a bundle whose plugin name already exists with an older version
-- **THEN** the system overwrites the existing directory, updates the PluginModel version field, and reloads the plugin
-
-#### Scenario: Install invalid bundle
-- **WHEN** an administrator attempts to install a corrupted or non-ZIP file
-- **THEN** the system rejects with an error and does not modify the plugins directory
-
-### Requirement: Plugin uninstall
-The system SHALL support uninstalling a plugin. Uninstall SHALL: delete the plugin directory from `plugins/`, delete the PluginModel record, and unregister from PluginRegistry.
-
-#### Scenario: Uninstall installed plugin
-- **WHEN** an administrator runs `hecate plugin uninstall my-plugin`
-- **THEN** the system removes `plugins/my-plugin/`, deletes the PluginModel record, and the plugin no longer appears in the plugin list
-
-#### Scenario: Uninstall non-existent plugin
-- **WHEN** an administrator runs `hecate plugin uninstall nonexistent`
-- **THEN** the system reports that the plugin is not installed
-
-### Requirement: Upload plugin via REST API
-The system SHALL expose a `POST /api/plugins/upload` endpoint that accepts a `.hecate-plugin` file upload. The backend SHALL extract, install dependencies, and register the plugin.
-
-#### Scenario: Upload valid bundle
-- **WHEN** a client uploads a valid `.hecate-plugin` file to `POST /api/plugins/upload`
-- **THEN** the system installs the plugin and returns the PluginReadSchema
-
-#### Scenario: Upload invalid file
-- **WHEN** a client uploads a non-ZIP file
-- **THEN** the system returns a 400 error
-
-### Requirement: Delete plugin via REST API
-The system SHALL expose a `DELETE /api/plugins/{id}` endpoint that uninstalls a plugin.
-
-#### Scenario: Delete installed plugin
-- **WHEN** a client sends `DELETE /api/plugins/{id}`
-- **THEN** the system uninstalls the plugin and returns 200
-
-#### Scenario: Delete built-in plugin rejected
-- **WHEN** a client sends `DELETE /api/plugins/{id}` for a built-in plugin
-- **THEN** the system returns 403 with "Built-in plugins cannot be uninstalled"
-
-### Requirement: Upload plugin UI
-The system SHALL provide an "Upload Plugin" button on the plugin management page that opens a file picker for `.hecate-plugin` files. On successful upload, the plugin list refreshes.
-
-#### Scenario: Upload via UI
-- **WHEN** an administrator clicks "Upload Plugin" and selects a `.hecate-plugin` file
-- **THEN** the system uploads the file, installs the plugin, and the new plugin appears in the list
-
-### Requirement: Uninstall plugin UI
-The system SHALL provide an "Uninstall" button on the plugin detail page. Built-in plugins SHALL NOT show the uninstall button.
-
-#### Scenario: Uninstall via UI
-- **WHEN** an administrator clicks "Uninstall" on a third-party plugin detail page
-- **THEN** the system uninstalls the plugin and redirects to the plugin list
-
-#### Scenario: Built-in plugin has no uninstall button
-- **WHEN** an administrator views a built-in plugin detail page
-- **THEN** the "Uninstall" button is not displayed
+## ADDED Requirements
 
 ### Requirement: Dual-format packaging output
 `hecate plugin package` SHALL emit the dual-format layout: it generates a plugin.json from the plugin.yaml fields (name, version, description; author and homepage when provided), writes the plugin.yaml manifest into the Hecate namespace directory (omitting name and version, which live in plugin.json alone), keeps the Python payload inside the namespace directory, and passes through `skills/` and `mcp.json` when present. The output SHALL be produced uniformly even when the open face is empty (no skills and no mcp.json). Default output is a git-ready directory; an output path ending in `.hecate-plugin` SHALL produce the ZIP transport of the same tree.
@@ -107,6 +41,7 @@ The system SHALL provide an "Uninstall" button on the plugin detail page. Built-
 #### Scenario: Other clients ignore the namespace
 - **WHEN** the emitted package is loaded by an ecosystem client that does not implement the Hecate namespace
 - **THEN** the client sees a conformant package with its plugin.json, skills, and mcp.json, and ignores the namespace directory
+
 ### Requirement: Directory and git install sources with ZIP as transport
 The Hecate plugin install surface SHALL accept three source types: a local directory path, a git URL (public repositories, optional ref), and a `.hecate-plugin` or `.zip` file used strictly as transport. Every source SHALL be materialized before validation, and layout detection SHALL route the materialized tree: a root `plugin.json` (dual-format) installs through the Agent Plugins pipeline, where the resolved origin is recorded (git ref, commit SHA, content digest); a root `plugin.yaml` (legacy) installs through the legacy installer path, which materializes by copying into the plugins directory and keeps the existing plugin-row semantics.
 

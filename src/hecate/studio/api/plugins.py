@@ -89,6 +89,88 @@ async def install_agent_plugin(
     return PluginReadSchema.model_validate(plugin)
 
 
+class SkillExportRequestSchema(PydanticBase):
+    """Two-phase skill export request (5.5d)."""
+
+    workspace_id: uuid.UUID
+    bundle_name: str | None = None
+    skill_names: list[str] | None = None
+
+
+@router.post("/export/preview")
+async def export_skills_preview(
+    body: SkillExportRequestSchema,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    ctx: AuthContext = Depends(get_auth_context),  # noqa: B008
+) -> dict[str, Any]:
+    """Phase 1: compute the bundle plan (no side effects)."""
+    from hecate.studio.plugin.export_service import SkillExportService
+
+    service = SkillExportService(db)
+    try:
+        plan = await service.preview_export(
+            body.workspace_id, bundle_name=body.bundle_name, skill_names=body.skill_names
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    return {
+        "bundle_name": plan.bundle_name,
+        "skills": [
+            {
+                "skill_id": str(e.skill_id),
+                "original_name": e.original_name,
+                "dir_name": e.dir_name,
+                "renamed": e.renamed,
+                "size_bytes": e.size_bytes,
+            }
+            for e in plan.entries
+        ],
+        "warnings": plan.warnings,
+        "total_bytes": plan.total_bytes,
+    }
+
+
+@router.post("/export")
+async def export_skills(
+    body: SkillExportRequestSchema,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    ctx: AuthContext = Depends(get_auth_context),  # noqa: B008
+) -> Any:
+    """Phase 2: materialize the previewed bundle and return the ZIP transport."""
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+
+    from hecate.studio.plugin.export_service import SkillExportService
+
+    service = SkillExportService(db)
+    out_dir = Path(tempfile.mkdtemp(prefix="hecate-export-"))
+    try:
+        result = await service.execute_export(
+            body.workspace_id,
+            out_dir,
+            bundle_name=body.bundle_name,
+            skill_names=body.skill_names,
+            with_zip=True,
+        )
+    except ValueError as e:
+        shutil.rmtree(out_dir, ignore_errors=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    zip_path = result.zip_path
+    if zip_path is None:  # pragma: no cover - with_zip=True always produces one
+        shutil.rmtree(out_dir, ignore_errors=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="export produced no archive")
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"{result.plan.bundle_name}.zip",
+        background=BackgroundTask(shutil.rmtree, str(out_dir), True),
+    )
+
+
 @router.get("")
 async def list_plugins(
     workspace_id: uuid.UUID | None = Query(None),  # noqa: B008
