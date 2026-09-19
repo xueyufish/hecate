@@ -584,7 +584,7 @@ class MemoryToolBackend:
                     trace_id=(context or {}).get("trace_id"),
                     tool_name=tool_name,
                     target_type=target_type,
-                    target_id=target_id,  # type: ignore[arg-type]
+                    target_id=target_id,
                     revision_before=(revision_after - 1) if revision_after else None,
                     revision_after=revision_after,
                     before_summary=_truncate(before),

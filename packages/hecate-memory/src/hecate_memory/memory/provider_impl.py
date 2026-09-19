@@ -130,7 +130,7 @@ class BuiltinMemoryProvider:
             collection_name,
             query,
             limit=limit,
-            mode=mode,  # type: ignore[arg-type]
+            mode=mode,
             workspace_id=workspace_id,
         )
 
@@ -306,7 +306,7 @@ class BuiltinMemoryProvider:
             if layer == "knowledge_memory" and content_changed:
                 from hecate_memory.memory.knowledge_memory import KnowledgeMemoryService
 
-                await KnowledgeMemoryService(db, self._vs()).reindex(row)  # type: ignore[arg-type]
+                await KnowledgeMemoryService(db, self._vs()).reindex(row)
             return MemoryWriteResult(ok=True, memory_id=row.id, revision=new_revision, metadata={"layer": layer})
 
     async def forget_memory(
