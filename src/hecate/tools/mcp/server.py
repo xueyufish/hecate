@@ -639,9 +639,18 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
                     provider=settings.SEARCH_PROVIDER,
                     api_key=settings.SEARCH_API_KEY,
                 )
+                memory_backend = None
+                if settings.MEMORY_TOOLS_ENABLED:
+                    try:
+                        from hecate_memory.memory.tools_backend import MemoryToolBackend
+
+                        memory_backend = MemoryToolBackend(db)
+                    except ImportError:
+                        memory_backend = None
                 builtin_executor = BuiltInToolExecutor(
                     search_provider=search_provider,
                     workspace_root=settings.WORKSPACE_ROOT,
+                    memory_backend=memory_backend,
                 )
                 registry = ToolRegistry(db=db, builtin_executor=builtin_executor)
                 result = await registry.execute(tool_name, arguments)

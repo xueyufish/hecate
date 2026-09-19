@@ -79,10 +79,10 @@ def _clear_cache() -> None:
 def test_resolve_returns_builtin_when_installed() -> None:
     """Default ``MEMORY_PROVIDER='builtin'`` resolves to the shipped in-process backend."""
     pytest.importorskip("hecate_memory")
-    from hecate_memory.rag.service import KnowledgeBaseService
+    from hecate_memory.memory.provider_impl import BuiltinMemoryProvider
 
     provider = resolve_memory_provider()
-    assert isinstance(provider, KnowledgeBaseService)
+    assert isinstance(provider, BuiltinMemoryProvider)
 
 
 def test_resolve_returns_none_when_no_entries(monkeypatch: pytest.MonkeyPatch) -> None:

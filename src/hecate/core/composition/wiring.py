@@ -322,6 +322,17 @@ async def prewarm_sandbox_pool() -> None:
         logger.info("Sandbox container pool prewarmed: %d containers", sandbox_pool.total_count)
 
 
+def start_recall_indexer() -> None:
+    """Start the recall indexer poll loop (no-op unless RECALL_INDEXING_ENABLED)."""
+    try:
+        from hecate_memory.memory.recall_indexer import start_recall_indexer as _start
+    except ImportError:
+        logger.warning("hecate-memory not installed; recall indexing unavailable")
+        return
+    if _start() is not None:
+        logger.info("Recall indexer started")
+
+
 def start_tool_decision_pipeline() -> None:
     """Wire the structured tool-decision event pipeline."""
     from hecate.core.config import settings
@@ -416,11 +427,18 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
     start_security_findings()
     await start_siem_export(app)
     await start_online_evaluation_worker(app)
+    start_recall_indexer()
 
     try:
         yield
     finally:
         # Shutdown — reverse order.
+        try:
+            from hecate_memory.memory.recall_indexer import stop_recall_indexer
+
+            await stop_recall_indexer()
+        except ImportError:
+            pass
         online_evaluation_worker = getattr(app.state, "online_evaluation_worker", None)
         if online_evaluation_worker is not None:
             try:

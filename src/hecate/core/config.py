@@ -95,6 +95,30 @@ class Settings(BaseSettings):
     # degrades to "no memory backend" rather than raising.
     MEMORY_PROVIDER: str = "builtin"
 
+    # Agent memory tools (agent-memory-tools change). All three default off;
+    # the off paths are byte-identical to the pre-change behavior.
+    # MEMORY_TOOLS_ENABLED: seed and allow the memory_* / conversation_search
+    # built-in tools.
+    MEMORY_TOOLS_ENABLED: bool = False
+    # RECALL_INDEXING_ENABLED: index user/assistant messages into the recall
+    # storage at turn commit (metadata table + Qdrant hecate_recall).
+    RECALL_INDEXING_ENABLED: bool = False
+    # MEMORY_PREFETCH_ENABLED: inject a memory context block before each LLM
+    # call via the ContextProcessorChain memory prefetch processor.
+    MEMORY_PREFETCH_ENABLED: bool = False
+    # Recall search tuning: results below this relevance score (or an empty
+    # page) are flagged low_signal and drive the retrieval escalation hint.
+    RECALL_LOW_SIGNAL_THRESHOLD: float = 0.35
+    # Recall indexer catch-up poll interval (seconds); 0 disables the poll
+    # (turn-commit callbacks still index).
+    RECALL_INDEX_POLL_INTERVAL_SECONDS: int = 60
+    # Recall retention TTL in days; 0 = keep indefinitely (the recall layer
+    # outlives event retention by design; conversation deletion cascades).
+    RECALL_TTL_DAYS: int = 0
+    # Prefetch injection budget (entries and approximate tokens per call).
+    MEMORY_PREFETCH_MAX_ENTRIES: int = 5
+    MEMORY_PREFETCH_MAX_TOKENS: int = 500
+
     # LLM gateway backend (hecate.llm_providers entry point, phase-4
     # follow-ups). Names: "litellm" (hecate-llm shipped in-process, default)
     # or any third-party gateway implementing the LLMGateway Protocol.

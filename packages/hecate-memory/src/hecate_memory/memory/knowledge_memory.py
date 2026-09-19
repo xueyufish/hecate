@@ -270,6 +270,7 @@ class KnowledgeMemoryService:
 
         memory.deleted = True
         memory.deleted_at = datetime.now(UTC)
+        memory.revision += 1
         await self.db.flush()
 
         if self._vector_store is not None:
@@ -279,6 +280,14 @@ class KnowledgeMemoryService:
                 logger.warning(f"Failed to delete knowledge from Qdrant: {e}")
 
         logger.info(f"Deleted knowledge memory {memory_id} for agent {agent_id}")
+
+    async def reindex(self, memory: KnowledgeMemoryModel) -> None:
+        """Regenerate the Qdrant vector for a knowledge memory.
+
+        Call after an in-place content change so the stored embedding stays in
+        sync with the new text.
+        """
+        await self._upsert_to_qdrant(memory)
 
     async def _ensure_collection(self) -> None:
         """Lazily create the Qdrant collection on first use."""

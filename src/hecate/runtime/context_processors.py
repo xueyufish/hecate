@@ -30,9 +30,12 @@ ledger (``runtime/compaction.py``).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+import uuid
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -822,6 +825,166 @@ class TerminationProcessor(ContextProcessor):
         )
 
 
+# -- Memory integration (agent-memory-tools) ------------------------------------
+# Both processors self-disable outside their enabling conditions so appending
+# them to the default chain keeps flag-off behavior byte-identical. They are
+# deliberately NOT part of the policy processor registry (ADR-029 trust
+# boundary): policy-configured chains keep their exact configured composition,
+# and the canonical policy hash vocabulary is unchanged.
+
+_PREFETCH_MARKER = "[memory_context]"
+_ESCALATION_MARKER = "[memory_hint]"
+_PREFETCH_QUERY_MAX_CHARS = 2000
+_ESCALATION_COOLDOWN_SECONDS = 120.0
+# Session-scoped cooldown for the escalation hint. Module-level because the
+# default chain (and its processors) is rebuilt per invocation — an instance
+# attribute would reset every call and never debounce anything.
+_ESCALATION_LAST_HINT: OrderedDict[str, float] = OrderedDict()
+_ESCALATION_LAST_HINT_MAX = 4096
+
+
+class MemoryPrefetchProcessor(ContextProcessor):
+    """Inject a memory context block before the LLM call (prefetch channel).
+
+    Queries the active memory provider with the most recent conversation text
+    and appends a ``[memory_context]`` block at the projection tail — after
+    the KV-cache protected prefix (never invalidating it) and counted in the
+    projection's token accounting. Skips injection when disabled, over
+    budget, without scope, or on any provider failure (prefetch is strictly
+    best-effort: it must never block or fail the turn).
+    """
+
+    name = "memory_prefetch"
+    run_mode = "always"
+
+    def __init__(self, timeout_seconds: float = 5.0) -> None:
+        self._timeout_seconds = timeout_seconds
+
+    async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
+        from hecate.core.config import settings
+
+        meta: dict[str, Any] = {"injected": False}
+        if not settings.MEMORY_PREFETCH_ENABLED:
+            meta["reason"] = "disabled"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        if ctx.tokens(flatten_units(units)) > ctx.budget:
+            # The projection is already over budget — injecting more context
+            # would only push toward controlled termination.
+            meta["reason"] = "over_budget"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        execution_context = ctx.execution_context or {}
+        raw_ws = execution_context.get("workspace_id")
+        raw_agent = execution_context.get("agent_id")
+        if not raw_ws or not raw_agent:
+            meta["reason"] = "no_scope"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        query_text = self._recent_text(units)
+        if not query_text:
+            meta["reason"] = "no_query"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        from hecate.core.composition.memory_provider import (
+            CAP_PREFETCH,
+            provider_supports,
+            resolve_memory_provider,
+        )
+
+        provider = resolve_memory_provider()
+        if provider is None or not provider_supports(provider, CAP_PREFETCH):
+            meta["reason"] = "provider_unavailable"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        try:
+            entries = await asyncio.wait_for(
+                provider.prefetch(
+                    query_text=query_text,
+                    workspace_id=uuid.UUID(str(raw_ws)),
+                    agent_id=uuid.UUID(str(raw_agent)),
+                    max_entries=int(settings.MEMORY_PREFETCH_MAX_ENTRIES),
+                    max_tokens=int(settings.MEMORY_PREFETCH_MAX_TOKENS),
+                ),
+                timeout=self._timeout_seconds,
+            )
+        except Exception as e:
+            logger.warning("Memory prefetch failed on session %s: %s", ctx.session_id, e)
+            meta["reason"] = "provider_error"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        if not entries:
+            meta["reason"] = "empty"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        lines = [f"- {e.content}" for e in entries]
+        block = {"role": "user", "content": _PREFETCH_MARKER + "\n" + "\n".join(lines)}
+        out = [*units, ContextUnit([block])]
+        meta.update({"injected": True, "entries": len(lines), "tokens": ctx.tokens([block])})
+        return out, ProcessorResult(processor=self.name, metadata=meta)
+
+    @staticmethod
+    def _recent_text(units: list[ContextUnit]) -> str:
+        """The most recent user/assistant exchange, as the prefetch query."""
+        recent: list[str] = []
+        for msg in reversed(flatten_units(units)):
+            if msg.get("role") not in ("user", "assistant"):
+                continue
+            content = msg.get("content")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            recent.append(content.strip())
+            if len(recent) >= 2:
+                break
+        text = "\n".join(reversed(recent))
+        return text[:_PREFETCH_QUERY_MAX_CHARS]
+
+
+class RetrievalEscalationHintProcessor(ContextProcessor):
+    """Nudge the model to iterate when a memory search came back weak.
+
+    The tool loop sets ``execution_context["memory_retrieval_low_signal"]``
+    when a memory/conversation search returns empty or below-threshold
+    results; this processor consumes the marker and appends one
+    ``[memory_hint]`` block telling the model how to iterate (reformulate,
+    narrow the window, use the cursor, exclude inspected sessions). Debounced
+    per session — at most one hint per cooldown window.
+    """
+
+    name = "retrieval_escalation_hint"
+    run_mode = "always"
+
+    async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
+        execution_context = ctx.execution_context or {}
+        if not execution_context.get("memory_retrieval_low_signal"):
+            return units, ProcessorResult(processor=self.name, metadata={"hinted": False})
+        # Consume the marker: one hint per weak-search turn, regardless of
+        # how many weak searches fired.
+        execution_context.pop("memory_retrieval_low_signal", None)
+
+        now = time.monotonic()
+        session_key = ctx.session_id or "anonymous"
+        last = _ESCALATION_LAST_HINT.get(session_key)
+        if last is not None and (now - last) < _ESCALATION_COOLDOWN_SECONDS:
+            return units, ProcessorResult(processor=self.name, metadata={"hinted": False, "cooldown": True})
+
+        _ESCALATION_LAST_HINT[session_key] = now
+        _ESCALATION_LAST_HINT.move_to_end(session_key)
+        while len(_ESCALATION_LAST_HINT) > _ESCALATION_LAST_HINT_MAX:
+            _ESCALATION_LAST_HINT.popitem(last=False)
+
+        hint = {
+            "role": "user",
+            "content": (
+                f"{_ESCALATION_MARKER} Your recent memory or conversation search returned weak or empty "
+                "results. Before concluding the information does not exist: reformulate with different "
+                "keywords, adjust start_date/end_date, page through results with the cursor, or skip "
+                "already-inspected sessions via exclude_session_ids."
+            ),
+        }
+        return [*units, ContextUnit([hint])], ProcessorResult(processor=self.name, metadata={"hinted": True})
+
+
 class HintProcessor(ContextProcessor):
     """Inject runtime state hints (elapsed time, context usage) into the projection.
 
@@ -1181,7 +1344,9 @@ def default_chain_processors() -> list[ContextProcessor]:
 
     Order encodes the lossiness ladder — cheap/recoverable first:
     truncation → KV-cache guard → window selection → offload → compression →
-    controlled termination.
+    controlled termination → memory integration (prefetch + escalation hint;
+    both self-disable outside their enabling conditions, so flag-off chains
+    behave exactly as before).
     """
     return [
         ToolResultTruncationProcessor(),
@@ -1190,4 +1355,6 @@ def default_chain_processors() -> list[ContextProcessor]:
         OffloadProcessor(),
         CompressionProcessor(),
         TerminationProcessor(),
+        MemoryPrefetchProcessor(),
+        RetrievalEscalationHintProcessor(),
     ]

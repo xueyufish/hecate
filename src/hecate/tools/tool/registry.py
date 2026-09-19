@@ -13,8 +13,13 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.config import settings
 from hecate.models.tool import ToolModel
-from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS, BuiltInToolExecutor
+from hecate.tools.tool.builtin import (
+    BUILTIN_TOOL_DEFINITIONS,
+    BuiltInToolExecutor,
+    get_memory_tool_names,
+)
 
 if TYPE_CHECKING:
     from hecate.tools.gateway.executor import RestToolExecutor
@@ -197,8 +202,16 @@ async def seed_builtin_tools(db: AsyncSession) -> int:
     import uuid
 
     zero_ws = uuid.UUID(_ZERO_WORKSPACE)
+    memory_tools = get_memory_tool_names()
 
     for tool_name, tool_def in BUILTIN_TOOL_DEFINITIONS.items():
+        # Memory tools are flag-gated at seeding: flag off → not visible to any
+        # agent and the platform surface stays byte-identical.
+        if tool_name in memory_tools:
+            if not settings.MEMORY_TOOLS_ENABLED:
+                continue
+            if tool_name == "conversation_search" and not settings.RECALL_INDEXING_ENABLED:
+                continue
         result = await db.execute(
             select(ToolModel).where(
                 ToolModel.name == tool_name,
