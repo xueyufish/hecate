@@ -82,10 +82,30 @@ _PARAM_SPECS: dict[str, dict[str, tuple[type, ...]]] = {
     "kv_cache_aware": {"window_units": (int,)},
     "round_window": {"ranking": (str,)},
     "offload": {"threshold_tokens": (int,)},
-    "compression": {"backend": (str,)},
+    "compression": {"backend": (str,), "trigger_ratio": (int, float), "retain_ratio": (int, float)},
     "terminate": {},
     "hint": {"time_interval_minutes": (int,), "usage_buffer_ratio": (int, float)},
 }
+
+
+def _validate_compression_params(params: dict[str, Any], index: int) -> None:
+    """Range checks for compression parameters (types already validated)."""
+    trigger = params.get("trigger_ratio")
+    if trigger is not None and not 0 < float(trigger) <= 1:
+        raise ChainPolicyError(
+            f"context_processors[{index}] (compression): trigger_ratio must be in (0, 1], got {trigger!r}"
+        )
+    retain = params.get("retain_ratio")
+    if retain is not None and not 0 < float(retain) < 1:
+        raise ChainPolicyError(
+            f"context_processors[{index}] (compression): retain_ratio must be in (0, 1), got {retain!r}"
+        )
+    backend = params.get("backend")
+    if backend is not None and backend not in ("projection", "surface_replacement"):
+        raise ChainPolicyError(
+            f"context_processors[{index}] (compression): backend must be 'projection' or "
+            f"'surface_replacement', got {backend!r}"
+        )
 
 
 def _validate_spec_entry(entry: Any, index: int) -> dict[str, Any]:
@@ -118,6 +138,8 @@ def _validate_spec_entry(entry: Any, index: int) -> dict[str, Any]:
                 f"context_processors[{index}] ({name}): param {key!r} has invalid type "
                 f"{type(value).__name__}; expected {allowed[key]}"
             )
+    if name == "compression":
+        _validate_compression_params(params, index)
     return {"type": name, "params": params}
 
 
@@ -215,6 +237,47 @@ def model_default_budget(model: str | None) -> int | None:
     return None
 
 
+def model_default_window(model: str | None) -> int | None:
+    """Model-capability context window (capacity axis), or None when unknown."""
+    candidate = _normalized_model(model)
+    for prefix, window in _WINDOW_HINTS:
+        if candidate.startswith(prefix):
+            return window
+    return None
+
+
+def uses_surface_replacement(spec: list[Any] | None) -> bool:
+    """Whether a chain policy spec selects the durable compaction backend."""
+    if not spec:
+        return False
+    for entry in spec:
+        if isinstance(entry, str):
+            continue
+        if isinstance(entry, dict) and entry.get("type") == "compression":
+            return (entry.get("params") or {}).get("backend") == "surface_replacement"
+    return False
+
+
+def validate_compaction_exclusivity(eviction_policy: Any, specs: list[list[Any] | None]) -> None:
+    """Fail-fast when durable compaction shares a session with message eviction.
+
+    Ledger ranges are message ordinals of the messages channel; an eviction
+    that drops channel entries shifts ordinals and would silently misapply
+    recorded ranges (ADR-033 design D4). ``eviction_policy`` is the runtime's
+    policy — anything beyond the no-op default disqualifies the backend.
+    """
+    from hecate.runtime.eviction import NoEviction
+
+    if eviction_policy is None or isinstance(eviction_policy, NoEviction):
+        return
+    if any(uses_surface_replacement(spec) for spec in specs):
+        raise ChainPolicyError(
+            "compression backend 'surface_replacement' is incompatible with an eviction policy "
+            f"({type(eviction_policy).__name__}) that mutates the messages channel; use the default "
+            "no-op eviction or the projection backend"
+        )
+
+
 @dataclass
 class ResolvedPolicy:
     """A fully resolved chain policy for one node/agent."""
@@ -258,11 +321,32 @@ class ContextChainFactory:
         agent_policy: list[Any] | None = None,
         platform_default: list[str] | None = None,
         failure_policy: FailurePolicy | None = None,
+        compaction_summarizer: Any = None,
+        model_window_provider: Any = None,
     ) -> None:
         self._agent_policy = agent_policy
         self._platform_default = platform_default or list(_PLATFORM_DEFAULT_POLICY)
         self._failure_policy = failure_policy or FailurePolicy()
+        # ADR-033 durable compaction wiring: production summarizer adapter
+        # and model-window lookup are composition-layer concerns; the factory
+        # forwards them to every chain it builds.
+        self._compaction_summarizer = compaction_summarizer
+        self._model_window_provider = model_window_provider
+        self._last_compaction: dict[str, str] = {}
         self._chain_cache: dict[str, ContextProcessorChain] = {}
+
+    def _note_compaction(self, session_id: str, compaction_id: str) -> None:
+        """Record the newest completed compaction per session (checkpoint metadata)."""
+        self._last_compaction[session_id] = compaction_id
+
+    def last_compaction_id(self, session_id: str) -> str | None:
+        """The newest recorded compaction id for a session, if any."""
+        return self._last_compaction.get(session_id)
+
+    @property
+    def configures_surface_replacement(self) -> bool:
+        """Whether a factory-level policy (agent/platform) selects the durable backend."""
+        return uses_surface_replacement(self._agent_policy)
 
     def resolve(
         self,
@@ -312,6 +396,9 @@ class ContextChainFactory:
             chain = ContextProcessorChain(
                 processors=list(policy.processors),
                 failure_policy=self._failure_policy,
+                compaction_summarizer=self._compaction_summarizer,
+                model_window_provider=self._model_window_provider,
+                compaction_listener=self._note_compaction,
             )
             self._chain_cache[policy.canonical_hash] = chain
         return chain

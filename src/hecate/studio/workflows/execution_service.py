@@ -11,6 +11,7 @@ ConversationService orchestration.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import random
 import uuid
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 from hecate.runtime.checkpoint import InMemoryCheckpointStore
+from hecate.runtime.compaction import CompactionSummarizer
 from hecate.runtime.compiler import GraphCompiler
 from hecate.runtime.context import PriorityContextEngine
 from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventStore, EventType
@@ -80,6 +82,56 @@ async def _sync_event_position(
         return state
     position = await event_store.get_version(session_id)
     return state.model_copy(update={"event_position": position})
+
+
+class PortCompactionSummarizer(CompactionSummarizer):
+    """Composition adapter: produces the structured summary via the runtime port.
+
+    The summarizer prompt is isolated from the tenant conversation namespace
+    and rides the routing configuration of the underlying port; route pinning
+    and cache-namespace isolation never leak into the runtime domain (which
+    only sees the :class:`CompactionSummarizer` ABC).
+    """
+
+    _PROMPT = (
+        "You are a conversation compaction engine. Summarize the conversation segment below so an "
+        "agent can continue the work with no other history. Respond with ONLY a JSON object "
+        "(no markdown fences) with exactly these keys:\n"
+        '- "objective": what the user is trying to accomplish (string)\n'
+        '- "key_decisions": important decisions, constraints and fixed choices so far (string[])\n'
+        '- "current_state": what has been done and what is in progress (string)\n'
+        '- "next_steps": concrete pending actions (string[])\n'
+        '- "critical_context": data, identifiers, file paths, errors and gotchas that must survive '
+        "verbatim (string)"
+    )
+
+    def __init__(self, port: Any) -> None:
+        self._port = port
+
+    async def summarize(self, messages: list[dict]) -> dict[str, Any]:
+        request = [
+            {"role": "system", "content": self._PROMPT},
+            {"role": "user", "content": json.dumps(messages, ensure_ascii=False, default=str)},
+        ]
+        text = ""
+        async for token in self._port.llm_invoke(messages=request, config={}):
+            text += token
+        return self._parse_summary(text)
+
+    def _parse_summary(self, text: str) -> dict[str, Any]:
+        """Parse the model response into the structured node; raise on any defect."""
+        stripped = text.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.strip("`").lstrip()
+            if stripped.lower().startswith("json"):
+                stripped = stripped[4:]
+        start, end = stripped.find("{"), stripped.rfind("}")
+        if start < 0 or end <= start:
+            raise ValueError("summarizer response contains no JSON object")
+        parsed = json.loads(stripped[start : end + 1])
+        if not isinstance(parsed, dict):
+            raise ValueError("summarizer response is not a JSON object")
+        return parsed
 
 
 class _CompositeWorker:
@@ -202,14 +254,45 @@ class WorkflowExecutionService:
         # 4.13 context processor chain factory: resolves per-node policies
         # (node > agent > model-capability > platform defaults) and caches
         # chains per canonical hash so session-scoped latches persist.
+        # ADR-033: the durable compaction summarizer adapter and the
+        # model-window lookup are composition concerns, forwarded to chains.
         from hecate.runtime.context_policy import ContextChainFactory
 
-        self._context_chain_factory = ContextChainFactory()
+        self._context_chain_factory = ContextChainFactory(
+            compaction_summarizer=PortCompactionSummarizer(self._port),
+            model_window_provider=self._model_context_window,
+        )
         # 1.3.5e citation provenance (Stage 1): per-session chunk registries,
         # mirrored into every execution context via PregelRuntime.
         from hecate.runtime.citation_provenance import CitationProvenanceManager
 
         self._citation_provenance = CitationProvenanceManager()
+
+    async def _model_context_window(self, model: str) -> int | None:
+        """Look up a model's context window from the model registry (ADR-033).
+
+        Best-effort by contract: any failure returns ``None`` so the chain
+        falls back to the model-capability window hints.
+        """
+        if self._db is None:
+            return None
+        from hecate.models.model_provider import ModelRegistryModel
+
+        try:
+            result = await self._db.execute(
+                select(ModelRegistryModel.max_context).where(
+                    ModelRegistryModel.model_id == model,
+                    ModelRegistryModel.is_enabled.is_(True),
+                )
+            )
+            row = result.first()
+        except Exception:  # noqa: BLE001 — registry lookup must never break projection
+            logger.warning("Model-window registry lookup failed for %s", model, exc_info=True)
+            return None
+        value = row[0] if row else None
+        if isinstance(value, (int, float)) and value > 0:
+            return int(value)
+        return None
 
     async def execute(
         self,

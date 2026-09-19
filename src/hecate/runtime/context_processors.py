@@ -18,9 +18,14 @@ ordered, budget-satisfied projection pipeline. The chain owns:
   the turn ends in a controlled manner (``stop_reason="token_capped"``)
   instead of silent content truncation.
 
-The projection is non-destructive: the output is a temporary message list for
+The projection is non-destructive by default: the output is a temporary message list for
 the current LLM invocation; channel state, checkpoints, and the event log are
 never modified by the chain (offload writes are additive environment files).
+The one exception is the compression processor's durable
+``surface_replacement`` backend (ADR-033): it appends bracket events to the
+execution log — the channel and the log's original events stay untouched,
+and the working surface is a per-invocation view derived from the compaction
+ledger (``runtime/compaction.py``).
 """
 
 from __future__ import annotations
@@ -31,6 +36,22 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
+
+from hecate.runtime.compaction import (
+    STATE_LEDGER,
+    STATE_LISTENER,
+    STATE_ORIGIN,
+    STATE_RAW_MESSAGES,
+    STATE_SHADOW_SOURCE,
+    STATE_SUMMARIZER,
+    STATE_TRIGGERED,
+    STATE_WINDOW,
+    apply_ledger,
+    load_compaction_state,
+    resolve_context_window,
+    run_surface_replacement,
+    surface_token_estimate,
+)
 
 if TYPE_CHECKING:
     from hecate.runtime.context import ContextEngine
@@ -694,24 +715,40 @@ class CompressionProcessor(ContextProcessor):
 
     Delegates to ``engine.compress`` when an engine is present (legacy
     equivalence); otherwise keeps the newest half with system units pinned.
-    The ``surface_replacement`` backend (durable, log-level compaction) is
-    defined by the compaction event schema ADR and delivered in a later
-    change — selecting it raises ``NotImplementedError`` at use time.
+
+    Two backends (ADR-033):
+
+    - ``projection`` (default): transient, non-destructive per-invocation
+      compression of the projection only.
+    - ``surface_replacement``: durable compaction recorded as bracket events
+      on the execution log; the working surface becomes summary + retained
+      tail while originals stay in the log and channel. Triggering is
+      capacity-axis (``trigger_ratio × context_window`` on the effective
+      surface, evaluated by the chain at the pre-step waterline) and the
+      most recent ``retain_ratio`` of the window is never shadowed.
     """
 
     name = "compression"
 
-    def __init__(self, backend: str = "projection") -> None:
+    def __init__(
+        self,
+        backend: str = "projection",
+        trigger_ratio: float = 0.8,
+        retain_ratio: float = 0.16,
+    ) -> None:
         if backend not in ("projection", "surface_replacement"):
             raise ValueError(f"compression backend must be 'projection' or 'surface_replacement', got {backend!r}")
+        if not isinstance(trigger_ratio, (int, float)) or isinstance(trigger_ratio, bool) or not 0 < trigger_ratio <= 1:
+            raise ValueError(f"trigger_ratio must be in (0, 1], got {trigger_ratio!r}")
+        if not isinstance(retain_ratio, (int, float)) or isinstance(retain_ratio, bool) or not 0 < retain_ratio < 1:
+            raise ValueError(f"retain_ratio must be in (0, 1), got {retain_ratio!r}")
         self.backend = backend
+        self.trigger_ratio = float(trigger_ratio)
+        self.retain_ratio = float(retain_ratio)
 
     async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
         if self.backend == "surface_replacement":
-            raise NotImplementedError(
-                "compression backend 'surface_replacement' is specified by the compaction "
-                "event schema ADR and not yet implemented; use the 'projection' backend"
-            )
+            return await run_surface_replacement(units, ctx, self.trigger_ratio, self.retain_ratio)
         before = ctx.tokens(flatten_units(units))
         if ctx.engine is not None:
             compressed_msgs = ctx.engine.compress(flatten_units(units))
@@ -947,12 +984,20 @@ class ContextProcessorChain:
         processors: list[ContextProcessor],
         failure_policy: FailurePolicy | None = None,
         session_state: dict[str, Any] | None = None,
+        compaction_summarizer: Any = None,
+        model_window_provider: Callable[[str], Any] | None = None,
+        compaction_listener: Callable[[str, str], None] | None = None,
     ) -> None:
         self.processors = list(processors)
         self.failure_policy = failure_policy or FailurePolicy()
         # Session-scoped memory shared by every apply() of this chain (warn
-        # latch, time-hint dedup, anchor state). Keyed by session_id.
+        # latch, time-hint dedup, anchor state, compaction ledger cache).
+        # Keyed by session_id.
         self.session_state: dict[str, Any] = session_state if session_state is not None else {}
+        # ADR-033 durable compaction wiring (composition-layer adapters).
+        self._compaction_summarizer = compaction_summarizer
+        self._model_window_provider = model_window_provider
+        self._compaction_listener = compaction_listener
         self._last_compression_savings: dict[str, float | None] = {}
         self._messages_at_last_degradation: dict[str, int] = {}
 
@@ -992,6 +1037,42 @@ class ContextProcessorChain:
             raw_sid = execution_context.get("session_id")
             session_id = str(raw_sid) if raw_sid is not None else ""
 
+        # ADR-033 substrate: derive the effective surface from the shadowing
+        # ledger before any processor runs. The ledger applies to every
+        # chain regardless of node policy; the backend selection only
+        # decides whether this chain may trigger a new compaction.
+        raw_messages = list(messages)
+        surface = raw_messages
+        projection_origin: list[int | None] = list(range(len(raw_messages)))
+        projection_shadow: list[Any] = [None] * len(raw_messages)
+        ledger = None
+        window: int | None = None
+        backend = next(
+            (p for p in self.processors if isinstance(p, CompressionProcessor) and p.backend == "surface_replacement"),
+            None,
+        )
+        if raw_messages and execution_context and execution_context.get("event_store") is not None and session_id:
+            try:
+                ledger = await load_compaction_state(execution_context["event_store"], session_id, self.session_state)
+                projection = apply_ledger(raw_messages, ledger.entries)
+                surface = projection.messages
+                projection_origin = projection.origin
+                projection_shadow = projection.shadow_source
+            except Exception:  # noqa: BLE001 — ledger read failure degrades to the unshadowed surface
+                logger.warning(
+                    "Compaction ledger read failed on session %s; projecting unshadowed", session_id, exc_info=True
+                )
+                ledger = None
+            if backend is not None:
+                window = await resolve_context_window(node_config, execution_context, self._model_window_provider)
+                if window is None:
+                    from hecate.runtime.context_policy import ChainPolicyError
+
+                    raise ChainPolicyError(
+                        "compression backend 'surface_replacement' requires a resolvable context window "
+                        "(execution_context['context_window'], a model-window provider, or a known model family)"
+                    )
+
         budget = resolve_budget(node_config, execution_context)
         estimator = self._estimator_for(session_id, engine)
         ctx = ChainContext(
@@ -1007,25 +1088,47 @@ class ContextProcessorChain:
             offload_threshold_tokens=getattr(offloader, "threshold_tokens", 6000) if offloader else 6000,
             state={},
         )
+        ctx.state[STATE_RAW_MESSAGES] = raw_messages
+        ctx.state[STATE_LEDGER] = ledger
+        ctx.state[STATE_ORIGIN] = projection_origin
+        ctx.state[STATE_SHADOW_SOURCE] = projection_shadow
+        ctx.state[STATE_WINDOW] = window
+        ctx.state[STATE_LISTENER] = self._compaction_listener
+        ctx.state[STATE_SUMMARIZER] = self._compaction_summarizer
+        # Capacity axis: evaluated on the effective surface (post-shadowing,
+        # pre-ladder) at the pre-step waterline — deliberately independent of
+        # the budget-ladder satisfaction short-circuit below.
+        if (
+            backend is not None
+            and window is not None
+            and surface_token_estimate(surface) >= window * backend.trigger_ratio
+        ):
+            ctx.state[STATE_TRIGGERED] = True
 
-        units = unitize(messages)
+        units = unitize(surface)
         ctx.state["original_units"] = list(units)
         tokens_before = ctx.tokens(flatten_units(units))
         report = ChainReport(
-            messages=list(messages),
+            messages=list(surface),
             tokens_before=tokens_before,
-            messages_before=len(messages),
+            messages_before=len(surface),
         )
         if not messages:
             return report
 
+        force_surface = bool(ctx.state.get(STATE_TRIGGERED))
         new_units = units
         for processor in self.processors:
             over = ctx.tokens(flatten_units(new_units)) > budget
-            if processor.run_mode != "always" and not over:
+            surface_slot = (
+                force_surface
+                and isinstance(processor, CompressionProcessor)
+                and processor.backend == "surface_replacement"
+            )
+            if processor.run_mode != "always" and not over and not surface_slot:
                 continue
             if isinstance(processor, CompressionProcessor):
-                forced = bool(node_config.get("context_force_degradation"))
+                forced = bool(node_config.get("context_force_degradation")) or surface_slot
                 last_savings = self._last_compression_savings.get(session_id)
                 new_messages = report.messages_before - self._messages_at_last_degradation.get(session_id, 0)
                 if self.failure_policy.should_anti_thrash(processor.name, last_savings, new_messages, forced):

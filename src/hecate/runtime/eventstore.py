@@ -73,6 +73,16 @@ class EventType(StrEnum):
     # decision. Additive; LogPolicy does NOT exclude these (ADR-030 §1).
     INTENT_RECOGNIZED = "INTENT_RECOGNIZED"
     CONTROLLER_ROUTED = "CONTROLLER_ROUTED"
+    # ADR-033 durable compaction — the bracket event sequence recorded by
+    # the compression processor's surface_replacement backend. All four are
+    # bookkeeping events: the fold skips them (channel state is untouched —
+    # the messages channel keeps every original), and they carry no
+    # log_schema_version marker. START without a matching COMPLETED is an
+    # in-progress lock, never a fabricated summary.
+    COMPACTION_STARTED = "COMPACTION_STARTED"
+    COMPACTION_SUMMARY = "COMPACTION_SUMMARY"
+    CONTEXT_SURFACE_REPLACED = "CONTEXT_SURFACE_REPLACED"
+    COMPACTION_COMPLETED = "COMPACTION_COMPLETED"
 
 
 CURRENT_LOG_SCHEMA_VERSION: int = 2  # events without this marker are non-replayable (values never recorded)

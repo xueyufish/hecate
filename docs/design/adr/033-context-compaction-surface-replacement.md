@@ -4,7 +4,7 @@
 
 Accepted (2026-09-16; extends ADR-030 event-sourced execution state and ADR-032's log-as-plan discipline; specifies the durable half of 4.13 Context Engine Processor Chain)
 
-> **落地状态（4.13 processor chain, 2026-09）**: the per-call projection half of 4.13 is implemented in `runtime/context_processors.py` (chain + processors + controlled termination). This ADR specifies the **durable compaction backend** of `CompressionProcessor` (`backend="surface_replacement"`) — the event schema below is normative now; implementation is sequenced as a follow-up change. Selecting the backend before that change lands fails fast (`NotImplementedError`).
+> **落地状态（4.13 processor chain, 2026-09）**: the per-call projection half of 4.13 is implemented in `runtime/context_processors.py` (chain + processors + controlled termination). The **durable compaction backend** (`backend="surface_replacement"`) is implemented per this ADR's event schema, with two additive payload refinements recorded in the change design: `CONTEXT_SURFACE_REPLACED` acts as a projection-filter instruction (ledger entry) over an untouched channel — the "surface mutation" wording below reads as *the derived view mutates*, never the log or channel state — and its payload carries `start_anchor`/`end_anchor` (endpoint content hashes) alongside `start_seq`/`end_seq`, while `COMPACTION_SUMMARY` carries an optional `prior_compaction_id` (rolling re-compaction). Ledger ordinals are messages-channel message ordinals; the backend and message-channel eviction are mutually exclusive (assembly-time check).
 
 ## Context
 

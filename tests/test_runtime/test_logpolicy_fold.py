@@ -298,3 +298,31 @@ def test_invariants_dispatch_tree_unbalanced():
     with pytest.raises(InvariantViolation) as exc:
         run_all(events)
     assert exc.value.code == "DISPATCH.TREE"
+
+
+def test_fold_skips_compaction_bracket_events():
+    """ADR-033: compaction events are bookkeeping — channel fold is unchanged.
+
+    The messages channel keeps every original; the surface replacement is a
+    per-invocation projection concern, never a fold mutation.
+    """
+    sid = uuid.uuid4()
+    cm = _make_manager(("messages", ChannelType.TOPIC))
+    compaction_events = [
+        _make_event(sid, 1, EventType.COMPACTION_STARTED, compaction_id="c1", trigger="threshold"),
+        _make_event(
+            sid, 1, EventType.COMPACTION_SUMMARY, compaction_id="c1", summary={"objective": "o"}, shadowed_seqs=[0, 0]
+        ),
+        _make_event(sid, 1, EventType.CONTEXT_SURFACE_REPLACED, compaction_id="c1", start_seq=0, end_seq=0),
+        _make_event(sid, 1, EventType.COMPACTION_COMPLETED, compaction_id="c1", tokens_before=100, tokens_after=10),
+    ]
+    baseline_events = [
+        _make_event(sid, 1, EventType.CHANNEL_WRITE, channel="messages", value={"role": "user"}),
+        _make_event(sid, 1, EventType.CHANNEL_WRITE, channel="messages", value={"role": "assistant"}),
+        _make_event(sid, 1, EventType.STEP_END),
+    ]
+    folded_with_compaction = _make_manager(("messages", ChannelType.TOPIC))
+    fold_session(folded_with_compaction, iter([*compaction_events, *baseline_events]))
+    fold_session(cm, iter(baseline_events))
+    assert folded_with_compaction.read("messages") == cm.read("messages")
+    assert derive_messages(folded_with_compaction) == [{"role": "user"}, {"role": "assistant"}]

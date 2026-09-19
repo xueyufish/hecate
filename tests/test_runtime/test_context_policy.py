@@ -9,9 +9,13 @@ from hecate.runtime.context_policy import (
     ContextChainFactory,
     canonical_policy_hash,
     model_default_budget,
+    model_default_window,
     model_supports_prompt_cache,
+    uses_surface_replacement,
+    validate_compaction_exclusivity,
     validate_policy_spec,
 )
+from hecate.runtime.eviction import NoEviction, SizeBasedEviction
 
 
 class TestModelCapability:
@@ -169,3 +173,65 @@ class TestChainFactory:
             "n1",
         )
         assert report.levels
+
+
+class TestCompressionBackendValidation:
+    """ADR-033: compression parameter validation and compaction exclusivity."""
+
+    def test_ratio_params_accepted(self) -> None:
+        normalized = validate_policy_spec(
+            [
+                {
+                    "type": "compression",
+                    "params": {"backend": "surface_replacement", "trigger_ratio": 0.8, "retain_ratio": 0.16},
+                }
+            ]
+        )
+        assert normalized[0]["params"] == {"backend": "surface_replacement", "trigger_ratio": 0.8, "retain_ratio": 0.16}
+
+    def test_trigger_ratio_out_of_range_rejected(self) -> None:
+        with pytest.raises(ChainPolicyError, match="trigger_ratio"):
+            validate_policy_spec([{"type": "compression", "params": {"trigger_ratio": 1.5}}])
+        with pytest.raises(ChainPolicyError, match="trigger_ratio"):
+            validate_policy_spec([{"type": "compression", "params": {"trigger_ratio": 0}}])
+
+    def test_retain_ratio_out_of_range_rejected(self) -> None:
+        with pytest.raises(ChainPolicyError, match="retain_ratio"):
+            validate_policy_spec([{"type": "compression", "params": {"retain_ratio": 1.0}}])
+        with pytest.raises(ChainPolicyError, match="retain_ratio"):
+            validate_policy_spec([{"type": "compression", "params": {"retain_ratio": -0.1}}])
+
+    def test_unknown_backend_rejected(self) -> None:
+        with pytest.raises(ChainPolicyError, match="backend"):
+            validate_policy_spec([{"type": "compression", "params": {"backend": "in_place"}}])
+
+
+class TestModelDefaultWindow:
+    def test_known_family(self) -> None:
+        assert model_default_window("glm-5") == 200_000
+        assert model_default_window("claude-sonnet-4") == 200_000
+
+    def test_unknown_family(self) -> None:
+        assert model_default_window("totally-unknown-model") is None
+        assert model_default_window(None) is None
+
+
+class TestCompactionExclusivity:
+    def test_surface_backend_spec_detected(self) -> None:
+        assert uses_surface_replacement([{"type": "compression", "params": {"backend": "surface_replacement"}}])
+        assert not uses_surface_replacement(["compression"])
+        assert not uses_surface_replacement([{"type": "compression", "params": {"backend": "projection"}}])
+        assert not uses_surface_replacement(None)
+
+    def test_noop_eviction_allows_surface_backend(self) -> None:
+        specs = [[{"type": "compression", "params": {"backend": "surface_replacement"}}]]
+        validate_compaction_exclusivity(NoEviction(), specs)
+        validate_compaction_exclusivity(None, specs)
+
+    def test_active_eviction_with_surface_backend_rejected(self) -> None:
+        specs = [[{"type": "compression", "params": {"backend": "surface_replacement"}}]]
+        with pytest.raises(ChainPolicyError, match="eviction"):
+            validate_compaction_exclusivity(SizeBasedEviction(max_size=10), specs)
+
+    def test_active_eviction_with_projection_backend_allowed(self) -> None:
+        validate_compaction_exclusivity(SizeBasedEviction(max_size=10), [["compression"]])

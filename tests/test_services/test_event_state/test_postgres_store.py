@@ -17,7 +17,7 @@ from sqlalchemy.dialects import postgresql
 
 from hecate.runtime.eventstore import Event, EventType, EventVersionConflictError
 from hecate.studio.event_state.models import EventModel
-from hecate.studio.event_state.postgres_store import PostgresEventStore
+from hecate.studio.event_state.postgres_store import PostgresEventStore, _row_to_event
 
 
 def _compile_sql(stmt) -> str:
@@ -259,3 +259,30 @@ async def test_acquire_event_lock_inherited_as_noop():
     session_id = uuid.uuid4()
     async with store.acquire_event_lock(session_id):
         pass  # default yields without acquiring any lock
+
+
+def test_row_to_event_maps_compaction_types_and_unknown_falls_back():
+    """ADR-033: new compaction event types round-trip; unknown types read as CUSTOM."""
+    from types import SimpleNamespace
+
+    sid = uuid.uuid4()
+
+    def _row(event_type: str):
+        return SimpleNamespace(
+            session_id=sid,
+            superstep=3,
+            event_type=event_type,
+            node_id="n1",
+            id=uuid.uuid4(),
+            payload={"compaction_id": "c1"},
+            trace_id=None,
+            version=7,
+        )
+
+    for name in ("COMPACTION_STARTED", "COMPACTION_SUMMARY", "CONTEXT_SURFACE_REPLACED", "COMPACTION_COMPLETED"):
+        event = _row_to_event(_row(name))
+        assert event.event_type == EventType(name)
+
+    unknown = _row_to_event(_row("SOME_FUTURE_TYPE"))
+    assert unknown.event_type == EventType.CUSTOM
+    assert unknown.payload == {"compaction_id": "c1"}
