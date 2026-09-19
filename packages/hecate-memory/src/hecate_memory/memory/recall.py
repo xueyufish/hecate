@@ -96,8 +96,10 @@ class RecallService:
             if str(meta.get("session_id", "")) in excluded:
                 continue
             # Strict (score, id) ordering continuation — no repeats.
-            if after_score is not None and after_id is not None and (
-                r.score < after_score or (r.score == after_score and str(r.id) <= after_id)
+            if (
+                after_score is not None
+                and after_id is not None
+                and (r.score < after_score or (r.score == after_score and str(r.id) <= after_id))
             ):
                 continue
             hits.append(
