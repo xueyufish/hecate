@@ -261,7 +261,7 @@ class TestSiblingPackagesAndOtherDomainsNeverImportEnterprise:
                 if not (module == "hecate.enterprise" or module.startswith("hecate.enterprise.")):
                     continue
                 rel = path.relative_to(REPO_ROOT)
-                if str(rel).startswith("packages/hecate-enterprise/"):
+                if rel.as_posix().startswith("packages/hecate-enterprise/"):
                     continue
                 bad.append(f"{rel}:line {lineno}: from {module} import ...")
         assert not bad, (
@@ -312,7 +312,7 @@ class TestSiblingPackagesAndOtherDomainsNeverImportChannel:
                 # Plugin channel packages (hecate-channel-*) are the
                 # protocol-implementers — they import ChannelBase and
                 # channel types by design. Allow them.
-                if str(rel).startswith("packages/channels/"):
+                if rel.as_posix().startswith("packages/channels/"):
                     continue
                 # Other workspace wheels have no business reaching
                 # into channel/ at module level.
@@ -359,7 +359,7 @@ class TestSiblingPackagesAndOtherDomainsNeverImportStudio:
                 # hecate-llm subclasses CircuitBreaker from
                 # studio.validation.retry_policy — protocol-implementer
                 # pattern, same as enterprise. Allow-list.
-                if str(rel).startswith("packages/hecate-llm/"):
+                if rel.as_posix().startswith("packages/hecate-llm/"):
                     continue
                 bad.append(f"{rel}:line {lineno}: from {module} import ...")
         assert not bad, (
@@ -411,7 +411,7 @@ class TestSiblingPackagesAndOtherDomainsNeverImportOps:
                 # the enterprise rule allows hecate_enterprise to
                 # import the enterprise/ domain for the AuthProvider
                 # ABC.
-                if str(rel).startswith("packages/hecate-enterprise/"):
+                if rel.as_posix().startswith("packages/hecate-enterprise/"):
                     continue
                 bad.append(f"{rel}:line {lineno}: from {module} import ...")
         assert not bad, (

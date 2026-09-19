@@ -3,16 +3,16 @@
 Registered under the ``hecate.memory_providers`` group as ``builtin``. The core
 package discovers this entry point via ``importlib.metadata`` and, when
 ``HECATE_MEMORY_PROVIDER`` is unset (or set to ``"builtin"``), uses the returned
-object as the default knowledge-search backend.
+object as the default memory backend.
 
 Third-party memory packages (e.g. ``hecate-memory-mem0``) should declare their
 own entry under the same group with a distinct name.
 
-Contract (duck-typed — no inheritance required):
-
-- ``async def search(collection_name, query, *, limit=10, mode="hybrid",
-  workspace_id=None) -> list[SearchHitLike]``
-- ``SearchHitLike`` exposes ``content: str``, ``score: float``, ``metadata: dict``.
+The factory returns the ``BuiltinMemoryProvider`` singleton, which implements
+the full tiered ``MemoryProvider`` contract (search / fact CRUD / lifecycle
+hooks) — see ``hecate_memory.memory.provider_impl``. ``search`` delegates to
+the ``KnowledgeBaseService`` singleton, preserving the pre-existing
+knowledge-query behavior.
 
 The returned object is consumed by the core package through the
 ``MemoryProvider`` Protocol in ``hecate.core.composition.memory_provider``.
@@ -20,17 +20,22 @@ The returned object is consumed by the core package through the
 
 from __future__ import annotations
 
-from .rag.service import KnowledgeBaseService, knowledge_base_service
+from hecate_memory.memory.provider_impl import BuiltinMemoryProvider
+
+_provider: BuiltinMemoryProvider | None = None
 
 
-def provider() -> KnowledgeBaseService:
-    """Zero-arg factory returning the in-process knowledge base service.
+def provider() -> BuiltinMemoryProvider:
+    """Zero-arg factory returning the builtin memory provider singleton.
 
-    Called by the core package's resolver when ``HECATE_MEMORY_PROVIDER`` selects
-    this entry point. Returning the singleton avoids re-instantiating the
-    service per request; the resolver caches the result module-wide.
+    Called by the core package's resolver when ``HECATE_MEMORY_PROVIDER``
+    selects this entry point. The singleton avoids re-resolving the vector
+    store per request; the resolver caches the result module-wide.
     """
-    return knowledge_base_service
+    global _provider
+    if _provider is None:
+        _provider = BuiltinMemoryProvider()
+    return _provider
 
 
 __all__ = ["provider"]

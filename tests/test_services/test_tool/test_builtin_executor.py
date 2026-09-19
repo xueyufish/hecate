@@ -110,7 +110,7 @@ class TestUnknownTool:
 
 
 class TestToolDefinitions:
-    def test_all_13_tools_defined(self) -> None:
+    def test_all_21_tools_defined(self) -> None:
         expected = {
             "web_search",
             "load_skill",
@@ -125,6 +125,15 @@ class TestToolDefinitions:
             "browser_screenshot",
             "browser_fill_form",
             "recall",
+            # agent-memory-tools
+            "memory_replace",
+            "memory_insert",
+            "memory_rethink",
+            "memory_search",
+            "memory_add",
+            "memory_update",
+            "memory_forget",
+            "conversation_search",
         }
         assert set(BUILTIN_TOOL_DEFINITIONS.keys()) == expected
 

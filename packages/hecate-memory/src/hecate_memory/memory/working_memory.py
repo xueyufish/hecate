@@ -131,6 +131,7 @@ class WorkingMemoryService:
             block.position = data.position
         if data.limit is not None:
             block.limit = data.limit
+        block.revision += 1
 
         await self.db.flush()
         await self.db.refresh(block)
@@ -160,6 +161,7 @@ class WorkingMemoryService:
 
         block.deleted = True
         block.deleted_at = datetime.now(UTC)
+        block.revision += 1
         await self.db.flush()
         logger.info(f"Deleted memory block {block_id} for agent {agent_id}")
 
@@ -230,6 +232,19 @@ class WorkingMemoryService:
                 break
 
         return messages[:insert_idx] + block_messages + messages[insert_idx:]
+
+    async def get_block_by_label(
+        self,
+        agent_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        label: str,
+    ) -> MemoryBlockModel | None:
+        """Get the raw block model by label within an agent and workspace.
+
+        Unlike ``list_blocks`` (read schemas), this returns the ORM model so
+        callers can mutate and flush in place.
+        """
+        return await self._get_by_label(agent_id, label, workspace_id)
 
     async def _get_by_id(
         self,

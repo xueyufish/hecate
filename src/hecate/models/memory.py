@@ -8,6 +8,11 @@ Defines the persistence layer (SQLAlchemy) and API schemas (Pydantic) for:
   stored with vector embeddings for semantic retrieval across sessions.
 - **KnowledgeMemoryModel** — L4 knowledge memory: long-term agent knowledge archive,
   stored in PostgreSQL metadata + Qdrant vectors for hybrid search retrieval.
+- **RecallMessageModel** — conversation recall storage: transcript-level index
+  rows (metadata + scope) backing semantic search over past conversations;
+  vectors live in the Qdrant ``hecate_recall`` collection.
+- **MemoryEditLogModel** — append-only audit trail for memory mutations made
+  through agent memory tools (L1 edits, L3/L4 update/forget).
 """
 
 from __future__ import annotations
@@ -18,7 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text  # noqa: I001
+from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint  # noqa: I001
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -58,6 +63,8 @@ class MemoryBlockModel(BaseModel):
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     limit: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    # Optimistic-concurrency counter, bumped on every successful mutation.
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     __table_args__ = (
         Index("idx_memory_blocks_workspace", "workspace_id", "deleted"),
@@ -98,6 +105,8 @@ class MemoryModel(BaseModel):
     importance: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     access_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     embedding: Mapped[list[float]] = mapped_column(JSON, nullable=False, default=list)
+    # Optimistic-concurrency counter, bumped on every successful mutation.
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
 
     __table_args__ = (
         Index("idx_memories_workspace", "workspace_id", "deleted"),
@@ -141,6 +150,8 @@ class KnowledgeMemoryModel(BaseModel):
     importance: Mapped[float] = mapped_column(Float, nullable=False, default=0.5)
     access_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="agent_tool")
+    # Optimistic-concurrency counter, bumped on every successful mutation.
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id"),
         nullable=True,
@@ -151,6 +162,92 @@ class KnowledgeMemoryModel(BaseModel):
         Index("idx_knowledge_memories_workspace", "workspace_id", "deleted"),
         Index("idx_knowledge_memories_agent", "agent_id"),
         Index("idx_knowledge_memories_importance", "importance"),
+    )
+
+
+class RecallMessageModel(BaseModel):
+    """ORM model for conversation recall storage (transcript-level index).
+
+    One row per indexed user/assistant message. Metadata and scope live here;
+    the vector embedding lives in the Qdrant ``hecate_recall`` collection with
+    a payload mirror of the scope columns (memory-isolation pattern). The
+    recall layer outlives event retention — pruning the ``events`` table never
+    touches these rows; deleting a conversation cascades to them.
+
+    Key fields:
+
+    - **workspace_id** — tenant scope (first-class isolation).
+    - **agent_id** — owning agent; recall defaults to the calling agent's scope.
+    - **conversation_id / session_id** — provenance pointers returned by
+      ``conversation_search`` so the agent can page into the source dialogue.
+    - **role / content** — the indexed message itself (user or assistant only).
+    - **content_hash / seq** — sha256 of the content and its position in the
+      session stream; together with ``session_id`` they form the idempotency
+      key that makes re-indexing converge.
+    - **event_version** — watermark of the last event log version covered for
+      this message's session (catch-up scan bookkeeping).
+    """
+
+    __tablename__ = "recall_messages"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    session_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    event_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "session_id",
+            "content_hash",
+            "seq",
+            name="uq_recall_messages_session_hash_seq",
+        ),
+        Index("idx_recall_messages_workspace", "workspace_id", "deleted"),
+        Index("idx_recall_messages_agent", "workspace_id", "agent_id"),
+        Index("idx_recall_messages_session", "session_id", "seq"),
+        Index("idx_recall_messages_conversation", "conversation_id"),
+    )
+
+
+class MemoryEditLogModel(BaseModel):
+    """Append-only audit trail for agent-driven memory mutations.
+
+    One row per memory tool mutation (L1 block edit, L3/L4 update or forget).
+    Written by the tool execution path; no tool can modify or delete audit
+    rows. Content is stored as truncated summaries (≤200 chars each), never
+    full bodies, to bound growth and PII exposure.
+    """
+
+    __tablename__ = "memory_edit_log"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    trace_id: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    tool_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    revision_before: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    revision_after: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    before_summary: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    after_summary: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+
+    __table_args__ = (
+        Index("idx_memory_edit_log_workspace", "workspace_id", "created_at"),
+        Index("idx_memory_edit_log_target", "target_type", "target_id"),
+        Index("idx_memory_edit_log_agent", "workspace_id", "agent_id"),
     )
 
 
@@ -191,6 +288,7 @@ class MemoryBlockReadSchema(PydanticBase):
     content: str
     position: int
     limit: int
+    revision: int
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
@@ -221,6 +319,7 @@ class MemoryReadSchema(PydanticBase):
     memory_type: str
     importance: float
     access_count: int
+    revision: int
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
@@ -266,6 +365,7 @@ class KnowledgeMemoryReadSchema(PydanticBase):
     access_count: int
     source: str
     user_id: uuid.UUID | None
+    revision: int
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
@@ -282,3 +382,45 @@ class KnowledgeMemorySearchSchema(PydanticBase):
     tags: list[str] | None = Field(None)
     user_id: uuid.UUID | None = Field(None)
     mode: str = Field(default="hybrid")
+
+
+# --- Recall & Audit Schemas ---
+
+
+class RecallMessageReadSchema(PydanticBase):
+    """Schema for reading a recall index row (observability surfaces)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    agent_id: uuid.UUID
+    conversation_id: uuid.UUID | None
+    session_id: uuid.UUID
+    user_id: uuid.UUID | None
+    role: str
+    content: str
+    content_hash: str
+    seq: int
+    event_version: int
+    created_at: datetime
+
+
+class MemoryEditLogReadSchema(PydanticBase):
+    """Schema for reading a memory edit audit record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    agent_id: uuid.UUID
+    session_id: uuid.UUID | None
+    trace_id: str | None
+    tool_name: str
+    target_type: str
+    target_id: uuid.UUID
+    revision_before: int | None
+    revision_after: int | None
+    before_summary: str | None
+    after_summary: str | None
+    created_at: datetime
