@@ -57,6 +57,7 @@ allowlist covers the files below — keep new bridge files on it):
 | EventStore | `eventstore.py` | `InMemoryEventStore` |
 | ContextEngine | `context.py` | `InMemoryContextEngine` |
 | ContextProcessor chain (4.13) | `context_processors.py`; policy resolution in `context_policy.py` | default chain via `default_chain_processors()`; production assembly: `ContextChainFactory` in `WorkflowExecutionService` |
+| CompactionSummarizer (ADR-033) | `compaction.py` | ABC only; production adapter: `PortCompactionSummarizer` in `WorkflowExecutionService` (routes via RuntimePort) |
 | SchedulerStrategy | `scheduler.py` | `FIFOScheduler` |
 | EvictionPolicy | `eviction.py` | `NoEviction`, `SizeBasedEviction` |
 | OptimizationPass | `optimization.py` | `DeadNodeElimination`, `ParallelBranchDetection` |
@@ -86,7 +87,11 @@ Chain conventions (4.13): processors are runtime-internal extension points
 (plain noun + ABC, no `Port`/`Base` marker); they operate on atomic
 `ContextUnit`s (tool-call-linked messages never split); the
 `CompressionProcessor` has two backends — `projection` (default) and
-`surface_replacement` (normative schema in ADR-033, implementation sequenced).
+`surface_replacement` (durable compaction per ADR-033, implemented in
+`compaction.py`: ledger view + bracket events; the messages channel and the
+fold stay untouched). Note the assembly-time exclusivity: the
+`surface_replacement` backend cannot be combined with a non-`NoEviction`
+eviction policy. Ledger ranges are messages-channel ordinals.
 Registry trust boundary: only types in `PROCESSOR_REGISTRY` pass config
 validation (third-party code cannot enter the in-process T0 chain by naming
 itself in configuration).

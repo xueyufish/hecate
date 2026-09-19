@@ -8,8 +8,6 @@ golden path (default chain vs the pre-chain pipeline behavior).
 
 from __future__ import annotations
 
-import pytest
-
 from hecate.runtime.context import InMemoryContextEngine
 from hecate.runtime.context_processors import (
     AnchorTokenEstimator,
@@ -268,11 +266,42 @@ class TestCompression:
         assert result.level == "compress"
         assert len(out) < len(messages)
 
-    async def test_surface_replacement_backend_not_implemented(self) -> None:
+    async def test_surface_replacement_delegates_to_durable_backend(self) -> None:
+        """The surface backend routes through the compaction machinery (ADR-033)."""
+        from hecate.runtime.compaction import CompactionLedgerState, CompactionSummarizer
+        from hecate.runtime.eventstore import InMemoryEventStore
+
+        class _NoopSummarizer(CompactionSummarizer):
+            async def summarize(self, messages):
+                return {
+                    "objective": "o",
+                    "key_decisions": ["d"],
+                    "current_state": "s",
+                    "next_steps": ["n"],
+                    "critical_context": "c",
+                }
+
+        store = InMemoryEventStore()
+        messages = [_user(f"m{i:02d}-{'x' * 400}") for i in range(10)]
         processor = CompressionProcessor(backend="surface_replacement")
-        ctx = ChainContext(budget=5, estimator=HeuristicTokenEstimator(), state={})
-        with pytest.raises(NotImplementedError):
-            await processor.process(unitize([_user("q")]), ctx)
+        ctx = ChainContext(
+            budget=5,
+            estimator=HeuristicTokenEstimator(),
+            session_id="proc-test",
+            execution_context={"event_store": store, "session_id": "proc-test", "superstep": 0},
+            state={
+                "compaction_raw_messages": list(messages),
+                "compaction_ledger": CompactionLedgerState(),
+                "compaction_window": 1000,
+                "compaction_summarizer": _NoopSummarizer(),
+            },
+        )
+        out, result = await processor.process(unitize(messages), ctx)
+        assert result.level == "compress"
+        assert result.metadata["backend"] == "surface_replacement"
+        assert result.metadata["compacted"] is True
+        assert out[0].messages[0]["content"].startswith("[context compaction]")
+        assert len(out) < len(messages)
 
 
 class TestTermination:

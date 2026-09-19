@@ -190,6 +190,29 @@ class PregelRuntime:
         # logpolicy exemption is moot (no channel == nothing to log).
         self._channel_manager.register("_dispatch", ChannelDef(type=ChannelType.LAST_VALUE, default=None))
 
+        # ADR-033 (D4): durable compaction ledger ranges are messages-channel
+        # ordinals; an eviction policy that mutates the channel would shift
+        # them and silently misapply recorded ranges. Reject the combination
+        # at construction time.
+        if eviction_policy is not None and not isinstance(eviction_policy, NoEviction):
+            from hecate.runtime.context_policy import ChainPolicyError, ContextChainFactory, uses_surface_replacement
+            from hecate.runtime.context_processors import CompressionProcessor, ContextProcessorChain
+
+            node_specs = [(node.config or {}).get("context_processors") for node in self._graph.nodes.values()]
+            factory_backend = (
+                isinstance(context_chain, ContextChainFactory) and context_chain.configures_surface_replacement
+            )
+            raw_chain_backend = isinstance(context_chain, ContextProcessorChain) and any(
+                isinstance(p, CompressionProcessor) and p.backend == "surface_replacement"
+                for p in context_chain.processors
+            )
+            if any(uses_surface_replacement(spec) for spec in node_specs) or factory_backend or raw_chain_backend:
+                raise ChainPolicyError(
+                    "compression backend 'surface_replacement' is incompatible with an eviction policy "
+                    f"({type(eviction_policy).__name__}) that mutates the messages channel; use the default "
+                    "no-op eviction or the projection backend"
+                )
+
     async def _emit(
         self,
         session_id: uuid.UUID,
@@ -967,6 +990,7 @@ class PregelRuntime:
                         metadata={
                             **self._interrupt_checkpoint_metadata(descriptor),
                             "log_version": await self._current_log_version(session_id),
+                            **self._compaction_checkpoint_metadata(session_id),
                         },
                     )
                 self._interrupted = True
@@ -985,6 +1009,7 @@ class PregelRuntime:
                     channel_state=self._channel_manager.snapshot(),
                     metadata={
                         "log_version": await self._current_log_version(session_id),
+                        **self._compaction_checkpoint_metadata(session_id),
                     },
                 )
             await self._emit(
@@ -1028,6 +1053,14 @@ class PregelRuntime:
                 payload={"log_schema_version": CURRENT_LOG_SCHEMA_VERSION, "reason": "graph_complete"},
                 trace_id=trace_id,
             )
+
+    def _compaction_checkpoint_metadata(self, session_id: uuid.UUID) -> dict[str, Any]:
+        """ADR-033: stamp the newest completed compaction into checkpoint metadata."""
+        getter = getattr(self._context_chain, "last_compaction_id", None)
+        if getter is None:
+            return {}
+        compaction_id = getter(str(session_id))
+        return {"last_compaction_id": compaction_id} if compaction_id else {}
 
     async def _restore_from_checkpoint(self, session_id: uuid.UUID, resume_value: Any) -> None:
         """Restore channel state via cache + event-log tail replay.
