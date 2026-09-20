@@ -175,14 +175,14 @@ Query → Retrieval (RAG) + Logic (Rules/ML) + Actions (Write-Back) → Response
 
 | Feature | Description |
 |---------|-------------|
-| LLM-Managed Memory | Agent autonomously decides when to store/retrieve/evict memories |
+| LLM-Managed Memory ✅ (tool layer) | Agent manages memory via 8 built-in tools (`memory_replace`/`memory_insert`/`memory_rethink`/`memory_search`/`memory_add`/`memory_update`/`memory_forget`/`conversation_search`) behind `MEMORY_TOOLS_ENABLED`; tiered `MemoryProvider` contract lets third-party backends take over |
 | Memory Pressure Alert | Context threshold notification to LLM for memory consolidation |
-| Self-Editing Memory | Agent can overwrite/correct stored memories |
-| Multi-Step Retrieval | Function chaining for complex memory queries |
+| Self-Editing Memory ✅ | Layered edit semantics: exact replace (ambiguity refused) / line insert / whole-block rethink; L3/L4 corrections via `memory_update`/`memory_forget` with `revision` optimistic concurrency + `memory_edit_log` audit; ADD-only supersession deferred to the temporal-memory workstream |
+| Retrieval Escalation ✅ (was Multi-Step Retrieval) | Weak/empty memory searches inject one debounced `[memory_hint]` block guiding reformulation/cursor/`exclude_session_ids` iteration; the MemGPT-heartbeat framing is retired |
 | Memory Versioning | Version snapshots, diff, rollback capability |
 | Memory Importance Scoring | Score memories by access frequency, time decay, semantic relevance |
 | Multi-Signal Fusion Retrieval | Combine vector similarity + time decay + importance + frequency |
-| Conversation Recall Storage | Semantic search over conversation history |
+| Conversation Recall Storage ✅ | Transcript-level recall layer: `recall_messages` + Qdrant `hecate_recall`, background indexer over message-channel events (version watermarks, idempotent), `conversation_search` with time-window/roles/cursor/exclusion; outlives event retention |
 | Memory Clustering | Clustering and graph-structured memory organization |
 
 ---

@@ -15,19 +15,45 @@ the caller treats it as an empty result rather than raising, so a missing wheel
 never crashes the chat path.
 
 The contract is duck-typed via ``MemoryProvider`` / ``SearchHitLike`` Protocols;
-no ABC is required on the third-party side. See
-``docs/integrations/memory/third-party-memory.md`` for the five-step integration.
+no ABC is required on the third-party side. The contract is tiered: providers
+declare the capabilities they implement via ``capabilities()`` and callers
+route on that declaration (``provider_supports``); a provider without
+``capabilities()`` is treated as search-only for backward compatibility.
+Structured result types (``MemoryFactHit``, ``RecallPage``, ``MemoryWriteResult``,
+``PrefetchEntry``) are part of the contract — implementations return them (or
+attribute-compatible equivalents). See
+``docs/integrations/memory/third-party-memory.md`` for the integration guide.
 """
 
 from __future__ import annotations
 
 import logging
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime
 from importlib.metadata import entry_points
 from typing import Any, Protocol
 
 from hecate.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Capability names of the tiered contract. tier-1: CAP_SEARCH. tier-2:
+# CAP_SEARCH_MEMORIES (L3/L4 fact retrieval) + CAP_SEARCH_RECALL (transcript
+# recall). tier-3: CAP_ADD_MEMORY / CAP_UPDATE_MEMORY / CAP_FORGET_MEMORY.
+# Lifecycle: CAP_PREFETCH (pre-call injection) + CAP_SYNC_TURN (post-turn
+# write-back).
+CAP_SEARCH = "search"
+CAP_SEARCH_MEMORIES = "search_memories"
+CAP_SEARCH_RECALL = "search_recall"
+CAP_ADD_MEMORY = "add_memory"
+CAP_UPDATE_MEMORY = "update_memory"
+CAP_FORGET_MEMORY = "forget_memory"
+CAP_PREFETCH = "prefetch"
+CAP_SYNC_TURN = "sync_turn"
+
+# Providers predating the capability declaration implement search only.
+_DEFAULT_CAPABILITIES = frozenset({CAP_SEARCH})
 
 
 class SearchHitLike(Protocol):
@@ -43,8 +69,76 @@ class SearchHitLike(Protocol):
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class MemoryFactHit:
+    """One fact-memory hit merged across the L3/L4 stores."""
+
+    memory_id: uuid.UUID
+    source_layer: str  # "user_memory" (L3) | "knowledge_memory" (L4)
+    content: str
+    score: float
+    revision: int = 1
+    tags: list[str] = field(default_factory=list)
+    importance: float = 0.5
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RecallHit:
+    """One recalled conversation message (transcript-level)."""
+
+    recall_id: uuid.UUID
+    session_id: uuid.UUID
+    conversation_id: uuid.UUID | None
+    role: str
+    content: str
+    timestamp: datetime
+    score: float
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class RecallPage:
+    """Cursor-paged recall search result."""
+
+    hits: list[RecallHit]
+    next_cursor: str | None = None
+    # True when the page is empty or every hit is below the relevance signal
+    # threshold — drives the retrieval escalation hint.
+    low_signal: bool = False
+
+
+@dataclass(frozen=True)
+class MemoryWriteResult:
+    """Structured outcome of a tier-3 fact write (add/update/forget)."""
+
+    ok: bool
+    memory_id: uuid.UUID | None = None
+    revision: int | None = None
+    # Structured error code (e.g. "not_found", "revision_conflict",
+    # "duplicate") — None on success.
+    error: str | None = None
+    # Extra context for error rendering (e.g. {"current_revision": 4}).
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class PrefetchEntry:
+    """One memory entry selected for pre-call context injection."""
+
+    content: str
+    source: str  # provider-specific provenance label
+    score: float = 0.0
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 class MemoryProvider(Protocol):
-    """Contract for memory backends plugged in via ``hecate.memory_providers``."""
+    """Contract for memory backends plugged in via ``hecate.memory_providers``.
+
+    Implementations declare the subset they support via ``capabilities()``;
+    callers MUST route through ``provider_supports`` instead of probing with
+    calls. Methods outside the declared set are never invoked.
+    """
 
     async def search(
         self,
@@ -55,6 +149,105 @@ class MemoryProvider(Protocol):
         mode: str = "hybrid",
         workspace_id: str | None = None,
     ) -> list[SearchHitLike]: ...
+
+    async def search_memories(
+        self,
+        *,
+        query: str,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+        top_k: int = 5,
+        tags: list[str] | None = None,
+    ) -> list[MemoryFactHit]: ...
+
+    async def search_recall(
+        self,
+        *,
+        query: str,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        limit: int = 5,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        roles: list[str] | None = None,
+        cursor: str | None = None,
+        exclude_session_ids: list[uuid.UUID] | None = None,
+    ) -> RecallPage: ...
+
+    async def add_memory(
+        self,
+        *,
+        content: str,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+        tags: list[str] | None = None,
+        importance: float = 0.5,
+    ) -> MemoryWriteResult: ...
+
+    async def update_memory(
+        self,
+        *,
+        memory_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        patch: dict[str, Any],
+        expected_revision: int | None = None,
+        agent_id: uuid.UUID | None = None,
+    ) -> MemoryWriteResult: ...
+
+    async def forget_memory(
+        self,
+        *,
+        memory_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID | None = None,
+        expected_revision: int | None = None,
+    ) -> MemoryWriteResult: ...
+
+    async def prefetch(
+        self,
+        *,
+        query_text: str,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
+        max_entries: int = 5,
+        max_tokens: int = 500,
+    ) -> list[PrefetchEntry]: ...
+
+    async def sync_turn(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        session_id: uuid.UUID,
+        messages: list[dict[str, Any]],
+    ) -> None: ...
+
+    def capabilities(self) -> frozenset[str]: ...
+
+
+def provider_supports(provider: Any, capability: str) -> bool:
+    """Return whether ``provider`` declares ``capability``.
+
+    A provider without a ``capabilities()`` method is treated as search-only
+    (backward compatibility with pre-tiering implementations). A raising
+    ``capabilities()`` degrades to search-only with a warning — never blocks
+    the chat path.
+    """
+    caps_fn = getattr(provider, "capabilities", None)
+    if caps_fn is None:
+        return capability in _DEFAULT_CAPABILITIES
+    try:
+        caps = frozenset(caps_fn())
+    except Exception:
+        logger.warning(
+            "Memory provider capabilities() raised; treating as search-only",
+            exc_info=True,
+        )
+        return capability in _DEFAULT_CAPABILITIES
+    return capability in caps
 
 
 _module_cache: MemoryProvider | None = None
@@ -115,4 +308,23 @@ def reset_memory_provider_cache() -> None:
     _resolved = False
 
 
-__all__ = ["MemoryProvider", "SearchHitLike", "reset_memory_provider_cache", "resolve_memory_provider"]
+__all__ = [
+    "CAP_ADD_MEMORY",
+    "CAP_FORGET_MEMORY",
+    "CAP_PREFETCH",
+    "CAP_SEARCH",
+    "CAP_SEARCH_MEMORIES",
+    "CAP_SEARCH_RECALL",
+    "CAP_SYNC_TURN",
+    "CAP_UPDATE_MEMORY",
+    "MemoryFactHit",
+    "MemoryProvider",
+    "MemoryWriteResult",
+    "PrefetchEntry",
+    "RecallHit",
+    "RecallPage",
+    "SearchHitLike",
+    "provider_supports",
+    "reset_memory_provider_cache",
+    "resolve_memory_provider",
+]

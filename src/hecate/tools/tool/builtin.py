@@ -270,6 +270,178 @@ BUILTIN_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "required": ["fields"],
         },
     },
+    # -- Memory tools (agent-memory-tools). Gated by MEMORY_TOOLS_ENABLED at
+    # seeding time; conversation_search additionally by RECALL_INDEXING_ENABLED.
+    "memory_replace": {
+        "description": (
+            "Replace an exact string inside one of your memory blocks (persistent notes shown to "
+            "you every turn). old_string must appear exactly once; empty new_string deletes the "
+            "fragment. The block is never silently truncated — growing it past its limit errors."
+        ),
+        "risk_level": "MEDIUM",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "Memory block label (e.g. persona)"},
+                "old_string": {"type": "string", "description": "Exact text to replace (must match once)"},
+                "new_string": {"type": "string", "description": "Replacement text (empty string deletes)"},
+            },
+            "required": ["label", "old_string", "new_string"],
+        },
+    },
+    "memory_insert": {
+        "description": (
+            "Insert a line into one of your memory blocks. insert_line=-1 (default) appends at the "
+            "end; 0 inserts at the top; N inserts after line N. Never include line-number prefixes."
+        ),
+        "risk_level": "MEDIUM",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "Memory block label"},
+                "insert_text": {"type": "string", "description": "The line to insert"},
+                "insert_line": {
+                    "type": "integer",
+                    "description": "Insert after this line (-1 = append at end, 0 = top)",
+                    "default": -1,
+                },
+            },
+            "required": ["label", "insert_text"],
+        },
+    },
+    "memory_rethink": {
+        "description": (
+            "Rewrite one of your memory blocks wholesale. Use for sweeping changes when precise "
+            "edits would be tedious; for small corrections prefer memory_replace. The block must "
+            "already exist."
+        ),
+        "risk_level": "MEDIUM",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "description": "Memory block label"},
+                "new_content": {"type": "string", "description": "The full new block content"},
+            },
+            "required": ["label", "new_content"],
+        },
+    },
+    "memory_search": {
+        "description": (
+            "Search your long-term memories (user memories and knowledge facts) for information "
+            "relevant to a query. Returns ranked facts with their source layer and revision."
+        ),
+        "risk_level": "LOW",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query"},
+                "top_k": {"type": "integer", "description": "Max results (default 5, max 20)", "default": 5},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional tag filter (knowledge memories)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    "memory_add": {
+        "description": (
+            "Store a durable knowledge fact for future conversations. Check memory_search first and "
+            "use memory_update for near-duplicates instead of creating a redundant entry."
+        ),
+        "risk_level": "MEDIUM",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "The fact to store, one complete sentence"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "Optional categorization tags"},
+                "importance": {
+                    "type": "number",
+                    "description": "Importance score 0.0-1.0 (default 0.5)",
+                    "default": 0.5,
+                },
+            },
+            "required": ["content"],
+        },
+    },
+    "memory_update": {
+        "description": (
+            "Correct an existing memory entry in place. Pass expected_revision (from memory_search "
+            "or the previous write) to refuse the update when someone else changed it meanwhile."
+        ),
+        "risk_level": "MEDIUM",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string", "description": "ID of the memory entry to update"},
+                "content": {"type": "string", "description": "New content"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "New tags"},
+                "importance": {"type": "number", "description": "New importance 0.0-1.0"},
+                "expected_revision": {
+                    "type": "integer",
+                    "description": "Refuse the update unless the current revision matches",
+                },
+            },
+            "required": ["memory_id"],
+        },
+    },
+    "memory_forget": {
+        "description": (
+            "Retire a memory entry that is wrong or no longer applies. Soft-deleted: the record is "
+            "kept for audit but never returned by searches again."
+        ),
+        "risk_level": "MEDIUM",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "memory_id": {"type": "string", "description": "ID of the memory entry to forget"},
+                "expected_revision": {
+                    "type": "integer",
+                    "description": "Refuse the deletion unless the current revision matches",
+                },
+            },
+            "required": ["memory_id"],
+        },
+    },
+    "conversation_search": {
+        "description": (
+            "Search your past conversations with this user (across sessions). Returns message "
+            "excerpts with session pointers. If results are weak, reformulate the query, narrow "
+            "the date window, or exclude already-inspected sessions via exclude_session_ids."
+        ),
+        "risk_level": "LOW",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to search for in past conversations"},
+                "limit": {"type": "integer", "description": "Max messages (default 5, max 20)", "default": 5},
+                "start_date": {
+                    "type": "string",
+                    "description": "Only messages after this ISO-8601 timestamp",
+                },
+                "end_date": {
+                    "type": "string",
+                    "description": "Only messages before this ISO-8601 timestamp",
+                },
+                "roles": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["user", "assistant"]},
+                    "description": "Filter by message role (default: both)",
+                },
+                "cursor": {
+                    "type": "string",
+                    "description": "Opaque continuation token from a previous result page",
+                },
+                "exclude_session_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Session IDs to skip (from previous result pages)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 
@@ -284,10 +456,30 @@ _BROWSER_TOOLS = frozenset(
     }
 )
 
+# Memory tools route to the MemoryToolBackend (hecate-memory) instead of the
+# generic executor branches.
+_MEMORY_TOOLS = frozenset(
+    {
+        "memory_replace",
+        "memory_insert",
+        "memory_rethink",
+        "memory_search",
+        "memory_add",
+        "memory_update",
+        "memory_forget",
+        "conversation_search",
+    }
+)
+
 
 def get_browser_tool_names() -> frozenset[str]:
     """Return the set of tool names handled by the browser subsystem."""
     return _BROWSER_TOOLS
+
+
+def get_memory_tool_names() -> frozenset[str]:
+    """Return the set of tool names handled by the memory backend."""
+    return _MEMORY_TOOLS
 
 
 def get_risk_level(tool_name: str) -> str:
@@ -321,6 +513,7 @@ class BuiltInToolExecutor:
         browser_session_manager: Any | None = None,
         allowed_domains: list[str] | None = None,
         skill_loader: Any | None = None,
+        memory_backend: Any | None = None,
     ) -> None:
         self._search = search_provider
         self._workspace = Path(workspace_root).resolve()
@@ -331,6 +524,10 @@ class BuiltInToolExecutor:
         # None in paths without agent context (e.g. the MCP server surface):
         # load_skill then fails closed with an informative error.
         self._skill_loader = skill_loader
+        # MemoryToolBackend for the memory_* / conversation_search tools
+        # (agent-memory-tools). None → memory tools fail closed with an
+        # informative error instead of acting without a scope.
+        self._memory_backend = memory_backend
 
     async def execute(self, name: str, args: dict[str, Any], context: dict[str, Any] | None = None) -> Any:
         """Execute a built-in tool by name.
@@ -353,6 +550,15 @@ class BuiltInToolExecutor:
         """
         if name in _BROWSER_TOOLS:
             return await self._dispatch_browser(name, args, context)
+
+        if name in _MEMORY_TOOLS:
+            if self._memory_backend is None:
+                return {
+                    "ok": False,
+                    "error": "unavailable",
+                    "detail": "memory tools are not enabled in this execution path",
+                }
+            return await self._memory_backend.execute(name, args, context)
 
         if name == "execute_code":
             return await self._execute_code(args, context)

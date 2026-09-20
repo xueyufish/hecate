@@ -195,3 +195,30 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   package installed by a non-platform installer keeps its skills/MCP but
   the code component is skipped with a recorded warning (mirror of the
   stdio rule).
+
+## Memory tools & recall (agent-memory-tools)
+
+- **Memory tools fail closed on missing scope** — `memory_*` /
+  `conversation_search` require `workspace_id` and `agent_id` in the tool
+  execution context. The chat path and ToolWorker thread them
+  automatically; a custom executor call site that omits them gets a
+  `missing_scope` structured error, not an implicit-tenant fallback.
+- **Memory tools need the backend wired at the construction site** —
+  `BuiltInToolExecutor(memory_backend=...)` is only injected when
+  `MEMORY_TOOLS_ENABLED` is on (chat registry builder and the MCP server).
+  Without it the tools return `unavailable` instead of acting.
+- **`conversation_search` is double-gated** — it seeds only when BOTH
+  `MEMORY_TOOLS_ENABLED` and `RECALL_INDEXING_ENABLED` are on; searching
+  with indexing off yields empty low-signal pages, not an error.
+- **Recall `seq` is the event log version** — recall rows key on
+  `(session_id, content_hash, seq)` with `seq = event.version`. Direct
+  `index_messages` callers must pass `start_seq` aligned with the event
+  versions, or the per-session watermark (`max(event_version)`) will
+  re-index the same content under a different seq.
+- **Recall outlives event retention by design** — retention prunes the
+  `events` table only; recall rows survive until the owning conversation is
+  deleted (cascade) or a workspace TTL is configured
+  (`RECALL_TTL_DAYS`, 0 = indefinite).
+- **`memory_update` dedup is not an audit event** — `memory_add` on
+  near-identical content bumps `access_count` and reports
+  `deduplicated: true`; only real mutations land in `memory_edit_log`.

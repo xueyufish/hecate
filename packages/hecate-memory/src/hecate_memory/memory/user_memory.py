@@ -143,6 +143,7 @@ class UserMemoryService:
 
         new_importance = max(0.0, min(1.0, memory.importance + boost))
         memory.importance = new_importance
+        memory.revision += 1
         await self.db.flush()
 
         logger.debug(f"Updated memory {memory_id} importance to {new_importance}")
@@ -168,6 +169,7 @@ class UserMemoryService:
 
         memory.deleted = True
         memory.deleted_at = datetime.now(UTC)
+        memory.revision += 1
         await self.db.flush()
         logger.info(f"Deleted memory {memory_id}")
 

@@ -526,6 +526,17 @@ class ToolWorker(Worker):
                 "content": str(e),
                 "is_error": True,
             }
+        # Memory tools flag weak/empty retrieval results; the escalation hint
+        # processor consumes this marker at the next context assembly
+        # (agent-memory-tools, retrieval escalation gating).
+        if isinstance(result, dict) and result.get("low_signal"):
+            try:
+                from hecate.tools.tool.builtin import get_memory_tool_names
+
+                if name in get_memory_tool_names() and execution_context is not None:
+                    execution_context["memory_retrieval_low_signal"] = True
+            except ImportError:
+                pass
         if self._event_store and execution_context:
             from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
 
