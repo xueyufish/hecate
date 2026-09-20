@@ -528,7 +528,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | # | Feature | Dependencies | Effort |
 |---|---------|------|--------|
 | 1.3.19 | Event-Sourced Execution State (Log-as-Truth) ✅ *(see [ADR-030](../design/adr/030-event-sourced-execution-state.md))* — EventStore from observation log to state carrier: "model-visible ⟺ logged" runtime invariant, derive_messages() projection for model context, checkpoint = log-replay fold (snapshots demoted to materialized caches), incremental delta storage (O(N²)→near-linear; note: deer-flow's DeltaChannel is the reference but sits UNRELEASED in its 2.1.0 milestone; OMA v1.15.0 durable-approval checkpoint schema v4 is the shipped production reference). Include a dsh-invariants-style runtime relational invariant layer (openTurn/openStep/pendingCalls, frozen result snapshots, dispatch-tree consistency) | EventStore ✅ + CheckpointStore ✅ | L |
-| 5.9 | Skill Provider Registry (enhancement) — provider registry (source origins: project/user/bundled/custom) + rank precedence (lower wins) + kebab-case name grammar + model/user invocation policy separation; replaces plain directory scan | 5.9 Skill Loading ✅ | M |
+| 5.9 (5.9-enh) ✅ | Skill Provider Registry — `provider` classification (bundled/user/project; `custom` reserved; plugin rows outside rank) + deterministic rank shadowing (project > user > bundled) + same-name cross-provider coexistence (dual-index migration) + `model_invocable`/`user_invocable` invocation-policy switches + `trust_tier` anti-escalation (unknown sources capped at community) + `content_hash` aligned with agent-version ref-manifest field set. **Shipped 2026-09-20**（真扫描归 5.13a;外部 registry 连接器与 studio 管理页延后;archive `openspec/changes/archive/2026-09-20-skill-provider-registry/`） | 5.9 Skill Loading ✅ | M |
 
 ### Competitive Gap Features (NEW — competitor analysis)
 
@@ -1092,7 +1092,7 @@ EventStore → Event-Sourced Execution State (1.3.19) → Run Replay (8.20) + Pr
 EventStore (1.3.19) → HITL durable audit pairs + middleware waterfall events
 Pregel + Collaboration Patterns (2.7a ✅) → Dynamic Orchestration (1.3.18) → runtime task DAG → 7th pattern → Advanced Orchestration (1.3.18a, P4: consensus / PlanPatch repair / async steering / plan-freeze replay) + UI companion (P3, follow-up change on pattern-selector-ui / multi-agent-canvas / 8.20)
 Built-in Tools (5.1 ✅) → Browser Automation (6.27, P3) → Computer-use (6.27a, P4)
-Skill Loading (5.9 ✅) → Skill Provider Registry (5.9 enhancement) → community skills ecosystem
+Skill Loading (5.9 ✅) → Skill Provider Registry (5.9-enh ✅) → community skills ecosystem
 A2A (2.10 ✅) → ACP Support (2.13, P4) → external coding agents as worker nodes
 ```
 

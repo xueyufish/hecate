@@ -214,6 +214,14 @@ class Settings(BaseSettings):
     # inject-all-skills behaviour (rollout escape hatch).
     SKILL_PROGRESSIVE_DISCLOSURE: bool = True
 
+    # Skill provider registry (5.9-enh): platform-level source allowlist for
+    # elevated trust tiers. Patterns match the skill's package origin (the
+    # `origin` column, e.g. a git URL prefix); only platform operators may set
+    # this — workspace admins cannot elevate arbitrary sources to
+    # official/trusted through workspace APIs. Empty = only bundled skills
+    # are official. Real scanning lands with 5.13a.
+    SKILL_TRUSTED_SOURCE_PATTERNS: list[str] = []
+
     # Self-evolution closed loop (1.3.6f). Disabled by default: the loop is
     # switched on per deployment after eval-gate review.
     SKILL_EVOLUTION_ENABLED: bool = False

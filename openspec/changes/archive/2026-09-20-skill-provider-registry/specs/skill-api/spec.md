@@ -1,9 +1,6 @@
-# skill-api Specification
+# Spec Delta
 
-## Purpose
-Provides the workspace-facing skill CRUD and SKILL.md import API, including provider-registry metadata exposure and invocation-policy validation.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Create skill via API
 The system SHALL provide a `POST /api/skills` endpoint that accepts a JSON body with name, description, source, instructions, and optional fields, creates a `SkillModel` record, and returns the created skill. The `SkillModel` SHALL support the source values `system`, `user`, `project`, and `plugin`, and SHALL carry nullable provenance fields `origin` (string) and `plugin_id` (UUID, set only for `source="plugin"` rows). This endpoint SHALL accept only the user-facing values (`system`, `user`, `project`); `plugin` is reserved for the ingestion pipeline. The endpoint SHALL also accept optional invocation-policy flags `model_invocable` and `user_invocable` (both defaulting to `true`), and SHALL reject the combination `auto_load=true` with `model_invocable=false` as a validation error. The `trust_tier` is not client-settable on this endpoint: user- and project-origin skills are created with `community`, and the response SHALL include `provider`, `trust_tier`, `model_invocable`, `user_invocable`, and `content_hash`. A create request whose `name` and resolved `provider` collide with an existing skill in the same workspace SHALL return 409 Conflict; same-name skills with a different `provider` SHALL be allowed to coexist.
@@ -36,31 +33,6 @@ The system SHALL provide a `POST /api/skills` endpoint that accepts a JSON body 
 - **WHEN** `POST /api/skills` is called without `model_invocable` or `user_invocable`
 - **THEN** the created skill SHALL have both flags set to `true`
 
-
-### Requirement: Update skill via API
-The system SHALL provide a `PUT /api/skills/{id}` endpoint that accepts a JSON body with optional fields to update, modifies the `SkillModel` record, and returns the updated skill.
-
-#### Scenario: Update skill description
-- **WHEN** `PUT /api/skills/{id}` is called with `{"description": "Updated description"}`
-- **THEN** the skill's description SHALL be updated and the API SHALL return 200 with full skill data
-
-#### Scenario: Update non-existent skill
-- **WHEN** `PUT /api/skills/{id}` is called with a non-existent ID
-- **THEN** the API SHALL return 404 Not Found
-
-
-### Requirement: Delete skill via API
-The system SHALL provide a `DELETE /api/skills/{id}` endpoint that soft-deletes the `SkillModel` record (sets `deleted_at` timestamp).
-
-#### Scenario: Delete existing skill
-- **WHEN** `DELETE /api/skills/{id}` is called for an existing skill
-- **THEN** the skill SHALL be soft-deleted (deleted_at set) and the API SHALL return 200
-
-#### Scenario: Delete non-existent skill
-- **WHEN** `DELETE /api/skills/{id}` is called with a non-existent ID
-- **THEN** the API SHALL return 404 Not Found
-
-
 ### Requirement: Import skill from SKILL.md file
 The system SHALL provide a `POST /api/skills/import` endpoint that accepts a SKILL.md file (YAML frontmatter + Markdown body), parses it, and creates a `SkillModel` record with `source="user"`, a `content_hash` computed over the same content field set used by agent-version reference manifests (name, instructions, allowed tools, scripts, references), and default invocation-policy flags. A same-name skill of a different `provider` in the workspace SHALL NOT block the import; a same-name `user`-provider skill SHALL be rejected with 409 Conflict.
 
@@ -84,45 +56,7 @@ The system SHALL provide a `POST /api/skills/import` endpoint that accepts a SKI
 - **WHEN** the workspace already contains a `user`-provider skill with the same name as the imported file
 - **THEN** the API SHALL return 409 Conflict
 
-
-### Requirement: Manage agent-skill associations
-The system SHALL provide endpoints to add and remove skill associations from an agent.
-
-#### Scenario: Add skill to agent
-- **WHEN** `POST /api/agents/{id}/skills` is called with `{"skill_name": "code-review"}`
-- **THEN** the skill name SHALL be appended to the agent's `skills` list if not already present, and the API SHALL return 200 with the updated skills list
-
-#### Scenario: Add duplicate skill to agent
-- **WHEN** `POST /api/agents/{id}/skills` is called with a skill name already in the agent's `skills` list
-- **THEN** the API SHALL return 200 with the unchanged skills list (idempotent)
-
-#### Scenario: Remove skill from agent
-- **WHEN** `DELETE /api/agents/{id}/skills/{skill_name}` is called
-- **THEN** the skill name SHALL be removed from the agent's `skills` list and the API SHALL return 200
-
-#### Scenario: Remove non-existent skill from agent
-- **WHEN** `DELETE /api/agents/{id}/skills/{skill_name}` is called with a skill name not in the agent's `skills` list
-- **THEN** the API SHALL return 200 with the unchanged skills list (idempotent)
-
-
-
-
-
-### Requirement: Plugin-derived skills are lifecycle-managed
-Skills with `source="plugin"` SHALL be readable through the skill list and detail endpoints with their provenance fields (`origin`, `plugin_id`) visible. Update and delete operations on a plugin-derived skill via the skill API SHALL be rejected with 409 Conflict directing the caller to the owning plugin's lifecycle (enable/disable/uninstall); these rows are managed exclusively by the ingestion pipeline.
-
-#### Scenario: List includes plugin-derived skills
-- **WHEN** `GET /api/skills` is called in a workspace with an installed agent-plugin package
-- **THEN** the imported skills appear with `source="plugin"` and their `origin` and `plugin_id` populated
-
-#### Scenario: Update plugin-derived skill rejected
-- **WHEN** `PUT /api/skills/{id}` is called for a skill with `source="plugin"`
-- **THEN** the API SHALL return 409 Conflict without modifying the skill
-
-#### Scenario: Delete plugin-derived skill rejected
-- **WHEN** `DELETE /api/skills/{id}` is called for a skill with `source="plugin"`
-- **THEN** the API SHALL return 409 Conflict without deleting the skill
-
+## ADDED Requirements
 
 ### Requirement: Skill API exposes provider registry metadata
 The skill list and detail endpoints SHALL include, for every skill, its `provider`, `trust_tier`, `model_invocable`, `user_invocable`, and `content_hash`. The `trust_tier` and `provider` SHALL be read-only on workspace-scoped update paths: an update request attempting to change either SHALL be rejected with a validation error. Workspace-scoped update requests MAY change the invocation-policy flags, subject to the auto-load consistency rule.

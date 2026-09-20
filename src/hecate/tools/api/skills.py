@@ -20,11 +20,31 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
+from hecate.core.canonical_hash import canonical_hash
 from hecate.core.deps import get_db
 from hecate.core.deps_workspace import get_auth_context
 from hecate.models.skill import SkillCreateSchema, SkillModel, SkillReadSchema, SkillUpdateSchema
+from hecate.tools.skill.provider_registry import PROVIDER_BUNDLED, derive_provider
 
 router = APIRouter()
+
+
+def _compute_content_hash(skill: SkillModel) -> str:
+    """Hash the content-field set shared with agent-version ref manifests."""
+    return canonical_hash(
+        {
+            "name": skill.name,
+            "instructions": skill.instructions,
+            "allowed_tools": skill.allowed_tools,
+            "scripts": skill.scripts,
+            "references": skill.references,
+        }
+    )
+
+
+def _derive_trust_tier(provider: str | None) -> str:
+    """Platform-managed tier: bundled skills are official, everything else community."""
+    return "official" if provider == PROVIDER_BUNDLED else "community"
 
 
 async def _get_skill_with_ownership_check(
@@ -93,12 +113,14 @@ async def create_skill(
         HTTPException: 409 if skill name already exists in workspace.
     """
     workspace_id = ctx.workspace_id or uuid.UUID(int=0)
+    provider = derive_provider(data.source)
 
-    # Check for duplicate name in workspace
+    # Same name + same provider collides; cross-provider names coexist (5.9-enh).
     existing = await db.execute(
         select(SkillModel).where(
             SkillModel.name == data.name,
             SkillModel.workspace_id == workspace_id,
+            SkillModel.provider == provider,
             ~SkillModel.deleted,
         )
     )
@@ -126,8 +148,14 @@ async def create_skill(
         references=data.references,
         max_tokens=data.max_tokens,
         auto_load=data.auto_load,
+        provider=provider,
+        trust_tier=_derive_trust_tier(provider),
+        model_invocable=data.model_invocable,
+        user_invocable=data.user_invocable,
     )
     db.add(skill)
+    await db.flush()
+    skill.content_hash = _compute_content_hash(skill)
     await db.flush()
     await db.refresh(skill)
     return SkillReadSchema.model_validate(skill).model_dump()
@@ -272,6 +300,24 @@ async def update_skill(
         else:
             setattr(skill, field, value)
 
+    # Final-state consistency: a payload-only flag change can conflict with
+    # the stored auto_load value (the schema validator only sees the payload).
+    if skill.auto_load and skill.model_invocable is False:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "auto_load requires model_invocable=true",
+                    "details": None,
+                }
+            },
+        )
+
+    content_fields = {"name", "instructions", "allowed_tools", "scripts", "references"}
+    if content_fields & update_data.keys():
+        skill.content_hash = _compute_content_hash(skill)
+
     await db.flush()
     await db.refresh(skill)
     return SkillReadSchema.model_validate(skill).model_dump()
@@ -396,12 +442,13 @@ async def import_skill(
         ) from None
 
     workspace_id = ctx.workspace_id or uuid.UUID(int=0)
-
-    # Check for duplicate name
+    # Imports create user-origin skills; collide only with the same provider.
+    provider = derive_provider(parsed.get("source", "user"))
     existing = await db.execute(
         select(SkillModel).where(
             SkillModel.name == parsed["name"],
             SkillModel.workspace_id == workspace_id,
+            SkillModel.provider == provider,
             ~SkillModel.deleted,
         )
     )
@@ -424,8 +471,12 @@ async def import_skill(
         source=parsed.get("source", "user"),
         instructions=parsed.get("instructions", ""),
         metadata_=parsed.get("metadata", {}),
+        provider=provider,
+        trust_tier=_derive_trust_tier(provider),
     )
     db.add(skill)
+    await db.flush()
+    skill.content_hash = _compute_content_hash(skill)
     await db.flush()
     await db.refresh(skill)
     return SkillReadSchema.model_validate(skill).model_dump()

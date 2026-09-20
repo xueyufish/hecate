@@ -29,6 +29,7 @@ from hecate.models.agent import AgentModel
 from hecate.models.evolution import SkillUsageEventModel
 from hecate.models.plugin import PluginModel
 from hecate.models.skill import SkillModel
+from hecate.tools.skill.provider_registry import resolve_precedence_map
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,12 @@ class SkillLoader:
             skill = skills_by_name.get(name)
             if skill is None:
                 continue
+            if not skill.model_invocable:
+                logger.warning(
+                    "Auto-load skill '%s' is not model-invocable; excluded from injection",
+                    name,
+                )
+                continue
             text = self._format_single_skill(skill)
             if len(text) // CHARS_PER_TOKEN > skill.max_tokens:
                 text = self._truncate_to_tokens(text, skill.max_tokens)
@@ -146,6 +153,12 @@ class SkillLoader:
                 continue
             skill = skills_by_name.get(name)
             if skill is None or skill.auto_load:
+                continue
+            if not skill.model_invocable:
+                logger.warning(
+                    "Skill '%s' is not model-invocable; excluded from L1 catalog",
+                    name,
+                )
                 continue
             description = skill.description[:DESCRIPTION_CHAR_BUDGET]
             catalog_entries.append((name, f'<skill name="{skill.name}" description="{description}"/>'))
@@ -205,6 +218,10 @@ class SkillLoader:
         if not skills:
             raise SkillNotAdvertisedError(f"Skill '{skill_name}' not found in workspace {workspace_id}")
         skill = skills[0]
+        if skill.model_invocable is False:
+            raise SkillNotAdvertisedError(
+                f"Skill '{skill_name}' is not model-invocable and cannot be loaded by the model"
+            )
 
         text = self._format_single_skill(skill)
         if len(text) // CHARS_PER_TOKEN > skill.max_tokens:
@@ -248,6 +265,12 @@ class SkillLoader:
 
         truncated: list[tuple[str, str]] = []
         for skill in skills:
+            if not skill.model_invocable:
+                logger.warning(
+                    "Skill '%s' is not model-invocable; excluded from injection",
+                    skill.name,
+                )
+                continue
             text = self._format_single_skill(skill)
             est_tokens = len(text) // CHARS_PER_TOKEN
             if est_tokens > skill.max_tokens:
@@ -274,10 +297,12 @@ class SkillLoader:
         return result.scalar_one_or_none()
 
     async def _query_auto_load_skills(self, workspace_id: UUID) -> list[SkillModel]:
-        """Query all skills with auto_load=True in workspace.
+        """Query skills with auto_load=True, resolving same-name candidates.
 
-        Plugin-derived skills load only while their owning package is
-        enabled (the package enable bit is the single source of truth).
+        Same-name rows across providers collapse to the highest-precedence
+        match (project > user > bundled). Plugin-derived skills load only
+        while their owning package is enabled (the package enable bit is
+        the single source of truth).
         """
         result = await self._db.execute(
             select(SkillModel)
@@ -289,7 +314,8 @@ class SkillLoader:
                 self._plugin_enabled_condition(),
             )
         )
-        return list(result.scalars().all())
+        winners = resolve_precedence_map(list(result.scalars().all()))
+        return list(winners.values())
 
     @staticmethod
     def _plugin_enabled_condition():
@@ -304,10 +330,13 @@ class SkillLoader:
         names: list[str],
         workspace_id: UUID,
     ) -> list[SkillModel]:
-        """Load skills by name within workspace (including system skills).
+        """Load skills by name, one winner per name (including system skills).
 
-        Plugin-derived skills are skipped (like missing skills) when their
-        owning package is disabled or soft-deleted.
+        Same-name rows across providers (project/user/bundled, workspace and
+        zero-UUID domains) collapse to the highest-precedence match, so
+        shadowing is deterministic regardless of storage order. Plugin-derived
+        skills are skipped (like missing skills) when their owning package is
+        disabled or soft-deleted.
         """
         zero_uuid = uuid.UUID(int=0)
         result = await self._db.execute(
@@ -320,7 +349,8 @@ class SkillLoader:
                 self._plugin_enabled_condition(),
             )
         )
-        return list(result.scalars().all())
+        winners = resolve_precedence_map(list(result.scalars().all()))
+        return list(winners.values())
 
     def _format_single_skill(self, skill: SkillModel) -> str:
         """Format a single skill as full XML block (L2 content)."""

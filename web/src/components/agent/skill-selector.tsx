@@ -9,6 +9,8 @@ interface Skill {
   id: string;
   name: string;
   description: string;
+  provider?: string | null;
+  trust_tier?: string;
 }
 
 interface SkillSelectorProps {
@@ -25,11 +27,16 @@ export function SkillSelector({ selected, onChange }: SkillSelectorProps) {
       .get<{ items: Skill[] }>("/api/skills")
       .then((res) =>
         setOptions(
-          (res.items || []).map((s) => ({
-            id: s.id,
-            label: s.name,
-            description: s.description,
-          }))
+          (res.items || []).map((s) => {
+            // Provider registry (5.9-enh): surface origin + trust tier so
+            // operators can tell bundled/user/project skills apart.
+            const badge = s.provider ? `[${s.provider}${s.trust_tier ? ` · ${s.trust_tier}` : ""}] ` : "";
+            return {
+              id: s.id,
+              label: s.name,
+              description: `${badge}${s.description}`,
+            };
+          })
         )
       )
       .catch(() => setOptions([]))

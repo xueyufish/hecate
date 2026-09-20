@@ -222,3 +222,28 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
 - **`memory_update` dedup is not an audit event** — `memory_add` on
   near-identical content bumps `access_count` and reports
   `deduplicated: true`; only real mutations land in `memory_edit_log`.
+
+## Skill provider registry (5.9-enh)
+
+- **`provider` is not `origin`** — `SkillModel.origin` (String 1024) holds
+  the plugin-package provenance (a git URL etc., set by 5.5c ingestion);
+  `SkillModel.provider` is the rank-precedence classification
+  (`bundled`/`user`/`project`; `custom` reserved). Plugin rows keep
+  `provider = NULL` and stay outside rank competition on purpose.
+- **Same-name rows now coexist — uniqueness moved with them** — the old
+  `(workspace_id, name, deleted, deleted_at)` unique index was replaced by
+  `(workspace_id, name, provider, deleted, deleted_at)` plus a partial
+  unique index for `provider IS NULL` rows (keeps plugin one-row-per-name).
+  Same-name cross-provider rows are legal; the 409 on create/import fires
+  only for same name AND same provider.
+- **Shadowing must go through `resolve_by_precedence`** — with multiple
+  rows per name, "query and take the last row" silently changes meaning.
+  Any new consumer of same-name candidates (loader, future 5.9d pinning)
+  must resolve via `hecate.tools.skill.provider_registry`, whose order
+  (project > user > bundled; unranked last) is the contract.
+- **`auto_load` requires `model_invocable=true`** — enforced both at the
+  schema level (create/update payloads) and in the update handler
+  (final-state check catches flag changes that collide with a stored
+  `auto_load=true`). The loader additionally filters `model_invocable=False`
+  skills out of every model-visible surface, so drifted rows degrade to
+  invisible rather than erroring.
