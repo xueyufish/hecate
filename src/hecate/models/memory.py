@@ -13,6 +13,11 @@ Defines the persistence layer (SQLAlchemy) and API schemas (Pydantic) for:
   vectors live in the Qdrant ``hecate_recall`` collection.
 - **MemoryEditLogModel** — append-only audit trail for memory mutations made
   through agent memory tools (L1 edits, L3/L4 update/forget).
+- **ConsolidationRunModel** — run-level audit trail for sleep-time memory
+  consolidation (trigger, review window, per-operation results); doubles as
+  the per-unit consolidation watermark source (latest SUCCESS ``window_end``).
+- **ConsolidationPressureFlagModel** — pending pressure markers written by the
+  memory pressure alert and consumed by the consolidation trigger bus.
 """
 
 from __future__ import annotations
@@ -23,7 +28,17 @@ from typing import Any
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint  # noqa: I001
+from sqlalchemy import (  # noqa: I001
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -107,6 +122,9 @@ class MemoryModel(BaseModel):
     embedding: Mapped[list[float]] = mapped_column(JSON, nullable=False, default=list)
     # Optimistic-concurrency counter, bumped on every successful mutation.
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # Set when a consolidation SUPERSEDE replaces this memory: pointer to the
+    # successor row. The row is soft-deleted but retained for audit/lineage.
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
 
     __table_args__ = (
         Index("idx_memories_workspace", "workspace_id", "deleted"),
@@ -152,6 +170,8 @@ class KnowledgeMemoryModel(BaseModel):
     source: Mapped[str] = mapped_column(String(50), nullable=False, default="agent_tool")
     # Optimistic-concurrency counter, bumped on every successful mutation.
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    # Consolidation SUPERSEDE pointer — see MemoryModel.superseded_by.
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id"),
         nullable=True,
@@ -248,6 +268,101 @@ class MemoryEditLogModel(BaseModel):
         Index("idx_memory_edit_log_workspace", "workspace_id", "created_at"),
         Index("idx_memory_edit_log_target", "target_type", "target_id"),
         Index("idx_memory_edit_log_agent", "workspace_id", "agent_id"),
+    )
+
+
+class ConsolidationRunModel(BaseModel):
+    """ORM model for sleep-time memory consolidation run audit.
+
+    One row per consolidation attempt on a single consolidation unit
+    ``(workspace_id, agent_id, user_id)`` — user_id NULL means the
+    agent-level unit. Append-only: rows are never rewritten by later runs.
+
+    Doubles as the per-unit watermark source: the latest ``SUCCESS`` run's
+    ``window_end`` is the review-window lower bound for the next run.
+
+    Key fields:
+
+    - **workspace_id / agent_id / user_id** — the consolidated unit.
+    - **trigger** — what scheduled this run: ``cron`` / ``idle`` /
+      ``pressure`` / ``manual``.
+    - **window_start / window_end** — review window bounds (transcript
+      created_at range) covered by this run.
+    - **candidate_count / adopted_count / rejected_count / failed_count** —
+      pipeline tallies (rejected = security/dedupe/allowlist refusals).
+    - **llm_calls** — LLM invocations spent (budget observability).
+    - **status** — ``success`` (all planned operations applied, watermark
+      advances) / ``partial`` (some operations applied, watermark does not
+      advance — unit is retried) / ``failed`` (pipeline error before or
+      during application).
+    - **degraded** — True when similarity scoring ran in exact-match
+      fallback mode (embedding unavailable).
+    - **operations** — JSON list of per-operation results
+      (op / target / outcome / detail).
+    - **error** — pipeline error detail when status is ``failed``.
+    """
+
+    __tablename__ = "consolidation_runs"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    trigger: Mapped[str] = mapped_column(String(20), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    candidate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    adopted_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rejected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    llm_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="running")
+    degraded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    operations: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=False, default=list
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+
+    __table_args__ = (
+        Index("idx_consolidation_runs_workspace", "workspace_id", "deleted"),
+        Index("idx_consolidation_runs_unit", "workspace_id", "agent_id", "status", "created_at"),
+    )
+
+
+class ConsolidationPressureFlagModel(BaseModel):
+    """Pending memory-pressure marker for a consolidation unit.
+
+    Written (best-effort) by the memory pressure alert when a session's
+    context usage first crosses the pressure threshold; consumed (deleted)
+    by the consolidation trigger bus, which schedules flagged units first.
+
+    ``user_id`` uses the zero-UUID sentinel for the agent-level unit so the
+    unique constraint keeps at most one flag per unit (SQL NULLs would be
+    treated as distinct).
+    """
+
+    __tablename__ = "consolidation_pressure_flags"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "agent_id",
+            "user_id",
+            name="uq_consolidation_pressure_flags_unit",
+        ),
+        Index("idx_consolidation_pressure_flags_unit", "workspace_id", "agent_id"),
     )
 
 
@@ -423,4 +538,44 @@ class MemoryEditLogReadSchema(PydanticBase):
     revision_after: int | None
     before_summary: str | None
     after_summary: str | None
+
+
+# --- Consolidation Schemas ---
+
+
+class ConsolidationOperationRecord(PydanticBase):
+    """One entry of a consolidation run's per-operation result list."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    op: str = Field(..., pattern="^(ADD|UPDATE|SUPERSEDE|NOOP|UPDATE_BLOCK)$")
+    target_type: str | None = Field(None, pattern="^(user_memory|knowledge_memory|memory_block)$")
+    target_id: uuid.UUID | None = None
+    content_summary: str | None = None
+    outcome: str = Field(..., pattern="^(applied|rejected|skipped|failed)$")
+    detail: str | None = None
+
+
+class ConsolidationRunReadSchema(PydanticBase):
+    """Schema for reading a consolidation run audit record."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    agent_id: uuid.UUID
+    user_id: uuid.UUID | None
+    trigger: str
+    window_start: datetime
+    window_end: datetime
+    candidate_count: int
+    adopted_count: int
+    rejected_count: int
+    failed_count: int
+    llm_calls: int
+    status: str
+    degraded: bool
+    operations: list[dict[str, Any]]
+    error: str | None
     created_at: datetime
+    updated_at: datetime

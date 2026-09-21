@@ -428,11 +428,20 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
     await start_siem_export(app)
     await start_online_evaluation_worker(app)
     start_recall_indexer()
+    from hecate.core.composition.consolidation import start_consolidation
+
+    start_consolidation()
 
     try:
         yield
     finally:
         # Shutdown — reverse order.
+        try:
+            from hecate.core.composition.consolidation import stop_consolidation
+
+            await stop_consolidation()
+        except ImportError:
+            pass
         try:
             from hecate_memory.memory.recall_indexer import stop_recall_indexer
 

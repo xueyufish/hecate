@@ -119,6 +119,35 @@ class Settings(BaseSettings):
     MEMORY_PREFETCH_MAX_ENTRIES: int = 5
     MEMORY_PREFETCH_MAX_TOKENS: int = 500
 
+    # Sleep-time memory consolidation (memory-consolidation change). All
+    # consolidation knobs default to the safe/off posture; enabling requires
+    # explicit configuration.
+    # CONSOLIDATION_ENABLED: master switch for the consolidation trigger bus
+    # (cron schedule + idle sweep + pressure-flag priority) and engine.
+    CONSOLIDATION_ENABLED: bool = False
+    # Cron expression for the fixed_interval trigger (5-field, UTC).
+    CONSOLIDATION_SCHEDULE: str = "0 2 * * *"
+    # Idle sweep: how often (seconds) to scan for quiet units with new
+    # transcripts; 0 disables the idle trigger (cron still runs).
+    CONSOLIDATION_IDLE_CHECK_INTERVAL_SECONDS: int = 300
+    # Idle sweep: a unit counts as quiet when its last recall row is at
+    # least this many seconds old.
+    CONSOLIDATION_IDLE_QUIET_SECONDS: int = 1800
+    # Per-run budget caps: LLM invocations and memory mutations. A run that
+    # hits either cap stops cleanly; remaining candidates wait for the next
+    # window.
+    CONSOLIDATION_MAX_LLM_CALLS_PER_RUN: int = 10
+    CONSOLIDATION_MAX_MUTATIONS_PER_RUN: int = 50
+    # Cosine similarity above which a candidate is treated as a near-
+    # duplicate of an existing memory (drives UPDATE/SUPERSEDE vs ADD).
+    CONSOLIDATION_SIMILARITY_THRESHOLD: float = 0.85
+    # MEMORY_PRESSURE_NUDGE_ENABLED: inject the memory pressure alert hint
+    # (usage numbers + persist-to-memory directive) into the projection when
+    # usage crosses MEMORY_PRESSURE_NUDGE_THRESHOLD, and mark the session's
+    # consolidation unit for priority processing.
+    MEMORY_PRESSURE_NUDGE_ENABLED: bool = False
+    MEMORY_PRESSURE_NUDGE_THRESHOLD: float = 0.9
+
     # LLM gateway backend (hecate.llm_providers entry point, phase-4
     # follow-ups). Names: "litellm" (hecate-llm shipped in-process, default)
     # or any third-party gateway implementing the LLMGateway Protocol.
