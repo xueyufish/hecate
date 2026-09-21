@@ -14,7 +14,12 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.models.memory import MemoryCreateSchema, MemoryModel, MemoryReadSchema
+from hecate.models.memory import (
+    MemoryCreateSchema,
+    MemoryEditLogModel,
+    MemoryModel,
+    MemoryReadSchema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +177,67 @@ class UserMemoryService:
         memory.revision += 1
         await self.db.flush()
         logger.info(f"Deleted memory {memory_id}")
+
+    async def supersede_memory(
+        self,
+        workspace_id: uuid.UUID,
+        memory_id: uuid.UUID,
+        superseded_by: uuid.UUID,
+        expected_revision: int | None = None,
+        *,
+        agent_id: uuid.UUID | None = None,
+    ) -> MemoryModel | None:
+        """Supersede a memory: point it at its successor and soft-delete it.
+
+        Consolidation replaces conflicting facts instead of overwriting or
+        deleting them — the old row stays queryable with a ``superseded_by``
+        lineage pointer. Writes one ``memory_edit_log`` audit row
+        (``tool_name="consolidation"``) like every other memory mutation.
+
+        Args:
+            workspace_id: The workspace for tenant isolation.
+            memory_id: The memory being replaced.
+            superseded_by: ID of the successor memory.
+            expected_revision: Optional optimistic-concurrency guard.
+            agent_id: Owning agent, for the audit row attribution.
+
+        Returns:
+            The superseded memory, or None if not found.
+
+        Raises:
+            ValueError: If the expected revision does not match.
+        """
+        memory = await self._get_by_id(workspace_id, memory_id)
+        if memory is None:
+            return None
+        if expected_revision is not None and memory.revision != expected_revision:
+            raise ValueError(
+                f"Revision conflict for memory {memory_id}: expected {expected_revision}, got {memory.revision}"
+            )
+
+        revision_after = memory.revision + 1
+        memory.superseded_by = superseded_by
+        memory.deleted = True
+        memory.deleted_at = datetime.now(UTC)
+        memory.revision = revision_after
+        await self.db.flush()
+
+        if agent_id is not None:
+            self.db.add(
+                MemoryEditLogModel(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    tool_name="consolidation",
+                    target_type="user_memory",
+                    target_id=memory_id,
+                    revision_before=revision_after - 1,
+                    revision_after=revision_after,
+                    after_summary=f"superseded_by {superseded_by}",
+                )
+            )
+            await self.db.flush()
+        logger.info(f"Superseded memory {memory_id} -> {superseded_by}")
+        return memory
 
     async def list_memories(
         self,

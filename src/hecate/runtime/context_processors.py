@@ -517,6 +517,87 @@ class BudgetWarnProcessor(ContextProcessor):
         )
 
 
+class MemoryPressureNudgeProcessor(ContextProcessor):
+    """Persist-to-memory directive when usage crosses the pressure threshold.
+
+    The memory-pressure-alert half of the consolidation loop: at a
+    threshold *above* the budget warning (default 0.9 vs 0.8), inject a
+    model-visible directive to write durable facts into memory *before*
+    compaction claims them, and mark the session's consolidation unit so
+    the trigger bus processes it first at the next window.
+
+    Same latching discipline as :class:`BudgetWarnProcessor`: injected at
+    most once per threshold crossing, latch resets when usage falls back
+    below. Marker writes are best-effort — any failure degrades to
+    hint-only and never fails the turn.
+    """
+
+    name = "memory_pressure_nudge"
+    run_mode = "always"
+
+    def __init__(self, threshold: float = 0.9) -> None:
+        self.threshold = threshold
+
+    async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
+        from hecate.core.config import settings
+
+        meta: dict[str, Any] = {"nudged": False}
+        if not settings.MEMORY_PRESSURE_NUDGE_ENABLED:
+            meta["reason"] = "disabled"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        tokens = ctx.tokens(flatten_units(units))
+        threshold_tokens = ctx.budget * self.threshold
+        key = f"pressure_latched:{ctx.session_id}:{id(self)}"
+        latched = ctx.state.get(key, False)
+
+        if tokens < threshold_tokens:
+            ctx.state[key] = False
+            meta["tokens"] = tokens
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+        if latched:
+            meta["latched"] = True
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+        ctx.state[key] = True
+
+        hint = {
+            "role": "user",
+            "content": (
+                f"[memory_pressure] Context usage is at {tokens} of {ctx.budget} tokens "
+                f"({self.threshold:.0%} threshold). Before this context is compacted, persist anything "
+                "that must survive this session into long-term memory now using your memory tools "
+                "(memory_replace / memory_insert / memory_rethink / memory_update)."
+            ),
+        }
+        out = [*units, ContextUnit([hint])]
+        meta.update({"nudged": True, "tokens": tokens, "threshold": threshold_tokens})
+
+        # Best-effort trigger-bus mark: priority for the next consolidation
+        # window. Failure is hint-only by contract.
+        try:
+            if await self._mark_pressure(ctx):
+                meta["marked"] = True
+        except Exception as e:
+            logger.warning("Memory pressure mark failed on session %s: %s", ctx.session_id, e)
+        return out, ProcessorResult(processor=self.name, level=LEVEL_WARN, metadata=meta)
+
+    async def _mark_pressure(self, ctx: ChainContext) -> bool:
+        """Mark the session's consolidation unit for priority processing."""
+        from hecate_memory.memory.consolidation import mark_unit_pressure
+
+        execution_context = ctx.execution_context or {}
+        raw_ws = execution_context.get("workspace_id")
+        raw_agent = execution_context.get("agent_id")
+        if not raw_ws or not raw_agent:
+            return False
+        raw_user = execution_context.get("user_id")
+        return await mark_unit_pressure(
+            uuid.UUID(str(raw_ws)),
+            uuid.UUID(str(raw_agent)),
+            uuid.UUID(str(raw_user)) if raw_user else None,
+        )
+
+
 class KVCacheAwareProcessor(ContextProcessor):
     """Mark a protected stable prefix to maximize provider prompt-cache reuse.
 

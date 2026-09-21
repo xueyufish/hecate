@@ -35,6 +35,7 @@ from hecate.runtime.context_processors import (
     FailurePolicy,
     HintProcessor,
     KVCacheAwareProcessor,
+    MemoryPressureNudgeProcessor,
     OffloadProcessor,
     RoundWindowProcessor,
     TerminationProcessor,
@@ -65,6 +66,7 @@ _PLATFORM_DEFAULT_POLICY: list[str] = [
 # T0 chain by naming itself in configuration (ADR-029).
 PROCESSOR_REGISTRY: dict[str, type[ContextProcessor]] = {
     BudgetWarnProcessor.name: BudgetWarnProcessor,
+    MemoryPressureNudgeProcessor.name: MemoryPressureNudgeProcessor,
     ToolResultTruncationProcessor.name: ToolResultTruncationProcessor,
     KVCacheAwareProcessor.name: KVCacheAwareProcessor,
     RoundWindowProcessor.name: RoundWindowProcessor,
@@ -78,6 +80,7 @@ PROCESSOR_REGISTRY: dict[str, type[ContextProcessor]] = {
 # fail-fast validation of unknown fields and bad values.
 _PARAM_SPECS: dict[str, dict[str, tuple[type, ...]]] = {
     "budget_warn": {"threshold": (int, float)},
+    "memory_pressure_nudge": {"threshold": (int, float)},
     "tool_result_truncation": {},
     "kv_cache_aware": {"window_units": (int,)},
     "round_window": {"ranking": (str,)},
@@ -173,6 +176,15 @@ def _check_cross_processor_constraints(normalized: list[dict[str, Any]]) -> None
             if ratio >= limit:
                 raise ChainPolicyError(
                     f"hint.usage_buffer_ratio ({ratio}) must be strictly below the budget_warn threshold ({limit})"
+                )
+        if entry["type"] == "memory_pressure_nudge":
+            # The pressure nudge lives above the warn band — crossing it must
+            # imply the warn hint already fired.
+            threshold = float(entry["params"].get("threshold", 0.9))
+            if threshold <= (warn_threshold if warn_threshold is not None else 0.8):
+                raise ChainPolicyError(
+                    f"memory_pressure_nudge.threshold ({threshold}) must be strictly above the "
+                    f"budget_warn threshold ({warn_threshold if warn_threshold is not None else 0.8})"
                 )
 
 

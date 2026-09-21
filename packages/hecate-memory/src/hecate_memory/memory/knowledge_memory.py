@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.models.memory import (
     KnowledgeMemoryModel,
     KnowledgeMemoryReadSchema,
+    MemoryEditLogModel,
 )
 from hecate_memory.rag.embedding import embedding_service
 from hecate_memory.rag.searcher import HybridSearcher
@@ -280,6 +281,74 @@ class KnowledgeMemoryService:
                 logger.warning(f"Failed to delete knowledge from Qdrant: {e}")
 
         logger.info(f"Deleted knowledge memory {memory_id} for agent {agent_id}")
+
+    async def supersede_knowledge(
+        self,
+        agent_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        memory_id: uuid.UUID,
+        superseded_by: uuid.UUID,
+        expected_revision: int | None = None,
+    ) -> KnowledgeMemoryModel | None:
+        """Supersede a knowledge memory: lineage pointer + soft delete.
+
+        Consolidation replaces conflicting facts instead of overwriting or
+        deleting them — the old row stays queryable with a ``superseded_by``
+        lineage pointer. The Qdrant vector is removed since the row no
+        longer participates in retrieval. Writes one ``memory_edit_log``
+        audit row (``tool_name="consolidation"``).
+
+        Args:
+            agent_id: The agent that owns the knowledge.
+            workspace_id: The workspace for tenant isolation.
+            memory_id: The knowledge memory being replaced.
+            superseded_by: ID of the successor memory.
+            expected_revision: Optional optimistic-concurrency guard.
+
+        Returns:
+            The superseded memory, or None if not found.
+
+        Raises:
+            ValueError: If the expected revision does not match.
+        """
+        memory = await self._get_by_id_raw(workspace_id, agent_id, memory_id)
+        if memory is None:
+            return None
+        if expected_revision is not None and memory.revision != expected_revision:
+            raise ValueError(
+                f"Revision conflict for knowledge memory {memory_id}: "
+                f"expected {expected_revision}, got {memory.revision}"
+            )
+
+        revision_after = memory.revision + 1
+        memory.superseded_by = superseded_by
+        memory.deleted = True
+        memory.deleted_at = datetime.now(UTC)
+        memory.revision = revision_after
+        await self.db.flush()
+
+        self.db.add(
+            MemoryEditLogModel(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                tool_name="consolidation",
+                target_type="knowledge_memory",
+                target_id=memory_id,
+                revision_before=revision_after - 1,
+                revision_after=revision_after,
+                after_summary=f"superseded_by {superseded_by}",
+            )
+        )
+        await self.db.flush()
+
+        if self._vector_store is not None:
+            try:
+                await self._vector_store.delete_by_ids(COLLECTION_NAME, [str(memory_id)])
+            except Exception as e:
+                logger.warning(f"Failed to delete superseded knowledge vector from Qdrant: {e}")
+
+        logger.info(f"Superseded knowledge memory {memory_id} -> {superseded_by}")
+        return memory
 
     async def reindex(self, memory: KnowledgeMemoryModel) -> None:
         """Regenerate the Qdrant vector for a knowledge memory.

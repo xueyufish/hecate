@@ -33,6 +33,15 @@ class EmbeddingService:
         self.model_name = model_name
         self._model = None
 
+    @property
+    def is_mock(self) -> bool:
+        """True when the real model is unavailable and mocks are served.
+
+        Consumers that need semantic fidelity (e.g. consolidation similarity
+        scoring) check this and degrade instead of trusting mock vectors.
+        """
+        return self._get_model() == "mock"
+
     def _get_model(self):
         """Lazy load the embedding model."""
         if self._model is None:
