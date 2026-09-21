@@ -14,10 +14,13 @@ Design notes:
   ``hecate.core.database.async_session_factory`` and commit on success.
   ``search`` keeps delegating to the ``KnowledgeBaseService`` singleton,
   preserving the pre-existing knowledge-query behavior byte for byte.
-- L3 ranking: ``UserMemoryService.retrieve_memories`` is importance-ranked
-  today (its embedding column is not yet wired to a real encoder); hits are
-  merged with L4 hybrid-relevance scores after normalizing both onto [0, 1].
-  This reuses the production retrieval quality baseline as-is (design D10).
+- L3 ranking: ``UserMemoryService.retrieve_memories_scored`` cosine-scores
+  scope-filtered candidates against the query vector; rows without a real
+  embedding carry no semantic signal. The merge below normalizes L3 cosine
+  and L4 hybrid relevance onto one [0, 1] scale and applies the bounded
+  metadata bias (``MEMORY_FUSION_BIAS_ENABLED``) across the union, so
+  ``MemoryFactHit.score`` has one documented meaning: the fused score
+  (relevance alone when the bias is off).
 - ``sync_turn`` is a deliberate no-op for the builtin backend: L3 extraction
   already runs in its own post-turn pipeline; a third-party backend would do
   its real write-back here.
@@ -28,6 +31,8 @@ from __future__ import annotations
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -40,6 +45,7 @@ from hecate.core.composition.memory_provider import (
     RecallPage,
 )
 from hecate.models.memory import KnowledgeMemoryModel, MemoryModel
+from hecate_memory.memory import ranking
 from hecate_memory.rag.service import knowledge_base_service
 
 logger = logging.getLogger(__name__)
@@ -47,6 +53,28 @@ logger = logging.getLogger(__name__)
 # L4/L3 patch fields accepted by update_memory, per target layer.
 _L4_PATCH_FIELDS = {"content", "tags", "importance"}
 _L3_PATCH_FIELDS = {"content", "importance", "memory_type", "scope"}
+
+
+@dataclass
+class _MergedCandidate:
+    """One fact-memory candidate awaiting cross-layer normalization.
+
+    ``raw_relevance`` is the layer's raw relevance (L3 cosine, L4 hybrid
+    score); ``None`` marks a candidate with no semantic signal, which is
+    ranked after the scored ones in metadata order.
+    """
+
+    source_layer: str
+    memory_id: uuid.UUID
+    content: str
+    revision: int
+    importance: float
+    raw_relevance: float | None
+    last_confirmed_at: datetime | None
+    created_at: datetime
+    memory_type: str
+    tags: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class BuiltinMemoryProvider:
@@ -146,8 +174,17 @@ class BuiltinMemoryProvider:
         top_k: int = 5,
         tags: list[str] | None = None,
     ) -> list[MemoryFactHit]:
-        """Merge L3 (importance-ranked) and L4 (hybrid relevance) fact hits."""
-        hits: list[MemoryFactHit] = []
+        """Merge L3 (semantic cosine) and L4 (hybrid relevance) fact hits.
+
+        Both layers' relevance scores are normalized onto one [0, 1] scale
+        and the bounded metadata bias (decay x importance multipliers) is
+        applied across the union, so the merged order is a single-scale
+        ranking rather than a mix of importance values and similarity
+        scores. Candidates without a semantic signal (no real vector)
+        rank after the scored ones in metadata order.
+        """
+        merged: list[_MergedCandidate] = []
+        unscored: list[_MergedCandidate] = []
 
         # L3 is user-scoped (agent_id is L4's scope dimension) — an agent
         # filter must not hide unscoped L3 memories.
@@ -156,19 +193,28 @@ class BuiltinMemoryProvider:
             l3_scope["user_id"] = str(user_id)
 
         async with self._session() as db:
-            l3_rows = await _load_l3_hits(db, workspace_id, query, l3_scope or None, top_k)
-            for m in l3_rows:
-                hits.append(
-                    MemoryFactHit(
-                        memory_id=m.id,
-                        source_layer="user_memory",
-                        content=m.content,
-                        score=float(m.importance),
-                        revision=m.revision,
-                        importance=float(m.importance),
-                        metadata={"scope": dict(m.scope or {})},
-                    )
+            from hecate_memory.memory.user_memory import UserMemoryService
+
+            l3_scored = await UserMemoryService(db).retrieve_memories_scored(
+                workspace_id, query, scope=l3_scope or None, top_k=top_k
+            )
+            for s in l3_scored:
+                candidate = _MergedCandidate(
+                    source_layer="user_memory",
+                    memory_id=s.memory.id,
+                    content=s.memory.content,
+                    revision=s.revision,
+                    importance=float(s.memory.importance),
+                    raw_relevance=s.raw_relevance,
+                    last_confirmed_at=s.last_confirmed_at,
+                    created_at=s.memory.created_at,
+                    memory_type=s.memory.memory_type,
+                    metadata={"scope": dict(s.memory.scope or {})},
                 )
+                if candidate.raw_relevance is None:
+                    unscored.append(candidate)
+                else:
+                    merged.append(candidate)
 
             if agent_id is not None:
                 from hecate_memory.memory.knowledge_memory import KnowledgeMemoryService
@@ -183,19 +229,79 @@ class BuiltinMemoryProvider:
                     user_id=user_id,
                 )
                 for r in results:
-                    hits.append(
-                        MemoryFactHit(
-                            memory_id=r.memory.id,
+                    merged.append(
+                        _MergedCandidate(
                             source_layer="knowledge_memory",
+                            memory_id=r.memory.id,
                             content=r.memory.content,
-                            score=float(r.score),
                             revision=r.memory.revision,
-                            tags=list(r.memory.tags),
                             importance=float(r.memory.importance),
+                            raw_relevance=float(r.score),
+                            last_confirmed_at=r.last_confirmed_at,
+                            created_at=r.memory.created_at,
+                            memory_type="semantic",
+                            tags=list(r.memory.tags),
                         )
                     )
 
-        hits.sort(key=lambda h: h.score, reverse=True)
+        return self._rank_merged(merged, unscored, top_k)
+
+    @staticmethod
+    def _rank_merged(
+        merged: list[_MergedCandidate],
+        unscored: list[_MergedCandidate],
+        top_k: int,
+    ) -> list[MemoryFactHit]:
+        """Normalize relevance across the union, apply bias, build hits."""
+        normalized = ranking.normalize_scores([c.raw_relevance for c in merged])
+        ranked: list[tuple[float, _MergedCandidate, dict[str, Any]]] = []
+        for candidate, rel in zip(merged, normalized, strict=True):
+            breakdown = ranking.breakdown_for_hit(
+                relevance=rel,
+                last_confirmed_at=candidate.last_confirmed_at,
+                created_at=candidate.created_at,
+                importance=candidate.importance,
+                knowledge_layer=candidate.source_layer == "knowledge_memory",
+                memory_type=candidate.memory_type,
+            )
+            fused, breakdown = ranking.fuse(rel, breakdown["decay_mult"], breakdown["importance_mult"])
+            ranked.append((fused, candidate, breakdown))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+
+        hits = [
+            MemoryFactHit(
+                memory_id=c.memory_id,
+                source_layer=c.source_layer,
+                content=c.content,
+                score=round(fused, 4),
+                revision=c.revision,
+                tags=c.tags,
+                importance=c.importance,
+                metadata=c.metadata | {"breakdown": breakdown},
+            )
+            for fused, c, breakdown in ranked
+        ]
+        hits.extend(
+            MemoryFactHit(
+                memory_id=c.memory_id,
+                source_layer=c.source_layer,
+                content=c.content,
+                score=0.0,
+                revision=c.revision,
+                tags=c.tags,
+                importance=c.importance,
+                metadata=c.metadata
+                | {
+                    "breakdown": {
+                        "relevance": 0.0,
+                        "decay_mult": 1.0,
+                        "importance_mult": 1.0,
+                        "semantic": False,
+                    }
+                },
+            )
+            for c in unscored
+        )
         return hits[:top_k]
 
     async def search_recall(
@@ -433,27 +539,6 @@ async def _load_l3(db: AsyncSession, memory_id: uuid.UUID, workspace_id: uuid.UU
         ~MemoryModel.deleted,
     )
     return (await db.execute(stmt)).scalar_one_or_none()
-
-
-async def _load_l3_hits(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-    query: str,
-    scope: dict[str, Any] | None,
-    top_k: int,
-) -> list[MemoryModel]:
-    from hecate_memory.memory.user_memory import UserMemoryService
-
-    rows = await UserMemoryService(db).retrieve_memories(workspace_id, query, scope=scope, top_k=top_k)
-    # retrieve_memories returns read schemas; reload raw models so callers see
-    # revision columns without a second query round-trip per row.
-    ids = [m.id for m in rows]
-    if not ids:
-        return []
-    stmt = select(MemoryModel).where(MemoryModel.id.in_(ids), ~MemoryModel.deleted)
-    found = (await db.execute(stmt)).scalars().all()
-    by_id = {m.id: m for m in found}
-    return [by_id[m.id] for m in rows if m.id in by_id]
 
 
 def _approx_tokens(text: str) -> int:

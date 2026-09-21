@@ -18,6 +18,8 @@ Defines the persistence layer (SQLAlchemy) and API schemas (Pydantic) for:
   the per-unit consolidation watermark source (latest SUCCESS ``window_end``).
 - **ConsolidationPressureFlagModel** — pending pressure markers written by the
   memory pressure alert and consumed by the consolidation trigger bus.
+- **MemoryAccessSessionModel** — distinct-session retrieval access markers
+  backing the deduplicated access-frequency signal (fusion ranking inputs).
 """
 
 from __future__ import annotations
@@ -125,6 +127,23 @@ class MemoryModel(BaseModel):
     # Set when a consolidation SUPERSEDE replaces this memory: pointer to the
     # successor row. The row is soft-deleted but retained for audit/lineage.
     superseded_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    # Exogenous decay anchor for retrieval-time time-decay ranking: set at
+    # insert, refreshed only by consolidation UPDATE / SUPERSEDE (successor).
+    # Deliberately NOT ``updated_at`` — that column is bumped by access-count
+    # increments, which would turn the anchor into "last retrieved".
+    last_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    # True once ``embedding`` holds a real model embedding. Legacy rows carry
+    # deterministic mock vectors and must be excluded from cosine scoring.
+    embedding_real: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    # Last retrieval hit (access-frequency heat clock for the offline value
+    # score). Never used as the decay anchor.
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    # Offline consolidation value score and its named components (observability
+    # only — never drives deletion, never enters online ranking).
+    value_score: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    value_components: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=True, default=None
+    )
 
     __table_args__ = (
         Index("idx_memories_workspace", "workspace_id", "deleted"),
@@ -172,6 +191,15 @@ class KnowledgeMemoryModel(BaseModel):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     # Consolidation SUPERSEDE pointer — see MemoryModel.superseded_by.
     superseded_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    # Confirmation anchor / real-vector marker / value-score fields — see
+    # MemoryModel for the field semantics.
+    last_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    embedding_real: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    value_score: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    value_components: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=True, default=None
+    )
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id"),
         nullable=True,
@@ -363,6 +391,38 @@ class ConsolidationPressureFlagModel(BaseModel):
             name="uq_consolidation_pressure_flags_unit",
         ),
         Index("idx_consolidation_pressure_flags_unit", "workspace_id", "agent_id"),
+    )
+
+
+class MemoryAccessSessionModel(BaseModel):
+    """Distinct-session access marker for memory retrieval hits.
+
+    One row per ``(target_type, memory_id, session_id)`` pair, written
+    best-effort when the ``memory_search`` tool returns a hit. The count of
+    these rows is the deduplicated access-frequency signal consumed by the
+    consolidation value score — repeated hits inside one session never
+    inflate it, which keeps the frequency signal from reinforcing itself.
+    """
+
+    __tablename__ = "memory_access_sessions"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    target_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    memory_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    session_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "target_type",
+            "memory_id",
+            "session_id",
+            name="uq_memory_access_sessions_hit",
+        ),
+        Index("idx_memory_access_sessions_memory", "target_type", "memory_id"),
+        Index("idx_memory_access_sessions_workspace", "workspace_id", "deleted"),
     )
 
 

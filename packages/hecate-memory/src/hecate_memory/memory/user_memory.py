@@ -2,12 +2,21 @@
 
 Manages persistent facts extracted from conversations, stored with
 vector embeddings for semantic retrieval across sessions.
+
+Retrieval is semantically ranked (memory-importance-fusion change):
+scope-filtered candidates are scored in-process with cosine similarity
+against the query vector, normalized, and — when
+``MEMORY_FUSION_BIAS_ENABLED`` — biased by bounded time-decay and
+importance multipliers. Rows without a real embedding (legacy mock
+vectors) carry no semantic signal: they are excluded from cosine
+scoring and returned after the scored candidates in metadata order.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -20,8 +29,30 @@ from hecate.models.memory import (
     MemoryModel,
     MemoryReadSchema,
 )
+from hecate_memory.memory import ranking
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ScoredMemory:
+    """One ranked L3 candidate with its per-signal breakdown.
+
+    ``relevance`` is the candidate-window-normalized score (the fusion
+    input); ``raw_relevance`` is the raw cosine similarity. Either is
+    ``None`` when the row was not semantically scored (no real vector,
+    or the query could not be embedded); such rows are ordered after
+    the scored candidates by importance. ``last_confirmed_at`` rides
+    along so the merge layer can re-run the bias across L3+L4.
+    """
+
+    memory: MemoryReadSchema
+    relevance: float | None
+    fused: float
+    revision: int
+    breakdown: dict[str, Any]
+    raw_relevance: float | None = None
+    last_confirmed_at: datetime | None = None
 
 
 class UserMemoryService:
@@ -50,14 +81,22 @@ class UserMemoryService:
         Args:
             workspace_id: The workspace for tenant isolation.
             data: Memory creation data.
-            embedding: Optional vector embedding. If None, generates a mock embedding.
+            embedding: Optional precomputed embedding (real vectors from
+                consolidation). When omitted, a real embedding is
+                attempted; if the embedding service is unavailable the
+                row falls back to a placeholder vector and is marked for
+                backfill (``embedding_real=False``).
 
         Returns:
             The created memory.
         """
+        embedding_real = embedding is not None
+        if embedding is None:
+            embedding, embedding_real = await self._try_real_embedding(data.content)
         if embedding is None:
             embedding = self._generate_mock_embedding(data.content)
 
+        now = datetime.now(UTC)
         memory = MemoryModel(
             workspace_id=workspace_id,
             content=data.content,
@@ -65,6 +104,8 @@ class UserMemoryService:
             memory_type=data.memory_type,
             importance=data.importance,
             embedding=embedding,
+            embedding_real=embedding_real,
+            last_confirmed_at=now,
         )
         self.db.add(memory)
         await self.db.flush()
@@ -82,6 +123,9 @@ class UserMemoryService:
     ) -> list[MemoryReadSchema]:
         """Retrieve relevant memories by semantic similarity.
 
+        Thin wrapper over :meth:`retrieve_memories_scored` for callers
+        that only want the rows.
+
         Args:
             workspace_id: The workspace for tenant isolation.
             query: The query to search for.
@@ -90,10 +134,42 @@ class UserMemoryService:
             min_importance: Minimum importance threshold.
 
         Returns:
-            List of relevant memories ordered by similarity.
+            List of relevant memories in ranked order.
         """
-        _query_embedding = self._generate_mock_embedding(query)  # noqa: F841
+        scored = await self.retrieve_memories_scored(
+            workspace_id, query, scope=scope, top_k=top_k, min_importance=min_importance
+        )
+        return [s.memory for s in scored]
 
+    async def retrieve_memories_scored(
+        self,
+        workspace_id: uuid.UUID,
+        query: str,
+        scope: dict[str, Any] | None = None,
+        top_k: int = 5,
+        min_importance: float = 0.0,
+    ) -> list[ScoredMemory]:
+        """Semantic retrieval with per-signal breakdown.
+
+        Candidate pool = scope-filtered rows up to the configured cap,
+        pre-ordered by importance then confirmation time. Rows with a
+        real embedding are cosine-scored against the query vector and
+        min-max normalized; rows without one are returned after the
+        scored candidates in metadata order (they carry no semantic
+        signal). When the query cannot be embedded, the whole pool
+        degrades to the metadata order with a warning — retrieval never
+        fails.
+
+        Args:
+            workspace_id: The workspace for tenant isolation.
+            query: The query to search for.
+            scope: Optional scope filter (user_id, agent_id, session_id).
+            top_k: Maximum number of results.
+            min_importance: Minimum importance threshold.
+
+        Returns:
+            Ranked scored memories (at most ``top_k``).
+        """
         conditions = [
             ~MemoryModel.deleted,
             MemoryModel.workspace_id == workspace_id,
@@ -108,20 +184,75 @@ class UserMemoryService:
             if "agent_id" in scope:
                 conditions.append(MemoryModel.scope["agent_id"].as_string() == str(scope["agent_id"]))
 
-        stmt = select(MemoryModel).where(*conditions).order_by(MemoryModel.importance.desc()).limit(top_k)
+        cap = int(ranking_cap())
+        stmt = (
+            select(MemoryModel)
+            .where(*conditions)
+            .order_by(MemoryModel.importance.desc(), MemoryModel.last_confirmed_at.desc())
+            .limit(cap)
+        )
 
-        result = await self.db.execute(stmt)
-        memories = result.scalars().all()
+        rows = (await self.db.execute(stmt)).scalars().all()
+        if not rows:
+            return []
 
-        for memory in memories:
-            memory.access_count += 1
+        real_rows = [r for r in rows if r.embedding_real]
+        unscored_rows = [r for r in rows if not r.embedding_real]
 
-        await self.db.flush()
+        query_dense: list[float] | None = None
+        if real_rows:
+            query_dense = await self._try_query_embedding(query)
+            if query_dense is None:
+                # Degraded: no semantic signal available — metadata order
+                # for the whole pool (never fail the search).
+                logger.warning("L3 retrieval degraded to metadata order: query embedding unavailable")
+                real_rows, unscored_rows = [], list(rows)
 
-        for memory in memories:
-            await self.db.refresh(memory)
+        scored: list[ScoredMemory] = []
+        if real_rows and query_dense is not None:
+            raw = [ranking.cosine_similarity(query_dense, list(r.embedding)) for r in real_rows]
+            normalized = ranking.normalize_scores(raw)
+            for r, raw_rel, rel in zip(real_rows, raw, normalized, strict=True):
+                breakdown = ranking.breakdown_for_hit(
+                    relevance=rel,
+                    last_confirmed_at=r.last_confirmed_at,
+                    created_at=r.created_at,
+                    importance=r.importance,
+                    memory_type=r.memory_type,
+                )
+                fused, breakdown = ranking.fuse(rel, breakdown["decay_mult"], breakdown["importance_mult"])
+                scored.append(
+                    ScoredMemory(
+                        memory=MemoryReadSchema.model_validate(r),
+                        relevance=rel,
+                        fused=fused,
+                        revision=r.revision,
+                        breakdown=breakdown,
+                        raw_relevance=raw_rel,
+                        last_confirmed_at=r.last_confirmed_at,
+                    )
+                )
+            scored.sort(key=lambda s: s.fused, reverse=True)
 
-        return [MemoryReadSchema.model_validate(m) for m in memories]
+        for r in unscored_rows:
+            scored.append(
+                ScoredMemory(
+                    memory=MemoryReadSchema.model_validate(r),
+                    relevance=None,
+                    fused=0.0,
+                    revision=r.revision,
+                    breakdown={"relevance": 0.0, "decay_mult": 1.0, "importance_mult": 1.0, "semantic": False},
+                    raw_relevance=None,
+                    last_confirmed_at=r.last_confirmed_at,
+                )
+            )
+
+        top = scored[:top_k]
+        # Access-frequency accounting: only rows actually returned count.
+        for s in top:
+            s.memory.access_count += 1
+        await self._bump_access_counts([s.memory.id for s in top])
+        return top
 
     async def update_importance(
         self,
@@ -348,6 +479,50 @@ class UserMemoryService:
 
         return facts
 
+    async def _try_real_embedding(self, text: str) -> tuple[list[float] | None, bool]:
+        """Attempt a real model embedding; (None, False) when unavailable."""
+        try:
+            from hecate_memory.rag.embedding import embedding_service
+        except ImportError:
+            return None, False
+        try:
+            if embedding_service.is_mock:
+                return None, False
+            result = await embedding_service.encode_query(text)
+            return result.dense, True
+        except Exception as e:
+            logger.warning("Real embedding unavailable, memory stored pending backfill: %s", e)
+            return None, False
+
+    async def _try_query_embedding(self, query: str) -> list[float] | None:
+        """Embed a retrieval query; None (degraded) when unavailable."""
+        try:
+            from hecate_memory.rag.embedding import embedding_service
+        except ImportError:
+            return None
+        try:
+            if embedding_service.is_mock:
+                return None
+            result = await embedding_service.encode_query(query)
+            return result.dense
+        except Exception as e:
+            logger.warning("Query embedding failed: %s", e)
+            return None
+
+    async def _bump_access_counts(self, memory_ids: list[uuid.UUID]) -> None:
+        """Increment access_count for the returned rows (existing semantics)."""
+        if not memory_ids:
+            return
+        try:
+            rows = (await self.db.execute(select(MemoryModel).where(MemoryModel.id.in_(memory_ids)))).scalars().all()
+            now = datetime.now(UTC)
+            for row in rows:
+                row.access_count += 1
+                row.last_accessed_at = now
+            await self.db.flush()
+        except Exception as e:
+            logger.warning("Access-count bump failed (best-effort): %s", e)
+
     def _generate_mock_embedding(self, text: str) -> list[float]:
         """Generate a deterministic mock embedding for testing.
 
@@ -373,3 +548,13 @@ class UserMemoryService:
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+
+def ranking_cap() -> int:
+    """Candidate-pool cap for in-process L3 semantic scoring."""
+    try:
+        from hecate.core.config import settings
+
+        return max(1, int(getattr(settings, "MEMORY_FUSION_L3_CANDIDATE_CAP", 200)))
+    except Exception:
+        return 200

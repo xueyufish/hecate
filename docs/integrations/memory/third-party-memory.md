@@ -112,6 +112,7 @@ The contract — what Hecate actually calls — is:
 |---|---|---|
 | `async def search(collection_name, query, *, limit=10, mode="hybrid", workspace_id=None) -> list[SearchHitLike]` | yes | Core calls this from `AgentExecutionPort.knowledge_query` (chat path) and the MCP `knowledge_search` tool. |
 | `SearchHitLike` (Protocol) | yes | `content: str` / `score: float` / `metadata: dict`. Return any object with those attributes — a dataclass, a Pydantic model, a plain class. |
+| `MemoryFactHit` (dataclass) | yes | `score` semantics: see the `MemoryFactHit` docstring in `hecate/core/composition/memory_provider.py`. The builtin provider surfaces per-signal decomposition under `metadata["breakdown"]`; third-party providers may supply their own breakdown shape. |
 
 **What the contract does NOT cover** (intentionally):
 

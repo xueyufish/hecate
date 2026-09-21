@@ -65,7 +65,16 @@ _PLAN_SYSTEM_PROMPT = (
     '{"op": "ADD"|"UPDATE"|"SUPERSEDE"|"NOOP"|"UPDATE_BLOCK", "target_type": '
     '"user_memory"|"knowledge_memory"|"memory_block"|null, "target_id": str|null, "content": str|null, '
     '"label": str|null, "memory_type": str|null, "importance": 0.0-1.0|null, '
-    '"expected_revision": int|null, "detail": str|null}'
+    '"expected_revision": int|null, "detail": str|null}\n'
+    "Importance scoring (anchor tiers — pick the band that fits the fact's "
+    "future-relevance evidence, do not invent numbers outside these bands):\n"
+    "  - 0.0–0.2  fleeting: single-shot context, unlikely to recur.\n"
+    "  - 0.2–0.5  situational: useful for the current task, weak signal beyond.\n"
+    "  - 0.5      default neutral: present the fact but signal no special weight.\n"
+    "  - 0.5–0.8  stable preference: stated / demonstrated preference, likely to recur.\n"
+    "  - 0.8–1.0  enduring identity: explicit long-term attribute (job, family, hard rule).\n"
+    "Omit importance only when you have no basis to choose — the planner "
+    "falls back to the neutral 0.5 default in that case.\n"
 )
 
 

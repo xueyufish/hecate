@@ -104,6 +104,44 @@ _PROMPT_CONSTRAINTS = (
 _L3_PATCH_FIELDS = {"content", "importance", "memory_type"}
 _L4_PATCH_FIELDS = {"content", "tags", "importance"}
 
+
+async def _apply_value_score(
+    db: AsyncSession,
+    *,
+    model: type[MemoryModel] | type[KnowledgeMemoryModel],
+    memory_id: uuid.UUID,
+) -> None:
+    """Refresh the offline value score on the touched row (observability).
+
+    Reads the distinct-session hit count from the access table, blends it
+    with confirmation freshness and access recency, and writes the score
+    and named components back. Never drives any deletion — purely
+    observational. Best-effort: failure logs a debug line and returns.
+    """
+    try:
+        from hecate_memory.memory.access import distinct_session_counts
+        from hecate_memory.memory.value_score import compute
+
+        target_type = "user_memory" if model is MemoryModel else "knowledge_memory"
+
+        row = (await db.execute(select(model).where(model.id == memory_id))).scalar_one_or_none()
+        if row is None:
+            return
+        counts = await distinct_session_counts(db, target_type=target_type, memory_ids=[memory_id])
+        distinct_sessions = counts.get(memory_id, 0)
+        total, components = compute(
+            last_confirmed_at=row.last_confirmed_at,
+            created_at=row.created_at,
+            last_accessed_at=row.last_accessed_at,
+            distinct_session_count=distinct_sessions,
+        )
+        row.value_score = total
+        row.value_components = components
+        await db.flush()
+    except Exception as e:  # noqa: BLE001 — best-effort, must never fail the run
+        logger.debug("Value score refresh failed for memory %s: %s", memory_id, e)
+
+
 ExtractFn = Callable[[dict[str, Any]], Awaitable[list[dict[str, Any]]]]
 PlanFn = Callable[[dict[str, Any]], Awaitable[list[dict[str, Any]]]]
 # Returns a rejection reason, or None when the content is safe.
@@ -598,6 +636,11 @@ class ConsolidationEngine:
             new_id = schema.id
 
         await self._audit(db, unit, "consolidation_add", str(target_type), new_id, None, None, content)
+        await _apply_value_score(
+            db,
+            model=KnowledgeMemoryModel if target_type == "knowledge_memory" else MemoryModel,
+            memory_id=new_id,
+        )
         outcomes.append(OperationOutcome("ADD", str(target_type), new_id, content[:120], "applied"))
         return new_id
 
@@ -631,12 +674,21 @@ class ConsolidationEngine:
         for key, value in patch.items():
             setattr(row, key, value)
         row.revision += 1
+        # Decay anchor: refreshed by consolidation writes only, never by
+        # retrieval. Set just before flush so the UPDATE lands in the same
+        # transaction as the patch.
+        row.last_confirmed_at = datetime.now(UTC)
         if layer == "knowledge_memory" and "content" in patch:
             from hecate_memory.memory.knowledge_memory import KnowledgeMemoryService
 
             await KnowledgeMemoryService(db, self._vector_store).reindex(row)
         await db.flush()
         await self._audit(db, unit, "consolidation_update", layer, row.id, row.revision, before, patch.get("content"))
+        await _apply_value_score(
+            db,
+            model=KnowledgeMemoryModel if layer == "knowledge_memory" else MemoryModel,
+            memory_id=row.id,
+        )
         outcomes.append(OperationOutcome("UPDATE", layer, row.id, (patch.get("content") or before)[:120], "applied"))
 
     async def _apply_supersede(
@@ -1109,6 +1161,15 @@ class ConsolidationScheduler:
                 run.rejected_count,
                 run.failed_count,
             )
+            # Memory-importance-fusion: refresh any pinned prefetch for the
+            # unit on the next call, so the next turn sees the just-applied
+            # memory updates without the prior pinned snapshot going stale.
+            try:
+                from hecate.runtime.context_processors import invalidate_prefetch_cache_for_unit
+
+                invalidate_prefetch_cache_for_unit(window.unit.key)
+            except Exception as inv_err:  # noqa: BLE001 — never fails the run
+                logger.debug("Prefetch cache invalidation failed: %s", inv_err)
             return True
         except Exception as exc:
             await db.rollback()

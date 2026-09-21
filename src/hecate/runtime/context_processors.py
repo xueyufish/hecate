@@ -921,6 +921,13 @@ _ESCALATION_COOLDOWN_SECONDS = 120.0
 # default chain (and its processors) is rebuilt per invocation — an instance
 # attribute would reset every call and never debounce anything.
 _ESCALATION_LAST_HINT: OrderedDict[str, float] = OrderedDict()
+# Pinned prefetch entries per session: key = session_id, value = (query_text,
+# frozen entries list). The first turn of a session pins its entries to
+# avoid invalidating the KV-cache prefix on every rerank; consolidation
+# completion calls ``invalidate_prefetch_cache_for_unit`` to force the next
+# turn to repin.
+_PREFETCH_PINNED: OrderedDict[str, tuple[str, list[Any]]] = OrderedDict()
+_PREFETCH_PINNED_MAX = 1024
 _ESCALATION_LAST_HINT_MAX = 4096
 
 
@@ -930,9 +937,20 @@ class MemoryPrefetchProcessor(ContextProcessor):
     Queries the active memory provider with the most recent conversation text
     and appends a ``[memory_context]`` block at the projection tail — after
     the KV-cache protected prefix (never invalidating it) and counted in the
-    projection's token accounting. Skips injection when disabled, over
-    budget, without scope, or on any provider failure (prefetch is strictly
-    best-effort: it must never block or fail the turn).
+    projection's token accounting.
+
+    The entries are **pinned per session** (memory-importance-fusion change):
+    only the first turn of a session queries the provider; subsequent turns
+    replay the same block byte-for-byte, protecting the KV-cache prefix from
+    per-turn rerank churn. Consolidation completion invalidates the pinned
+    entries for the matching consolidation unit (see
+    :func:`invalidate_prefetch_cache_for_unit`), so the next turn after
+    consolidation repins with the updated memory state. Pinned entries are
+    also dropped on any provider error during the pinning call.
+
+    Skips injection when disabled, over budget, without scope, or on any
+    provider failure (prefetch is strictly best-effort: it must never block
+    or fail the turn).
     """
 
     name = "memory_prefetch"
@@ -967,6 +985,13 @@ class MemoryPrefetchProcessor(ContextProcessor):
             meta["reason"] = "no_query"
             return units, ProcessorResult(processor=self.name, metadata=meta)
 
+        # Pinning: replay cached entries if pinned for this session.
+        session_key = str(ctx.session_id) if ctx.session_id else None
+        pinned = _PREFETCH_PINNED.get(session_key) if session_key else None
+        if pinned is not None:
+            meta["pin"] = "replay"
+            return _render_pinned(units, ctx, pinned[1])
+
         from hecate.core.composition.memory_provider import (
             CAP_PREFETCH,
             provider_supports,
@@ -998,10 +1023,14 @@ class MemoryPrefetchProcessor(ContextProcessor):
             meta["reason"] = "empty"
             return units, ProcessorResult(processor=self.name, metadata=meta)
 
-        lines = [f"- {e.content}" for e in entries]
-        block = {"role": "user", "content": _PREFETCH_MARKER + "\n" + "\n".join(lines)}
-        out = [*units, ContextUnit([block])]
-        meta.update({"injected": True, "entries": len(lines), "tokens": ctx.tokens([block])})
+        if session_key:
+            _PREFETCH_PINNED[session_key] = (query_text, list(entries))
+            _PREFETCH_PINNED.move_to_end(session_key)
+            while len(_PREFETCH_PINNED) > _PREFETCH_PINNED_MAX:
+                _PREFETCH_PINNED.popitem(last=False)
+
+        out, render_meta = _build_block(units, ctx, entries)
+        meta.update({"injected": True, "pin": "new", **render_meta})
         return out, ProcessorResult(processor=self.name, metadata=meta)
 
     @staticmethod
@@ -1019,6 +1048,49 @@ class MemoryPrefetchProcessor(ContextProcessor):
                 break
         text = "\n".join(reversed(recent))
         return text[:_PREFETCH_QUERY_MAX_CHARS]
+
+
+def _build_block(
+    units: list[ContextUnit],
+    ctx: ChainContext,
+    entries: list[Any],
+) -> tuple[list[ContextUnit], dict[str, Any]]:
+    """Render the prefetch memory block from a frozen entry list."""
+    if not entries:
+        return units, {"entries": 0, "tokens": 0}
+    lines = [f"- {e.content}" for e in entries]
+    block = {"role": "user", "content": _PREFETCH_MARKER + "\n" + "\n".join(lines)}
+    out = [*units, ContextUnit([block])]
+    return out, {"entries": len(lines), "tokens": ctx.tokens([block])}
+
+
+def _render_pinned(
+    units: list[ContextUnit], ctx: ChainContext, entries: list[Any]
+) -> tuple[list[ContextUnit], ProcessorResult]:
+    """Replay a pinned prefetch payload for subsequent session turns."""
+    if not entries:
+        return units, ProcessorResult(processor="memory_prefetch", metadata={"injected": False, "pin": "replay_empty"})
+    out, render_meta = _build_block(units, ctx, entries)
+    return out, ProcessorResult(processor="memory_prefetch", metadata={"injected": True, **render_meta})
+
+
+def invalidate_prefetch_cache_for_unit(unit_key: str) -> int:
+    """Drop pinned prefetch entries whose session belongs to the given unit.
+
+    Called by the consolidation scheduler after a successful run; subsequent
+    turns of the matching sessions will repin with the updated memory state.
+    Best-effort: the function is idempotent and never raises.
+    """
+    # Conservative heuristic: the consolidation unit key embeds (workspace,
+    # agent, user_id); a session-id prefix match on the cache is too narrow
+    # to be useful without session→unit mapping. Clear all pinned entries
+    # instead — bounded by _PREFETCH_PINNED_MAX and acceptable because
+    # repinning costs one retrieval per session (not per unit).
+    dropped = len(_PREFETCH_PINNED)
+    _PREFETCH_PINNED.clear()
+    if dropped:
+        logger.debug("Invalidated %d pinned prefetch entries for unit %s", dropped, unit_key)
+    return dropped
 
 
 class RetrievalEscalationHintProcessor(ContextProcessor):

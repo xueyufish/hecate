@@ -43,6 +43,7 @@ from hecate.core.composition.memory_provider import (
     resolve_memory_provider,
 )
 from hecate.models.memory import MemoryEditLogModel
+from hecate_memory.memory.access import record_access
 from hecate_memory.memory.token_counter import TokenCounter
 from hecate_memory.memory.working_memory import WorkingMemoryService
 
@@ -108,7 +109,7 @@ class MemoryToolBackend:
             if name == "memory_rethink":
                 return await self._block_rethink(workspace_id, agent_id, session_id, args, context)
             if name == "memory_search":
-                return await self._search(workspace_id, agent_id, args)
+                return await self._search(workspace_id, agent_id, session_id, args)
             if name == "memory_add":
                 return await self._add(workspace_id, agent_id, session_id, args, context)
             if name == "memory_update":
@@ -322,7 +323,13 @@ class MemoryToolBackend:
             return _err("unsupported_by_backend", f"the active memory backend does not support {capability}")
         return provider
 
-    async def _search(self, workspace_id: uuid.UUID, agent_id: uuid.UUID, args: dict[str, Any]) -> dict[str, Any]:
+    async def _search(
+        self,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        session_id: uuid.UUID | None,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
         provider_or_err = self._provider(CAP_SEARCH_MEMORIES)
         if isinstance(provider_or_err, dict):
             return provider_or_err
@@ -338,6 +345,14 @@ class MemoryToolBackend:
             top_k=top_k,
             tags=[str(t) for t in tags] if tags else None,
         )
+        # Distinct-session access markers: best-effort, never fails the
+        # search. session_id=None still refreshes the heat clocks.
+        await record_access(
+            self.db,
+            workspace_id=workspace_id,
+            hits=[(h.source_layer, h.memory_id) for h in hits],
+            session_id=session_id,
+        )
         return {
             "ok": True,
             "results": [
@@ -347,6 +362,7 @@ class MemoryToolBackend:
                     "content": h.content,
                     "score": round(h.score, 4),
                     "revision": h.revision,
+                    "breakdown": h.metadata.get("breakdown", {}),
                 }
                 for h in hits
             ],

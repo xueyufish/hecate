@@ -148,6 +148,36 @@ class Settings(BaseSettings):
     MEMORY_PRESSURE_NUDGE_ENABLED: bool = False
     MEMORY_PRESSURE_NUDGE_THRESHOLD: float = 0.9
 
+    # Memory fusion ranking (memory-importance-fusion change). The bias layer
+    # defaults off: with MEMORY_FUSION_BIAS_ENABLED=false, fact-memory ranking
+    # is pure normalized relevance and the multipliers below are inert (1.0).
+    MEMORY_FUSION_BIAS_ENABLED: bool = False
+    # Time-decay half-lives in days, anchored on last_confirmed_at. 0 means
+    # evergreen (no decay). Defaults: episodic facts fade fast, semantic
+    # facts slowly, knowledge memories never (staleness is handled by
+    # consolidation supersession instead).
+    MEMORY_FUSION_HALFLIFE_EPISODIC_DAYS: float = 30.0
+    MEMORY_FUSION_HALFLIFE_SEMANTIC_DAYS: float = 180.0
+    MEMORY_FUSION_HALFLIFE_KNOWLEDGE_DAYS: float = 0.0
+    # Importance multiplier bounds: importance 0.5 (the neutral default)
+    # maps to 1.0x; the mapping is linear and clamped to these bounds.
+    MEMORY_FUSION_IMPORTANCE_MULT_MIN: float = 0.5
+    MEMORY_FUSION_IMPORTANCE_MULT_MAX: float = 1.5
+    # Floor on the fused product: bias is a ranking nudge, never a filter —
+    # a decayed candidate is down-weighted, not excluded.
+    MEMORY_FUSION_PRODUCT_FLOOR: float = 0.3
+    # L3 semantic search fetches scope-filtered candidates and scores them
+    # in-process; this cap bounds the per-query candidate pool.
+    MEMORY_FUSION_L3_CANDIDATE_CAP: int = 200
+    # Offline consolidation value score (observability only): weighted mix of
+    # confirmation freshness (half-life below, anchored on last_confirmed_at)
+    # and access heat (log-compressed distinct-session count, half-life since
+    # last accessed). Never drives deletion; never enters online ranking.
+    MEMORY_VALUE_W_CONFIRMATION: float = 0.65
+    MEMORY_VALUE_W_ACCESS: float = 0.35
+    MEMORY_VALUE_HALFLIFE_CONFIRMATION_DAYS: float = 90.0
+    MEMORY_VALUE_HALFLIFE_ACCESS_DAYS: float = 30.0
+
     # LLM gateway backend (hecate.llm_providers entry point, phase-4
     # follow-ups). Names: "litellm" (hecate-llm shipped in-process, default)
     # or any third-party gateway implementing the LLMGateway Protocol.
