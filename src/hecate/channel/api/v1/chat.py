@@ -434,7 +434,7 @@ async def _process_chat(
                     agent_id=parsed_agent_id,
                     kb_ids=parsed_kb_ids,
                     generate_opening=request.generate_opening,
-                    enable_suggestions=request.enable_suggestions,
+                    enable_suggestions=request.generate_suggestions,
                     skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
                 )
 
