@@ -42,6 +42,20 @@ def _compute_content_hash(skill: SkillModel) -> str:
     )
 
 
+async def _attach_version_status(db: AsyncSession, payload: dict) -> dict:
+    """Augment a skill read payload with 5.9d versioning status fields."""
+    from hecate.tools.skill.versioning import SkillVersionService
+
+    service = SkillVersionService(db)
+    try:
+        status = await service.get_status(uuid.UUID(str(payload["id"])))
+    except Exception:  # noqa: BLE001 - versioning must never break read paths
+        status = {"latest_version": None, "has_uncommitted_changes": True}
+    payload["latest_version"] = status["latest_version"]
+    payload["has_uncommitted_changes"] = status["has_uncommitted_changes"]
+    return payload
+
+
 def _derive_trust_tier(provider: str | None) -> str:
     """Platform-managed tier: bundled skills are official, everything else community."""
     return "official" if provider == PROVIDER_BUNDLED else "community"
@@ -206,7 +220,7 @@ async def list_skills(
     skills = result.scalars().all()
 
     return {
-        "items": [SkillReadSchema.model_validate(s).model_dump() for s in skills],
+        "items": [await _attach_version_status(db, SkillReadSchema.model_validate(s).model_dump()) for s in skills],
         "total": total,
     }
 
@@ -242,7 +256,7 @@ async def get_skill(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"error": {"code": "NOT_FOUND", "message": "Skill not found", "details": None}},
         )
-    return SkillReadSchema.model_validate(skill).model_dump()
+    return await _attach_version_status(db, SkillReadSchema.model_validate(skill).model_dump())
 
 
 @router.put("/skills/{skill_id}")
@@ -320,7 +334,7 @@ async def update_skill(
 
     await db.flush()
     await db.refresh(skill)
-    return SkillReadSchema.model_validate(skill).model_dump()
+    return await _attach_version_status(db, SkillReadSchema.model_validate(skill).model_dump())
 
 
 @router.delete("/skills/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)

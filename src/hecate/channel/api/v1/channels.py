@@ -188,10 +188,12 @@ def _transient_agent_from_resolved(resolved: Any) -> AgentModel:
     ``_process_chat`` reads plain attributes off the agent (id, persona,
     model_config, tools, guardrail_config) — a detached instance carrying
     the snapshot's frozen values satisfies it without touching the live
-    row.
+    row. The snapshot's reference manifest rides along as a non-mapped
+    attribute (``_resolved_ref_manifest``) so pinned skills (5.9d) resolve
+    from their version snapshots downstream.
     """
     cfg = resolved.config
-    return AgentModel(
+    agent = AgentModel(
         id=resolved.agent_id,
         workspace_id=resolved.workspace_id,
         name=cfg.get("name", ""),
@@ -207,6 +209,10 @@ def _transient_agent_from_resolved(resolved: Any) -> AgentModel:
         enable_suggestions=cfg.get("enable_suggestions", True),
         guardrail_config=cfg.get("guardrail_config"),
     )
+    # Non-mapped attribute: exists only on this detached instance, never
+    # persisted — downstream readers use getattr with a None default.
+    agent._resolved_ref_manifest = list(resolved.ref_manifest or [])
+    return agent
 
 
 @router.get("/{name}/webhook")

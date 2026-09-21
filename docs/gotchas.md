@@ -247,3 +247,35 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   `auto_load=true`). The loader additionally filters `model_invocable=False`
   skills out of every model-visible surface, so drifted rows degrade to
   invisible rather than erroring.
+
+## Skill versioning (5.9d)
+
+- **Frozen snapshot, hashed subset** — `skill_versions.config_snapshot`
+  freezes seven fields (`name` / `instructions` / `allowed_tools` /
+  `scripts` / `references` / `description` / `max_tokens`); the
+  `content_hash` covers only the 5-field set shared with agent-version
+  reference manifests, so hashes recorded in the two places stay
+  comparable. Snapshot integrity rests on row immutability, not the
+  hash.
+- **Plugin-sourced skills stay outside versioning** — `provider IS NULL`
+  rows are rejected at commit with 409; the loader, in turn, never
+  serves a plugin row from a pin (no version exists for it).
+- **Rollback writes back, not just snapshots** — skills have no
+  publish pointer; a rollback that only created a snapshot would be
+  a no-op. `rollback_to_version` mirrors the snapshot to a new version
+  *and* writes the frozen fields back to the live row, so the dirty
+  badge zeroes immediately. Pinned agent snapshots keep resolving from
+  the old version row.
+- **Pinned agent manifests skip drift** — entries with `version` set
+  on the reference manifest freeze their content, so `version_drift`
+  skips them. Legacy snapshots with no `version` field keep drifting
+  (resolved as unpinned).
+- **Manifest skill entries must resolve via the provider registry** —
+  `_build_ref_manifest` now calls `resolve_precedence_map` on the
+  query result, so the skill pinned at commit time matches what the
+  loader serves at runtime. Storage order decides nothing.
+- **Loader overlay never mutates ORM state** — `SkillLoader._apply_pinned_content`
+  builds a detached `SkillModel` overlay for each pinned skill; the
+  session cannot flush frozen content back to the live row even when
+  the live row is still present.
+

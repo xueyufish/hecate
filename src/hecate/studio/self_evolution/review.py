@@ -187,6 +187,8 @@ class CandidateReviewService:
             if existing is not None and not existing.deleted:
                 existing.description = candidate.description
                 existing.instructions = instructions
+                await self._flush_skill_content_hash(existing)
+                await self._auto_commit_version(existing, candidate)
                 return existing
 
         skill = SkillModel(
@@ -202,4 +204,53 @@ class CandidateReviewService:
         )
         self._db.add(skill)
         await self._db.flush()
+        await self._auto_commit_version(skill, candidate)
         return skill
+
+    async def _flush_skill_content_hash(self, skill: SkillModel) -> None:
+        """Refresh the live content hash after a self-evolution write.
+
+        Mirrors the workspace-skill update path so drift detection (5.9d)
+        sees a stable comparison basis.
+        """
+        from hecate.tools.api.skills import _compute_content_hash
+
+        skill.content_hash = _compute_content_hash(skill)
+        await self._db.flush()
+
+    async def _auto_commit_version(self, skill: SkillModel, candidate: SkillCandidateModel) -> None:
+        """Snapshot a self-evolution publish for audit (5.9d).
+
+        Best-effort: a versioning failure never blocks the publish — the
+        audit gap remains visible through the existing publish event and
+        warning log. ``learned_run_id`` ties the snapshot to the run that
+        produced it; ``created_by`` stays ``None`` (system-created) per
+        the service contract.
+        """
+        from hecate.tools.skill.versioning import (
+            SkillNotVersionableError,
+            SkillVersionService,
+        )
+
+        try:
+            await SkillVersionService(self._db).commit(
+                skill.id,
+                change_summary=f"Self-evolution publish from run {candidate.run_id}",
+                learned_run_id=candidate.run_id,
+            )
+        except SkillNotVersionableError:
+            # Learned skills start source="learned" with provider unset
+            # until the migration that promotes them; skip silently and
+            # let future publishes pick up versioning once the provider
+            # is assigned. Logged so the audit gap is visible.
+            logger.warning(
+                "Skill %s (id=%s) has no provider assigned; skipping auto-versioning",
+                skill.name,
+                skill.id,
+            )
+        except Exception:
+            logger.exception(
+                "Auto-versioning failed for skill %s (id=%s); publish continues",
+                skill.name,
+                skill.id,
+            )
