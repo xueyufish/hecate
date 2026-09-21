@@ -12,6 +12,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
+
+
+def canonical_hash(obj: Any) -> str:
+    """sha256 over the canonical JSON rendering of ``obj``.
+
+    ``sort_keys`` normalizes key order; ``default=str`` absorbs
+    non-JSON-native values (datetimes, UUIDs) deterministically enough
+    for change detection. Hashes single values (dicts, lists, scalars);
+    for projecting entry collections, see :func:`canonical_content_hash`.
+    """
+    payload = json.dumps(obj, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def canonical_content_hash(entries: list[dict]) -> str:

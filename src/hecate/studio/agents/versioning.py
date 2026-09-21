@@ -26,7 +26,6 @@ visible instead of pretending it cannot happen.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import uuid
@@ -36,6 +35,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.canonical_hash import canonical_hash
 from hecate.models.agent import AgentModel
 from hecate.models.agent_version import AgentVersionModel
 from hecate.models.evaluation import EvaluationRunModel
@@ -97,15 +97,11 @@ class ResolvedAgentConfig:
     ref_manifest: list[dict[str, Any]] = field(default_factory=list)
 
 
-def canonical_hash(obj: Any) -> str:
-    """sha256 over the canonical JSON rendering of ``obj``.
-
-    ``sort_keys`` normalizes key order; ``default=str`` absorbs
-    non-JSON-native values (datetimes, UUIDs) deterministically enough
-    for change detection.
-    """
-    payload = json.dumps(obj, sort_keys=True, ensure_ascii=False, default=str)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+# `canonical_hash` lives in `hecate.core.canonical_hash` and is re-exported
+# here: stored `AgentVersionModel.content_hash` values were produced by this
+# name, and the skill registry hashes the same content-field sets for
+# drift/pin comparability (5.9-enh).
+__all__ = ["AgentVersionService", "canonical_hash", "snapshot_own_config"]
 
 
 def snapshot_own_config(agent: AgentModel) -> dict[str, Any]:

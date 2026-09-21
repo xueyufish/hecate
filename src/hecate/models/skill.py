@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
-from pydantic import ConfigDict, Field, field_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import Boolean, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
@@ -41,6 +41,18 @@ class SkillModel(BaseModel):
     - **auto_load** — if ``True``, the skill is automatically injected into
       the agent's system prompt at session start, without requiring
       explicit user selection.
+    - **provider** — registry classification for rank precedence:
+      ``"bundled"`` / ``"user"`` / ``"project"`` (``"custom"`` reserved);
+      ``None`` for plugin-sourced rows, which stay outside rank competition.
+    - **trust_tier** — ``"official"`` / ``"trusted"`` / ``"community"``;
+      platform-managed, not client-settable on workspace-scoped APIs.
+    - **model_invocable** / **user_invocable** — invocation-policy flags:
+      ``model_invocable=False`` hides the skill from every model-visible
+      surface (L1 catalog, on-demand loads); ``user_invocable=False``
+      removes it from user-facing explicit-invocation surfaces.
+    - **content_hash** — sha256 over the same content-field set used by
+      agent-version reference manifests (name, instructions, allowed
+      tools, scripts, references); recomputed on content changes.
     """
 
     __tablename__ = "skills"
@@ -63,6 +75,14 @@ class SkillModel(BaseModel):
     plugin_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("plugins.id", ondelete="CASCADE"), nullable=True, default=None
     )
+    # Provider registry (5.9-enh): classification for rank precedence and
+    # governance. NULL for plugin-sourced rows (outside rank competition) —
+    # see hecate.tools.skill.provider_registry for the derivation rules.
+    provider: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    trust_tier: Mapped[str] = mapped_column(String(20), nullable=False, default="community")
+    model_invocable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    user_invocable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     # Learned-skill provenance (self-evolution loop): populated only when
     # source == "learned" and the skill was published from a reviewed candidate.
     learned_run_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
@@ -105,6 +125,15 @@ class SkillCreateSchema(PydanticBase):
     references: list = Field(default_factory=list)
     max_tokens: int = 2000
     auto_load: bool = False
+    model_invocable: bool = True
+    user_invocable: bool = True
+
+    @model_validator(mode="after")
+    def _auto_load_requires_model_visibility(self) -> SkillCreateSchema:
+        if self.auto_load and not self.model_invocable:
+            msg = "auto_load requires model_invocable=true"
+            raise ValueError(msg)
+        return self
 
 
 class SkillUpdateSchema(PydanticBase):
@@ -121,6 +150,15 @@ class SkillUpdateSchema(PydanticBase):
     references: list | None = None
     max_tokens: int | None = None
     auto_load: bool | None = None
+    model_invocable: bool | None = None
+    user_invocable: bool | None = None
+
+    @model_validator(mode="after")
+    def _auto_load_requires_model_visibility(self) -> SkillUpdateSchema:
+        if self.auto_load and self.model_invocable is False:
+            msg = "auto_load requires model_invocable=true"
+            raise ValueError(msg)
+        return self
 
 
 class SkillReadSchema(PydanticBase):
@@ -142,6 +180,11 @@ class SkillReadSchema(PydanticBase):
     auto_load: bool
     origin: str | None = None
     plugin_id: uuid.UUID | None = None
+    provider: str | None = None
+    trust_tier: str = "community"
+    model_invocable: bool = True
+    user_invocable: bool = True
+    content_hash: str | None = None
     learned_run_id: uuid.UUID | None = None
     failure_category: str | None = None
     created_at: datetime

@@ -689,6 +689,10 @@ class TestReadSchemaFromAttributes:
             references=[],
             max_tokens=2000,
             auto_load=False,
+            provider="bundled",
+            trust_tier="official",
+            model_invocable=True,
+            user_invocable=True,
             **attrs,
         )
         schema = SkillReadSchema.model_validate(skill)
