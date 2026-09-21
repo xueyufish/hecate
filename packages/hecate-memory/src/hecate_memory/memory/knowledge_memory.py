@@ -37,6 +37,9 @@ class KnowledgeSearchResult:
     score: float
     dense_score: float = 0.0
     sparse_score: float = 0.0
+    # Exogenous decay anchor of the backing row — rides along so the
+    # merge layer can apply the metadata bias without reloading the row.
+    last_confirmed_at: datetime | None = None
 
 
 class KnowledgeMemoryService:
@@ -170,6 +173,7 @@ class KnowledgeMemoryService:
                     score=r.score,
                     dense_score=r.dense_score,
                     sparse_score=r.sparse_score,
+                    last_confirmed_at=memory.last_confirmed_at,
                 )
             )
 
@@ -384,6 +388,9 @@ class KnowledgeMemoryService:
         await self._ensure_collection()
 
         result = await embedding_service.encode_query(memory.content)
+        # Honest marker: rows indexed from mock vectors are flagged so the
+        # real-embedding backfill can find them.
+        memory.embedding_real = not embedding_service.is_mock
 
         payload: dict[str, Any] = {
             "workspace_id": str(memory.workspace_id),

@@ -71,7 +71,18 @@ class SearchHitLike(Protocol):
 
 @dataclass(frozen=True)
 class MemoryFactHit:
-    """One fact-memory hit merged across the L3/L4 stores."""
+    """One fact-memory hit merged across the L3/L4 stores.
+
+    ``score`` has one documented meaning: the fused ranking score. When
+    ``MEMORY_FUSION_BIAS_ENABLED`` is on (default off), it is
+    ``normalized_relevance × decay_mult × importance_mult`` clamped to the
+    configured product floor. When the bias is off, the multipliers are
+    inert (1.0) and ``score`` equals the normalized relevance across the
+    cross-layer union. Per-signal decomposition lives under
+    ``metadata["breakdown"]`` (``relevance``, ``decay_mult``,
+    ``importance_mult``) — a single scale is exposed via ``score``, the
+    components are exposed for observability.
+    """
 
     memory_id: uuid.UUID
     source_layer: str  # "user_memory" (L3) | "knowledge_memory" (L4)

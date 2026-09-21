@@ -16,6 +16,7 @@ import pytest
 
 from hecate.core.composition import memory_provider as mp_mod
 from hecate.core.config import settings
+from hecate.runtime import context_processors as cp_mod
 from hecate.runtime.context_processors import (
     _ESCALATION_LAST_HINT,
     ChainContext,
@@ -81,8 +82,10 @@ class _StubProvider:
 @pytest.fixture(autouse=True)
 def _reset_cooldown() -> Any:
     _ESCALATION_LAST_HINT.clear()
+    cp_mod._PREFETCH_PINNED.clear()
     yield
     _ESCALATION_LAST_HINT.clear()
+    cp_mod._PREFETCH_PINNED.clear()
 
 
 class TestMemoryPrefetch:

@@ -9,6 +9,7 @@ sessions are pointed at the test session factory so fixture data is visible.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -125,6 +126,7 @@ async def test_search_memories_merges_l3_and_l4(
         tags: list[str] = ["policy"]
         importance: float = 0.5
         access_count: int = 0
+        created_at: datetime = datetime.now(UTC)
 
     @_dc
     class _StubResult:
@@ -132,6 +134,7 @@ async def test_search_memories_merges_l3_and_l4(
         score = 0.42
         dense_score = 0.4
         sparse_score = 0.1
+        last_confirmed_at = None
 
     async def _fake_search(self: Any, *a: Any, **kw: Any) -> list[Any]:
         return [_StubResult()]
