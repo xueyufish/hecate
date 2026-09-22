@@ -321,7 +321,7 @@ async def _process_chat(
         # Agent-configured tools: drive the tool-calling loop directly —
         # the LLM proposes tool calls, the registry executes them, and results
         # feed back into the conversation (mirrors ConversationService).
-        tool_registry = _build_tool_registry(db)
+        tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
         provider_cfg = await _get_provider_config(db, effective_model)
         # T0.2 (guardrail-upgrade-trio): assemble the guardrail bundle so path-A
         # direct tool loop is gated the same way the Pregel path is. Reads the
@@ -410,7 +410,7 @@ async def _process_chat(
         from hecate.core.composition.runtime_port_adapter import create_runtime_port
         from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
-        tool_registry = _build_tool_registry(db)
+        tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
 
         port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
 
@@ -435,6 +435,7 @@ async def _process_chat(
                     kb_ids=parsed_kb_ids,
                     generate_opening=request.generate_opening,
                     enable_suggestions=request.generate_suggestions,
+                    skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
                 )
 
                 if isinstance(result_gen, dict):
@@ -478,6 +479,7 @@ async def _process_chat(
             kb_ids=parsed_kb_ids,
             generate_opening=request.generate_opening,
             enable_suggestions=request.generate_suggestions,
+            skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
         )
 
         if not isinstance(result, dict):
@@ -696,7 +698,7 @@ async def _load_agent_tools(db: AsyncSession, tool_names: list[str]) -> list[dic
     return format_tools_for_llm(definitions)
 
 
-def _build_tool_registry(db: AsyncSession) -> ToolRegistry:
+def _build_tool_registry(db: AsyncSession, skill_ref_manifest: list[dict[str, Any]] | None = None) -> ToolRegistry:
     """Construct a ToolRegistry wired to builtin + DB tools using app settings.
 
     Args:
@@ -726,7 +728,7 @@ def _build_tool_registry(db: AsyncSession) -> ToolRegistry:
     builtin_executor = BuiltInToolExecutor(
         search_provider=search_provider,
         workspace_root=settings.WORKSPACE_ROOT,
-        skill_loader=SkillLoader(db),
+        skill_loader=SkillLoader(db, ref_manifest=skill_ref_manifest),
         memory_backend=memory_backend,
     )
     return ToolRegistry(db=db, builtin_executor=builtin_executor)

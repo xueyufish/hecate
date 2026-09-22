@@ -60,15 +60,54 @@ class SkillLoader:
     Progressive mode (default) returns an L1 catalog from ``format_skills``
     and full content from ``load_skill_content``. Legacy mode injects every
     skill's full content from ``format_skills`` (pre-change behaviour).
+
+    ``ref_manifest`` (5.9d) opts the loader into pinned resolution: entries
+    of an agent-version reference manifest shaped ``{resource_type: "skill",
+    skill_id, version}`` freeze the served content to that skill version's
+    snapshot while governance flags (``model_invocable`` / ``auto_load``)
+    keep resolving from the live row. Snapshot-resolved executions (channel
+    bindings, 1.3.20) pass the resolved manifest; studio/draft paths omit
+    it and keep live resolution.
     """
 
-    def __init__(self, db: AsyncSession, *, progressive: bool | None = None) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        progressive: bool | None = None,
+        ref_manifest: list[dict] | None = None,
+    ) -> None:
         self._db = db
         if progressive is None:
             from hecate.core.config import settings
 
             progressive = settings.SKILL_PROGRESSIVE_DISCLOSURE
         self._progressive = progressive
+        self._pins_by_name = self._extract_pins(ref_manifest)
+
+    @staticmethod
+    def _extract_pins(ref_manifest: list[dict] | None) -> dict[str, tuple[UUID, int]]:
+        """Map skill name → (skill_id, version) for pinned manifest entries.
+
+        Entries without ``skill_id``/``version`` (legacy snapshots,
+        unversioned resources) resolve unpinned.
+        """
+        pins: dict[str, tuple[UUID, int]] = {}
+        for entry in ref_manifest or []:
+            if not isinstance(entry, dict) or entry.get("resource_type") != "skill":
+                continue
+            version = entry.get("version")
+            skill_id = entry.get("skill_id")
+            if version is None or skill_id is None:
+                continue
+            name = entry.get("resource_id") or entry.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            try:
+                pins[name] = (UUID(str(skill_id)), int(version))
+            except (TypeError, ValueError):
+                logger.warning("Ignoring malformed skill pin for '%s' in reference manifest", name)
+        return pins
 
     async def format_skills(
         self,
@@ -336,7 +375,8 @@ class SkillLoader:
         zero-UUID domains) collapse to the highest-precedence match, so
         shadowing is deterministic regardless of storage order. Plugin-derived
         skills are skipped (like missing skills) when their owning package is
-        disabled or soft-deleted.
+        disabled or soft-deleted. Pinned names (5.9d) get their content
+        overlaid from the pinned version snapshots afterwards.
         """
         zero_uuid = uuid.UUID(int=0)
         result = await self._db.execute(
@@ -350,7 +390,79 @@ class SkillLoader:
             )
         )
         winners = resolve_precedence_map(list(result.scalars().all()))
-        return list(winners.values())
+        merged = await self._apply_pinned_content(winners)
+        return list(merged.values())
+
+    async def _apply_pinned_content(self, winners: dict[str, SkillModel]) -> dict[str, SkillModel]:
+        """Overlay pinned snapshot content onto the resolved live rows.
+
+        Governance fields (``model_invocable`` / ``auto_load`` / budget
+        behaviour beyond ``max_tokens``) stay live; content fields
+        (description / instructions / max_tokens / frozen lists) come
+        from the pinned version snapshot. When the live row is gone the
+        snapshot still serves, with permissive governance defaults.
+        Live ORM rows are never mutated — a detached copy carries the
+        overlay so the session cannot flush frozen content back to the
+        live row.
+        """
+        if not self._pins_by_name:
+            return winners
+
+        from hecate.models.skill_version import SkillVersionModel
+
+        conditions = [
+            (SkillVersionModel.skill_id == sid) & (SkillVersionModel.version == ver)
+            for sid, ver in self._pins_by_name.values()
+        ]
+        result = await self._db.execute(select(SkillVersionModel).where(or_(*conditions), ~SkillVersionModel.deleted))
+        by_key = {(v.skill_id, v.version): v for v in result.scalars().all()}
+
+        merged = dict(winners)
+        for name, (skill_id, version) in self._pins_by_name.items():
+            record = by_key.get((skill_id, version))
+            if record is None:
+                logger.warning(
+                    "Pinned skill '%s' version %s not found; falling back to live resolution",
+                    name,
+                    version,
+                )
+                continue
+            snap = record.config_snapshot or {}
+            base = winners.get(name)
+            if base is not None:
+                overlay = SkillModel(
+                    id=base.id,
+                    workspace_id=base.workspace_id,
+                    name=snap.get("name", base.name),
+                    description=snap.get("description", base.description),
+                    instructions=snap.get("instructions", base.instructions),
+                    allowed_tools=list(snap.get("allowed_tools") or []),
+                    metadata_=dict(base.metadata_ or {}),
+                    scripts=list(snap.get("scripts") or []),
+                    references=list(snap.get("references") or []),
+                    max_tokens=snap.get("max_tokens", base.max_tokens),
+                    auto_load=base.auto_load,
+                    provider=base.provider,
+                    plugin_id=base.plugin_id,
+                    trust_tier=base.trust_tier,
+                    model_invocable=base.model_invocable,
+                    user_invocable=base.user_invocable,
+                    content_hash=base.content_hash,
+                )
+            else:
+                overlay = SkillModel(
+                    id=skill_id,
+                    name=snap.get("name", name),
+                    description=snap.get("description", ""),
+                    instructions=snap.get("instructions", ""),
+                    allowed_tools=list(snap.get("allowed_tools") or []),
+                    scripts=list(snap.get("scripts") or []),
+                    references=list(snap.get("references") or []),
+                    max_tokens=snap.get("max_tokens", 2000),
+                )
+                overlay.model_invocable = True
+            merged[name] = overlay
+        return merged
 
     def _format_single_skill(self, skill: SkillModel) -> str:
         """Format a single skill as full XML block (L2 content)."""

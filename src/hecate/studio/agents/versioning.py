@@ -172,52 +172,24 @@ class AgentVersionService:
         ]
 
     async def _build_ref_manifest(self, agent: AgentModel) -> list[dict[str, Any]]:
-        """Record content hashes for resources that have no versioning yet.
+        """Record references at commit time.
 
-        Skills are hashed over their stored definition (instructions,
-        allowed tools, scripts, references). Tool entries are hashed as
-        they appear on the agent row. Knowledge bases deliberately get no
-        hash — their corpus is mutable data (the snapshot references the
-        KB, it does not freeze its documents).
+        Skills are versioned resources (5.9d): same-name candidates resolve
+        through the provider registry (the winner must match what the
+        loader serves — storage order decides nothing), and a skill with
+        committed versions pins to its latest version
+        ``(name, skill_id, provider, version, content_hash)``. Skills
+        never committed (and plugin-sourced rows) stay unpinned with a
+        live content hash so drift stays detectable. Tool entries are
+        hashed as they appear on the agent row. Knowledge bases
+        deliberately get no hash — their corpus is mutable data (the
+        snapshot references the KB, it does not freeze its documents).
         """
         manifest: list[dict[str, Any]] = []
 
         skill_names = [s for s in (agent.skills or []) if isinstance(s, str)]
         if skill_names:
-            from hecate.models.skill import SkillModel
-
-            zero_uuid = uuid.UUID(int=0)
-            result = await self.db.execute(
-                select(SkillModel).where(
-                    SkillModel.name.in_(skill_names),
-                    SkillModel.workspace_id.in_([agent.workspace_id, zero_uuid]),
-                    ~SkillModel.deleted,
-                )
-            )
-            by_name = {s.name: s for s in result.scalars().all()}
-            for name in skill_names:
-                skill = by_name.get(name)
-                content_hash = (
-                    canonical_hash(
-                        {
-                            "name": skill.name,
-                            "instructions": skill.instructions,
-                            "allowed_tools": skill.allowed_tools,
-                            "scripts": skill.scripts,
-                            "references": skill.references,
-                        }
-                    )
-                    if skill is not None
-                    else None
-                )
-                manifest.append(
-                    {
-                        "resource_type": "skill",
-                        "resource_id": name,
-                        "version": None,
-                        "content_hash": content_hash,
-                    }
-                )
+            manifest.extend(await self._skill_manifest_entries(agent, skill_names))
 
         for tool in agent.tools or []:
             manifest.append(
@@ -240,6 +212,92 @@ class AgentVersionService:
             )
 
         return manifest
+
+    async def _skill_manifest_entries(self, agent: AgentModel, skill_names: list[str]) -> list[dict[str, Any]]:
+        """Build the skill entries of the reference manifest (5.9d).
+
+        A pinned entry carries ``(resource_type, resource_id=name,
+        skill_id, provider, version, content_hash)`` where content_hash
+        is the pinned version's own hash; an unpinned entry (version
+        ``None``) hashes the live row so post-commit changes stay
+        drift-detectable. Missing skills keep the legacy hash-less entry
+        shape (drift reports them through the live-manifest comparison).
+        """
+        from hecate.models.skill import SkillModel
+        from hecate.models.skill_version import SkillVersionModel
+
+        zero_uuid = uuid.UUID(int=0)
+        result = await self.db.execute(
+            select(SkillModel).where(
+                SkillModel.name.in_(skill_names),
+                SkillModel.workspace_id.in_([agent.workspace_id, zero_uuid]),
+                ~SkillModel.deleted,
+            )
+        )
+        # Lazy: cross-domain function-level import (see gate glue below).
+        from hecate.tools.skill.provider_registry import resolve_precedence_map
+
+        winners = resolve_precedence_map(list(result.scalars().all()))
+
+        latest_by_skill: dict[uuid.UUID, SkillVersionModel] = {}
+        winner_ids = [s.id for s in winners.values()]
+        if winner_ids:
+            rows = await self.db.execute(
+                select(SkillVersionModel)
+                .where(
+                    SkillVersionModel.skill_id.in_(winner_ids),
+                    ~SkillVersionModel.deleted,
+                )
+                .order_by(SkillVersionModel.version.desc())
+            )
+            for row in rows.scalars().all():
+                latest_by_skill.setdefault(row.skill_id, row)
+
+        entries: list[dict[str, Any]] = []
+        for name in skill_names:
+            skill = winners.get(name)
+            if skill is None:
+                entries.append(
+                    {
+                        "resource_type": "skill",
+                        "resource_id": name,
+                        "version": None,
+                        "content_hash": None,
+                    }
+                )
+                continue
+            latest = latest_by_skill.get(skill.id)
+            if latest is not None:
+                entries.append(
+                    {
+                        "resource_type": "skill",
+                        "resource_id": name,
+                        "skill_id": str(skill.id),
+                        "provider": skill.provider,
+                        "version": latest.version,
+                        "content_hash": latest.content_hash,
+                    }
+                )
+            else:
+                entries.append(
+                    {
+                        "resource_type": "skill",
+                        "resource_id": name,
+                        "skill_id": str(skill.id),
+                        "provider": skill.provider,
+                        "version": None,
+                        "content_hash": canonical_hash(
+                            {
+                                "name": skill.name,
+                                "instructions": skill.instructions,
+                                "allowed_tools": skill.allowed_tools,
+                                "scripts": skill.scripts,
+                                "references": skill.references,
+                            }
+                        ),
+                    }
+                )
+        return entries
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -589,7 +647,10 @@ class AgentVersionService:
         """Report manifest entries whose live content differs from the snapshot.
 
         Knowledge-base entries (``content_hash=None``) are skipped —
-        their corpus is mutable data by design.
+        their corpus is mutable data by design. Pinned skill entries
+        (``version`` set, 5.9d) are skipped too — a pin freezes its
+        content, so there is nothing to drift. Entries without a
+        ``version`` field (legacy snapshots) resolve as unpinned.
         """
         record = await self.get_version(agent_id, version, include_snapshot=True)
         drifted: list[dict[str, Any]] = []
@@ -597,6 +658,8 @@ class AgentVersionService:
         live_by_key = {(entry["resource_type"], str(entry["resource_id"])): entry for entry in live_manifest}
         for entry in record["ref_manifest"]:
             if entry.get("content_hash") is None:
+                continue
+            if entry.get("version") is not None:
                 continue
             key = (entry["resource_type"], str(entry["resource_id"]))
             live = live_by_key.get(key)
@@ -685,7 +748,12 @@ class AgentVersionService:
 
     @staticmethod
     def _ref_manifest_diff(v1: AgentVersionModel, v2: AgentVersionModel) -> list[dict[str, Any]]:
-        """Manifest deltas between two snapshots (added/removed/hash-changed)."""
+        """Manifest deltas between two snapshots (added/removed/content-changed).
+
+        A 5.9d skill entry counts as changed when its pin ``version`` or
+        ``content_hash`` moved; entries without the field (legacy shape,
+        unversioned resources) compare on hash alone.
+        """
         old = {(e.get("resource_type"), str(e.get("resource_id"))): e for e in (v1.ref_manifest or [])}
         new = {(e.get("resource_type"), str(e.get("resource_id"))): e for e in (v2.ref_manifest or [])}
         changes: list[dict[str, Any]] = []
@@ -695,7 +763,9 @@ class AgentVersionService:
                 changes.append({"change": "removed", "resource_type": key[0], "resource_id": key[1]})
             elif o is None and n is not None:
                 changes.append({"change": "added", "resource_type": key[0], "resource_id": key[1]})
-            elif (o or {}).get("content_hash") != (n or {}).get("content_hash"):
+            elif (o or {}).get("content_hash") != (n or {}).get("content_hash") or (o or {}).get("version") != (
+                n or {}
+            ).get("version"):
                 changes.append(
                     {
                         "change": "content_changed",
@@ -703,6 +773,8 @@ class AgentVersionService:
                         "resource_id": key[1],
                         "v1_hash": (o or {}).get("content_hash"),
                         "v2_hash": (n or {}).get("content_hash"),
+                        "v1_version": (o or {}).get("version"),
+                        "v2_version": (n or {}).get("version"),
                     }
                 )
         return changes

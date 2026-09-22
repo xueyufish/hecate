@@ -319,6 +319,7 @@ class WorkflowExecutionService:
         version_selector: str = "published_preferred",
         citation_provenance: dict | None = None,
         grounding_scoring: dict | None = None,
+        skill_ref_manifest: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute an agent through the unified graph engine.
 
@@ -350,7 +351,13 @@ class WorkflowExecutionService:
             agent_version: Optional agent version number (1.3.20). When
                 set, the agent's persona/model/workflow binding come from
                 the frozen snapshot instead of the live row — the
-                channel-published invocation path.
+                channel-published invocation path. Its reference manifest
+                also drives pinned skill resolution (5.9d).
+            skill_ref_manifest: Optional pre-resolved skill reference
+                manifest (5.9d) for callers that resolved the agent
+                snapshot themselves (the channel invoke path). Wins over
+                the manifest derived from ``agent_version``. ``None``
+                keeps live skill resolution.
             workflow_version: Exact workflow version to execute (the
                 agent snapshot's pinned workflow version). Wins over
                 ``version_selector``.
@@ -384,6 +391,7 @@ class WorkflowExecutionService:
 
             agent_uuid = agent_id if isinstance(agent_id, uuid.UUID) else uuid.UUID(str(agent_id))
             agent_workspace_id: uuid.UUID | None = None
+            skill_manifest: list[dict[str, Any]] | None = list(skill_ref_manifest) if skill_ref_manifest else None
             if agent_version is not None:
                 # 1.3.20: the frozen snapshot supplies persona / model /
                 # workflow binding; unpinned resources (skills) still
@@ -401,6 +409,9 @@ class WorkflowExecutionService:
                     workflow_id = uuid.UUID(str(cfg["workflow_id"]))
                 workflow_version = workflow_version or resolved.workflow_version
                 agent_workspace_id = resolved.workspace_id
+                # 5.9d: pinned skills resolve from their version snapshots.
+                if skill_manifest is None:
+                    skill_manifest = list(resolved.ref_manifest or [])
             else:
                 result = await self._db.execute(
                     select(AgentModel).where(
@@ -413,7 +424,7 @@ class WorkflowExecutionService:
                     persona = agent.persona or "You are a helpful assistant."
                     agent_workspace_id = agent.workspace_id
             if agent_workspace_id is not None:
-                loader = SkillLoader(self._db)
+                loader = SkillLoader(self._db, ref_manifest=skill_manifest)
                 skills_block = await loader.format_skills(
                     agent_id=agent_uuid,
                     workspace_id=agent_workspace_id,

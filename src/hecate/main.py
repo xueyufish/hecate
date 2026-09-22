@@ -86,6 +86,7 @@ from hecate.studio.api.workflows import router as workflows_router
 from hecate.tools.api.gateway import router as gateway_router
 from hecate.tools.api.mcp import router as mcp_router
 from hecate.tools.api.skill_registry import router as skill_registry_router
+from hecate.tools.api.skill_versions import router as skill_versions_router
 from hecate.tools.api.skills import router as skills_router
 from hecate.tools.api.tool_cache import router as tool_cache_router
 from hecate.tools.api.tool_policies import router as tool_policies_router
@@ -432,6 +433,7 @@ app.include_router(replay_router, prefix="/api", tags=["replay"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(skills_router, prefix="/api", tags=["skills"])
+app.include_router(skill_versions_router, prefix="/api", tags=["skill-versions"])
 app.include_router(conversations_router, prefix="/api", tags=["conversations"])
 app.include_router(self_evolution_router, prefix="/api", tags=["self-evolution"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])

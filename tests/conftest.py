@@ -48,6 +48,7 @@ from hecate.models import (  # noqa: F401
     plugin,
     quota,
     skill,
+    skill_version,
     tool,
     tool_policy,
     trace,
