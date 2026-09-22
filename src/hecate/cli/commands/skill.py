@@ -7,6 +7,7 @@ Provides:
 - hecate skill update <id>
 - hecate skill delete <id>
 - hecate skill import <file>
+- hecate skill deps <name> [--graph|--closure|--reverse|--reverse-direct]
 """
 
 from __future__ import annotations
@@ -113,3 +114,67 @@ def import_skill(
         )
 
     display_result(result, get_output_format(), title="Skill Imported")
+
+
+@app.command()
+def deps(
+    name: Annotated[str, typer.Argument(help="Skill name")],
+    graph: Annotated[bool, typer.Option("--graph", help="Show dependency tree")] = False,
+    closure: Annotated[bool, typer.Option("--closure", help="Show transitive closure")] = False,
+    reverse: Annotated[bool, typer.Option("--reverse", help="Who depends on this skill")] = False,
+    reverse_direct: Annotated[
+        bool, typer.Option("--reverse-direct", help="Direct reverse only (combine with --reverse)")
+    ] = False,
+) -> None:
+    """Inspect skill dependencies (5.9e diagnostic command).
+
+    Default (no flag) shows the direct ``requires`` list. Combine exactly
+    one of ``--graph`` / ``--closure`` / ``--reverse``. ``--reverse-direct``
+    refines ``--reverse`` to skip transitive reverse lookup.
+    """
+    flags = sum([graph, closure, reverse])
+    if flags > 1:
+        typer.echo("Error: combine at most one of --graph / --closure / --reverse.")
+        raise typer.Exit(2)
+
+    mode = "direct"
+    transitive = True
+    if graph:
+        mode = "graph"
+    elif closure:
+        mode = "closure"
+    elif reverse:
+        mode = "reverse"
+        transitive = not reverse_direct
+
+    client = HecateClient(get_profile_name())
+    result = client.get(
+        f"/api/skills/by-name/{name}/deps",
+        params={"mode": mode, "transitive": transitive},
+    )
+    fmt = get_output_format()
+    if mode == "graph":
+        display_result(result, fmt, title=f"Dependency graph for {name}")
+    elif mode == "closure":
+        rows = result.get("closure", [])
+        display_result(
+            rows,
+            fmt,
+            columns=["name", "provider", "version", "skill_id"],
+            title=f"Closure for {name} ({len(rows)} node(s))",
+        )
+    elif mode == "reverse":
+        hits = result.get("depends_on_me", [])
+        display_result(
+            hits,
+            fmt,
+            columns=["name"],
+            title=f"Skills depending on {name} ({len(hits)})",
+        )
+    else:
+        display_result(
+            result.get("requires", []),
+            fmt,
+            columns=["name", "provider"],
+            title=f"Direct requires for {name}",
+        )

@@ -89,4 +89,12 @@ def parse_skill_md(content: str) -> dict:
     if isinstance(metadata, dict):
         result["metadata"] = metadata
 
+    # ``requires`` is an optional frontmatter block listing skill
+    # dependencies. The shape is a list of ``{name, provider?}`` entries;
+    # deep validation (graph check, cycle, cross-source) runs in the API
+    # layer, not here — the parser only normalizes the YAML structure.
+    requires = frontmatter.get("requires")
+    if requires is not None:
+        result["requires"] = requires
+
     return result

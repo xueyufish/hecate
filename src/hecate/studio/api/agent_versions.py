@@ -99,6 +99,33 @@ async def get_agent_version(
         raise _not_found(e) from e
 
 
+@router.get("/agents/{agent_id}/versions/{version}/skill-closure")
+async def get_agent_version_skill_closure(
+    agent_id: uuid.UUID,
+    version: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Return the skill closure for an agent version (5.9e).
+
+    Pulls the skill entries out of the version's ``ref_manifest`` and
+    surfaces them as a flat list of ``(name, skill_id, provider, version,
+    content_hash)`` tuples. ``implicit`` flags nodes added by the
+    closure walk that are not in ``agent.skills`` directly.
+    """
+    try:
+        detail = await AgentVersionService(db).get_version(agent_id, version, include_snapshot=True)
+    except ValueError as e:
+        raise _not_found(e) from e
+    manifest = detail.get("ref_manifest") or []
+    skill_entries = [e for e in manifest if isinstance(e, dict) and e.get("resource_type") == "skill"]
+    return {
+        "agent_id": str(agent_id),
+        "version": version,
+        "skill_closure": skill_entries,
+    }
+
+
 @router.patch("/agents/{agent_id}/versions/{version}")
 async def update_agent_version(
     agent_id: uuid.UUID,

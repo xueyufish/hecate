@@ -53,6 +53,31 @@ AGENT_PLUGIN_TYPE = "agent-plugin"
 AGENT_PLUGINS_SUBDIR = "agent-plugins"
 
 
+def _merge_plugin_requires(
+    namespace_requires: list[dict[str, Any]],
+    frontmatter_requires: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Union plugin-level (namespace) and per-skill (frontmatter) requires.
+
+    Namespace entries take precedence on name collision — they are the
+    package-level declaration and reflect the author's intent for every
+    skill in the bundle. Returns a list (not a set) to preserve order
+    while deduplicating by ``name`` so the persisted column reads
+    predictably.
+    """
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entry in [*namespace_requires, *frontmatter_requires]:
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not isinstance(name, str) or name == "" or name in seen:
+            continue
+        seen.add(name)
+        merged.append(entry)
+    return merged
+
+
 class FeatureDisabledError(ValueError):
     """Raised when the Agent Plugins ingestion switch is off."""
 
@@ -292,11 +317,110 @@ class PluginService:
             msg = "Built-in plugins cannot be uninstalled"
             raise PermissionError(msg)
 
+        # 5.9e: mark unbinded user/project skills that ``requires`` a
+        # plugin-sourced skill as dangling. Bound agent versions are
+        # untouched — 5.9d's "源删除后 pinned 内容仍可解析" contract covers
+        # that case (the agent version's ref-manifest holds the snapshot).
+        await self._mark_dangling_skills_for_plugin(plugin)
+
         from hecate.core.plugin.installer import uninstall_plugin as _uninstall
 
         _uninstall(plugin.name, Path(plugins_dir))
         plugin.deleted_at = __import__("datetime").datetime.now(__import__("datetime").UTC)
         await self._db.flush()
+
+    async def _mark_dangling_skills_for_plugin(self, plugin: PluginModel) -> None:
+        """Mark unbinded user/project skills that depend on this plugin as dangling.
+
+        Reads the plugin's owned skill names, then finds any non-plugin
+        skill whose ``requires`` JSON references one of them. For each
+        candidate, checks whether any agent version's ref-manifest still
+        pins that skill name; if not, writes a ``metadata.dangling`` entry
+        so the loader knows to skip the dangling skill and the user sees
+        it in API responses.
+        """
+        from sqlalchemy import select
+
+        # 1. Collect plugin-owned skill names (in the plugin's workspace).
+        result = await self._db.execute(
+            select(SkillModel.name).where(
+                SkillModel.plugin_id == plugin.id,
+                ~SkillModel.deleted,
+            )
+        )
+        plugin_skill_names: set[str] = {row[0] for row in result.all()}
+        if not plugin_skill_names:
+            return
+
+        # 2. Find user/project skills whose ``requires`` references one of
+        #    the plugin's skills. JSON containment via a JSON_EXTRACT-style
+        #    query is vendor-specific; we over-fetch and filter in Python
+        #    because the typical plugin ships only a handful of skills
+        #    and the user-skill population is bounded.
+        result = await self._db.execute(
+            select(SkillModel).where(
+                SkillModel.source.in_(["user", "project"]),
+                SkillModel.workspace_id == plugin.workspace_id,
+                ~SkillModel.deleted,
+                SkillModel.requires.is_not(None),
+            )
+        )
+        candidates = list(result.scalars())
+
+        # 3. Determine which candidates are *not* pinned by any agent
+        #    version's ref-manifest. We re-use the existing version-table
+        #    scan via canonical content hashes; conservatively, a skill is
+        #    considered bound if its id appears in any agent version's
+        #    ref_manifest with resource_type == "skill".
+        from hecate.models.agent_version import AgentVersionModel
+
+        bound_ids: set[uuid.UUID] = set()
+        if candidates:
+            result = await self._db.execute(
+                select(AgentVersionModel.ref_manifest).where(
+                    ~AgentVersionModel.deleted,
+                )
+            )
+            for (manifest,) in result.all():
+                if not isinstance(manifest, list):
+                    continue
+                for entry in manifest:
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("resource_type") != "skill":
+                        continue
+                    skill_id_str = entry.get("skill_id")
+                    if skill_id_str:
+                        try:
+                            bound_ids.add(uuid.UUID(skill_id_str))
+                        except (TypeError, ValueError):
+                            continue
+
+        # 4. Mark each candidate whose ``requires`` references a plugin
+        #    skill and that is not bound by any agent version.
+        now = __import__("datetime").datetime.now(__import__("datetime").UTC)
+        for skill in candidates:
+            requires = skill.requires or []
+            referenced_plugin_skill = False
+            for entry in requires:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("name") in plugin_skill_names:
+                    referenced_plugin_skill = True
+                    break
+            if not referenced_plugin_skill:
+                continue
+            if skill.id in bound_ids:
+                continue
+            existing_meta = dict(skill.metadata_ or {})
+            existing_meta["dangling"] = {
+                "reason": "plugin_uninstalled",
+                "plugin_id": str(plugin.id),
+                "plugin_name": plugin.name,
+                "missing_deps": sorted(plugin_skill_names),
+                "marked_at": now.isoformat(),
+            }
+            skill.metadata_ = existing_meta
 
     # ------------------------------------------------------------------
     # Agent Plugins 1.0 ingestion (feature 5.5c)
@@ -304,6 +428,65 @@ class PluginService:
 
     def _agent_plugins_root(self, plugins_dir: str | Path) -> Path:
         return Path(plugins_dir) / AGENT_PLUGINS_SUBDIR
+
+    async def _validate_plugin_skill_requires_or_raise(
+        self,
+        skill_name: str,
+        source: str,
+        requires: list[dict[str, Any]],
+        workspace_id: uuid.UUID,
+    ) -> None:
+        """Validate a plugin-imported skill's merged requires before persisting.
+
+        Builds a :class:`SkillLookup` adapter against ``self._db`` and
+        delegates to :func:`hecate.tools.skill.dependency_validator.validate_requires`.
+        Failure raises — the install pipeline catches it and rolls the
+        transaction back, leaving no orphan rows behind.
+        """
+        from sqlalchemy import select
+
+        from hecate.tools.skill.dependency_validator import validate_requires
+
+        # Bulk-load candidate rows by name for one-shot resolution.
+        names = sorted({e["name"] for e in requires if isinstance(e, dict) and isinstance(e.get("name"), str)})
+        rows: list[SkillModel] = []
+        if names:
+            result = await self._db.execute(
+                select(SkillModel).where(
+                    SkillModel.name.in_(names),
+                    SkillModel.workspace_id.in_([workspace_id, uuid.UUID(int=0)]),
+                    ~SkillModel.deleted,
+                )
+            )
+            rows = list(result.scalars())
+
+        by_key: dict[tuple[str, str | None], SkillModel] = {(r.name, r.provider): r for r in rows}
+
+        class _Adapter:
+            def find_skill(
+                self,
+                ws: uuid.UUID,
+                name: str,
+                provider: str | None = None,
+            ) -> SkillModel | None:
+                if provider is not None:
+                    return by_key.get((name, provider))
+                for (n, _), row in by_key.items():
+                    if n == name:
+                        return row
+                return None
+
+        errors = validate_requires(
+            skill_name=skill_name,
+            source=source,
+            requires=requires,
+            workspace_id=workspace_id,
+            lookup=_Adapter(),
+        )
+        if errors:
+            names_str = ", ".join(sorted({e.dependency_path[-1] if e.dependency_path else "?" for e in errors}))
+            msg = f"plugin skill {skill_name!r} has invalid requires: {names_str}"
+            raise ValueError(msg)
 
     async def install_agent_plugin(
         self,
@@ -561,12 +744,16 @@ class PluginService:
                     "config_schema": namespace.manifest.config_schema,
                     "metadata": namespace.metadata,
                     "component_status": code_status,
+                    "requires": list(namespace.requires),  # 5.9e
                 }
             plugin.scan_result = self._scan_result_dict(scan, _suppressed)
             await self._db.flush()
 
             # --- Import skills ---
             skill_workspace = workspace_id or uuid.UUID(int=0)
+            # 5.9e: per-skill requires = plugin-level (namespace) union
+            # SKILL.md frontmatter requires, namespace preferred on conflict.
+            namespace_requires = list(namespace.requires) if namespace is not None else []
             for _skill_dir, candidate in candidates:
                 allowed = candidate.extra.get("allowed-tools") or []
                 metadata = dict(candidate.extra.get("metadata") or {})
@@ -574,6 +761,24 @@ class PluginService:
                     metadata["license"] = candidate.extra["license"]
                 if "compatibility" in candidate.extra:
                     metadata["compatibility"] = candidate.extra["compatibility"]
+                # Merge requires: SKILL.md frontmatter first, namespace
+                # requires override on key (name) collision. The
+                # candidate.extra field carries the parsed frontmatter
+                # when the candidate was prepared by the SKILL.md loader.
+                frontmatter_requires = candidate.extra.get("requires") or []
+                merged_requires = _merge_plugin_requires(
+                    namespace_requires=namespace_requires,
+                    frontmatter_requires=frontmatter_requires,
+                )
+                # Validate the merged requires against the workspace's
+                # existing skill inventory before persisting — fail-closed.
+                if merged_requires:
+                    await self._validate_plugin_skill_requires_or_raise(
+                        skill_name=candidate.name,
+                        source="plugin",
+                        requires=merged_requires,
+                        workspace_id=skill_workspace,
+                    )
                 skill = SkillModel(
                     workspace_id=skill_workspace,
                     name=candidate.name,
@@ -582,6 +787,7 @@ class PluginService:
                     instructions=candidate.instructions,
                     allowed_tools=list(allowed) if isinstance(allowed, list) else [allowed],
                     metadata_=metadata,
+                    requires=merged_requires,  # 5.9e
                     origin=origin_str,
                     plugin_id=plugin.id,
                 )
