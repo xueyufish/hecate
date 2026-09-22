@@ -184,12 +184,32 @@ class AgentVersionService:
         hashed as they appear on the agent row. Knowledge bases
         deliberately get no hash — their corpus is mutable data (the
         snapshot references the KB, it does not freeze its documents).
+
+        Skill dependencies (5.9e): after the direct-skill entries are
+        recorded, the closure walk resolves transitive ``requires`` and
+        adds an entry per implicit node. A failure in the closure walk
+        (missing transitive dep, soft-deleted upstream) aborts the
+        commit so the whole transaction rolls back.
         """
         manifest: list[dict[str, Any]] = []
 
         skill_names = [s for s in (agent.skills or []) if isinstance(s, str)]
         if skill_names:
             manifest.extend(await self._skill_manifest_entries(agent, skill_names))
+
+        # 5.9e: transitive closure of `requires` becomes manifest entries.
+        # Direct skills are already in the manifest above; we add only the
+        # implicit ones (closure minus direct) so the same name does not
+        # appear twice.
+        if skill_names:
+            try:
+                implicit_entries = await self._skill_closure_entries(agent, skill_names, manifest)
+                manifest.extend(implicit_entries)
+            except Exception:
+                # Re-raise so the outer commit transaction rolls back.
+                # Surfaced to the caller as the standard 422 / 500 mapping
+                # in the API layer.
+                raise
 
         for tool in agent.tools or []:
             manifest.append(
@@ -298,6 +318,65 @@ class AgentVersionService:
                     }
                 )
         return entries
+
+    async def _skill_closure_entries(
+        self,
+        agent: AgentModel,
+        direct_skill_names: list[str],
+        existing_manifest: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Add implicit-skill entries from the transitive ``requires`` closure.
+
+        Skips any node that is already a direct skill (the caller has
+        already produced its entry). On closure failure (missing
+        transitive dep, soft-deleted upstream) re-raises so the commit
+        transaction rolls back.
+
+        The dedupe key is ``(name, provider)`` rather than ``skill_id``
+        because the legacy direct-skill entry shape (no committed
+        version, no ``skill_id`` field) does not carry one — comparing
+        on ``(name, provider)`` matches both the legacy and the
+        closure-built entries.
+        """
+        from hecate.tools.skill.dependency_resolver import (
+            ClosureError,
+            resolve_closure,
+        )
+
+        try:
+            closure = await resolve_closure(
+                direct_skill_names=direct_skill_names,
+                workspace_id=agent.workspace_id,
+                db=self.db,
+            )
+        except ClosureError as exc:
+            # Wrap in a ValueError so the API layer's existing handler
+            # converts to a 422. The closure error message already lists
+            # the missing nodes.
+            raise ValueError(str(exc)) from exc
+
+        direct_keys: set[tuple[str, str | None]] = {
+            (entry.get("resource_id"), entry.get("provider"))
+            for entry in existing_manifest
+            if entry.get("resource_type") == "skill"
+        }
+
+        implicit_entries: list[dict[str, Any]] = []
+        for resolved in closure:
+            if (resolved.name, resolved.provider) in direct_keys:
+                continue
+            implicit_entries.append(
+                {
+                    "resource_type": "skill",
+                    "resource_id": resolved.name,
+                    "skill_id": str(resolved.skill_id),
+                    "provider": resolved.provider,
+                    "version": resolved.version,
+                    "content_hash": resolved.content_hash,
+                    "implicit": True,  # 5.9e: marks closure-only deps
+                }
+            )
+        return implicit_entries
 
     # --- lifecycle ---------------------------------------------------------
 

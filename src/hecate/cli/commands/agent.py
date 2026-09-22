@@ -71,6 +71,33 @@ def get(
 
 
 @app.command()
+def show_version(
+    agent_id: Annotated[str, typer.Argument(help="Agent UUID")],
+    version: Annotated[int, typer.Argument(help="Version number")],
+    skill_closure: Annotated[bool, typer.Option("--skill-closure", help="Show the skill closure (5.9e)")] = False,
+) -> None:
+    """Show a single agent version's metadata or its skill closure.
+
+    With ``--skill-closure``, prints the closed skill set as a table —
+    direct skills (in ``agent.skills``) plus implicit transitive
+    ``requires`` dependencies pinned by the closure walk at commit time.
+    """
+    client = HecateClient(get_profile_name())
+    if skill_closure:
+        result = client.get(f"/api/agents/{agent_id}/versions/{version}/skill-closure")
+        rows = result.get("skill_closure", [])
+        display_result(
+            rows,
+            get_output_format(),
+            columns=["name", "provider", "version", "skill_id", "implicit"],
+            title=f"Skill closure for agent {agent_id} v{version} ({len(rows)})",
+        )
+        return
+    result = client.get(f"/api/agents/{agent_id}/versions/{version}")
+    display_result(result, get_output_format(), title=f"Agent Version v{version}")
+
+
+@app.command()
 def update(
     agent_id: Annotated[str, typer.Argument(help="Agent UUID")],
     name: Annotated[str | None, typer.Option("--name", "-n", help="New name")] = None,

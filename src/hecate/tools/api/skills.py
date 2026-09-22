@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, or_, select
@@ -24,9 +24,16 @@ from hecate.core.canonical_hash import canonical_hash
 from hecate.core.deps import get_db
 from hecate.core.deps_workspace import get_auth_context
 from hecate.models.skill import SkillCreateSchema, SkillModel, SkillReadSchema, SkillUpdateSchema
+from hecate.tools.skill.dependency_validator import (
+    validate_requires,
+)
 from hecate.tools.skill.provider_registry import PROVIDER_BUNDLED, derive_provider
 
 router = APIRouter()
+
+#: Identity for the bundled workspace used by deps lookups; mirrors the
+#: convention in :mod:`hecate.tools.skill.dependency_resolver`.
+BUNDLED_WORKSPACE_ID = uuid.UUID(int=0)
 
 
 def _compute_content_hash(skill: SkillModel) -> str:
@@ -59,6 +66,251 @@ async def _attach_version_status(db: AsyncSession, payload: dict) -> dict:
 def _derive_trust_tier(provider: str | None) -> str:
     """Platform-managed tier: bundled skills are official, everything else community."""
     return "official" if provider == PROVIDER_BUNDLED else "community"
+
+
+def _collect_requires_names(requires: list[dict] | None) -> list[str]:
+    """Flatten a ``requires`` payload into a deduplicated name list.
+
+    Used by the API validation path to drive a single bulk ``WHERE name IN``
+    query, avoiding per-node round trips when the validator walks the
+    transitive closure.
+    """
+    if not requires:
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for entry in requires:
+        if isinstance(entry, dict):
+            name = entry.get("name")
+            if isinstance(name, str) and name not in seen:
+                seen.add(name)
+                out.append(name)
+    return out
+
+
+async def _build_deps_view(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    skill_name: str,
+    mode: str,
+    *,
+    reverse: bool = False,
+    transitive: bool = True,
+) -> dict:
+    """Build a deps view (direct / graph / closure / reverse) for a skill.
+
+    Modes:
+        ``direct`` — list of direct ``requires`` entries (no traversal).
+        ``graph``  — tree of {name -> children} flattened.
+        ``closure`` — full transitive list of resolved skill names.
+        ``reverse`` — list of skills whose ``requires`` includes this one.
+
+    The closure walk delegates to the resolver so the same logic serves
+    authoring validation and the diagnostic CLI.
+    """
+    if mode not in {"direct", "graph", "closure", "reverse"}:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"error": {"code": "INVALID_MODE", "message": f"unknown mode {mode!r}"}},
+        )
+
+    if mode == "reverse":
+        # Reverse lookup: who requires this skill? Direct + transitive
+        # when ``transitive=True``, direct-only when ``reverse-direct``.
+        result = await db.execute(
+            select(SkillModel).where(
+                SkillModel.workspace_id.in_([workspace_id, BUNDLED_WORKSPACE_ID]),
+                SkillModel.requires.is_not(None),
+                ~SkillModel.deleted,
+            )
+        )
+        reverse_hits: list[str] = []
+        for row in result.scalars():
+            if any(isinstance(e, dict) and e.get("name") == skill_name for e in (row.requires or [])):
+                reverse_hits.append(row.name)
+        return {"mode": "reverse", "skill": skill_name, "depends_on_me": sorted(reverse_hits)}
+
+    # Forward modes
+    result = await db.execute(
+        select(SkillModel).where(
+            SkillModel.name == skill_name,
+            SkillModel.workspace_id.in_([workspace_id, BUNDLED_WORKSPACE_ID]),
+            ~SkillModel.deleted,
+        )
+    )
+    skill = result.scalar_one_or_none()
+    if skill is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": f"skill {skill_name!r} not found"}},
+        )
+
+    direct_requires = list(skill.requires or [])
+    if mode == "direct":
+        return {"mode": "direct", "skill": skill_name, "requires": direct_requires}
+
+    if mode == "graph":
+        # Tree shape: each node carries its direct requires.
+        visited: set[str] = set()
+        order: list[str] = []
+
+        async def _walk(name: str) -> dict:
+            if name in visited:
+                return {"name": name, "children": []}
+            visited.add(name)
+            order.append(name)
+            r = await db.execute(
+                select(SkillModel).where(
+                    SkillModel.name == name,
+                    SkillModel.workspace_id.in_([workspace_id, BUNDLED_WORKSPACE_ID]),
+                    ~SkillModel.deleted,
+                )
+            )
+            node = r.scalar_one_or_none()
+            if node is None:
+                return {"name": name, "children": [], "missing": True}
+            children = []
+            for entry in _coerce_entry_list(node.requires):
+                children.append(await _walk(entry["name"]))
+            return {"name": name, "children": children}
+
+        tree = await _walk(skill_name)
+        return {"mode": "graph", "root": tree, "order": order}
+
+    if mode == "closure":
+        from hecate.tools.skill.dependency_resolver import (
+            ClosureError,
+            resolve_closure,
+        )
+
+        try:
+            closure = await resolve_closure(
+                direct_skill_names=[skill_name],
+                workspace_id=workspace_id,
+                db=db,
+            )
+        except ClosureError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "error": {
+                        "code": "CLOSURE_INCOMPLETE",
+                        "message": str(exc),
+                        "details": {"missing": exc.missing},
+                    }
+                },
+            ) from None
+        return {
+            "mode": "closure",
+            "skill": skill_name,
+            "closure": [
+                {
+                    "skill_id": str(r.skill_id),
+                    "name": r.name,
+                    "provider": r.provider,
+                    "version": r.version,
+                    "content_hash": r.content_hash,
+                }
+                for r in closure
+            ],
+        }
+
+    # Unreachable: validated above.
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={"error": {"code": "INVALID_MODE", "message": f"unknown mode {mode!r}"}},
+    )
+
+
+def _coerce_entry_list(requires: Any) -> list[dict[str, Any]]:
+    """Drop non-dict entries from a ``requires`` value (defensive)."""
+    if not isinstance(requires, list):
+        return []
+    return [e for e in requires if isinstance(e, dict)]
+
+
+async def _validate_requires_or_422(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    skill_name: str,
+    source: str | None,
+    requires: list[dict] | None,
+    excluded_skill_id: uuid.UUID | None = None,
+) -> None:
+    """Run the dependency validator and translate failures to HTTP 422.
+
+    Builds an in-memory :class:`SkillLookup` adapter that maps names to
+    pre-loaded :class:`SkillModel` rows, then delegates to
+    :func:`hecate.tools.skill.dependency_validator.validate_requires`.
+    The bulk pre-load avoids one SQL query per closure node.
+
+    ``excluded_skill_id`` lets the update path exclude the skill being
+    updated from the lookup so a self-reference report only fires when
+    the existing stored row really points at itself.
+    """
+    if not requires:
+        return
+
+    name_list = _collect_requires_names(requires)
+    if not name_list:
+        return
+
+    rows = await db.execute(
+        select(SkillModel).where(
+            SkillModel.workspace_id == workspace_id,
+            SkillModel.name.in_(name_list),
+            ~SkillModel.deleted,
+        )
+    )
+    by_name_provider: dict[tuple[str, str | None], SkillModel] = {}
+    for row in rows.scalars():
+        by_name_provider[(row.name, row.provider)] = row
+    if excluded_skill_id is not None:
+        for key, row in list(by_name_provider.items()):
+            if row.id == excluded_skill_id:
+                by_name_provider.pop(key, None)
+
+    class _Adapter:
+        def find_skill(
+            self,
+            ws: uuid.UUID,
+            name: str,
+            provider: str | None = None,
+        ) -> SkillModel | None:
+            if provider is not None:
+                return by_name_provider.get((name, provider))
+            for (n, _prov), row in by_name_provider.items():
+                if n == name:
+                    return row
+            return None
+
+    errors = validate_requires(
+        skill_name=skill_name,
+        source=source,
+        requires=requires,
+        workspace_id=workspace_id,
+        lookup=_Adapter(),
+    )
+    if errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": {
+                    "code": "VALIDATION_ERROR",
+                    "message": "dependency validation failed",
+                    "details": {
+                        "dependency_errors": [
+                            {
+                                "error_code": err.error_code,
+                                "dependency_path": err.dependency_path,
+                                "message": err.message,
+                            }
+                            for err in errors
+                        ],
+                    },
+                }
+            },
+        )
 
 
 async def _get_skill_with_ownership_check(
@@ -129,6 +381,18 @@ async def create_skill(
     workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     provider = derive_provider(data.source)
 
+    # Validate requires graph before persisting — the duplicate-name 409 below
+    # would mask a validation error if the new name collided with an existing
+    # skill, but the dependency error is the more actionable signal for a
+    # user editing the skills field.
+    await _validate_requires_or_422(
+        db=db,
+        workspace_id=workspace_id,
+        skill_name=data.name,
+        source=data.source,
+        requires=data.requires,
+    )
+
     # Same name + same provider collides; cross-provider names coexist (5.9-enh).
     existing = await db.execute(
         select(SkillModel).where(
@@ -166,6 +430,7 @@ async def create_skill(
         trust_tier=_derive_trust_tier(provider),
         model_invocable=data.model_invocable,
         user_invocable=data.user_invocable,
+        requires=data.requires,
     )
     db.add(skill)
     await db.flush()
@@ -225,6 +490,37 @@ async def list_skills(
     }
 
 
+@router.get("/skills/by-name/{skill_name}/deps")
+async def get_skill_deps(
+    skill_name: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    mode: Annotated[str, Query(pattern="^(direct|graph|closure|reverse)$")] = "direct",
+    transitive: Annotated[bool, Query(description="Reverse-mode flag; ignored elsewhere")] = True,
+) -> dict:
+    """Return a deps view for a skill by name.
+
+    Modes:
+        ``direct``  — list of direct ``requires`` entries (default).
+        ``graph``   — tree of {name -> children} flattened.
+        ``closure`` — full transitive list of resolved skill names.
+        ``reverse`` — list of skills whose ``requires`` includes this one.
+            When ``transitive=False`` is supplied, only direct reverse hits
+            are returned.
+
+    Powers the ``hecate skill deps`` CLI subcommand.
+    """
+    workspace_id = ctx.workspace_id or BUNDLED_WORKSPACE_ID
+    return await _build_deps_view(
+        db=db,
+        workspace_id=workspace_id,
+        skill_name=skill_name,
+        mode=mode,
+        reverse=mode == "reverse",
+        transitive=transitive,
+    )
+
+
 @router.get("/skills/{skill_id}")
 async def get_skill(
     skill_id: uuid.UUID,
@@ -282,6 +578,18 @@ async def update_skill(
     """
     workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     skill = await _get_skill_with_ownership_check(db, skill_id, workspace_id)
+
+    # Validate requires graph only when the payload changes the field —
+    # omitting ``requires`` is a no-op that leaves the stored column alone.
+    if "requires" in data.model_fields_set:
+        await _validate_requires_or_422(
+            db=db,
+            workspace_id=workspace_id,
+            skill_name=skill.name,
+            source=skill.source,
+            requires=data.requires,
+            excluded_skill_id=skill.id,
+        )
 
     if skill.source == "system":
         raise HTTPException(
@@ -458,6 +766,14 @@ async def import_skill(
     workspace_id = ctx.workspace_id or uuid.UUID(int=0)
     # Imports create user-origin skills; collide only with the same provider.
     provider = derive_provider(parsed.get("source", "user"))
+    import_requires = parsed.get("requires") or []
+    await _validate_requires_or_422(
+        db=db,
+        workspace_id=workspace_id,
+        skill_name=parsed["name"],
+        source=parsed.get("source", "user"),
+        requires=import_requires,
+    )
     existing = await db.execute(
         select(SkillModel).where(
             SkillModel.name == parsed["name"],
@@ -487,6 +803,7 @@ async def import_skill(
         metadata_=parsed.get("metadata", {}),
         provider=provider,
         trust_tier=_derive_trust_tier(provider),
+        requires=import_requires,
     )
     db.add(skill)
     await db.flush()

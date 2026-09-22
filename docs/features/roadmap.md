@@ -530,6 +530,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 | 1.3.19 | Event-Sourced Execution State (Log-as-Truth) ✅ *(see [ADR-030](../design/adr/030-event-sourced-execution-state.md))* — EventStore from observation log to state carrier: "model-visible ⟺ logged" runtime invariant, derive_messages() projection for model context, checkpoint = log-replay fold (snapshots demoted to materialized caches), incremental delta storage (O(N²)→near-linear; note: deer-flow's DeltaChannel is the reference but sits UNRELEASED in its 2.1.0 milestone; OMA v1.15.0 durable-approval checkpoint schema v4 is the shipped production reference). Include a dsh-invariants-style runtime relational invariant layer (openTurn/openStep/pendingCalls, frozen result snapshots, dispatch-tree consistency) | EventStore ✅ + CheckpointStore ✅ | L |
 | 5.9 (5.9-enh) ✅ | Skill Provider Registry — `provider` classification (bundled/user/project; `custom` reserved; plugin rows outside rank) + deterministic rank shadowing (project > user > bundled) + same-name cross-provider coexistence (dual-index migration) + `model_invocable`/`user_invocable` invocation-policy switches + `trust_tier` anti-escalation (unknown sources capped at community) + `content_hash` aligned with agent-version ref-manifest field set. **Shipped 2026-09-20**（真扫描归 5.13a;外部 registry 连接器与 studio 管理页延后;archive `openspec/changes/archive/2026-09-20-skill-provider-registry/`） | 5.9 Skill Loading ✅ | M |
 | 5.9d ✅ (2026-09-21) | Skill Versioning — skill 资产级不可变快照全生命周期: commit / list / get / diff / rollback / delete + drift detection;快照冻结 7 个内容字段(name / instructions / allowed_tools / scripts / references / description / max_tokens),5 字段 hash 与 agent ref_manifest 对齐;回滚同时生成新版本并写回活行(无 publish 指针,活行即服务对象),pinned skill 通过 `(name, skill_id, provider, version, content_hash)` 在 agent 解析路径冻结内容,plugin 来源排除,自演进发布自动成版关联 `learned_run_id`。**Shipped 2026-09-21**(studio skill 独立管理页延后,后端版本端点 + skill 读路径附 `latest_version` / `has_uncommitted_changes` 已可用;archive `openspec/changes/archive/2026-09-21-skill-versioning/`) | 5.9-enh ✅ + 1.3.20 ✅ | M |
+| 5.9e ✅ (2026-09-22) | Skill Dependency Declaration — SKILL.md frontmatter `requires`(`{name, provider?}` 列表)声明 skill 间依赖,`plugin.json` 通过 `extensions.io.github.xueyufish.requires` namespace 同形承载 plugin 级依赖;创作期校验缺失依赖 / DFS 环 / 跨 source(user/project/bundled/plugin 互斥矩阵) / trust 反升级,422 含结构化 `error_code` + `dependency_path`;绑定期 agent 版本 commit 递归闭包 walk,把传递闭包按 `(name, skill_id, provider, version, content_hash)` 五元组写入 ref_manifest,任一节点不可解析即整个 DB 事务回滚(绝不静默跳过);隐式闭包依赖进 ref-manifest 但不出现在 `agent.skills` 用户可见列表;plugin 卸载时未绑定 user/project skill 的 `requires` 引用该 plugin 的标 `metadata.dangling`(已绑定 agent 版本仍由 5.9d 源删除契约覆盖);**无运行时 range 求解器**(声明松散、绑定期冻结);bundle skill(空壳 requires-only)推后。**Shipped 2026-09-22**(archive `openspec/changes/archive/2026-09-22-skill-dependency-declaration/`;后端 `dependency_validator` + `dependency_resolver` 双模块、API 422 结构化错误体、agent_versioning 闭包 walk 整合、plugin namespace 解析 + 卸载 dangling 标记、CLI `hecate skill deps` + `agent show-version --skill-closure`、27 单测全过;ruff/mypy/97 pytest 全绿) | 5.9-enh ✅ + 5.9d ✅ + 1.3.20 ✅ | M |
 
 ### Competitive Gap Features (NEW — competitor analysis)
 
@@ -1093,7 +1094,7 @@ EventStore → Event-Sourced Execution State (1.3.19) → Run Replay (8.20) + Pr
 EventStore (1.3.19) → HITL durable audit pairs + middleware waterfall events
 Pregel + Collaboration Patterns (2.7a ✅) → Dynamic Orchestration (1.3.18) → runtime task DAG → 7th pattern → Advanced Orchestration (1.3.18a, P4: consensus / PlanPatch repair / async steering / plan-freeze replay) + UI companion (P3, follow-up change on pattern-selector-ui / multi-agent-canvas / 8.20)
 Built-in Tools (5.1 ✅) → Browser Automation (6.27, P3) → Computer-use (6.27a, P4)
-Skill Loading (5.9 ✅) → Skill Provider Registry (5.9-enh ✅) → Skill Versioning (5.9d ✅) → community skills ecosystem
+Skill Loading (5.9 ✅) → Skill Provider Registry (5.9-enh ✅) → Skill Versioning (5.9d ✅) → Skill Dependency Declaration (5.9e ✅) → Composable Skill Packages
 A2A (2.10 ✅) → ACP Support (2.13, P4) → external coding agents as worker nodes
 ```
 
@@ -1104,7 +1105,7 @@ Self-Learning → Trajectory Analysis → Policy Evolution → Constraint Inject
 Hallucination Detection → Self-Learning → Intent Recognition → Deep Research
 Deterministic Hooks (1.3.5i) → Lifecycle Event Handlers → Tool/File Automation
 Skill Auto-Detection (5.9c) → Context-Based Skill Invocation → Progressive Disclosure
-Skill Dependency Declaration (5.9e) → Bind-time Dependency Resolution (closure pinning) → Composable Skill Packages
+Skill Dependency Declaration (5.9e ✅) → Bind-time Dependency Resolution (closure pinning) → Composable Skill Packages
 MCP Server Registry & Connection Management (5.4c) → Connection Pool → Reconnection → Timeout Control → Health Check → Circuit Breaker
 Plugin Packaging (5.5b) → Distributable Plugin Bundles → Community Ecosystem
 Agentic RAG (3.2.10) → Iterative Retrieval → Query Reformulation → Multi-Step Reasoning

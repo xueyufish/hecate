@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field, field_validator, model_validator
@@ -83,6 +84,11 @@ class SkillModel(BaseModel):
     model_invocable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     user_invocable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    # Dependency declaration (5.9e): list of {name, provider?} entries pointing
+    # to other skills in the same workspace. NULL treated as [] — validated at
+    # authoring time (missing dep / cycle / cross-source) and pinned in agent
+    # version ref-manifest at bind time.
+    requires: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     # Learned-skill provenance (self-evolution loop): populated only when
     # source == "learned" and the skill was published from a reviewed candidate.
     learned_run_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
@@ -127,6 +133,11 @@ class SkillCreateSchema(PydanticBase):
     auto_load: bool = False
     model_invocable: bool = True
     user_invocable: bool = True
+    # Dependency declaration (5.9e): list of {name, provider?} entries.
+    # Validated post-construction by dependency_validator.validate_requires
+    # (graph check, cycle, cross-source) — the schema here only enforces the
+    # shape, not the workspace-existence / cycle semantics.
+    requires: list = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _auto_load_requires_model_visibility(self) -> SkillCreateSchema:
@@ -152,6 +163,10 @@ class SkillUpdateSchema(PydanticBase):
     auto_load: bool | None = None
     model_invocable: bool | None = None
     user_invocable: bool | None = None
+    # Dependency declaration (5.9e): absent means "do not modify the column"
+    # (allows partial updates to leave requires as-is). Validation runs in
+    # the API layer when this field is supplied.
+    requires: list | None = None
 
     @model_validator(mode="after")
     def _auto_load_requires_model_visibility(self) -> SkillUpdateSchema:
@@ -185,9 +200,22 @@ class SkillReadSchema(PydanticBase):
     model_invocable: bool = True
     user_invocable: bool = True
     content_hash: str | None = None
+    requires: list = Field(default_factory=list)
     learned_run_id: uuid.UUID | None = None
     failure_category: str | None = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("requires", mode="before")
+    @classmethod
+    def _coerce_requires_none(cls, v: Any) -> Any:
+        """Treat ``None`` as the empty list when reading from legacy rows.
+
+        Pre-5.9e rows carry ``requires=NULL``; the new contract is
+        ``requires=[]``. Accept either so existing snapshots still
+        serialize cleanly.
+        """
+        return [] if v is None else v
+
     deleted: bool | None = False
     deleted_at: datetime | None

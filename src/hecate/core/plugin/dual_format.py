@@ -34,6 +34,9 @@ AGENT_PLUGIN_SCHEMA_URL = "https://agent-plugins.org/schemas/1.0.0/plugin.schema
 # Fields permitted in the namespace manifest (the legacy Hecate manifest
 # model). ``name``/``version`` are identity fields owned by plugin.json —
 # allowed but must match, or the package is rejected (replace-not-merge).
+# ``requires`` (5.9e) is the plugin-level skill dependency list; each
+# element is a ``{name, provider?}`` entry applied to every skill
+# imported from the package.
 NAMESPACE_MANIFEST_FIELDS: frozenset[str] = frozenset(
     {
         "name",
@@ -47,6 +50,7 @@ NAMESPACE_MANIFEST_FIELDS: frozenset[str] = frozenset(
         "translations",
         "config_schema",
         "metadata",
+        "requires",
     }
 )
 
@@ -73,6 +77,10 @@ class ResolvedNamespace:
     manifest: PluginManifest
     ns_dir: Path
     metadata: dict[str, Any]
+    # 5.9e: plugin-level skill dependency list. Empty list when the
+    # package declares no requires. Validated against the workspace at
+    # install time by the agent_plugins pipeline (fail-closed).
+    requires: tuple[dict[str, Any], ...] = ()
 
 
 def namespace_manifest_path(package_root: Path) -> Path:
@@ -144,6 +152,20 @@ def resolve_namespace(package_root: Path, plugin_json: dict[str, Any]) -> Resolv
     if metadata is not None and not isinstance(metadata, dict):
         raise NamespaceManifestError("metadata must be a mapping")
 
+    # 5.9e: optional plugin-level skill dependency list. The shape mirrors
+    # SKILL.md frontmatter ``requires`` — a list of ``{name, provider?}``
+    # entries. Structural shape is checked here; graph validation
+    # (missing / cycle / cross-source) runs at install time in the
+    # ``agent_plugins`` ingestion pipeline so the error message points at
+    # the package, not at the parser.
+    raw_requires = raw.get("requires")
+    if raw_requires is None:
+        requires_tuple: tuple[dict[str, Any], ...] = ()
+    elif isinstance(raw_requires, list):
+        requires_tuple = tuple(e for e in raw_requires if isinstance(e, dict))
+    else:
+        raise NamespaceManifestError("requires must be a list of {name, provider?} entries")
+
     manifest = PluginManifest(
         type=str(plugin_type or ""),
         name=str(raw.get("name") or plugin_json.get("name") or ""),
@@ -156,7 +178,12 @@ def resolve_namespace(package_root: Path, plugin_json: dict[str, Any]) -> Resolv
         translations=tuple(raw.get("translations") or ()),
         config_schema=config_schema,
     )
-    return ResolvedNamespace(manifest=manifest, ns_dir=package_root / NAMESPACE_DIR_NAME, metadata=dict(metadata or {}))
+    return ResolvedNamespace(
+        manifest=manifest,
+        ns_dir=package_root / NAMESPACE_DIR_NAME,
+        metadata=dict(metadata or {}),
+        requires=requires_tuple,
+    )
 
 
 def build_plugin_json(
