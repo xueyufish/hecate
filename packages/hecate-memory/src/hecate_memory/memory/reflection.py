@@ -434,9 +434,7 @@ class ReflectionEngine:
 
                 await supersede_nodes_for_reflection(db, reflection_id=existing_id)
                 await db.execute(
-                    update(ReflectionModel)
-                    .where(ReflectionModel.id == existing_id)
-                    .values(superseded_by=new_id)
+                    update(ReflectionModel).where(ReflectionModel.id == existing_id).values(superseded_by=new_id)
                 )
 
         row = ReflectionModel(

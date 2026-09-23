@@ -154,11 +154,15 @@ class TestEvolutionGate:
 
         assert report.overall == "pass"
         statuses = {c["name"]: c["status"] for c in report.checks}
+        # 4.21 path c adds a fifth check (reflection_relevance). The test
+        # candidate doesn't carry ``linked_reflection_ids``, so the new
+        # check is skipped (no candidate-side references to verify).
         assert statuses == {
             "golden_subset_regression": "pass",
             "trigger_test": "pass",
             "dataset_regression": "pass",
             "with_without_baseline": "pass",
+            "reflection_relevance": "skipped",
         }
 
     async def test_regression_vote_blocks_review(self, db_session: AsyncSession) -> None:

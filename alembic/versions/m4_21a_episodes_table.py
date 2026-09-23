@@ -20,7 +20,12 @@ from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "m4_21a_episodes_table"
-down_revision = "l9m0n1o2p3q4"
+# Chain off origin/main's current head at branching time. ``l9m0n1o2p3q4``
+# is the historical baseline (4.14 / 4.15 / 5.9d merge point) but
+# ``aa6b7c8d9e0f1_add_skill_requires_column`` was merged into main
+# after this branch was cut; chaining m4_21a off it keeps the
+# alembic graph linear (one terminal head) when the change lands.
+down_revision = "aa6b7c8d9e0f1"
 branch_labels = None
 depends_on = None
 

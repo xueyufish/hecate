@@ -1,0 +1,30 @@
+# Normalize line endings repo-wide, independent of each developer's
+# local core.autocrlf setting. All text files are stored with LF in the
+# repository and checked out with LF, so commits never carry CRLF bytes
+# regardless of platform.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF in the working tree (some Windows
+# tooling still chokes on LF batch/PowerShell files).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Shell scripts and Python sources: always LF, everywhere.
+*.sh text eol=lf
+*.py text eol=lf
+
+# Binary assets — never normalize, never diff.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.whl binary

@@ -11,27 +11,13 @@ Run with ``python -m pytest tests/test_memory_storage_family_units.py -q``.
 
 from __future__ import annotations
 
-import os
-import uuid
-
 import pytest
-
-from hecate.core.composition.memory_provider import (
-    CAP_CROSS_THREAD,
-    CAP_TASK_MEMORY,
-    EpisodeWriteResult,
-    TIER_2,
-    TIER_4,
-    TIER_5,
-    TierRoutingError,
-    route_search_by_tier,
-)
 from hecate_memory.memory.tools_backend import (
-    MEMORY_ADD_SCOPE_ACTOR_SCOPED,
-    MEMORY_ADD_SCOPE_WORKSPACE_SHARED,
     _MEMORY_ADD_SCOPES,
     _MEMORY_SEARCH_TIER_DEFAULT,
     _MEMORY_TOOL_NAMES,
+    MEMORY_ADD_SCOPE_ACTOR_SCOPED,
+    MEMORY_ADD_SCOPE_WORKSPACE_SHARED,
     get_memory_tool_names,
     get_visible_memory_tool_names,
 )
@@ -44,6 +30,16 @@ from hecate_memory.memory.work_context_graph import (
     derive_node_type,
 )
 
+from hecate.core.composition.memory_provider import (
+    CAP_CROSS_THREAD,
+    CAP_TASK_MEMORY,
+    TIER_2,
+    TIER_4,
+    TIER_5,
+    EpisodeWriteResult,
+    TierRoutingError,
+    route_search_by_tier,
+)
 
 # ──────────────────────── capability routing ────────────────────────
 
@@ -126,10 +122,10 @@ def test_visible_tool_names_includes_all_when_flag_on() -> None:
 
 def test_memory_add_scopes_constants_complete() -> None:
     """Both scopes must be in the accepted set."""
-    assert _MEMORY_ADD_SCOPES == {
+    assert {
         MEMORY_ADD_SCOPE_ACTOR_SCOPED,
         MEMORY_ADD_SCOPE_WORKSPACE_SHARED,
-    }
+    } == _MEMORY_ADD_SCOPES
 
 
 def test_memory_search_default_tier_is_tier_2() -> None:

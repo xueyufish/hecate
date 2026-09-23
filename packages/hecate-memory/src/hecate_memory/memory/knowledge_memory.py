@@ -57,11 +57,7 @@ def _namespace_visible(
         return True
     if row_team_id is None and row_actor_id is None:
         return include_shared
-    return bool(
-        row_team_id is not None
-        and caller_team_id is not None
-        and row_team_id == caller_team_id
-    )
+    return bool(row_team_id is not None and caller_team_id is not None and row_team_id == caller_team_id)
 
 
 @dataclass

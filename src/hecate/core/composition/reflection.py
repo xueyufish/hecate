@@ -192,9 +192,7 @@ _reflection_task: asyncio.Task[None] | None = None
 _reflection_bundle: dict[str, Any] = {}
 
 
-async def _confidence_evaluator_loop(
-    evaluator: Any, *, interval_seconds: float = 3600.0
-) -> None:
+async def _confidence_evaluator_loop(evaluator: Any, *, interval_seconds: float = 3600.0) -> None:
     """Background loop for the gate-4 confidence evaluator.
 
     Default cadence: hourly. Each pass walks approved reflections and
@@ -210,9 +208,7 @@ async def _confidence_evaluator_loop(
             async with async_session_factory() as db:
                 result = await evaluator.run(db)
                 if result.get("scanned", 0):
-                    logger.debug(
-                        "Reflection confidence evaluator pass: %s", result
-                    )
+                    logger.debug("Reflection confidence evaluator pass: %s", result)
         except asyncio.CancelledError:  # graceful shutdown
             raise
         except Exception as e:  # pragma: no cover — best-effort

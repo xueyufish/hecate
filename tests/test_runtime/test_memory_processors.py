@@ -183,7 +183,10 @@ class TestEscalationHint:
 class TestDefaultChain:
     def test_memory_processors_appended(self) -> None:
         names = [p.name for p in default_chain_processors()]
-        assert names[-2:] == ["memory_prefetch", "retrieval_escalation_hint"]
+        # 4.21 appends reflection_injection + escalation_on_failure at the
+        # tail (gated on REFLECTION_ENABLED — off path is byte-identical
+        # via the same short-circuit in both processors).
+        assert names[-2:] == ["reflection_injection", "escalation_on_failure"]
         # The core lossiness ladder is untouched and ordered first.
         assert names[:6] == [
             "tool_result_truncation",

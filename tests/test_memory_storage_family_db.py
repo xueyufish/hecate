@@ -17,14 +17,6 @@ from datetime import UTC, datetime
 
 import pytest
 import pytest_asyncio
-
-from hecate.core.composition.memory_provider import (
-    CAP_TASK_MEMORY,
-    provider_supports,
-    resolve_memory_provider,
-)
-from hecate.core.database import async_session_factory
-from hecate_memory.memory.consolidation import ConsolidationScheduler
 from hecate_memory.memory.reflection import (
     ConfidenceEvaluator,
     ReflectionEngine,
@@ -35,9 +27,9 @@ from hecate_memory.memory.work_context_graph import (
     create_node_for_reflection,
     derive_node_type,
     supersede_nodes_for_reflection,
-    write_supersession_edge,
 )
 
+from hecate.core.database import async_session_factory
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("DATABASE_URL"),
@@ -64,15 +56,24 @@ class TestEpisodeLifecycle:
         ag = uuid.UUID("00000000-0000-0000-0000-00000000e102")
         sess = uuid.UUID("00000000-0000-0000-0000-00000000e103")
         r = await TaskMemoryService.add_episode(
-            workspace_id=ws, agent_id=ag, actor_id=None, session_id=sess,
-            task_type="demo", situation="x", intent="y",
+            workspace_id=ws,
+            agent_id=ag,
+            actor_id=None,
+            session_id=sess,
+            task_type="demo",
+            situation="x",
+            intent="y",
         )
         assert r.ok is True
         assert r.episode_id is not None
 
         r2 = await TaskMemoryService.record_tool_event(
-            workspace_id=ws, agent_id=ag, session_id=sess,
-            tool_name="demo_tool", args={"k": "v"}, result_ref="ok",
+            workspace_id=ws,
+            agent_id=ag,
+            session_id=sess,
+            tool_name="demo_tool",
+            args={"k": "v"},
+            result_ref="ok",
         )
         assert r2.ok is True
 
@@ -82,8 +83,13 @@ class TestEpisodeLifecycle:
         ag = uuid.UUID("00000000-0000-0000-0000-00000000e202")
         ep_id = uuid.uuid4()
         r = await TaskMemoryService.add_episode(
-            workspace_id=ws, agent_id=ag, actor_id=None, session_id=None,
-            task_type="x", situation="", intent="",
+            workspace_id=ws,
+            agent_id=ag,
+            actor_id=None,
+            session_id=None,
+            task_type="x",
+            situation="",
+            intent="",
         )
         assert r.ok
         ep_id = r.episode_id
@@ -103,6 +109,7 @@ class TestReflectionPipeline:
     @pytest.mark.asyncio
     async def test_gate_thresholds_short_circuit(self) -> None:
         """Smoke test for the four gates with stub LLM seams."""
+
         async def reflect_stub(payload):
             return [
                 {
@@ -180,11 +187,7 @@ class TestReflectionPipeline:
                 await evaluator.run(db, workspace_id=ws)
 
         async with async_session_factory() as db:
-            row = (
-                await db.execute(
-                    select(ReflectionModel).where(ReflectionModel.id == reflection_id)
-                )
-            ).scalar_one()
+            row = (await db.execute(select(ReflectionModel).where(ReflectionModel.id == reflection_id))).scalar_one()
         assert row.status == REFLECTION_STATUS_DEPRECATED
         assert row.deprecation_streak >= 3
 
@@ -254,9 +257,7 @@ class TestWorkContextGraph:
         assert flipped >= 1
 
         node = (
-            await db_session.execute(
-                select(WorkContextNodeModel).where(WorkContextNodeModel.id == node_id)
-            )
+            await db_session.execute(select(WorkContextNodeModel).where(WorkContextNodeModel.id == node_id))
         ).scalar_one()
         assert node.active is False
 

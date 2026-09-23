@@ -83,9 +83,7 @@ _MEMORY_TOOL_NAMES = frozenset(
 # workspace admin callers (Group 8.2 / task-memory capability).
 MEMORY_ADD_SCOPE_ACTOR_SCOPED = "actor_scoped"
 MEMORY_ADD_SCOPE_WORKSPACE_SHARED = "workspace_shared"
-_MEMORY_ADD_SCOPES: frozenset[str] = frozenset(
-    {MEMORY_ADD_SCOPE_ACTOR_SCOPED, MEMORY_ADD_SCOPE_WORKSPACE_SHARED}
-)
+_MEMORY_ADD_SCOPES: frozenset[str] = frozenset({MEMORY_ADD_SCOPE_ACTOR_SCOPED, MEMORY_ADD_SCOPE_WORKSPACE_SHARED})
 
 # Tier literals accepted by ``memory_search(tier=...)``. Default is
 # ``tier_2`` (existing L3 + L4 behavior); ``tier_4`` routes to
@@ -107,11 +105,7 @@ def get_visible_memory_tool_names(*, reflection_enabled: bool | None = None) -> 
     ``reflection_search`` and ``work_context_query`` are withheld so
     the agent cannot mount them.
     """
-    flag = (
-        core_settings.REFLECTION_ENABLED
-        if reflection_enabled is None
-        else reflection_enabled
-    )
+    flag = core_settings.REFLECTION_ENABLED if reflection_enabled is None else reflection_enabled
     if flag:
         return _MEMORY_TOOL_NAMES
     return _MEMORY_TOOL_NAMES - {"reflection_search", "work_context_query"}
@@ -169,13 +163,9 @@ class MemoryToolBackend:
             if name == "conversation_search":
                 return await self._conversation_search(workspace_id, agent_id, args)
             if name == "reflection_search":
-                return await self._reflection_search_tool(
-                    workspace_id=workspace_id, agent_id=agent_id, args=args
-                )
+                return await self._reflection_search_tool(workspace_id=workspace_id, agent_id=agent_id, args=args)
             if name == "work_context_query":
-                return await self._work_context_query_tool(
-                    workspace_id=workspace_id, agent_id=agent_id, args=args
-                )
+                return await self._work_context_query_tool(workspace_id=workspace_id, agent_id=agent_id, args=args)
         except Exception as e:  # defensive: the tool boundary must not crash the loop
             logger.exception("Memory tool %s failed", name)
             return _err("internal_error", str(e))
@@ -452,13 +442,9 @@ class MemoryToolBackend:
                 ],
             }
         if tier == TIER_4:
-            return await self._reflection_search(
-                workspace_id=workspace_id, agent_id=agent_id, args=args
-            )
+            return await self._reflection_search(workspace_id=workspace_id, agent_id=agent_id, args=args)
         if tier == TIER_5:
-            return await self._cross_thread_search(
-                workspace_id=workspace_id, args=args
-            )
+            return await self._cross_thread_search(workspace_id=workspace_id, args=args)
         # Should be unreachable: VALID_TIERS covers the three handled
         # cases above. Defensive fallback: structured error.
         return _err(
@@ -584,9 +570,7 @@ class MemoryToolBackend:
         # is restricted to workspace admin callers. The role check
         # runs before any DB write so a rejected scope never produces
         # a half-write.
-        scope = str(
-            args.get("scope", MEMORY_ADD_SCOPE_ACTOR_SCOPED)
-        )
+        scope = str(args.get("scope", MEMORY_ADD_SCOPE_ACTOR_SCOPED))
         if scope not in _MEMORY_ADD_SCOPES:
             return _err(
                 "invalid_scope",

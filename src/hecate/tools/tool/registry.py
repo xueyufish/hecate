@@ -210,9 +210,7 @@ async def seed_builtin_tools(db: AsyncSession) -> int:
     # loop skips these names and the agent cannot mount them.
     from hecate_memory.memory.tools_backend import get_visible_memory_tool_names
 
-    visible_memory_tools = get_visible_memory_tool_names(
-        reflection_enabled=settings.REFLECTION_ENABLED
-    )
+    visible_memory_tools = get_visible_memory_tool_names(reflection_enabled=settings.REFLECTION_ENABLED)
 
     for tool_name, tool_def in BUILTIN_TOOL_DEFINITIONS.items():
         # Memory tools are flag-gated at seeding: flag off → not visible to any
