@@ -1,6 +1,6 @@
 # ADR-024: Knowledge & Memory Enhancement Architecture
 
-> **Status**: Proposed
+> **Status**: Accepted (KM1 / KM2 / KM3 / KM4 / KM5 / KM6 implemented as part of `memory-storage-family` change, 2026-09-22)
 > **Date**: 2026-07-02
 
 ## Context

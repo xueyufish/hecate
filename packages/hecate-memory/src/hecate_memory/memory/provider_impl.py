@@ -90,27 +90,46 @@ class BuiltinMemoryProvider:
     def capabilities(self) -> frozenset[str]:
         from hecate.core.composition.memory_provider import (
             CAP_ADD_MEMORY,
+            CAP_CROSS_THREAD,
+            CAP_END_EPISODE,
+            CAP_ESCALATE_FAILURE,
             CAP_FORGET_MEMORY,
             CAP_PREFETCH,
             CAP_SEARCH,
             CAP_SEARCH_MEMORIES,
             CAP_SEARCH_RECALL,
             CAP_SYNC_TURN,
+            CAP_TASK_MEMORY,
             CAP_UPDATE_MEMORY,
         )
+        from hecate.core.config import settings
 
-        return frozenset(
-            {
-                CAP_SEARCH,
-                CAP_SEARCH_MEMORIES,
-                CAP_SEARCH_RECALL,
-                CAP_ADD_MEMORY,
-                CAP_UPDATE_MEMORY,
-                CAP_FORGET_MEMORY,
-                CAP_PREFETCH,
-                CAP_SYNC_TURN,
-            }
-        )
+        # Base set — always declared when the builtin provider is active.
+        caps = {
+            CAP_SEARCH,
+            CAP_SEARCH_MEMORIES,
+            CAP_SEARCH_RECALL,
+            CAP_ADD_MEMORY,
+            CAP_UPDATE_MEMORY,
+            CAP_FORGET_MEMORY,
+            CAP_PREFETCH,
+            CAP_SYNC_TURN,
+        }
+        # 4.21 / 4.23 surface. The four caps are *opt-in*: only added when
+        # ``settings.REFLECTION_ENABLED`` is true. Off paths must be
+        # byte-identical to pre-change behavior, which is what callers see
+        # when these four caps are absent — ``provider_supports`` returns
+        # False and the structured-error path takes over.
+        if settings.REFLECTION_ENABLED:
+            caps.update(
+                {
+                    CAP_TASK_MEMORY,
+                    CAP_CROSS_THREAD,
+                    CAP_END_EPISODE,
+                    CAP_ESCALATE_FAILURE,
+                }
+            )
+        return frozenset(caps)
 
     # -- session / vector-store plumbing ---------------------------------------
 
@@ -502,14 +521,253 @@ class BuiltinMemoryProvider:
         session_id: uuid.UUID,
         messages: list[dict[str, Any]],
     ) -> None:
-        # No-op by design: builtin L3 extraction runs in its own post-turn
-        # pipeline; injecting the same messages here would double-extract.
+        # 4.21 sub-action: when REFLECTION_ENABLED is on and the provider
+        # declared ``CAP_TASK_MEMORY``, append any TOOL events from the
+        # just-completed turn to the active episode for this
+        # (workspace, agent, session). No active episode → silent skip;
+        # tool events present but flag off → byte-identical to the
+        # pre-change path (the helper short-circuits).
+        try:
+            await self._episode_record_sub_action(
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                session_id=session_id,
+                messages=messages,
+            )
+        except Exception:
+            # Per the task-memory capability: sub-action failure MUST NOT
+            # affect the turn result. Log and move on.
+            logger.warning(
+                "sync_turn episode_record sub-action failed (workspace=%s agent=%s session=%s)",
+                workspace_id,
+                agent_id,
+                session_id,
+                exc_info=True,
+            )
+
+        # Original sync_turn is a no-op for L3 extraction (the builtin
+        # post-turn pipeline handles L3 separately to avoid double-extract).
+        # Kept verbatim below — behavior unchanged for callers.
         logger.debug(
-            "sync_turn no-op for builtin provider (workspace=%s agent=%s session=%s, %d messages)",
+            "sync_turn completed (workspace=%s agent=%s session=%s, %d messages)",
             workspace_id,
             agent_id,
             session_id,
             len(messages),
+        )
+
+    # -- tier-4 + tier-5 + lifecycle hooks (4.21 / 4.23) --------------------
+    #
+    # These methods are *opt-in*: when ``REFLECTION_ENABLED`` is false the
+    # builtin provider omits the corresponding CAP_* declarations from
+    # ``capabilities()``, so callers short-circuit on
+    # ``provider_supports`` and never reach these implementations. The
+    # bodies therefore only need to be correct when REFLECTION_ENABLED
+    # is on; they default to a structured no-op result so an accidental
+    # direct call (or a legacy caller that bypassed the capability check)
+    # gets a clean ``error='none'`` / empty result instead of an
+    # exception.
+    async def _episode_record_sub_action(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        session_id: uuid.UUID,
+        messages: list[dict[str, Any]],
+    ) -> None:
+        """Sync-turn sub-action: append TOOL events to the active episode.
+
+        No-op unless ``settings.REFLECTION_ENABLED`` is true AND the
+        provider declared ``CAP_TASK_MEMORY`` (i.e. the caller already
+        passed the capability check). The actual write path is owned by
+        ``TaskMemoryService.append_tool_events`` (added in Group 3 of
+        the memory-storage-family change) — this method is the hook
+        point that the runtime invokes from ``sync_turn``.
+        """
+        from hecate.core.config import settings
+
+        if not settings.REFLECTION_ENABLED:
+            return
+        from hecate.core.composition.memory_provider import (
+            CAP_TASK_MEMORY,
+            provider_supports,
+        )
+
+        if not provider_supports(self, CAP_TASK_MEMORY):
+            return
+        from hecate_memory.memory.task_memory import TaskMemoryService
+
+        await TaskMemoryService.append_turn_tool_events(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            messages=messages,
+        )
+
+    async def add_episode(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        actor_id: uuid.UUID | None = None,
+        session_id: uuid.UUID | None = None,
+        task_type: str = "",
+        situation: str | None = None,
+        intent: str | None = None,
+    ):
+        from hecate.core.composition.memory_provider import EpisodeWriteResult
+        from hecate.core.config import settings
+
+        if not settings.REFLECTION_ENABLED:
+            return EpisodeWriteResult(ok=False, error="none")
+        from hecate_memory.memory.task_memory import TaskMemoryService
+
+        return await TaskMemoryService.add_episode(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            actor_id=actor_id,
+            session_id=session_id,
+            task_type=task_type,
+            situation=situation,
+            intent=intent,
+        )
+
+    async def record_tool_event(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        session_id: uuid.UUID,
+        tool_name: str,
+        args: dict[str, Any],
+        result_ref: str | None = None,
+        ts: datetime | None = None,
+    ):
+        from hecate.core.composition.memory_provider import EpisodeWriteResult
+        from hecate.core.config import settings
+
+        if not settings.REFLECTION_ENABLED:
+            return EpisodeWriteResult(ok=False, error="none")
+        from hecate_memory.memory.task_memory import TaskMemoryService
+
+        return await TaskMemoryService.record_tool_event(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            tool_name=tool_name,
+            args=args,
+            result_ref=result_ref,
+            ts=ts,
+        )
+
+    async def close_episode(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        episode_id: uuid.UUID,
+    ):
+        from hecate.core.composition.memory_provider import EpisodeWriteResult
+        from hecate.core.config import settings
+
+        if not settings.REFLECTION_ENABLED:
+            return EpisodeWriteResult(ok=False, error="none")
+        from hecate_memory.memory.task_memory import TaskMemoryService
+
+        return await TaskMemoryService.close_episode(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            episode_id=episode_id,
+        )
+
+    async def search_task_memory(
+        self,
+        *,
+        query: str,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID | None = None,
+        actor_id: uuid.UUID | None = None,
+        top_k: int = 5,
+        task_type: str | None = None,
+    ) -> list[Any]:
+        from hecate.core.config import settings
+
+        if not settings.REFLECTION_ENABLED:
+            return []
+        from hecate_memory.memory.task_memory import TaskMemoryService
+
+        return await TaskMemoryService.search_reflections(
+            query=query,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            actor_id=actor_id,
+            top_k=top_k,
+            task_type=task_type,
+        )
+
+    async def search_cross_thread(
+        self,
+        *,
+        query: str,
+        workspace_id: uuid.UUID,
+        team_id: uuid.UUID | None = None,
+        actor_id: uuid.UUID | None = None,
+        top_k: int = 5,
+        tags: list[str] | None = None,
+    ) -> list[Any]:
+        from hecate.core.config import settings
+
+        if not settings.REFLECTION_ENABLED:
+            return []
+        from hecate_memory.memory.task_memory import TaskMemoryService
+
+        return await TaskMemoryService.search_cross_thread(
+            query=query,
+            workspace_id=workspace_id,
+            team_id=team_id,
+            actor_id=actor_id,
+            top_k=top_k,
+            tags=tags,
+        )
+
+    async def end_episode(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        episode_id: uuid.UUID,
+    ) -> None:
+        from hecate.core.config import settings
+
+        if not settings.REFLECTION_ENABLED:
+            return
+        from hecate_memory.memory.task_memory import TaskMemoryService
+
+        await TaskMemoryService.end_episode(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            episode_id=episode_id,
+        )
+
+    async def escalate_failure(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        task_type: str,
+        confidence: float,
+    ) -> list[Any]:
+        from hecate.core.config import settings
+
+        if not settings.REFLECTION_ENABLED:
+            return []
+        from hecate_memory.memory.task_memory import TaskMemoryService
+
+        return await TaskMemoryService.escalate_failure_recall(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            task_type=task_type,
+            confidence=confidence,
         )
 
 

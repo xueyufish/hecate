@@ -2,6 +2,8 @@
 
 > Deep dive into Hecate's knowledge management and memory system: RAG pipeline, knowledge graph, ontology system, and multi-level memory architecture. For a system overview, see [Architecture](architecture.md). For engine details, see [Engine Design](engine-design.md). For the architecture decisions behind these enhancements, see [ADR-024](adr/024-knowledge-memory-enhancement.md).
 
+> **Status note (2026-09-22)**: 4.21 (Task Memory + Tool Memory + KM6 Work Context Graph) and 4.23 (Cross-Thread Memory Store) are **shipped**. The `memory-storage-family` change introduces the new tables (`episodes`, `reflections`, `reflection_runs`, `work_context_nodes`, `work_context_edges`), extends `memories` / `knowledge_memories` with `team_id` + `actor_id` namespace columns, extends the `MemoryProvider` contract with tier-4 / tier-5 capabilities plus `end_episode` / `escalate_failure` lifecycle hooks, ships the `ReflectionEngine` (sister to the consolidation engine), and adds two new agent tools (`reflection_search` / `work_context_query`). All surfaces are gated on `REFLECTION_ENABLED=false` by default so the pre-change behavior is byte-identical. See the [Task Memory](#task-memory-421), [Cross-Thread Memory Store](#cross-thread-memory-store-423), and [Work Context Graph KM6](#work-context-graph-km6) sections below for the design summary; full requirements live under `openspec/changes/memory-storage-family/specs/`.
+
 ---
 
 ## Overview
@@ -443,6 +445,39 @@ The Knowledge & Memory system integrates with the Agent Engine through:
 - **EnginePort.memory_store/retrieve()**: Memory operations during agent execution
 - **ContextEngine**: Context assembly with memory and knowledge retrieval
 - **Guardrail Hooks**: Security filtering on retrieved content
+
+## Task Memory (4.21)
+
+The Task Memory stack complements the existing fact-memory (L3 / L4) and RAG (L4 knowledge) layers by capturing **what the agent did and what it learned from doing it**, rather than what was said or what is true about the world. The `memory-storage-family` change ships three coupled surfaces:
+
+- **Episodes** (`episodes` table). One row per user-goal-level task. The runtime writes tool calls as `TOOL` events into `actions` and tool results into `outcomes`; the agent runtime calls `episode_close(episode_id)` at task boundaries to stamp `closed_at`. Only closed episodes enter the reflection candidate pool.
+- **Reflections** (`reflections` table). Typed records produced by the `ReflectionEngine` (sister to the existing `ConsolidationEngine`) over closed episodes. Each reflection has `title / use_cases / hints / source_episode_ids / confidence / status / isrel / issup / isuse`. Status flow: `pending → approved | rejected | deprecated`. Reflections with `status='approved'` are surfaced by `reflection_search` and consumed by the consumer paths.
+- **Tool Memory (4.22)** — same store, different strategy. Tool calls are written as `TOOL` events into the parent episode's `actions` rather than a dedicated store. The reflection engine analyzes `actions` + `outcomes` together when extracting typed reflections, so the tool experience is implicitly captured without a second storage layer.
+
+The four quality gates (per ADR-024 §6 reflection hygiene) protect against reflection pollution:
+
+1. **Model isolation** — the reflection LLM call only sees episode + knowledge_memory read paths; write tools are excluded.
+2. **LLM-as-Judge** — every reflection carries three quality tokens `isrel / issup / isuse`; all three must clear 0.5 to pass.
+3. **`source_episode_ids >= 2`** — single-episode reflections are refused at gate 1 (no LLM call needed) and re-checked at gate 3.
+4. **Confidence auto-deprecation** — `confidence < 0.4` three times in a row flips status to `deprecated`. Driven by `ConfidenceEvaluator` on an hourly cadence.
+
+All four gates plus the LLM seam cost are contained behind the `REFLECTION_ENABLED` master flag (default off). Off paths are byte-identical to the pre-change platform surface: no new tables touched at runtime, no `reflection_search` / `work_context_query` tools seeded, no `sync_turn` episode-record sub-action fired.
+
+## Cross-Thread Memory Store (4.23)
+
+Cross-Thread extends the existing two-layer namespace (`workspace_id + user_id`) on `memories` and `knowledge_memories` to four layers: `workspace_id + team_id + actor_id + session_id`. The migration (`m4_23_namespace_team_actor`) backfills `actor_id` from the existing `user_id` column on `knowledge_memories` and from `scope->>'user_id'` on `memories`; `team_id` starts as `null` for all rows.
+
+`memory_add` and `memory_search` accept an explicit `scope` parameter (`actor_scoped` default, `workspace_shared` opt-in). Workspace-shared writes require the calling user to hold workspace-admin role (carried on the tool execution context as `workspace_role='admin'`); editor-role callers receive a structured `permission_denied` error before any DB write.
+
+The four-layer namespace visibility is enforced in `KnowledgeMemoryService.search_knowledge` via the `_namespace_visible` helper, applied to the Qdrant vector payload mirror. The composite index `(workspace_id, team_id, actor_id)` is added in the same migration to keep namespace scans cheap.
+
+## Work Context Graph (KM6)
+
+The Work Context Graph is the structured successor to flat Task Memory records (ADR-024 §6). When a reflection is approved, the `ReflectionEngine._apply` calls `work_context_graph.create_node_for_reflection` in the same transaction (atomic with the reflection insert). The node's `node_type` is derived heuristically from the reflection's `title` + `hints` content (`method / outcome / correction / source / pattern`).
+
+When a reflection is `operator='update'` (same title, new evidence), the prior reflection's graph nodes are flipped `active=False` and a `corrected_by` edge is written between the prior and new nodes — both in the same transaction. Background aggregation (`NodeStatsAggregator.run`) recomputes `usage_count` / `success_rate` / `last_used_at` / `user_correction_count` from the reflection lineage on a slow cadence (default: nightly). Aggregator writes are bulk, never blocking the read path.
+
+The `work_context_query` agent tool reads `active=true` nodes only; superseded nodes remain queryable for audit. KM6 is the substrate the `Work Context Graph (4.21 Enhancement)` section of the design doc describes — it is now implemented and shipped rather than "proposed".
 
 ---
 

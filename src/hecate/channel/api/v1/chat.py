@@ -725,6 +725,12 @@ def _build_tool_registry(db: AsyncSession, skill_ref_manifest: list[dict[str, An
             memory_backend = MemoryToolBackend(db)
         except ImportError:
             memory_backend = None
+    # 4.21 reflection_tools seeding — when MEMORY_TOOLS_ENABLED is on
+    # but REFLECTION_ENABLED is off, the seeding layer excludes
+    # ``reflection_search`` and ``work_context_query`` so the agent
+    # never sees tools whose backend would refuse the call. Tool
+    # definitions live in tools/tool/builtin.py and are also gated by
+    # the same visibility check below at the registry layer.
     builtin_executor = BuiltInToolExecutor(
         search_provider=search_provider,
         workspace_root=settings.WORKSPACE_ROOT,

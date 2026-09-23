@@ -197,6 +197,21 @@ class EvolutionGate:
                 if not (regression_ok and threshold_ok and improvement):
                     report.overall = "fail"
 
+        # 4.21 path c — reflection participation. When the candidate
+        # skill references one or more reflection ids (carried on
+        # ``candidate.evidence`` or ``candidate.linked_reflection_ids``),
+        # the gate checks the reflection layer is still ``approved``
+        # and within confidence bounds. This guards against an
+        # approved skill that pivots on a deprecated reflection.
+        try:
+            reflection_check = await self._check_reflection_relevance(candidate)
+        except Exception as e:  # pragma: no cover — best-effort
+            logger.warning("EvolutionGate reflection_relevance failed: %s", e)
+            reflection_check = ("reflection_relevance", "skipped", {"error": str(e)})
+        report.checks.append(self._check(*reflection_check))
+        if reflection_check[1] == "fail":
+            report.overall = "fail"
+
         if report.overall == "pass":
             has_fail = any(c["status"] == "fail" for c in report.checks)
             if has_fail:

@@ -204,6 +204,16 @@ async def seed_builtin_tools(db: AsyncSession) -> int:
     zero_ws = uuid.UUID(_ZERO_WORKSPACE)
     memory_tools = get_memory_tool_names()
 
+    # 4.21 reflection_tools seeding gate — REFLECTION_ENABLED controls
+    # whether ``reflection_search`` and ``work_context_query`` enter
+    # the platform surface at all. When the flag is off, the seed
+    # loop skips these names and the agent cannot mount them.
+    from hecate_memory.memory.tools_backend import get_visible_memory_tool_names
+
+    visible_memory_tools = get_visible_memory_tool_names(
+        reflection_enabled=settings.REFLECTION_ENABLED
+    )
+
     for tool_name, tool_def in BUILTIN_TOOL_DEFINITIONS.items():
         # Memory tools are flag-gated at seeding: flag off → not visible to any
         # agent and the platform surface stays byte-identical.
@@ -211,6 +221,9 @@ async def seed_builtin_tools(db: AsyncSession) -> int:
             if not settings.MEMORY_TOOLS_ENABLED:
                 continue
             if tool_name == "conversation_search" and not settings.RECALL_INDEXING_ENABLED:
+                continue
+            # 4.21 reflection_tools: skip when REFLECTION_ENABLED=false.
+            if tool_name not in visible_memory_tools:
                 continue
         result = await db.execute(
             select(ToolModel).where(

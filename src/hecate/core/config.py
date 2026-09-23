@@ -103,6 +103,24 @@ class Settings(BaseSettings):
     # RECALL_INDEXING_ENABLED: index user/assistant messages into the recall
     # storage at turn commit (metadata table + Qdrant hecate_recall).
     RECALL_INDEXING_ENABLED: bool = False
+    # REFLECTION_ENABLED: master switch for the Task Memory stack — when
+    # off, the builtin provider omits CAP_TASK_MEMORY /
+    # CAP_CROSS_THREAD / CAP_END_EPISODE / CAP_ESCALATE_FAILURE from
+    # ``capabilities()`` and the sync_turn path skips episode_record.
+    # Off paths are byte-identical to the pre-change behavior.
+    REFLECTION_ENABLED: bool = False
+    # REFLECTION_LLM_MODEL: model routed for reflection LLM calls.
+    # Defaults to ``flash`` for cost — reflection is structured-output,
+    # short-form text; a flagship model is overkill. Override via env
+    # when the workload demands it.
+    REFLECTION_LLM_MODEL: str = "flash"
+    # REFLECTION_MAX_LLM_CALLS_PER_RUN: per-unit-run cap. ReflectionEngine
+    # surfaces ``degraded=True`` once the ceiling is hit, mirroring
+    # consolidation's budget exhaustion path.
+    REFLECTION_MAX_LLM_CALLS_PER_RUN: int = 6
+    # REFLECTION_MAX_MUTATIONS_PER_RUN: per-unit-run cap on rows
+    # adopted (additions + updates combined).
+    REFLECTION_MAX_MUTATIONS_PER_RUN: int = 30
     # MEMORY_PREFETCH_ENABLED: inject a memory context block before each LLM
     # call via the ContextProcessorChain memory prefetch processor.
     MEMORY_PREFETCH_ENABLED: bool = False

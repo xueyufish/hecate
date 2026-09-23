@@ -1,10 +1,6 @@
-# memory-provider-contract Specification
+# memory-provider-contract Specification(Delta)
 
-## Purpose
-
-定义 MemoryProvider 的分层契约:把记忆后端从单一检索接口扩展为覆盖检索、fact CRUD 与对话前注入/回合后写回的完整协议,使第三方记忆后端可以整体接管 Hecate 的记忆工具层,而 builtin(hecate-memory)只是该契约的默认实现。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 分层能力契约
 
@@ -116,6 +112,8 @@ Provider SHALL 通过能力声明暴露其实际支持的 tier;核心组合根�
 - **WHEN** 偏置关闭与开启各执行一次相同查询
 - **THEN** 关闭时 score 即相关性分,开启时 score 为融合分;两种状态下元数据均含分信号分解,调用方可区分
 - **AND** 结果元数据含 `source_scope` 字段,标明来源(actor / team / workspace / reflection / graph node)
+
+## ADDED Requirements
 
 ### Requirement: end_episode 钩子语义
 

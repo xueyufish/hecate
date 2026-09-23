@@ -144,12 +144,25 @@ class MemoryModel(BaseModel):
     value_components: Mapped[dict[str, Any] | None] = mapped_column(
         JSON().with_variant(JSONB(), "postgresql"), nullable=True, default=None
     )
+    # 4.23 cross-thread namespace: team_id + actor_id as first-class columns
+    # alongside the existing scope JSONB. ``actor_id`` is backfilled from
+    # ``scope.user_id`` by the migration; new writes should populate it
+    # explicitly so retrieval can short-circuit without parsing the scope
+    # JSON. ``team_id`` is null for actor-only memories.
+    team_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
 
     __table_args__ = (
         Index("idx_memories_workspace", "workspace_id", "deleted"),
         Index("idx_memories_scope", "scope", postgresql_using="gin"),
         Index("idx_memories_type", "memory_type"),
         Index("idx_memories_importance", "importance"),
+        Index(
+            "idx_memories_namespace",
+            "workspace_id",
+            "team_id",
+            "actor_id",
+        ),
     )
 
 
@@ -205,11 +218,20 @@ class KnowledgeMemoryModel(BaseModel):
         nullable=True,
         default=None,
     )
+    # 4.23 cross-thread namespace — see MemoryModel.team_id / actor_id.
+    team_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
 
     __table_args__ = (
         Index("idx_knowledge_memories_workspace", "workspace_id", "deleted"),
         Index("idx_knowledge_memories_agent", "agent_id"),
         Index("idx_knowledge_memories_importance", "importance"),
+        Index(
+            "idx_knowledge_memories_namespace",
+            "workspace_id",
+            "team_id",
+            "actor_id",
+        ),
     )
 
 

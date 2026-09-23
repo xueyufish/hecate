@@ -664,7 +664,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 > **Goal**: P4 intelligence features — Self-Learning, Agentic AI (RL, Prompt Optimization, Ontology Actions, OAG), Memory Intelligence. Make agents genuinely smart.
 >
-> **2026-08-22 reclassification**: Sprint 8 scope also absorbs the 48 items deferred from P3 (see feature-catalog → P4 → "Deferred from P3"): Evaluation Suite (7.2b-e/7.3/7.4/7.4a/7.5 + 8.10/8.12), Security remainder (9.5a/9.11/7.10/2.10b/7.7), Deployment & Ops (13.1/13.1a/13.1b/13.4/13.4b/13.17/13.18), Advanced KB (3.2.4/3.3.2/3.3.3/3.4.1), Canvas nodes (1.1.24/1.1.25), Memory (4.3a/4.16/4.25/4.21; 4.14 ✅ 2026-09-21, 4.15 ✅ 2026-09-21, 4.17 ✅ 2026-09-20 delivered), AIP (6.16/6.18), Auth (11.16/11.17), 5.4a/5.8/5.9-enh, and 8 shipped-feature enhancements. Sequencing within Sprint 8 is open — no forced ordering inherited from P3.
+> **2026-08-22 reclassification**: Sprint 8 scope also absorbs the 48 items deferred from P3 (see feature-catalog → P4 → "Deferred from P3"): Evaluation Suite (7.2b-e/7.3/7.4/7.4a/7.5 + 8.10/8.12), Security remainder (9.5a/9.11/7.10/2.10b/7.7), Deployment & Ops (13.1/13.1a/13.1b/13.4/13.4b/13.17/13.18), Advanced KB (3.2.4/3.3.2/3.3.3/3.4.1), Canvas nodes (1.1.24/1.1.25), Memory (4.3a/4.16/4.25; 4.14 ✅ 2026-09-21, 4.15 ✅ 2026-09-21, 4.17 ✅ 2026-09-20, 4.21 ✅ 2026-09-22, 4.22 ✅ 2026-09-22, 4.23 ✅ 2026-09-22, 4.24 ✅ 2026-09-22 delivered), AIP (6.16/6.18), Auth (11.16/11.17), 5.4a/5.8/5.9-enh, and 8 shipped-feature enhancements. Sequencing within Sprint 8 is open — no forced ordering inherited from P3.
 >
 > **2026-09-04 reorder (this change)**: Sprint 8 now opens with an **Opening Queue** of 4 items — all底座 ✅, all directly shippable or with shallow blockers — followed by the original three blocks as **Absorption Pool** (原 Sprint 8 块级，按原章节迁移；可在 Opening Queue 进展后择机启动), plus two appended blocks: Plugin Ecosystem (5.5d) and **Model Management (6.47/6.48, added 2026-09-06 from the AgentArts comparison — publish lifecycle pairs with 1.3.20's 提交/发布 semantics)**. The original chapter ordering was shaped by an earlier vision (deep intelligence first); it front-loaded two L-grade items (6.20 Ontology Action System, 6.22 OAG) that depend on the P5-deferred Knowledge Graph integration. Surfacing the Opening Queue first fixes a structural defect: 6.20 / 6.22 cannot close inside Sprint 8 in their current form (closure condition = P5 KG integration trigger). See change `openspec/changes/roadmap-p4-reorder/` for full rationale.
 >
@@ -714,9 +714,12 @@ Order is priority, not mandate — any change still goes through independent `/o
 | 4.18 ✅ (2026-09-19) | Conversation Recall Storage — recall_messages + Qdrant hecate_recall, event-projecting indexer, conversation_search tool | Memory System ✅ | S |
 | 4.19 ✅ (2026-09-19) | Self-Editing Memory — L1 replace/insert/rethink + L3/L4 update/forget, revision optimistic concurrency, memory_edit_log audit; supersession deferred to 3.5.13 alignment | Memory System ✅ | S |
 | 4.20 ✅ (2026-09-19, rescoped) | Retrieval Escalation — heartbeat reference retired; weak-search hint gating + iteration primitives; v2: gated recall sub-agent | Memory System ✅ | S |
-| 4.21 | Task Memory | Memory System ✅ | M |
-| 4.22 | Tool Memory | Memory System ✅ | M |
-| 4.23 | Cross-Thread Memory Store | Memory System ✅ | M |
+| 4.21 ✅ (2026-09-22, `memory-storage-family`, archive `2026-09-23-memory-storage-family`) | Task Memory → P4 (delivered: `episodes` + `reflections` + `ReflectionEngine` sharing consolidation seam; `work_context_nodes` + `work_context_edges` (KM6 / ADR-024 §6); four quality gates — model-isolation, LLM-as-Judge three-token score, `source_episode_ids >= 2`, confidence auto-deprecation; `NodeStatsAggregator` background job; behind `REFLECTION_ENABLED`) | Memory System ✅ | M |
+| 4.22 ✅ (2026-09-22, `memory-storage-family`, archive `2026-09-23-memory-storage-family`) | Tool Memory → P4 (delivered: same store as 4.21 — tool calls as `TOOL` events in episode `actions`; `ReflectionRecordProcessor` (4.13 chain) extracts tool events and forwards to active episode; per-session dedup) | Memory System ✅ | M |
+| 4.23 ✅ (2026-09-22, `memory-storage-family`, archive `2026-09-23-memory-storage-family`) | Cross-Thread Memory Store → P4 (delivered: four-layer namespace `workspace_id + team_id + actor_id + session_id` on `memories` + `knowledge_memories`; `memory_add(scope='workspace_shared')` admin-only; `memory_search(tier='tier_5')` cross-thread; composite index `(workspace_id, team_id, actor_id)`) | Memory System ✅ | M |
+| 4.24 ✅ (2026-09-22, `memory-storage-family`, archive `2026-09-23-memory-storage-family`) | Memory Versioning → P4 (delivered: monotonic `revision` on every L1/L3/L4 row; `expected_revision` guard on `memory_update` / `memory_forget`; `reflections.version` + `superseded_by` lineage; `memory_edit_log` append-only audit; sister audit pair `consolidation_runs` + `reflection_runs`) | Memory System ✅ | S |
+
+> 4.21 / 4.22 / 4.23 / 4.24 (KM6) shipped together via the `memory-storage-family` change. Default flag `REFLECTION_ENABLED=false`; off paths byte-identical to the pre-change platform surface.
 
 ### Plugin Ecosystem (NEW — adjustment，已交付 ✅ 2026-09-19)
 
@@ -951,7 +954,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 | 14.1 | Agentic Resource Discovery (ARD) | A2A ✅ | L |
 | 2.12 | Agent Payments (AP2) | A2A ✅ | M |
 | 7.8a | Agent Benchmark Integration | Evaluation ✅ | M |
-| 4.24 | Memory Versioning | Memory System ✅ | S |
+| 4.24 | Memory Versioning | Memory System ✅ | S | (kept on the row above 4.21–4.23 delivery note)
 
 ### Milestone M10 (End of Sprint 10)
 

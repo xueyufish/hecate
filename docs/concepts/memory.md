@@ -113,9 +113,20 @@ All four contribute to the context the [Context Engineering](context-engineering
 | Hold a coherent long conversation | L2 (automatic — no configuration) |
 | Remember user preferences across sessions | L3 user memory (automatic extraction) |
 | Answer questions from your documents | L4 knowledge base (upload + bind to agent) |
+| Learn from past task execution (4.21 Task Memory) | Reflection layer + Work Context Graph (`REFLECTION_ENABLED=true`) |
+| Share durable knowledge across users / teams in one workspace (4.23) | Cross-Thread Memory Store (`memory_add(scope='workspace_shared')`) |
 | Nothing — stateless single-turn Q&A | None required; L2 runs by default but is per-session |
 
 L1 and L2 are part of every session by default. L3 is extracted automatically as conversations proceed. L4 requires you to create a Knowledge Base and bind it to the agent.
+
+### Task Memory and Cross-Thread Memory Store (4.21 + 4.23)
+
+Task Memory and the Cross-Thread Memory Store extend the four-level model in two complementary directions:
+
+- **Task Memory (4.21)** captures what the agent **did** and what it **learned**. Closed task episodes are sealed records (`episodes` table); the `ReflectionEngine` produces typed reflections (`reflections` table, gated by four quality gates); the Work Context Graph (`work_context_nodes` + `work_context_edges`, KM6) is the structured successor to flat reflection records. Off by default — `REFLECTION_ENABLED=false`.
+- **Cross-Thread Memory Store (4.23)** extends the existing `workspace_id` namespace on L3 / L4 memories to four layers (`workspace_id + team_id + actor_id + session_id`). `memory_add(scope='workspace_shared')` promotes a fact into the workspace-wide pool (admin-only); `memory_search(tier='tier_5')` walks the cross-thread namespace.
+
+Both are off by default and gated on `REFLECTION_ENABLED=false` (Task Memory) / standard workspace role permissions (Cross-Thread). See [Knowledge & Memory Design](../design/knowledge-memory-design.md#task-memory-421) for the design summary and `openspec/changes/memory-storage-family/specs/` for the full requirements.
 
 ---
 
