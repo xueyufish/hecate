@@ -16,6 +16,7 @@ is mandatory: without enough golden samples the candidate is suspended as
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -197,6 +198,21 @@ class EvolutionGate:
                 if not (regression_ok and threshold_ok and improvement):
                     report.overall = "fail"
 
+        # 4.21 path c — reflection participation. When the candidate
+        # skill references one or more reflection ids (carried on
+        # ``candidate.evidence`` or ``candidate.linked_reflection_ids``),
+        # the gate checks the reflection layer is still ``approved``
+        # and within confidence bounds. This guards against an
+        # approved skill that pivots on a deprecated reflection.
+        try:
+            reflection_check = await self._check_reflection_relevance(candidate)
+        except Exception as e:  # pragma: no cover — best-effort
+            logger.warning("EvolutionGate reflection_relevance failed: %s", e)
+            reflection_check = ("reflection_relevance", "skipped", {"error": str(e)})
+        report.checks.append(self._check(*reflection_check))
+        if reflection_check[1] == "fail":
+            report.overall = "fail"
+
         if report.overall == "pass":
             has_fail = any(c["status"] == "fail" for c in report.checks)
             if has_fail:
@@ -204,6 +220,59 @@ class EvolutionGate:
         return report
 
     # --- helpers -----------------------------------------------------------
+
+    async def _check_reflection_relevance(self, candidate: Any) -> tuple[str, str, dict[str, Any]]:
+        """Path c — verify every reflection referenced by ``candidate`` is still approved.
+
+        Reads ``candidate.linked_reflection_ids`` (list of UUIDs); each
+        id is looked up in ``reflections`` and its ``status`` must be
+        ``approved`` and ``confidence >= 0.4``. A single non-approved
+        reflection flips the check to ``fail`` with the offending ids
+        in the detail payload so the caller can surface them.
+        """
+        from hecate.core.config import settings
+        from hecate.models.task_memory import (
+            REFLECTION_DEPRECATION_CONFIDENCE,
+            REFLECTION_STATUS_APPROVED,
+            REFLECTION_STATUS_DEPRECATED,
+            ReflectionModel,
+        )
+
+        ids: list[uuid.UUID] = list(getattr(candidate, "linked_reflection_ids", []) or [])
+        if not ids:
+            return ("reflection_relevance", "skipped", {"reason": "no_linked_reflections"})
+        if not settings.REFLECTION_ENABLED:
+            return (
+                "reflection_relevance",
+                "skipped",
+                {"reason": "REFLECTION_ENABLED is off", "reflection_ids": [str(i) for i in ids]},
+            )
+
+        from sqlalchemy import select
+
+        stmt = select(ReflectionModel.id, ReflectionModel.status, ReflectionModel.confidence).where(
+            ReflectionModel.id.in_(ids)
+        )
+        rows = list((await self._db.execute(stmt)).all())
+        by_id = {r[0]: (r[1], r[2]) for r in rows}
+        bad: list[dict[str, Any]] = []
+        for rid in ids:
+            status, conf = by_id.get(rid, (None, None))
+            if status is None:
+                bad.append({"reflection_id": str(rid), "reason": "missing"})
+            elif status == REFLECTION_STATUS_DEPRECATED:
+                bad.append({"reflection_id": str(rid), "reason": "deprecated"})
+            elif status != REFLECTION_STATUS_APPROVED:
+                bad.append({"reflection_id": str(rid), "reason": f"status={status}"})
+            elif (conf or 0.0) < REFLECTION_DEPRECATION_CONFIDENCE:
+                bad.append({"reflection_id": str(rid), "reason": "low_confidence"})
+        if bad:
+            return ("reflection_relevance", "fail", {"offending_reflections": bad})
+        return (
+            "reflection_relevance",
+            "pass",
+            {"checked": len(ids), "all_approved": True},
+        )
 
     def _check(self, name: str, status: str, detail: Any) -> dict[str, Any]:
         """Build one check entry for the report."""

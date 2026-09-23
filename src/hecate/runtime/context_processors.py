@@ -598,6 +598,171 @@ class MemoryPressureNudgeProcessor(ContextProcessor):
         )
 
 
+class ReflectionRecordProcessor(ContextProcessor):
+    """Append TOOL events from the current projection to the active episode.
+
+    Chain link that runs ``always`` and observes ``tool_group`` units to
+    extract ``assistant.tool_calls`` and their sibling ``tool`` results,
+    forwarding each pair to the builtin provider's
+    ``record_tool_event`` / ``append_turn_tool_events`` write path. The
+    active episode is identified by ``(workspace_id, agent_id, session_id)``
+    from the chain context's ``execution_context`` plus the ``session_id``.
+
+    Discipline:
+
+    - **Capability-gated**: short-circuits to a pass-through if
+      ``settings.REFLECTION_ENABLED`` is off OR the builtin provider does
+      not declare ``CAP_TASK_MEMORY``. Same byte-identical guarantee as
+      the other memory processors: when off, the projection is
+      unmodified and no DB call is made.
+    - **Best-effort**: any record failure is logged and reported via
+      ``ProcessorResult.metadata["error"]``; the projection still passes
+      through. The processor MUST NEVER fail the turn.
+    - **Non-destructive**: never rewrites the input units; the chain
+      contract requires it. Episode writes happen as side effects.
+
+    Per-session dedup key: a per-(session_id, tool_call_id) entry in
+    ``ctx.state`` tracks which calls have already been recorded so the
+    same projection replayed across multiple chain invocations does not
+    double-write. The key is a single string ``recorded:<sid>:<call_id>``
+    with truthy value ``True``.
+    """
+
+    name = "reflection_record"
+    run_mode = "always"
+
+    async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
+        from hecate.core.config import settings
+
+        meta: dict[str, Any] = {"recorded": 0, "skipped": 0, "disabled": False}
+        if not settings.REFLECTION_ENABLED:
+            meta["disabled"] = True
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        execution_context = ctx.execution_context or {}
+        raw_ws = execution_context.get("workspace_id")
+        raw_agent = execution_context.get("agent_id")
+        if not raw_ws or not raw_agent:
+            meta["skipped"] = len([u for u in units if u.kind == "tool_group"])
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        workspace_id = uuid.UUID(str(raw_ws))
+        agent_id = uuid.UUID(str(raw_agent))
+
+        tool_events = _extract_tool_events(units)
+        if not tool_events:
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        # Capability check — only dispatch when the provider declares it.
+        from hecate.core.composition.memory_provider import (
+            CAP_TASK_MEMORY,
+            provider_supports,
+            resolve_memory_provider,
+        )
+
+        provider = resolve_memory_provider()
+        if provider is None or not provider_supports(provider, CAP_TASK_MEMORY):
+            meta["skipped"] = len(tool_events)
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        # Per-session dedup: ``ctx.state`` is shared across processors within
+        # one chain invocation and across re-invocations of the same chain
+        # instance, so a single ``state`` check is sufficient.
+        session_key = ctx.session_id or "anonymous"
+        recorded: list[dict[str, Any]] = []
+        skipped_existing = 0
+        for event in tool_events:
+            dedup_key = f"recorded:{session_key}:{event['tool_call_id']}"
+            if ctx.state.get(dedup_key):
+                skipped_existing += 1
+                continue
+            try:
+                result = await provider.record_tool_event(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    session_id=session_key if isinstance(session_key, str) else "",
+                    tool_name=event["tool_name"],
+                    args=event["args"],
+                    result_ref=event.get("result_ref"),
+                    ts=event.get("ts"),
+                )
+            except Exception as e:  # pragma: no cover — best-effort
+                logger.warning(
+                    "ReflectionRecordProcessor: record_tool_event failed (session=%s tool=%s): %s",
+                    session_key,
+                    event.get("tool_name"),
+                    e,
+                )
+                meta["error"] = str(e)
+                continue
+            ctx.state[dedup_key] = True
+            recorded.append(
+                {
+                    "tool_call_id": event["tool_call_id"],
+                    "tool_name": event["tool_name"],
+                    "episode_id": getattr(result, "episode_id", None),
+                    "ok": bool(getattr(result, "ok", False)),
+                }
+            )
+
+        meta["recorded"] = len(recorded)
+        meta["skipped"] = skipped_existing
+        meta["events"] = recorded
+        return units, ProcessorResult(processor=self.name, metadata=meta)
+
+
+def _extract_tool_events(units: list[ContextUnit]) -> list[dict[str, Any]]:
+    """Pull ``(tool_name, args, result_ref, ts)`` for every tool call in ``units``.
+
+    Looks at ``tool_group`` units — by construction each carries one
+    assistant message with a non-empty ``tool_calls`` list, followed by
+    one or more ``tool`` messages whose ``tool_call_id`` joins the call.
+    Result reference is the first matching tool message's content (or
+    truncated head); full tool result payloads stay in their original
+    message rather than being duplicated into the episode.
+    """
+    from datetime import UTC, datetime
+
+    events: list[dict[str, Any]] = []
+    for unit in units:
+        if unit.kind != "tool_group":
+            continue
+        assistant_msg = unit.messages[0]
+        for tc in assistant_msg.get("tool_calls") or []:
+            call_id = tc.get("id") or ""
+            tool_name = (tc.get("function") or {}).get("name") or tc.get("name") or ""
+            args = (tc.get("function") or {}).get("arguments") or tc.get("args") or {}
+            if isinstance(args, str):
+                # OpenAI-style JSON string. Decode best-effort; fall back
+                # to wrapping in a dict so the JSONB column stays valid.
+                try:
+                    import json
+
+                    args = json.loads(args)
+                except Exception:
+                    args = {"_raw": args}
+            elif not isinstance(args, dict):
+                args = {"_value": args}
+            result_ref: str | None = None
+            for sibling in unit.messages[1:]:
+                if sibling.get("role") == "tool" and sibling.get("tool_call_id") == call_id:
+                    content = sibling.get("content") or ""
+                    if isinstance(content, list):
+                        content = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
+                    result_ref = content[:1024] if isinstance(content, str) else None
+                    break
+            events.append(
+                {
+                    "tool_call_id": call_id,
+                    "tool_name": tool_name,
+                    "args": args,
+                    "result_ref": result_ref,
+                    "ts": datetime.now(UTC),
+                }
+            )
+    return events
+
+
 class KVCacheAwareProcessor(ContextProcessor):
     """Mark a protected stable prefix to maximize provider prompt-cache reuse.
 
@@ -915,6 +1080,7 @@ class TerminationProcessor(ContextProcessor):
 
 _PREFETCH_MARKER = "[memory_context]"
 _ESCALATION_MARKER = "[memory_hint]"
+_REFLECTION_MARKER = "[reflection_summary]"
 _PREFETCH_QUERY_MAX_CHARS = 2000
 _ESCALATION_COOLDOWN_SECONDS = 120.0
 # Session-scoped cooldown for the escalation hint. Module-level because the
@@ -1287,12 +1453,12 @@ class ContextProcessorChain:
     """Ordered, budget-satisfied context projection pipeline (4.13).
 
     Processors run in declaration order. "when_over_budget" processors are
-    skipped once the projection fits the budget (satisfied predicate). Every
-    processor reports a ``ProcessorResult``; the chain aggregates them into a
-    ``ChainReport`` and emits one budget snapshot when any degradation level
-    fired. The session-scoped latches (warn crossing, time hints) live on the
-    chain instance, so a chain should be reused across the invocations of a
-    session/run — the composition layer guarantees this.
+        skipped once the projection fits the budget (satisfied predicate). Every
+        processor reports a ``ProcessorResult``; the chain aggregates them into a
+        ``ChainReport`` and emits one budget snapshot when any degradation level
+        fired. The session-scoped latches (warn crossing, time hints) live on
+        the chain instance, so a chain should be reused across the invocations of a
+        session/run — the composition layer guarantees this.
     """
 
     def __init__(
@@ -1485,6 +1651,161 @@ class ContextProcessorChain:
         return report
 
 
+class ReflectionInjectionProcessor(ContextProcessor):
+    """Path a — task-start reflection injection (4.21).
+
+    Queries approved reflections matching the current ``task_type`` and
+    appends a ``[reflection_summary]`` block at the projection tail —
+    after the KV-cache protected prefix and counted in the projection's
+    token accounting (same discipline as ``MemoryPrefetchProcessor``).
+
+    Gated on ``REFLECTION_ENABLED`` AND the provider's
+    ``CAP_TASK_MEMORY`` declaration. Off paths are byte-identical to
+    the pre-change chain. Best-effort: any failure degrades to a no-op
+    rather than failing the turn.
+    """
+
+    name = "reflection_injection"
+    run_mode = "always"
+
+    async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
+        from hecate.core.composition.memory_provider import (
+            CAP_TASK_MEMORY,
+            provider_supports,
+            resolve_memory_provider,
+        )
+        from hecate.core.config import settings
+
+        meta: dict[str, Any] = {"injected": False}
+        if not settings.REFLECTION_ENABLED:
+            meta["reason"] = "disabled"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        execution_context = ctx.execution_context or {}
+        raw_ws = execution_context.get("workspace_id")
+        raw_agent = execution_context.get("agent_id")
+        raw_task_type = execution_context.get("task_type")
+        if not raw_ws or not raw_agent or not raw_task_type:
+            meta["reason"] = "no_scope"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        provider = resolve_memory_provider()
+        if provider is None or not provider_supports(provider, CAP_TASK_MEMORY):
+            meta["reason"] = "provider_unavailable"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        try:
+            hits = await provider.search_task_memory(
+                query=str(raw_task_type),
+                workspace_id=uuid.UUID(str(raw_ws)),
+                agent_id=uuid.UUID(str(raw_agent)),
+                top_k=5,
+                task_type=str(raw_task_type),
+            )
+        except Exception as e:  # pragma: no cover — best-effort
+            logger.warning("ReflectionInjectionProcessor failed: %s", e)
+            meta["error"] = str(e)
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        if not hits:
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        # Build a compact summary block. Each approved reflection
+        # contributes its ``title`` + ``hints`` (≤ 300 words enforced
+        # at write time, but defensively clipped here too).
+        lines: list[str] = [f"{_REFLECTION_MARKER} task_type={raw_task_type} count={len(hits)}"]
+        for h in hits:
+            title = (h.title or "").strip()[:120]
+            hints = (h.content or "").strip()[:600]
+            lines.append(f"- {title}: {hints}")
+        block_text = "\n".join(lines)
+        block = ContextUnit([{"role": "user", "content": block_text}])
+        out = [*units, block]
+        meta["injected"] = True
+        meta["count"] = len(hits)
+        return out, ProcessorResult(processor=self.name, metadata=meta)
+
+
+class EscalationOnFailureProcessor(ContextProcessor):
+    """Path b — failure-retry reflection recall (4.21 / `escalate_failure`).
+
+    When the runtime marks a turn as failed (``execution_context
+    ['confidence']`` below threshold) AND ``REFLECTION_ENABLED`` is on,
+    look up approved reflections whose ``use_cases`` match the failing
+    ``task_type`` and inject them into the retry context so the model
+    can avoid repeating the same mistake.
+
+    Same best-effort discipline as ``ReflectionInjectionProcessor`` —
+    any failure degrades to a no-op rather than failing the retry.
+    """
+
+    name = "escalation_on_failure"
+    run_mode = "always"
+
+    async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
+        from hecate.core.composition.memory_provider import (
+            CAP_ESCALATE_FAILURE,
+            provider_supports,
+            resolve_memory_provider,
+        )
+        from hecate.core.config import settings
+
+        meta: dict[str, Any] = {"recalled": False}
+        if not settings.REFLECTION_ENABLED:
+            meta["reason"] = "disabled"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        execution_context = ctx.execution_context or {}
+        raw_ws = execution_context.get("workspace_id")
+        raw_agent = execution_context.get("agent_id")
+        raw_task_type = execution_context.get("task_type")
+        raw_confidence = execution_context.get("confidence", 1.0)
+        try:
+            confidence = float(raw_confidence)
+        except (TypeError, ValueError):
+            confidence = 1.0
+        threshold = float(execution_context.get("failure_threshold", 0.6))
+        if confidence >= threshold:
+            meta["reason"] = "no_failure"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+        if not raw_ws or not raw_agent or not raw_task_type:
+            meta["reason"] = "no_scope"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        provider = resolve_memory_provider()
+        if provider is None or not provider_supports(provider, CAP_ESCALATE_FAILURE):
+            meta["reason"] = "provider_unavailable"
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        try:
+            hits = await provider.escalate_failure(
+                workspace_id=uuid.UUID(str(raw_ws)),
+                agent_id=uuid.UUID(str(raw_agent)),
+                task_type=str(raw_task_type),
+                confidence=confidence,
+            )
+        except Exception as e:  # pragma: no cover — best-effort
+            logger.warning("EscalationOnFailureProcessor failed: %s", e)
+            meta["error"] = str(e)
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        if not hits:
+            return units, ProcessorResult(processor=self.name, metadata=meta)
+
+        lines: list[str] = [
+            f"[reflection_retry] task_type={raw_task_type} prior_confidence={confidence:.2f} hits={len(hits)}"
+        ]
+        for h in hits:
+            title = (h.title or "").strip()[:120]
+            hints = (h.content or "").strip()[:600]
+            lines.append(f"- {title}: {hints}")
+        block = ContextUnit([{"role": "user", "content": "\n".join(lines)}])
+        out = [*units, block]
+        meta["recalled"] = True
+        meta["count"] = len(hits)
+        return out, ProcessorResult(processor=self.name, metadata=meta)
+
+
 def _resolve_tool_result_limit(node_config: dict[str, Any]) -> int:
     limit = node_config.get("tool_result_limit", _DEFAULT_TOOL_RESULT_LIMIT)
     if not isinstance(limit, int) or limit <= 0:
@@ -1499,7 +1820,10 @@ def default_chain_processors() -> list[ContextProcessor]:
     truncation → KV-cache guard → window selection → offload → compression →
     controlled termination → memory integration (prefetch + escalation hint;
     both self-disable outside their enabling conditions, so flag-off chains
-    behave exactly as before).
+    behave exactly as before). The two 4.21 reflection processors at the tail
+    are flag-gated and self-disable when the gate isn't open, so the chain
+    composition is identical to the pre-change default when
+    ``REFLECTION_ENABLED=false``.
     """
     return [
         ToolResultTruncationProcessor(),
@@ -1510,4 +1834,6 @@ def default_chain_processors() -> list[ContextProcessor]:
         TerminationProcessor(),
         MemoryPrefetchProcessor(),
         RetrievalEscalationHintProcessor(),
+        ReflectionInjectionProcessor(),
+        EscalationOnFailureProcessor(),
     ]

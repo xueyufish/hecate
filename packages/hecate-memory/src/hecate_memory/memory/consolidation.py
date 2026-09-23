@@ -79,7 +79,20 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
 
 # L1 block that consolidation may rewrite by default. Persona and other
 # hand-curated blocks require an explicit per-agent allowlist entry.
-DEFAULT_BLOCK_ALLOWLIST = ("learned_context",)
+DEFAULT_BLOCK_ALLOWLIST = (
+    # Original consolidation-only entry. Remains the default even with
+    # REFLECTION_ENABLED off; ``reflection_summary`` is opt-in via the
+    # same flag at the runtime layer.
+    "learned_context",
+    # 4.21 reflection_summary — the block the reflection consumer
+    # writes approved reflections into via ``UPDATE_BLOCK``. Listed in
+    # the default allowlist so workspaces running with
+    # ``REFLECTION_ENABLED=true`` get reflection injection without an
+    # extra config step. Workspaces with ``REFLECTION_ENABLED=false``
+    # never write the block (the consolidation engine emits ``NOOP``
+    # for it, see ``_plan`` block guard).
+    "reflection_summary",
+)
 
 # Credential-shaped content never enters memory, regardless of scanner
 # availability (D7 floor).
@@ -1100,6 +1113,13 @@ class ConsolidationScheduler:
     Owns the unit-processing transaction: commit on success/partial,
     rollback + separate failed-run audit row on unexpected errors, and
     pressure-flag consumption after each flagged unit's attempt.
+
+    Also drives the reflection engine as a sister mechanism (4.21):
+    ``reflection_engine`` is an optional constructor arg; when present,
+    ``process_reflection_unit`` writes ``reflection_runs`` rows under
+    the same advisory-lock discipline so a single
+    ``(workspace, agent, actor, team)`` unit runs consolidation and
+    reflection serially rather than concurrently.
     """
 
     def __init__(
@@ -1110,12 +1130,14 @@ class ConsolidationScheduler:
         idle_check_interval: int = 300,
         idle_quiet_seconds: int = 1800,
         session_factory: Any | None = None,
+        reflection_engine: Any | None = None,
     ) -> None:
         self.engine = engine
         self.schedule = schedule
         self.idle_check_interval = max(int(idle_check_interval), 0)
         self.idle_quiet_seconds = int(idle_quiet_seconds)
         self._session_factory = session_factory
+        self.reflection_engine = reflection_engine
         self._task: asyncio.Task[None] | None = None
 
     def _factory(self) -> Any:
@@ -1177,6 +1199,133 @@ class ConsolidationScheduler:
             await self._consume_flag(db, window.unit)
             await db.commit()
             return True
+        finally:
+            await self._release_lock(db, lock_id)
+
+    # -- reflection (4.21 sister mechanism) ----------------------------------
+
+    async def process_reflection_unit(
+        self,
+        db: AsyncSession,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        actor_id: uuid.UUID | None = None,
+        team_id: uuid.UUID | None = None,
+        window_start: datetime,
+        window_end: datetime,
+        trigger: str,
+    ) -> uuid.UUID | None:
+        """Run one reflection pass under the same advisory lock as consolidation.
+
+        Returns the created ``reflection_runs.id`` row id, or ``None``
+        when no reflection engine is configured or the unit was locked
+        elsewhere. Reflection and consolidation share the lock so the
+        same ``(workspace, agent, actor, team)`` unit cannot run both
+        at once — they serialize.
+
+        The reflection audit row lives in ``reflection_runs`` (parallel
+        to ``consolidation_runs``); the same status vocabulary
+        (``running / success / partial / failed``) is used.
+        """
+        from hecate.models.task_memory import ReflectionRunModel
+
+        if self.reflection_engine is None:
+            logger.debug("process_reflection_unit: no reflection_engine configured")
+            return None
+        unit = ConsolidationUnit(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            user_id=actor_id,  # reflection unit's user-slot is the actor
+        )
+        lock_id, locked = await self._acquire_lock(db, unit)
+        if not locked:
+            logger.debug(
+                "Reflection unit locked elsewhere (ws=%s agent=%s actor=%s)",
+                workspace_id,
+                agent_id,
+                actor_id,
+            )
+            return None
+        run_row = ReflectionRunModel(
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            actor_id=actor_id,
+            team_id=team_id,
+            trigger=trigger,
+            window_start=window_start,
+            window_end=window_end,
+            candidate_episode_ids=[],
+            adopted_count=0,
+            rejected_count=0,
+            confidence_distribution=None,
+            rejection_reasons=None,
+            status="running",
+            llm_calls=0,
+            error=None,
+        )
+        db.add(run_row)
+        await db.flush()
+        run_id = run_row.id
+        try:
+            engine = self.reflection_engine
+            summary = await engine.run_unit(
+                db,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                actor_id=actor_id,
+                team_id=team_id,
+                window_start=window_start,
+                window_end=window_end,
+                trigger=trigger,
+            )
+            # Aggregate counters into the audit row.
+            outcome_buckets: dict[str, int] = {}
+            for o in summary.get("outcomes", []):
+                key = o.get("rejection_reason") or o.get("op") or "unknown"
+                outcome_buckets[key] = outcome_buckets.get(key, 0) + 1
+            run_row.adopted_count = summary.get("adopted", 0)
+            run_row.rejected_count = summary.get("rejected", 0)
+            run_row.llm_calls = summary.get("llm_calls", 0)
+            run_row.confidence_distribution = {
+                "episodes_considered": summary.get("episodes_considered", 0),
+                "candidates_extracted": summary.get("candidates_extracted", 0),
+                "degraded": summary.get("degraded", False),
+            }
+            run_row.rejection_reasons = outcome_buckets
+            run_row.status = "success" if not summary.get("degraded", False) else "partial"
+            await db.commit()
+            logger.info(
+                "Reflection run %s for unit %s: %s adopted / %s rejected / %d llm_calls",
+                run_row.status,
+                unit.key,
+                run_row.adopted_count,
+                run_row.rejected_count,
+                run_row.llm_calls,
+            )
+            return run_id
+        except Exception as exc:
+            await db.rollback()
+            await db.commit()
+            try:
+                async with self._factory() as err_db:
+                    err_run = ReflectionRunModel(
+                        workspace_id=workspace_id,
+                        agent_id=agent_id,
+                        actor_id=actor_id,
+                        team_id=team_id,
+                        trigger=trigger,
+                        window_start=window_start,
+                        window_end=window_end,
+                        status="failed",
+                        error=str(exc),
+                    )
+                    err_db.add(err_run)
+                    await err_db.commit()
+            except Exception as audit_err:  # pragma: no cover
+                logger.warning("Reflection failure audit also failed: %s", audit_err)
+            logger.warning("Reflection run failed for unit %s: %s", unit.key, exc)
+            return None
         finally:
             await self._release_lock(db, lock_id)
 

@@ -432,10 +432,25 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
 
     start_consolidation()
 
+    # 4.21 reflection lifecycle — wires the ReflectionEngine + the
+    # background confidence evaluator when REFLECTION_ENABLED is on.
+    # Off by default (matches the MEMORY_TOOLS_ENABLED / CONSOLIDATION_ENABLED
+    # pattern): no scheduler is started, no LLM calls are made, and
+    # nothing leaks into the runtime.
+    from hecate.core.composition.reflection import start_reflection
+
+    start_reflection()
+
     try:
         yield
     finally:
         # Shutdown — reverse order.
+        try:
+            from hecate.core.composition.reflection import stop_reflection
+
+            await stop_reflection()
+        except ImportError:
+            pass
         try:
             from hecate.core.composition.consolidation import stop_consolidation
 

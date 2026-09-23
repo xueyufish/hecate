@@ -11,13 +11,18 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from hecate_memory.memory.tools_backend import get_visible_memory_tool_names
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core import database as core_db
 from hecate.core.config import settings
 from hecate.models.memory import MemoryBlockCreateSchema, MemoryEditLogModel
-from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS, BuiltInToolExecutor, get_memory_tool_names
+from hecate.tools.tool.builtin import (
+    BUILTIN_TOOL_DEFINITIONS,
+    BuiltInToolExecutor,
+    get_memory_tool_names,
+)
 from hecate.tools.tool.registry import seed_builtin_tools
 from hecate.tools.tool.search import SearchProvider
 from tests.conftest import test_session_factory
@@ -71,6 +76,7 @@ async def test_seed_flags_off_seeds_no_memory_tools(db_session: AsyncSession, mo
 async def test_seed_flags_on_seeds_memory_tools(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "MEMORY_TOOLS_ENABLED", True)
     monkeypatch.setattr(settings, "RECALL_INDEXING_ENABLED", True)
+    monkeypatch.setattr(settings, "REFLECTION_ENABLED", True)
     await seed_builtin_tools(db_session)
 
     from hecate.models.tool import ToolModel
@@ -78,7 +84,7 @@ async def test_seed_flags_on_seeds_memory_tools(db_session: AsyncSession, monkey
     names = {
         n for (n,) in (await db_session.execute(select(ToolModel.name).where(ToolModel.source == "builtin"))).all()
     }
-    assert get_memory_tool_names() <= names
+    assert get_visible_memory_tool_names(reflection_enabled=True) <= names
 
 
 async def test_conversation_search_gated_by_recall_flag(

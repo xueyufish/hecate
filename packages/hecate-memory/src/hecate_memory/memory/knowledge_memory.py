@@ -29,6 +29,37 @@ logger = logging.getLogger(__name__)
 COLLECTION_NAME = "hecate_knowledge_memories"
 
 
+def _namespace_visible(
+    *,
+    row_team_id: uuid.UUID | None,
+    row_actor_id: uuid.UUID | None,
+    caller_team_id: uuid.UUID | None,
+    caller_actor_id: uuid.UUID | None,
+    include_shared: bool,
+) -> bool:
+    """Check whether a memory row is visible to the caller under the
+    four-layer namespace (workspace_id / team_id / actor_id / session_id).
+
+    Rules:
+
+    - ``actor_id == caller_actor_id`` is always visible (actor's own row).
+    - Workspace-shared rows (``team_id IS NULL AND actor_id IS NULL``)
+      are visible iff ``include_shared``.
+    - Team rows (``team_id != NULL``): visible iff ``caller_team_id ==
+      row_team_id``. ``actor_id`` on the row may be NULL (team-wide) or
+      match the caller's actor_id (intra-team actor scoping).
+    - Otherwise: hidden.
+
+    Symmetric for read paths: the row is "in" the caller's scope iff
+    every dimension matches what the caller has access to.
+    """
+    if row_actor_id is not None and caller_actor_id is not None and row_actor_id == caller_actor_id:
+        return True
+    if row_team_id is None and row_actor_id is None:
+        return include_shared
+    return bool(row_team_id is not None and caller_team_id is not None and row_team_id == caller_team_id)
+
+
 @dataclass
 class KnowledgeSearchResult:
     """Search result with relevance score."""
@@ -120,6 +151,10 @@ class KnowledgeMemoryService:
         tags: list[str] | None = None,
         user_id: uuid.UUID | None = None,
         mode: str = "hybrid",
+        *,
+        team_id: uuid.UUID | None = None,
+        actor_id: uuid.UUID | None = None,
+        include_shared: bool = True,
     ) -> list[KnowledgeSearchResult]:
         """Search knowledge memories using hybrid search.
 
@@ -131,6 +166,15 @@ class KnowledgeMemoryService:
             tags: Optional tag filter.
             user_id: Optional user filter for user-specific knowledge.
             mode: Search mode ("hybrid", "dense", or "sparse").
+            team_id: 4.23 namespace dimension. When ``None``, returns
+                rows whose ``team_id IS NULL`` or whose ``team_id``
+                matches the caller's. When set, narrows to that team.
+            actor_id: 4.23 namespace dimension. Same shape as
+                ``team_id``: ``None`` matches ``actor_id IS NULL`` rows.
+            include_shared: When ``True`` (default), rows with
+                ``actor_id IS NULL AND team_id IS NULL`` (workspace-shared)
+                are also returned. When ``False``, only the caller's
+                exact actor/team scope is queried.
 
         Returns:
             List of scored knowledge search results.
@@ -156,6 +200,21 @@ class KnowledgeMemoryService:
             if str(meta.get("agent_id", "")) != str(agent_id):
                 continue
             if user_id and str(meta.get("user_id", "")) != str(user_id):
+                continue
+            # 4.23 namespace filtering on metadata: the Qdrant vector
+            # payload mirrors the SQL columns for retrieval-time filter;
+            # absent keys are treated as NULL (actor-only or workspace-
+            # shared rows). The structured filter below ensures the
+            # SQL-backed path returns the same scope.
+            row_team_id = meta.get("team_id")
+            row_actor_id = meta.get("actor_id")
+            if not _namespace_visible(
+                row_team_id=uuid.UUID(row_team_id) if row_team_id else None,
+                row_actor_id=uuid.UUID(row_actor_id) if row_actor_id else None,
+                caller_team_id=team_id,
+                caller_actor_id=actor_id,
+                include_shared=include_shared,
+            ):
                 continue
             if tags:
                 result_tags = set(meta.get("tags", []))

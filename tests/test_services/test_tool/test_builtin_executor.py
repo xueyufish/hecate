@@ -134,6 +134,12 @@ class TestToolDefinitions:
             "memory_update",
             "memory_forget",
             "conversation_search",
+            # 4.21 reflection tools — gated on REFLECTION_ENABLED at
+            # seeding time (see get_visible_memory_tool_names); this
+            # test asserts the static definitions are present, the
+            # runtime seeding check is in test_memory_tools.py.
+            "reflection_search",
+            "work_context_query",
         }
         assert set(BUILTIN_TOOL_DEFINITIONS.keys()) == expected
 

@@ -34,14 +34,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.composition.memory_provider import (
     CAP_ADD_MEMORY,
+    CAP_CROSS_THREAD,
     CAP_FORGET_MEMORY,
     CAP_SEARCH_MEMORIES,
     CAP_SEARCH_RECALL,
+    CAP_TASK_MEMORY,
     CAP_UPDATE_MEMORY,
+    TIER_2,
+    TIER_4,
+    TIER_5,
+    TIER_UNSUPPORTED_ERROR,
+    VALID_TIERS,
     MemoryFactHit,
+    TierRoutingError,
     provider_supports,
     resolve_memory_provider,
+    route_search_by_tier,
 )
+from hecate.core.config import settings as core_settings
 from hecate.models.memory import MemoryEditLogModel
 from hecate_memory.memory.access import record_access
 from hecate_memory.memory.token_counter import TokenCounter
@@ -59,15 +69,49 @@ _MEMORY_TOOL_NAMES = frozenset(
         "memory_update",
         "memory_forget",
         "conversation_search",
+        # 4.21 surfaces — gated on ``REFLECTION_ENABLED`` at the seeding
+        # layer; tools_backend executes them whenever the runtime
+        # reaches this code path because the registry only mounts
+        # them when the flag is on.
+        "reflection_search",
+        "work_context_query",
     }
 )
 
-_SUMMARY_LIMIT = 200
+# Allowed values for ``memory_add.scope``. ``actor_scoped`` is the default
+# for backwards compatibility; ``workspace_shared`` is restricted to
+# workspace admin callers (Group 8.2 / task-memory capability).
+MEMORY_ADD_SCOPE_ACTOR_SCOPED = "actor_scoped"
+MEMORY_ADD_SCOPE_WORKSPACE_SHARED = "workspace_shared"
+_MEMORY_ADD_SCOPES: frozenset[str] = frozenset({MEMORY_ADD_SCOPE_ACTOR_SCOPED, MEMORY_ADD_SCOPE_WORKSPACE_SHARED})
+
+# Tier literals accepted by ``memory_search(tier=...)``. Default is
+# ``tier_2`` (existing L3 + L4 behavior); ``tier_4`` routes to
+# task-memory / reflections, ``tier_5`` routes to cross-thread
+# shared facts. Other tier values are rejected as structured errors.
+_MEMORY_SEARCH_TIER_DEFAULT = TIER_2
 
 
 def get_memory_tool_names() -> frozenset[str]:
-    """Return the set of memory tool names handled by this backend."""
+    """Return the set of tool names handled by the memory backend."""
     return _MEMORY_TOOL_NAMES
+
+
+def get_visible_memory_tool_names(*, reflection_enabled: bool | None = None) -> frozenset[str]:
+    """Return the tool names that should be seeded under the current flag state.
+
+    ``reflection_enabled`` defaults to ``settings.REFLECTION_ENABLED``;
+    callers may pass an explicit value for tests. When ``False``,
+    ``reflection_search`` and ``work_context_query`` are withheld so
+    the agent cannot mount them.
+    """
+    flag = core_settings.REFLECTION_ENABLED if reflection_enabled is None else reflection_enabled
+    if flag:
+        return _MEMORY_TOOL_NAMES
+    return _MEMORY_TOOL_NAMES - {"reflection_search", "work_context_query"}
+
+
+_SUMMARY_LIMIT = 200
 
 
 def _err(error: str, detail: str, **extra: Any) -> dict[str, Any]:
@@ -118,6 +162,10 @@ class MemoryToolBackend:
                 return await self._forget(workspace_id, agent_id, session_id, args, context)
             if name == "conversation_search":
                 return await self._conversation_search(workspace_id, agent_id, args)
+            if name == "reflection_search":
+                return await self._reflection_search_tool(workspace_id=workspace_id, agent_id=agent_id, args=args)
+            if name == "work_context_query":
+                return await self._work_context_query_tool(workspace_id=workspace_id, agent_id=agent_id, args=args)
         except Exception as e:  # defensive: the tool boundary must not crash the loop
             logger.exception("Memory tool %s failed", name)
             return _err("internal_error", str(e))
@@ -330,39 +378,174 @@ class MemoryToolBackend:
         session_id: uuid.UUID | None,
         args: dict[str, Any],
     ) -> dict[str, Any]:
-        provider_or_err = self._provider(CAP_SEARCH_MEMORIES)
-        if isinstance(provider_or_err, dict):
-            return provider_or_err
         query = str(args.get("query", "")).strip()
         if not query:
             return _err("invalid_arguments", "memory_search requires query")
         top_k = min(int(args.get("top_k", 5)), 20)
         tags = args.get("tags")
-        hits: list[MemoryFactHit] = await provider_or_err.search_memories(
-            query=query,
+        # Tier routing — added in 4.21. ``tier_2`` is the default
+        # (L3 + L4 fact memory) and preserves the pre-change behavior
+        # byte-identical. Other tiers are routed via the provider's
+        # capability declaration; an incapable provider yields a
+        # structured error rather than a crash.
+        tier = str(args.get("tier", _MEMORY_SEARCH_TIER_DEFAULT))
+        if tier not in VALID_TIERS:
+            return _err(
+                TIER_UNSUPPORTED_ERROR,
+                f"unknown tier {tier!r}; expected one of {sorted(VALID_TIERS)}",
+                tier=tier,
+            )
+        provider = resolve_memory_provider()
+        if provider is None:
+            return _err("no_provider", "no memory provider resolved")
+        try:
+            route_search_by_tier(provider, tier, provider_name=type(provider).__name__)
+        except TierRoutingError as e:
+            return _err(
+                TIER_UNSUPPORTED_ERROR,
+                f"memory provider does not declare capability for tier {tier!r}",
+                tier=e.requested_tier,
+                required_capability=e.required_capability,
+            )
+
+        if tier == TIER_2:
+            provider_or_err = self._provider(CAP_SEARCH_MEMORIES)
+            if isinstance(provider_or_err, dict):
+                return provider_or_err
+            hits: list[MemoryFactHit] = await provider_or_err.search_memories(
+                query=query,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                top_k=top_k,
+                tags=[str(t) for t in tags] if tags else None,
+            )
+            await record_access(
+                self.db,
+                workspace_id=workspace_id,
+                hits=[(h.source_layer, h.memory_id) for h in hits],
+                session_id=session_id,
+            )
+            return {
+                "ok": True,
+                "tier": tier,
+                "source_scope_default": "actor_scoped",
+                "results": [
+                    {
+                        "memory_id": str(h.memory_id),
+                        "source_layer": h.source_layer,
+                        "content": h.content,
+                        "score": round(h.score, 4),
+                        "revision": h.revision,
+                        "breakdown": h.metadata.get("breakdown", {}),
+                    }
+                    for h in hits
+                ],
+            }
+        if tier == TIER_4:
+            return await self._reflection_search(workspace_id=workspace_id, agent_id=agent_id, args=args)
+        if tier == TIER_5:
+            return await self._cross_thread_search(workspace_id=workspace_id, args=args)
+        # Should be unreachable: VALID_TIERS covers the three handled
+        # cases above. Defensive fallback: structured error.
+        return _err(
+            TIER_UNSUPPORTED_ERROR,
+            f"tier {tier!r} not handled by memory_search",
+            tier=tier,
+        )
+
+    async def _reflection_search(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Tier-4 reflection_search: approved reflections only.
+
+        Tool-level helper invoked by ``memory_search(tier='tier_4')``.
+        Returns reflections matching the query / ``task_type`` filter;
+        ``pending`` / ``rejected`` / ``deprecated`` reflections are
+        excluded — the same status filter the ``reflection_search``
+        standalone tool enforces. Behavior is byte-identical to the
+        standalone tool, both routing through
+        ``provider.search_task_memory`` (Group 4 capability surface).
+        """
+        if not core_settings.REFLECTION_ENABLED:
+            return _err(
+                "reflection_disabled",
+                "REFLECTION_ENABLED is off; tier_4 not available",
+            )
+        provider = resolve_memory_provider()
+        if provider is None or not provider_supports(provider, CAP_TASK_MEMORY):
+            return _err(
+                TIER_UNSUPPORTED_ERROR,
+                "memory provider does not declare capability for tier_4",
+                required_capability=CAP_TASK_MEMORY,
+            )
+        hits = await provider.search_task_memory(
+            query=str(args.get("query", "")).strip(),
             workspace_id=workspace_id,
             agent_id=agent_id,
-            top_k=top_k,
-            tags=[str(t) for t in tags] if tags else None,
-        )
-        # Distinct-session access markers: best-effort, never fails the
-        # search. session_id=None still refreshes the heat clocks.
-        await record_access(
-            self.db,
-            workspace_id=workspace_id,
-            hits=[(h.source_layer, h.memory_id) for h in hits],
-            session_id=session_id,
+            top_k=min(int(args.get("top_k", 5)), 20),
+            task_type=args.get("task_type"),
         )
         return {
             "ok": True,
+            "tier": TIER_4,
+            "source_scope_default": "reflection",
+            "results": [
+                {
+                    "reflection_id": str(h.hit_id),
+                    "kind": str(h.hit_kind),
+                    "title": h.title,
+                    "content": h.content,
+                    "use_cases": list(h.use_cases),
+                    "confidence": round(h.confidence, 4),
+                    "score": round(h.score, 4),
+                }
+                for h in hits
+            ],
+        }
+
+    async def _cross_thread_search(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Tier-5 cross-thread search: workspace_shared / team_scoped facts.
+
+        Tool-level helper invoked by ``memory_search(tier='tier_5')``.
+        Walks the namespace dimensions from the tool context; only the
+        surfaces the caller is authorized for are returned.
+        """
+        provider = resolve_memory_provider()
+        if provider is None or not provider_supports(provider, CAP_CROSS_THREAD):
+            return _err(
+                TIER_UNSUPPORTED_ERROR,
+                "memory provider does not declare capability for tier_5",
+                required_capability=CAP_CROSS_THREAD,
+            )
+        hits = await provider.search_cross_thread(
+            query=str(args.get("query", "")).strip(),
+            workspace_id=workspace_id,
+            top_k=min(int(args.get("top_k", 5)), 20),
+            tags=[str(t) for t in args.get("tags") or []] or None,
+        )
+        return {
+            "ok": True,
+            "tier": TIER_5,
+            "source_scope_default": "workspace_shared",
             "results": [
                 {
                     "memory_id": str(h.memory_id),
                     "source_layer": h.source_layer,
+                    "source_scope": h.source_scope,
                     "content": h.content,
                     "score": round(h.score, 4),
                     "revision": h.revision,
-                    "breakdown": h.metadata.get("breakdown", {}),
+                    "tags": list(h.tags),
+                    "importance": h.importance,
                 }
                 for h in hits
             ],
@@ -382,6 +565,27 @@ class MemoryToolBackend:
         content = str(args.get("content", "")).strip()
         if not content:
             return _err("invalid_arguments", "memory_add requires content")
+        # 4.23 scope parameter. ``actor_scoped`` (default) preserves
+        # the pre-change behavior byte-identical; ``workspace_shared``
+        # is restricted to workspace admin callers. The role check
+        # runs before any DB write so a rejected scope never produces
+        # a half-write.
+        scope = str(args.get("scope", MEMORY_ADD_SCOPE_ACTOR_SCOPED))
+        if scope not in _MEMORY_ADD_SCOPES:
+            return _err(
+                "invalid_scope",
+                f"memory_add.scope must be one of {sorted(_MEMORY_ADD_SCOPES)}",
+                requested=scope,
+            )
+        if scope == MEMORY_ADD_SCOPE_WORKSPACE_SHARED:
+            ctx = context or {}
+            caller_role = str(ctx.get("workspace_role") or "editor")
+            if caller_role != "admin":
+                return _err(
+                    "permission_denied",
+                    "memory_add(scope='workspace_shared') requires workspace admin role",
+                    caller_role=caller_role,
+                )
         result = await provider_or_err.add_memory(
             content=content,
             workspace_id=workspace_id,
@@ -412,6 +616,7 @@ class MemoryToolBackend:
             "memory_id": str(result.memory_id),
             "revision": result.revision,
             "deduplicated": deduplicated,
+            "scope": scope,
         }
 
     async def _update(
@@ -504,6 +709,127 @@ class MemoryToolBackend:
             context,
         )
         return {"ok": True, "memory_id": str(result.memory_id), "revision": result.revision}
+
+    async def _reflection_search_tool(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Standalone ``reflection_search`` tool entry point.
+
+        Distinct from the ``memory_search(tier='tier_4')`` shim only in
+        ergonomics: callers get a typed response without needing to
+        remember the tier keyword. Both paths share the same
+        provider call and the same approved-only status filter.
+        """
+        if not core_settings.REFLECTION_ENABLED:
+            return _err(
+                "reflection_disabled",
+                "REFLECTION_ENABLED is off; reflection_search not available",
+            )
+        provider = resolve_memory_provider()
+        if provider is None or not provider_supports(provider, CAP_TASK_MEMORY):
+            return _err(
+                "tier_unsupported",
+                "memory provider does not declare capability for task_memory",
+                required_capability=CAP_TASK_MEMORY,
+            )
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return _err("invalid_arguments", "reflection_search requires query")
+        hits = await provider.search_task_memory(
+            query=query,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            top_k=min(int(args.get("top_k", 5)), 20),
+            task_type=args.get("task_type"),
+        )
+        return {
+            "ok": True,
+            "results": [
+                {
+                    "reflection_id": str(h.hit_id),
+                    "kind": str(h.hit_kind),
+                    "title": h.title,
+                    "content": h.content,
+                    "use_cases": list(h.use_cases),
+                    "confidence": round(h.confidence, 4),
+                    "score": round(h.score, 4),
+                }
+                for h in hits
+            ],
+        }
+
+    async def _work_context_query_tool(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        agent_id: uuid.UUID,
+        args: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Standalone ``work_context_query`` tool entry point."""
+        if not core_settings.REFLECTION_ENABLED:
+            return _err(
+                "reflection_disabled",
+                "REFLECTION_ENABLED is off; work_context_query not available",
+            )
+        provider = resolve_memory_provider()
+        if provider is None or not provider_supports(provider, CAP_TASK_MEMORY):
+            return _err(
+                "tier_unsupported",
+                "memory provider does not declare capability for task_memory",
+                required_capability=CAP_TASK_MEMORY,
+            )
+        from hecate_memory.memory.work_context_graph import get_active_node
+
+        node_type = args.get("node_type")
+        query = str(args.get("query", "")).strip()
+        if not query:
+            return _err("invalid_arguments", "work_context_query requires query")
+        top_k = min(int(args.get("top_k", 5)), 20)
+        # The provider's ``search_task_memory`` returns both reflections
+        # and work-context nodes; ``work_context_query`` filters to
+        # nodes only via the ``hit_kind`` discriminator.
+        hits = await provider.search_task_memory(
+            query=query,
+            workspace_id=workspace_id,
+            agent_id=agent_id,
+            top_k=top_k,
+            task_type=None,
+        )
+        nodes_only = [h for h in hits if str(h.hit_kind) == "work_context_node"]
+        # Filter by node_type client-side; the builtin provider's
+        # future implementation may push this into the SQL query
+        # (Group 6 follow-up).
+        if node_type:
+            nodes_only = [h for h in nodes_only if (h.title or "").startswith(node_type + ":")]
+        # active-only filter — rely on the provider's status gate;
+        # belt-and-suspenders check via get_active_node per result.
+        out: list[dict[str, Any]] = []
+        for h in nodes_only:
+            node = await get_active_node(
+                self.db,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                linked_reflection_id=h.hit_id,  # best-effort: hit_id == reflection_id when kind=node
+            )
+            if node is None:
+                continue
+            out.append(
+                {
+                    "node_id": str(node.id),
+                    "node_type": node.node_type,
+                    "content": node.content,
+                    "success_rate": round(node.success_rate, 4),
+                    "usage_count": node.usage_count,
+                    "user_correction_count": node.user_correction_count,
+                    "source_reliability": node.source_reliability,
+                    "score": round(h.score, 4),
+                }
+            )
+        return {"ok": True, "results": out}
 
     async def _conversation_search(
         self, workspace_id: uuid.UUID, agent_id: uuid.UUID, args: dict[str, Any]

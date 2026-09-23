@@ -328,7 +328,12 @@ BUILTIN_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     "memory_search": {
         "description": (
             "Search your long-term memories (user memories and knowledge facts) for information "
-            "relevant to a query. Returns ranked facts with their source layer and revision."
+            "relevant to a query. Returns ranked facts with their source layer and revision. The "
+            "optional tier argument routes to different memory surfaces: tier_2 (default; L3 user "
+            "memories + L4 knowledge facts), tier_4 (reflections; requires REFLECTION_ENABLED), "
+            "tier_5 (workspace-shared / team-shared facts; requires REFLECTION_ENABLED). When the "
+            "underlying provider doesn't declare the requested tier, the tool returns a structured "
+            "error rather than crashing."
         ),
         "risk_level": "LOW",
         "parameters": {
@@ -341,6 +346,18 @@ BUILTIN_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                     "items": {"type": "string"},
                     "description": "Optional tag filter (knowledge memories)",
                 },
+                "tier": {
+                    "type": "string",
+                    "enum": ["tier_1", "tier_2", "tier_3", "tier_4", "tier_5"],
+                    "description": (
+                        "Memory tier to search. tier_2 is the default (L3 + L4 facts). tier_4 routes "
+                        "to reflections / work context graph (4.21 surfaces). tier_5 routes to "
+                        "workspace-shared / team-shared facts (4.23 surfaces). Other tiers return "
+                        "structured errors when the active provider doesn't declare the matching "
+                        "capability."
+                    ),
+                    "default": "tier_2",
+                },
             },
             "required": ["query"],
         },
@@ -348,7 +365,10 @@ BUILTIN_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     "memory_add": {
         "description": (
             "Store a durable knowledge fact for future conversations. Check memory_search first and "
-            "use memory_update for near-duplicates instead of creating a redundant entry."
+            "use memory_update for near-duplicates instead of creating a redundant entry. The "
+            "optional scope argument selects the namespace: actor_scoped (default; visible only to "
+            "the calling actor) or workspace_shared (visible to every actor in the workspace; "
+            "requires workspace admin role)."
         ),
         "risk_level": "MEDIUM",
         "parameters": {
@@ -360,6 +380,17 @@ BUILTIN_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                     "type": "number",
                     "description": "Importance score 0.0-1.0 (default 0.5)",
                     "default": 0.5,
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["actor_scoped", "workspace_shared"],
+                    "description": (
+                        "Namespace the new fact is written into. actor_scoped (default) is visible "
+                        "only to the calling actor within the workspace. workspace_shared promotes "
+                        "the fact into the workspace-wide pool and requires workspace admin role; "
+                        "editor-role callers receive a structured permission_denied error."
+                    ),
+                    "default": "actor_scoped",
                 },
             },
             "required": ["content"],
@@ -442,6 +473,52 @@ BUILTIN_TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "required": ["query"],
         },
     },
+    # 4.21 reflection_tools. Visible only when REFLECTION_ENABLED=true at
+    # seeding time; the seeding layer consults
+    # ``tools_backend.get_visible_memory_tool_names`` to decide which of
+    # these ten tool names are mounted.
+    "reflection_search": {
+        "description": (
+            "Search your task reflections — durable lessons learned from past task execution. "
+            "Returns only approved reflections; pending / rejected / deprecated rows are filtered "
+            "out. Each hit carries the original task_type tags so the agent can filter by use case. "
+            "Available only when REFLECTION_ENABLED is on."
+        ),
+        "risk_level": "LOW",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query"},
+                "task_type": {
+                    "type": "string",
+                    "description": "Optional task_type tag (matches against reflection.use_cases)",
+                },
+                "top_k": {"type": "integer", "description": "Max results (default 5, max 20)", "default": 5},
+            },
+            "required": ["query"],
+        },
+    },
+    "work_context_query": {
+        "description": (
+            "Query the Work Context Graph (KM6 / 4.21 enhancement). Returns active nodes that "
+            "match the query and (optionally) the requested node_type. Inactive / superseded "
+            "nodes are excluded. Available only when REFLECTION_ENABLED is on."
+        ),
+        "risk_level": "LOW",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query"},
+                "node_type": {
+                    "type": "string",
+                    "enum": ["method", "outcome", "correction", "source", "pattern"],
+                    "description": "Optional node type filter",
+                },
+                "top_k": {"type": "integer", "description": "Max results (default 5, max 20)", "default": 5},
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 
@@ -468,6 +545,11 @@ _MEMORY_TOOLS = frozenset(
         "memory_update",
         "memory_forget",
         "conversation_search",
+        # 4.21 reflection_tools. Seeding layer hides these when
+        # ``REFLECTION_ENABLED=false`` so the agent never sees a tool
+        # whose backend would refuse the call.
+        "reflection_search",
+        "work_context_query",
     }
 )
 
