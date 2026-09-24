@@ -21,7 +21,7 @@ python -m pytest tests/ -q
 python -m pytest tests/test_runtime/test_pregel.py -v
 python -m pytest tests/test_runtime/test_pregel.py::test_linear_execution -v
 
-# Verify before committing (run ALL of these)
+# Verify before pushing (run ALL of these)
 ruff check src/hecate/ tests/
 ruff format --check src/ tests/
 mypy src/
@@ -37,7 +37,7 @@ alembic upgrade head
 uvicorn hecate.main:app --reload
 ```
 
-**Pre-commit hooks** run ruff, ruff-format, commitizen (commit-message check), mypy, and pytest. pytest is scoped to affected layers by `scripts/smart-pytest.sh` and skipped for non-Python changes. Never use `--no-verify`.
+**Git hooks are split by stage**: pre-commit runs fast checks only (ruff check + format, seconds); commit-msg validates the message via commitizen; pre-push runs the full local gate (mypy + pytest scoped to the pushed changes by `scripts/smart-pytest.sh`, skipped for non-Python changes). Never use `--no-verify`.
 
 ## Architecture
 
@@ -54,7 +54,7 @@ Modular monolith after Phase R: six domain directories (`runtime/`, `tools/`, `e
 - **Git**: GitHub Flow; all changes via PR. **`main` is a protected branch — never commit, amend, push, or edit directly on it.** Self-check before any write: `git rev-parse --abbrev-ref HEAD` must not return `main`; if it does, `git checkout -b <branch>` first (`feat/`, `fix/`, `docs/`, `chore/`). If you accidentally edited on main: `git stash push -u -m "..."` → `git checkout -b <topic>` → `git stash pop`; never `git reset --hard` on main. CI runs on push and PR to `main`; tag releases from `main` commits.
 - **Merge commits are disabled at the repo level** — only "Rebase and merge" or "Squash and merge" exist on GitHub; prefer `git rebase origin/main` over `git merge origin/main` locally so `main` stays linear.
 - **Push requires explicit user confirmation in chat** — any `git push`, `--force-with-lease`, or wrapper (`./scripts/opsx-flow.sh push`). After approval, the pre-push hook may rebase and re-push without a second confirmation. `--no-verify` (push or commit) needs explicit justification.
-- **Git hooks** (install once per clone; worktrees share `.git/hooks/`): `cp scripts/pre-commit.sh .git/hooks/pre-commit` — runs the checks and refuses commits on `main` (prints its own recovery recipe). `cp scripts/pre-push.sh .git/hooks/pre-push` — rebases onto `origin/main` before push; aborts with printed steps on conflict.
+- **Git hooks** (install once per clone; worktrees share `.git/hooks/`): `cp scripts/pre-commit.sh .git/hooks/pre-commit` — fast ruff checks; refuses commits on `main` (prints its own recovery recipe). `cp scripts/commit-msg.sh .git/hooks/commit-msg` — Conventional Commits check via commitizen. `cp scripts/pre-push.sh .git/hooks/pre-push` — rebases onto `origin/main` before push (aborts with printed steps on conflict), then runs mypy + scoped pytest as the full gate.
 
 ## Conventions
 
@@ -67,7 +67,7 @@ Modular monolith after Phase R: six domain directories (`runtime/`, `tools/`, `e
 
 ### Commits and PRs
 
-- **Commit format is Conventional Commits** — `<type>(<scope>): <subject>`. Valid `type`: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `build`, `ci`. `subject` is imperative mood, no trailing period, ≤ 72 chars. Body and footer are free-form but must include a `Refs:` or `Closes:` trailer when the commit closes an issue or PR. Enforced by commitizen (already in the pre-commit config); bad-format commits are refused, not auto-fixed.
+- **Commit format is Conventional Commits** — `<type>(<scope>): <subject>`. Valid `type`: `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `perf`, `build`, `ci`. `subject` is imperative mood, no trailing period, ≤ 72 chars. Body and footer are free-form but must include a `Refs:` or `Closes:` trailer when the commit closes an issue or PR. Enforced by commitizen (via the commit-msg hook); bad-format commits are refused, not auto-fixed.
 - **One PR, one purpose** — keep PRs focused on a single concern. If a branch carries independent changes (e.g., a refactor plus a feature), split before opening the PR or use stacked PRs. This pairs with the rebase-merge default: history should read as a sequence of independent changes, not one mega-squash.
 - **Never bypass hooks with `--no-verify`** (commit or push). If a hook fails, fix the underlying issue — do not silence the gate. The only named exception is `./scripts/opsx-flow.sh push` force-pushing a synthesized squash commit when the pre-push rebase blocks on a known-good base; that path still requires explicit user approval per the Git rule above.
 - **AGENTS.md is pruned, not grown** — every rule has a cost: each line loads into every session. If a rule is already standard Python / ruff / mypy / git behavior, remove it from this file. If a rule is no longer load-bearing, delete it. Re-evaluate on every `/opsx-archive`.
