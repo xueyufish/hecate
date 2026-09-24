@@ -501,3 +501,106 @@ async def test_agent_execute_invalid_handoff_target(db_session):
 
     assert "handoff_to" not in result
     assert "Invalid handoff target" in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_agent_execute_discovery_entries_reach_system_prompt(db_session, monkeypatch):
+    """With discovery enabled, unbound eligible skills appear in the system prompt."""
+    from hecate.core.config import settings as app_settings
+    from hecate.models.skill import SkillModel
+    from hecate.models.workspace import WorkspaceModel
+
+    monkeypatch.setattr(app_settings, "SKILL_DISCOVERY_ENABLED", True)
+
+    workspace_id = uuid.uuid4()
+    workspace = WorkspaceModel(
+        id=workspace_id,
+        org_id=uuid.uuid4(),
+        name="ws",
+        slug="ws",
+        settings={"skill_discovery": {"enabled": True}},
+    )
+    skill = SkillModel(
+        workspace_id=workspace_id,
+        name="discovered-skill",
+        description="Discovered capability",
+        source="project",
+        instructions="SECRET-DISCOVERED-INSTRUCTIONS",
+        provider="project",
+        trust_tier="community",
+    )
+    agent = _make_agent()
+    agent.workspace_id = workspace_id
+    db_session.add_all([workspace, skill, agent])
+    await db_session.flush()
+
+    mock_llm = MagicMock()
+    mock_response = MagicMock()
+    mock_response.content = "ok"
+    mock_response.usage = {"total_tokens": 10}
+    mock_response.model = "gpt-4o"
+    mock_llm.chat = AsyncMock(return_value=mock_response)
+
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
+
+    with patch("hecate_llm.service.llm_service", mock_llm):
+        port = AgentExecutionPort(db_session)
+        await port.agent_execute(
+            agent_id=agent.id,
+            messages=[{"role": "user", "content": "hi"}],
+            channel_snapshot={},
+        )
+
+    messages = mock_llm.chat.call_args.kwargs.get("messages") or mock_llm.chat.call_args[1].get("messages")
+    system_content = messages[0]["content"]
+    assert '<skill name="discovered-skill" description="Discovered capability"/>' in system_content
+    assert "SECRET-DISCOVERED-INSTRUCTIONS" not in system_content
+
+
+@pytest.mark.asyncio
+async def test_agent_execute_discovery_off_keeps_system_prompt_closed(db_session):
+    """With the global switch off (default), unbound skills stay invisible."""
+    from hecate.models.skill import SkillModel
+    from hecate.models.workspace import WorkspaceModel
+
+    workspace_id = uuid.uuid4()
+    workspace = WorkspaceModel(
+        id=workspace_id,
+        org_id=uuid.uuid4(),
+        name="ws",
+        slug="ws",
+        settings={"skill_discovery": {"enabled": True}},
+    )
+    skill = SkillModel(
+        workspace_id=workspace_id,
+        name="unbound-skill",
+        description="Unbound capability",
+        source="project",
+        instructions="SECRET-INSTRUCTIONS",
+        provider="project",
+    )
+    agent = _make_agent()
+    agent.workspace_id = workspace_id
+    db_session.add_all([workspace, skill, agent])
+    await db_session.flush()
+
+    mock_llm = MagicMock()
+    mock_response = MagicMock()
+    mock_response.content = "ok"
+    mock_response.usage = {"total_tokens": 10}
+    mock_response.model = "gpt-4o"
+    mock_llm.chat = AsyncMock(return_value=mock_response)
+
+    from hecate.runtime.agent_execution_port import AgentExecutionPort
+
+    with patch("hecate_llm.service.llm_service", mock_llm):
+        port = AgentExecutionPort(db_session)
+        await port.agent_execute(
+            agent_id=agent.id,
+            messages=[{"role": "user", "content": "hi"}],
+            channel_snapshot={},
+        )
+
+    messages = mock_llm.chat.call_args.kwargs.get("messages") or mock_llm.chat.call_args[1].get("messages")
+    system_content = messages[0]["content"]
+    assert "unbound-skill" not in system_content

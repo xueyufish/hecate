@@ -112,6 +112,33 @@ Skill **versioning** allows multiple versions to coexist (e.g., `web-search@1.0.
 
 ---
 
+## Two surfaces: binding vs discovery
+
+A SKILL.md skill reaches an agent's model through one of two surfaces:
+
+- **Binding (frozen surface)** — the skill name is listed in `agent.skills`.
+  At agent-version commit, bound skills are pinned into the version
+  reference manifest (`name, skill_id, provider, version, content_hash`),
+  so the served content is frozen and covered by drift detection.
+- **Discovery (live surface)** — the skill is merely eligible in the
+  workspace (`model_invocable`, not user-personal, plugin-enabled, above
+  the workspace trust floor). Its name and description appear in the
+  agent's L1 catalog and the model may load the full content on demand;
+  content always resolves from the live row and is never pinned.
+
+Discovery is governed by three layers that only narrow, never widen:
+
+1. the global `SKILL_DISCOVERY_ENABLED` switch (default off — upgrades are
+   behaviour-neutral),
+2. the workspace `skill_discovery` policy (enable + minimum `trust_tier`),
+3. a per-agent override (`skill_discovery_enabled`: follow the workspace,
+   explicit opt-in, or opt-out).
+
+The promote endpoint converts a discovered skill into a binding; the next
+agent-version commit then freezes its content into the reference manifest.
+
+---
+
 ## Skill resolution
 
 When an agent references a skill by name, the `SkillRegistry` resolves it:

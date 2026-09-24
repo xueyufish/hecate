@@ -92,6 +92,21 @@ minutes. Environment/git gotchas live in the root `AGENTS.md`.
   `auto_load=True` keep full injection and are excluded from the catalog.
   Set `SKILL_PROGRESSIVE_DISCLOSURE=false` to restore the legacy
   inject-everything behaviour.
+- **Skill discovery (5.9c) adds a governed third source** — when
+  `SKILL_DISCOVERY_ENABLED=true` AND the workspace
+  `settings.skill_discovery.enabled=true` (and the agent has not opted out
+  via `skill_discovery_enabled=False`), eligible unbound workspace/bundled
+  skills (`model_invocable`, non-`user` provider, plugin-enabled, above
+  the workspace `min_trust_tier` floor) enter the L1 catalog and the
+  `load_skill` advertised set. Discovery serves live rows — never
+  ref_manifest pins: binding = frozen surface, discovery = live surface.
+  Catalog overflow selection is deterministic: bound/auto_load first,
+  then trust tier → provider rank → `skill_loaded` usage count → name.
+  Usage events carry `detected_via` (`bound`/`auto_detected`); a
+  discovered load whose `requires` cannot be resolved serves content plus
+  a `dependency_warning` event — the 5.9e bind-time contract is
+  unchanged. With the global switch off, the loader issues no extra
+  queries (upgrade-neutral default).
 - **Learned skills are knowledge-only and human-gated** — candidates from
   the evolution loop (`studio/self_evolution/`) are published as
   `SkillModel` rows with `source="learned"` + provenance
