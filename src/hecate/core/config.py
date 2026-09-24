@@ -196,6 +196,48 @@ class Settings(BaseSettings):
     MEMORY_VALUE_HALFLIFE_CONFIRMATION_DAYS: float = 90.0
     MEMORY_VALUE_HALFLIFE_ACCESS_DAYS: float = 30.0
 
+    # Memory lifecycle + governance (memory-lifecycle-governance change).
+    # Everything defaults to the safe/off posture; enabling requires
+    # explicit configuration, and an empty memory_policies table resolves
+    # every scope to these platform defaults (byte-identical behavior).
+    # MEMORY_FLUSH_ENABLED: register a flush window at the L2 compaction
+    # boundary (the pre_compaction trigger). Registration is a lightweight
+    # synchronous row insert; failure only logs a warning and compaction
+    # proceeds. Extraction is asynchronous via the consolidation trigger
+    # bus (at-least-once, watermark-idempotent, failure = alert only).
+    MEMORY_FLUSH_ENABLED: bool = False
+    # MEMORY_LIFECYCLE_ENABLED: master switch for the lifecycle sweeper
+    # (layer TTL expiry, capacity eviction, promotion gate). Off = nothing
+    # is ever archived by TTL/capacity and no promotion runs.
+    MEMORY_LIFECYCLE_ENABLED: bool = False
+    # Cron expression for the lifecycle sweeper pass (5-field, UTC).
+    MEMORY_LIFECYCLE_SWEEP_SCHEDULE: str = "30 3 * * *"
+    # Platform-default layer TTLs in days (0 = never expires). Policy
+    # objects may override downward or up to the hard cap below.
+    MEMORY_TTL_L3_EPISODIC_DAYS: int = 365
+    MEMORY_TTL_L3_SEMANTIC_DAYS: int = 0
+    MEMORY_TTL_L4_DAYS: int = 0
+    # Platform-default capacity caps (0 = unlimited). Policy objects may
+    # set their own, clamped to MEMORY_POLICY_MAX_CAPACITY.
+    MEMORY_CAPACITY_L3: int = 0
+    MEMORY_CAPACITY_L4: int = 0
+    # Eviction guardrails: per-sweep archive budget and the protection
+    # window (memories confirmed/hit within it are never evicted).
+    MEMORY_LIFECYCLE_EVICTION_BUDGET_PER_SWEEP: int = 200
+    MEMORY_LIFECYCLE_PROTECTION_WINDOW_DAYS: int = 7
+    # Promotion gate defaults (off — requires explicit policy enablement;
+    # thresholds below apply when a policy turns promotion on).
+    MEMORY_PROMOTION_SCORE_THRESHOLD: float = 0.6
+    MEMORY_PROMOTION_MIN_HITS: int = 3
+    MEMORY_PROMOTION_MIN_AGE_DAYS: int = 7
+    # Hard caps clamping every numeric policy field (agent/workspace
+    # policies may not exceed these even when platform defaults do).
+    MEMORY_POLICY_MAX_TTL_DAYS: int = 3650
+    MEMORY_POLICY_MAX_CAPACITY: int = 1000000
+    MEMORY_POLICY_MAX_EVICTION_BUDGET: int = 2000
+    MEMORY_POLICY_MAX_LLM_CALLS_PER_RUN: int = 50
+    MEMORY_POLICY_MAX_MUTATIONS_PER_RUN: int = 500
+
     # LLM gateway backend (hecate.llm_providers entry point, phase-4
     # follow-ups). Names: "litellm" (hecate-llm shipped in-process, default)
     # or any third-party gateway implementing the LLMGateway Protocol.

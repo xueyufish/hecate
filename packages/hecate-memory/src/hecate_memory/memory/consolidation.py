@@ -59,6 +59,7 @@ from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.memory import (
+    ConsolidationFlushWindowModel,
     ConsolidationPressureFlagModel,
     ConsolidationRunModel,
     KnowledgeMemoryModel,
@@ -76,6 +77,17 @@ logger = logging.getLogger(__name__)
 ZERO_UUID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+# In-process flush observability (memory-lifecycle-governance). Per-instance
+# counters, assertable in tests; latency records the registration→extraction
+# gap of the most recently consumed flush window (milliseconds).
+flush_metrics: dict[str, float] = {
+    "registered": 0.0,
+    "registration_failures": 0.0,
+    "consumed": 0.0,
+    "extraction_latency_ms_last": 0.0,
+    "run_failures": 0.0,
+}
 
 # L1 block that consolidation may rewrite by default. Persona and other
 # hand-curated blocks require an explicit per-agent allowlist entry.
@@ -1107,6 +1119,86 @@ async def mark_unit_pressure(
         return False
 
 
+async def mark_unit_flush_window(
+    workspace_id: uuid.UUID,
+    agent_id: uuid.UUID,
+    user_id: uuid.UUID | None,
+    *,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
+    session_id: uuid.UUID | None = None,
+    session_factory: Any | None = None,
+) -> bool:
+    """Best-effort pre-compaction flush registration. False on failure.
+
+    Called at the L2 compaction boundary when the surface replacement has
+    committed and a transcript window is about to leave the model surface.
+    The trigger bus picks the window up asynchronously with pressure-flag
+    priority; extraction itself stays watermark-idempotent (at-least-once),
+    so a duplicate or lost registration degrades to "later sweep covers it"
+    — never to data loss (the raw event log is untouched by compaction).
+    """
+    now = datetime.now(UTC)
+    try:
+        from hecate.core.database import async_session_factory as default_factory
+
+        factory = session_factory or default_factory
+        async with factory() as db:
+            db.add(
+                ConsolidationFlushWindowModel(
+                    workspace_id=workspace_id,
+                    agent_id=agent_id,
+                    user_id=user_id or ZERO_UUID,
+                    window_start=_ensure_utc(window_start or now),
+                    window_end=_ensure_utc(window_end or now),
+                    session_id=session_id,
+                )
+            )
+            await db.commit()
+        flush_metrics["registered"] += 1
+        logger.info(
+            "Flush window registered for unit %s/%s (user=%s)",
+            workspace_id,
+            agent_id,
+            user_id,
+        )
+        return True
+    except Exception as e:
+        flush_metrics["registration_failures"] += 1
+        logger.warning("Failed to register flush window for %s/%s: %s", agent_id, user_id, e)
+        return False
+
+
+async def flush_flagged_units(db: AsyncSession) -> dict[str, datetime]:
+    """Unit keys carrying unconsumed flush windows → latest window end."""
+    rows = (
+        await db.execute(
+            select(
+                ConsolidationFlushWindowModel.workspace_id,
+                ConsolidationFlushWindowModel.agent_id,
+                ConsolidationFlushWindowModel.user_id,
+                func.max(ConsolidationFlushWindowModel.window_end),
+            ).where(~ConsolidationFlushWindowModel.deleted)
+        )
+    ).all()
+    return {
+        ConsolidationUnit(ws, agent, None if user == ZERO_UUID else user).key: _ensure_utc(end)
+        for ws, agent, user, end in rows
+        if end is not None
+    }
+
+
+def unit_from_key(key: str) -> ConsolidationUnit | None:
+    """Inverse of :attr:`ConsolidationUnit.key` (None on malformed keys)."""
+    parts = key.split(":")
+    if len(parts) != 3:
+        return None
+    ws, agent, user = _as_uuid(parts[0]), _as_uuid(parts[1]), parts[2]
+    if ws is None or agent is None:
+        return None
+    return ConsolidationUnit(ws, agent, None if user == "agent" else _as_uuid(user))
+
+
 class ConsolidationScheduler:
     """Trigger bus + runner: cron, idle sweep, pressure priority.
 
@@ -1155,11 +1247,13 @@ class ConsolidationScheduler:
         window: UnitWindow,
         *,
         trigger: str,
+        flush_scheduled: bool = False,
     ) -> bool:
         """Run one unit under the advisory lock; returns True when executed.
 
         On SQLite (tests) the lock is skipped — single instance by
-        construction there.
+        construction there. ``flush_scheduled`` marks units whose pending
+        status came from a flush window (observability only).
         """
         lock_id, locked = await self._acquire_lock(db, window.unit)
         if not locked:
@@ -1174,6 +1268,7 @@ class ConsolidationScheduler:
                 trigger=trigger,
             )
             await self._consume_flag(db, window.unit)
+            await self._consume_flush_windows(db, window.unit)
             await db.commit()
             logger.info(
                 "Consolidation %s for %s: %s adopted / %s rejected / %s skipped",
@@ -1197,7 +1292,10 @@ class ConsolidationScheduler:
             await db.rollback()
             await self._record_failed_run(db, window, trigger, exc)
             await self._consume_flag(db, window.unit)
+            await self._consume_flush_windows(db, window.unit)
             await db.commit()
+            if flush_scheduled:
+                flush_metrics["run_failures"] += 1
             return True
         finally:
             await self._release_lock(db, lock_id)
@@ -1338,7 +1436,10 @@ class ConsolidationScheduler:
     ) -> int:
         """Process all pending units for one trigger; returns units run.
 
-        Pressure-flagged units sort first regardless of trigger.
+        Pressure-flagged and flush-window units sort first regardless of
+        trigger. Flush windows bypass the quiet filter (they were requested
+        explicitly at the compaction boundary) and extend the unit's review
+        window so the dropped transcript segment is covered.
         """
         now = _ensure_utc(now or datetime.now(UTC))
         factory = self._factory()
@@ -1349,11 +1450,26 @@ class ConsolidationScheduler:
                 pending = [w for w in pending if w.window_end <= cutoff]
 
             flagged = await pressure_flagged_units(db)
-            pending.sort(key=lambda w: w.unit.key not in flagged)
+            flush = await flush_flagged_units(db)
+            if flush:
+                by_key = {w.unit.key: w for w in pending}
+                for key, flush_end in flush.items():
+                    existing = by_key.get(key)
+                    if existing is not None:
+                        if flush_end > existing.window_end:
+                            by_key[key] = UnitWindow(existing.unit, existing.window_start, flush_end)
+                    else:
+                        unit = unit_from_key(key)
+                        if unit is not None:
+                            by_key[key] = UnitWindow(unit, _EPOCH, flush_end)
+                pending = list(by_key.values())
+
+            priority = flagged | set(flush)
+            pending.sort(key=lambda w: w.unit.key not in priority)
 
             processed = 0
             for window in pending:
-                if await self.process_unit(db, window, trigger=trigger):
+                if await self.process_unit(db, window, trigger=trigger, flush_scheduled=window.unit.key in flush):
                     processed += 1
             return processed
 
@@ -1388,6 +1504,38 @@ class ConsolidationScheduler:
                 ConsolidationPressureFlagModel.user_id == unit.flag_user_id,
             )
         )
+
+    async def _consume_flush_windows(self, db: AsyncSession, unit: ConsolidationUnit) -> None:
+        """Delete the unit's pending flush windows after its run attempt.
+
+        Same at-least-once contract as the pressure flag: consumption after
+        the attempt, with the watermark deciding what the next window covers.
+        Also records the registration→extraction latency of the consumed
+        batch (observability only).
+        """
+        oldest = (
+            await db.execute(
+                select(func.min(ConsolidationFlushWindowModel.created_at)).where(
+                    ConsolidationFlushWindowModel.workspace_id == unit.workspace_id,
+                    ConsolidationFlushWindowModel.agent_id == unit.agent_id,
+                    ConsolidationFlushWindowModel.user_id == unit.flag_user_id,
+                    ~ConsolidationFlushWindowModel.deleted,
+                )
+            )
+        ).scalar_one_or_none()
+        result = await db.execute(
+            delete(ConsolidationFlushWindowModel).where(
+                ConsolidationFlushWindowModel.workspace_id == unit.workspace_id,
+                ConsolidationFlushWindowModel.agent_id == unit.agent_id,
+                ConsolidationFlushWindowModel.user_id == unit.flag_user_id,
+            )
+        )
+        consumed = float(result.rowcount or 0)
+        if consumed:
+            flush_metrics["consumed"] += consumed
+            if oldest is not None:
+                latency_ms = (datetime.now(UTC) - _ensure_utc(oldest)).total_seconds() * 1000.0
+                flush_metrics["extraction_latency_ms_last"] = max(latency_ms, 0.0)
 
     async def _acquire_lock(self, db: AsyncSession, unit: ConsolidationUnit) -> tuple[int | None, bool]:
         bind = db.get_bind()

@@ -36,8 +36,8 @@ GATEWAY_DIR = PACKAGES_ROOT / "hecate-llm" / "src" / "hecate_llm"
 # 1. module-level litellm imports (the strict acceptance test)
 # 2. any litellm.<attr> reference (catches lazy imports inside functions)
 LITELLM_IMPORT_PATTERNS: tuple[str, ...] = (
-    r"^\s*import\s+litellm\b",
-    r"^\s*from\s+litellm\b",
+    r"^[[:space:]]*import[[:space:]]+litellm([[:space:]]|$)",
+    r"^[[:space:]]*from[[:space:]]+litellm([[:space:]]|$)",
 )
 LITELLM_ATTR_PATTERN = r"\blitellm\.[a-z_]+\b"
 
@@ -65,7 +65,7 @@ class TestLitellmScopedToGateway:
     def test_litellm_imports_only_in_services_llm(self) -> None:
         """No `import litellm` or `from litellm` exists outside the gateway module."""
         # First find ALL litellm import hits (any root).
-        all_hits = _grep(r"^\s*(import|from)\s+litellm\b", [SRC_ROOT, PACKAGES_ROOT])
+        all_hits = _grep(r"^[[:space:]]*(import|from)[[:space:]]+litellm([[:space:]]|$)", [SRC_ROOT, PACKAGES_ROOT])
         # Filter to absolute paths and exclude __pycache__ / pyc.
         all_hits = [p for p in all_hits if "__pycache__" not in p.parts and p.suffix == ".py"]
         # The only acceptable site is packages/hecate-llm/src/hecate_llm/{service,gateway}.py.
@@ -77,7 +77,7 @@ class TestLitellmScopedToGateway:
 
     def test_hecate_llm_has_exactly_one_or_two_litellm_importers(self) -> None:
         """The gateway module owns the import — between 1 and 2 files (service + gateway)."""
-        hits = _grep(r"^\s*(import|from)\s+litellm\b", [GATEWAY_DIR])
+        hits = _grep(r"^[[:space:]]*(import|from)[[:space:]]+litellm([[:space:]]|$)", [GATEWAY_DIR])
         hits = [p for p in hits if p.suffix == ".py"]
         assert 1 <= len(hits) <= 2, (
             f"Expected 1-2 litellm importers under hecate_llm/, found {len(hits)}: {[p.name for p in hits]}"
@@ -105,7 +105,7 @@ class TestEngineNeverImportsLitellm:
 
     def test_engine_tree_free_of_litellm_imports(self) -> None:
         engine_dir = SRC_ROOT / "engine"
-        hits = _grep(r"^\s*(import|from)\s+litellm\b", [engine_dir])
+        hits = _grep(r"^[[:space:]]*(import|from)[[:space:]]+litellm([[:space:]]|$)", [engine_dir])
         hits = [p for p in hits if p.suffix == ".py"]
         assert not hits, f"engine/ must never import litellm; found: {[str(h.relative_to(REPO_ROOT)) for h in hits]}"
 
@@ -115,7 +115,7 @@ class TestModelHubStaysLitellmFree:
 
     def test_model_hub_has_no_litellm(self) -> None:
         model_hub_dir = PACKAGES_ROOT / "hecate-llm" / "src" / "hecate_llm" / "hub"
-        hits = _grep(r"^\s*(import|from)\s+litellm\b", [model_hub_dir])
+        hits = _grep(r"^[[:space:]]*(import|from)[[:space:]]+litellm([[:space:]]|$)", [model_hub_dir])
         hits = [p for p in hits if p.suffix == ".py"]
         assert not hits, (
             f"model_hub/ must not import litellm (PR4a converged them apart); "
@@ -134,7 +134,7 @@ class TestPackagesLitellmFree:
         other_packages = [p for p in PACKAGES_ROOT.iterdir() if p.is_dir() and p.name not in {"hecate-llm"}]
         if not other_packages:
             pytest.skip("no other packages present")
-        hits = _grep(r"^\s*(import|from)\s+litellm\b", other_packages)
+        hits = _grep(r"^[[:space:]]*(import|from)[[:space:]]+litellm([[:space:]]|$)", other_packages)
         hits = [p for p in hits if p.suffix == ".py"]
         assert not hits, (
             "litellm is owned by hecate-llm; other extracted packages must "

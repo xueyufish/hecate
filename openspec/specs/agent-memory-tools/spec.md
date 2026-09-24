@@ -19,6 +19,8 @@
 - `REFLECTION_ENABLED` 默认关闭;关闭时新增的 `reflection_search` / `work_context_query` 不出现在 seeding 集合,行为不变。
 - `conversation_search` 额外受 `RECALL_INDEXING_ENABLED` 约束。
 
+在平台 flag 允许集之上,系统 SHALL 叠加生效记忆策略的工具面收敛(见 `memory-policy` capability):Agent 实际可见的记忆工具集合 SHALL 为平台 flag 允许集与生效策略工具子集的交集;策略 SHALL NOT 使任何工具越过平台 flag 出现(策略只能收窄,不能扩权)。无生效策略时,可见集合与平台 flag 语义单独决定的结果一致。
+
 #### Scenario: `MEMORY_TOOLS_ENABLED=false` 行为不变
 
 - **WHEN** `MEMORY_TOOLS_ENABLED=false`(默认)
@@ -54,6 +56,16 @@
 
 - **WHEN** `MEMORY_TOOLS_ENABLED=true` 且 `REFLECTION_ENABLED=true`
 - **THEN** 10 个工具全部出现,Agent 可按名挂载
+
+#### Scenario: 策略收窄工具面
+
+- **WHEN** `MEMORY_TOOLS_ENABLED=true` 且某 agent 的生效策略工具子集不含 `memory_forget`
+- **THEN** 该 agent 的工具列表中不出现 `memory_forget`,其余记忆工具照常出现;其他无策略 agent 不受影响
+
+#### Scenario: 策略不能扩权
+
+- **WHEN** `MEMORY_TOOLS_ENABLED=false` 且某 agent 的生效策略工具子集包含全部记忆工具
+- **THEN** 该 agent 的工具列表中仍不出现任何记忆工具(平台 flag 是硬上界)
 
 ### Requirement: L1 记忆块编辑语义
 

@@ -172,6 +172,7 @@ class UserMemoryService:
         """
         conditions = [
             ~MemoryModel.deleted,
+            MemoryModel.archived_at.is_(None),  # lifecycle archive: out of every retrieval path
             MemoryModel.workspace_id == workspace_id,
         ]
 
@@ -392,6 +393,7 @@ class UserMemoryService:
         """
         conditions = [
             ~MemoryModel.deleted,
+            MemoryModel.archived_at.is_(None),  # lifecycle archive filter
             MemoryModel.workspace_id == workspace_id,
         ]
 

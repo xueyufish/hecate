@@ -118,8 +118,13 @@ class AgentExecutionPort(RuntimePort):
         system_message = {"role": "system", "content": system_content}
         full_messages = [system_message] + messages
 
-        # Load agent tools from database
-        tools = await self._load_agent_tools(agent.tools)
+        # Load agent tools from database, narrowed by the agent's resolved
+        # memory policy (memory-policy capability — the policy may drop
+        # memory tools from the surface, never add beyond the platform gate).
+        from hecate.core.composition.memory_policy import narrowed_tool_names
+
+        policy_tool_names = await narrowed_tool_names(self._db, agent.workspace_id, agent.id, list(agent.tools or []))
+        tools = await self._load_agent_tools(policy_tool_names)
 
         # Apply AgentDefinition tool filtering (whitelist/blacklist)
         if agent_definition is not None and hasattr(agent_definition, "tools"):

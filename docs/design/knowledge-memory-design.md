@@ -147,11 +147,13 @@ Query → Retrieval (RAG) + Logic (Rules/ML) + Actions (Write-Back) → Response
 │  └──────────┘ └──────────┘ └──────────────────┘│
 ├─────────────────────────────────────────────────┤
 │              Memory Management                  │
-│  • LLM-Managed Memory (4.16)                   │
+│  • LLM-Managed Memory (4.16)                    │
 │  • Self-Editing Memory (4.19)                   │
-│  • Multi-Step Retrieval (4.20)                  │
+│  • Retrieval Escalation (4.20)                  │
 │  • Memory Versioning (4.24)                     │
 │  • Auto-Integration (4.5)                       │
+│  • Flush + Lifecycle (4.25)                     │
+│  • Policies + Governance (4.16)                 │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -177,7 +179,10 @@ Query → Retrieval (RAG) + Logic (Rules/ML) + Actions (Write-Back) → Response
 
 | Feature | Description |
 |---------|-------------|
-| LLM-Managed Memory ✅ (tool layer) | Agent manages memory via 8 built-in tools (`memory_replace`/`memory_insert`/`memory_rethink`/`memory_search`/`memory_add`/`memory_update`/`memory_forget`/`conversation_search`) behind `MEMORY_TOOLS_ENABLED`; tiered `MemoryProvider` contract lets third-party backends take over |
+| LLM-Managed Memory ✅ | Agent manages memory via built-in tools behind `MEMORY_TOOLS_ENABLED`; tiered `MemoryProvider` contract lets third-party backends take over; per-workspace/per-agent `memory_policies` narrow the tool surface (permission fields narrow-only, numeric fields hard-cap clamped) and drive flush/lifecycle parameters |
+| Memory Flush (pre_compaction) ✅ | Best-effort registration at the L2 compaction boundary (`consolidation_flush_windows`) hands the to-be-dropped window to the consolidation trigger bus for async extraction (at-least-once, watermark-idempotent, pressure-flag priority); correctness anchored on ADR-033 surface replacement — the raw event log is never deleted by compaction, so a missed flush degrades to a later sweep, never data loss; `MEMORY_FLUSH_ENABLED` gates it |
+| Memory Lifecycle ✅ | Per-layer TTL expiry (anchor `last_confirmed_at`, L4 never by default), capacity eviction scored on the fusion value-score family (protection window + per-sweep budget), actor→workspace promotion gate (three thresholds, sharing-ceiling bounded, off unless enabled); archives are soft-delete with lifecycle `memory_edit_log` reasons and restorable via the governance API/UI; `MEMORY_LIFECYCLE_ENABLED` gates it |
+| Governance REST + Memory Center ✅ | `/api/memory/governance/*`: edit-log and consolidation/reflection run queries, policy CRUD with resolved view, archive/restore, lifecycle stats, recall search; Studio Memory Center browses L3/L4/recall, archives/restores, and edits policies — content edits stay on the agent tool path |
 | Memory Pressure Alert | Context threshold notification to LLM for memory consolidation |
 | Self-Editing Memory ✅ | Layered edit semantics: exact replace (ambiguity refused) / line insert / whole-block rethink; L3/L4 corrections via `memory_update`/`memory_forget` with `revision` optimistic concurrency + `memory_edit_log` audit; ADD-only supersession deferred to the temporal-memory workstream |
 | Retrieval Escalation ✅ (was Multi-Step Retrieval) | Weak/empty memory searches inject one debounced `[memory_hint]` block guiding reformulation/cursor/`exclude_session_ids` iteration; the MemGPT-heartbeat framing is retired |

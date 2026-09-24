@@ -432,6 +432,17 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
 
     start_consolidation()
 
+    # Memory lifecycle sweeper (memory-lifecycle-governance) — TTL expiry,
+    # capacity eviction, promotion gate. Off by default
+    # (MEMORY_LIFECYCLE_ENABLED); an empty policy table resolves every
+    # scope to platform defaults, where the L4 layer never expires.
+    try:
+        from hecate_memory.memory.lifecycle import start_lifecycle_sweeper
+
+        start_lifecycle_sweeper()
+    except ImportError:
+        pass
+
     # 4.21 reflection lifecycle — wires the ReflectionEngine + the
     # background confidence evaluator when REFLECTION_ENABLED is on.
     # Off by default (matches the MEMORY_TOOLS_ENABLED / CONSOLIDATION_ENABLED
@@ -445,6 +456,12 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         # Shutdown — reverse order.
+        try:
+            from hecate_memory.memory.lifecycle import stop_lifecycle_sweeper
+
+            await stop_lifecycle_sweeper()
+        except ImportError:
+            pass
         try:
             from hecate.core.composition.reflection import stop_reflection
 
