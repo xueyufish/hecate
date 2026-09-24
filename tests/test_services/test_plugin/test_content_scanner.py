@@ -186,7 +186,7 @@ class TestFileHandling:
         (root / "README.md").write_text("y" * 500)
         scanned = ContentScanner(file_cap_bytes=100).scan(root)
         f = _finding(scanned, "OVERSIZED-TEXT")
-        assert f["severity"] == "medium"  # readme oversize cap
+        assert f["severity"] == "high"  # ROLE_SEVERITY_CAP: oversize is high for every role (fail-closed)
 
 
 class TestAllowedToolsAudit:

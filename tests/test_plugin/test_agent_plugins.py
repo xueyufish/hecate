@@ -28,6 +28,26 @@ from hecate.core.plugin.agent_plugins import (
 )
 
 
+def _symlinks_usable() -> bool:
+    """Creating symlinks on Windows needs admin/developer-mode privileges."""
+    import tempfile
+
+    root = Path(tempfile.mkdtemp(prefix="symlink-probe-"))
+    try:
+        link = root / "probe"
+        link.symlink_to(root)
+        return True
+    except OSError:
+        return False
+    finally:
+        import shutil
+
+        shutil.rmtree(root, ignore_errors=True)
+
+
+_SYMLINKS_USABLE = _symlinks_usable()
+
+
 def _minimal_manifest() -> dict:
     return {
         "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
@@ -95,6 +115,10 @@ class TestPathContainment:
         target = resolve_contained(tmp_path, "skills/a/SKILL.md")
         assert target == (tmp_path / "skills/a/SKILL.md").resolve()
 
+    @pytest.mark.skipif(
+        not _SYMLINKS_USABLE,
+        reason="creating symlinks on Windows requires admin/developer-mode privileges",
+    )
     def test_symlink_escape_rejected(self, tmp_path: Path) -> None:
         package = tmp_path / "pkg"
         outside_dir = tmp_path / "outside"
@@ -107,6 +131,10 @@ class TestPathContainment:
         with pytest.raises(AgentPluginValidationError, match="escapes package root"):
             resolve_contained(package, "skills/a/SKILL.md")
 
+    @pytest.mark.skipif(
+        not _SYMLINKS_USABLE,
+        reason="creating symlinks on Windows requires admin/developer-mode privileges",
+    )
     def test_symlink_inside_root_allowed(self, tmp_path: Path) -> None:
         package = tmp_path / "pkg"
         (package / "skills" / "a").mkdir(parents=True)
