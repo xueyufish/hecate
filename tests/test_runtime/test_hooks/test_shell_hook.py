@@ -16,7 +16,11 @@ async def test_shell_hook_exit_0_allows() -> None:
 
 async def test_shell_hook_exit_2_blocks() -> None:
     """Exit code 2 returns BLOCK with stderr as reason."""
-    hook = ShellCommandHook(command="echo 'blocked reason' >&2; exit 2", timeout=5, event_type="PreToolUse")
+    hook = ShellCommandHook(
+        command="python -c \"import sys; sys.stderr.write('blocked reason'); sys.exit(2)\"",
+        timeout=5,
+        event_type="PreToolUse",
+    )
     result = await hook.execute_guardrail_hook({"tool_name": "test"})
     assert result.action == GuardrailAction.BLOCK
     assert "blocked reason" in result.reason

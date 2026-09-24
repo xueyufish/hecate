@@ -241,7 +241,13 @@ class WorkspaceBoundaryPolicy:
             return None
 
         normalized = self._normalize_path(path_value, workspace_root)
-        if normalized.startswith(workspace_root):
+        # Normalize the root on the same side of the comparison: on Windows,
+        # ``os.path.normpath`` rewrites forward slashes to backslashes, so
+        # comparing the normalized candidate against the raw root string
+        # would mismatch on platform separator. Also add ``os.sep`` to avoid
+        # the prefix-overlap false positive (e.g. ``/workspace`` vs ``/workspacex``).
+        root_norm = os.path.normpath(workspace_root)
+        if normalized == root_norm or normalized.startswith(root_norm + os.sep):
             return AccessDecision.EXECUTE
         return AccessDecision.REQUIRE_APPROVAL
 

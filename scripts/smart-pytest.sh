@@ -5,21 +5,40 @@
 #   2. Scope tests by domain directory (runtime->test_runtime, etc.);
 #      test dirs keep legacy names (e.g. test_auth covers enterprise/auth)
 #   3. Use pytest-xdist for parallel execution (-n auto)
+#
+# Change source:
+#   (no argument)   staged files (git diff --cached)
+#   --diff <range>  commits in <range>, e.g. merge-base..HEAD (pre-push gate)
 set -euo pipefail
 
-staged=$(git diff --cached --name-only --diff-filter=ACMR)
+if [ "${1:-}" = "--diff" ]; then
+    range="${2:?--diff requires a commit range, e.g. base..HEAD}"
+    changed_files=$(git diff --name-only --diff-filter=ACMR "$range")
+else
+    changed_files=$(git diff --cached --name-only --diff-filter=ACMR)
+fi
 
-if [ -z "$staged" ]; then
-    echo "pytest: no staged files, skipping"
+if [ -z "$changed_files" ]; then
+    echo "pytest: no changed files, skipping"
     exit 0
 fi
 
 # Check if only non-Python files changed (docs, frontend, configs)
-python_files=$(echo "$staged" | grep -E '\.py$' || true)
+python_files=$(echo "$changed_files" | grep -E '\.py$' || true)
 
 if [ -z "$python_files" ]; then
     echo "pytest: no Python files changed, skipping"
     exit 0
+fi
+
+# venv layout differs per platform: bin/ on macOS+Linux, Scripts/ on Windows
+PY=".venv/bin/python"
+if [ ! -x "$PY" ]; then
+    PY=".venv/Scripts/python.exe"
+fi
+if [ ! -x "$PY" ]; then
+    echo "pytest: no .venv interpreter found (looked for .venv/bin/python, .venv/Scripts/python.exe)"
+    exit 1
 fi
 
 test_dirs=""
@@ -28,7 +47,7 @@ while IFS= read -r f; do
     case "$f" in
         src/hecate/core/*|src/hecate/main.py|src/hecate/cli/*|alembic/*|pyproject.toml|packages/*)
             echo "pytest: full suite (infrastructure/composition/wheel change: $f)"
-            exec .venv/bin/python -m pytest tests/ -q --tb=short -x -n auto
+            exec "$PY" -m pytest tests/ -q --tb=short -x -n auto
             ;;
         src/hecate/runtime/*)
             test_dirs="$test_dirs tests/test_runtime"
@@ -56,7 +75,7 @@ while IFS= read -r f; do
             ;;
         tests/conftest.py)
             echo "pytest: full suite (shared fixture change: $f)"
-            exec .venv/bin/python -m pytest tests/ -q --tb=short -x -n auto
+            exec "$PY" -m pytest tests/ -q --tb=short -x -n auto
             ;;
         tests/*)
             dir=$(echo "$f" | cut -d/ -f1-2)
@@ -73,4 +92,4 @@ if [ -z "$test_dirs" ]; then
 fi
 
 echo "pytest: scoped -> $test_dirs"
-exec .venv/bin/python -m pytest $test_dirs -q --tb=short -x -n auto
+exec "$PY" -m pytest $test_dirs -q --tb=short -x -n auto
