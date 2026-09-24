@@ -37,7 +37,7 @@ alembic upgrade head
 uvicorn hecate.main:app --reload
 ```
 
-**Git hooks are split by stage**: pre-commit runs fast checks only (ruff check + format, seconds); commit-msg validates the message via commitizen; pre-push runs the full local gate (mypy + pytest scoped to the pushed changes by `scripts/smart-pytest.sh`, skipped for non-Python changes). Never use `--no-verify`.
+**Git hooks are split by stage**: pre-commit runs fast checks only (ruff check + format, seconds); commit-msg validates the message via commitizen; pre-push runs mypy on `src/` (seconds, hot cache) and lets CI be the single source of truth for tests — the local gate deliberately does not run pytest, since running it twice (local + CI) wasted more time than it caught. Use `pytest --testmon` interactively for fast inner-loop feedback on just the affected tests (see "Inner-loop testing" below). Never use `--no-verify`.
 
 ## Architecture
 
@@ -54,7 +54,7 @@ Modular monolith after Phase R: six domain directories (`runtime/`, `tools/`, `e
 - **Git**: GitHub Flow; all changes via PR. **`main` is a protected branch — never commit, amend, push, or edit directly on it.** Self-check before any write: `git rev-parse --abbrev-ref HEAD` must not return `main`; if it does, `git checkout -b <branch>` first (`feat/`, `fix/`, `docs/`, `chore/`). If you accidentally edited on main: `git stash push -u -m "..."` → `git checkout -b <topic>` → `git stash pop`; never `git reset --hard` on main. CI runs on push and PR to `main`; tag releases from `main` commits.
 - **Merge commits are disabled at the repo level** — only "Rebase and merge" or "Squash and merge" exist on GitHub; prefer `git rebase origin/main` over `git merge origin/main` locally so `main` stays linear.
 - **Push requires explicit user confirmation in chat** — any `git push`, `--force-with-lease`, or wrapper (`./scripts/opsx-flow.sh push`). After approval, the pre-push hook may rebase and re-push without a second confirmation. `--no-verify` (push or commit) needs explicit justification.
-- **Git hooks** (install once per clone; worktrees share `.git/hooks/`): `cp scripts/pre-commit.sh .git/hooks/pre-commit` — fast ruff checks; refuses commits on `main` (prints its own recovery recipe). `cp scripts/commit-msg.sh .git/hooks/commit-msg` — Conventional Commits check via commitizen. `cp scripts/pre-push.sh .git/hooks/pre-push` — rebases onto `origin/main` before push (aborts with printed steps on conflict), then runs mypy + scoped pytest as the full gate.
+- **Git hooks** (install once per clone; worktrees share `.git/hooks/`): `cp scripts/pre-commit.sh .git/hooks/pre-commit` — fast ruff checks; refuses commits on `main` (prints its own recovery recipe). `cp scripts/commit-msg.sh .git/hooks/commit-msg` — Conventional Commits check via commitizen. `cp scripts/pre-push.sh .git/hooks/pre-push` — rebases onto `origin/main` before push (aborts with printed steps on conflict), then runs mypy. Pytest runs in CI only.
 
 ## Conventions
 
@@ -98,6 +98,21 @@ Enforced mechanically by ruff (E/F/I/N/W/UP/B/SIM) and mypy — see `pyproject.t
 - No specific numbers or dates as descriptive markers in `README.md` / `docs/**` — full rule and exemptions: [`docs/design/writing-style.md`](docs/design/writing-style.md).
 
 ## Testing
+
+### Inner-loop testing (optional, recommended)
+
+For quick feedback while developing — *not* a gate — use `pytest --testmon` (already in the dev extra). It records which source files each test touches and re-runs only the affected tests on subsequent invocations. First run is full-suite; later runs typically take seconds.
+
+```bash
+# First run on a checkout: builds .testmondata
+pytest --testmon
+
+# Subsequent runs after editing src/hecate/runtime/compaction.py:
+pytest --testmon                 # only the tests touching that file
+pytest --testmon tests/test_runtime/test_compaction.py   # scoped further
+```
+
+`--testmon` is **not** part of the local gate; CI runs the full suite. It exists to make the dev loop fast without weakening the safety net.
 
 Conventions (fixtures, in-memory SQLite, stub classes, no factories): [`tests/AGENTS.md`](tests/AGENTS.md).
 

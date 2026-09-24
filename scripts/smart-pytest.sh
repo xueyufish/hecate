@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Run pytest scoped to changed files based on dependency layer mapping.
-# Optimizations:
-#   1. Skip pytest for doc-only, frontend-only, config-only changes
-#   2. Scope tests by domain directory (runtime->test_runtime, etc.);
-#      test dirs keep legacy names (e.g. test_auth covers enterprise/auth)
-#   3. Use pytest-xdist for parallel execution (-n auto)
+# Layer-scoped pytest runner. NOT used by the pre-push gate (CI is the test
+# source of truth). Kept for occasional manual use and for `pytest --testmon`
+# interop via HE_USE_SMART_PYTEST=1 in future. Use `pytest --testmon` for the
+# common inner-loop case (see AGENTS.md "Inner-loop testing").
 #
 # Change source:
 #   (no argument)   staged files (git diff --cached)
-#   --diff <range>  commits in <range>, e.g. merge-base..HEAD (pre-push gate)
+#   --diff <range>  commits in <range>, e.g. merge-base..HEAD
 set -euo pipefail
 
 if [ "${1:-}" = "--diff" ]; then
