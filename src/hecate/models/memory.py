@@ -20,6 +20,11 @@ Defines the persistence layer (SQLAlchemy) and API schemas (Pydantic) for:
   memory pressure alert and consumed by the consolidation trigger bus.
 - **MemoryAccessSessionModel** — distinct-session retrieval access markers
   backing the deduplicated access-frequency signal (fusion ranking inputs).
+- **MemoryPolicyModel** — per-workspace / per-agent memory governance policy
+  (tool subset, sharing ceiling, lifecycle/trigger/budget parameters).
+- **ConsolidationFlushWindowModel** — pending pre-compaction flush window
+  written at the L2 compaction boundary; consumed by the consolidation
+  trigger bus with pressure-flag priority.
 """
 
 from __future__ import annotations
@@ -151,6 +156,11 @@ class MemoryModel(BaseModel):
     # JSON. ``team_id`` is null for actor-only memories.
     team_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    # Lifecycle soft-delete (memory-lifecycle): set by TTL expiry, capacity
+    # eviction or manual archive. Archived rows keep all data and lineage
+    # (superseded_by chains stay intact) but are excluded from every
+    # retrieval path; restore clears the marker.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
     __table_args__ = (
         Index("idx_memories_workspace", "workspace_id", "deleted"),
@@ -163,6 +173,7 @@ class MemoryModel(BaseModel):
             "team_id",
             "actor_id",
         ),
+        Index("idx_memories_archived", "workspace_id", "archived_at"),
     )
 
 
@@ -221,6 +232,8 @@ class KnowledgeMemoryModel(BaseModel):
     # 4.23 cross-thread namespace — see MemoryModel.team_id / actor_id.
     team_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+    # Lifecycle soft-delete marker — see MemoryModel.archived_at.
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
     __table_args__ = (
         Index("idx_knowledge_memories_workspace", "workspace_id", "deleted"),
@@ -232,6 +245,7 @@ class KnowledgeMemoryModel(BaseModel):
             "team_id",
             "actor_id",
         ),
+        Index("idx_knowledge_memories_archived", "workspace_id", "archived_at"),
     )
 
 
@@ -313,6 +327,10 @@ class MemoryEditLogModel(BaseModel):
     revision_after: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     before_summary: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     after_summary: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    # Why the mutation happened — agent tools leave it null; lifecycle
+    # operations record the trigger (ttl_expired / capacity_evicted /
+    # manual_archive / restored / promoted).
+    reason: Mapped[str | None] = mapped_column(String(100), nullable=True, default=None)
 
     __table_args__ = (
         Index("idx_memory_edit_log_workspace", "workspace_id", "created_at"),
@@ -445,6 +463,94 @@ class MemoryAccessSessionModel(BaseModel):
         ),
         Index("idx_memory_access_sessions_memory", "target_type", "memory_id"),
         Index("idx_memory_access_sessions_workspace", "workspace_id", "deleted"),
+    )
+
+
+class MemoryPolicyModel(BaseModel):
+    """Memory governance policy for a workspace or a single agent.
+
+    Two scopes share one table, discriminated by ``agent_id`` using the
+    zero-UUID sentinel (same pattern as
+    :class:`ConsolidationPressureFlagModel`, so a plain unique constraint
+    works — SQL NULLs would be treated as distinct):
+
+    - ``agent_id == ZERO_UUID`` — workspace-level policy (at most one per
+      workspace).
+    - ``agent_id`` set — agent-level override (at most one per
+      ``(workspace_id, agent_id)``).
+
+    Field semantics (resolution: platform env defaults → workspace row →
+    agent row; permission-surface fields can only narrow, numeric fields
+    are clamped to platform hard caps):
+
+    - **tool_subset** — JSON list of allowed memory tool names; null means
+      "inherit from the parent level".
+    - **sharing_ceiling** — widest namespace share level permitted
+      (``actor`` / ``team`` / ``workspace``); null means inherit.
+    - **params** — JSON object with the numeric/lifecycle groups
+      (``ttl`` / ``capacity`` / ``eviction`` / ``promotion`` / ``flush`` /
+      ``budgets``); missing keys inherit.
+    """
+
+    __tablename__ = "memory_policies"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    tool_subset: Mapped[list[str] | None] = mapped_column(JSON, nullable=True, default=None)
+    sharing_ceiling: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
+    params: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON().with_variant(JSONB(), "postgresql"), nullable=True, default=None
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "agent_id",
+            name="uq_memory_policies_scope",
+        ),
+        Index("idx_memory_policies_workspace", "workspace_id", "deleted"),
+    )
+
+
+class ConsolidationFlushWindowModel(BaseModel):
+    """Pending pre-compaction flush window for a consolidation unit.
+
+    Written (best-effort) by the L2 compaction boundary when a surface
+    replacement determines the to-be-dropped window; consumed (deleted) by
+    the consolidation trigger bus, which schedules flushed units with the
+    same priority as pressure-flagged ones. Consumption happens after the
+    run attempt exactly like pressure flags; the extraction itself stays
+    watermark-idempotent (at-least-once).
+
+    ``user_id`` uses the zero-UUID sentinel for the agent-level unit (same
+    convention as :class:`ConsolidationPressureFlagModel`).
+    """
+
+    __tablename__ = "consolidation_flush_windows"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    agent_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        nullable=False,
+        default=_DEFAULT_WORKSPACE,
+    )
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    session_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
+
+    __table_args__ = (
+        Index("idx_consolidation_flush_windows_unit", "workspace_id", "agent_id", "user_id"),
+        Index("idx_consolidation_flush_windows_window", "window_end"),
     )
 
 
@@ -620,6 +726,42 @@ class MemoryEditLogReadSchema(PydanticBase):
     revision_after: int | None
     before_summary: str | None
     after_summary: str | None
+    reason: str | None = None
+
+
+# --- Memory Policy Schemas ---
+
+
+class MemoryPolicyUpsertSchema(PydanticBase):
+    """Create/update payload for a workspace- or agent-level memory policy.
+
+    ``agent_id`` omitted (or zero-UUID) targets the workspace-level policy.
+    Field validation (unknown tool names, narrowing rules, hard caps) is
+    enforced by the policy service, not the schema.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=True)
+    tool_subset: list[str] | None = Field(None)
+    sharing_ceiling: str | None = Field(None, pattern="^(actor|team|workspace)$")
+    params: dict[str, Any] | None = Field(None)
+
+
+class MemoryPolicyReadSchema(PydanticBase):
+    """Schema for reading a stored memory policy row."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    agent_id: uuid.UUID
+    enabled: bool
+    tool_subset: list[str] | None
+    sharing_ceiling: str | None
+    params: dict[str, Any] | None
+    created_at: datetime
+    updated_at: datetime
 
 
 # --- Consolidation Schemas ---

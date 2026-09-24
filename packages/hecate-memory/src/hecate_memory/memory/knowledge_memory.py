@@ -224,6 +224,10 @@ class KnowledgeMemoryService:
             memory = await self._get_by_id_raw(workspace_id, agent_id, uuid.UUID(r.id))
             if memory is None:
                 continue
+            # Lifecycle archive: archived rows stay in Qdrant but leave
+            # every retrieval path (soft delete; restore rejoins them).
+            if memory.archived_at is not None:
+                continue
 
             memory.access_count += 1
             filtered.append(
@@ -290,6 +294,7 @@ class KnowledgeMemoryService:
             KnowledgeMemoryModel.workspace_id == workspace_id,
             KnowledgeMemoryModel.agent_id == agent_id,
             ~KnowledgeMemoryModel.deleted,
+            KnowledgeMemoryModel.archived_at.is_(None),  # lifecycle archive filter
         ]
 
         count_stmt = select(func.count()).select_from(KnowledgeMemoryModel).where(*conditions)

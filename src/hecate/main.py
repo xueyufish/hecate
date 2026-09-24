@@ -76,6 +76,7 @@ from hecate.studio.api.channels import router as studio_channels_router
 from hecate.studio.api.collaboration_patterns import router as collaboration_patterns_router
 from hecate.studio.api.conversations import router as conversations_router
 from hecate.studio.api.intent_packages import router as intent_packages_router
+from hecate.studio.api.memory_governance import router as memory_governance_router
 from hecate.studio.api.orchestration_templates import router as orchestration_templates_router
 from hecate.studio.api.plugins import router as plugins_router
 from hecate.studio.api.prompts import router as prompts_router
@@ -429,6 +430,7 @@ app.include_router(agent_chat_router, prefix="/v1", tags=["agents"])
 app.include_router(agents_router, prefix="/api", tags=["agents"])
 app.include_router(agent_versions_router, prefix="/api", tags=["agents"])
 app.include_router(studio_channels_router, prefix="/api", tags=["channels"])
+app.include_router(memory_governance_router, prefix="/api", tags=["memory-governance"])
 app.include_router(replay_router, prefix="/api", tags=["replay"])
 app.include_router(sessions_router, prefix="/api", tags=["sessions"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])

@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from hecate.tools.tool.registry import ToolRegistry
 
 from hecate.core.auth_context import AuthContext
+from hecate.core.composition.memory_policy import narrowed_tool_names
 from hecate.core.database import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_state_store import get_session_state_store
@@ -305,6 +306,23 @@ async def _process_chat(
         }
         effective_tools = [t for t in effective_tools if t.get("function", {}).get("name") not in client_names]
         effective_tools.extend(t for t in request.tools if isinstance(t, dict))
+
+    # Memory-policy narrowing (memory-policy capability): applied after the
+    # merge so a client-supplied tool cannot bypass the agent's policy —
+    # the resolved policy may drop memory tools from the visible surface,
+    # never add beyond the platform flag gate.
+    if agent is not None and effective_tools:
+        merged_names = [
+            name for t in effective_tools if isinstance(t, dict) for name in [t.get("function", {}).get("name")] if name
+        ]
+        if merged_names:
+            allowed = set(await narrowed_tool_names(db, agent.workspace_id, agent.id, merged_names))
+            effective_tools = [
+                t for t in effective_tools if isinstance(t, dict) and t.get("function", {}).get("name") in allowed
+            ]
+            agent_tools = [
+                t for t in agent_tools if isinstance(t, dict) and t.get("function", {}).get("name") in allowed
+            ]
 
     # Parse kb_ids if provided
     parsed_kb_ids: list[str] | None = None

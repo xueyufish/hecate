@@ -49,6 +49,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from hecate.core.config import settings
 from hecate.runtime.eventstore import EventType
 
 if TYPE_CHECKING:
@@ -391,6 +392,46 @@ def _session_lock(session_id: str) -> asyncio.Lock:
     return lock
 
 
+async def _register_flush_window(execution_context: dict[str, Any], session_id: Any) -> None:
+    """Register one flush window for the session's consolidation unit.
+
+    Resolves the scope's memory policy first (a policy may disable flush
+    for this agent; the platform flag is the upper bound and was already
+    checked by the caller). Any failure raises — the caller catches and
+    logs, keeping the compaction path untouched.
+    """
+    raw_ws = execution_context.get("workspace_id")
+    raw_agent = execution_context.get("agent_id")
+    if not raw_ws or not raw_agent:
+        return
+    from hecate.core.composition.memory_policy import resolve_policy
+    from hecate.core.database import async_session_factory
+
+    workspace_id = uuid.UUID(str(raw_ws))
+    agent_id = uuid.UUID(str(raw_agent))
+    async with async_session_factory() as db:
+        policy = await resolve_policy(db, workspace_id, agent_id)
+        if not policy.flush_enabled:
+            return
+
+    raw_user = execution_context.get("user_id")
+    user_id = uuid.UUID(str(raw_user)) if raw_user else None
+    session_uuid: uuid.UUID | None = None
+    try:
+        session_uuid = uuid.UUID(str(session_id)) if session_id is not None else None
+    except ValueError:
+        session_uuid = None
+
+    from hecate_memory.memory.consolidation import mark_unit_flush_window
+
+    await mark_unit_flush_window(
+        workspace_id,
+        agent_id,
+        user_id,
+        session_id=session_uuid,
+    )
+
+
 async def resolve_context_window(
     node_config: dict[str, Any],
     execution_context: dict[str, Any] | None,
@@ -696,6 +737,18 @@ async def run_surface_replacement(
     listener: Callable[[str, str], None] | None = ctx.state.get(STATE_LISTENER)
     if listener is not None:
         listener(str(session_id), compaction_id)
+
+    # Pre-compaction flush registration (memory-lifecycle-governance): the
+    # shadowed window [start_seq, end_seq] is about to leave the model
+    # surface, so hand it to the consolidation trigger bus for extraction.
+    # Best-effort by contract — a failure here only logs; compaction has
+    # already committed and the raw event log keeps the content (the
+    # watermark sweep covers the window on a later trigger).
+    if settings.MEMORY_FLUSH_ENABLED:
+        try:
+            await _register_flush_window(execution_context, session_id)
+        except Exception:  # noqa: BLE001 — never fails the compaction path
+            logger.warning("Flush window registration failed (non-fatal)", exc_info=True)
 
     new_units = [*units[:head_unit], ContextUnit([node_message]), *units[tail_unit:]]
     saved = max(0, pre_tokens - post_tokens)

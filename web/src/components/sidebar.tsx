@@ -1,11 +1,23 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { Bot, ClipboardCheck, Database, LogOut, Settings, Share2, Activity, DollarSign, Gauge, Users, MessageSquare, Puzzle } from "lucide-react";
+import { api } from "@/lib/api-client";
+import { Bot, Brain, ClipboardCheck, Database, LogOut, Settings, Share2, Activity, DollarSign, Gauge, Users, MessageSquare, Puzzle } from "lucide-react";
 
 export function Sidebar() {
   const { userEmail, logout } = useAuth();
+  // Memory Center is editor+; viewers never see the entry. The probe is
+  // the cheapest governance GET — a 403 hides the link.
+  const [canGovern, setCanGovern] = useState(false);
+
+  useEffect(() => {
+    api
+      .get("/api/memory/governance/stats")
+      .then(() => setCanGovern(true))
+      .catch(() => setCanGovern(false));
+  }, []);
 
   return (
     <aside className="flex h-screen w-60 flex-col border-r bg-muted/30">
@@ -21,6 +33,16 @@ export function Sidebar() {
           <Bot className="h-4 w-4" />
           Agents
         </Link>
+        {canGovern && (
+          <Link
+            href="/memory"
+            data-testid="nav-memory"
+            className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
+          >
+            <Brain className="h-4 w-4" />
+            Memory
+          </Link>
+        )}
         <Link
           href="/workflows"
           className="flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted"
