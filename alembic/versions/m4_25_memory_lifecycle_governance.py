@@ -1,7 +1,7 @@
 """Memory lifecycle + governance: policies, flush windows, archived_at, edit-log reason.
 
 Revision ID: m4_25_lifecycle_governance
-Revises: m4_23_namespace_team_actor
+Revises: m5_9c_skill_discovery
 Create Date: 2026-09-23
 
 Fully additive schema for the memory-lifecycle-governance change:
@@ -27,7 +27,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "m4_25_lifecycle_governance"
-down_revision = "m4_23_namespace_team_actor"
+down_revision = "m5_9c_skill_discovery"
 branch_labels = None
 depends_on = None
 
