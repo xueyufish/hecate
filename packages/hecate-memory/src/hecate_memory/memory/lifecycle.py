@@ -167,7 +167,7 @@ async def _ttl_expired_ids(
         conditions.append(agent_column == agent_id)
     if type_column is not None and memory_type is not None:
         conditions.append(type_column == memory_type)
-    rows = (await db.execute(select(model).where(*conditions))).scalars().all()
+    rows: list[Any] = list((await db.execute(select(model).where(*conditions))).scalars().all())
     return rows
 
 
@@ -297,7 +297,7 @@ async def _evict_over_capacity(
         model.archived_at.is_(None),
         model.workspace_id == workspace_id,
     ]
-    rows = (await db.execute(select(model).where(*conditions))).scalars().all()
+    rows: list[Any] = list((await db.execute(select(model).where(*conditions))).scalars().all())
     if not rows:
         return 0
 
