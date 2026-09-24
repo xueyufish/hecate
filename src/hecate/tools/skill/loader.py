@@ -14,6 +14,13 @@ Skills with ``auto_load=True`` keep their legacy semantics: full content is
 always injected without an L2 request. Set
 ``settings.SKILL_PROGRESSIVE_DISCLOSURE = False`` to restore the legacy
 inject-everything behaviour wholesale (rollout escape hatch).
+
+Skill discovery (5.9c) adds a third source, the **discovery pool**:
+eligible workspace + bundled skills without any binding become visible in
+the L1 catalog and loadable on demand. Discovery is governed by the
+three-layer policy in :mod:`hecate.tools.skill.discovery` and is served
+from live rows — discovered skills are never pinned through a reference
+manifest (binding = frozen surface, discovery = live surface).
 """
 
 from __future__ import annotations
@@ -22,22 +29,31 @@ import logging
 import uuid
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.agent import AgentModel
 from hecate.models.evolution import SkillUsageEventModel
 from hecate.models.plugin import PluginModel
 from hecate.models.skill import SkillModel
-from hecate.tools.skill.provider_registry import resolve_precedence_map
+from hecate.models.workspace import WorkspaceModel
+from hecate.tools.skill.discovery import (
+    TRUST_TIER_ORDER,
+    DiscoveryPolicy,
+    parse_workspace_policy,
+    resolve_agent_policy,
+)
+from hecate.tools.skill.provider_registry import RANKED_PROVIDERS, resolve_precedence_map
 
 logger = logging.getLogger(__name__)
 
 # Default total token budget for all skills combined
 DEFAULT_TOTAL_TOKEN_BUDGET = 4000
 
-# Default token budget for the L1 catalog block (name + description entries)
-DEFAULT_CATALOG_TOKEN_BUDGET = 1000
+# Default token budget for the L1 catalog block (name + description entries).
+# Raised from 1000 in 5.9c so discovery entries fit alongside the bound and
+# auto_load entries they must never evict.
+DEFAULT_CATALOG_TOKEN_BUDGET = 2000
 
 # Per-entry description cap inside the L1 catalog (~100 tokens)
 DESCRIPTION_CHAR_BUDGET = 400
@@ -84,6 +100,8 @@ class SkillLoader:
             progressive = settings.SKILL_PROGRESSIVE_DISCLOSURE
         self._progressive = progressive
         self._pins_by_name = self._extract_pins(ref_manifest)
+        # Lazy per-instance cache for the resolved discovery policy (5.9c).
+        self._discovery_policy: DiscoveryPolicy | None = None
 
     @staticmethod
     def _extract_pins(ref_manifest: list[dict] | None) -> dict[str, tuple[UUID, int]]:
@@ -162,7 +180,24 @@ class SkillLoader:
                     agent_id,
                     workspace_id,
                 )
-        if not skills:
+
+        # Discovery pool (5.9c): eligible unbound skills ranked by the
+        # deterministic selection policy. They only fill the catalog budget
+        # that bound/auto_load entries leave behind. Resolved before the
+        # empty check below — an agent with no bindings can still have a
+        # discovery catalog.
+        discovery_policy = await self._resolve_discovery_policy(agent, workspace_id)
+        discovery_skills: list[SkillModel] = []
+        if discovery_policy.enabled:
+            discovery_skills = await self._query_discovery_pool(
+                workspace_id,
+                exclude_names=set(all_names),
+                policy=discovery_policy,
+            )
+            usage_counts = await self._load_usage_counts(workspace_id)
+            discovery_skills.sort(key=lambda s: self._discovery_sort_key(s, usage_counts))
+
+        if not skills and not discovery_skills:
             return ""
 
         skills_by_name = {s.name: s for s in skills}
@@ -201,6 +236,9 @@ class SkillLoader:
                 continue
             description = skill.description[:DESCRIPTION_CHAR_BUDGET]
             catalog_entries.append((name, f'<skill name="{skill.name}" description="{description}"/>'))
+        for skill in discovery_skills:
+            description = skill.description[:DESCRIPTION_CHAR_BUDGET]
+            catalog_entries.append((skill.name, f'<skill name="{skill.name}" description="{description}"/>'))
         catalog_entries = self._enforce_catalog_budget(catalog_entries, catalog_budget)
 
         if not catalog_entries and not auto_blocks:
@@ -217,8 +255,9 @@ class SkillLoader:
             workspace_id=workspace_id,
             agent_id=agent_id,
             session_id=session_id,
-            skills=skills,
+            skills=[*skills, *discovery_skills],
             event_type="catalog_served",
+            detected_via_by_name={s.name: "auto_detected" for s in discovery_skills},
         )
         return "\n".join(parts)
 
@@ -231,6 +270,9 @@ class SkillLoader:
     ) -> str:
         """Load full L2 content for an advertised skill (run-scoped context).
 
+        The advertised set is the agent's bound skills, extended with the
+        discovery pool when discovery is active for the agent (5.9c).
+
         Args:
             skill_name: Name of the skill to load.
             agent_id: UUID of the requesting agent (catalog membership check).
@@ -240,18 +282,34 @@ class SkillLoader:
             Formatted full skill block, truncated to the skill's max_tokens.
 
         Raises:
-            SkillNotAdvertisedError: The skill is not bound to the agent, is
-                missing from the workspace, or its owning plugin is disabled.
+            SkillNotAdvertisedError: The skill is not bound to the agent and
+                not discoverable, is missing from the workspace, or its
+                owning plugin is disabled.
         """
         agent = await self._load_agent(agent_id)
         if agent is None:
             raise SkillNotAdvertisedError(f"Agent {agent_id} not found")
 
-        advertised = agent.skills or []
-        if skill_name not in advertised:
-            raise SkillNotAdvertisedError(
-                f"Skill '{skill_name}' is not advertised for agent {agent_id}. Available skills: {advertised or 'none'}"
+        bound_names = agent.skills or []
+        discovered = False
+        if skill_name not in bound_names:
+            discovery_policy = await self._resolve_discovery_policy(agent, workspace_id)
+            if not discovery_policy.enabled:
+                raise SkillNotAdvertisedError(
+                    f"Skill '{skill_name}' is not advertised for agent {agent_id}. "
+                    f"Available skills: {bound_names or 'none'}"
+                )
+            pool = await self._query_discovery_pool(
+                workspace_id,
+                exclude_names=set(bound_names),
+                policy=discovery_policy,
             )
+            if not any(skill.name == skill_name for skill in pool):
+                raise SkillNotAdvertisedError(
+                    f"Skill '{skill_name}' is not advertised for agent {agent_id}. "
+                    f"Available skills: {bound_names or 'none'}"
+                )
+            discovered = True
 
         skills = await self._load_skills_by_names([skill_name], workspace_id)
         if not skills:
@@ -272,8 +330,147 @@ class SkillLoader:
             session_id=session_id,
             skills=[skill],
             event_type="skill_loaded",
+            detected_via_by_name={skill.name: "auto_detected"} if discovered else None,
         )
+        if discovered:
+            await self._warn_missing_dependencies(
+                skill,
+                workspace_id=workspace_id,
+                agent_id=agent_id,
+                session_id=session_id,
+            )
         return text
+
+    async def _resolve_discovery_policy(self, agent: AgentModel, workspace_id: UUID) -> DiscoveryPolicy:
+        """Resolve the effective discovery policy for this agent (cached).
+
+        With the global switch off, no workspace query is issued at all —
+        discovery-off must not add database work to the hot path.
+        """
+        if self._discovery_policy is not None:
+            return self._discovery_policy
+
+        from hecate.core.config import settings
+
+        global_enabled = settings.SKILL_DISCOVERY_ENABLED
+        workspace_policy = DiscoveryPolicy()
+        if global_enabled:
+            result = await self._db.execute(select(WorkspaceModel.settings).where(WorkspaceModel.id == workspace_id))
+            workspace_policy = parse_workspace_policy(result.scalar_one_or_none())
+        self._discovery_policy = resolve_agent_policy(
+            global_enabled=global_enabled,
+            workspace_policy=workspace_policy,
+            agent_override=agent.skill_discovery_enabled,
+        )
+        return self._discovery_policy
+
+    async def _query_discovery_pool(
+        self,
+        workspace_id: UUID,
+        *,
+        exclude_names: set[str],
+        policy: DiscoveryPolicy,
+    ) -> list[SkillModel]:
+        """Resolve the discovery pool: eligible skills without any binding.
+
+        Workspace + bundled rows, precedence-collapsed per name, then
+        filtered on the winners: a user-provider winner hides the whole
+        name (mirroring shadowing semantics), the trust floor drops tiers
+        below the workspace policy. ``model_invocable`` and plugin
+        enablement are enforced in SQL.
+        """
+        zero_uuid = uuid.UUID(int=0)
+        result = await self._db.execute(
+            select(SkillModel)
+            .outerjoin(PluginModel, SkillModel.plugin_id == PluginModel.id)
+            .where(
+                SkillModel.workspace_id.in_([workspace_id, zero_uuid]),
+                ~SkillModel.deleted,
+                SkillModel.model_invocable.is_(True),
+                self._plugin_enabled_condition(),
+            )
+        )
+        winners = resolve_precedence_map(list(result.scalars().all()))
+        pool: list[SkillModel] = []
+        for name, skill in winners.items():
+            if name in exclude_names or skill.provider == "user":
+                continue
+            if not policy.admits(skill.trust_tier):
+                continue
+            pool.append(skill)
+        return pool
+
+    async def _load_usage_counts(self, workspace_id: UUID) -> dict[str, int]:
+        """Per-skill successful-load counts for the workspace (discovery ranking).
+
+        Only ``skill_loaded`` events count — serving the catalog must not
+        raise a skill's own ranking (feedback-loop guard).
+        """
+        result = await self._db.execute(
+            select(SkillUsageEventModel.skill_name, func.count())
+            .where(
+                SkillUsageEventModel.workspace_id == workspace_id,
+                SkillUsageEventModel.event_type == "skill_loaded",
+            )
+            .group_by(SkillUsageEventModel.skill_name)
+        )
+        return {name: count for name, count in result.all()}
+
+    @staticmethod
+    def _discovery_sort_key(skill: SkillModel, usage_counts: dict[str, int]) -> tuple:
+        """Deterministic discovery ranking: tier > provider > usage > name.
+
+        Ranked providers order project > user > bundled; plugin rows
+        (``provider=None``) sit below every ranked provider and fall
+        through to the usage/name keys.
+        """
+        tier = TRUST_TIER_ORDER.get(skill.trust_tier or "community", 0)
+        if skill.provider in RANKED_PROVIDERS:
+            provider_rank = len(RANKED_PROVIDERS) - RANKED_PROVIDERS.index(skill.provider)
+        else:
+            provider_rank = 0
+        usage = usage_counts.get(skill.name, 0)
+        return (-tier, -provider_rank, -usage, skill.name)
+
+    async def _warn_missing_dependencies(
+        self,
+        skill: SkillModel,
+        *,
+        workspace_id: UUID,
+        agent_id: UUID,
+        session_id: UUID | None,
+    ) -> None:
+        """Record a ``dependency_warning`` event per unresolvable ``requires``.
+
+        Discovery-served content warns but never blocks: ``requires`` is a
+        bind-time contract (5.9e); the discovery path has no runtime
+        solver. One event per missing dependency, with the missing skill's
+        name in ``skill_name``.
+        """
+        requires = skill.requires or []
+        names = [entry.get("name") for entry in requires if isinstance(entry, dict) and entry.get("name")]
+        if not names:
+            return
+        resolved = await self._load_skills_by_names(list(names), workspace_id)
+        missing = [name for name in names if name not in {s.name for s in resolved}]
+        if not missing:
+            return
+        try:
+            async with self._db.begin_nested():
+                for name in missing:
+                    self._db.add(
+                        SkillUsageEventModel(
+                            workspace_id=workspace_id,
+                            agent_id=agent_id,
+                            session_id=session_id,
+                            skill_id=None,
+                            skill_name=name,
+                            event_type="dependency_warning",
+                        )
+                    )
+                await self._db.flush()
+        except Exception:
+            logger.warning("Failed to record skill dependency warning", exc_info=True)
 
     async def _format_legacy(
         self,
@@ -550,13 +747,17 @@ class SkillLoader:
         session_id: UUID | None,
         skills: list[SkillModel],
         event_type: str,
+        detected_via_by_name: dict[str, str] | None = None,
     ) -> None:
         """Record skill usage events; best-effort inside a savepoint.
 
         A failure rolls back only the savepoint, never the caller's
         transaction (mirrors the best-effort contract of the evidence
-        tracker and security finding writer).
+        tracker and security finding writer). Skills named in
+        ``detected_via_by_name`` (5.9c) are recorded as ``auto_detected``;
+        everything else defaults to ``bound``.
         """
+        detected_via_by_name = detected_via_by_name or {}
         try:
             async with self._db.begin_nested():
                 for skill in skills:
@@ -568,6 +769,7 @@ class SkillLoader:
                             skill_id=skill.id,
                             skill_name=skill.name,
                             event_type=event_type,
+                            detected_via=detected_via_by_name.get(skill.name, "bound"),
                         )
                     )
                 await self._db.flush()

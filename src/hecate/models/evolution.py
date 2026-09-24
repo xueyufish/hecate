@@ -155,7 +155,8 @@ class SkillUsageEventModel(BaseModel):
     """One skill usage observation (L1 catalog served / L2 content loaded).
 
     Written best-effort by the SkillLoader; powers the effect-feedback
-    statistics (trigger counts, per-skill session quality comparison).
+    statistics (trigger counts, per-skill session quality comparison) and
+    the 5.9c discovery-provenance split (bound vs auto_detected loads).
     """
 
     __tablename__ = "skill_usage_events"
@@ -166,6 +167,9 @@ class SkillUsageEventModel(BaseModel):
     skill_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
     skill_name: Mapped[str] = mapped_column(String(255), nullable=False)
     event_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    # 5.9c: "bound" (explicit binding or auto_load path) / "auto_detected"
+    # (discovered pool). NULL on pre-5.9c rows is read as "bound".
+    detected_via: Mapped[str | None] = mapped_column(String(20), nullable=True, default=None)
 
     __table_args__ = (Index("idx_skill_usage_workspace_skill", "workspace_id", "skill_name", "created_at"),)
 

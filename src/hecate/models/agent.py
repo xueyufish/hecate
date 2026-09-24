@@ -12,7 +12,7 @@ from datetime import datetime
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import Index, Integer, String
+from sqlalchemy import Boolean, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -46,6 +46,11 @@ class AgentModel(BaseModel):
     - **evaluation_gate** — nullable JSON publish-gate configuration
       (1.3.20; same shape as ``workflows.evaluation_gate``); ``NULL`` =
       gate off.
+    - **skill_discovery_enabled** — three-state skill-discovery override
+      (5.9c): ``NULL`` follows the workspace policy, ``True`` opts in,
+      ``False`` opts out even when the workspace enabled discovery. The
+      layers only narrow, never widen: an explicit ``True`` has no effect
+      unless the workspace enabled discovery.
     """
 
     __tablename__ = "agents"
@@ -69,6 +74,7 @@ class AgentModel(BaseModel):
     guardrail_config: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     published_version: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     evaluation_gate: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    skill_discovery_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
 
     __table_args__ = (Index("idx_agents_workspace", "workspace_id", "deleted"),)
 
@@ -94,6 +100,12 @@ class AgentCreateSchema(PydanticBase):
     opening_remarks: str | None = None
     enable_suggestions: bool = Field(default=True)
     guardrail_config: dict | None = None
+    skill_discovery_enabled: bool | None = Field(
+        None,
+        description="Skill-discovery override: None follows the workspace policy; "
+        "True opts in (effective only when the workspace enabled discovery); "
+        "False opts out.",
+    )
 
 
 class AgentUpdateSchema(PydanticBase):
@@ -117,6 +129,12 @@ class AgentUpdateSchema(PydanticBase):
     opening_remarks: str | None = None
     enable_suggestions: bool | None = None
     guardrail_config: dict | None = None
+    skill_discovery_enabled: bool | None = Field(
+        None,
+        description="None resets the override to follow the workspace policy; "
+        "True/False set an explicit opt-in/opt-out. Omitting the field leaves "
+        "the stored override untouched.",
+    )
     evaluation_gate: EvaluationGateConfigSchema | None = None
 
 
@@ -141,6 +159,7 @@ class AgentReadSchema(PydanticBase):
     guardrail_config: dict | None = None
     published_version: int | None = None
     evaluation_gate: dict | None = None
+    skill_discovery_enabled: bool | None = None
     created_at: datetime
     updated_at: datetime
     deleted: bool | None = False
