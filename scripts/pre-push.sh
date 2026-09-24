@@ -54,10 +54,9 @@ if [ "$LOCAL" = "$BASE" ]; then
     exit 0
 fi
 
-# origin/main is exactly the merge-base → branch is ahead, no rebase needed
-if [ "$REMOTE_MAIN" = "$BASE" ]; then
-    exit 0
-fi
+# Branch is ahead of main (origin/main == merge-base) is the normal push
+# case: fall through. The rebase step below is a no-op there, and the
+# verification gate must still run.
 
 # Otherwise: branch has diverged from main. Check whether it's behind.
 BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo "0")
