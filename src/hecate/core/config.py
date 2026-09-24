@@ -299,6 +299,13 @@ class Settings(BaseSettings):
     # are official. Real scanning lands with 5.13a.
     SKILL_TRUSTED_SOURCE_PATTERNS: list[str] = []
 
+    # Skill auto-detection (5.9c): master switch for skill discovery. When
+    # False, agents see only their bound + auto_load skills (pre-5.9c
+    # behaviour). When True, workspaces may still opt in via the
+    # `skill_discovery.enabled` workspace setting, and agents may opt out via
+    # `AgentModel.skill_discovery_enabled` — the layers only narrow, never
+    # widen. Default False so upgrades are behaviour-neutral.
+    SKILL_DISCOVERY_ENABLED: bool = False
     # Self-evolution closed loop (1.3.6f). Disabled by default: the loop is
     # switched on per deployment after eval-gate review.
     SKILL_EVOLUTION_ENABLED: bool = False

@@ -1,4 +1,6 @@
-## Requirements
+# skill-loader Delta
+
+## MODIFIED Requirements
 
 ### Requirement: SkillLoader resolves agent skills to formatted instructions
 
@@ -51,6 +53,7 @@ The system SHALL provide a `SkillLoader` service that accepts an agent ID and wo
 #### Scenario: Pinned bound skill keeps snapshot content while discovery entry serves live
 - **WHEN** an agent-version reference manifest pins a bound skill to a snapshot, and discovery additionally surfaces an unbound skill
 - **THEN** the pinned bound skill SHALL serve snapshot content while the discovered skill SHALL serve live-row content
+
 ### Requirement: SkillLoader respects per-skill token budget
 
 The loader SHALL enforce budgets at both levels: the L1 catalog SHALL respect a compact catalog budget (default 2000 tokens; each entry truncated to its description), and L2 content SHALL be truncated to the skill's `max_tokens` limit before delivery. The combined always-injected content (auto_load skills plus any L2 content loaded for the current run) SHALL respect the total system budget; when exceeded, the loader SHALL drop skills starting from the lowest priority. When discovery entries compete for the catalog budget, the loader SHALL apply the selection policy defined by the `skill-auto-detection` capability (bound and `auto_load` first, then trust tier, provider rank, usage count, name).
@@ -66,20 +69,6 @@ The loader SHALL enforce budgets at both levels: the L1 catalog SHALL respect a 
 #### Scenario: Total injected content exceeds budget
 - **WHEN** always-injected content plus loaded L2 content exceeds the system budget (default 4000 tokens)
 - **THEN** the loader SHALL drop lowest-priority content until the budget is met and log the eviction
-### Requirement: Skills are injected into system prompt as XML block
-When skills are loaded for an agent, the L1 catalog SHALL be formatted as an XML block appended to the agent's persona (system prompt) before LLM invocation, advertising each skill's name, description, and how to request full content. L2 content SHALL be injected as run-scoped context when a load request is accepted, and SHALL NOT be permanently appended to the system prompt.
-
-#### Scenario: Chat mode agent with persona and skills
-- **WHEN** `WorkflowExecutionService.execute()` is called with an `agent_id` and the agent has `persona="You are a coding assistant"` and `skills=["code-review"]`
-- **THEN** the system prompt passed to `build_chat_graph()` SHALL be the persona followed by an L1 catalog XML block listing "code-review" with its description, without the skill's full instructions
-
-#### Scenario: Sub-agent execution with skills
-- **WHEN** `AgentExecutionPort.agent_execute()` is called for an agent with skills
-- **THEN** the system message SHALL contain the agent's persona followed by the L1 catalog XML block
-
-#### Scenario: Agent with persona=None and skills
-- **WHEN** an agent has `persona=None` and `skills=["code-review"]`
-- **THEN** the system prompt SHALL be the default persona followed by the L1 catalog XML block
 
 ### Requirement: On-demand L2 skill loading
 

@@ -17,7 +17,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
@@ -410,6 +410,108 @@ async def add_skill_to_agent(
         await db.refresh(agent)
 
     return {"skills": agent.skills}
+
+
+@router.post("/agents/{agent_id}/skills/promote")
+async def promote_skill_to_agent(
+    agent_id: uuid.UUID,
+    data: SkillAssociationRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> dict:
+    """Promote a discovery-sourced skill to an explicit agent binding (5.9c).
+
+    Unlike the blind add endpoint, this validates that the named skill
+    resolves in the workspace or bundled origin, is model-invocable, and —
+    for plugin-sourced skills — that its owning plugin is enabled. The
+    append is idempotent. The response marks the binding as not frozen:
+    committing an agent version is what pins the skill's content into the
+    version reference manifest.
+
+    Args:
+        agent_id: The UUID of the agent.
+        data: Request body with skill_name.
+        db: The async database session.
+        ctx: The authenticated context.
+    Returns:
+        dict: ``{"skills": [...], "frozen": False, "next_step": "..."}``.
+
+    Raises:
+        HTTPException: 404 if agent not found or the skill is unresolvable,
+            model-invisible, or its owning plugin is disabled.
+    """
+    _ws_filter = AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0))
+    result = await db.execute(
+        select(AgentModel).where(
+            AgentModel.id == agent_id,
+            ~AgentModel.deleted,
+            _ws_filter,
+        )
+    )
+    agent = result.scalar_one_or_none()
+    if agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": {"code": "NOT_FOUND", "message": "Agent not found", "details": None}},
+        )
+
+    from hecate.models.plugin import PluginModel
+    from hecate.models.skill import SkillModel
+    from hecate.tools.skill.provider_registry import resolve_precedence_map
+
+    workspace_id = agent.workspace_id
+    zero_uuid = uuid.UUID(int=0)
+    skill_result = await db.execute(
+        select(SkillModel)
+        .outerjoin(PluginModel, SkillModel.plugin_id == PluginModel.id)
+        .where(
+            SkillModel.name == data.skill_name,
+            SkillModel.workspace_id.in_([workspace_id, zero_uuid]),
+            ~SkillModel.deleted,
+            or_(
+                SkillModel.plugin_id.is_(None),
+                (PluginModel.status == "enabled") & PluginModel.deleted_at.is_(None),
+            ),
+        )
+    )
+    candidates = resolve_precedence_map(list(skill_result.scalars().all()))
+    skill = candidates.get(data.skill_name)
+    if skill is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "SKILL_NOT_FOUND",
+                    "message": f"Skill '{data.skill_name}' not found in workspace",
+                    "details": None,
+                }
+            },
+        )
+    if skill.model_invocable is False:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "error": {
+                    "code": "SKILL_NOT_MODEL_INVOCABLE",
+                    "message": (
+                        f"Skill '{data.skill_name}' is not model-invocable and cannot be bound for model invocation"
+                    ),
+                    "details": None,
+                }
+            },
+        )
+
+    current_skills: list[str] = agent.skills or []
+    if data.skill_name not in current_skills:
+        agent.skills = current_skills + [data.skill_name]
+        await db.flush()
+        await db.refresh(agent)
+
+    return {
+        "skills": agent.skills,
+        "frozen": False,
+        "next_step": "Commit an agent version to freeze this skill's content into the version reference manifest.",
+    }
 
 
 @router.delete("/agents/{agent_id}/skills/{skill_name}")
