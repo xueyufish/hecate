@@ -12,9 +12,10 @@
 #   3. Fetch origin.
 #   4. If current branch is behind origin/main: auto-rebase.
 #   5. If rebase conflicts: abort the rebase and print resolution steps.
-#   6. Run the full local gate: mypy + layer-scoped pytest (xdist) over the
-#      commits being pushed (merge-base..HEAD). ruff and the commit-message
-#      check already ran in the pre-commit / commit-msg hooks.
+#   6. Run mypy on src/ (seconds). The full pytest suite is NOT run locally —
+#      GitHub Actions CI is the single source of truth for tests. Use
+#      `pytest --testmon` interactively when you want a fast inner-loop check
+#      of just the affected tests (see AGENTS.md).
 
 set -e
 
@@ -83,8 +84,7 @@ if [ "$BEHIND" -gt 0 ]; then
     echo "✅ Rebase complete. Proceeding with push."
 fi
 
-# Full local gate before sharing code: same checks as CI, scoped to what
-# this push carries. Fast checks (ruff, commit message) already ran per commit.
+# Local pre-push gate: mypy only. CI is the source of truth for tests.
 VENV_DIR="$(git rev-parse --show-toplevel)/.venv"
 if [ -f "$VENV_DIR/bin/activate" ]; then
     source "$VENV_DIR/bin/activate"
@@ -95,26 +95,16 @@ else
     exit 1
 fi
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
-PUSH_RANGE="$(git merge-base HEAD origin/main)..HEAD"
-
 echo "🔍 Running pre-push checks..."
 
 # 1. mypy
-echo "  [1/2] mypy..."
+echo "  [1/1] mypy..."
 if ! mypy src/; then
     echo "❌ mypy failed. Fix type errors before pushing."
     exit 1
 fi
 
-# 2. pytest scoped to the pushed changes
-echo "  [2/2] pytest (scoped to pushed changes)..."
-if ! bash "${REPO_ROOT}/scripts/smart-pytest.sh" --diff "$PUSH_RANGE"; then
-    echo "❌ pytest failed. Fix failing tests before pushing."
-    exit 1
-fi
-
-echo "✅ Pre-push checks passed!"
+echo "✅ Pre-push checks passed! (Full pytest runs in GitHub Actions CI.)"
 
 # Allow push to proceed
 exit 0
