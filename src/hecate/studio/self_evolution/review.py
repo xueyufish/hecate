@@ -55,13 +55,20 @@ class CandidateReviewService:
     ) -> SkillCandidateModel:
         """Apply a reviewer decision: approve / approve_with_edits / reject.
 
-        Only ``validated`` candidates are reviewable (the gate must have
-        passed). Approval publishes a learned skill with full provenance.
+        Only gate-passed candidates are reviewable — ``validated`` (all four
+        checks ran and passed) or ``content_validated`` (content checks
+        passed, behavioral evaluation was skipped; the human reviewer is the
+        remaining evidence). Approval publishes a learned skill with full
+        provenance.
         """
         candidate = await self._repo.get_candidate(workspace_id, candidate_id)
         if candidate is None:
             raise CandidateReviewError(f"Candidate {candidate_id} not found")
-        if candidate.status != SkillCandidateStatus.VALIDATED.value:
+        reviewable = (
+            SkillCandidateStatus.VALIDATED.value,
+            SkillCandidateStatus.CONTENT_VALIDATED.value,
+        )
+        if candidate.status not in reviewable:
             raise CandidateReviewError(f"Candidate {candidate_id} is not reviewable (status={candidate.status})")
 
         if decision == "rejected":

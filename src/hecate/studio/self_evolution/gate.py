@@ -11,6 +11,12 @@ is mandatory: without enough golden samples the candidate is suspended as
   wiring); skipped when no runner or no bound evaluation task exists.
 - ``golden_subset_regression`` and ``trigger_test`` are LLM-judged over the
   agent's frozen golden samples (design D10 for the trigger decision).
+
+When the behavioral checks (``dataset_regression`` / ``with_without_baseline``)
+were skipped but every executed check passed, the overall outcome is
+``pass_unverified`` — content checks alone must not present as fully
+validated. The candidate still reaches human review; the report says what
+was actually verified.
 """
 
 from __future__ import annotations
@@ -40,7 +46,7 @@ BASELINE_REGRESSION_TOLERANCE = 0.05
 class GateReport:
     """Aggregated gate outcome for one candidate."""
 
-    overall: str  # pass | fail | insufficient_data
+    overall: str  # pass | pass_unverified | fail | insufficient_data
     checks: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -217,6 +223,11 @@ class EvolutionGate:
             has_fail = any(c["status"] == "fail" for c in report.checks)
             if has_fail:
                 report.overall = "fail"
+            elif any(
+                c["name"] in ("dataset_regression", "with_without_baseline") and c["status"] == "skipped"
+                for c in report.checks
+            ):
+                report.overall = "pass_unverified"
         return report
 
     # --- helpers -----------------------------------------------------------

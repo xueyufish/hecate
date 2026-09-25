@@ -331,6 +331,26 @@ class TestNodeCacheUnit:
         k2 = derive_cache_key(self._policy(), "B", {"model": "gpt-5"}, snapshot, session_id=session)
         assert k1 != k2
 
+    def test_tool_rebinding_invalidates_identity(self):
+        """A TOOL node rebound to a different tool must not hit stale entries."""
+        session = uuid.uuid4()
+        snapshot = {"messages": ["hi"]}
+        k1 = derive_cache_key(self._policy(), "T", {"tool_name": "search"}, snapshot, session_id=session)
+        k2 = derive_cache_key(self._policy(), "T", {"tool_name": "create_ticket"}, snapshot, session_id=session)
+        assert k1 != k2
+
+    def test_cache_block_change_keeps_identity(self):
+        """TTL tweaks are policy, not semantics — semantically identical configs share the key."""
+        session = uuid.uuid4()
+        snapshot = {"messages": ["hi"]}
+        k1 = derive_cache_key(
+            self._policy(), "T", {"tool_name": "search", "cache": {"ttl": 60}}, snapshot, session_id=session
+        )
+        k2 = derive_cache_key(
+            self._policy(), "T", {"tool_name": "search", "cache": {"ttl": 3600}}, snapshot, session_id=session
+        )
+        assert k1 == k2
+
     def test_readable_slice_narrows_key(self):
         session = uuid.uuid4()
         k1 = derive_cache_key(

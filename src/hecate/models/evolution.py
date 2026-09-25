@@ -58,6 +58,9 @@ class SkillCandidateStatus(StrEnum):
     PENDING = "pending"
     VALIDATING = "validating"
     VALIDATED = "validated"
+    # Gate passed its content checks but behavioral evaluation was skipped
+    # (no eval runner wired) — reviewable, but not claimed behavior-validated.
+    CONTENT_VALIDATED = "content_validated"
     VALIDATION_FAILED = "validation_failed"
     INSUFFICIENT_DATA = "insufficient_data"
     BLOCKED = "blocked"

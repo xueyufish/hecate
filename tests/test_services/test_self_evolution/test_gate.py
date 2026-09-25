@@ -220,4 +220,20 @@ class TestEvolutionGate:
         statuses = {c["name"]: c["status"] for c in report.checks}
         assert statuses["dataset_regression"] == "skipped"
         assert statuses["with_without_baseline"] == "skipped"
-        assert report.overall == "pass"
+        assert report.overall == "pass_unverified"
+
+    async def test_runner_returning_none_marks_unverified(self, db_session: AsyncSession) -> None:
+        await _freeze_samples(db_session, 3, with_evidence=True)
+
+        async def judge(instruction: str, transcript: str) -> str:
+            return "NO" if "degrade" in instruction else "YES"
+
+        async def runner(candidate: Any, *, bind_skill: bool) -> float | None:
+            return None
+
+        gate = EvolutionGate(db_session, runner, judge_fn=judge)
+        report = await gate.validate(_candidate(), WS_A, AGENT)
+
+        statuses = {c["name"]: c["status"] for c in report.checks}
+        assert statuses["dataset_regression"] == "skipped"
+        assert report.overall == "pass_unverified"
