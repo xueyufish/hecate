@@ -85,6 +85,7 @@ class RedisSessionStateStore(SessionStateStore):
         self._key_prefix = key_prefix if key_prefix is not None else settings.SESSION_STATE_KEY_PREFIX
         self._ttl_seconds = ttl_seconds
         self._redis: aioredis.Redis | None = None
+        self._release_lua: Any | None = None
 
     def _build_key(self, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID) -> str:
         return f"{self._key_prefix}{org_id}:{user_id}:{session_id}"
@@ -160,18 +161,26 @@ class RedisSessionStateStore(SessionStateStore):
             yield
         finally:
             try:
-                # Owner-safe release: GET-then-DEL only if the stored value
-                # matches our owner UUID. We do this in Python rather than a
-                # Lua script to keep fakeredis compatibility (fakeredis does
-                # not support EVAL by default) and because the rare race
-                # window (TTL expires between GET and DEL) is acceptable for
-                # session-state locks — worst case: we delete a successor's
-                # lock and they retry through their own retry budget.
-                current = await redis.get(lock_key)
-                if current == owner:
-                    await redis.delete(lock_key)
+                # Owner-safe release via the Lua script: GET-compare-and-DEL
+                # runs atomically server-side, so a TTL expiry + successor
+                # takeover between check and delete cannot delete a
+                # successor's lock. Some environments cannot run EVAL
+                # (fakeredis without lua in tests) — degrade to a plain
+                # GET-then-DEL for that call and log it; the tiered mode's
+                # PG row lock remains the safety net there.
+                if self._release_lua is None:
+                    self._release_lua = redis.register_script(_RELEASE_LOCK_SCRIPT)
+                await self._release_lua(keys=[lock_key], args=[owner])
             except Exception:
-                logger.warning("Redis lock release failed (key=%s owner=%s)", lock_key, owner, exc_info=True)
+                logger.warning(
+                    "Redis Lua release unavailable (key=%s); falling back to GET/DEL", lock_key, exc_info=True
+                )
+                try:
+                    current = await redis.get(lock_key)
+                    if current == owner:
+                        await redis.delete(lock_key)
+                except Exception:
+                    logger.warning("Redis lock release failed (key=%s owner=%s)", lock_key, owner, exc_info=True)
 
     async def save(self, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID, state: SessionState) -> None:
         key = self._build_key(org_id, user_id, session_id)

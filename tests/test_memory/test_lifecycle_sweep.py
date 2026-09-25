@@ -257,3 +257,53 @@ async def test_l4_capacity_groups_by_agent(db_session: AsyncSession) -> None:
     assert a1.archived_at is not None
     assert a2.archived_at is None
     assert b1.archived_at is None
+
+
+async def test_l4_ttl_uses_agent_level_policy(db_session: AsyncSession) -> None:
+    """L4 TTL resolves per agent: workspace TTL off, agent-A TTL on.
+
+    A workspace-level resolution would apply the workspace's (zero) L4 TTL
+    to every agent and archive nothing — agent-level tightening must win."""
+    from hecate.models.memory import KnowledgeMemoryModel
+
+    await upsert_policy(db_session, _WS, None, params={"ttl": {"l4_days": 0}})
+    await upsert_policy(db_session, _WS, _AGENT, params={"ttl": {"l4_days": 7}})
+    invalidate_memory_policy_cache()
+    agent_b = uuid.uuid4()
+    old = (_NOW - timedelta(days=30)).replace(tzinfo=None)
+    a1 = KnowledgeMemoryModel(workspace_id=_WS, agent_id=_AGENT, content="a1", last_confirmed_at=old)
+    b1 = KnowledgeMemoryModel(workspace_id=_WS, agent_id=agent_b, content="b1", last_confirmed_at=old)
+    db_session.add_all([a1, b1])
+    await db_session.flush()
+
+    stats = await run_lifecycle_sweep(db_session, now=_NOW)
+
+    assert stats["ttl_archived"] == 1
+    assert a1.archived_at is not None
+    assert b1.archived_at is None
+
+
+async def test_l4_capacity_uses_agent_level_policy(db_session: AsyncSession) -> None:
+    """L4 capacity resolves per agent: workspace cap loose, agent-A cap tight."""
+    from hecate.models.memory import KnowledgeMemoryModel
+
+    await upsert_policy(db_session, _WS, None, params={"capacity": {"l4": 5}})
+    await upsert_policy(db_session, _WS, _AGENT, params={"capacity": {"l4": 1}})
+    invalidate_memory_policy_cache()
+    agent_b = uuid.uuid4()
+    old = (_NOW - timedelta(days=30)).replace(tzinfo=None)
+    a1 = KnowledgeMemoryModel(workspace_id=_WS, agent_id=_AGENT, content="a1", last_confirmed_at=old)
+    a2 = KnowledgeMemoryModel(workspace_id=_WS, agent_id=_AGENT, content="a2", importance=0.9, last_confirmed_at=old)
+    b1 = KnowledgeMemoryModel(workspace_id=_WS, agent_id=agent_b, content="b1", last_confirmed_at=old)
+    b2 = KnowledgeMemoryModel(workspace_id=_WS, agent_id=agent_b, content="b2", last_confirmed_at=old)
+    db_session.add_all([a1, a2, b1, b2])
+    await db_session.flush()
+
+    stats = await run_lifecycle_sweep(db_session, now=_NOW)
+
+    # Only agent A is over its own cap; agent B's two rows fit the workspace cap.
+    assert stats["evicted"] == 1
+    assert a1.archived_at is not None
+    assert a2.archived_at is None
+    assert b1.archived_at is None
+    assert b2.archived_at is None

@@ -104,26 +104,22 @@ async def test_redis_lock_contention_raises_conflict():
 async def test_redis_lock_release_owner_mismatch_no_delete():
     """Owner-safe release checks owner UUID — A's release MUST NOT delete B's lock.
 
-    Implementation uses GET-then-DEL (not Lua) for fakeredis compatibility.
-    The rare race window (TTL expires between GET and DEL) is acceptable for
-    session-state locks — worst case: a successor's lock is deleted and they
-    retry through their own retry budget."""
+    Release runs the Lua compare-and-delete script atomically server-side;
+    environments without EVAL (fakeredis without lua) fall back to
+    GET-then-DEL and the same ownership check applies."""
     fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
     store = _make_redis_store(fake)
 
     org, user, session = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     lock_key = store._build_lock_key(org, user, session)
 
-    # A holds the lock.
-    await fake.set(lock_key, "owner-A", nx=True, px=30000)
+    async with store.acquire_session_lock(org, user, session):
+        # Simulate TTL expiry + successor takeover inside A's critical
+        # section: the stored owner is no longer A's.
+        await fake.set(lock_key, "owner-successor", px=30000)
 
-    # Simulate B's release call (wrong owner): GET returns "owner-A" which
-    # != "owner-B", so DEL is skipped.
-    current = await fake.get(lock_key)
-    if current == "owner-B":
-        await fake.delete(lock_key)
-    still_there = await fake.get(lock_key)
-    assert still_there == "owner-A", "owner-safe release MUST NOT delete with mismatched owner"
+    # A's release must not delete the successor's lock.
+    assert await fake.get(lock_key) == "owner-successor"
 
 
 # ---------------------------------------------------------------------------
