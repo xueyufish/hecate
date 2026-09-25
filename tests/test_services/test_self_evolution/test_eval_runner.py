@@ -13,6 +13,7 @@ import uuid
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.evaluation import EvaluationTaskModel
@@ -152,3 +153,62 @@ class TestOfflineEvaluationRunner:
 
         assert await runner(_CANDIDATE, bind_skill=True, agent_id=AGENT) is None
         assert stub_engine == []
+
+
+class TestMetricDirectionSafety:
+    """Non-normalized metrics must never become the gate score (B4 hotfix).
+
+    The gate compares higher-is-better with a 0-1 threshold: a latency-only
+    task returning 900 as its score would make a slower run count as an
+    improvement. Only pass_rate may stand in when the summary lacks it.
+    """
+
+    async def test_latency_metric_never_becomes_score(self, db_session, stub_engine, stub_runner_helpers) -> None:
+        db_session.add(_task())
+        # Strip the threshold from the task config so no summary pass_rate exists.
+        task = (await db_session.execute(select(EvaluationTaskModel))).scalars().one()
+        task.config.pop("threshold", None)
+        await db_session.flush()
+
+        # Engine stub with no summary and a latency-only metric average.
+        class _LatencyResult:
+            run_id = uuid.uuid4()
+            metric_averages = {"latency_ms": 900.0}
+
+        orig_run = stub_engine  # captured calls list
+
+        import hecate.studio.self_evolution.eval_runner as er
+
+        class _EngineNoSummary:
+            def __init__(self, db) -> None:
+                pass
+
+            async def run(self, **kwargs):
+                orig_run.append(kwargs)
+                return _LatencyResult()
+
+        import hecate.ops.evaluation.engine as engine_mod
+
+        real_engine = engine_mod.EvaluationEngine
+        engine_mod.EvaluationEngine = _EngineNoSummary
+        try:
+            runner = er.OfflineEvaluationRunner(db_session)
+            score = await runner(_CANDIDATE, bind_skill=True, agent_id=AGENT)
+        finally:
+            engine_mod.EvaluationEngine = real_engine
+
+        assert score is None  # direction unknown → skipped, not 900
+
+    def test_pass_rate_metric_still_used(self) -> None:
+        from types import SimpleNamespace
+
+        from hecate.studio.self_evolution.eval_runner import _primary_metric_average
+
+        result = SimpleNamespace(metric_averages={"pass_rate": 0.8})
+        assert _primary_metric_average(result) == 0.8
+
+        result = SimpleNamespace(metric_averages={"latency_ms": 900.0})
+        assert _primary_metric_average(result) is None
+
+        result = SimpleNamespace(metric_averages={})
+        assert _primary_metric_average(result) is None

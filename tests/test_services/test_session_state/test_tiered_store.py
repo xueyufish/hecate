@@ -46,9 +46,13 @@ def _summary() -> SessionSummary:
     )
 
 
-async def test_tiered_save_writes_redis_then_pg():
+async def test_tiered_save_writes_pg_then_redis():
+    """PG (source of truth) persists before the Redis cache fill."""
     redis = _redis_store_mock()
     pg = _pg_store_mock()
+    order: list[str] = []
+    pg.save.side_effect = lambda *a, **k: order.append("pg")
+    redis.save.side_effect = lambda *a, **k: order.append("redis")
 
     tiered = TieredSessionStateStore(redis_store=redis, postgres_store=pg)
     state = SessionState(channel_state={"k": "v"})
@@ -56,34 +60,35 @@ async def test_tiered_save_writes_redis_then_pg():
 
     await tiered.save(org_id, user_id, session_id, state)
 
+    assert order == ["pg", "redis"]
     redis.save.assert_awaited_once_with(org_id, user_id, session_id, state)
     pg.save.assert_awaited_once_with(org_id, user_id, session_id, state)
 
 
-async def test_tiered_save_propagates_pg_failure_even_when_redis_succeeds():
+async def test_tiered_save_pg_failure_propagates_and_invalidates_cache():
+    """A failed durable write must not leave the old cache servable."""
     redis = _redis_store_mock()
+    pg = _pg_store_mock()
+    pg.save = AsyncMock(side_effect=ConnectionError("PG down"))
+    org_id, user_id, session_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+
+    tiered = TieredSessionStateStore(redis_store=redis, postgres_store=pg)
+    with pytest.raises(ConnectionError):
+        await tiered.save(org_id, user_id, session_id, SessionState())
+
+    redis.invalidate.assert_awaited_once_with(org_id, user_id, session_id)
+    redis.save.assert_not_awaited()
+
+
+async def test_tiered_save_pg_failure_not_masked_by_invalidate_error():
+    redis = _redis_store_mock()
+    redis.invalidate = AsyncMock(side_effect=ConnectionError("Redis down too"))
     pg = _pg_store_mock()
     pg.save = AsyncMock(side_effect=ConnectionError("PG down"))
 
     tiered = TieredSessionStateStore(redis_store=redis, postgres_store=pg)
-    with pytest.raises(ConnectionError):
+    with pytest.raises(ConnectionError, match="PG down"):
         await tiered.save(uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), SessionState())
-
-    redis.save.assert_awaited_once()
-
-
-async def test_tiered_save_continues_when_redis_fails_but_pg_failure_propagates():
-    redis = _redis_store_mock()
-    redis.save = AsyncMock(side_effect=ConnectionError("Redis down"))
-    pg = _pg_store_mock()
-    pg.save = AsyncMock(side_effect=RuntimeError("PG also down"))
-
-    tiered = TieredSessionStateStore(redis_store=redis, postgres_store=pg)
-    with pytest.raises(RuntimeError):
-        await tiered.save(uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), SessionState())
-
-    redis.save.assert_awaited_once()
-    pg.save.assert_awaited_once()
 
 
 async def test_tiered_save_swallows_redis_when_pg_succeeds():

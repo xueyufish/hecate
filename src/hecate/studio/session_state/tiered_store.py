@@ -7,9 +7,12 @@ the design document for the ``session-state-store-redis-pg`` change.
 
 Coordination protocols:
 
-- **Write-through** — ``save`` writes to Redis first, then to PostgreSQL.
-  Redis failure is logged and swallowed (Redis is best-effort); PostgreSQL
-  failure propagates as a real error because PG is the source of truth.
+- **Write-through** — ``save`` persists to PostgreSQL first (source of
+  truth), then fills the Redis hot cache. PostgreSQL failure propagates
+  as a real error and invalidates any cached copy, so a later ``load``
+  falls back to the authoritative store instead of serving state whose
+  durable write failed. Redis cache-fill failure is logged and swallowed
+  (Redis is best-effort).
 - **Read-through** — ``load`` attempts Redis first; on hit, returns
   immediately. On miss or Redis failure, falls back to PostgreSQL; if PG
   returns a state, warms the Redis cache by writing it back. PG failure
@@ -21,6 +24,7 @@ Coordination protocols:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import uuid
 from collections.abc import AsyncGenerator
@@ -43,17 +47,28 @@ class TieredSessionStateStore(SessionStateStore):
         self._postgres = postgres_store
 
     async def save(self, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID, state: SessionState) -> None:
+        # PG first (source of truth). Writing Redis first left a window
+        # where the durable write failed but subsequent loads kept serving
+        # the never-persisted state from cache until TTL expiry.
+        try:
+            await self._postgres.save(org_id, user_id, session_id, state)
+        except Exception:
+            # Drop any cached copy so reads fall back to the authoritative
+            # store; a failure to invalidate must not mask the original error.
+            with contextlib.suppress(Exception):
+                await self._redis.invalidate(org_id, user_id, session_id)
+            raise
         try:
             await self._redis.save(org_id, user_id, session_id, state)
         except Exception:
             logger.warning(
-                "TieredSessionStateStore Redis save failed (org=%s user=%s session=%s); falling back to PG-only",
+                "TieredSessionStateStore Redis cache fill failed "
+                "(org=%s user=%s session=%s); PG holds the authoritative copy",
                 org_id,
                 user_id,
                 session_id,
                 exc_info=True,
             )
-        await self._postgres.save(org_id, user_id, session_id, state)
 
     async def load(self, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID) -> SessionState | None:
         try:
