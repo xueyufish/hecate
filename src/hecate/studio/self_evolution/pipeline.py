@@ -104,6 +104,8 @@ class EvolutionPipeline:
             candidate.validation_report = report.to_dict()
             if report.overall == "pass":
                 candidate.status = SkillCandidateStatus.VALIDATED.value
+            elif report.overall == "pass_unverified":
+                candidate.status = SkillCandidateStatus.CONTENT_VALIDATED.value
             elif report.overall == "insufficient_data":
                 candidate.status = SkillCandidateStatus.INSUFFICIENT_DATA.value
             else:

@@ -114,6 +114,20 @@ class TestReview:
                 decision="approved",
             )
 
+    async def test_content_validated_candidate_reviewable(self, db_session: AsyncSession) -> None:
+        """Gate pass without behavioral eval still flows to human review."""
+        candidate = await _seed_candidate(db_session, status="content_validated")
+
+        service = CandidateReviewService(db_session)
+        reviewed = await service.review(
+            workspace_id=WS_A,
+            candidate_id=candidate.id,
+            reviewer="admin",
+            decision="approved",
+        )
+
+        assert reviewed.status == "published"
+
     async def test_review_scoped_to_workspace(self, db_session: AsyncSession) -> None:
         candidate = await _seed_candidate(db_session)
 

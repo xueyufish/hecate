@@ -13,9 +13,11 @@ forbids module-level cross-domain imports.
 Design decisions (openspec/changes/node-cache-policy/design.md):
 - In-memory per-replica OrderedDict with LRU eviction and per-entry TTL
   (monotonic clock — immune to wall-clock adjustments)
-- Default key = scope namespace + node id + node-type identity hash
-  (CONVERSATION nodes fold in their model config so a model upgrade
-  invalidates entries naturally) + canonical JSON of the node's input slice
+- Default key = scope namespace + node id + full node-config identity hash
+  (any semantic config change — a CONVERSATION model upgrade, a TOOL node
+  rebound to a different tool — self-invalidates; the ``cache`` block itself
+  is excluded, TTL tweaks are policy not semantics) + canonical JSON of the
+  node's input slice
 - Key functions are registered by name, mirroring the accumulator reducer
   registry in ``channel.py``; unknown names fail at compile time
 """
@@ -34,10 +36,17 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ENTRIES = 4096
 
-#: Config keys that participate in the CONVERSATION identity hash. A change
-#: to any of them yields a different cache key, so model/parameter upgrades
-#: never serve stale outputs.
-_CONVERSATION_IDENTITY_KEYS = ("model", "temperature", "top_p", "system_prompt")
+
+def _identity_payload(node_config: dict[str, Any]) -> dict[str, Any]:
+    """Semantic identity of a node: its full config minus the ``cache`` block.
+
+    Hashing the whole config (not just model keys) closes the stale-hit gap
+    where a TOOL node is rebound to a different tool under the same node id
+    and input slice — the old four-key hash left that entry servable. The
+    ``cache`` block stays out so TTL/scope tweaks do not invalidate entries
+    that are semantically identical.
+    """
+    return {k: v for k, v in node_config.items() if k != "cache"}
 
 
 class UnknownKeyFuncError(Exception):
@@ -210,9 +219,10 @@ def derive_cache_key(
 
     Layout: ``{scope}:{scope_id}:{node_id}:{identity_hash}:{slice_hash}``.
 
-    - ``identity_hash``: CONVERSATION nodes fold in their model-affecting
-      config so model/parameter upgrades self-invalidate; other node types
-      hash to a constant.
+    - ``identity_hash``: canonical hash of the node's full config minus the
+      ``cache`` block, so any semantic change — model/parameter upgrades on
+      CONVERSATION nodes, tool rebinding or param changes on TOOL nodes —
+      self-invalidates entries.
     - ``slice_hash``: canonical JSON of the node's input — the declared
       readable channels, overridden by ``branch_slice`` for fan-out branch
       invocations (the packet state IS the branch input), falling back to
@@ -242,11 +252,7 @@ def derive_cache_key(
         material = str(get_node_key_func(policy.key_func)(node_id, snapshot))
         return f"{policy.scope}:{scope_id}:{node_id}:{material}"
 
-    # Identity: model-affecting config keys are absent on non-CONVERSATION
-    # nodes, so their identity hash is a constant — only CONVERSATION nodes
-    # currently carry self-invalidating identity material.
-    identity_payload = {key: node_config.get(key) for key in _CONVERSATION_IDENTITY_KEYS}
-    identity_hash = _canonical_hash(identity_payload)
+    identity_hash = _canonical_hash(_identity_payload(node_config))
 
     if branch_slice is not None:
         slice_payload: Any = branch_slice
