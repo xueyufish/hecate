@@ -115,7 +115,7 @@ class TestPipelineRun:
         async def judge(instruction: str, transcript: str) -> str:
             return "NO" if "degrade" in instruction else "YES"
 
-        async def runner(candidate: Any, *, bind_skill: bool) -> float:
+        async def runner(candidate: Any, *, bind_skill: bool, agent_id) -> float:
             return 0.9 if bind_skill else 0.7
 
         pipeline = EvolutionPipeline(

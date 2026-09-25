@@ -52,7 +52,25 @@ class EvolutionAgent:
                 pending = await EvolutionRepository(db).list_pending_inputs(workspace_id, limit=1)
                 if not pending:
                     continue
-                pipeline = EvolutionPipeline(db, self._event_store)
+                pipeline = EvolutionPipeline(db, self._event_store, eval_runner=_build_eval_runner(db))
                 await pipeline.run(workspace_id)
             except Exception:
                 logger.exception("Evolution tick failed for workspace %s", workspace_id)
+
+
+def _build_eval_runner(db: Any) -> Any:
+    """Production eval_runner for the gate, honoring the wiring flag.
+
+    Returns an :class:`OfflineEvaluationRunner` when
+    ``SKILL_EVOLUTION_EVAL_WIRING_ENABLED`` is on; ``None`` (gate skips the
+    behavioral checks, pre-wiring semantics) otherwise. The adapter itself
+    degrades to skipped when the agent has no bound offline evaluation
+    task — binding a task is the per-agent opt-in.
+    """
+    from hecate.core.config import settings
+
+    if not settings.SKILL_EVOLUTION_EVAL_WIRING_ENABLED:
+        return None
+    from hecate.studio.self_evolution.eval_runner import OfflineEvaluationRunner
+
+    return OfflineEvaluationRunner(db)

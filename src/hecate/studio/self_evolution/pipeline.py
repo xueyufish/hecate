@@ -38,6 +38,7 @@ class EvolutionPipeline:
         event_store: Any | None = None,  # noqa: ANN401
         *,
         gate: EvolutionGate | None = None,
+        eval_runner: Any | None = None,  # noqa: ANN401
         llm_call_limit: int | None = None,
     ) -> None:
         self._db = db
@@ -45,7 +46,7 @@ class EvolutionPipeline:
         self._prefilter = TrajectoryPrefilter()
         self._attributor = FailureAttributor()
         self._generator = CandidateGenerator(db)
-        self._gate = gate or EvolutionGate(db)
+        self._gate = gate or EvolutionGate(db, eval_runner=eval_runner)
         self._builder = GoldenSubsetBuilder(db)
         self._event_store = event_store
         self._last_attribution_calls = 0

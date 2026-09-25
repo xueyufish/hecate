@@ -145,3 +145,43 @@ async def test_override_keeps_tools_and_model_from_agent_config(db_session):
 
     assert _system_content(capture).startswith("Candidate template")
     assert mock_llm.chat.call_args.kwargs.get("model") == "test-model-x"
+
+
+@pytest.mark.asyncio
+async def test_extra_skill_instructions_append_to_skill_block(db_session):
+    """CandidateSkillBinding-style definitions append an ad-hoc skill block.
+
+    The self-evolution gate rolls out a candidate skill via
+    ``extra_skill_instructions`` — it must land in the system prompt
+    alongside the agent's configured skills, without replacing the persona
+    (unlike prompt_override)."""
+    from types import SimpleNamespace
+
+    agent = _make_agent()
+    db_session.add(agent)
+    await db_session.flush()
+
+    capture: dict = {}
+    definition = SimpleNamespace(
+        extra_skill_instructions="## Procedure\n\nRead the schema first.",
+    )
+    await _execute(db_session, agent, capture, agent_definition=definition)
+
+    content = _system_content(capture)
+    assert "Production persona." in content  # persona untouched
+    assert "Read the schema first." in content
+
+
+@pytest.mark.asyncio
+async def test_extra_skill_instructions_absent_leaves_block_unchanged(db_session):
+    from types import SimpleNamespace
+
+    agent = _make_agent()
+    db_session.add(agent)
+    await db_session.flush()
+
+    capture: dict = {}
+    definition = SimpleNamespace(prompt_override=None)  # no extra_skill attr
+    await _execute(db_session, agent, capture, agent_definition=definition)
+
+    assert "Read the schema first." not in _system_content(capture)

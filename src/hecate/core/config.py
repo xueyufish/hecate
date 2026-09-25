@@ -354,6 +354,12 @@ class Settings(BaseSettings):
     SKILL_EVOLUTION_QUALITY_THRESHOLD: float = 0.6
     SKILL_EVOLUTION_ATTRIBUTION_MODEL: str = "gpt-4o-mini"
     SKILL_EVOLUTION_RUN_LLM_CALL_LIMIT: int = 50
+    # Behavioral evaluation wiring for the evolution gate: when on, the gate
+    # runs the agent's bound offline evaluation task (7.2c) with/without the
+    # candidate skill instead of skipping those checks. Off by default — two
+    # full evaluation legs per candidate are a real cost, and deployments
+    # opt in by binding an offline eval task to the agent.
+    SKILL_EVOLUTION_EVAL_WIRING_ENABLED: bool = False
 
     # Prompt self-optimization (6.19). Disabled by default: dataset-driven
     # prompt optimization burns real rollout + LLM budget, so deployments

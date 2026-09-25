@@ -362,11 +362,26 @@ class GraphCompiler:
         ttl positivity, scope value) and the registry-dependent check the
         schema cannot do: ``key_func`` must name a registered function.
 
+        Cache-safety contract (B2): a cache hit fabricates the WorkerResult
+        and skips the worker, so nodes whose execution carries external
+        side effects or permission/approval checks may not be cached.
+        Allowed types are the side-effect-free ones (VARIABLE_SET,
+        SUGGESTION, CONDITION). TOOL_CALL / CONVERSATION / AGENT /
+        COORDINATOR / CONTROLLER are rejected (they can invoke tools — a
+        hit would skip the approval and audit path inside tool execution);
+        KNOWLEDGE_RETRIEVAL is rejected until cache keys carry a
+        permission/visibility snapshot (6.30/9.3 retrieval-permission
+        propagation).
+
         Raises:
-            GraphValidationError: if a cache declaration is malformed or
-                references an unregistered key function.
+            GraphValidationError: if a cache declaration is malformed,
+                references an unregistered key function, or sits on a
+                non-cacheable node type.
         """
         from hecate.runtime.node_cache import CachePolicy, UnknownKeyFuncError, get_node_key_func
+        from hecate.runtime.types import NodeType
+
+        cacheable_types = frozenset({NodeType.VARIABLE_SET, NodeType.SUGGESTION, NodeType.CONDITION})
 
         for node_id, node in config.nodes.items():
             raw = node.config.get("cache")
@@ -375,6 +390,15 @@ class GraphCompiler:
             if not isinstance(raw, dict):
                 raise GraphValidationError(
                     f"cache config on '{node_id}' must be an object, got {type(raw).__name__}",
+                    field=f"nodes[{node_id}].config.cache",
+                )
+            if node.type not in cacheable_types:
+                raise GraphValidationError(
+                    f"cache policy on '{node_id}' is not allowed on node type '{node.type}': a cache hit "
+                    "skips the worker, so only side-effect-free types may be cached "
+                    f"({', '.join(sorted(t.value for t in cacheable_types))}). Tool/LLM-loop and "
+                    "knowledge-retrieval nodes carry external effects or permission-scoped results and "
+                    "must re-execute every run.",
                     field=f"nodes[{node_id}].config.cache",
                 )
             try:
