@@ -98,6 +98,58 @@ async def test_timeout_raises() -> None:
         await task
 
 
+async def test_timeout_does_not_release_holders_lock() -> None:
+    """A timed-out waiter must not free a lock held by another caller.
+
+    asyncio.Lock has no owner tracking — an unconditional release on the
+    timeout path lets a later caller enter while the original holder is
+    still inside its critical section.
+    """
+    manager = SessionLockManager(default_timeout=5.0)
+
+    async with manager.acquire("s1"):
+        with pytest.raises(asyncio.TimeoutError):
+            async with manager.acquire("s1", timeout=0.05):
+                pass
+
+        # The first caller still holds exclusivity: a third acquisition
+        # must time out too, not slip into the freed lock.
+        with pytest.raises(asyncio.TimeoutError):
+            async with manager.acquire("s1", timeout=0.05):
+                pass
+
+
+async def test_cancelled_waiter_does_not_release_holders_lock() -> None:
+    manager = SessionLockManager(default_timeout=5.0)
+
+    async def waiter() -> None:
+        async with manager.acquire("s1", timeout=10.0):
+            pass
+
+    async with manager.acquire("s1"):
+        task = asyncio.create_task(waiter())
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        with pytest.raises(asyncio.TimeoutError):
+            async with manager.acquire("s1", timeout=0.05):
+                pass
+
+
+async def test_body_exception_releases_lock() -> None:
+    manager = SessionLockManager(default_timeout=5.0)
+
+    with pytest.raises(ValueError, match="boom"):
+        async with manager.acquire("s1"):
+            raise ValueError("boom")
+
+    # Released on exception: the next acquisition succeeds immediately.
+    async with manager.acquire("s1") as info:
+        assert info["queue_position"] == 0
+
+
 async def test_cleanup_session() -> None:
     manager = SessionLockManager(default_timeout=5.0)
 

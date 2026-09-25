@@ -16,12 +16,12 @@
 |----------|----------|------|-----------|
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
-| **P3 Trustworthy** | 87 | 87/87 (100%) | **0** — closed |
-| **P4 Intelligent** | 152 | 28/152 (18%) | 124 |
-| **P5 Ecosystem** | 71 | 0/71 (0%) | 71 |
-| **Total** | **393** | **198/393 (50%)** | **195** |
+| **P3 Trustworthy** | 86 | 85/86 (99%) | 1 — 8.6-abc 🔀 merged into ChannelBase |
+| **P4 Intelligent** | 154 | 47/154 (31%) | 107 |
+| **P5 Ecosystem** | 66 | 1/66 (2%) | 65 |
+| **Total** | **390** | **217/390 (56%)** | **173** |
 
-> Row counts are physical feature-catalog rows (2026-08-22 basis; verified by grep). Prior figures (127/101/60, total 372) used audit-counting that predated the reclassification — see feature-catalog overview note for the reconciliation.
+> Row counts mirror the feature-catalog counting basis (2026-09-25 re-audit: physical ID rows per phase section; delivered = ✅ in the ID or Feature column). The feature-catalog counting note is the single source of truth — update it there first, then sync this table. Prior figures (393/198) predated the re-audit and had drifted from the catalog.
 
 ---
 

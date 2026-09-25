@@ -109,8 +109,9 @@ def register_node_key_func(name: str, fn: Any) -> None:
     Args:
         name: The name referenced by ``cache.key_func`` in a node config.
         fn: Callable ``(node_id, snapshot) -> str`` returning the key material
-            for the node's input. The scope namespace and node id are still
-            prepended by the engine — isolation is never opt-out.
+            for the node's input. The scope namespace, node id, and config
+            identity hash are still prepended by the engine — isolation and
+            semantic invalidation are never opt-out.
     """
     _KEY_FUNCS[name] = fn
     logger.debug("Registered node cache key function '%s' → %s", name, fn)
@@ -228,9 +229,9 @@ def derive_cache_key(
       invocations (the packet state IS the branch input), falling back to
       the full snapshot when the node declares no readable channels
       (never under-key: an undeclared input must not produce spurious hits).
-    - A registered ``key_func`` replaces identity+slice derivation; the
-      scope namespace and node id prefix always remain (isolation is
-      never opt-out).
+    - A registered ``key_func`` replaces the slice derivation only; the
+      scope namespace, node id, and config identity hash always remain
+      (isolation and semantic invalidation are never opt-out).
 
     Raises:
         RuntimeError: when ``scope="tenant"`` but no ``tenant_id`` was
@@ -250,7 +251,11 @@ def derive_cache_key(
 
     if policy.key_func is not None:
         material = str(get_node_key_func(policy.key_func)(node_id, snapshot))
-        return f"{policy.scope}:{scope_id}:{node_id}:{material}"
+        # The config identity hash is non-bypassable: a custom key function
+        # narrows the input dimension only, so a semantic config change
+        # (e.g. a rebound tool) still invalidates entries.
+        identity_hash = _canonical_hash(_identity_payload(node_config))
+        return f"{policy.scope}:{scope_id}:{node_id}:{identity_hash}:{material}"
 
     identity_hash = _canonical_hash(_identity_payload(node_config))
 
