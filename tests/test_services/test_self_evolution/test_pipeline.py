@@ -132,6 +132,10 @@ class TestPipelineRun:
         assert len(candidates) == 1
         assert candidates[0].status == "validated"
         assert candidates[0].validation_report["overall"] == "pass"
+        # B3: the verdict is bound to the exact content it validated.
+        from hecate.studio.self_evolution.gate import candidate_content_hash
+
+        assert candidates[0].validation_report["content_hash"] == candidate_content_hash(candidates[0])
 
     async def test_budget_exceeded_stops_run(self, db_session: AsyncSession, monkeypatch) -> None:
         _patch_projection(monkeypatch, [{"role": "user", "content": "hello"}])

@@ -20,6 +20,7 @@ from hecate.models.evolution import (
     SkillCandidateStatus,
 )
 from hecate.models.skill import SkillModel
+from hecate.studio.self_evolution.gate import candidate_content_hash
 from hecate.studio.self_evolution.repository import EvolutionRepository
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,19 @@ class CandidateReviewService:
                     if before != after:
                         edit_diff[field_name] = {"before": before, "after": after}
                         setattr(candidate, field_name, after)
+
+        # Review-revalidation (B3): the gate bound its verdict to the exact
+        # content it validated (validation_report.content_hash). If the
+        # content at review time differs — edited here or drifted through
+        # any other path — mark the report stale before publishing so the
+        # published skill carries the honest provenance: human-approved,
+        # but not the content the behavioral checks ran against.
+        report = dict(candidate.validation_report or {})
+        recorded_hash = report.get("content_hash")
+        if recorded_hash and recorded_hash != candidate_content_hash(candidate) and not report.get("stale"):
+            report["stale"] = True
+            report["stale_reason"] = "content_changed_after_validation"
+            candidate.validation_report = report
 
         skill = await self._publish_skill(workspace_id, candidate)
 

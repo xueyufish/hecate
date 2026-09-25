@@ -45,6 +45,7 @@ from sqlalchemy import (  # noqa: I001
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -161,6 +162,12 @@ class MemoryModel(BaseModel):
     # (superseded_by chains stay intact) but are excluded from every
     # retrieval path; restore clears the marker.
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    # Promotion lineage (4.25 lifecycle): set on the workspace-shared copy
+    # created by the promotion gate — pointer to the source actor-scoped
+    # row. Hard-uniqueness (no deleted filter on the index): one promoted
+    # copy EVER per source, so a forgotten/withdrawn shared copy is never
+    # silently re-created by a later sweep.
+    promoted_from_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True, default=None)
 
     __table_args__ = (
         Index("idx_memories_workspace", "workspace_id", "deleted"),
@@ -174,6 +181,13 @@ class MemoryModel(BaseModel):
             "actor_id",
         ),
         Index("idx_memories_archived", "workspace_id", "archived_at"),
+        Index(
+            "ux_memories_promoted_from",
+            "promoted_from_id",
+            unique=True,
+            postgresql_where=text("promoted_from_id IS NOT NULL"),
+            sqlite_where=text("promoted_from_id IS NOT NULL"),
+        ),
     )
 
 
