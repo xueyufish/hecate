@@ -20,6 +20,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncGenerator
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -262,3 +263,63 @@ async def client(auth_context: AuthContext) -> AsyncGenerator[AsyncClient, None]
 
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+
+
+# Raw platform admin bootstrap token used by auth-gate tests.
+PLATFORM_ADMIN_TEST_TOKEN = "platform-admin-test-token"
+
+
+@pytest_asyncio.fixture
+async def anonymous_client() -> AsyncGenerator[AsyncClient, None]:
+    """HTTP client with no authentication overrides — requests are anonymous.
+
+    Only the database is redirected to the in-memory test engine; the auth
+    dependency chain runs for real, so credential-less requests exercise the
+    401 path end to end.
+    """
+    from hecate.core.database import get_db
+    from hecate.main import app
+
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        async with test_session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+    app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture
+def platform_admin_token(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Enable platform admin token bootstrap for the test.
+
+    Yields the raw admin token to send as ``Authorization: Bearer <token>``;
+    settings are restored after the test.
+    """
+    from hecate.core.config import settings
+
+    monkeypatch.setattr(settings, "PLATFORM_ADMIN_API_KEYS", PLATFORM_ADMIN_TEST_TOKEN)
+    monkeypatch.setattr(settings, "PLATFORM_ADMIN_EMAILS", "")
+    return PLATFORM_ADMIN_TEST_TOKEN
+
+
+@pytest.fixture
+def platform_admin_email(monkeypatch: pytest.MonkeyPatch) -> str:
+    """Enable platform admin email allowlist bootstrap for the test."""
+    from hecate.core.config import settings
+
+    monkeypatch.setattr(settings, "PLATFORM_ADMIN_API_KEYS", "")
+    monkeypatch.setattr(settings, "PLATFORM_ADMIN_EMAILS", "root@hecate.dev")
+    return "root@hecate.dev"
