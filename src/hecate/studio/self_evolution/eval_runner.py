@@ -125,9 +125,15 @@ class OfflineEvaluationRunner:
         summary = getattr(run, "summary", None)
         pass_rate = summary.get("pass_rate") if isinstance(summary, dict) else None
         if pass_rate is None:
-            # No threshold summary on the task — fall back to the primary
-            # metric average so the with/without comparison still has signal.
+            # No threshold summary on the task — only an explicit pass_rate
+            # metric may stand in (direction-safe); anything else degrades
+            # the leg to skipped rather than guessing a metric direction.
             pass_rate = _primary_metric_average(result)
+            if pass_rate is None:
+                logger.info(
+                    "Bound eval task %s has no pass_rate (summary or metric); behavioral leg skipped",
+                    task.id,
+                )
         logger.info(
             "Behavioral leg done (candidate=%s bind_skill=%s task=%s run=%s pass_rate=%s)",
             getattr(candidate, "id", None),
@@ -177,17 +183,14 @@ class OfflineEvaluationRunner:
 
 
 def _primary_metric_average(result: Any) -> float | None:
-    """A single comparable score from a run result without a threshold summary.
+    """The gate score from a run result without a threshold summary.
 
-    Prefers an explicit ``pass_rate`` metric; otherwise the single-metric
-    average. Multi-metric tasks without pass_rate return None — averaging
-    across heterogeneous metrics would be meaningless.
+    Only ``pass_rate`` may serve as the gate score: the gate compares
+    higher-is-better and applies a 0-1 threshold, so any other metric
+    (latency, cost, error counts…) would invert the comparison semantics —
+    a slower run must never score "higher". Tasks without a pass_rate
+    metric return None → the gate records the behavioral check as skipped
+    rather than guessing a direction.
     """
     averages: dict[str, float] = getattr(result, "metric_averages", None) or {}
-    if not averages:
-        return None
-    if "pass_rate" in averages:
-        return averages["pass_rate"]
-    if len(averages) == 1:
-        return next(iter(averages.values()))
-    return None
+    return averages.get("pass_rate")

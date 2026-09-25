@@ -202,6 +202,16 @@ class RedisSessionStateStore(SessionStateStore):
         except Exception:
             logger.warning("Redis SessionStateStore save failed (key=%s)", key, exc_info=True)
 
+    async def invalidate(self, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID) -> None:
+        """Drop the cached copy — used when the authoritative write failed.
+
+        A plain key delete suffices (this is the data key, not the lock key);
+        errors propagate to the tiered store, which suppresses them so they
+        never mask the original persistence failure.
+        """
+        redis = await self._get_redis()
+        await redis.delete(self._build_key(org_id, user_id, session_id))
+
     async def load(self, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID) -> SessionState | None:
         key = self._build_key(org_id, user_id, session_id)
         try:

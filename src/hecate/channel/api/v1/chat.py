@@ -174,16 +174,27 @@ async def create_chat_completion(
         try:
             # Lazy: studio is a sibling domain — cross-domain access is
             # function-level only (no module-level structural coupling).
-            from hecate.studio.session_lock import session_lock_manager
+            from hecate.studio.session_lock import hold_lock_over_stream, session_lock_manager
 
-            async with session_lock_manager.acquire(session_id) as lock_info:
+            # Manual enter/exit instead of ``async with``: for streaming
+            # responses the lock must outlive this frame — actual generation
+            # happens while the client consumes the body iterator, so the
+            # release is bound to the stream's lifetime.
+            lock_ctx = session_lock_manager.acquire(session_id)
+            lock_info = await lock_ctx.__aenter__()
+            try:
                 result = await _process_chat(
                     request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store, dlp_scanner
                 )
-                if isinstance(result, StreamingResponse):
-                    result.headers["X-Queue-Position"] = str(lock_info["queue_position"])
-                    result.headers["X-Queue-Wait-Ms"] = str(lock_info["wait_ms"])
-                return result
+            except BaseException:
+                await lock_ctx.__aexit__(None, None, None)
+                raise
+            if isinstance(result, StreamingResponse):
+                result.headers["X-Queue-Position"] = str(lock_info["queue_position"])
+                result.headers["X-Queue-Wait-Ms"] = str(lock_info["wait_ms"])
+                return hold_lock_over_stream(lock_ctx, result)
+            await lock_ctx.__aexit__(None, None, None)
+            return result
         except TimeoutError:
             raise HTTPException(
                 status_code=408,

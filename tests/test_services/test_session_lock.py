@@ -179,3 +179,75 @@ async def test_sequential_processing_simulation() -> None:
     await asyncio.gather(*tasks)
 
     assert order == [1, 2, 3]
+
+
+class TestHoldLockOverStream:
+    """The lock stays held while the streaming body executes."""
+
+    @staticmethod
+    def _response(chunks: list[str], fail: Exception | None = None):
+        from types import SimpleNamespace
+
+        async def _body():
+            for c in chunks:
+                yield c
+            if fail is not None:
+                raise fail
+
+        return SimpleNamespace(body_iterator=_body())
+
+    async def test_lock_held_until_stream_consumed(self) -> None:
+        from hecate.studio.session_lock import hold_lock_over_stream
+
+        manager = SessionLockManager(default_timeout=5.0)
+        lock_ctx = manager.acquire("s1")
+        await lock_ctx.__aenter__()
+
+        response = self._response(["a", "b"])
+        hold_lock_over_stream(lock_ctx, response)
+
+        # Lock still held: a second acquisition must time out.
+        with pytest.raises(asyncio.TimeoutError):
+            async with manager.acquire("s1", timeout=0.05):
+                pass
+
+        chunks = [c async for c in response.body_iterator]
+        assert chunks == ["a", "b"]
+
+        # Stream done → lock released.
+        async with manager.acquire("s1", timeout=0.05):
+            pass
+
+    async def test_stream_error_releases_lock(self) -> None:
+        from hecate.studio.session_lock import hold_lock_over_stream
+
+        manager = SessionLockManager(default_timeout=5.0)
+        lock_ctx = manager.acquire("s1")
+        await lock_ctx.__aenter__()
+
+        response = self._response(["a"], fail=RuntimeError("boom"))
+        hold_lock_over_stream(lock_ctx, response)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            async for _ in response.body_iterator:
+                pass
+
+        async with manager.acquire("s1", timeout=0.05):
+            pass
+
+    async def test_client_disconnect_releases_lock(self) -> None:
+        from hecate.studio.session_lock import hold_lock_over_stream
+
+        manager = SessionLockManager(default_timeout=5.0)
+        lock_ctx = manager.acquire("s1")
+        await lock_ctx.__aenter__()
+
+        response = self._response(["a", "b", "c"])
+        hold_lock_over_stream(lock_ctx, response)
+
+        gen = response.body_iterator
+        await gen.__anext__()  # client reads one chunk
+        await gen.aclose()  # then disconnects
+
+        async with manager.acquire("s1", timeout=0.05):
+            pass

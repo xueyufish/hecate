@@ -11,7 +11,8 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,37 @@ class SessionLockManager:
         """
         self._locks.pop(session_id, None)
         self._queue_positions.pop(session_id, None)
+
+
+def hold_lock_over_stream(
+    lock_ctx: AbstractAsyncContextManager[dict[str, int | float]],
+    response: Any,
+) -> Any:
+    """Bind a session lock's release to a streaming response's lifetime.
+
+    ``acquire()`` covers only the construction of the response object; the
+    actual generation happens later, while the client consumes the body
+    iterator. This wrapper keeps the lock held until the body is exhausted,
+    raises, or is closed (client disconnect) — mutual exclusion then covers
+    the real execution, not just response construction. Used by the chat
+    streaming path, which cannot keep the ``async with`` frame open across
+    the response's lifetime.
+
+    The caller is responsible for releasing the lock on any path that does
+    NOT go through the returned response (setup errors, non-streaming
+    results).
+    """
+    original = response.body_iterator
+
+    async def _guarded() -> AsyncGenerator[Any, None]:
+        try:
+            async for chunk in original:
+                yield chunk
+        finally:
+            await lock_ctx.__aexit__(None, None, None)
+
+    response.body_iterator = _guarded()
+    return response
 
 
 session_lock_manager = SessionLockManager()
