@@ -198,11 +198,29 @@ async def run_lifecycle_sweep(
         budget = policy.eviction_budget_per_sweep
         protection_cutoff = now - timedelta(days=policy.protection_window_days)
 
-        # -- TTL expiry (L3 per type, L4 per workspace-level TTL) ----------
+        # L4 rows are agent-scoped, so their TTL/capacity stages resolve the
+        # policy per agent — a workspace-level resolution would flatten
+        # agent-level overrides (an agent that tightened its own L4 TTL or
+        # capacity would silently inherit the workspace numbers).
+        l4_agents: list[uuid.UUID] = [
+            row[0]
+            for row in (
+                await db.execute(
+                    select(KnowledgeMemoryModel.agent_id)
+                    .where(
+                        KnowledgeMemoryModel.workspace_id == workspace_id,
+                        ~KnowledgeMemoryModel.deleted,
+                    )
+                    .distinct()
+                )
+            ).all()
+            if row[0] is not None
+        ]
+
+        # -- TTL expiry (L3 per type, L4 per agent policy) -----------------
         for layer in (
             (MemoryModel, None, MemoryModel.memory_type, "episodic", "l3_episodic", "user_memory"),
             (MemoryModel, None, MemoryModel.memory_type, "semantic", "l3_semantic", "user_memory"),
-            (KnowledgeMemoryModel, KnowledgeMemoryModel.agent_id, None, None, "l4", "knowledge_memory"),
         ):
             model, agent_col, type_col, memory_type, ttl_key, target_type = layer
             ttl_days = policy.ttl_days.get(ttl_key, 0)
@@ -231,9 +249,37 @@ async def run_lifecycle_sweep(
                     reason=REASON_TTL,
                 )
                 stats["ttl_archived"] += 1
+
+        for agent_id in l4_agents:
+            agent_policy = await resolve_policy(db, workspace_id, agent_id)
+            ttl_days = agent_policy.ttl_days.get("l4", 0)
+            if ttl_days <= 0 or stats["ttl_archived"] + stats["evicted"] >= budget:
+                continue
+            rows = await _ttl_expired_ids(
+                db,
+                model=KnowledgeMemoryModel,
+                workspace_id=workspace_id,
+                agent_column=KnowledgeMemoryModel.agent_id,
+                agent_id=agent_id,
+                type_column=None,
+                memory_type=None,
+                ttl_days=ttl_days,
+                now=now,
+            )
+            for row in rows:
+                if stats["ttl_archived"] + stats["evicted"] >= budget:
+                    break
+                await _archive_row(
+                    db,
+                    row=row,
+                    target_type="knowledge_memory",
+                    agent_id=agent_id,
+                    reason=REASON_TTL,
+                )
+                stats["ttl_archived"] += 1
         await db.flush()
 
-        # -- Capacity eviction (L3 per workspace, L4 per agent) ------------
+        # -- Capacity eviction (L3 per workspace, L4 per agent policy) ------
         def budget_left(budget: int = budget) -> int:
             return budget - stats["ttl_archived"] - stats["evicted"]
 
@@ -248,16 +294,22 @@ async def run_lifecycle_sweep(
                 protection_cutoff=protection_cutoff,
                 group_by_agent=False,
             )
-        if policy.capacity.get("l4", 0) > 0:
+        for agent_id in l4_agents:
+            agent_policy = await resolve_policy(db, workspace_id, agent_id)
+            cap = agent_policy.capacity.get("l4", 0)
+            if cap <= 0:
+                continue
+            agent_cutoff = now - timedelta(days=agent_policy.protection_window_days)
             stats["evicted"] += await _evict_over_capacity(
                 db,
                 model=KnowledgeMemoryModel,
                 target_type="knowledge_memory",
                 workspace_id=workspace_id,
-                cap=policy.capacity["l4"],
+                cap=cap,
                 budget_left=budget_left,
-                protection_cutoff=protection_cutoff,
+                protection_cutoff=agent_cutoff,
                 group_by_agent=True,
+                agent_id=agent_id,
             )
         await db.flush()
 
@@ -290,13 +342,20 @@ async def _evict_over_capacity(
     budget_left: Any,
     protection_cutoff: datetime,
     group_by_agent: bool,
+    agent_id: uuid.UUID | None = None,
 ) -> int:
-    """Archive lowest-value rows until the scope fits its cap. Budget-bounded."""
+    """Archive lowest-value rows until the scope fits its cap. Budget-bounded.
+
+    ``agent_id`` narrows the scan to one agent's rows (used by the per-agent
+    L4 stage); ``None`` scans the whole workspace (L3).
+    """
     conditions = [
         ~model.deleted,
         model.archived_at.is_(None),
         model.workspace_id == workspace_id,
     ]
+    if agent_id is not None:
+        conditions.append(model.agent_id == agent_id)
     rows: list[Any] = list((await db.execute(select(model).where(*conditions))).scalars().all())
     if not rows:
         return 0

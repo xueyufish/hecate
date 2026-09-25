@@ -23,7 +23,7 @@ else
     exit 1
 fi
 
-if ! cz check --commit-msg-file "$MSG_FILE"; then
+if ! python -m commitizen check --commit-msg-file "$MSG_FILE"; then
     echo "❌ Commit message does not follow Conventional Commits."
     echo "   Format: <type>(<scope>): <subject> — e.g. 'fix(runtime): handle empty queue'"
     exit 1
