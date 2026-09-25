@@ -18,6 +18,11 @@ Design decisions (openspec/changes/node-cache-policy/design.md):
   rebound to a different tool — self-invalidates; the ``cache`` block itself
   is excluded, TTL tweaks are policy not semantics) + canonical JSON of the
   node's input slice
+- Cache-safety contract (B2): the compiler accepts cache blocks only on
+  side-effect-free node types (VARIABLE_SET / SUGGESTION / CONDITION) — a
+  hit skips the worker, which would also skip approval/audit checks inside
+  tool execution; knowledge-retrieval caching waits for permission-snapshot
+  keys (6.30/9.3)
 - Key functions are registered by name, mirroring the accumulator reducer
   registry in ``channel.py``; unknown names fail at compile time
 """

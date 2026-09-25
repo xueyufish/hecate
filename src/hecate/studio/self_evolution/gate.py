@@ -178,8 +178,8 @@ class EvolutionGate:
             report.checks.append(self._check("dataset_regression", "skipped", "no_eval_runner"))
             report.checks.append(self._check("with_without_baseline", "skipped", "no_eval_runner"))
         else:
-            with_score = await self._run_eval(candidate, bind_skill=True)
-            without_score = await self._run_eval(candidate, bind_skill=False)
+            with_score = await self._run_eval(candidate, bind_skill=True, agent_id=agent_id)
+            without_score = await self._run_eval(candidate, bind_skill=False, agent_id=agent_id)
             if with_score is None or without_score is None:
                 report.checks.append(self._check("dataset_regression", "skipped", "runner_returned_none"))
                 report.checks.append(self._check("with_without_baseline", "skipped", "runner_returned_none"))
@@ -370,10 +370,15 @@ class EvolutionGate:
             return "no"
         return str(getattr(response, "content", "") or "")
 
-    async def _run_eval(self, candidate: Any, *, bind_skill: bool) -> float | None:
-        """Delegate to the injected eval runner; None when not runnable."""
+    async def _run_eval(self, candidate: Any, *, bind_skill: bool, agent_id: UUID) -> float | None:
+        """Delegate to the injected eval runner; None when not runnable.
+
+        The runner contract is ``async (candidate, *, bind_skill, agent_id)``
+        — one behavioral-evaluation leg per call (the gate invokes it twice:
+        with and without the candidate skill bound).
+        """
         try:
-            return await self._eval_runner(candidate, bind_skill=bind_skill)
+            return await self._eval_runner(candidate, bind_skill=bind_skill, agent_id=agent_id)
         except Exception:
             logger.warning("Eval runner failed", exc_info=True)
             return None

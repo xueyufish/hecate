@@ -146,7 +146,7 @@ class TestEvolutionGate:
             # NO to "would it degrade", YES to "would the agent load it".
             return "NO" if "degrade" in instruction else "YES"
 
-        async def runner(candidate: Any, *, bind_skill: bool) -> float:
+        async def runner(candidate: Any, *, bind_skill: bool, agent_id) -> float:
             return 0.9 if bind_skill else 0.7
 
         gate = EvolutionGate(db_session, runner, judge_fn=judge)
@@ -198,7 +198,7 @@ class TestEvolutionGate:
         async def judge(instruction: str, transcript: str) -> str:
             return "YES" if "degrade" in instruction else "YES"
 
-        async def runner(candidate: Any, *, bind_skill: bool) -> float:
+        async def runner(candidate: Any, *, bind_skill: bool, agent_id) -> float:
             return 0.9 if not bind_skill else 0.7  # skill makes it worse
 
         gate = EvolutionGate(db_session, runner, judge_fn=judge)
@@ -228,7 +228,7 @@ class TestEvolutionGate:
         async def judge(instruction: str, transcript: str) -> str:
             return "NO" if "degrade" in instruction else "YES"
 
-        async def runner(candidate: Any, *, bind_skill: bool) -> float | None:
+        async def runner(candidate: Any, *, bind_skill: bool, agent_id) -> float | None:
             return None
 
         gate = EvolutionGate(db_session, runner, judge_fn=judge)

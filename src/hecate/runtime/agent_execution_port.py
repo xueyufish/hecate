@@ -114,6 +114,15 @@ class AgentExecutionPort(RuntimePort):
             agent_id=agent_id,
             workspace_id=agent.workspace_id,
         )
+        # Per-invocation extra skill instructions (agent_definition attribute,
+        # mirroring the prompt_override pattern) — appends one ad-hoc skill
+        # block without touching the agent's configured skills. Used by the
+        # self-evolution gate to roll out a candidate skill for evaluation.
+        extra_skill: str | None = None
+        if agent_definition is not None:
+            extra_skill = getattr(agent_definition, "extra_skill_instructions", None)
+        if extra_skill:
+            skills_block = f"{skills_block}\n\n{extra_skill}" if skills_block else extra_skill
         system_content = f"{persona}\n\n{skills_block}" if skills_block else persona
         system_message = {"role": "system", "content": system_content}
         full_messages = [system_message] + messages

@@ -145,7 +145,7 @@ def _linear_config(
     cache_nodes = cache_nodes or {}
     nodes = {}
     for node_id in ("A", "B", "C"):
-        nodes[node_id] = NodeConfig(id=node_id, type=NodeType.CONVERSATION, config=cache_nodes.get(node_id, {}))
+        nodes[node_id] = NodeConfig(id=node_id, type=NodeType.VARIABLE_SET, config=cache_nodes.get(node_id, {}))
     return GraphConfig(
         name="node-cache-linear",
         nodes=nodes,
@@ -170,8 +170,8 @@ def _dsl_document_with_cache(cache_block: dict) -> dict:
         "name": "dsl-node-cache",
         "state": {"messages": {"type": "topic", "default": []}},
         "nodes": {
-            "A": {"type": "conversation", "config": {}},
-            "B": {"type": "conversation", "config": {"cache": cache_block}},
+            "A": {"type": "variable-set", "config": {}},
+            "B": {"type": "variable-set", "config": {"cache": cache_block}},
         },
         "edges": [
             {"source": "A", "target": "B"},
@@ -226,17 +226,41 @@ class TestNodeCacheDsl:
         with pytest.raises(GraphValidationError, match="real_key"):
             GraphCompiler().compile(parse_graph(doc))
 
-    def test_cache_allowed_on_any_node_type(self, clean_key_func_registry):
+    def test_cache_rejected_on_side_effect_node_types(self, clean_key_func_registry):
+        """Cache-safety contract: a hit skips the worker — side-effect-ful
+        types (tool invocation, LLM tool loop, delegation, retrieval with
+        permission-scoped results) must re-execute every run."""
+        # CONTROLLER also sits in the compiler's rejected set but fails an
+        # earlier validation (category_targets) before reaching the cache
+        # check, so it is not exercised here.
+        for node_type in (
+            NodeType.TOOL_CALL,
+            NodeType.CONVERSATION,
+            NodeType.AGENT,
+            NodeType.COORDINATOR,
+            NodeType.KNOWLEDGE_RETRIEVAL,
+        ):
+            graph = GraphConfig(
+                name=f"impure-{node_type}",
+                nodes={"x": NodeConfig(id="x", type=node_type, config={"cache": {"ttl": 30}})},
+                edges=[Edge(source="x", target="__end__")],
+                state={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
+                entry="x",
+            )
+            with pytest.raises(GraphValidationError, match="side-effect-free"):
+                GraphCompiler().compile(graph)
+
+    def test_cache_allowed_on_pure_node_types(self, clean_key_func_registry):
         graph = GraphConfig(
-            name="any-type",
+            name="pure-types",
             nodes={
-                "c": NodeConfig(id="c", type=NodeType.CONVERSATION, config={"cache": {"ttl": 30}}),
-                "k": NodeConfig(id="k", type=NodeType.KNOWLEDGE_RETRIEVAL, config={"cache": {"ttl": 30}}),
-                "t": NodeConfig(id="t", type=NodeType.TOOL_CALL, config={"cache": {"ttl": 30}}),
+                "v": NodeConfig(id="v", type=NodeType.VARIABLE_SET, config={"cache": {"ttl": 30}}),
+                "s": NodeConfig(id="s", type=NodeType.SUGGESTION, config={"cache": {"ttl": 30}}),
+                "c": NodeConfig(id="c", type=NodeType.CONDITION, config={"cache": {"ttl": 30}}),
             },
-            edges=[Edge(source="c", target="k"), Edge(source="k", target="t"), Edge(source="t", target="__end__")],
+            edges=[Edge(source="v", target="s"), Edge(source="s", target="c"), Edge(source="c", target="__end__")],
             state={"messages": ChannelDef(type=ChannelType.TOPIC, default=[])},
-            entry="c",
+            entry="v",
         )
         compiled = GraphCompiler().compile(graph)
         assert all(n.config.get("cache") for n in compiled.nodes.values())
@@ -567,7 +591,7 @@ class TestNodeCacheEngine:
                 ),
                 "branch": NodeConfig(
                     id="branch",
-                    type=NodeType.CONVERSATION,
+                    type=NodeType.VARIABLE_SET,
                     config={"cache": {"ttl": 300}},
                 ),
             },
@@ -613,8 +637,8 @@ class TestNodeCacheEngine:
         graph = CompiledGraph(
             nodes={
                 "fan": NodeConfig(id="fan", type=NodeType.FAN_OUT, config={"branches": ["b1", "b2"]}),
-                "b1": NodeConfig(id="b1", type=NodeType.CONVERSATION, config={"cache": {"ttl": 300}}),
-                "b2": NodeConfig(id="b2", type=NodeType.CONVERSATION, config={"cache": {"ttl": 300}}),
+                "b1": NodeConfig(id="b1", type=NodeType.VARIABLE_SET, config={"cache": {"ttl": 300}}),
+                "b2": NodeConfig(id="b2", type=NodeType.VARIABLE_SET, config={"cache": {"ttl": 300}}),
                 "merge": NodeConfig(
                     id="merge",
                     type=NodeType.MERGE,
