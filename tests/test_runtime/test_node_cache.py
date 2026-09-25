@@ -382,6 +382,18 @@ class TestNodeCacheUnit:
         assert "mat:['a']" in k1
         assert k1 != k2  # scope namespace survives key_func override
 
+    def test_key_func_path_config_change_invalidates(self, clean_key_func_registry):
+        """Custom key material alone must not mask a semantic config change."""
+        register_node_key_func("kf", lambda node_id, snapshot: f"mat:{snapshot.get('messages')}")
+        session = uuid.uuid4()
+        k1 = derive_cache_key(
+            self._policy(key_func="kf"), "T", {"tool_name": "search"}, {"messages": ["a"]}, session_id=session
+        )
+        k2 = derive_cache_key(
+            self._policy(key_func="kf"), "T", {"tool_name": "create_ticket"}, {"messages": ["a"]}, session_id=session
+        )
+        assert k1 != k2
+
 
 class TestNodeCacheEngine:
     """Task 4.3: dispatch seam semantics."""

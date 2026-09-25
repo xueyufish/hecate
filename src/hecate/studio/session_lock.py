@@ -68,8 +68,10 @@ class SessionLockManager:
         position = self._queue_positions[session_id]
 
         start_time = time.monotonic()
+        acquired = False
         try:
             await asyncio.wait_for(lock.acquire(), timeout=timeout)
+            acquired = True
             wait_ms = (time.monotonic() - start_time) * 1000
             logger.debug(f"Session {session_id}: lock acquired after {wait_ms:.0f}ms (position {position})")
             yield {
@@ -84,7 +86,12 @@ class SessionLockManager:
             self._queue_positions[session_id] -= 1
             if self._queue_positions[session_id] <= 0:
                 del self._queue_positions[session_id]
-            if lock.locked():
+            # Only the caller that acquired the lock may release it.
+            # asyncio.Lock has no owner tracking, so an unconditional
+            # ``if lock.locked(): release()`` on the timeout/cancel path
+            # would free a lock held by another caller and break mutual
+            # exclusion for everyone entering after the timed-out one.
+            if acquired:
                 lock.release()
 
     def get_queue_position(self, session_id: str) -> int:
