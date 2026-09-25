@@ -425,9 +425,28 @@ async def _promote_eligible(
     if not rows:
         return 0
 
+    # Idempotency (B3): a source row promotes exactly once, ever. The
+    # promoted copy carries ``promoted_from_id`` back to its source under a
+    # partial unique index that has no deleted filter — a withdrawn shared
+    # copy still blocks re-promotion, so a sweep can never re-create a
+    # shared copy the workspace chose to forget.
+    already_promoted: set[uuid.UUID] = set(
+        (
+            await db.execute(
+                select(MemoryModel.promoted_from_id).where(
+                    MemoryModel.promoted_from_id.in_([row.id for row in rows]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     scores = await _value_scores(db, rows=rows, target_type="user_memory")
     promoted = 0
     for row in rows:
+        if row.id in already_promoted:
+            continue
         if scores.get(row.id, 0.0) < policy.promotion_score_threshold:
             continue
         # Workspace-shared copy: the namespace-visible shape with both
@@ -444,6 +463,7 @@ async def _promote_eligible(
                 last_confirmed_at=row.last_confirmed_at,
                 team_id=None,
                 actor_id=None,
+                promoted_from_id=row.id,
             )
         )
         db.add(

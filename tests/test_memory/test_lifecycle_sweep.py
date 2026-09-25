@@ -307,3 +307,80 @@ async def test_l4_capacity_uses_agent_level_policy(db_session: AsyncSession) -> 
     assert a2.archived_at is None
     assert b1.archived_at is None
     assert b2.archived_at is None
+
+
+async def test_promotion_is_idempotent_across_sweeps(db_session: AsyncSession) -> None:
+    """A source row promotes exactly once — re-running the sweep must not
+    append another shared copy (B3 promotion-idempotency)."""
+    actor = uuid.uuid4()
+    eligible = _l3(
+        "stable fact",
+        memory_type="semantic",
+        confirmed_days_ago=30,
+        access_count=10,
+        user=actor,
+        actor=actor,
+    )
+    db_session.add(eligible)
+    await db_session.flush()
+    await upsert_policy(
+        db_session,
+        _WS,
+        None,
+        params={"promotion": {"enabled": True, "score_threshold": 0.1, "min_hits": 1, "min_age_days": 1}},
+        sharing_ceiling="workspace",
+    )
+    invalidate_memory_policy_cache()
+
+    first = await run_lifecycle_sweep(db_session, now=_NOW)
+    second = await run_lifecycle_sweep(db_session, now=_NOW)
+
+    assert first["promoted"] == 1
+    assert second["promoted"] == 0
+    shared = (await db_session.execute(select(MemoryModel).where(MemoryModel.actor_id.is_(None)))).scalars().all()
+    assert len(shared) == 1
+    assert shared[0].promoted_from_id == eligible.id
+
+
+async def test_promotion_copy_blocks_recreation_after_withdrawal(db_session: AsyncSession) -> None:
+    """The partial unique index has no deleted filter: a forgotten shared
+    copy still blocks re-promotion — withdrawal wins over the sweeper."""
+    actor = uuid.uuid4()
+    source = _l3("fact", memory_type="semantic", confirmed_days_ago=30, access_count=10, user=actor, actor=actor)
+    withdrawn_copy = MemoryModel(
+        workspace_id=_WS,
+        content="fact",
+        scope={},
+        memory_type="semantic",
+        embedding=[],
+        team_id=None,
+        actor_id=None,
+        promoted_from_id=source.id,
+        deleted=True,
+        deleted_at=_NOW.replace(tzinfo=None),
+    )
+    # Flush the source first: client-side id defaults evaluate at flush
+    # time, and the copy's promoted_from_id must capture the real id.
+    db_session.add(source)
+    await db_session.flush()
+    withdrawn_copy.promoted_from_id = source.id
+    db_session.add(withdrawn_copy)
+    await db_session.flush()
+    await upsert_policy(
+        db_session,
+        _WS,
+        None,
+        params={"promotion": {"enabled": True, "score_threshold": 0.1, "min_hits": 1, "min_age_days": 1}},
+        sharing_ceiling="workspace",
+    )
+    invalidate_memory_policy_cache()
+
+    stats = await run_lifecycle_sweep(db_session, now=_NOW)
+
+    assert stats["promoted"] == 0
+    live_copies = (
+        (await db_session.execute(select(MemoryModel).where(MemoryModel.actor_id.is_(None), ~MemoryModel.deleted)))
+        .scalars()
+        .all()
+    )
+    assert live_copies == []

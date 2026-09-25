@@ -21,6 +21,8 @@ was actually verified.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -40,6 +42,25 @@ logger = logging.getLogger(__name__)
 DEFAULT_GOLDEN_SAMPLES = 10
 DEFAULT_MIN_GOLDEN = 3
 BASELINE_REGRESSION_TOLERANCE = 0.05
+
+
+def candidate_content_hash(candidate: Any) -> str:
+    """Stable hash of the candidate content the gate verdict covers.
+
+    Bound into ``validation_report.content_hash`` at validation time so the
+    review service can detect content drift between gate and review (B3
+    review-revalidation): an ``approved_with_edits`` path that changes the
+    validated content marks the report stale. Covers the fields review can
+    edit plus the failure category the published skill carries.
+    """
+    payload = {
+        "name": candidate.name,
+        "description": candidate.description,
+        "procedure": candidate.procedure,
+        "guardrails": candidate.guardrails,
+        "failure_category": candidate.failure_category,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
 @dataclass

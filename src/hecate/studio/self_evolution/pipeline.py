@@ -22,7 +22,7 @@ from hecate.models.evolution import (
 )
 from hecate.studio.self_evolution.attribution import FailureAttributor
 from hecate.studio.self_evolution.candidate_generator import CandidateGenerator
-from hecate.studio.self_evolution.gate import EvolutionGate, GoldenSubsetBuilder
+from hecate.studio.self_evolution.gate import EvolutionGate, GoldenSubsetBuilder, candidate_content_hash
 from hecate.studio.self_evolution.prefilter import TrajectoryPrefilter
 from hecate.studio.self_evolution.repository import EvolutionRepository
 
@@ -102,7 +102,12 @@ class EvolutionPipeline:
             if agent_id is None:
                 continue
             report = await self._gate.validate(candidate, workspace_id, agent_id)
-            candidate.validation_report = report.to_dict()
+            # Bind the verdict to the exact content it validated (B3): the
+            # review service compares this hash against the content at
+            # review time and flags edited-after-validation reports stale.
+            report_dict = report.to_dict()
+            report_dict["content_hash"] = candidate_content_hash(candidate)
+            candidate.validation_report = report_dict
             if report.overall == "pass":
                 candidate.status = SkillCandidateStatus.VALIDATED.value
             elif report.overall == "pass_unverified":

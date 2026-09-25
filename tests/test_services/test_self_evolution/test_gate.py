@@ -237,3 +237,14 @@ class TestEvolutionGate:
         statuses = {c["name"]: c["status"] for c in report.checks}
         assert statuses["dataset_regression"] == "skipped"
         assert report.overall == "pass_unverified"
+
+
+def test_candidate_content_hash_is_stable_and_content_sensitive() -> None:
+    from hecate.studio.self_evolution.gate import candidate_content_hash
+
+    a = _candidate()
+    b = _candidate()
+    assert candidate_content_hash(a) == candidate_content_hash(b)
+
+    edited = _candidate(procedure="Changed procedure text.")
+    assert candidate_content_hash(edited) != candidate_content_hash(a)

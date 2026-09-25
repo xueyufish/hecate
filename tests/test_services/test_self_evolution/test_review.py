@@ -188,3 +188,74 @@ class TestLineage:
         assert chain["run_id"] == str(RUN_ID)
         assert chain["source_inputs"][0]["conversation_id"] == str(conversation_id)
         assert chain["validation_report"]["overall"] == "pass"
+
+
+class TestReviewRevalidation:
+    """B3: gate verdicts bind to content; edited-after-validation reports go stale."""
+
+    async def test_approve_with_edits_marks_report_stale(self, db_session: AsyncSession) -> None:
+        from hecate.studio.self_evolution.gate import candidate_content_hash
+
+        candidate = await _seed_candidate(db_session)
+        candidate.validation_report = {
+            "overall": "pass",
+            "checks": [],
+            "content_hash": candidate_content_hash(candidate),
+        }
+        await db_session.flush()
+
+        service = CandidateReviewService(db_session)
+        reviewed = await service.review(
+            workspace_id=WS_A,
+            candidate_id=candidate.id,
+            reviewer="admin",
+            decision="approved_with_edits",
+            edited_content={"procedure": "Read the schema carefully. Then call."},
+        )
+
+        assert reviewed.validation_report["stale"] is True
+        assert reviewed.validation_report["stale_reason"] == "content_changed_after_validation"
+        assert reviewed.validation_report["content_hash"] != candidate_content_hash(reviewed)
+
+    async def test_approve_without_edits_keeps_report_fresh(self, db_session: AsyncSession) -> None:
+        from hecate.studio.self_evolution.gate import candidate_content_hash
+
+        candidate = await _seed_candidate(db_session)
+        candidate.validation_report = {
+            "overall": "pass",
+            "checks": [],
+            "content_hash": candidate_content_hash(candidate),
+        }
+        await db_session.flush()
+
+        service = CandidateReviewService(db_session)
+        reviewed = await service.review(
+            workspace_id=WS_A,
+            candidate_id=candidate.id,
+            reviewer="admin",
+            decision="approved",
+        )
+
+        assert reviewed.validation_report.get("stale") is None
+        assert reviewed.status == "published"
+
+    async def test_pre_drifted_content_marks_report_stale(self, db_session: AsyncSession) -> None:
+        """Content drifted between gate and review through any path — not
+        just review edits — is flagged: the recorded hash no longer matches."""
+        candidate = await _seed_candidate(db_session)
+        candidate.validation_report = {
+            "overall": "pass",
+            "checks": [],
+            "content_hash": "stale-hash-from-gate-time",
+        }
+        await db_session.flush()
+
+        service = CandidateReviewService(db_session)
+        reviewed = await service.review(
+            workspace_id=WS_A,
+            candidate_id=candidate.id,
+            reviewer="admin",
+            decision="approved",
+        )
+
+        assert reviewed.validation_report["stale"] is True
