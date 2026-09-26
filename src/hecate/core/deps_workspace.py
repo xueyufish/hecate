@@ -19,7 +19,7 @@ import logging
 import uuid
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -112,11 +112,15 @@ async def authenticate_bearer(token: str | None, db: AsyncSession) -> AuthContex
 async def get_auth_context(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
 ) -> AuthContext:
     """Resolve the full authentication context for a request.
 
     Delegates to :func:`authenticate_bearer` — the provider chain shared
-    with the MCP transport middleware.
+    with the MCP transport middleware. On success the resolved context is
+    stashed on ``request.state.auth_context`` so the audit middleware can
+    attribute the record to the real operator; on failure the reason is
+    stashed as ``request.state.auth_failure`` (never the raw credential).
 
     Returns:
         AuthContext with full identity and authorization state.
@@ -126,12 +130,15 @@ async def get_auth_context(
             authentication method succeeds.
     """
     if credentials is None:
+        request.state.auth_failure = "missing_credentials"
         raise _unauthorized()
 
     ctx = await authenticate_bearer(credentials.credentials, db)
     if ctx is not None:
+        request.state.auth_context = ctx
         return ctx
 
+    request.state.auth_failure = "invalid_credentials"
     raise _unauthorized()
 
 

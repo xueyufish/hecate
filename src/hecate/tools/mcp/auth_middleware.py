@@ -65,6 +65,9 @@ class MCPAuthMiddleware:
             ctx = await authenticate_bearer(token, db)
 
         if ctx is None:
+            # Same state key the REST dependency uses, so the audit
+            # middleware observes the failure type (never the credential).
+            scope.setdefault("state", {})["auth_failure"] = "invalid_credentials"
             response = JSONResponse(_UNAUTHORIZED_BODY, status_code=401)
             await response(scope, receive, send)
             return

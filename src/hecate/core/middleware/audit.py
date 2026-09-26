@@ -86,21 +86,28 @@ class AuditMiddleware(BaseHTTPMiddleware):
             return response
 
         try:
-            # Extract auth context from request state (set by auth dependency)
+            # Extract auth context from request state (set by auth dependency
+            # or the MCP transport middleware), plus the failure reason when
+            # authentication was rejected. Raw credentials never land here.
             ctx = getattr(request.state, "auth_context", None)
+            auth_failure = getattr(request.state, "auth_failure", None)
 
             user_id: uuid.UUID
             org_id: uuid.UUID
             workspace_id: uuid.UUID | None = None
+            extra_metadata: dict = {}
 
             if ctx is not None:
                 user_id = ctx.user_id
                 org_id = ctx.org_id or uuid.UUID(int=0)
                 workspace_id = ctx.workspace_id
+                extra_metadata["auth_method"] = ctx.auth_method
             else:
                 # Unauthenticated request — use sentinel values
                 user_id = uuid.UUID(int=0)
                 org_id = uuid.UUID(int=0)
+            if auth_failure:
+                extra_metadata["auth_failure"] = auth_failure
 
             event = AuditEvent(
                 org_id=org_id,
@@ -115,6 +122,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 ip_address=request.client.host if request.client else None,
                 user_agent=request.headers.get("user-agent"),
                 success=200 <= response.status_code < 400,
+                metadata=extra_metadata,
             )
             # Non-blocking put — if queue is full, drop the event rather than blocking
             try:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import MutableMapping
+from typing import Any
 
 from dotenv import dotenv_values
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -598,6 +599,11 @@ class Settings(BaseSettings):
     A2A_SIGNING_ENABLED: bool = False
     A2A_SIGNING_KEY_PATH: str = ""
     A2A_JWKS_CACHE_TTL: int = 3600
+    # Client-side trust root for Agent Card signature verification: inline
+    # JWKS JSON or a path to a JWKS file. Unconfigured = no verification
+    # possible (requests demanding verification fail closed).
+    A2A_TRUSTED_JWKS: str = ""
+    A2A_TRUSTED_JWKS_PATH: str = ""
 
     COST_ANOMALY_THRESHOLD: float = 2.5
     COST_ROLLING_WINDOW_DAYS: int = 30
@@ -619,6 +625,35 @@ class Settings(BaseSettings):
     BACKUP_VERIFY_ENABLED: bool = False
     BACKUP_VERIFY_SCHEDULE: str = "0 4 * * 0"  # weekly Sunday 04:00
     BACKUP_PG_DUMP_JOBS: int = 1  # parallel jobs for pg_restore
+
+    @property
+    def a2a_trusted_jwks_map(self) -> dict[str, dict[str, Any]] | None:
+        """Parse the trusted Agent Card verification keys into a kid→JWK map.
+
+        Reads ``A2A_TRUSTED_JWKS`` (inline JWKS JSON) or
+        ``A2A_TRUSTED_JWKS_PATH`` (JWKS file), whichever is configured.
+        Returns None when neither is set — verification must then fail
+        closed rather than silently trusting everything.
+        """
+        import json
+        from pathlib import Path
+
+        raw: str | None = None
+        if self.A2A_TRUSTED_JWKS.strip():
+            raw = self.A2A_TRUSTED_JWKS
+        elif self.A2A_TRUSTED_JWKS_PATH.strip():
+            path = Path(self.A2A_TRUSTED_JWKS_PATH)
+            if not path.is_file():
+                raise ValueError(f"A2A_TRUSTED_JWKS_PATH does not exist: {path}")
+            raw = path.read_text(encoding="utf-8")
+        if raw is None:
+            return None
+
+        jwks = json.loads(raw)
+        keys = jwks.get("keys") if isinstance(jwks, dict) else None
+        if not isinstance(keys, list):
+            raise ValueError("A2A trusted JWKS must be a JWKS document with a 'keys' array")
+        return {key["kid"]: key for key in keys if isinstance(key, dict) and key.get("kid")}
 
     @property
     def api_keys_list(self) -> list[str]:

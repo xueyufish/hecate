@@ -257,16 +257,42 @@ class LLMService:
             raise RuntimeError(msg)
 
         try:
-            response = await _get_litellm().acompletion(
-                model=resolved_model,
-                messages=messages,
-                tools=tools,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stream=True,
-                **litellm_kwargs,
-            )
+            try:
+                response = await _get_litellm().acompletion(
+                    model=resolved_model,
+                    messages=messages,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **litellm_kwargs,
+                )
+            except Exception:
+                # Some providers/proxies reject unknown stream options — retry
+                # without usage collection rather than failing the call.
+                response = await _get_litellm().acompletion(
+                    model=resolved_model,
+                    messages=messages,
+                    tools=tools,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    stream=True,
+                    **litellm_kwargs,
+                )
+            usage_payload: dict[str, Any] | None = None
             async for chunk in response:
+                chunk_usage = getattr(chunk, "usage", None)
+                if chunk_usage is not None and getattr(chunk_usage, "total_tokens", 0):
+                    details = getattr(chunk_usage, "prompt_tokens_details", None)
+                    cached = getattr(details, "cached_tokens", None) if details is not None else None
+                    usage_payload = {
+                        "prompt_tokens": getattr(chunk_usage, "prompt_tokens", 0) or 0,
+                        "completion_tokens": getattr(chunk_usage, "completion_tokens", 0) or 0,
+                        "total_tokens": getattr(chunk_usage, "total_tokens", 0) or 0,
+                    }
+                    if cached is not None:
+                        usage_payload["cache_read_tokens"] = cached
                 if chunk.choices:
                     delta = chunk.choices[0].delta
                     yield {
@@ -274,6 +300,10 @@ class LLMService:
                         "tool_calls": delta.tool_calls if delta and hasattr(delta, "tool_calls") else None,
                         "finish_reason": chunk.choices[0].finish_reason,
                     }
+            if usage_payload is not None:
+                # Terminal usage chunk — consumed by callers that do cost
+                # accounting; providers without usage support simply omit it.
+                yield {"content": None, "tool_calls": None, "finish_reason": None, "usage": usage_payload}
             if self._breaker is not None:
                 self._breaker.record_success(resolved_model)
         except Exception as e:
