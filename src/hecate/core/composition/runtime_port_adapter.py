@@ -25,6 +25,33 @@ logger = logging.getLogger(__name__)
 # Module-level holder for quota service — set during app startup
 _quota_service_factory: Any = None
 
+# Whitelisted call parameters forwarded from the agent model config to the
+# LLM service — keeps arbitrary config keys out of the provider call.
+_INVOKE_PARAM_KEYS = ("temperature", "max_tokens", "timeout", "num_retries")
+
+_COST_PER_TOKEN = 0.00001
+
+
+def _invoke_params(config: dict) -> dict[str, Any]:
+    """Build the forwarded call kwargs from the agent model config."""
+    return {key: config[key] for key in _INVOKE_PARAM_KEYS if config.get(key) is not None}
+
+
+def _estimate_usage(messages: list[dict], output: str) -> dict[str, Any]:
+    """Deterministic chunk-invariant token estimate for streams without
+    provider usage: input and output are each measured once from their
+    full text (never per-chunk, which silently rounds small chunks down
+    to zero)."""
+    input_chars = sum(len(str(m.get("content") or "")) for m in messages)
+    prompt_tokens = -(-input_chars // 4)
+    completion_tokens = -(-len(output) // 4)
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": prompt_tokens + completion_tokens,
+        "estimated": True,
+    }
+
 
 def set_quota_service_factory(factory: Any) -> None:
     """Register the QuotaService factory for cost recording."""
@@ -62,24 +89,30 @@ class _ProductionRuntimePort(RuntimePort):
     async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
         """Invoke LLM via LLMService in streaming mode.
 
-        After streaming completes, records cost against quotas for
-        org, workspace, and agent scopes if QuotaService is available.
+        After streaming completes, records cost against quotas — provider
+        usage when the stream carried it, a chunk-invariant estimate marked
+        ``estimated`` otherwise.
         """
         model = config.get("model", "gpt-4o")
         tools = config.get("tools")
 
-        token_count = 0
+        content_parts: list[str] = []
+        usage: dict[str, Any] | None = None
         async for chunk in self._llm_service.chat_stream(
             messages=messages,
             model=model,
             tools=tools,
+            **_invoke_params(config),
         ):
-            content = chunk.get("content", "")
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+                continue
+            content = chunk.get("content", "") or ""
             if content:
-                token_count += len(content) // 4
+                content_parts.append(content)
                 yield content
 
-        await self._record_cost(model, token_count)
+        await self._record_cost(model, messages, "".join(content_parts), usage)
 
     async def llm_invoke_structured(
         self,
@@ -106,16 +139,21 @@ class _ProductionRuntimePort(RuntimePort):
         tools = config.get("tools")
 
         tool_call_acc: dict[int, dict[str, Any]] = {}
-        token_count = 0
+        content_parts: list[str] = []
+        usage: dict[str, Any] | None = None
 
         async for chunk in self._llm_service.chat_stream(
             messages=messages,
             model=model,
             tools=tools,
+            **_invoke_params(config),
         ):
-            content = chunk.get("content")
+            if chunk.get("usage"):
+                usage = chunk["usage"]
+                continue
+            content = chunk.get("content") or ""
             if content:
-                token_count += len(content) // 4
+                content_parts.append(content)
                 yield {"content": content, "tool_calls": None}
 
             delta_tool_calls = chunk.get("tool_calls")
@@ -147,15 +185,29 @@ class _ProductionRuntimePort(RuntimePort):
 
         yield {"content": None, "tool_calls": final_tool_calls}
 
-        await self._record_cost(model, token_count)
+        await self._record_cost(model, messages, "".join(content_parts), usage)
 
-    async def _record_cost(self, model: str, token_count: int) -> None:
-        """Record cost usage against quotas after LLM invocation."""
-        if _quota_service_factory is None or token_count == 0:
+    async def _record_cost(self, model: str, messages: list[dict], output: str, usage: dict[str, Any] | None) -> None:
+        """Record cost usage against quotas after LLM invocation.
+
+        Uses the provider usage when the stream carried it; otherwise falls
+        back to a chunk-invariant estimate (logged with ``estimated``).
+        """
+        resolved = dict(usage) if usage else _estimate_usage(messages, output)
+        prompt = resolved.get("prompt_tokens", 0) or 0
+        completion = resolved.get("completion_tokens", 0) or 0
+        total = prompt + completion
+        if resolved.get("estimated"):
+            logger.info(
+                "LLM cost recorded from estimate (provider usage unavailable): model=%s tokens=%d",
+                model,
+                total,
+            )
+        if _quota_service_factory is None or total == 0:
             return
         try:
             service = _quota_service_factory(self._db, self._workspace_id)
-            cost_estimate = token_count * 0.00001
+            cost_estimate = total * _COST_PER_TOKEN
 
             if self._workspace_id:
                 await service.record_usage(

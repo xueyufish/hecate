@@ -26,7 +26,12 @@ class TaskState(StrEnum):
 
 @dataclass
 class AgentCard:
-    """A2A AgentCard describing Hecate's capabilities."""
+    """A2A AgentCard describing Hecate's capabilities.
+
+    ``verified`` distinguishes client-side verification trust from the
+    server's signing capability: True only after the card's signature was
+    checked against the local trusted JWKS during discovery.
+    """
 
     name: str
     description: str
@@ -37,6 +42,7 @@ class AgentCard:
     security_schemes: dict[str, Any] = field(default_factory=dict)
     default_input_modes: list[str] = field(default_factory=lambda: ["text/plain"])
     default_output_modes: list[str] = field(default_factory=lambda: ["text/plain"])
+    verified: bool = False
 
 
 @dataclass
