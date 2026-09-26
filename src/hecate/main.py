@@ -534,6 +534,7 @@ except ImportError:
 if _settings.MCP_SERVER_ENABLED:
     from fastmcp.utilities.lifespan import combine_lifespans
 
+    from hecate.tools.mcp.auth_middleware import MCPAuthMiddleware
     from hecate.tools.mcp.server import create_mcp_server
 
     _mcp = create_mcp_server()
@@ -542,7 +543,9 @@ if _settings.MCP_SERVER_ENABLED:
     _mcp_app = _mcp.http_app(path="/")
     _original_lifespan = app.router.lifespan_context
     app.router.lifespan_context = combine_lifespans(_original_lifespan, _mcp_app.lifespan)
-    app.mount("/mcp", _mcp_app)
+    # Transport auth wraps only the HTTP app; the lifespan stays wired to
+    # the unwrapped FastMCP app above.
+    app.mount("/mcp", MCPAuthMiddleware(_mcp_app))
 
 # A2A Server — conditional mount when A2A_SERVER_ENABLED=true
 if _settings.A2A_SERVER_ENABLED:

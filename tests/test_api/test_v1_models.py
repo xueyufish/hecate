@@ -206,3 +206,11 @@ class TestListModels:
         result = response.json()
         model_ids = [m["id"] for m in result["data"]]
         assert "should-not-show" not in model_ids
+
+
+@pytest.fixture
+def client(admin_client: AsyncClient) -> AsyncClient:
+    """Model-domain tests run as platform admin — they exercise provider
+    business behavior, not the admin gate (covered by the dedicated authz
+    matrix in test_e2e_model_provider.py)."""
+    return admin_client

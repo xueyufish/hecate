@@ -29,8 +29,8 @@ from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
-from hecate.core.deps import get_db, verify_api_key
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps import get_db
+from hecate.core.deps_workspace import get_auth_context, require_platform_admin
 from hecate.enterprise.auth.crypto import decrypt_api_key, encrypt_api_key
 from hecate.models.agent import AgentModel
 from hecate.models.audit import AuditAction, AuditLogModel
@@ -242,7 +242,7 @@ async def _discover_models(provider_name: str, api_key: str, base_url: str | Non
 async def create_provider(
     data: ModelProviderCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> dict:
     """Create a new model provider and discover available models."""
     provider_name = _generate_provider_name(data.display_name)
@@ -300,7 +300,7 @@ async def create_provider(
 @router.get("/model-providers")
 async def list_providers(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(get_auth_context)],
     search: str | None = None,
 ) -> dict:
     """List all model providers with status, model count, and call counts."""
@@ -345,7 +345,7 @@ async def update_provider(
     provider_id: uuid.UUID,
     data: ModelProviderUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> dict:
     """Update a model provider."""
     result = await db.execute(
@@ -381,7 +381,7 @@ async def update_provider(
 async def delete_provider(
     provider_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> None:
     """Soft delete a provider and cascade soft-delete its models."""
     result = await db.execute(
@@ -415,7 +415,7 @@ async def delete_provider(
 async def test_provider(
     provider_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> dict:
     """Test provider connectivity by verifying API key and endpoint reachability.
 
@@ -488,7 +488,7 @@ async def test_provider(
 @router.get("/models")
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(get_auth_context)],
     search: str | None = None,
     publish_state: str | None = None,
 ) -> dict:
@@ -540,7 +540,7 @@ async def update_model(
     model_id: uuid.UUID,
     data: ModelUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> dict:
     """Update a registered model (enable/disable, display name)."""
     result = await db.execute(
@@ -569,7 +569,7 @@ async def update_model(
 async def add_custom_model(
     data: CustomModelCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> dict:
     """Manually add a custom model to a provider."""
     provider_result = await db.execute(
@@ -605,7 +605,7 @@ async def add_custom_model(
 async def test_model(
     data: ModelTestRequestSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> dict:
     """Test a model with a custom prompt using its provider's credentials."""
     provider_result = await db.execute(
@@ -668,7 +668,7 @@ async def test_model(
 async def publish_model(
     model_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> dict:
     """Publish a registered model to the application reference surface.
 
@@ -700,7 +700,7 @@ async def publish_model(
 async def unpublish_model(
     model_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> dict:
     """Remove a model from the application reference surface.
 
@@ -720,7 +720,7 @@ async def unpublish_model(
 async def delete_model(
     model_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    api_key: Annotated[str, Depends(verify_api_key)],
+    _ctx: Annotated[AuthContext, Depends(require_platform_admin)],
 ) -> None:
     """Soft-delete a registered model, refused while still referenced.
 

@@ -17,7 +17,8 @@ from hecate.core.auth_context import AuthContext
 from hecate.enterprise.auth.provider import AuthProvider
 from hecate.enterprise.auth.token import decode_access_token
 from hecate.models.user import UserModel
-from hecate.models.workspace_member import WorkspaceRole
+from hecate.models.workspace import WorkspaceModel
+from hecate.models.workspace_member import WorkspaceMemberModel, WorkspaceRole
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,24 @@ class JWTAuthProvider(AuthProvider):
             user = result.scalar_one_or_none()
             if user is None or not user.active:
                 return None
+
+            # Request-time membership validation: a workspace claim must
+            # match a live membership with the claimed role, so member
+            # removal and role downgrades revoke outstanding tokens.
+            if workspace_id_raw is not None:
+                member_result = await db.execute(
+                    select(WorkspaceMemberModel)
+                    .join(WorkspaceModel, WorkspaceMemberModel.workspace_id == WorkspaceModel.id)
+                    .where(
+                        WorkspaceMemberModel.user_id == user_id,
+                        WorkspaceMemberModel.workspace_id == uuid.UUID(workspace_id_raw),
+                        WorkspaceMemberModel.deleted.is_(False),
+                        WorkspaceModel.deleted.is_(False),
+                    )
+                )
+                member = member_result.scalar_one_or_none()
+                if member is None or role_raw is None or member.role.value != role_raw:
+                    return None
 
             return AuthContext(
                 user_id=user_id,

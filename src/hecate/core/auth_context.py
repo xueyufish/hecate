@@ -40,8 +40,13 @@ class AuthContext:
 
     @property
     def is_system_scope(self) -> bool:
-        """Check if this context has system-level access."""
-        return self.api_key_scope == "system" or self.workspace_id is None
+        """Check if this context has system-level access.
+
+        Only deploy-time bootstrap keys (env-configured) carry the
+        "system" API key scope. A missing workspace on a JWT NEVER
+        implies system access — such identities are restricted.
+        """
+        return self.api_key_scope == "system"
 
     @property
     def is_workspace_member(self) -> bool:

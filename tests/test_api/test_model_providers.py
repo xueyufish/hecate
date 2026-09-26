@@ -266,3 +266,11 @@ class TestDeleteProvider:
 
         models_resp = await provider_client.get("/api/models")
         assert models_resp.json()["total"] == 0
+
+
+@pytest.fixture
+def client(admin_client: AsyncClient) -> AsyncClient:
+    """Model-domain tests run as platform admin — they exercise provider
+    business behavior, not the admin gate (covered by the dedicated authz
+    matrix in test_e2e_model_provider.py)."""
+    return admin_client

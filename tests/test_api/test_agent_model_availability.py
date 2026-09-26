@@ -261,3 +261,11 @@ class TestAgentModelAvailability:
         items2 = list_resp2.json()["items"]
         agent2 = next(a for a in items2 if a["name"] == "Status Agent")
         assert agent2["model_available"] is False
+
+
+@pytest.fixture
+def client(admin_client: AsyncClient) -> AsyncClient:
+    """Model-domain tests run as platform admin — they exercise provider
+    business behavior, not the admin gate (covered by the dedicated authz
+    matrix in test_e2e_model_provider.py)."""
+    return admin_client

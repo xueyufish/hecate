@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from httpx import AsyncClient
 
 
@@ -22,3 +23,11 @@ class TestModelLifecycleAPI:
     async def test_rollback_missing_version(self, client: AsyncClient) -> None:
         resp = await client.post("/api/models/gpt-4o/rollback", json={})
         assert resp.status_code == 400
+
+
+@pytest.fixture
+def client(admin_client: AsyncClient) -> AsyncClient:
+    """Model-domain tests run as platform admin — they exercise provider
+    business behavior, not the admin gate (covered by the dedicated authz
+    matrix in test_e2e_model_provider.py)."""
+    return admin_client

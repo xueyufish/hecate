@@ -32,8 +32,14 @@ async def _seed_provider_and_model(
     e2e_client: AsyncClient,
     provider_name: str = "e2e-provider",
     model_id: str = "e2e-model",
+    admin_headers: dict[str, str] | None = None,
 ) -> dict:
-    """Create a provider with active status and register a model."""
+    """Create a provider + model via the platform-admin gate.
+
+    ``admin_headers`` must carry a PLATFORM_ADMIN_API_KEYS bearer token —
+    provider mutations are platform admin only (model-provider-management
+    spec).
+    """
     from sqlalchemy import select
 
     from hecate.models.model_provider import ModelProviderModel
@@ -46,6 +52,7 @@ async def _seed_provider_and_model(
             "api_key": "sk-test-key",
             "config": {"timeout": 60, "max_retries": 5},
         },
+        headers=admin_headers,
     )
     assert resp.status_code == 201
     provider_id = resp.json()["id"]
@@ -58,6 +65,7 @@ async def _seed_provider_and_model(
             "model_id": model_id,
             "display_name": f"Test {model_id}",
         },
+        headers=admin_headers,
     )
     assert model_resp.status_code == 201
     model_uuid = model_resp.json()["id"]
@@ -74,7 +82,7 @@ async def _seed_provider_and_model(
         registry_model.last_test_passed_at = datetime.now(UTC)
         await session.commit()
 
-    publish_resp = await e2e_client.post(f"/api/models/{model_uuid}/publish")
+    publish_resp = await e2e_client.post(f"/api/models/{model_uuid}/publish", headers=admin_headers)
     assert publish_resp.status_code == 200
 
     # Set provider status to active
@@ -90,9 +98,16 @@ async def _seed_provider_and_model(
 
 
 class TestE2EProviderModelFlow:
-    async def test_provider_models_appear_in_v1_models(self, e2e_client: AsyncClient) -> None:
+    async def test_provider_models_appear_in_v1_models(
+        self, e2e_client: AsyncClient, platform_admin_token: str
+    ) -> None:
         """Models from registered providers appear in /v1/models."""
-        await _seed_provider_and_model(e2e_client, provider_name="v1-provider", model_id="v1-model-x")
+        await _seed_provider_and_model(
+            e2e_client,
+            provider_name="v1-provider",
+            model_id="v1-model-x",
+            admin_headers={"Authorization": f"Bearer {platform_admin_token}"},
+        )
 
         resp = await e2e_client.get("/v1/models")
         assert resp.status_code == 200
@@ -104,9 +119,17 @@ class TestE2EProviderModelFlow:
         assert model_obj["provider"]  # auto-generated slug
         assert model_obj["provider_display_name"] == "v1-provider Display"
 
-    async def test_disabled_model_hidden_from_v1_models(self, e2e_client: AsyncClient) -> None:
+    async def test_disabled_model_hidden_from_v1_models(
+        self, e2e_client: AsyncClient, platform_admin_token: str
+    ) -> None:
         """Disabled models are excluded from /v1/models."""
-        await _seed_provider_and_model(e2e_client, provider_name="hidden-provider", model_id="hidden-model")
+        admin_headers = {"Authorization": f"Bearer {platform_admin_token}"}
+        await _seed_provider_and_model(
+            e2e_client,
+            provider_name="hidden-provider",
+            model_id="hidden-model",
+            admin_headers=admin_headers,
+        )
 
         # Disable the model
         models_resp = await e2e_client.get("/api/models")
@@ -117,6 +140,7 @@ class TestE2EProviderModelFlow:
         await e2e_client.put(
             f"/api/models/{target['id']}",
             json={"is_enabled": False},
+            headers=admin_headers,
         )
 
         resp = await e2e_client.get("/v1/models")
@@ -124,12 +148,13 @@ class TestE2EProviderModelFlow:
         model_ids = [m["id"] for m in data]
         assert "hidden-model" not in model_ids
 
-    async def test_chat_with_provider_config(self, e2e_client: AsyncClient) -> None:
+    async def test_chat_with_provider_config(self, e2e_client: AsyncClient, platform_admin_token: str) -> None:
         """Chat endpoint passes provider timeout/retry config to LLM service."""
         await _seed_provider_and_model(
             e2e_client,
             provider_name="chat-provider",
             model_id="chat-model",
+            admin_headers={"Authorization": f"Bearer {platform_admin_token}"},
         )
 
         mock_response = AsyncMock()
@@ -188,12 +213,15 @@ class TestE2EProviderModelFlow:
             assert call_kwargs["timeout"] is None
             assert call_kwargs["num_retries"] is None
 
-    async def test_create_agent_select_model_chat_succeeds(self, e2e_client: AsyncClient) -> None:
+    async def test_create_agent_select_model_chat_succeeds(
+        self, e2e_client: AsyncClient, platform_admin_token: str
+    ) -> None:
         """Create agent with provider model, verify model_available=True, chat works."""
         await _seed_provider_and_model(
             e2e_client,
             provider_name="agent-chat-provider",
             model_id="agent-chat-model",
+            admin_headers={"Authorization": f"Bearer {platform_admin_token}"},
         )
 
         # Create agent
@@ -235,3 +263,72 @@ class TestE2EProviderModelFlow:
                 },
             )
             assert chat_resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Authorization matrix (auth-boundary-hardening: model-provider-management)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.usefixtures("setup_database")
+class TestModelProviderAuthz:
+    async def test_workspace_admin_cannot_mutate_provider(self, client: AsyncClient) -> None:
+        """Workspace admin credentials do not cross the platform boundary."""
+        resp = await client.post(
+            "/api/model-providers",
+            json={"display_name": "Nope", "api_key": "sk-nope"},
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"]["error"]["code"] == "FORBIDDEN"
+
+    async def test_anonymous_cannot_mutate_provider(self, anonymous_client: AsyncClient) -> None:
+        resp = await anonymous_client.post(
+            "/api/model-providers",
+            json={"display_name": "Nope", "api_key": "sk-nope"},
+        )
+        assert resp.status_code == 401
+
+    async def test_platform_admin_can_create_provider(self, client: AsyncClient, platform_admin_token: str) -> None:
+        resp = await client.post(
+            "/api/model-providers",
+            json={"display_name": "Admin Provider", "api_key": "sk-admin"},
+            headers={"Authorization": f"Bearer {platform_admin_token}"},
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["display_name"] == "Admin Provider"
+        # The response must not leak provider credentials.
+        assert "api_key" not in body
+        assert "api_key_encrypted" not in body
+
+    async def test_list_requires_authentication(self, anonymous_client: AsyncClient) -> None:
+        resp = await anonymous_client.get("/api/model-providers")
+        assert resp.status_code == 401
+
+    async def test_list_allowed_for_authenticated_users(self, client: AsyncClient) -> None:
+        resp = await client.get("/api/model-providers")
+        assert resp.status_code == 200
+
+    async def test_inactive_user_jwt_rejected_on_mutation(self, anonymous_client: AsyncClient, db_session) -> None:
+        """A deactivated user's still-valid JWT is rejected (401)."""
+
+        from hecate.enterprise.auth.password import hash_password
+        from hecate.enterprise.auth.token import create_access_token
+        from hecate.models.user import UserModel
+
+        suffix = uuid.uuid4().hex[:8]
+        user = UserModel(
+            email=f"gone-{suffix}@example.com",
+            hashed_password=hash_password("deactivated"),
+            active=False,
+        )
+        db_session.add(user)
+        await db_session.flush()
+        token = create_access_token(user.id)
+
+        resp = await anonymous_client.post(
+            "/api/model-providers",
+            json={"display_name": "Nope", "api_key": "sk-nope"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 401

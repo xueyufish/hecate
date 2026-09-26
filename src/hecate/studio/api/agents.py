@@ -137,6 +137,12 @@ async def create_agent(
     """
     await validate_knowledge_base_ids(db, data.knowledge_base_ids)
 
+    if not ctx.is_system_scope and ctx.workspace_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": {"code": "FORBIDDEN", "message": "Workspace context required", "details": None}},
+        )
+
     agent = AgentModel(
         workspace_id=ctx.workspace_id or uuid.UUID(int=0),
         name=data.name,
@@ -172,17 +178,18 @@ async def list_agents(
     Returns:
         dict: ``{"items": [...], "total": int}`` with agent list and total count.
     """
-    # Count total
+    # Count total — server-side tenant filter is authoritative; restricted
+    # identities (no workspace) fall back to the bundled zero-uuid scope.
     count_stmt = select(func.count()).select_from(AgentModel).where(~AgentModel.deleted)
-    if ctx.workspace_id is not None:
-        count_stmt = count_stmt.where(AgentModel.workspace_id == ctx.workspace_id)
+    if not ctx.is_system_scope:
+        count_stmt = count_stmt.where(AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0)))
     total = (await db.execute(count_stmt)).scalar_one()
 
     # Fetch page
     offset = (page - 1) * page_size
     stmt = select(AgentModel).where(~AgentModel.deleted)
-    if ctx.workspace_id is not None:
-        stmt = stmt.where(AgentModel.workspace_id == ctx.workspace_id)
+    if not ctx.is_system_scope:
+        stmt = stmt.where(AgentModel.workspace_id == (ctx.workspace_id or uuid.UUID(int=0)))
     stmt = stmt.order_by(AgentModel.created_at.desc()).offset(offset).limit(page_size)
     result = await db.execute(stmt)
     agents = result.scalars().all()
