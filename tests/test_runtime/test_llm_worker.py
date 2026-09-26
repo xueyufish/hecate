@@ -405,11 +405,47 @@ class TestLLMWorkerToolCallDetection:
             events.append(event)
         token_events = [e for e in events if isinstance(e, dict) and "content" in e]
         final_events = [e for e in events if not isinstance(e, dict)]
-        assert token_events == [{"content": "Calc"}, {"content": "ing..."}]
+        # Silent first iteration (unified-chat-execution): with tools
+        # configured and no tool results in the channel, intermediate LLM
+        # text must NOT stream — the full text still lands in the channel.
+        assert token_events == []
         assert len(final_events) == 1
         final = final_events[0]
         assert final.channel_updates.get("_has_tool_call") is True
         assert final.channel_updates["messages"][0]["tool_calls"] == tool_calls
+
+    async def test_streaming_followup_iteration_streams_content(self) -> None:
+        """Follow-up iterations (tool results in the channel) stream live —
+        they carry the final answer."""
+        tool_calls = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "calc", "arguments": '{"expr":"2+2"}'},
+            },
+        ]
+        port = self._make_structured_port(
+            [
+                {"content": "The", "tool_calls": None},
+                {"content": " answer", "tool_calls": None},
+            ]
+        )
+        worker = LLMWorker(port=port)
+        events: list = []
+        async for event in worker.execute_stream(
+            node_id="llm",
+            node_config={"model": "gpt-4o", "tools": [{"type": "function"}]},
+            channel_snapshot={
+                "messages": [
+                    {"role": "user", "content": "Calc 2+2"},
+                    {"role": "assistant", "content": "", "tool_calls": tool_calls},
+                    {"role": "tool", "tool_call_id": "call_1", "content": "4"},
+                ]
+            },
+        ):
+            events.append(event)
+        token_events = [e for e in events if isinstance(e, dict) and "content" in e]
+        assert token_events == [{"content": "The"}, {"content": " answer"}]
 
     async def test_streaming_no_tool_calls(self) -> None:
         port = self._make_structured_port(

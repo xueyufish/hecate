@@ -605,6 +605,13 @@ class Settings(BaseSettings):
     A2A_TRUSTED_JWKS: str = ""
     A2A_TRUSTED_JWKS_PATH: str = ""
 
+    # Chat engine convergence (B1b): when true, chat requests for agents
+    # with configured tools execute through WorkflowExecutionService /
+    # Pregel (unified events, receipts, checkpoints) instead of the direct
+    # tool loop. Default false keeps the legacy direct loop — flip after
+    # the consistency regression suite passes in a staging environment.
+    CHAT_TOOL_LOOP_ENGINE_ENABLED: bool = False
+
     COST_ANOMALY_THRESHOLD: float = 2.5
     COST_ROLLING_WINDOW_DAYS: int = 30
     COST_DEFAULT_POLICY: str = "alert"

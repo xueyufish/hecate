@@ -48,6 +48,7 @@ from hecate.runtime.tool_side_effects import (
     RECEIPT_SUCCEEDED,
     RECEIPT_UNKNOWN,
     classify,
+    should_auto_retry,
 )
 from hecate.runtime.types import WorkerResult
 from hecate.runtime.worker import Worker
@@ -87,7 +88,14 @@ async def get_tool_receipt(event_store: Any, session_id: Any, execution_id: str)
     if event_store is None:
         return None
     receipt: dict[str, Any] | None = None
-    for event in await event_store.get_events(session_id):
+    try:
+        events = await event_store.get_events(session_id)
+    except Exception:
+        # An unreadable store must not block execution: treat as no receipt
+        # and let should_auto_retry apply its conservative defaults.
+        logger.warning("Tool receipt lookup failed; treating as no receipt", exc_info=True)
+        return None
+    for event in events:
         if event.event_type is not EventType.TOOL_RESULT:
             continue
         if event.payload.get("execution_id") != execution_id:
@@ -374,11 +382,51 @@ class ToolWorker(Worker):
             except json.JSONDecodeError:
                 arguments = {}
 
-        # Server-assigned stable execution id — the recovery key. The LLM's
-        # tool_call_id may be empty or ephemeral and stays only as an
-        # association field.
-        execution_id = str(uuid.uuid4())
+        # Server-assigned stable execution id — the recovery key. Derived
+        # deterministically from (session, tool_call_id) so a resumed replay
+        # of the same logical call lands on the SAME id and can find its
+        # prior receipt; the LLM's tool_call_id may be empty or ephemeral
+        # (then the id degenerates to random and receipt matching is simply
+        # unavailable for that call).
+        session_key = (execution_context or {}).get("session_id")
+        if session_key and tc_id:
+            execution_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"tool-exec:{session_key}:{tc_id}"))
+        else:
+            execution_id = str(uuid.uuid4())
         side_effect_class = classify(name).value
+
+        # Recovery (unified-chat-execution): an existing receipt means this
+        # dispatch is a resume replay of an already-attempted call — never
+        # re-run it blindly. succeeded → skip; unknown/failed-unretryable →
+        # human review. Retryable combinations fall through and re-execute
+        # under the same execution_id (latest receipt wins).
+        if self._event_store is not None and session_key:
+            prior_receipt = await get_tool_receipt(self._event_store, session_key, execution_id)
+            prior_status = (prior_receipt or {}).get("status")
+            if prior_status is not None and not should_auto_retry(classify(name), prior_status):
+                if prior_status == RECEIPT_SUCCEEDED:
+                    logger.info(
+                        "Tool '%s' execution %s already succeeded (resume) — skipping re-execution",
+                        name,
+                        execution_id,
+                    )
+                    return {
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": "[recovered] result restored from execution receipt; not re-executed",
+                    }
+                logger.warning(
+                    "Tool '%s' execution %s outcome %s — human review, not re-executed",
+                    name,
+                    execution_id,
+                    prior_status,
+                )
+                return {
+                    "role": "tool",
+                    "tool_call_id": tc_id,
+                    "content": "[needs review] previous execution outcome indeterminate; retry withheld",
+                    "is_error": True,
+                }
 
         access_decision = self._check_access(name, arguments, context, tc_id=tc_id, execution_context=execution_context)
         if access_decision is not None:
@@ -619,6 +667,8 @@ class ToolWorker(Worker):
             except ImportError:
                 pass
         if self._event_store and execution_context:
+            import hashlib as _hashlib
+
             from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
 
             await self._event_store.append(
@@ -631,6 +681,7 @@ class ToolWorker(Worker):
                     payload={
                         "tool_name": name,
                         "result_length": len(str(result)),
+                        "result_digest": _hashlib.sha256(str(result).encode()).hexdigest(),
                         "tool_call_id": tc_id,
                         "execution_id": execution_id,
                         "side_effect_class": side_effect_class,
