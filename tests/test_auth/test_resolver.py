@@ -29,11 +29,16 @@ class _MockProvider(AuthProvider):
 
 
 @pytest.fixture(autouse=True)
-def _clear_providers() -> None:
-    """Clear registered providers before each test."""
-    register_auth_providers()
+def _restore_providers() -> None:
+    """Restore the global provider chain after each test.
+
+    ``register_auth_providers`` replaces the process-wide registry; leaving
+    it empty would silently 401 every later test that authenticates through
+    the real provider chain (MCP transport, anonymous REST clients).
+    """
+    saved = get_registered_providers()
     yield
-    register_auth_providers()
+    register_auth_providers(*saved)
 
 
 class TestResolver:

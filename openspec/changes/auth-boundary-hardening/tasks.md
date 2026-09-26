@@ -34,3 +34,4 @@
 - [x] 6.1 文档：`.env.example` 的 `MCP_AUTH_TYPE` 注释更新（默认强制认证、none 为 dev 逃生口）；`docs/reference/rest-api.md` 的 MCP 段落与 system 段落补充认证要求。验证：文档自查。
 - [x] 6.2 门禁：`ruff check src/hecate/ tests/`、`ruff format --check src/ tests/`、`mypy src/`、`python -m pytest tests/test_api tests/test_services tests/test_enterprise -q`。验证：全部 0 错误。
 - [x] 6.3 `openspec validate auth-boundary-hardening` 通过。
+- [x] 6.4 修复 CI 全量回归暴露的 provider 链污染：`tests/test_auth/test_resolver.py` 的 autouse fixture 清空全局 provider 注册表且不恢复，而 `deps_workspace._ensure_providers` 用一次性布尔标记跳过重注册，导致其后所有真实链认证（MCP transport 4 例）401。改为 fixture 快照恢复 + `_ensure_providers` 在注册表为空时自愈。验证：`tests/test_api/test_auth.py + tests/test_auth/ + tests/test_services/test_mcp_server.py` 同进程组合运行全绿；CI 门禁范围已含 `tests/test_auth/`，不再有此盲区。

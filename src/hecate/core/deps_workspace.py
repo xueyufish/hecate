@@ -29,7 +29,7 @@ from hecate.core.config import settings
 from hecate.core.database import get_db
 from hecate.enterprise.auth.api_key_provider import APIKeyAuthProvider
 from hecate.enterprise.auth.jwt_provider import JWTAuthProvider
-from hecate.enterprise.auth.resolver import register_auth_providers, resolve_auth_context
+from hecate.enterprise.auth.resolver import get_registered_providers, register_auth_providers, resolve_auth_context
 from hecate.models.user import UserModel
 from hecate.models.workspace_member import WorkspaceRole
 
@@ -37,16 +37,16 @@ logger = logging.getLogger(__name__)
 
 security_scheme = HTTPBearer(auto_error=False)
 
-# Register built-in auth providers (JWT first, then API key)
-_providers_registered = False
-
 
 def _ensure_providers() -> None:
-    """Register built-in auth providers on first use."""
-    global _providers_registered
-    if not _providers_registered:
+    """Register built-in auth providers (JWT first, then API key).
+
+    Checks the registry itself instead of a one-shot flag so a chain that
+    was cleared at runtime (tests, future plugin swaps) self-heals on the
+    next authentication instead of silently rejecting every token.
+    """
+    if not get_registered_providers():
         register_auth_providers(JWTAuthProvider(), APIKeyAuthProvider())
-        _providers_registered = True
 
 
 def _hash_key(raw_key: str) -> str:
