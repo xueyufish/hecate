@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from typing import Any
 
 from hecate.core.config import Settings
 
@@ -21,6 +22,19 @@ async def main() -> None:
 
     logger.info(f"Connecting to Temporal server at {settings.TEMPORAL_SERVER_URL}")
     logger.info(f"Task queue: {settings.TEMPORAL_TASK_QUEUE}")
+
+    # Checked before the temporalio import so an empty registration is
+    # rejected even in environments without the package installed.
+    activities: list[Any] = []
+    if not activities:
+        # Refuse to start an idle worker: polling an empty task queue gives
+        # the false impression of distributed execution capacity.
+        raise RuntimeError(
+            "Refusing to start the Temporal worker with no registered Activities. "
+            "The Temporal activity integration is not implemented yet (see the "
+            "feature catalog's Temporal note); implement and register the node "
+            "execution Activities before starting this worker."
+        )
 
     try:
         from temporalio.client import Client
@@ -35,7 +49,7 @@ async def main() -> None:
     worker = Worker(
         client=client,
         task_queue=settings.TEMPORAL_TASK_QUEUE,
-        activities=[],
+        activities=activities,
     )
 
     logger.info("Temporal worker started. Press Ctrl+C to stop.")
