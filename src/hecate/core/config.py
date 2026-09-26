@@ -268,6 +268,13 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str = "hecate"
 
     HECATE_API_KEYS: str = ""
+    # Platform Admin bootstrap (deploy-time config) — gates platform-level
+    # operations (backup/restore, system API key minting). Both lists empty
+    # means no platform admin exists (fail-closed). DB-issued system-scope
+    # API keys do NOT satisfy this gate; the DB identity pipeline (11.16/11.17)
+    # will supersede this bootstrap.
+    PLATFORM_ADMIN_API_KEYS: str = ""
+    PLATFORM_ADMIN_EMAILS: str = ""
     JWT_SECRET: str = ""
     LLM_GUARD_ENABLED: bool = True
     RATE_LIMIT_RPM: int = 60
@@ -617,6 +624,16 @@ class Settings(BaseSettings):
     def api_keys_list(self) -> list[str]:
         """Split the comma-separated ``HECATE_API_KEYS`` string into a list."""
         return [k.strip() for k in self.HECATE_API_KEYS.split(",") if k.strip()]
+
+    @property
+    def platform_admin_api_keys_list(self) -> list[str]:
+        """Split the comma-separated ``PLATFORM_ADMIN_API_KEYS`` string into a list."""
+        return [k.strip() for k in self.PLATFORM_ADMIN_API_KEYS.split(",") if k.strip()]
+
+    @property
+    def platform_admin_emails_list(self) -> list[str]:
+        """Split the comma-separated ``PLATFORM_ADMIN_EMAILS`` string into a list."""
+        return [e.strip().lower() for e in self.PLATFORM_ADMIN_EMAILS.split(",") if e.strip()]
 
 
 # Bridge .env into os.environ before Settings instantiation so the Settings

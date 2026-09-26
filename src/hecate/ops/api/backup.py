@@ -1,21 +1,32 @@
-"""REST API endpoints for backup and restore management."""
+"""REST API endpoints for backup and restore management.
+
+All endpoints require platform admin identity (see the ``platform-admin``
+spec): a deploy-time configured admin token or a JWT user on the admin
+email allowlist. The gate is enforced at the router level so future
+endpoints on this router are protected by default.
+"""
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel as PydanticBase
 from pydantic import Field
 
 from hecate.core.database import async_session_factory
+from hecate.core.deps_workspace import require_platform_admin
 from hecate.models.backup import (
     BackupRecordModel,
     BackupRecordReadSchema,
 )
 
-router = APIRouter(prefix="/api/system", tags=["system-backup"])
+router = APIRouter(
+    prefix="/api/system",
+    tags=["system-backup"],
+    dependencies=[Depends(require_platform_admin)],
+)
 
 
 class CreateBackupRequest(PydanticBase):
@@ -40,7 +51,6 @@ class RestoreResponse(PydanticBase):
 @router.post("/backups", response_model=BackupRecordReadSchema)
 async def create_backup_endpoint(req: CreateBackupRequest) -> BackupRecordModel:
     """Create a new backup. Platform Admin only."""
-    _require_platform_admin()
     from hecate.ops.backup.orchestrator import create_backup
 
     record = await create_backup(scope=req.scope)
@@ -71,7 +81,6 @@ async def get_backup_endpoint(backup_id: uuid.UUID) -> BackupRecordModel:
 @router.post("/backups/{backup_id}/verify")
 async def verify_backup_endpoint(backup_id: uuid.UUID) -> dict:
     """Trigger verification of a backup."""
-    _require_platform_admin()
     from hecate.ops.backup.verification import verify_backup
 
     result = await verify_backup(backup_id)
@@ -81,7 +90,6 @@ async def verify_backup_endpoint(backup_id: uuid.UUID) -> dict:
 @router.post("/restore", response_model=RestoreResponse)
 async def restore_endpoint(req: RestoreRequest) -> RestoreResponse:
     """Restore data from a backup. Requires confirm=true."""
-    _require_platform_admin()
     if not req.confirm:
         raise HTTPException(status_code=400, detail="confirm=true is required for restore")
 
@@ -95,13 +103,3 @@ async def restore_endpoint(req: RestoreRequest) -> RestoreResponse:
         pitr_timestamp=req.pitr_timestamp,
     )
     return RestoreResponse(status=result.status, details=result.details, error=result.error)
-
-
-def _require_platform_admin() -> None:
-    """Check platform admin permission.
-
-    TODO: integrate with actual RBAC system once auth middleware exposes
-    the current user's role. For now, this is a placeholder that allows
-    all authenticated requests.
-    """
-    pass

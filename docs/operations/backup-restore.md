@@ -2,7 +2,7 @@
 
 How to back up and restore Hecate's data stores through the built-in Backup & Recovery API. The API coordinates backups across PostgreSQL, Qdrant, MinIO, and the filesystem, tracks each backup as a `BackupRecord`, and supports point-in-time restore with conflict policies.
 
-All endpoints live under `/api/system` and are intended for Platform Admin use. Endpoints are defined in `src/hecate/ops/api/backup.py`; orchestration logic lives in `hecate.ops.backup`.
+All endpoints live under `/api/system` and require Platform Admin identity. Admin access is bootstrapped at deploy time: set `PLATFORM_ADMIN_API_KEYS` (comma-separated admin tokens matched against the request bearer credential) and/or `PLATFORM_ADMIN_EMAILS` (comma-separated emails of JWT-authenticated admin users). With both empty, no caller is a platform admin. Credential-less requests get 401; authenticated non-admins get 403. Endpoints are defined in `src/hecate/ops/api/backup.py`; orchestration logic lives in `hecate.ops.backup`.
 
 ---
 

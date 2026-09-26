@@ -14,12 +14,14 @@ Authentication flow:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import logging
 import uuid
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
@@ -28,11 +30,12 @@ from hecate.core.database import get_db
 from hecate.enterprise.auth.api_key_provider import APIKeyAuthProvider
 from hecate.enterprise.auth.jwt_provider import JWTAuthProvider
 from hecate.enterprise.auth.resolver import register_auth_providers, resolve_auth_context
+from hecate.models.user import UserModel
 from hecate.models.workspace_member import WorkspaceRole
 
 logger = logging.getLogger(__name__)
 
-security_scheme = HTTPBearer()
+security_scheme = HTTPBearer(auto_error=False)
 
 # Register built-in auth providers (JWT first, then API key)
 _providers_registered = False
@@ -71,7 +74,7 @@ async def _resolve_env_api_key(raw_key: str) -> AuthContext | None:
 
 
 async def get_auth_context(
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security_scheme)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AuthContext:
     """Resolve the full authentication context for a request.
@@ -84,9 +87,13 @@ async def get_auth_context(
         AuthContext with full identity and authorization state.
 
     Raises:
-        HTTPException: 401 if no authentication method succeeds.
+        HTTPException: 401 if no credentials are presented or no
+            authentication method succeeds.
     """
     _ensure_providers()
+
+    if credentials is None:
+        raise _unauthorized()
 
     # Try registered providers (JWT + API key)
     try:
@@ -100,7 +107,12 @@ async def get_auth_context(
     if ctx is not None:
         return ctx
 
-    raise HTTPException(
+    raise _unauthorized()
+
+
+def _unauthorized() -> HTTPException:
+    """Build the canonical 401 error response for this module."""
+    return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail={
             "error": {
@@ -110,6 +122,55 @@ async def get_auth_context(
             }
         },
     )
+
+
+def _is_platform_admin_token(raw_key: str) -> bool:
+    """Constant-time compare a raw bearer token against configured admin keys."""
+    raw_bytes = raw_key.encode()
+    return any(
+        hmac.compare_digest(raw_bytes, configured.encode()) for configured in settings.platform_admin_api_keys_list
+    )
+
+
+async def ensure_platform_admin(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Raise 403 unless the request carries a platform admin identity.
+
+    Platform admin resolution is deploy-time bootstrap only (see the
+    ``platform-admin`` spec): a bearer token in ``PLATFORM_ADMIN_API_KEYS``
+    (constant-time compared) or a JWT-authenticated user whose email is in
+    ``PLATFORM_ADMIN_EMAILS``. Database-issued system-scope API keys do not
+    qualify — their issuance history predates this gate.
+    """
+    if credentials is not None and _is_platform_admin_token(credentials.credentials):
+        return
+
+    result = await db.execute(select(UserModel).where(UserModel.id == ctx.user_id))
+    user = result.scalar_one_or_none()
+    if user is not None and user.email.lower() in settings.platform_admin_emails_list:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": {
+                "code": "FORBIDDEN",
+                "message": "Platform admin required",
+                "details": None,
+            }
+        },
+    )
+
+
+async def require_platform_admin(
+    checked: Annotated[None, Depends(ensure_platform_admin)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+) -> AuthContext:
+    """Dependency form of the platform admin gate; returns the AuthContext."""
+    return ctx
 
 
 def _role_level(role: WorkspaceRole) -> int:

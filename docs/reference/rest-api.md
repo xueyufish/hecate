@@ -135,6 +135,8 @@ The DLP engine (see [DLP](../concepts/dlp.md)) runs inside the security hooks an
 
 ### System and backup
 
+All `/api/system` backup/restore endpoints require **Platform Admin** identity: a bearer token configured in `PLATFORM_ADMIN_API_KEYS`, or a JWT user whose email is in `PLATFORM_ADMIN_EMAILS`. Credential-less requests return 401; authenticated non-admins get 403. Minting system-scope API keys via `/api/api-keys` is likewise restricted to Platform Admins.
+
 | Base path | Resource |
 |-----------|----------|
 | `/api/system/backups` | Create, list, inspect, and verify backups (see [Backup and Restore Runbook](../operations/backup-restore.md)) |

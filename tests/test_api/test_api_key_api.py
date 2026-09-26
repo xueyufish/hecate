@@ -108,8 +108,8 @@ async def test_rotate_api_key(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_system_scope_key(client: AsyncClient) -> None:
-    """Test creating a system-scope API key."""
+async def test_create_system_scope_key_requires_platform_admin(client: AsyncClient) -> None:
+    """Non-platform-admin callers cannot mint a system-scope key (403, no row)."""
     response = await client.post(
         "/api/api-keys",
         json={
@@ -117,9 +117,30 @@ async def test_create_system_scope_key(client: AsyncClient) -> None:
             "scope": "system",
         },
     )
+    assert response.status_code == 403
+    assert response.json()["detail"]["error"]["code"] == "FORBIDDEN"
+
+    # No key record was persisted for the rejected mint.
+    list_response = await client.get("/api/api-keys")
+    assert list_response.status_code == 200
+    assert list_response.json()["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_create_system_scope_key_as_platform_admin(client: AsyncClient, platform_admin_token: str) -> None:
+    """A platform admin token can mint a system-scope key."""
+    response = await client.post(
+        "/api/api-keys",
+        json={
+            "name": "System Key",
+            "scope": "system",
+        },
+        headers={"Authorization": f"Bearer {platform_admin_token}"},
+    )
     assert response.status_code == 201
     data = response.json()
     assert data["scope"] == "system"
+    assert "key" in data
 
 
 @pytest.mark.asyncio

@@ -9,11 +9,12 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.database import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import ensure_platform_admin, get_auth_context, security_scheme
 from hecate.enterprise.auth.api_key_service import ApiKeyService
 from hecate.models.api_key import (
     ApiKeyCreateResponseSchema,
@@ -30,8 +31,16 @@ async def create_api_key(
     body: ApiKeyCreateSchema,
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
 ) -> dict:
-    """Create a new API key."""
+    """Create a new API key.
+
+    System-scoped keys are platform admin only (see the ``platform-admin``
+    spec); workspace-scoped keys follow the pre-existing rules.
+    """
+    if body.scope.value == "system":
+        await ensure_platform_admin(credentials, ctx, db)
+
     if body.scope.value == "workspace":
         if body.workspace_id is None:
             raise HTTPException(
