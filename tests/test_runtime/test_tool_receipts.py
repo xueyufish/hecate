@@ -32,13 +32,16 @@ from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
 class _StubPort:
     def __init__(self, *, raise_exc: Exception | None = None) -> None:
         self.raise_exc = raise_exc
+        self.calls: list[tuple[str, dict]] = []
 
     async def tool_execute(self, name, args, context=None):
+        self.calls.append((name, args))
         if self.raise_exc is not None:
             raise self.raise_exc
         return {"executed": True}
 
     async def tool_execute_sandbox(self, name, args, context=None):
+        self.calls.append((name, args))
         if self.raise_exc is not None:
             raise self.raise_exc
         return {"executed": True}
@@ -251,3 +254,87 @@ async def test_temporal_worker_pool_fails_fast():
 async def test_temporal_run_worker_rejects_empty_activities():
     with pytest.raises(RuntimeError, match="no registered Activities"):
         await run_worker_main()
+
+
+# ---------------------------------------------------------------------------
+# Resume replay consumption (chat-loop-engine-convergence)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resume_does_not_reexecute_succeeded_call():
+    """A re-dispatch of the same (session, tool_call_id) after a succeeded
+    receipt must not re-run the tool — the result is restored from the
+    receipt (deterministic execution_id makes the replay match)."""
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    port = _StubPort()
+    worker = _make_worker(store, port)
+    ctx = _execution_context(session_id)
+
+    await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
+    assert len(port.calls) == 1
+
+    replay = await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
+    assert len(port.calls) == 1, "succeeded tool must not re-execute on resume"
+    replay_msg = replay.channel_updates["messages"][0]
+    assert "[recovered]" in replay_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_resume_unknown_outcome_goes_to_human_review():
+    """After an indeterminate failure (connection lost), a resume dispatch
+    must withhold automatic retry for an external-side-effect tool."""
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    port = _StubPort(raise_exc=ConnectionError("lost"))
+    worker = _make_worker(store, port)
+    ctx = _execution_context(session_id)
+
+    await worker.execute("tools", {}, _payload("call-1", "browser_click", {"x": "1"}), ctx)
+    assert len(port.calls) == 1
+
+    port.raise_exc = None
+    replay = await worker.execute("tools", {}, _payload("call-1", "browser_click", {"x": "1"}), ctx)
+    assert len(port.calls) == 1, "unknown outcome must not auto-retry"
+    replay_msg = replay.channel_updates["messages"][0]
+    assert "[needs review]" in replay_msg["content"]
+    assert replay_msg["is_error"] is True
+
+
+@pytest.mark.asyncio
+async def test_resume_failed_readonly_call_retries():
+    """A definitive failure of a readonly tool is retryable on resume —
+    the call re-executes under the same execution_id."""
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    port = _StubPort(raise_exc=ValueError("bad args"))
+    worker = _make_worker(store, port)
+    ctx = _execution_context(session_id)
+
+    await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
+    assert len(port.calls) == 1
+
+    port.raise_exc = None
+    await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
+    assert len(port.calls) == 2, "failed readonly call is retryable on resume"
+
+
+@pytest.mark.asyncio
+async def test_deterministic_execution_id_across_replays():
+    """Same (session, tool_call_id) → same execution_id on every dispatch;
+    different sessions never collide."""
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    worker = _make_worker(store, _StubPort())
+    ctx = _execution_context(session_id)
+
+    await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
+    first_id = (await _tool_calls(store, session_id))[0].payload["execution_id"]
+
+    store2 = InMemoryEventStore()
+    worker2 = _make_worker(store2, _StubPort())
+    await worker2.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
+    replay_id = (await _tool_calls(store2, session_id))[0].payload["execution_id"]
+
+    assert first_id == replay_id
