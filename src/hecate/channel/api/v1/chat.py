@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.composition.memory_policy import narrowed_tool_names
+from hecate.core.config import settings
 from hecate.core.database import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_state_store import get_session_state_store
@@ -346,15 +347,12 @@ async def _process_chat(
     elif agent_uuid is not None:
         parsed_agent_id = str(agent_uuid)
 
+    # Guardrail bundle (T0.2): assembled once and shared by both paths —
+    # the direct loop and, when CHAT_TOOL_LOOP_ENGINE_ENABLED, the Pregel
+    # engine ToolWorker. Reads the agent's guardrail_config and the
+    # workspace's policy rule rows.
+    bundle = None
     if agent_tools:
-        # Agent-configured tools: drive the tool-calling loop directly —
-        # the LLM proposes tool calls, the registry executes them, and results
-        # feed back into the conversation (mirrors ConversationService).
-        tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
-        provider_cfg = await _get_provider_config(db, effective_model)
-        # T0.2 (guardrail-upgrade-trio): assemble the guardrail bundle so path-A
-        # direct tool loop is gated the same way the Pregel path is. Reads the
-        # agent's guardrail_config and the workspace's policy rule rows.
         from hecate.runtime.security.guardrail_assembly import assemble_guardrails
 
         bundle = await assemble_guardrails(
@@ -368,6 +366,17 @@ async def _process_chat(
             # so the documented 3-point scanning actually runs in the chain.
             dlp_scanner=dlp_scanner,
         )
+
+    # B1b convergence: with CHAT_TOOL_LOOP_ENGINE_ENABLED the tool loop runs
+    # inside the Pregel engine (unified events, receipts, checkpoints); the
+    # direct loop below stays as the rollback path while the flag is false.
+    use_engine_loop = bool(agent_tools) and settings.CHAT_TOOL_LOOP_ENGINE_ENABLED
+    if agent_tools and not use_engine_loop:
+        # Agent-configured tools: drive the tool-calling loop directly —
+        # the LLM proposes tool calls, the registry executes them, and results
+        # feed back into the conversation (mirrors ConversationService).
+        tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
+        provider_cfg = await _get_provider_config(db, effective_model)
         if request.stream:
             return StreamingResponse(
                 _stream_chat_with_tools(
@@ -433,7 +442,10 @@ async def _process_chat(
             ),
         ).model_dump()
 
-    use_enhanced = parsed_kb_ids or request.generate_opening or request.generate_suggestions
+    # With the convergence flag on, tool agents execute here too — the
+    # engine branch must also serve them (this also fixes the pre-existing
+    # loss of agent-configured tools on the enhanced branch).
+    use_enhanced = parsed_kb_ids or request.generate_opening or request.generate_suggestions or use_engine_loop
 
     if use_enhanced:
         from hecate.core.composition.runtime_port_adapter import create_runtime_port
@@ -448,6 +460,11 @@ async def _process_chat(
             db=db,
             event_store=event_store,
             checkpoint_store=session_state_store,
+            access_policy=bundle.access_policy if bundle else None,
+            approval_callback=bundle.approval_callback if bundle else None,
+            tool_policy_rules=bundle.rules if bundle else None,
+            middleware_chains=bundle.middleware_chains if bundle else None,
+            denial_tracker=bundle.denial_tracker if bundle else None,
         )
 
         if request.stream:
@@ -457,7 +474,7 @@ async def _process_chat(
                     agent_mode="chat",
                     messages=msg_dicts,
                     model=effective_model,
-                    tools=request.tools,
+                    tools=effective_tools,
                     stream=True,
                     session_id=request.session_id,
                     agent_id=parsed_agent_id,
@@ -473,11 +490,16 @@ async def _process_chat(
 
                 async for event in result_gen:
                     if event.get("type") == "message":
+                        delta_content = event.get("content", "")
+                        if not delta_content:
+                            # Empty deltas (tool-call-only iterations) are not
+                            # content — suppress rather than emit no-op chunks.
+                            continue
                         chunk = ChatCompletionChunk(
                             model=effective_model,
                             choices=[
                                 ChatCompletionChunkChoice(
-                                    delta=ChatCompletionChunkDelta(content=event.get("content", "")),
+                                    delta=ChatCompletionChunkDelta(content=delta_content),
                                     finish_reason=None,
                                 )
                             ],
@@ -501,7 +523,7 @@ async def _process_chat(
             agent_mode="chat",
             messages=msg_dicts,
             model=effective_model,
-            tools=request.tools,
+            tools=effective_tools,
             stream=False,
             session_id=request.session_id,
             agent_id=parsed_agent_id,

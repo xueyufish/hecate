@@ -218,6 +218,7 @@ class WorkflowExecutionService:
         approval_callback: Any = None,
         tool_policy_rules: list | None = None,
         middleware_chains: dict | None = None,
+        denial_tracker: Any = None,
         grounding_scoring: Any = None,
     ) -> None:
         self._port = port
@@ -238,6 +239,7 @@ class WorkflowExecutionService:
         # agent-level grounding scoring policy mirrored into every
         # execution context.
         self._middleware_chains = middleware_chains or {}
+        self._denial_tracker = denial_tracker
         self._grounding_scoring = grounding_scoring
         self._tool_policy_rules = tool_policy_rules or []
         if access_policy is not None:
@@ -846,6 +848,9 @@ class WorkflowExecutionService:
             access_policy=self._access_policy,
             approval_callback=self._approval_callback,
             tool_rules=self._tool_policy_rules,
+            event_store=self._event_store,
+            middleware_chains=self._middleware_chains,
+            denial_tracker=self._denial_tracker,
         )
         agent_worker = AgentWorker(port=self._port)
         knowledge_worker = KnowledgeWorker(port=self._port)

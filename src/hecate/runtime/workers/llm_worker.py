@@ -898,6 +898,14 @@ class LLMWorker(Worker):
         structured_tool_calls: list[dict[str, Any]] | None = None
         provider_usage: dict[str, Any] | None = None
         has_tools = bool(shaped_tools)
+        # Tool-loop iteration gating (unified-chat-execution): the first
+        # iteration of a tool loop proposes tool calls, and any LLM text it
+        # produces is intermediate — it must not reach the streamed answer.
+        # When tools are configured and the channel has no tool results yet,
+        # stream nothing; follow-up iterations (tool results present) carry
+        # the final answer and stream live. full_response still accumulates
+        # for the channel update either way.
+        silent_iteration = has_tools and not any(isinstance(m, dict) and m.get("role") == "tool" for m in messages)
         try:
             if has_tools:
                 async for chunk in self._port.llm_invoke_structured(
@@ -912,7 +920,8 @@ class LLMWorker(Worker):
                         if first_token_time is None:
                             first_token_time = time.monotonic()
                         full_response += content
-                        yield {"content": content}
+                        if not silent_iteration:
+                            yield {"content": content}
                     if chunk_tool_calls:
                         structured_tool_calls = chunk_tool_calls
             else:
