@@ -40,17 +40,19 @@ class TestTemporalWorkerPool:
         assert pool.start_to_close_timeout == 600.0
 
     @pytest.mark.asyncio
-    async def test_dispatch_fallback(self) -> None:
-        """Test that dispatch falls back to direct execution."""
+    async def test_dispatch_fails_fast_while_unimplemented(self) -> None:
+        """Dispatch must fail loudly, not silently degrade to local execution.
+
+        The silent fallback masked the fact that distributed execution,
+        retries, and crash recovery were not actually happening (tool-recovery
+        spec: unimplemented Temporal dispatch fails explicitly)."""
         pool = TemporalWorkerPool()
         worker = SimpleWorker()
 
-        result = await pool.dispatch(
-            worker=worker,
-            node_id="test-node",
-            node_config={"model": "gpt-4o"},
-            channel_snapshot={"messages": []},
-        )
-
-        assert isinstance(result, WorkerResult)
-        assert result.node_id == "test-node"
+        with pytest.raises(NotImplementedError, match="not implemented"):
+            await pool.dispatch(
+                worker=worker,
+                node_id="test-node",
+                node_config={"model": "gpt-4o"},
+                channel_snapshot={"messages": []},
+            )

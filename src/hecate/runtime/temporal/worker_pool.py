@@ -17,14 +17,12 @@ logger = logging.getLogger(__name__)
 class TemporalWorkerPool(WorkerPool):
     """Worker pool that dispatches node execution as Temporal Activities.
 
-    This enables distributed execution across multiple workers with:
-    - Automatic retries on failure
-    - Configurable timeouts per activity
-    - Heartbeat monitoring for long-running tasks
-    - Durable execution that survives worker crashes
-
-    Note: This is a placeholder implementation. Full Temporal integration
-    requires the temporalio package and a running Temporal server.
+    Intended for distributed execution across multiple workers with
+    automatic retries, timeouts, heartbeats, and durable execution. NOT
+    implemented yet: ``dispatch`` fails loudly instead of silently
+    degrading to local execution (see the feature catalog's Temporal
+    note). Full integration requires the temporalio package, a running
+    Temporal server, and registered node-execution Activities.
     """
 
     def __init__(
@@ -54,20 +52,27 @@ class TemporalWorkerPool(WorkerPool):
     ) -> WorkerResult:
         """Dispatch node execution as a Temporal Activity.
 
-        In P3, this will schedule a Temporal Activity and await the result.
-        For now, falls back to direct execution.
+        Not implemented: scheduling the Activity and awaiting its result
+        requires the Temporal client/workflow integration that is still
+        pending (see the feature catalog's Temporal note). This pool
+        deliberately fails loudly instead of silently degrading to local
+        execution — callers get an honest error, not a false sense of
+        distributed execution.
 
         Args:
-            worker: The worker to execute the node.
+            worker: The worker to execute the node (unused while unimplemented).
             node_id: The node identifier.
             node_config: Node configuration dict.
             channel_snapshot: Read-only channel state snapshot.
 
-        Returns:
-            WorkerResult with execution outcome.
+        Raises:
+            NotImplementedError: Always — distributed dispatch is not implemented.
         """
         logger.debug(f"Dispatching node {node_id} via Temporal (task_queue={self.task_queue})")
 
-        # P3: Schedule as Temporal Activity
-        # For now, fall back to direct execution
-        return await worker.execute(node_id, node_config, channel_snapshot)
+        raise NotImplementedError(
+            "Distributed dispatch via Temporal is not implemented: TemporalWorkerPool "
+            "does not schedule Activities yet. Use the default DirectWorkerPool for "
+            "local execution, or implement the Temporal Activity integration "
+            "(see runtime/temporal/run_worker.py)."
+        )

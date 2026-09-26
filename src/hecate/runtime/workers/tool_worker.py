@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from typing import Any
 
 from hecate.runtime.citation_provenance import (
@@ -42,11 +43,57 @@ from hecate.runtime.tool_access import (
     ToolRule,
 )
 from hecate.runtime.tool_matcher import ToolMatcher
+from hecate.runtime.tool_side_effects import (
+    RECEIPT_FAILED,
+    RECEIPT_SUCCEEDED,
+    RECEIPT_UNKNOWN,
+    classify,
+)
 from hecate.runtime.types import WorkerResult
 from hecate.runtime.worker import Worker
 from hecate.runtime.workers.sandbox_router import SandboxEnforcementRouter
 
 logger = logging.getLogger(__name__)
+
+
+def _is_indeterminate_error(exc: Exception) -> bool:
+    """Whether an execution exception leaves the outcome unknowable.
+
+    Timeout and connection failures are indeterminate: the tool may have
+    completed remotely after the client gave up. Everything else (bad
+    arguments, permission denial, missing tool) provably did not take
+    effect. Deliberately narrow — prefer human review over blind retry.
+    """
+    import httpx
+
+    return isinstance(
+        exc,
+        (
+            TimeoutError,
+            ConnectionError,
+            httpx.TimeoutException,
+            httpx.ConnectError,
+        ),
+    )
+
+
+async def get_tool_receipt(event_store: Any, session_id: Any, execution_id: str) -> dict[str, Any] | None:
+    """Read the TOOL_RESULT receipt for a tool execution.
+
+    Returns the most recent receipt payload (with ``status`` and
+    ``side_effect_class``) for the execution, or None when no receipt
+    exists — e.g. log loss, which recovery must treat as indeterminate.
+    """
+    if event_store is None:
+        return None
+    receipt: dict[str, Any] | None = None
+    for event in await event_store.get_events(session_id):
+        if event.event_type is not EventType.TOOL_RESULT:
+            continue
+        if event.payload.get("execution_id") != execution_id:
+            continue
+        receipt = event.payload
+    return receipt
 
 
 class ToolWorker(Worker):
@@ -327,6 +374,12 @@ class ToolWorker(Worker):
             except json.JSONDecodeError:
                 arguments = {}
 
+        # Server-assigned stable execution id — the recovery key. The LLM's
+        # tool_call_id may be empty or ephemeral and stays only as an
+        # association field.
+        execution_id = str(uuid.uuid4())
+        side_effect_class = classify(name).value
+
         access_decision = self._check_access(name, arguments, context, tc_id=tc_id, execution_context=execution_context)
         if access_decision is not None:
             if access_decision == AccessDecision.DENY:
@@ -471,6 +524,8 @@ class ToolWorker(Worker):
                         "tool_name": name,
                         "arguments": arguments,
                         "tool_call_id": tc_id,
+                        "execution_id": execution_id,
+                        "side_effect_class": side_effect_class,
                         "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
                     },
                 )
@@ -512,6 +567,32 @@ class ToolWorker(Worker):
             logger.warning("Tool '%s' execution failed: %s", name, e)
             if span_ctx:
                 await self._port.end_span(span_ctx.span_id, output_data={"error": str(e)})
+            # Receipt: the TOOL_CALL above must not stay orphaned. Timeout /
+            # connection failures leave the outcome unknowable (the tool may
+            # have completed remotely) — recorded as unknown so recovery
+            # sends the case to human review instead of blindly retrying.
+            if self._event_store and execution_context:
+                from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
+                status = RECEIPT_UNKNOWN if _is_indeterminate_error(e) else RECEIPT_FAILED
+                await self._event_store.append(
+                    Event(
+                        session_id=execution_context["session_id"],
+                        superstep=execution_context["superstep"],
+                        event_type=EventType.TOOL_RESULT,
+                        node_id=None,
+                        trace_id=execution_context.get("trace_id"),
+                        payload={
+                            "tool_name": name,
+                            "tool_call_id": tc_id,
+                            "execution_id": execution_id,
+                            "side_effect_class": side_effect_class,
+                            "status": status,
+                            "error": str(e)[:500],
+                            "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                        },
+                    )
+                )
             self._capture_evidence(
                 execution_context=execution_context,
                 node_id=node_id,
@@ -551,6 +632,9 @@ class ToolWorker(Worker):
                         "tool_name": name,
                         "result_length": len(str(result)),
                         "tool_call_id": tc_id,
+                        "execution_id": execution_id,
+                        "side_effect_class": side_effect_class,
+                        "status": RECEIPT_SUCCEEDED,
                         "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
                     },
                 )

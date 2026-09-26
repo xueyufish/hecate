@@ -23,4 +23,4 @@
 
 - [x] 4.1 `docs/features/feature-catalog.md`：A2A Signed Cards 相关条目按服务端签名/客户端验签分别标注状态；`.env.example` 补 `A2A_TRUSTED_JWKS(_PATH)` 注释。验证：文档自查。
 - [x] 4.2 门禁：`ruff check src/hecate/ packages/ tests/`、`ruff format --check`、`mypy src/`、`python -m pytest tests/test_api tests/test_services tests/test_enterprise packages -q`（packages 目录含 hecate_llm 测试则纳入，否则按实际布局调整）。验证：全部 0 错误。
-- [ ] 4.3 `openspec validate p1-audit-cost-a2a` 通过。
+- [x] 4.3 `openspec validate p1-audit-cost-a2a` 通过。

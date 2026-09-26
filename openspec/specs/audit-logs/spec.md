@@ -1,7 +1,9 @@
 # audit-logs Specification
 
 ## Purpose
-TBD - created by archiving change p2-backend-features. Update Purpose after archive.
+
+Append-only audit trail for administrative and protocol operations: every API request is captured with its authenticated operator (user, organization, workspace), the action performed, and the outcome — including authentication failures with a failure type but never raw credentials. Records support filtered queries and export for compliance review.
+
 ## Requirements
 ### Requirement: AuditLog model with monthly partitioning
 The system SHALL persist audit log records in a PostgreSQL table partitioned by month on `created_at`. Each record SHALL contain: `id` (UUID PK), `org_id` (UUID, NOT NULL), `workspace_id` (UUID, nullable), `user_id` (UUID, NOT NULL), `action` (VARCHAR(100), NOT NULL), `resource_type` (VARCHAR(50)), `resource_id` (UUID, nullable), `request_method` (VARCHAR(10)), `request_path` (VARCHAR(500)), `response_status` (INTEGER), `ip_address` (VARCHAR(255)), `user_agent` (VARCHAR(500), nullable), `success` (BOOLEAN, NOT NULL), `error_code` (VARCHAR(100), nullable), `error_message` (TEXT, nullable), `metadata` (JSONB, default '{}'), `created_at` (TIMESTAMPTZ, NOT NULL).
@@ -26,7 +28,7 @@ The system SHALL define an `AuditStore` ABC with methods: `write(event)`, `query
 - **THEN** the system SHALL return paginated results matching all provided filters
 
 ### Requirement: AuditMiddleware for automatic API capture
-The system SHALL register a FastAPI `BaseHTTPMiddleware` that captures every API request (excluding `/health`, `/metrics`, OPTIONS requests, and static assets). The middleware SHALL extract `AuthContext` for `user_id`, `org_id`, `workspace_id`, record request method, path, response status, and enqueue the audit event asynchronously.
+The system SHALL register a FastAPI `BaseHTTPMiddleware` that captures every API request (excluding `/health`, `/metrics`, OPTIONS requests, and static assets). The middleware SHALL extract `AuthContext` for `user_id`, `org_id`, `workspace_id`, record request method, path, response status, and enqueue the audit event asynchronously. 认证依赖（REST 与 MCP 传输层）SHALL 在认证成功后统一把已解析的 `AuthContext` 写入请求状态（`request.state.auth_context`），使中间件读取到真实操作者而非匿名哨兵值。认证失败（401）SHALL 被审计为含失败类型（如 `invalid_credentials`、`malformed_credentials`）的事件，且 SHALL NOT 包含原始凭据（token、API key、密码）。MCP 传输层与 A2A 服务端的认证 SHALL 映射到同一请求身份结构。
 
 #### Scenario: Successful API request captured
 - **WHEN** an authenticated POST request to `/api/agents` returns 201
@@ -39,6 +41,18 @@ The system SHALL register a FastAPI `BaseHTTPMiddleware` that captures every API
 #### Scenario: Unauthenticated request excluded from audit
 - **WHEN** an unauthenticated request hits any endpoint
 - **THEN** the middleware SHALL create an audit event with `user_id=NULL`, `action="api.unauthenticated"`
+
+#### Scenario: 审计事件关联真实操作者
+- **WHEN** 分别使用 JWT 与数据库 API key 认证的用户发起管理操作（如创建 agent）
+- **THEN** 对应审计事件的 `user_id`/`org_id`/`workspace_id` 与认证身份一致，且 `metadata` 含认证方式（`jwt` / `api_key`）
+
+#### Scenario: 认证失败记录类型而非凭据
+- **WHEN** 携带无效 Bearer 凭据的请求被 401 拒绝
+- **THEN** 审计事件记录失败类型（`metadata.auth_failure="invalid_credentials"` 或等价错误码），事件中不出现原始 token 或 API key 字符串
+
+#### Scenario: MCP 请求复用同一身份结构
+- **WHEN** 已认证的 MCP 请求（经 `/mcp` 传输认证）被审计
+- **THEN** 审计事件的主体字段与 REST 请求使用同一 `AuthContext` 结构（同一 `request.state.auth_context` 键）
 
 ### Requirement: Async batch writer for audit events
 The system SHALL use an `asyncio.Queue`-based batch writer that drains audit events from the queue and inserts them into the database in batches (configurable batch size, default 100). The writer SHALL NOT block the request path.
