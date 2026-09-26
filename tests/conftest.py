@@ -323,3 +323,59 @@ def platform_admin_email(monkeypatch: pytest.MonkeyPatch) -> str:
     monkeypatch.setattr(settings, "PLATFORM_ADMIN_API_KEYS", "")
     monkeypatch.setattr(settings, "PLATFORM_ADMIN_EMAILS", "root@hecate.dev")
     return "root@hecate.dev"
+
+
+@pytest_asyncio.fixture
+async def admin_client(auth_context: AuthContext) -> AsyncGenerator[AsyncClient, None]:
+    """Client whose identity satisfies the platform admin gate.
+
+    Provider/model CRUD tests exercise business behavior, not the admin
+    gate itself (covered by the dedicated authz matrix in
+    ``test_e2e_model_provider.py``). Same overrides as ``client`` plus a
+    pass-through for ``require_platform_admin``.
+    """
+    from hecate.core.config import settings
+    from hecate.core.database import get_db
+    from hecate.core.deps import get_current_user_id, verify_api_key
+    from hecate.core.deps_workspace import get_auth_context, require_platform_admin
+    from hecate.main import app
+
+    async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        async with test_session_factory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    async def override_get_auth_context() -> AuthContext:
+        return auth_context
+
+    async def override_require_platform_admin() -> AuthContext:
+        return auth_context
+
+    settings.HECATE_API_KEYS = "test-api-key-123"
+    settings.JWT_SECRET = "test-jwt-secret-for-ci"
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_auth_context] = override_get_auth_context
+    app.dependency_overrides[require_platform_admin] = override_require_platform_admin
+
+    async def override_verify_api_key() -> str:
+        return "test-api-key-123"
+
+    async def override_get_current_user_id() -> uuid.UUID:
+        return auth_context.user_id
+
+    app.dependency_overrides[get_current_user_id] = override_get_current_user_id
+    app.dependency_overrides[verify_api_key] = override_verify_api_key
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+    app.dependency_overrides.clear()

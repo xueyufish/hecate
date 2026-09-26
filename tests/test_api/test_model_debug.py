@@ -125,3 +125,11 @@ class TestModelTest:
             assert "usage" in result
         else:
             pytest.fail(f"Expected 200, got {response.status_code}: {response.text}")
+
+
+@pytest.fixture
+def client(admin_client: AsyncClient) -> AsyncClient:
+    """Model-domain tests run as platform admin — they exercise provider
+    business behavior, not the admin gate (covered by the dedicated authz
+    matrix in test_e2e_model_provider.py)."""
+    return admin_client

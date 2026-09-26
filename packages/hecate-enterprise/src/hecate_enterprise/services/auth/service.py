@@ -54,21 +54,33 @@ class AuthService:
     async def _resolve_workspace_context(
         self, db: AsyncSession, user_id: UUID
     ) -> tuple[UUID | None, UUID | None, str | None]:
-        """Resolve the user's first workspace membership.
+        """Resolve the user's first active workspace membership.
+
+        Joins WorkspaceModel for the real org_id and skips soft-deleted
+        memberships and workspaces — the same lifecycle rules as
+        ``get_user_workspaces``.
 
         Returns:
             Tuple of (org_id, workspace_id, role) or (None, None, None).
         """
+        from hecate.models.workspace import WorkspaceModel
+
         result = await db.execute(
-            select(WorkspaceMemberModel)
-            .where(WorkspaceMemberModel.user_id == user_id)
+            select(WorkspaceMemberModel, WorkspaceModel)
+            .join(WorkspaceModel, WorkspaceMemberModel.workspace_id == WorkspaceModel.id)
+            .where(
+                WorkspaceMemberModel.user_id == user_id,
+                WorkspaceMemberModel.deleted.is_(False),
+                WorkspaceModel.deleted.is_(False),
+            )
             .order_by(WorkspaceMemberModel.created_at)
             .limit(1)
         )
-        membership = result.scalar_one_or_none()
-        if membership is None:
+        row = result.first()
+        if row is None:
             return None, None, None
-        return membership.workspace_id, membership.workspace_id, membership.role.value
+        membership, workspace = row
+        return workspace.org_id, workspace.id, membership.role.value
 
     async def get_user_workspaces(self, db: AsyncSession, user_id: UUID) -> list[dict[str, str]]:
         """Get all workspaces the user has access to.
@@ -157,18 +169,16 @@ class AuthService:
         user_id = UUID(payload["sub"])
         result = await db.execute(select(UserModel).where(UserModel.id == user_id))
         user = result.scalar_one_or_none()
-        if user is None:
+        if user is None or not user.active:
             raise ValueError("User not found")
 
-        org_id_raw = payload.get("org_id")
-        workspace_id_raw = payload.get("workspace_id")
-        role_raw = payload.get("role")
+        # Re-resolve membership from the database — never carry the old
+        # org/workspace/role claims forward, so revocations and role
+        # changes take effect on refresh.
+        org_id, workspace_id, role = await self._resolve_workspace_context(db, user_id)
 
-        org_id = UUID(org_id_raw) if org_id_raw else None
-        workspace_id = UUID(workspace_id_raw) if workspace_id_raw else None
-
-        new_access = create_access_token(user.id, org_id, workspace_id, role_raw)
-        new_refresh = create_refresh_token(user.id, org_id, workspace_id, role_raw)
+        new_access = create_access_token(user.id, org_id, workspace_id, role)
+        new_refresh = create_refresh_token(user.id, org_id, workspace_id, role)
         return new_access, new_refresh
 
     async def switch_workspace(self, db: AsyncSession, user_id: UUID, workspace_id: UUID) -> tuple[str, str]:
@@ -198,7 +208,9 @@ class AuthService:
 
         from hecate.models.workspace import WorkspaceModel
 
-        ws_result = await db.execute(select(WorkspaceModel).where(WorkspaceModel.id == workspace_id))
+        ws_result = await db.execute(
+            select(WorkspaceModel).where(WorkspaceModel.id == workspace_id, WorkspaceModel.deleted.is_(False))
+        )
         workspace = ws_result.scalar_one_or_none()
         if workspace is None:
             raise ValueError("Workspace not found")

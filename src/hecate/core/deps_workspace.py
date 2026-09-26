@@ -29,7 +29,7 @@ from hecate.core.config import settings
 from hecate.core.database import get_db
 from hecate.enterprise.auth.api_key_provider import APIKeyAuthProvider
 from hecate.enterprise.auth.jwt_provider import JWTAuthProvider
-from hecate.enterprise.auth.resolver import register_auth_providers, resolve_auth_context
+from hecate.enterprise.auth.resolver import get_registered_providers, register_auth_providers, resolve_auth_context
 from hecate.models.user import UserModel
 from hecate.models.workspace_member import WorkspaceRole
 
@@ -37,16 +37,16 @@ logger = logging.getLogger(__name__)
 
 security_scheme = HTTPBearer(auto_error=False)
 
-# Register built-in auth providers (JWT first, then API key)
-_providers_registered = False
-
 
 def _ensure_providers() -> None:
-    """Register built-in auth providers on first use."""
-    global _providers_registered
-    if not _providers_registered:
+    """Register built-in auth providers (JWT first, then API key).
+
+    Checks the registry itself instead of a one-shot flag so a chain that
+    was cleared at runtime (tests, future plugin swaps) self-heals on the
+    next authentication instead of silently rejecting every token.
+    """
+    if not get_registered_providers():
         register_auth_providers(JWTAuthProvider(), APIKeyAuthProvider())
-        _providers_registered = True
 
 
 def _hash_key(raw_key: str) -> str:
@@ -55,14 +55,28 @@ def _hash_key(raw_key: str) -> str:
 
 
 async def _resolve_env_api_key(raw_key: str) -> AuthContext | None:
-    """Attempt to resolve a raw token as an env-var API key (deprecated)."""
-    if raw_key not in settings.api_keys_list:
-        return None
+    """Resolve a raw token against deploy-time bootstrap key lists.
 
-    logger.warning(
-        "API key from HECATE_API_KEYS env var is deprecated. "
-        "Migrate to database-backed API keys via POST /api/api-keys."
-    )
+    Both ``HECATE_API_KEYS`` (deprecated) and ``PLATFORM_ADMIN_API_KEYS``
+    establish a system-scope identity; they are the ONLY sources of
+    system scope (see the ``platform-admin`` spec).
+    """
+    if raw_key in settings.api_keys_list:
+        logger.warning(
+            "API key from HECATE_API_KEYS env var is deprecated. "
+            "Migrate to database-backed API keys via POST /api/api-keys."
+        )
+        return _env_system_context()
+
+    if _is_platform_admin_token(raw_key):
+        logger.info("Authenticated via PLATFORM_ADMIN_API_KEYS bootstrap token")
+        return _env_system_context()
+
+    return None
+
+
+def _env_system_context() -> AuthContext:
+    """Build the system-scope AuthContext for env bootstrap keys."""
     return AuthContext(
         user_id=uuid.UUID("00000000-0000-0000-0000-000000000000"),
         org_id=None,
@@ -73,15 +87,36 @@ async def _resolve_env_api_key(raw_key: str) -> AuthContext | None:
     )
 
 
+async def authenticate_bearer(token: str | None, db: AsyncSession) -> AuthContext | None:
+    """Resolve a raw bearer token through the shared provider chain.
+
+    Single source of truth for bearer authentication, shared by the
+    REST dependency (``get_auth_context``) and the MCP transport
+    middleware: registered providers (JWT, database API key) first,
+    then env bootstrap keys. Returns None when nothing accepts the
+    token — callers decide the error surface (401 response etc.).
+    """
+    if not token:
+        return None
+
+    _ensure_providers()
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    try:
+        return await resolve_auth_context(credentials, db)
+    except HTTPException:
+        pass
+
+    return await _resolve_env_api_key(token)
+
+
 async def get_auth_context(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AuthContext:
     """Resolve the full authentication context for a request.
 
-    Delegates to registered auth providers (JWT, API key) via the
-    AuthProvider framework. Falls back to env-var API key (deprecated)
-    if no provider succeeds.
+    Delegates to :func:`authenticate_bearer` — the provider chain shared
+    with the MCP transport middleware.
 
     Returns:
         AuthContext with full identity and authorization state.
@@ -90,20 +125,10 @@ async def get_auth_context(
         HTTPException: 401 if no credentials are presented or no
             authentication method succeeds.
     """
-    _ensure_providers()
-
     if credentials is None:
         raise _unauthorized()
 
-    # Try registered providers (JWT + API key)
-    try:
-        return await resolve_auth_context(credentials, db)
-    except HTTPException:
-        pass
-
-    # Fallback: env-var API key (deprecated)
-    token = credentials.credentials
-    ctx = await _resolve_env_api_key(token)
+    ctx = await authenticate_bearer(credentials.credentials, db)
     if ctx is not None:
         return ctx
 

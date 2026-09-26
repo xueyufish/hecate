@@ -176,7 +176,7 @@ These mount only when the corresponding flag is enabled in `.env`:
 
 | Surface | Mount condition | Purpose |
 |---------|-----------------|---------|
-| **MCP Server** | `MCP_SERVER_ENABLED=true` | Exposes Hecate agents, knowledge bases, and tools as MCP primitives at `/mcp` (Streamable HTTP transport) |
+| **MCP Server** | `MCP_SERVER_ENABLED=true` | Exposes Hecate agents, knowledge bases, and tools as MCP primitives at `/mcp` (Streamable HTTP transport). Every `/mcp` request requires a bearer credential (same provider chain as the REST API; 401 otherwise). Tools execute under the caller's authenticated workspace — server-side identity is authoritative, caller-supplied workspace parameters never widen access. `MCP_AUTH_TYPE=none` is a local-development escape hatch only |
 | **A2A Server** | `A2A_SERVER_ENABLED=true` | Exposes Hecate agents via the Agent-to-Agent protocol; discovery via `/.well-known/agent.json` (Agent Cards) |
 
 See [Enable MCP Server](../how-to/enable-mcp-server.md) and [Enable A2A Server](../how-to/enable-a2a-server.md).

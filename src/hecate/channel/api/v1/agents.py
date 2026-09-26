@@ -96,11 +96,15 @@ def _request_to_chat_request(req: AgentChatCompletionRequest) -> ChatCompletionR
     )
 
 
-async def _load_agent_or_404(agent_id: uuid.UUID, db: AsyncSession) -> AgentModel:
-    """Look up an agent by UUID; 404 if missing or soft-deleted."""
+async def _load_agent_or_404(agent_id: uuid.UUID, db: AsyncSession, ctx: AuthContext) -> AgentModel:
+    """Look up an agent by UUID; 404 if missing, soft-deleted, or outside
+    the caller's workspace (404 rather than 403 to avoid leaking the
+    agent's existence across tenants; system scope bypasses)."""
     agent_row = await db.execute(select(AgentModel).where(AgentModel.id == agent_id, ~AgentModel.deleted))
     agent = agent_row.scalar_one_or_none()
     if agent is None:
+        raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
+    if not ctx.is_system_scope and agent.workspace_id != (ctx.workspace_id or uuid.UUID(int=0)):
         raise HTTPException(status_code=404, detail=f"Agent not found: {agent_id}")
     return agent
 
@@ -143,7 +147,7 @@ async def chat_completion_for_agent(
         HTTPException: 404 if the agent does not exist; 408 if a session
             lock cannot be acquired in time.
     """
-    agent = await _load_agent_or_404(agent_id, db)
+    agent = await _load_agent_or_404(agent_id, db, ctx)
     chat_request = _request_to_chat_request(request)
 
     # 9.10 wiring: resolve the boot-built DLP scanner (main.py lifespan

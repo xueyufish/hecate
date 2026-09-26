@@ -14,13 +14,40 @@ from typing import Any
 from fastmcp import FastMCP
 from sqlalchemy import select
 
+from hecate.core.auth_context import AuthContext
 from hecate.core.database import async_session_factory
 from hecate.models.agent import AgentModel
 from hecate.models.knowledge import KnowledgeBaseModel
 from hecate.models.tool import ToolModel
+from hecate.tools.mcp.auth_middleware import get_transport_auth_context
 from hecate.tools.mcp.session_manager import MCPSessionManager
 
 logger = logging.getLogger(__name__)
+
+_BUNDLED_WS = uuid.UUID(int=0)
+
+
+def _auth() -> AuthContext:
+    """Caller identity resolved by the transport middleware.
+
+    Raises PermissionError for in-process calls without an HTTP transport —
+    tools never execute with global permissions.
+    """
+    return get_transport_auth_context()
+
+
+def _workspace_ok(resource_workspace_id: Any, ctx: AuthContext) -> bool:
+    """Whether ctx may touch a resource owned by this workspace."""
+    if ctx.is_system_scope:
+        return True
+    return resource_workspace_id == (ctx.workspace_id or _BUNDLED_WS)
+
+
+def _tenant_filter(model_workspace_col: Any, ctx: AuthContext) -> Any:
+    """SQL filter constraining a model column to the caller's workspace."""
+    if ctx.is_system_scope:
+        return True
+    return model_workspace_col.in_([ctx.workspace_id or _BUNDLED_WS, _BUNDLED_WS])
 
 
 def _maybe_attach_gateway(mcp: FastMCP, gateway_enabled: bool | None) -> None:
@@ -85,6 +112,13 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
+                agent_row = await db.execute(
+                    select(AgentModel).where(AgentModel.id == uuid.UUID(agent_id), ~AgentModel.deleted)
+                )
+                agent = agent_row.scalar_one_or_none()
+                if agent is None or not _workspace_ok(agent.workspace_id, ctx):
+                    return json.dumps({"error": "Agent not found"})
                 result = await session_mgr.create_session(agent_id, db)
                 await db.commit()
                 return json.dumps(result)
@@ -107,6 +141,13 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
             try:
                 session = await session_mgr.get_session(session_id, db)
                 if session is None:
+                    return json.dumps({"error": "Session not found"})
+                ctx = _auth()
+                agent_row = await db.execute(
+                    select(AgentModel).where(AgentModel.id == session.agent_id, ~AgentModel.deleted)
+                )
+                agent = agent_row.scalar_one_or_none()
+                if agent is None or not _workspace_ok(agent.workspace_id, ctx):
                     return json.dumps({"error": "Session not found"})
 
                 from hecate_llm.service import llm_service
@@ -143,7 +184,15 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
                 sessions = await session_mgr.list_sessions(agent_id, db)
+                if not ctx.is_system_scope:
+                    allowed_ws = ctx.workspace_id or _BUNDLED_WS
+                    agent_rows = await db.execute(
+                        select(AgentModel.id).where(AgentModel.workspace_id == allowed_ws, ~AgentModel.deleted)
+                    )
+                    allowed_ids = {str(row) for row in agent_rows.scalars().all()}
+                    sessions = [s for s in sessions if s.get("agent_id") in allowed_ids]
                 return json.dumps(sessions)
             except Exception as e:
                 return json.dumps({"error": str(e)})
@@ -163,6 +212,13 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
             try:
                 session = await session_mgr.get_session(session_id, db)
                 if session is None:
+                    return json.dumps({"error": "Session not found"})
+                ctx = _auth()
+                agent_row = await db.execute(
+                    select(AgentModel).where(AgentModel.id == session.agent_id, ~AgentModel.deleted)
+                )
+                agent = agent_row.scalar_one_or_none()
+                if agent is None or not _workspace_ok(agent.workspace_id, ctx):
                     return json.dumps({"error": "Session not found"})
 
                 from hecate_llm.service import llm_service
@@ -207,10 +263,25 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
 
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
                 cid = uuid.UUID(conversation_id)
                 session_rows = (
                     (await db.execute(select(SessionModel).where(SessionModel.conversation_id == cid))).scalars().all()
                 )
+                if not ctx.is_system_scope:
+                    allowed_ws = ctx.workspace_id or _BUNDLED_WS
+                    allowed_ids = set(
+                        (
+                            await db.execute(
+                                select(AgentModel.id).where(AgentModel.workspace_id == allowed_ws, ~AgentModel.deleted)
+                            )
+                        )
+                        .scalars()
+                        .all()
+                    )
+                    session_rows = [s for s in session_rows if s.agent_id in allowed_ids]
+                    if not session_rows:
+                        return json.dumps([])
 
                 store = create_event_store(settings)
                 messages: list[dict] = []
@@ -237,20 +308,21 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
     # ----------------------------------------------------------------
 
     @mcp.tool
-    async def agent_list(workspace_id: str | None = None) -> str:
-        """List all agents with ID, name, mode, and model config.
+    async def agent_list() -> str:
+        """List agents visible to the caller, with ID, name, mode, and model config.
 
-        Args:
-            workspace_id: Optional UUID string to filter by workspace.
+        The workspace filter comes from the caller's authenticated identity —
+        callers cannot widen it by passing a workspace id.
 
         Returns:
             JSON array of agent summaries.
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
                 query = select(AgentModel).where(~AgentModel.deleted)
-                if workspace_id:
-                    query = query.where(AgentModel.workspace_id == uuid.UUID(workspace_id))
+                if not ctx.is_system_scope:
+                    query = query.where(AgentModel.workspace_id == (ctx.workspace_id or _BUNDLED_WS))
                 result = await db.execute(query.order_by(AgentModel.created_at.desc()).limit(100))
                 agents = result.scalars().all()
                 return json.dumps(
@@ -292,7 +364,11 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
+                if not ctx.is_system_scope and ctx.workspace_id is None:
+                    return json.dumps({"error": "Workspace context required"})
                 agent = AgentModel(
+                    workspace_id=ctx.workspace_id or _BUNDLED_WS,
                     name=name,
                     model_config_db=model_config,
                     mode=mode,
@@ -335,11 +411,12 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         allowed_fields = {"name", "persona", "mode", "model_config", "tools", "knowledge_base_ids", "risk_level"}
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
                 result = await db.execute(
                     select(AgentModel).where(AgentModel.id == uuid.UUID(agent_id), ~AgentModel.deleted)
                 )
                 agent = result.scalar_one_or_none()
-                if agent is None:
+                if agent is None or not _workspace_ok(agent.workspace_id, ctx):
                     return json.dumps({"error": "Agent not found"})
 
                 for key, value in fields.items():
@@ -379,11 +456,12 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
 
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
                 result = await db.execute(
                     select(AgentModel).where(AgentModel.id == uuid.UUID(agent_id), ~AgentModel.deleted)
                 )
                 agent = result.scalar_one_or_none()
-                if agent is None:
+                if agent is None or not _workspace_ok(agent.workspace_id, ctx):
                     return json.dumps({"error": "Agent not found"})
 
                 agent.deleted = True
@@ -408,9 +486,10 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
                 result = await db.execute(
                     select(KnowledgeBaseModel)
-                    .where(~KnowledgeBaseModel.deleted)
+                    .where(~KnowledgeBaseModel.deleted, _tenant_filter(KnowledgeBaseModel.workspace_id, ctx))
                     .order_by(KnowledgeBaseModel.created_at.desc())
                     .limit(100)
                 )
@@ -451,6 +530,7 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
                 result = await db.execute(
                     select(KnowledgeBaseModel).where(
                         KnowledgeBaseModel.id == uuid.UUID(kb_id),
@@ -458,7 +538,7 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
                     )
                 )
                 kb = result.scalar_one_or_none()
-                if kb is None:
+                if kb is None or not _workspace_ok(kb.workspace_id, ctx):
                     return json.dumps({"error": "Knowledge base not found"})
 
                 from hecate.core.composition.memory_provider import (
@@ -509,8 +589,12 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
+                if not ctx.is_system_scope and ctx.workspace_id is None:
+                    return json.dumps({"error": "Workspace context required"})
                 collection_name = f"kb_{uuid.uuid4().hex[:8]}"
                 kb = KnowledgeBaseModel(
+                    workspace_id=ctx.workspace_id or _BUNDLED_WS,
                     name=name,
                     description=description,
                     embedding_model=embedding_model,
@@ -559,6 +643,7 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
                 result = await db.execute(
                     select(KnowledgeBaseModel).where(
                         KnowledgeBaseModel.id == uuid.UUID(kb_id),
@@ -566,7 +651,7 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
                     )
                 )
                 kb = result.scalar_one_or_none()
-                if kb is None:
+                if kb is None or not _workspace_ok(kb.workspace_id, ctx):
                     return json.dumps({"error": "Knowledge base not found"})
 
                 from hecate_memory.rag.service import knowledge_base_service
@@ -597,7 +682,8 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
-                query = select(ToolModel).where(~ToolModel.deleted)
+                ctx = _auth()
+                query = select(ToolModel).where(~ToolModel.deleted, _tenant_filter(ToolModel.workspace_id, ctx))
                 if source:
                     query = query.where(ToolModel.source == source)
                 result = await db.execute(query.order_by(ToolModel.created_at.desc()).limit(100))
@@ -630,6 +716,12 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
+                tool_row = await db.execute(select(ToolModel).where(ToolModel.name == tool_name, ~ToolModel.deleted))
+                registered = tool_row.scalar_one_or_none()
+                if registered is not None and not _workspace_ok(registered.workspace_id, ctx):
+                    return json.dumps({"error": "Tool not found"})
+
                 from hecate.core.config import settings
                 from hecate.tools.tool.builtin import BuiltInToolExecutor
                 from hecate.tools.tool.registry import ToolRegistry
@@ -679,7 +771,11 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """
         async with async_session_factory() as db:
             try:
+                ctx = _auth()
+                if not ctx.is_system_scope and ctx.workspace_id is None:
+                    return json.dumps({"error": "Workspace context required"})
                 tool = ToolModel(
+                    workspace_id=ctx.workspace_id or _BUNDLED_WS,
                     name=name,
                     description=description,
                     source=source,
@@ -706,17 +802,26 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
 
     @mcp.resource("agent://list")
     async def resource_agent_list() -> str:
-        """Agent catalog — all agents with metadata."""
+        """Agent catalog — agents visible to the caller."""
         async with async_session_factory() as db:
-            result = await db.execute(select(AgentModel).where(~AgentModel.deleted).limit(100))
+            ctx = _auth()
+            query = select(AgentModel).where(~AgentModel.deleted).limit(100)
+            if not ctx.is_system_scope:
+                query = query.where(AgentModel.workspace_id == (ctx.workspace_id or _BUNDLED_WS))
+            result = await db.execute(query)
             agents = result.scalars().all()
             return json.dumps([{"id": str(a.id), "name": a.name, "mode": a.mode} for a in agents])
 
     @mcp.resource("knowledge://list")
     async def resource_knowledge_list() -> str:
-        """Knowledge base catalog."""
+        """Knowledge base catalog visible to the caller."""
         async with async_session_factory() as db:
-            result = await db.execute(select(KnowledgeBaseModel).where(~KnowledgeBaseModel.deleted).limit(100))
+            ctx = _auth()
+            result = await db.execute(
+                select(KnowledgeBaseModel)
+                .where(~KnowledgeBaseModel.deleted, _tenant_filter(KnowledgeBaseModel.workspace_id, ctx))
+                .limit(100)
+            )
             kbs = result.scalars().all()
             return json.dumps(
                 [{"id": str(kb.id), "name": kb.name, "collection_name": kb.collection_name} for kb in kbs]
@@ -724,9 +829,12 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
 
     @mcp.resource("tool://list")
     async def resource_tool_list() -> str:
-        """Tool catalog."""
+        """Tool catalog visible to the caller."""
         async with async_session_factory() as db:
-            result = await db.execute(select(ToolModel).where(~ToolModel.deleted).limit(100))
+            ctx = _auth()
+            result = await db.execute(
+                select(ToolModel).where(~ToolModel.deleted, _tenant_filter(ToolModel.workspace_id, ctx)).limit(100)
+            )
             tools = result.scalars().all()
             return json.dumps([{"id": str(t.id), "name": t.name, "source": t.source} for t in tools])
 

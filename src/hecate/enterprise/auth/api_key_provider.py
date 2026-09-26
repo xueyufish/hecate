@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import UTC, datetime
-from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -69,6 +68,17 @@ class APIKeyAuthProvider(AuthProvider):
         if api_key.expires_at is not None and api_key.expires_at < datetime.now(UTC):
             return None
 
+        # Database-issued SYSTEM-scope keys are rejected outright: minting
+        # was unrestricted before the platform-admin gate, so existing keys
+        # have untrustworthy provenance (see the platform-admin spec).
+        if api_key.scope == ApiKeyScope.SYSTEM:
+            logger.warning(
+                "Rejected database SYSTEM-scope API key (deprecated and revoked by policy). "
+                "Migrate integrations to env bootstrap keys or workspace-scoped keys. key_prefix=%s",
+                api_key.key_prefix,
+            )
+            return None
+
         # Reject inactive users
         user_result = await db.execute(select(UserModel).where(UserModel.id == api_key.created_by))
         user = user_result.scalar_one_or_none()
@@ -79,22 +89,11 @@ class APIKeyAuthProvider(AuthProvider):
         api_key.last_used_at = datetime.now(UTC)
         await db.flush()
 
-        scope: Literal["system", "workspace"] = "system" if api_key.scope == ApiKeyScope.SYSTEM else "workspace"
-
-        if api_key.scope == ApiKeyScope.SYSTEM:
-            return AuthContext(
-                user_id=api_key.created_by,
-                org_id=None,
-                workspace_id=None,
-                role=None,
-                auth_method="api_key",
-                api_key_scope=scope,
-            )
         return AuthContext(
             user_id=api_key.created_by,
             org_id=api_key.org_id,
             workspace_id=api_key.workspace_id,
             role=WorkspaceRole.ADMIN,
             auth_method="api_key",
-            api_key_scope=scope,
+            api_key_scope="workspace",
         )

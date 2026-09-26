@@ -448,3 +448,11 @@ class TestAgentCommitWarning:
         unknown_agent = await self._seed_agent(db_session, "not-in-registry-model")
         result = await AgentVersionService(db_session).commit_version(unknown_agent.id)
         assert "warnings" not in result
+
+
+@pytest.fixture
+def client(admin_client: AsyncClient) -> AsyncClient:
+    """Model-domain tests run as platform admin — they exercise provider
+    business behavior, not the admin gate (covered by the dedicated authz
+    matrix in test_e2e_model_provider.py)."""
+    return admin_client
