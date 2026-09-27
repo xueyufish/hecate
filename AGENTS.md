@@ -80,6 +80,7 @@ Enforced mechanically by ruff (E/F/I/N/W/UP/B/SIM) and mypy — see `pyproject.t
 - Docstrings in English on all modules, public classes, and public methods. Private (`_` prefix) exempt when self-explanatory.
 - Inline comments: only for non-obvious logic, explain **why** not **what**.
 - Declare every new Python package in `pyproject.toml` (correct optional group) at install time — never use an undeclared package in code.
+- No new runtime extension points (ABC/Protocol) without a second implementation or a named consumer — proposals must include one of the two (`runtime-pluggability` spec).
 
 ### Naming
 
