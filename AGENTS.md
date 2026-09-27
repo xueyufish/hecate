@@ -25,7 +25,7 @@ python -m pytest tests/test_runtime/test_pregel.py::test_linear_execution -v
 ruff check src/hecate/ tests/
 ruff format --check src/ tests/
 mypy src/
-python -m pytest tests/ -q
+python -m pytest <affected dirs/files> -q   # scope locally; the full suite runs in CI
 
 # Start infrastructure (PostgreSQL 16, Qdrant, MinIO, Temporal)
 docker compose -f docker/docker-compose.yml up -d
@@ -119,7 +119,7 @@ Conventions (fixtures, in-memory SQLite, stub classes, no factories): [`tests/AG
 
 ## What to do / What not to do
 
-- **Do** reach **0 errors** on all four verification checks before pushing.
+- **Do** reach **0 errors** on all four verification checks before pushing (pytest scoped to the tests your change touches locally — the full suite is CI's gate, not a local pre-push step).
 - **Don't** commit PDF files or large binary assets.
 - **Don't** use `as any`, `@ts-ignore`, or equivalent type suppression.
 - **Don't** assume test failures are "pre-existing" without investigating.
