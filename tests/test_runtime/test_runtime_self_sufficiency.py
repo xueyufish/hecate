@@ -69,11 +69,12 @@ CORE_RUNTIME_MODULES: tuple[str, ...] = (
     "hecate.runtime.compiler",
     "hecate.runtime.pregel",
     "hecate.runtime.errors",
-    # Port adapter + security assembly bridge files. These historically
-    # escaped the probe (not on this allowlist) while carrying module-level
-    # sibling-domain imports; they now lazy-import siblings — keep them on
-    # the list so a regression resurfaces here, not only in the AST guard.
-    "hecate.runtime.agent_execution_port",
+    # Security assembly bridge files. These historically escaped the probe
+    # (not on this allowlist) while carrying module-level sibling-domain
+    # imports; they now lazy-import siblings — keep them on the list so a
+    # regression resurfaces here, not only in the AST guard. (The
+    # AgentExecutionPort adapter left runtime in
+    # runtime-boundary-pluggability and no longer needs this exemption.)
     "hecate.runtime.security.egress",
     "hecate.runtime.security.hooks.output_security",
 )
@@ -104,6 +105,26 @@ BLOCKED_WHEELS: tuple[str, ...] = (
 )
 
 ALL_BLOCKED_PREFIXES: tuple[str, ...] = BLOCKED_IN_MAIN_DOMAINS + BLOCKED_WHEELS
+
+# Static lazy-import inventory (runtime-boundary-pluggability): mirrors the
+# sanctioned function-level imports documented in ``runtime/AGENTS.md``.
+# The AST prescan treats any (file, module) pair outside this map as a
+# violation — lazy imports can no longer escape the layering guard. When a
+# new sanctioned lazy import lands, add the row to BOTH the AGENTS.md
+# inventory (with an exit condition) and this map.
+ALLOWED_LAZY_IMPORTS: dict[str, tuple[str, ...]] = {
+    "agent_tool.py": ("hecate.channel.a2a",),
+    "compaction.py": ("hecate_memory",),
+    "context_processors.py": ("hecate_memory",),
+    "offloader.py": ("hecate_sandbox",),
+    "task_memory_hook.py": ("hecate_memory",),
+    "tool_access.py": ("hecate.tools",),
+    "workers/coordinator_worker.py": ("hecate.studio",),
+    "workers/tool_worker.py": ("hecate.tools",),
+    "security/egress.py": ("hecate.ops",),
+    "security/guardrail_assembly.py": ("hecate.ops",),
+    "security/hooks/output_security.py": ("hecate.ops",),
+}
 
 _PROBE_SCRIPT = textwrap.dedent(
     """
@@ -192,3 +213,40 @@ def test_runtime_modules_importable_without_blocked_domains() -> None:
     attempted = sorted(result["attempted"])
     imported = sorted(result["imported"])
     assert imported == attempted, f"some runtime modules were skipped: imported={imported} attempted={attempted}"
+
+
+def test_runtime_has_no_undocumented_business_imports() -> None:
+    """AST prescan over ALL import sites in runtime (module-level, function
+    bodies, conditionals, try blocks). A business-module import is allowed
+    only for (file, prefix) pairs in ALLOWED_LAZY_IMPORTS — which mirrors
+    the sanctioned inventory in ``runtime/AGENTS.md``. Undocumented hits
+    fail with file and line so they can be inventoried or removed."""
+    import ast
+
+    runtime_root = REPO_ROOT / "src" / "hecate" / "runtime"
+    violations: list[str] = []
+    for path in sorted(runtime_root.rglob("*.py")):
+        rel = path.relative_to(runtime_root).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module]
+            else:
+                continue
+            for module in modules:
+                if not any(module == b or module.startswith(b + ".") for b in ALL_BLOCKED_PREFIXES):
+                    continue
+                allowed = any(
+                    module == allowed or module.startswith(allowed + ".")
+                    for allowed in ALLOWED_LAZY_IMPORTS.get(rel, ())
+                )
+                if not allowed:
+                    violations.append(f"{rel}:{node.lineno} imports {module}")
+
+    assert violations == [], (
+        "Undocumented business imports in hecate.runtime — add the row to "
+        "runtime/AGENTS.md (with an exit condition) and ALLOWED_LAZY_IMPORTS, "
+        "or remove the import:\n" + "\n".join(violations)
+    )

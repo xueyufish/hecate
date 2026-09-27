@@ -14,8 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from hecate.core.composition.agent_execution_port import AgentExecutionPort
 from hecate.models.agent import AgentModel
-from hecate.runtime.agent_execution_port import AgentExecutionPort
 from hecate.runtime.agent_tool import AgentDefinition
 
 
