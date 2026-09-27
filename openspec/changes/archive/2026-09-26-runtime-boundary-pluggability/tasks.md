@@ -22,4 +22,4 @@
 - [x] 4.1 `runtime/AGENTS.md` 清单逐条补退出条件（可验证条件，非愿望；RuntimePort 拆分条件亦记入）。验证：文档自查。
 - [x] 4.2 门禁：`ruff check src/ tests/`、`ruff format --check src/ tests/`、`mypy src/`、`python -m pytest tests/test_runtime tests/test_core tests/test_services/test_workflow -q`（受影响范围；全量归 CI）。验证：0 错误。
 - [x] 4.3 `openspec validate runtime-boundary-pluggability` 通过。
-- [ ] 4.4 AGENTS.md 停增 ABC 规则一条（本 change archive 时落地，tasks 占位提醒）。
+- [x] 4.4 AGENTS.md 停增 ABC 规则一条（本 change archive 时落地，tasks 占位提醒）。

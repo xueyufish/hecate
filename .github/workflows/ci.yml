@@ -8,6 +8,33 @@ on:
   merge_group:
 
 jobs:
+  # Docs-only changes (markdown, the inventory YAML, this workflow's own
+  # docs) skip the four heavy jobs below. The detection job always runs;
+  # on events where changed files cannot be determined (merge_group), it
+  # fails safe to "code: true" so the merge queue keeps running everything.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'packages/**'
+              - 'tests/**'
+              - 'alembic/**'
+              - 'docker/**'
+              - 'scripts/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.github/workflows/ci.yml'
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -24,6 +51,8 @@ jobs:
         run: ruff format --check src/hecate/ packages/ tests/
 
   typecheck:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +66,8 @@ jobs:
         run: uv run mypy src/ packages/
 
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # Deliberately the plain sequential run that PRs #103–#107 passed with
     # (~16 min wall). Do NOT add pytest-xdist (-n auto), matrix sharding, or
@@ -47,6 +78,13 @@ jobs:
     # required check. timeout-minutes 60 = ~4x historical wall time; a single
     # hanging test surfaces as a clear FAIL via pytest-timeout instead of a
     # silent job cancellation.
+    #
+    # Docs-only gating (needs: changes + job-level if) is safe for the
+    # required check: a job skipped via `if` reports Success and satisfies
+    # branch protection (docs.github.com — "Using conditions to control job
+    # execution"). Do NOT convert this to workflow-level `paths:` filtering —
+    # a path-filtered workflow leaves the required check Pending and blocks
+    # merging.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +100,8 @@ jobs:
           uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
 
   migrations:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -93,6 +133,8 @@ jobs:
   # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
   # requires Docker-in-Docker and is covered by integration tests locally.
   docker-sandbox-smoke:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
