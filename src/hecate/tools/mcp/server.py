@@ -13,6 +13,7 @@ from typing import Any
 
 from fastmcp import FastMCP
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.database import async_session_factory
@@ -30,10 +31,18 @@ _BUNDLED_WS = uuid.UUID(int=0)
 def _auth() -> AuthContext:
     """Caller identity resolved by the transport middleware.
 
-    Raises PermissionError for in-process calls without an HTTP transport —
-    tools never execute with global permissions.
+    Raises ``PermissionError`` for in-process calls without an HTTP
+    transport — tools never execute with global permissions. The
+    underlying transport distinguishes "auth disabled" from
+    "unauthenticated"; tool bodies that want to surface those as
+    explicit authorization errors catch this exception themselves.
     """
-    return get_transport_auth_context()
+    from hecate.core.deps_workspace import ensure_workspace_role
+    from hecate.models.workspace_member import WorkspaceRole
+
+    ctx = get_transport_auth_context()
+    ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    return ctx
 
 
 def _workspace_ok(resource_workspace_id: Any, ctx: AuthContext) -> bool:
@@ -41,6 +50,48 @@ def _workspace_ok(resource_workspace_id: Any, ctx: AuthContext) -> bool:
     if ctx.is_system_scope:
         return True
     return resource_workspace_id == (ctx.workspace_id or _BUNDLED_WS)
+
+
+def _require_editor(ctx: AuthContext) -> None:
+    """Guard mutating MCP tools with the shared workspace-role predicate.
+
+    Re-uses :func:`hecate.core.deps_workspace.ensure_workspace_role` so
+    REST and MCP endpoints enforce the same editor threshold. On denial
+    we raise ``PermissionError`` — the tool's top-level ``except Exception``
+    handler will surface it as ``{"error": "..."}`` to the MCP caller.
+    Tool bodies that want to surface a more specific message catch this
+    exception and translate it themselves.
+    """
+    from hecate.core.deps_workspace import WorkspaceRole, ensure_workspace_role
+
+    ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+
+
+def _reject_tool_execution(ctx: AuthContext, tool_name: str, reason: str) -> str:
+    """Record a denied MCP tool decision without logging arguments or credentials."""
+    logger.warning(
+        "MCP tool decision=denied user_id=%s workspace_id=%s tool=%s reason=%s",
+        ctx.user_id,
+        ctx.workspace_id,
+        tool_name,
+        reason,
+    )
+    return json.dumps({"error": reason})
+
+
+async def _knowledge_ids_visible(db: AsyncSession, ids: list[Any], ctx: AuthContext) -> bool:
+    """Check that every referenced knowledge base belongs to the caller."""
+    try:
+        kb_ids = {uuid.UUID(str(value)) for value in ids}
+    except (TypeError, ValueError):
+        return False
+    if not kb_ids:
+        return True
+    query = select(KnowledgeBaseModel.id).where(KnowledgeBaseModel.id.in_(kb_ids), ~KnowledgeBaseModel.deleted)
+    if not ctx.is_system_scope:
+        query = query.where(KnowledgeBaseModel.workspace_id == ctx.workspace_id)
+    found = (await db.execute(query)).scalars().all()
+    return set(found) == kb_ids
 
 
 def _tenant_filter(model_workspace_col: Any, ctx: AuthContext) -> Any:
@@ -365,10 +416,11 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         async with async_session_factory() as db:
             try:
                 ctx = _auth()
-                if not ctx.is_system_scope and ctx.workspace_id is None:
-                    return json.dumps({"error": "Workspace context required"})
+                _require_editor(ctx)
+                if not await _knowledge_ids_visible(db, knowledge_base_ids or [], ctx):
+                    return json.dumps({"error": "Knowledge base not found"})
                 agent = AgentModel(
-                    workspace_id=ctx.workspace_id or _BUNDLED_WS,
+                    workspace_id=ctx.workspace_id if not ctx.is_system_scope else _BUNDLED_WS,
                     name=name,
                     model_config_db=model_config,
                     mode=mode,
@@ -412,12 +464,19 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         async with async_session_factory() as db:
             try:
                 ctx = _auth()
-                result = await db.execute(
-                    select(AgentModel).where(AgentModel.id == uuid.UUID(agent_id), ~AgentModel.deleted)
-                )
+                _require_editor(ctx)
+                query = select(AgentModel).where(AgentModel.id == uuid.UUID(agent_id), ~AgentModel.deleted)
+                if not ctx.is_system_scope:
+                    query = query.where(AgentModel.workspace_id == ctx.workspace_id)
+                result = await db.execute(query)
                 agent = result.scalar_one_or_none()
-                if agent is None or not _workspace_ok(agent.workspace_id, ctx):
+                if agent is None:
                     return json.dumps({"error": "Agent not found"})
+
+                if "knowledge_base_ids" in fields:
+                    kb_ids = fields["knowledge_base_ids"]
+                    if not isinstance(kb_ids, list) or not await _knowledge_ids_visible(db, kb_ids, ctx):
+                        return json.dumps({"error": "Knowledge base not found"})
 
                 for key, value in fields.items():
                     if key not in allowed_fields:
@@ -457,11 +516,13 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         async with async_session_factory() as db:
             try:
                 ctx = _auth()
-                result = await db.execute(
-                    select(AgentModel).where(AgentModel.id == uuid.UUID(agent_id), ~AgentModel.deleted)
-                )
+                _require_editor(ctx)
+                query = select(AgentModel).where(AgentModel.id == uuid.UUID(agent_id), ~AgentModel.deleted)
+                if not ctx.is_system_scope:
+                    query = query.where(AgentModel.workspace_id == ctx.workspace_id)
+                result = await db.execute(query)
                 agent = result.scalar_one_or_none()
-                if agent is None or not _workspace_ok(agent.workspace_id, ctx):
+                if agent is None:
                     return json.dumps({"error": "Agent not found"})
 
                 agent.deleted = True
@@ -487,12 +548,10 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         async with async_session_factory() as db:
             try:
                 ctx = _auth()
-                result = await db.execute(
-                    select(KnowledgeBaseModel)
-                    .where(~KnowledgeBaseModel.deleted, _tenant_filter(KnowledgeBaseModel.workspace_id, ctx))
-                    .order_by(KnowledgeBaseModel.created_at.desc())
-                    .limit(100)
-                )
+                query = select(KnowledgeBaseModel).where(~KnowledgeBaseModel.deleted)
+                if not ctx.is_system_scope:
+                    query = query.where(KnowledgeBaseModel.workspace_id == ctx.workspace_id)
+                result = await db.execute(query.order_by(KnowledgeBaseModel.created_at.desc()).limit(100))
                 kbs = result.scalars().all()
                 return json.dumps(
                     [
@@ -590,11 +649,10 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         async with async_session_factory() as db:
             try:
                 ctx = _auth()
-                if not ctx.is_system_scope and ctx.workspace_id is None:
-                    return json.dumps({"error": "Workspace context required"})
+                _require_editor(ctx)
                 collection_name = f"kb_{uuid.uuid4().hex[:8]}"
                 kb = KnowledgeBaseModel(
-                    workspace_id=ctx.workspace_id or _BUNDLED_WS,
+                    workspace_id=ctx.workspace_id if not ctx.is_system_scope else _BUNDLED_WS,
                     name=name,
                     description=description,
                     embedding_model=embedding_model,
@@ -644,14 +702,15 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         async with async_session_factory() as db:
             try:
                 ctx = _auth()
-                result = await db.execute(
-                    select(KnowledgeBaseModel).where(
-                        KnowledgeBaseModel.id == uuid.UUID(kb_id),
-                        ~KnowledgeBaseModel.deleted,
-                    )
+                _require_editor(ctx)
+                query = select(KnowledgeBaseModel).where(
+                    KnowledgeBaseModel.id == uuid.UUID(kb_id), ~KnowledgeBaseModel.deleted
                 )
+                if not ctx.is_system_scope:
+                    query = query.where(KnowledgeBaseModel.workspace_id == ctx.workspace_id)
+                result = await db.execute(query)
                 kb = result.scalar_one_or_none()
-                if kb is None or not _workspace_ok(kb.workspace_id, ctx):
+                if kb is None:
                     return json.dumps({"error": "Knowledge base not found"})
 
                 from hecate_memory.rag.service import knowledge_base_service
@@ -714,41 +773,101 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         Returns:
             JSON with the tool execution result.
         """
+        ctx: AuthContext | None = None
         async with async_session_factory() as db:
             try:
                 ctx = _auth()
-                tool_row = await db.execute(select(ToolModel).where(ToolModel.name == tool_name, ~ToolModel.deleted))
-                registered = tool_row.scalar_one_or_none()
-                if registered is not None and not _workspace_ok(registered.workspace_id, ctx):
-                    return json.dumps({"error": "Tool not found"})
+                if not ctx.is_system_scope and ctx.workspace_id is None:
+                    return _reject_tool_execution(ctx, tool_name, "tool_execute requires an explicit workspace context")
+
+                from pathlib import Path
 
                 from hecate.core.config import settings
-                from hecate.tools.tool.builtin import BuiltInToolExecutor
-                from hecate.tools.tool.registry import ToolRegistry
+                from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS, BuiltInToolExecutor
                 from hecate.tools.tool.search.factory import create_search_provider
+
+                # Only rows visible to this caller can affect resolution.
+                # Foreign tenants cannot shadow or disable a builtin tool.
+                query = select(ToolModel).where(ToolModel.name == tool_name, ~ToolModel.deleted)
+                builtin_def = BUILTIN_TOOL_DEFINITIONS.get(tool_name)
+                if ctx.is_system_scope:
+                    if builtin_def is not None:
+                        query = query.where(ToolModel.workspace_id == _BUNDLED_WS)
+                else:
+                    query = query.where(ToolModel.workspace_id.in_([ctx.workspace_id, _BUNDLED_WS]))
+                rows = (await db.execute(query)).scalars().all()
+                if len(rows) > 1:
+                    return _reject_tool_execution(ctx, tool_name, "Ambiguous tool identity")
+
+                registered = rows[0] if rows else None
+                if builtin_def is not None:
+                    if registered is not None and (
+                        registered.source != "builtin" or registered.workspace_id != _BUNDLED_WS
+                    ):
+                        return _reject_tool_execution(ctx, tool_name, "Tool source conflicts with builtin definition")
+                    risk = str(builtin_def.get("risk_level", "")).upper()
+                    if registered is not None:
+                        registered_risk = str(registered.risk_level or "").upper()
+                        if registered.approval_required or registered_risk == "HIGH":
+                            return _reject_tool_execution(ctx, tool_name, "Tool requires approval or is HIGH risk")
+                        if registered_risk not in {"LOW", "MEDIUM"}:
+                            return _reject_tool_execution(ctx, tool_name, "Tool risk metadata is unavailable")
+                    if builtin_def.get("approval_required") or risk == "HIGH":
+                        return _reject_tool_execution(ctx, tool_name, "Tool requires approval or is HIGH risk")
+                    if risk not in {"LOW", "MEDIUM"}:
+                        return _reject_tool_execution(ctx, tool_name, "Tool risk metadata is unavailable")
+                elif registered is None:
+                    return _reject_tool_execution(ctx, tool_name, "Tool not found")
+                else:
+                    risk = str(registered.risk_level or "").upper()
+                    if registered.approval_required or risk == "HIGH":
+                        return _reject_tool_execution(ctx, tool_name, "Tool requires approval or is HIGH risk")
+                    if risk not in {"LOW", "MEDIUM"}:
+                        return _reject_tool_execution(ctx, tool_name, "Tool risk metadata is unavailable")
+                    return _reject_tool_execution(
+                        ctx, tool_name, "Tool has no authorized execution binding on this MCP entry"
+                    )
+
+                # These builtin handlers need only a workspace-scoped file
+                # root or a search provider. Other builtins require an agent,
+                # session, sandbox, browser, or approval binding unavailable
+                # to this direct MCP call.
+                if tool_name not in {"web_search", "read_file", "write_file", "list_files"}:
+                    return _reject_tool_execution(
+                        ctx, tool_name, "Tool has no authorized execution binding on this MCP entry"
+                    )
+
+                base_root = Path(settings.WORKSPACE_ROOT)
+                effective_root = base_root if ctx.is_system_scope else base_root / str(ctx.workspace_id)
 
                 search_provider = create_search_provider(
                     provider=settings.SEARCH_PROVIDER,
                     api_key=settings.SEARCH_API_KEY,
                 )
-                memory_backend = None
-                if settings.MEMORY_TOOLS_ENABLED:
-                    try:
-                        from hecate_memory.memory.tools_backend import MemoryToolBackend
-
-                        memory_backend = MemoryToolBackend(db)
-                    except ImportError:
-                        memory_backend = None
-                builtin_executor = BuiltInToolExecutor(
+                executor = BuiltInToolExecutor(
                     search_provider=search_provider,
-                    workspace_root=settings.WORKSPACE_ROOT,
-                    memory_backend=memory_backend,
+                    workspace_root=str(effective_root),
                 )
-                registry = ToolRegistry(db=db, builtin_executor=builtin_executor)
-                result = await registry.execute(tool_name, arguments)
+                result = await executor.execute(
+                    tool_name,
+                    arguments,
+                    {"user_id": str(ctx.user_id), "workspace_id": str(ctx.workspace_id) if ctx.workspace_id else None},
+                )
+                logger.info(
+                    "MCP tool decision=allowed user_id=%s workspace_id=%s tool=%s",
+                    ctx.user_id,
+                    ctx.workspace_id,
+                    tool_name,
+                )
                 return json.dumps({"result": result})
             except Exception as e:
-                logger.error("tool_execute failed: %s", e, exc_info=True)
+                logger.error(
+                    "MCP tool decision=failed user_id=%s workspace_id=%s tool=%s error_type=%s",
+                    ctx.user_id if ctx else None,
+                    ctx.workspace_id if ctx else None,
+                    tool_name,
+                    type(e).__name__,
+                )
                 return json.dumps({"error": str(e)})
 
     @mcp.tool
@@ -772,10 +891,9 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         async with async_session_factory() as db:
             try:
                 ctx = _auth()
-                if not ctx.is_system_scope and ctx.workspace_id is None:
-                    return json.dumps({"error": "Workspace context required"})
+                _require_editor(ctx)
                 tool = ToolModel(
-                    workspace_id=ctx.workspace_id or _BUNDLED_WS,
+                    workspace_id=ctx.workspace_id if not ctx.is_system_scope else _BUNDLED_WS,
                     name=name,
                     description=description,
                     source=source,
@@ -817,11 +935,10 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
         """Knowledge base catalog visible to the caller."""
         async with async_session_factory() as db:
             ctx = _auth()
-            result = await db.execute(
-                select(KnowledgeBaseModel)
-                .where(~KnowledgeBaseModel.deleted, _tenant_filter(KnowledgeBaseModel.workspace_id, ctx))
-                .limit(100)
-            )
+            query = select(KnowledgeBaseModel).where(~KnowledgeBaseModel.deleted)
+            if not ctx.is_system_scope:
+                query = query.where(KnowledgeBaseModel.workspace_id == ctx.workspace_id)
+            result = await db.execute(query.limit(100))
             kbs = result.scalars().all()
             return json.dumps(
                 [{"id": str(kb.id), "name": kb.name, "collection_name": kb.collection_name} for kb in kbs]
