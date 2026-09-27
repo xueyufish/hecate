@@ -31,21 +31,47 @@ import probe — blocks transitive/lazy imports an AST scan cannot see) and
   `hecate_channel_feishu`
 
 Function-level lazy imports are the only sanctioned way to cross the domain
-boundary (module-level imports are rejected by the AST scan; the probe
-allowlist covers the files below — keep new bridge files on it):
+boundary (module-level imports are rejected by the AST scan; the runtime
+self-sufficiency probe AST-scans ALL import sites against the inventory
+below — an undocumented lazy import fails CI. Each row carries an exit
+condition; new rows must include one):
 
 - `runtime/tool_access.py` → `hecate.tools.tool.shell_analysis`
-  (content-aware shell gating)
+  (content-aware shell gating). *Exit*: a second shell-analysis
+  implementation appears or an engine hook replaces content gating —
+  promote to an injected interface.
 - `runtime/workers/coordinator_worker.py` →
-  `hecate.studio.workflows.templates` (dynamic orchestration executor)
-- `runtime/agent_execution_port.py` → `hecate.studio.agents.handoff`
-  (handoff tool injection/validation in `agent_execute`)
-- `runtime/agent_execution_port.py` → `hecate_ops.span_adapter`
-  (create_span / end_span; wheel boundary — same rule)
+  `hecate.studio.workflows.templates` (dynamic orchestration executor).
+  *Exit*: template construction becomes parameter-injected / DSL-driven.
+- `runtime/agent_tool.py` → `hecate.channel.a2a.client` + `types`
+  (A2A handoff transport). *Exit*: A2A client injected via a port
+  (fold into the A2A server-auth initiative).
+- `runtime/compaction.py`, `runtime/context_processors.py` →
+  `hecate_memory.memory.consolidation` (consolidation backend).
+  *Exit*: consolidation extracted behind a runtime-owned Protocol.
+- `runtime/offloader.py` → `hecate_sandbox.environment` (offload
+  execution env). *Exit*: sandbox environment exposed as a runtime port.
+- `runtime/task_memory_hook.py` → `hecate_memory.memory.task_memory` +
+  `EpisodeModel` (task-memory writes). *Exit*: writes injected via the
+  memory provider Protocol (dropping the ORM import).
+- `runtime/workers/tool_worker.py` → `hecate.tools.tool.builtin`
+  (memory-tool name set for retrieval escalation). *Exit*: the name set
+  moves to a shared constants module or is injected.
 - `runtime/security/egress.py` → `hecate.ops.dlp.*` (scanner via DI +
-  TYPE_CHECKING annotations; action enum at its runtime use site)
-- `runtime/security/hooks/output_security.py` →
-  `hecate.ops.security.findings_writer` (isinstance dispatch)
+  TYPE_CHECKING annotations; action enum at its runtime use site).
+  *Exit*: full DI when the DLP action enum moves out of ops.
+- `runtime/security/hooks/output_security.py` → `hecate.ops.dlp.*`,
+  `hecate.ops.output_security.*`, `hecate.ops.security.findings_writer`
+  (scan/redact/record dispatch). *Exit*: scan, redact, and finding-write
+  injected via the security hook port.
+- `runtime/security/guardrail_assembly.py` →
+  `hecate.ops.security.findings_writer` (finding-write wiring into the
+  guardrail bundle). *Exit*: finding writes injected via the security
+  hook port (same initiative as the output_security row).
+
+(`runtime/agent_execution_port.py` rows removed — the adapter moved to
+`core/composition/agent_execution_port.py` in
+runtime-boundary-pluggability; composition may know all modules.)
 
 ## Extension point inventory
 

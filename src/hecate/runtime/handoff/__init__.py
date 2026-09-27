@@ -7,8 +7,8 @@ dependency on services/orchestration.
 Other handoff concerns (tool schema generation, target validation, the
 ``handoff_to_agent`` detection helper) remain in
 ``hecate.studio.agents.handoff`` because ``AgentExecutionPort`` (a
-concrete RuntimePort adapter) consumes them — splitting them out would
-invert the layering.
+concrete RuntimePort adapter, now in ``core/composition``) consumes
+them — splitting them out would invert the layering.
 """
 
 from __future__ import annotations

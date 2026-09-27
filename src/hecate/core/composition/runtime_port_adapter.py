@@ -18,6 +18,7 @@ from hecate_ops.span_adapter import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.composition.agent_execution_port import AgentExecutionPort
 from hecate.runtime.ports import RuntimePort, SpanContext
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,11 @@ class _ProductionRuntimePort(RuntimePort):
         if tool_call_acc:
             final_tool_calls = [tool_call_acc[k] for k in sorted(tool_call_acc.keys())]
 
+        if usage:
+            # Terminal usage chunk — surfaced for consumers that account for
+            # cost themselves (mirrors chat_stream's terminal chunk).
+            yield {"content": None, "tool_calls": None, "usage": usage}
+
         yield {"content": None, "tool_calls": final_tool_calls}
 
         await self._record_cost(model, messages, "".join(content_parts), usage)
@@ -253,7 +259,6 @@ class _ProductionRuntimePort(RuntimePort):
         Returns:
             A list of document chunk dicts.
         """
-        from hecate.runtime.agent_execution_port import AgentExecutionPort
 
         port = AgentExecutionPort(self._db)
         return await port.knowledge_query(query, kb_ids)
@@ -312,7 +317,6 @@ class _ProductionRuntimePort(RuntimePort):
         Returns:
             Dict with response, usage, and optionally tool_calls.
         """
-        from hecate.runtime.agent_execution_port import AgentExecutionPort
 
         port = AgentExecutionPort(
             self._db,
