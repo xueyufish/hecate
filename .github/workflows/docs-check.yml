@@ -6,6 +6,7 @@ on:
     paths:
       - "README.md"
       - "docs/**"
+      - "scripts/**"
       - ".github/workflows/docs-check.yml"
       - ".opencode/skills/hecate-docs-sync/**"
   push:
@@ -13,6 +14,7 @@ on:
     paths:
       - "README.md"
       - "docs/**"
+      - "scripts/**"
       - ".github/workflows/docs-check.yml"
       - ".opencode/skills/hecate-docs-sync/**"
 
@@ -40,6 +42,11 @@ jobs:
         run: |
           python .opencode/skills/hecate-docs-sync/scripts/sync_specs.py \
             --audit-readme
+
+      - name: Feature inventory check (roadmap-structured-source)
+        run: |
+          pip install pyyaml
+          python scripts/feature_inventory.py check
 
       - name: Markdown link check (changed files only)
         uses: step-security/github-action-markdown-link-check@v1
