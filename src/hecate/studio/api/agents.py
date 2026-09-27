@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
+from hecate.core.deps_workspace import get_auth_context, require_workspace_editor
 from hecate.models.agent import (
     AgentCreateSchema,
     AgentModel,
@@ -38,12 +38,14 @@ router = APIRouter()
 async def validate_knowledge_base_ids(
     db: AsyncSession,
     kb_ids: list[str],
+    ctx: AuthContext,
 ) -> None:
-    """Validate that all KB IDs reference existing, non-deleted knowledge bases.
+    """Validate that KB IDs reference knowledge bases visible to the caller.
 
     Args:
         db: The async database session.
         kb_ids: List of knowledge base UUID strings to validate.
+        ctx: The authenticated caller whose workspace owns the references.
 
     Raises:
         HTTPException: 400 if any KB ID is invalid or references a deleted KB.
@@ -71,6 +73,8 @@ async def validate_knowledge_base_ids(
         KnowledgeBaseModel.id.in_(kb_uuids),
         ~KnowledgeBaseModel.deleted,
     )
+    if not ctx.is_system_scope:
+        stmt = stmt.where(KnowledgeBaseModel.workspace_id == ctx.workspace_id)
     result = await db.execute(stmt)
     found_ids = {str(row[0]) for row in result.all()}
 
@@ -124,7 +128,7 @@ async def _check_models_availability(
 async def create_agent(
     data: AgentCreateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_workspace_editor)],
 ) -> dict:
     """Create a new agent.
 
@@ -135,16 +139,15 @@ async def create_agent(
     Returns:
         dict: The created agent data.
     """
-    await validate_knowledge_base_ids(db, data.knowledge_base_ids)
+    await validate_knowledge_base_ids(db, data.knowledge_base_ids, ctx)
 
-    if not ctx.is_system_scope and ctx.workspace_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": {"code": "FORBIDDEN", "message": "Workspace context required", "details": None}},
-        )
-
+    # ``require_workspace_editor`` already rejects (a) callers without a
+    # workspace and (b) viewers. The non-system / no-workspace fallback
+    # below is therefore unreachable for tenant callers; we keep it only
+    # for system-scope bootstrap writes, where the empty zero UUID is a
+    # deliberate seed destination rather than an implicit catch-all.
     agent = AgentModel(
-        workspace_id=ctx.workspace_id or uuid.UUID(int=0),
+        workspace_id=ctx.workspace_id if not ctx.is_system_scope else uuid.UUID(int=0),
         name=data.name,
         persona=data.persona,
         model_config_db=data.llm_config,
@@ -261,7 +264,7 @@ async def update_agent(
     agent_id: uuid.UUID,
     data: AgentUpdateSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_workspace_editor)],
 ) -> dict:
     """Update an existing agent.
 
@@ -293,7 +296,7 @@ async def update_agent(
 
     update_data = data.model_dump(exclude_unset=True, by_alias=True)
     if "knowledge_base_ids" in update_data:
-        await validate_knowledge_base_ids(db, update_data["knowledge_base_ids"])
+        await validate_knowledge_base_ids(db, update_data["knowledge_base_ids"], ctx)
     for field, value in update_data.items():
         if field == "model_config":
             agent.model_config_db = value
@@ -309,7 +312,7 @@ async def update_agent(
 async def delete_agent(
     agent_id: uuid.UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_workspace_editor)],
 ) -> None:
     """Soft delete an agent.
 
@@ -354,7 +357,7 @@ async def add_skill_to_agent(
     agent_id: uuid.UUID,
     data: SkillAssociationRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_workspace_editor)],
 ) -> dict:
     """Add a skill to an agent's skills list.
 
@@ -424,7 +427,7 @@ async def promote_skill_to_agent(
     agent_id: uuid.UUID,
     data: SkillAssociationRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_workspace_editor)],
 ) -> dict:
     """Promote a discovery-sourced skill to an explicit agent binding (5.9c).
 
@@ -526,7 +529,7 @@ async def remove_skill_from_agent(
     agent_id: uuid.UUID,
     skill_name: str,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_workspace_editor)],
 ) -> dict:
     """Remove a skill from an agent's skills list.
 
@@ -682,7 +685,7 @@ class AgentImportSchema(PydanticBase):
 async def import_agent(
     data: AgentImportSchema,
     db: Annotated[AsyncSession, Depends(get_db)],
-    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    ctx: Annotated[AuthContext, Depends(require_workspace_editor)],
 ) -> dict:
     """Import agent from exported JSON.
 
@@ -701,12 +704,12 @@ async def import_agent(
     kb_ids = agent_config.get("knowledge_base_ids", [])
     if kb_ids:
         try:
-            await validate_knowledge_base_ids(db, kb_ids)
+            await validate_knowledge_base_ids(db, kb_ids, ctx)
         except HTTPException:
             logger.warning("Some KB IDs are invalid on import, clearing knowledge_base_ids")
             agent_config["knowledge_base_ids"] = []
 
-    _import_ws = ctx.workspace_id or uuid.UUID(int=0)
+    _import_ws = uuid.UUID(int=0) if ctx.is_system_scope else ctx.workspace_id
 
     workflow_id = None
     if data.workflow:

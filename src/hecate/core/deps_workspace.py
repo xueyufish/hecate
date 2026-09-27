@@ -215,17 +215,58 @@ def _role_level(role: WorkspaceRole) -> int:
     return levels.get(role, -1)
 
 
+class WorkspaceRoleRequiredError(PermissionError):
+    """Caller lacks the workspace role required for a mutating action.
+
+    Shared between FastAPI dependency wrappers (which translate this into a
+    403 ``HTTPException``) and MCP tool helpers (which translate it into
+    an authorization-error response). Raising a domain ``PermissionError``
+    subclass — rather than ``HTTPException`` — keeps the dependency layer
+    free of HTTP semantics so non-HTTP callers (MCP tools, background
+    jobs) can use the same predicate.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+def ensure_workspace_role(ctx: AuthContext, minimum: WorkspaceRole) -> None:
+    """Raise ``WorkspaceRoleRequiredError`` unless the caller's role is at
+    least ``minimum`` in their active workspace.
+
+    Rules (mirrors the prior ``require_workspace_*`` behavior so that
+    callers see the same outcome on REST and MCP):
+
+    * ``ctx.is_system_scope`` is exempt: deploy-time bootstrap keys keep
+      their existing bypass (see the ``platform-admin`` spec).
+    * Missing workspace or role (no live workspace membership) ⇒ denied.
+    * ``ctx.role`` numeric level (per ``_role_level``) below ``minimum`` ⇒
+      denied with a message naming the required role.
+
+    Use this from any entry point that mutates a workspace-scoped
+    resource. REST wrappers call it via ``require_workspace_*``; MCP
+    tools call it directly via ``hecate.tools.mcp.server._require_editor``.
+    """
+    if ctx.is_system_scope:
+        return
+    if ctx.workspace_id is None or ctx.role is None:
+        raise WorkspaceRoleRequiredError("Workspace membership required")
+    if _role_level(ctx.role) < _role_level(minimum):
+        raise WorkspaceRoleRequiredError(f"{minimum.value.title()} role required")
+
+
 async def require_workspace_viewer(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> AuthContext:
     """Require at least viewer role in the current workspace."""
-    if ctx.is_system_scope:
-        return ctx
-    if ctx.role is None:
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.VIEWER)
+    except WorkspaceRoleRequiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": {"code": "FORBIDDEN", "message": "Not a member of this workspace", "details": None}},
-        )
+            detail={"error": {"code": "FORBIDDEN", "message": exc.message, "details": None}},
+        ) from exc
     return ctx
 
 
@@ -233,13 +274,13 @@ async def require_workspace_editor(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> AuthContext:
     """Require at least editor role in the current workspace."""
-    if ctx.is_system_scope:
-        return ctx
-    if ctx.role is None or _role_level(ctx.role) < _role_level(WorkspaceRole.EDITOR):
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.EDITOR)
+    except WorkspaceRoleRequiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": {"code": "FORBIDDEN", "message": "Editor role required", "details": None}},
-        )
+            detail={"error": {"code": "FORBIDDEN", "message": exc.message, "details": None}},
+        ) from exc
     return ctx
 
 
@@ -247,11 +288,11 @@ async def require_workspace_admin(
     ctx: Annotated[AuthContext, Depends(get_auth_context)],
 ) -> AuthContext:
     """Require admin role in the current workspace."""
-    if ctx.is_system_scope:
-        return ctx
-    if ctx.role != WorkspaceRole.ADMIN:
+    try:
+        ensure_workspace_role(ctx, WorkspaceRole.ADMIN)
+    except WorkspaceRoleRequiredError as exc:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail={"error": {"code": "FORBIDDEN", "message": "Admin role required", "details": None}},
-        )
+            detail={"error": {"code": "FORBIDDEN", "message": exc.message, "details": None}},
+        ) from exc
     return ctx

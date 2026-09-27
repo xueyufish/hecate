@@ -57,6 +57,11 @@ class MCPAuthMiddleware:
             return
 
         if settings.MCP_AUTH_TYPE == "none":
+            # ``auth_disabled`` is the explicit signal that the deployment
+            # disabled authentication. ``get_transport_auth_context``
+            # raises a distinguishing message so tool bodies can tell
+            # "auth was off" apart from "auth was attempted and failed".
+            scope.setdefault("state", {})["auth_disabled"] = True
             await self.app(scope, receive, send)
             return
 
@@ -82,11 +87,26 @@ def get_transport_auth_context() -> AuthContext:
     Raises:
         PermissionError: When no transport context exists (in-process
             calls without an HTTP request, or an unauthenticated request).
+            The message distinguishes between the three reachable shapes
+            so tool bodies (and the failing audit log) can tell them
+            apart:
+
+            * ``auth_disabled=True`` on the request state — deployment
+              ran with ``MCP_AUTH_TYPE=none``. Protected tools SHALL
+              fail closed; this is the local-development escape hatch.
+            * No ``auth_context`` on state and no ``auth_disabled``
+              marker — caller reached the transport without credentials
+              while authentication was on.
+            * ``auth_failure`` set on state — transport authentication
+              ran and rejected the presented credential.
+
             Tools must never fall back to global permissions.
     """
     from fastmcp.server.dependencies import get_http_request
 
     request = get_http_request()
+    if getattr(request.state, "auth_disabled", False):
+        raise PermissionError("MCP authentication disabled (MCP_AUTH_TYPE=none); protected tools unavailable")
     ctx: AuthContext | None = getattr(request.state, "auth_context", None)
     if ctx is None:
         raise PermissionError("unauthenticated: MCP transport did not provide an identity")
