@@ -17,11 +17,30 @@
 | **P1 Usable** | 19 | 19/19 (100%) | 0 |
 | **P2 Good** | 65 | 65/65 (100%) | 0 |
 | **P3 Trustworthy** | 86 | 85/86 (99%) | 1 — 8.6-abc 🔀 merged into ChannelBase |
-| **P4 Intelligent** | 154 | 47/154 (31%) | 107 |
-| **P5 Ecosystem** | 66 | 1/66 (2%) | 65 |
-| **Total** | **390** | **217/390 (56%)** | **173** |
+| **P4 Intelligent** | 151 | 47/151 (31%) | 104 |
+| **P5 Ecosystem** | 61 | 1/61 (2%) | 60 |
+| **Total** | **382** | **217/382 (57%)** | **165** |
+
+> **2026-09-26 research-candidate reclassification (review item #15)**: eight planned rows moved out of the committed roadmap into the [Research Candidate Pool](feature-catalog.md#research-candidate-pool) (6.15 from P4; 2.12, 6.38, 6.39, 6.42, 6.43, and the full 6.20+6.22 ontology/OAG closed loop from P5). None were delivered; none dropped — each carries documented restart conditions. Statuses tracked as `research-candidate` in `feature-inventory.yaml`. The pool table's ids restate catalog ids and are excluded from physical-row counts.
 
 > Row counts mirror the feature-catalog counting basis (2026-09-25 re-audit: physical ID rows per phase section; delivered = ✅ in the ID or Feature column). The feature-catalog counting note is the single source of truth — update it there first, then sync this table. Prior figures (393/198) predated the re-audit and had drifted from the catalog.
+
+---
+
+## Next Phase — Enterprise Hardening (P4′)
+
+> Driven by the governance fields in [`feature-inventory.yaml`](feature-inventory.yaml) (dependencies / evidence / acceptance). The P1–P5 tables above remain as the audit record of past scoping.
+
+Delivery path: **develop config → pin version → regression eval → approval → release → rollback**, reusing the existing evaluation platform, agent versioning, and approval machinery — no new quality gate.
+
+| # | Item | Goal | Depends on |
+|---|------|------|------------|
+| 1 | 11.16 Identity Pipeline | Identity resolution covering user/org/workspace with revocation semantics | — |
+| 2 | 11.17 Resource-Level Authorization | Cross-entry (REST/MCP) resource authorization; cross-tenant → 404 | 11.16 |
+| 3 | 13.1b Agent Identity | Pinned agent identity across versioning/execution/audit | 11.16, 11.17 |
+| 4 | 13.17 Environment & Release Management | The six-step delivery path above, end to end | 13.1b |
+| 5 | 8.10 CI/CD Evaluation Gate | Regression eval failure blocks release; consumes the existing evaluation platform | 13.17 |
+| 6 | 9.16a Multi-Replica Fault Tests | Kill-during-external-write recovery without duplicate side effects; indeterminate → human review | 13.17 |
 
 ---
 
