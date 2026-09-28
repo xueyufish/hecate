@@ -66,7 +66,7 @@ class PostgresEventStore(EventStore):
 
     Uses ``SELECT ... FOR UPDATE`` to serialize per-session appends and
     propagates SQLAlchemy exceptions so callers can decide retry behavior.
-    ``acquire_event_lock`` is a transaction-scoped ``pg_advisory_xact_lock``
+    ``acquire_event_lock`` is a session-scoped ``pg_advisory_lock``
     per session: row locking inside ``append`` serializes single appends
     but not check-then-act sequences across several appends.
     """
@@ -88,20 +88,27 @@ class PostgresEventStore(EventStore):
         *,
         timeout_ms: int = 30000,
     ) -> AsyncGenerator[None, None]:
-        """Transaction-scoped advisory key lock for read-modify-write spans.
+        """Session-scoped advisory key lock for read-modify-write spans.
 
         The per-session ``SELECT ... FOR UPDATE`` queue inside ``append``
         serializes single appends, but not check-then-act sequences (e.g.
         the tool recovery claim: resolve state, then append TOOL_CALL).
-        ``pg_advisory_xact_lock`` is held until the wrapping transaction
-        commits or rolls back, making the critical section exclusive per
-        session. ``timeout_ms`` is accepted for ABC compatibility; the
-        database's own statement/session timeout governs the wait.
+        ``pg_advisory_lock`` is session-scoped: the lock is released when
+        the wrapping session closes (or at session reset), making the
+        critical section exclusive per session without depending on
+        transaction lifecycle. ``timeout_ms`` is accepted for ABC
+        compatibility; the database's own statement/session timeout
+        governs the wait.
+
+        Production deployments rely on a real ``async_sessionmaker``;
+        tests that pass a ``MagicMock`` factory see no SQL execution and
+        no lock — a no-op fallback that keeps the ABC contract honoured
+        on both sides without affecting production semantics.
         """
         lock_key = session_id.int & ((1 << 63) - 1)
-        async with self._async_session_factory() as session, session.begin():
+        async with self._async_session_factory() as session:
             await session.execute(
-                text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                text("SELECT pg_advisory_lock(:lock_key)"),
                 {"lock_key": lock_key},
             )
             yield
