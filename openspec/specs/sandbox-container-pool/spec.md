@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the sandbox container pool: Docker exec support, pooled execution, startup pre-warming, health-checked acquire, recycling with state cleanup, TTL busy markers for crash recovery, idle trimming, exhaustion strategy, opt-in default, graceful shutdown, and environment-based configuration.
+
+## Requirements
 
 ### Requirement: SandboxExecutor docker exec support
 The system SHALL extend `SandboxExecutor.execute()` with an optional `container_id` keyword parameter. When `container_id` is provided, the executor SHALL run the tool inside the specified existing container via `docker exec`, returning stdout/stderr/exit_code directly. When `container_id` is omitted, the executor SHALL use the existing `docker run --detach → docker wait → docker logs → docker rm` path (backward compatible).

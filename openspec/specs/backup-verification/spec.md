@@ -1,7 +1,9 @@
 # backup-verification Specification
 
 ## Purpose
-TBD - created by archiving change data-backup-recovery. Update Purpose after archive.
+
+定义备份验证能力:对已完成备份做完整性校验、对 Qdrant 快照做可恢复性验证,并通过自动定期验证持续保证备份可用,避免不可恢复的备份被误认为有效。
+
 ## Requirements
 ### Requirement: 备份完整性验证
 系统 SHALL 支持将备份恢复到临时 PostgreSQL 实例并校验数据完整性。

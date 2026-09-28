@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines multi-key conditional routing: multi-key condition configuration and route-key production during expression evaluation.
+
+## Requirements
 
 ### Requirement: Multi-key conditional routing
 The CONDITION node SHALL support routing to more than two branches by allowing the edge target dict to contain arbitrary string keys beyond "true" and "false". The `_route` value written by the CONDITION node's expression evaluation SHALL be used as the lookup key in the edge target dict.

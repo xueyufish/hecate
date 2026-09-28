@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines guardrail hooks: the GuardrailAction and GuardrailResult contract, pre/post LLM and pre/post tool hook interfaces, no-op pass-through defaults, and SANITIZE handling in workers.
+
+## Requirements
 
 ### Requirement: GuardrailAction enum
 The system SHALL define `GuardrailAction` as a `StrEnum` with three members: `ALLOW`, `BLOCK`, and `SANITIZE`.

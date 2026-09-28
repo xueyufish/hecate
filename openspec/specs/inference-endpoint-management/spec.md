@@ -1,7 +1,9 @@
 # inference-endpoint-management Specification
 
 ## Purpose
-TBD - created by archiving change model-hub-completion. Update Purpose after archive.
+
+Defines external inference endpoint management: endpoint registration, periodic health polling, metrics collection, healthy-endpoint routing, and the InferenceBackendABC interaction interface.
+
 ## Requirements
 ### Requirement: System registers external inference endpoints
 The system SHALL allow administrators to register external inference endpoints with URL, model_id, backend_type (vllm/ollama/openai-compatible/custom), and optional authentication credentials.

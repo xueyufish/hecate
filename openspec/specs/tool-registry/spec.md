@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the tool registry: execution routing by tool source type, in-memory builtin lookup with database fallback, and startup seeding of built-in tool definitions.
+
+## Requirements
 
 ### Requirement: ToolRegistry routes tool execution by source type
 The system SHALL provide a `ToolRegistry` service in `services/tool/registry.py` that accepts a tool name, arguments, and optional context, looks up the tool definition by source type, and routes execution to the appropriate executor.

@@ -1,7 +1,9 @@
 # event-bus Specification
 
 ## Purpose
-TBD - created by archiving change multi-agent-advanced-collaboration. Update Purpose after archive.
+
+Defines the collaboration event bus: the EventBus pub/sub ABC, CollaborationEvent and its event-type enum including A2A-specific events, the session-scoped in-memory implementation, PregelRuntime integration, and A2A task correlation.
+
 ## Requirements
 ### Requirement: EventBus ABC defines pub/sub interface
 The engine SHALL define an `EventBus` ABC in `runtime/eventbus.py` with abstract methods: `publish`, `subscribe`, `unsubscribe`, and `close`.

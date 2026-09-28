@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the plugin system: manifest loading and directory discovery, compatibility validation, extended lifecycle and state persistence, two-layer scope, configuration and permission enforcement, python: and mcp: entry loading with the T0 trust gate, SaaS-mode installation restrictions, and management APIs with a frontend page.
+
+## Requirements
 
 ### Requirement: Plugin manifest loading
 The system SHALL parse `plugin.yaml` files into `PluginManifest` objects. The manifest SHALL support the following fields: `name` (required), `version` (required), `type` (required), `api_version` (required), `min_platform_version` (required), `description`, `entry` (required), `permissions` (list), `config_schema` (JSON Schema object). The loader SHALL validate that all required fields are present and raise a validation error if any are missing.

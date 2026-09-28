@@ -1,7 +1,9 @@
 # negotiation-templates Specification
 
 ## Purpose
-TBD - created by archiving change multi-agent-advanced-collaboration. Update Purpose after archive.
+
+Defines the negotiation and debate graph templates and their adherence to existing template conventions.
+
 ## Requirements
 ### Requirement: Negotiation graph template
 The system SHALL provide a `build_negotiation_graph` factory function in `studio/workflows/templates.py` that returns a `GraphConfig` implementing a two-agent negotiation protocol: proposal → response → accept/reject, with configurable max rounds.

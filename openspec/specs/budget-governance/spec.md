@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines session budget governance: per-session token tracking, pre-invocation budget checks, a three-level degradation strategy, and budget usage reporting.
+
+## Requirements
 
 ### Requirement: Budget Manager tracks token usage per session
 The system SHALL maintain a `BudgetManager` that tracks cumulative token usage per session and enforces a configurable token budget for the context window.

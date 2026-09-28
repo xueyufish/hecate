@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines prompt analytics: version diffing, per-version analytics, version comparison, AI-assisted change summaries, and the prompt analytics service.
+
+## Requirements
 
 ### Requirement: Prompt version diff API
 The system SHALL expose `GET /api/prompts/{id}/diff?from_version=X&to_version=Y` that computes a line-level diff between two prompt versions using `difflib`, returning structured diff entries with added/removed/context lines, line numbers, commit messages, and token count delta.

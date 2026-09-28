@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines inbound security tooling: LLMGuard input/output scanning, reversible PII anonymization, SecurityMiddleware orchestration, and MCP client-side connection, multi-server management, and tool conversion to Hecate format.
+
+## Requirements
 
 ### Requirement: LLMGuardScanner provides input/output safety scanning
 The `LLMGuardScanner` SHALL scan prompts and outputs for safety issues using LLM Guard with lazy-loaded scanners and mock fallback. It SHALL also support returning the sanitized text from scanners (not just a boolean), enabling the SANITIZE action to carry transformed data.

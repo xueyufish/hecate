@@ -122,6 +122,15 @@ When `output_findings["enabled"]` is False, the entire writer is None and no fin
 
 `siem_severity_floor` is enforced by the SIEM collector (`services/security/siem/collector.py`) which already filters by severity — this capability just sets the floor for output-side findings.
 
+#### Scenario: Persist and emit flags are honored independently
+
+- **WHEN** `guardrail_config["output_findings"]` is configured with `persist_to_db: False` while `emit_event` stays `True`
+- **THEN** a detected finding emits the EventStore event but writes no DB row, and findings below `siem_severity_floor` are excluded from SIEM export
+
+#### Scenario: Persist and emit flags are honored independently
+
+- **WHEN** `guardrail_config["output_findings"]` is configured with `persist_to_db: False` while `emit_event` stays `True`
+- **THEN** a detected finding emits the EventStore event but writes no DB row, and findings below `siem_severity_floor` are excluded from SIEM export
 ### Requirement: Writer integrates into existing SIEM pipeline (no SIEM changes)
 
 The system SHALL NOT modify the SIEM collector, exporter, or any formatter. The writer persists `SecurityFindingModel` rows; the SIEM collector picks them up via its existing `from_security_finding` pathway. This is the same mechanism that already exists for audit-pipeline findings (`services/audit/writer.py:188`); the writer simply adds another write site for output-side findings.
@@ -154,6 +163,15 @@ The `SecurityFindingWriter` instance SHALL be created at `assemble_guardrails` c
 
 The writer's lifetime SHALL be bounded by the `GuardrailBundle` returned from `assemble_guardrails` (which itself is bounded by the per-execution-path lifetime — see `guardrail-upgrade-trio` T1 for the bundle's lifetime semantics).
 
+#### Scenario: Writer is not shared across turns or agents
+
+- **WHEN** `assemble_guardrails` runs for two different agents (or two turns of the same agent) in a shared worker pool
+- **THEN** each execution receives its own `SecurityFindingWriter` instance bounded by its `GuardrailBundle`, with no cached writer reused across executions
+
+#### Scenario: Writer is not shared across turns or agents
+
+- **WHEN** `assemble_guardrails` runs for two different agents (or two turns of the same agent) in a shared worker pool
+- **THEN** each execution receives its own `SecurityFindingWriter` instance bounded by its `GuardrailBundle`, with no cached writer reused across executions
 ### Requirement: errors during writer invocation are caught and logged
 
 If `SecurityFindingWriter.write(...)` raises an exception (DB connection drop, EventStore timeout, etc.), the hook SHALL:
@@ -164,6 +182,25 @@ If `SecurityFindingWriter.write(...)` raises an exception (DB connection drop, E
 
 This matches the existing fail-safe pattern in `prompt-leakage-protection` capability (fingerprint compute failure).
 
+#### Scenario: Writer failure is best-effort and audible
+
+- **WHEN** `SecurityFindingWriter.write` raises (for example a database connection drop) while the hook processes a finding
+- **THEN** the hook logs the exception at WARNING with `session_id`, `agent_id`, and the recognizer id, emits an `EventType.ERROR` event with `source: output_findings_writer`, and the LLM call still completes successfully
+
+#### Scenario: Writer failure is best-effort and audible
+
+- **WHEN** `SecurityFindingWriter.write` raises (for example a database connection drop) while the hook processes a finding
+- **THEN** the hook logs the exception at WARNING with `session_id`, `agent_id`, and the recognizer id, emits an `EventType.ERROR` event with `source: output_findings_writer`, and the LLM call still completes successfully
 ### Requirement: backward-compat test for direct hook construction without writer
 
 A test SHALL exist that constructs `OutputSecurityHook` directly with no `security_finding_writer` (the historical construction), invokes it on a response with DLP findings, and asserts that the hook still returns the correct `GuardrailResult` (BLOCK / MASK / ALLOW per DLP) without raising. This test guards against accidental regression when wiring is changed.
+
+#### Scenario: Hook without writer still returns the correct guardrail result
+
+- **WHEN** `OutputSecurityHook` is constructed directly with no `security_finding_writer` (the historical construction) and invoked on a response containing DLP findings
+- **THEN** the hook returns the correct GuardrailResult (BLOCK / MASK / ALLOW per DLP) without raising
+
+#### Scenario: Hook without writer still returns the correct guardrail result
+
+- **WHEN** `OutputSecurityHook` is constructed directly with no `security_finding_writer` (the historical construction) and invoked on a response containing DLP findings
+- **THEN** the hook returns the correct GuardrailResult (BLOCK / MASK / ALLOW per DLP) without raising

@@ -1,7 +1,9 @@
 # backup-storage Specification
 
 ## Purpose
-TBD - created by archiving change data-backup-recovery. Update Purpose after archive.
+
+定义备份存储:内部 MinIO bucket 与外部 S3 兼容存储、备份文件组织结构、保留策略与备份清理。
+
 ## Requirements
 ### Requirement: 内部 MinIO bucket 存储
 系统 SHALL 支持将备份文件存储到 MinIO 的独立 bucket（`hecate-backups`），与主数据 bucket 物理隔离。

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines sparse (keyword) retrieval: sparse vector generation from text, Qdrant collections with sparse vectors, and sparse indexing.
+
+## Requirements
 
 ### Requirement: Sparse vector generation from text
 The system SHALL generate sparse vectors (token_id → weight mapping) from text input using BGE-M3's sparse encoding capability, alongside the existing dense vector generation.

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines agent templates: the template schema, list and detail APIs, instantiation into runnable agents, built-in templates, and the frontend template picker.
+
+## Requirements
 
 ### Requirement: Agent Template Schema
 The system SHALL define an agent template schema with fields: name, description, category, preview (icon, tags), and agent configuration (persona, model_config, tools, skills, knowledge_base_ids, risk_level, opening_remarks, enable_suggestions, memory_blocks).

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines template customization: entering customization mode after loading, editing agent roles, adding and removing agent nodes, saving as a new workflow, and leaving the original template unmodified.
+
+## Requirements
 
 ### Requirement: Template customization mode after loading
 After loading an orchestration template, the system SHALL enable template customization mode, allowing the user to edit agent roles, add/remove nodes, adjust connections, and modify channel declarations.

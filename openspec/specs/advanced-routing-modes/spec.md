@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines CONDITION-node routing modes beyond static routing: intent-based and dynamic routing, and their configuration schema in the Graph DSL.
+
+## Requirements
 
 ### Requirement: Routing mode field on CONDITION node config
 The CONDITION node config SHALL support an optional `routing_mode` field with values `"condition"` (default), `"intent"`, and `"dynamic"`. When `routing_mode` is absent or `"condition"`, behavior is identical to existing expression-based routing.

@@ -1,7 +1,9 @@
 # dlp-policy-management Specification
 
 ## Purpose
-TBD - created by archiving change outbound-dlp-engine. Update Purpose after archive.
+
+Defines DLP policy management: policy, custom-regex, and dictionary data models, the three-level policy resolver, built-in default rules, and the REST API for policy management.
+
 ## Requirements
 ### Requirement: DLPPolicyModel data model
 The system SHALL provide `DLPPolicyModel` ORM table (`dlp_policies`) with fields: `id` (UUID PK), `org_id` (UUID), `workspace_id` (UUID | None, null = org-level), `agent_id` (UUID | None, null = workspace/org-level), `entity_type` (str), `direction` (str), `action` (str, ALLOW/BLOCK/MASK/AUDIT), `mask_format` (str | None), `is_locked` (bool), `enabled` (bool), `created_at`, `updated_at`, `deleted_at`.

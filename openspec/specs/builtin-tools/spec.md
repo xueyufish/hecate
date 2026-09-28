@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the built-in toolset - web search, file operations, code execution, and the browser tool family - including per-session browser lifecycle, network egress policy, risk gating with audit, and fallback when the sandbox is disabled.
+
+## Requirements
 
 ### Requirement: web_search tool searches the web via configurable provider
 The system SHALL provide a `web_search` built-in tool that accepts a `query` string and optional `max_results` integer, calls the configured search provider (Tavily / Serper / DuckDuckGo), and returns a list of search results.

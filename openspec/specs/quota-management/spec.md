@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines quota management: quota and usage models, definition/usage/reset APIs, request-count enforcement middleware, post-LLM token and cost recording, period auto-reset, standard response headers, and definition caching.
+
+## Requirements
 
 ### Requirement: QuotaModel ORM model
 The system SHALL define `QuotaModel(BaseModel)` in `models/quota.py` with fields: `name` (String 255), `resource_type` (String 32, one of QuotaResourceType: requests, tokens, cost), `scope` (String 16, one of QuotaScope: workspace, api_key), `scope_id` (UUID, the workspace or API key ID), `limit_value` (Float, hard cap), `soft_limit` (Float, nullable, warning threshold), `window_type` (String 16, one of QuotaWindowType: rolling_minute, daily, monthly), `enforcement` (String 16, one of EnforcementMode: hard_reject, soft_allow, default hard_reject), `enabled` (Boolean, default True), `workspace_id` (UUID, default zero UUID).

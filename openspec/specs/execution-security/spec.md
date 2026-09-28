@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines execution-time tool security: risk levels, access decisions, approval scopes and decisions, tool rules with ordered evaluation, pattern matching, approval records and schemas, workspace policy persistence, and ToolWorker enforcement with sandbox routing and approval caching.
+
+## Requirements
 
 ### Requirement: RiskLevel enum
 The system SHALL define `RiskLevel` as a `StrEnum` in `runtime/tool_access.py` with four members: `LOW`, `MEDIUM`, `HIGH`, `CRITICAL`.

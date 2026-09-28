@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines outbound MCP connection management: the server registry, lazy connections with session reuse, two-step probing with error codes, pooling, exponential-backoff reconnection, per-request timeouts, health checks, circuit breaking, tool-discovery caching, REST management APIs, and the frontend status panel.
+
+## Requirements
 
 ### Requirement: MCP server registry
 The system SHALL maintain a registry of MCP servers with their capabilities (tools/resources/prompts). Servers register when their plugin is enabled, unregister when disabled. Registration sources are: (a) a plugin with a single `entry: mcp://endpoint`, and (b) an agent-plugin package (`type="agent-plugin"`) whose manifest carries mcp.json components — each such server registers under the name `<plugin-name>__<server-name>` in the installing workspace's scope. At platform startup, the system SHALL replay registration for every enabled plugin source so registrations survive restarts. The registry supports capability-based discovery — clients can query which servers provide specific tools.

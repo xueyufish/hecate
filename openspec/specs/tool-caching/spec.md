@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines tool result caching: the cacheability priority chain, per-tool TTL configuration, session-scoped entries, canonical key generation, LRU eviction, invalidation, metrics, and REST management APIs.
+
+## Requirements
 
 ### Requirement: Tool result caching
 The system SHALL cache tool execution results in memory with configurable TTL. On a cache hit, the cached result is returned without executing the tool. On a cache miss, the tool executes normally and the result is stored.

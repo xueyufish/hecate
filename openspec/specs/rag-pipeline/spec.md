@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the RAG pipeline components: the embedding service, document parsing, chunking with overlap, Qdrant indexing with dense and sparse vectors, hybrid fusion, MinIO object storage, the orchestrating KnowledgeBaseService, and citation types.
+
+## Requirements
 
 ### Requirement: EmbeddingService generates dense and sparse vectors
 The `EmbeddingService` SHALL use BGE-M3 (1024-dim dense + sparse) with lazy model loading and mock fallback.

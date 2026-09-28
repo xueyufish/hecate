@@ -1,7 +1,9 @@
 # pattern-selector-ui Specification
 
 ## Purpose
-TBD - created by archiving change p2-collaboration-pattern-selection. Update Purpose after archive.
+
+Defines the pattern selector UI: the card grid, pattern configuration dialog, canvas graph generation from a selected pattern, and coexistence with the template picker.
+
 ## Requirements
 ### Requirement: Pattern selector card grid
 The system SHALL display a pattern selector as a card grid dialog accessible from the workflow canvas toolbar. Each of the 6 patterns (Sequential, Parallel, Handoff, Broadcast, Negotiation, Debate) SHALL be shown as a card with an icon, name, short description, and a mini topological preview.

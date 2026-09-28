@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines conversation quality scoring: LLM-as-Judge turn scoring, event-driven triggers on conversation completion, sampling and judge-model configuration, conversation-level aggregation, APIs, and failure handling.
+
+## Requirements
 
 ### Requirement: Turn-level quality scoring via LLM-as-Judge
 The system SHALL evaluate each assistant turn in a completed conversation using LLM-as-Judge. The judge SHALL assess three dimensions: helpfulness (0.0–1.0), coherence (0.0–1.0), and instruction_adherence (0.0–1.0). Each dimension score SHALL include reasoning text explaining the assessment. The judge prompt SHALL include full conversation context (all prior turns) for accurate evaluation.

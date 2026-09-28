@@ -1,7 +1,9 @@
 # sandbox-environment-mount Specification
 
 ## Purpose
-TBD - created by archiving change sandbox-environment-mount. Update Purpose after archive.
+
+Defines sandbox volume mounts: SandboxConfig volume support, executor mounting, resolution from AgentEnvironment via the environment bridge, configurable mount mode, pool propagation, and builtin-tools handoff to the executor.
+
 ## Requirements
 ### Requirement: SandboxConfig supports volume mounts
 

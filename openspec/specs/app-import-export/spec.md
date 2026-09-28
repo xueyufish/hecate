@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines agent configuration portability: the export format, export and import endpoints, and the frontend export/import buttons.
+
+## Requirements
 
 ### Requirement: Agent Export Format
 The system SHALL define an export JSON format with fields: `version` (string), `exported_at` (ISO timestamp), `agent` (config object), `workflow` (optional Graph DSL), `memory_blocks` (list of block configs).

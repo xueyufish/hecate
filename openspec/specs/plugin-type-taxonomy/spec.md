@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the plugin type taxonomy: tool, extension, trigger, and model plugin interfaces, existing ABC support in plugin.yaml, the hecate.plugin SDK module, the init CLI, dev hot-reload, install-time API surface validation, and online creation for API-type plugins.
+
+## Requirements
 
 ### Requirement: Tool Plugin ABC
 The system SHALL define `ToolPluginABC` as the abstract base class for tool-type plugins. A Tool Plugin extends Agent capabilities with callable functions. The ABC SHALL require `name`, `description` properties and an async `execute` method that accepts parameters and returns a result dict.

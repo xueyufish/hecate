@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines channel access control on compiled graphs: compile-time access validation, runtime access warnings, and the channel access map carried by CompiledGraph.
+
+## Requirements
 
 ### Requirement: Compile-time channel access validation
 The `GraphCompiler.compile()` SHALL validate that each node's declared `channels.readable` and `channels.writable` lists reference channels that exist in the graph's `state` declaration. When a node declares access to a non-existent channel, the compiler SHALL log a WARNING. The compiler SHALL also warn when a node with no channel declaration is connected to channels via edges, suggesting that channel access be explicitly declared.

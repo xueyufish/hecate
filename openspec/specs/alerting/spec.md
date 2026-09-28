@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the alerting subsystem: rule, event, silence, escalation-policy, and notification-channel models with CRUD APIs, the advisory-locked alert evaluator, the signal provider registry, notification dispatch, and budget-forecast signals.
+
+## Requirements
 
 ### Requirement: AlertRuleModel ORM model
 The system SHALL define `AlertRuleModel(BaseModel)` in `models/alert.py` with fields: `name` (String 255), `description` (String, nullable), `alert_type` (String, one of AlertType enum), `threshold` (Float), `window_minutes` (Integer, evaluation window), `for_minutes` (Integer, sustained duration before firing), `severity` (String, one of AlertSeverity enum), `filters` (JSON, optional scope filters: agent_id, model), `enabled` (Boolean, default True), `escalation_policy_id` (UUID FK, nullable), `channel_ids` (JSON, list of NotificationChannel UUIDs), `workspace_id` (UUID, default zero UUID).

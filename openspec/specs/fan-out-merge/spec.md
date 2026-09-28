@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines fan-out/merge execution: static parallel dispatch and result collection, branch sub-channel isolation, runtime dispatch packets with per-branch fault tolerance and depth limits, dynamic merge plan discovery, and the COORDINATOR boundary.
+
+## Requirements
 
 ### Requirement: FAN_OUT node dispatches parallel branches
 The FAN_OUT NodeType SHALL represent a parallel dispatch point that splits execution into multiple concurrent branches. The node config SHALL contain a `branches` field listing the node IDs of all parallel branch targets.
@@ -112,7 +116,3 @@ MERGE 节点 SHALL 支持聚合动态扇出的产出:当 `fan_out_source` 指向
 #### Scenario: 分支在父会话日志可见
 - **WHEN** 动态扇出派发 3 个分支
 - **THEN** 3 个分支的 NODE_START/NODE_END 事件 SHALL 出现在父会话日志中,SHALL NOT 创建子会话
-
-
-## Requirements
-

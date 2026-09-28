@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the engine exception hierarchy: the HecateError base, engine, graph-validation, channel, and security error categories, the ErrorCategory enum, and isinstance-based error classification.
+
+## Requirements
 
 ### Requirement: HecateError base exception class
 

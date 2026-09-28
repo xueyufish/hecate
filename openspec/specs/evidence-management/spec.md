@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines evidence management: capture of tool call results, normalization of raw output, provenance tracking, importance scoring, and storage with retrieval.
+
+## Requirements
 
 ### Requirement: Evidence Tracker captures tool call results
 The system SHALL intercept tool execution results and store them as structured evidence records with normalized content, source metadata, and importance scoring.

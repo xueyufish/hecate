@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines knowledge-base hit testing: the search endpoint, chunk browsing, search-mode comparison, and per-mode score breakdowns on hybrid results.
+
+## Requirements
 
 ### Requirement: Knowledge base search endpoint for hit testing
 The system SHALL provide a `POST /api/knowledge-bases/{id}/search` endpoint that accepts a JSON body with `query` (string, required), `mode` (string, optional, default `"hybrid"`, one of `"hybrid"` / `"dense"` / `"sparse"`), and `limit` (integer, optional, default 10, max 50), and returns a list of scored chunks matching the query.
@@ -39,7 +43,6 @@ The system SHALL provide a `POST /api/knowledge-bases/{id}/compare` endpoint tha
 - **WHEN** `POST /api/knowledge-bases/{kb_id}/compare` with `{"query": "test", "limit": 3}`
 - **THEN** each mode returns at most 3 results
 
-## MODIFIED Requirements
 
 ### Requirement: HybridSearchResult includes per-mode score breakdown
 The system SHALL include `dense_score` and `sparse_score` fields in `HybridSearchResult`, populated with the individual mode scores when hybrid search is performed, so users can understand each mode's contribution to the final ranking.

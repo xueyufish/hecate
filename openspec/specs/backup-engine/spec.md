@@ -1,7 +1,9 @@
 # backup-engine Specification
 
 ## Purpose
-TBD - created by archiving change data-backup-recovery. Update Purpose after archive.
+
+定义备份引擎的各数据域备份能力:PostgreSQL 全量备份与 WAL 归档、Qdrant collection 快照、MinIO 对象存储备份、文件系统备份,以及全系统统一备份入口。
+
 ## Requirements
 ### Requirement: PostgreSQL 全量备份
 系统 SHALL 支持通过 `pg_dump -Fc` 对 PostgreSQL 数据库进行全量逻辑备份，生成 custom format 的 dump 文件。

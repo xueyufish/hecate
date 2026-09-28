@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the OpenTelemetry trace bridge: a span processor that bridges OTel spans into TraceModel rows, span type inference, an async write queue with background consumer, trace_id metadata, startup registration, root spans from PregelRuntime, and GenAI semantic conventions.
+
+## Requirements
 
 ### Requirement: HecateTraceSpanProcessor bridges OTel spans to TraceModel
 The system SHALL implement `HecateTraceSpanProcessor` that implements the OpenTelemetry `SpanProcessor` interface (`on_start`, `on_end`, `shutdown`, `force_flush`). On span start, the processor SHALL create a `TraceModel` record with `start_time`, `name`, `type` (inferred from span name prefix), and `metadata_` (from OTel attributes). On span end, the processor SHALL update the record with `end_time`, `status` (completed or error), `output_data` (from output attributes), and `usage` (from usage attributes).

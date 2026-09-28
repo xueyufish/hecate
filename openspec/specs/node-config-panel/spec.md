@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the node configuration panel: selection-driven activation in the right-side panel, two-way edits that propagate to the canvas with auto-save, panel width, and coexistence with test-run results.
+
+## Requirements
 
 ### Requirement: Node selection activates ConfigPanel in right-side panel
 When a user clicks a node on the workflow canvas, the system SHALL display the ConfigPanel component in the right-side panel (300px width), populated with that node's current configuration. For agent nodes, the panel SHALL display the enhanced structured form (agent selector, role description, invocation mode, channel selector, model override) instead of the previous single `agent_ref` text input.

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines knowledge citations end to end: the citation data model, numbered reference injection into prompts, REST and SSE transport, persistence, retrieval endpoints, and kb_ids on chat requests.
+
+## Requirements
 
 ### Requirement: Citation data model
 The system SHALL define a `Citation` schema with fields: `position` (int, 1-indexed), `kb_id` (UUID), `kb_name` (str), `document_name` (str), `chunk_id` (str), `score` (float), `content_snippet` (str, max 150 chars). Citations SHALL be serialized as OpenAI-compatible `annotations` on the assistant message with `type: "kb_citation"`.

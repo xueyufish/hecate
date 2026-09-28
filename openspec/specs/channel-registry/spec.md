@@ -1,7 +1,9 @@
 # channel-registry Specification
 
 ## Purpose
-TBD - created by archiving change channel-registry. Update Purpose after archive.
+
+Defines pluggable channel behaviors: ACCUMULATOR reducer registration, the ChannelBehavior write-semantics contract with built-in implementations, channel-type registry mapping, and delegation from Channel, ChannelManager eviction checks, and ConflictResolver.
+
 ## Requirements
 ### Requirement: 可插拔 ACCUMULATOR reducer 注册
 

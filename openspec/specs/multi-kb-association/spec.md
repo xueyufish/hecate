@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines multi-knowledge-base association: KB validation on agent create/update, cascade cleanup on KB deletion, reverse lookup, cross-KB result aggregation, chat auto-loading, and active-KB indicators.
+
+## Requirements
 
 ### Requirement: KB ID validation on agent create/update
 When creating or updating an agent with `knowledge_base_ids`, the system SHALL validate that every KB ID references an existing, non-deleted knowledge base. If any KB ID is invalid, the system SHALL reject the request with HTTP 400 and include a message listing the invalid IDs.

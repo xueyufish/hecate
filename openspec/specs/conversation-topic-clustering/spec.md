@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines conversation topic clustering: embedding generation, HDBSCAN clustering, incremental matching, LLM-generated topic labels, cluster quality monitoring and refinement, configuration, and the topic distribution API.
+
+## Requirements
 
 ### Requirement: Conversation embedding generation
 The system SHALL generate embeddings for completed conversations using the existing RAG embedding service. The embedding SHALL be computed from the conversation's message content (concatenated user and assistant messages). Embeddings SHALL be stored in Qdrant in a dedicated `conversation_embeddings` collection.

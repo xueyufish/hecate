@@ -8,7 +8,11 @@
 > Later sync: `known-bad-exemption` (7.3c) added the known-bad exemption
 > marker fields, the marking requirement, and exemption-status filtering.
 
-## MODIFIED Requirements
+## Purpose
+
+Defines evaluation datasets: item management, tag-filtered queries and runs, synthesis provenance tags, tag-preserving import/export, CRUD, and known-bad exemption marking.
+
+## Requirements
 
 ### Requirement: Dataset item management
 The system SHALL provide methods to add, list, update, and remove items within a dataset. Each item SHALL contain: `query: str`, `expected_answer: str | None`, `context: list[str] | None`, `metadata: dict | None`, `tags: list[str] | None`, `known_bad: bool` (default `False`), `known_bad_reason: str | None`, `known_bad_marked_by: UUID | None`, `known_bad_marked_at: datetime | None`, and `known_bad_expires_at: datetime | None`. Items SHALL be persisted with the `tags` field stored as a JSON column on `EvaluationItemModel`. The `tags` field and the known-bad marker fields SHALL be retrievable in `EvaluationItemReadSchema`, and both SHALL round-trip through JSON import/export.
@@ -80,7 +84,6 @@ The system SHALL provide an `EvaluationDatasetService` with async methods: `crea
 - **WHEN** a user deletes a dataset that contains evaluation items
 - **THEN** the system SHALL cascade-delete all associated items and return success
 
-## ADDED Requirements
 
 ### Requirement: Known-bad exemption marking
 The system SHALL allow marking a dataset item as known-bad (exempt) and clearing the mark through the dataset item update API. Setting `known_bad=true` SHALL require a non-empty `known_bad_reason`. When the mark is set, the service SHALL fill `known_bad_marked_by` with the current authenticated user's id and `known_bad_marked_at` with the current server timestamp; clients SHALL NOT be able to set the provenance fields directly. Clearing the mark (`known_bad=false`) SHALL reset `known_bad_reason`, `known_bad_marked_by`, `known_bad_marked_at`, and `known_bad_expires_at` to `None`. Listing items SHALL support filtering by exemption status. `known_bad_expires_at` is a reserved field: v1 SHALL persist it but SHALL NOT enforce any expiry behavior.

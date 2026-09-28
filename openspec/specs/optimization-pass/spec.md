@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines pluggable graph optimization: the OptimizationPass ABC, dead-node elimination, parallel-branch detection, and optional passes accepted by GraphCompiler.
+
+## Requirements
 
 ### Requirement: OptimizationPass ABC defines pluggable graph optimization
 The engine SHALL define an `OptimizationPass` ABC in `runtime/optimization.py` with abstract method: `optimize(graph: CompiledGraph) -> CompiledGraph`.

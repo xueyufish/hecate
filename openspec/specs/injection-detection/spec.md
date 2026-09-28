@@ -76,24 +76,79 @@ The system SHALL reuse the existing `security_finding_writer` callable contract 
 
 Each emitted finding SHALL set `context={"source": "injection_detection", "recognizer": <id>, "entity_type": <canonical name>}` to distinguish from DLP findings in audit/SIEM queries.
 
+#### Scenario: Finding carries injection-detection context
+
+- **WHEN** the detector recognizes an injection pattern in an LLM response and emits a finding through the security finding writer
+- **THEN** the finding is written with `context={"source": "injection_detection", "recognizer": <id>, "entity_type": <canonical name>}` so audit and SIEM queries can distinguish it from DLP findings
+
+#### Scenario: Finding carries injection-detection context
+
+- **WHEN** the detector recognizes an injection pattern in an LLM response and emits a finding through the security finding writer
+- **THEN** the finding is written with `context={"source": "injection_detection", "recognizer": <id>, "entity_type": <canonical name>}` so audit and SIEM queries can distinguish it from DLP findings
 ### Requirement: Detector produces no findings on benign content
 
 The recognizers SHALL be deterministic regex matchers with no ML model dependency. They SHALL emit zero findings when the input contains none of the configured patterns. False-positive rate target on the test corpus (see `test_services/test_security_hooks_injection.py`) SHALL be ≤ 5% per recognizer on a curated benign dataset (Python tutorial snippets, SQL reference docs, Jinja tutorial content, MDN HTML examples).
 
+#### Scenario: Benign technical content yields no findings
+
+- **WHEN** the recognizers run over the curated benign corpus (Python tutorial snippets, SQL reference docs, Jinja tutorial content, MDN HTML examples) containing none of the configured patterns
+- **THEN** zero findings are emitted and the per-recognizer false-positive rate stays within the 5% target
+
+#### Scenario: Benign technical content yields no findings
+
+- **WHEN** the recognizers run over the curated benign corpus (Python tutorial snippets, SQL reference docs, Jinja tutorial content, MDN HTML examples) containing none of the configured patterns
+- **THEN** zero findings are emitted and the per-recognizer false-positive rate stays within the 5% target
 ### Requirement: Action merging follows the most-restrictive-wins rule
 
 When multiple recognizers fire on the same response, the system SHALL compute a single overall action using the same most-restrictive-wins ordering used by DLP: `block > mask > sanitize > audit > allow`. This mirrors `DLPAction.overall_action` (`services/security/dlp/result.py`) and SHALL be implemented as a shared utility rather than duplicated.
 
+#### Scenario: Multiple recognizers merge to the most restrictive action
+
+- **WHEN** two recognizers fire on the same response, one mapping to `mask` and the other to `block`
+- **THEN** the overall action is `block`, computed by the shared most-restrictive-wins utility (`block > mask > sanitize > audit > allow`) rather than a duplicated local implementation
+
+#### Scenario: Multiple recognizers merge to the most restrictive action
+
+- **WHEN** two recognizers fire on the same response, one mapping to `mask` and the other to `block`
+- **THEN** the overall action is `block`, computed by the shared most-restrictive-wins utility (`block > mask > sanitize > audit > allow`) rather than a duplicated local implementation
 ### Requirement: Detector is synchronous and adds negligible latency
 
 Each recognizer SHALL execute synchronously inside the existing post-LLM hook (`OutputSecurityHook.on_post_llm_call`). Per-call latency budget SHALL be ≤ 5ms for a typical 2KB response across all four built-in recognizers combined. Custom-pattern regex execution SHALL respect a configurable per-pattern timeout (default 50ms) and SHALL NOT block the hook on timeout (skip + log warning instead).
 
+#### Scenario: Regex timeout skips instead of blocking
+
+- **WHEN** a custom pattern's regex execution exceeds its per-pattern timeout (default 50ms) during a typical 2KB response scan
+- **THEN** that recognizer is skipped for the call with a logged warning, the hook completes within its latency budget, and the response is not blocked
+
+#### Scenario: Regex timeout skips instead of blocking
+
+- **WHEN** a custom pattern's regex execution exceeds its per-pattern timeout (default 50ms) during a typical 2KB response scan
+- **THEN** that recognizer is skipped for the call with a logged warning, the hook completes within its latency budget, and the response is not blocked
 ### Requirement: Configuration section is opt-in with backward-compatible defaults
 
 `guardrail_config["injection_detection"]` is an optional section. When absent, all four built-in recognizers SHALL default to `enabled=True, action="audit"` (per the safe-default rule above). When explicitly set to `"enabled": False`, the entire capability SHALL be skipped (recognizers not constructed, no overhead).
 
 This is deliberately distinct from `output_security["enabled"]` — disabling `output_security` collapses to NoOpPostLLMHook (kills toxicity/PII/DLP scanning too); disabling `injection_detection` only skips this capability while preserving the rest of the output pipeline.
 
+#### Scenario: Absent section falls back to safe defaults
+
+- **WHEN** `guardrail_config` contains no `injection_detection` section
+- **THEN** all four built-in recognizers run with `enabled=True, action="audit"`
+
+#### Scenario: Explicit disable skips the capability
+
+- **WHEN** `guardrail_config["injection_detection"]["enabled"]` is set to `False`
+- **THEN** the recognizers are not constructed and the hook adds no detection overhead, while `output_security` scanning is unaffected
+
+#### Scenario: Absent section falls back to safe defaults
+
+- **WHEN** `guardrail_config` contains no `injection_detection` section
+- **THEN** all four built-in recognizers run with `enabled=True, action="audit"`
+
+#### Scenario: Explicit disable skips the capability
+
+- **WHEN** `guardrail_config["injection_detection"]["enabled"]` is set to `False`
+- **THEN** the recognizers are not constructed and the hook adds no detection overhead, while `output_security` scanning is unaffected
 ### Requirement: Findings carry rule_name aligned with SecurityFindingModel schema
 
 Each finding SHALL set `rule_name` on the SecurityFindingModel row to one of:
@@ -106,6 +161,15 @@ Each finding SHALL set `rule_name` on the SecurityFindingModel row to one of:
 
 This naming convention is forward-compatible with the SIEM collector's `from_security_finding` mapping (`services/security/siem/event.py:197`) — it preserves the dotted `domain.capability` shape already used by the existing DLP rule names.
 
+#### Scenario: rule_name uses the dotted domain.capability convention
+
+- **WHEN** a SQL-injection recognizer emits a finding that is persisted as a SecurityFindingModel row
+- **THEN** the row's `rule_name` is `injection_detection.sql_injection`, matching the shape the SIEM collector's `from_security_finding` mapping already expects
+
+#### Scenario: rule_name uses the dotted domain.capability convention
+
+- **WHEN** a SQL-injection recognizer emits a finding that is persisted as a SecurityFindingModel row
+- **THEN** the row's `rule_name` is `injection_detection.sql_injection`, matching the shape the SIEM collector's `from_security_finding` mapping already expects
 ### Requirement: Detector supports streaming via the existing accumulated-response contract
 
 Streaming LLM responses (`LLMWorker.execute_stream`) accumulate the full response before invoking the post hook (see `runtime/workers/llm_worker.py` execute_stream path, post hook call at line 570). The detector SHALL operate on the full accumulated string, NOT on individual tokens. This is a deliberate alignment with Bedrock Guardrails `ApplyGuardrail` semantics — token-level chunk scanning is a future change (see Deferred items in proposal.md).
@@ -134,3 +198,13 @@ The detector SHALL run inside `OutputSecurityHook.on_post_llm_call` and SHALL be
 - Path A direct chat loop: `services/orchestration/agent_execution_port.py:239`
 
 No new wiring SHALL be added to these two call sites — the existing factory (`create_security_hooks`) and assembly (`assemble_guardrails`) handle it via the standard hook pipeline.
+
+#### Scenario: Same hook pipeline serves both execution paths
+
+- **WHEN** a response flows through either the Pregel LLMWorker path (non-streaming or streaming) or the Path A direct chat loop
+- **THEN** injection detection runs identically via the standard `create_security_hooks` / `assemble_guardrails` pipeline with no call-site-specific wiring
+
+#### Scenario: Same hook pipeline serves both execution paths
+
+- **WHEN** a response flows through either the Pregel LLMWorker path (non-streaming or streaming) or the Path A direct chat loop
+- **THEN** injection detection runs identically via the standard `create_security_hooks` / `assemble_guardrails` pipeline with no call-site-specific wiring

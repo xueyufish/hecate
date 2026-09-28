@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines conversation openers: opening-remarks generation, follow-up question suggestions in streaming and non-streaming responses, agent configuration, and the suggestion prompt template.
+
+## Requirements
 
 ### Requirement: Opening remarks generation
 The system SHALL generate an opening greeting with 3 starter questions when a conversation starts. The greeting SHALL be based on the agent's persona, tools, and knowledge bases. When the agent has a configured `opening_remarks` field, the system SHALL use that static text instead of generating one via LLM.

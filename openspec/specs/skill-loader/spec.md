@@ -1,3 +1,9 @@
+# skill-loader Specification
+
+## Purpose
+
+Defines skill loading: resolving an agent's skills into formatted instructions, per-skill token budgets, XML-block system-prompt injection, and on-demand L2 loading.
+
 ## Requirements
 
 ### Requirement: SkillLoader resolves agent skills to formatted instructions

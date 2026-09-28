@@ -1,7 +1,9 @@
 # model-metadata-schema Specification
 
 ## Purpose
-TBD - created by archiving change model-hub-completion. Update Purpose after archive.
+
+Defines structured model metadata: the ModelRegistryModel metadata schema, migration of model_type into model_metadata, backward-compatible accessors, and catalog capability badges.
+
 ## Requirements
 ### Requirement: ModelRegistryModel stores structured model metadata
 The system SHALL add a `model_metadata` JSON column to `ModelRegistryModel` containing `modalities` (input/output arrays), `capabilities` (boolean flags), and `limits` (context/output integers).

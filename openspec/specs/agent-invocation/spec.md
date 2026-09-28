@@ -1,4 +1,8 @@
-## MODIFIED Requirements
+## Purpose
+
+Defines agent invocation: the EnginePort agent_execute entry, real AGENT-node execution, dynamic agent-as-tool registration, and per-agent context isolation.
+
+## Requirements
 
 ### Requirement: EnginePort agent_execute method
 The system SHALL add an `agent_execute` method to `EnginePort` that accepts an agent_id, messages, channel_snapshot, and optional context, and returns a dict containing the agent's response. The concrete implementation SHALL load the agent's configured tools, query knowledge bases, apply guard hooks (PreLLMHook/PostLLMHook), and call context_assemble before invoking the LLM — matching the full pipeline used by LLMWorker for CONVERSATION nodes. When the optional `agent_definition` carries a `prompt_override`, the top-level invocation SHALL use the override value as the system prompt in place of the agent's configured prompt — the same override semantics already applied on the agent-as-tool delegation path. When `agent_definition` is absent or carries no `prompt_override`, behavior SHALL be unchanged.

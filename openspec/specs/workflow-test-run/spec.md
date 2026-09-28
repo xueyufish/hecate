@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the workflow test-run experience: the custom input form, node output and execution log panels, node status badges, and run history.
+
+## Requirements
 
 ### Requirement: Custom Input Form
 The workflow editor SHALL provide an input form for test runs. Users SHALL be able to specify input data (messages array and/or custom variables) before clicking Run Test.

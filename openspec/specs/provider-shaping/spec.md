@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines provider shaping: context shaping strategies per target LLM provider, selection by model name, provider-specific system message handling, and extensibility.
+
+## Requirements
 
 ### Requirement: Provider Strategy shapes context for target LLM
 The system SHALL apply a provider-specific strategy to the assembled context before passing it to the LLM service, adapting message format, tool definitions, and system prompt structure to the target provider's preferences.

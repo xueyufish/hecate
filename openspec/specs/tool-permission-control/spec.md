@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the composable tool permission pipeline: plugin availability, declarative profile rules, visibility, security, and permission-mode layers, per-agent policy configuration, rule management, REST APIs, and audit logging.
+
+## Requirements
 
 ### Requirement: Composable policy pipeline
 The system SHALL provide a `ToolPolicyPipeline` that evaluates tool access through ordered, pluggable `PolicyLayer` instances. Each layer receives `(tool, context)` and returns a `PolicyDecision` (ALLOW / DENY / HIDE / REQUIRE_APPROVAL / EXECUTE_SANDBOX). DENY short-circuits the pipeline. HIDE removes the tool from LLM visibility only.

@@ -1,4 +1,8 @@
-## MODIFIED Requirements
+## Purpose
+
+Defines the Context Assembler: context assembly before LLM invocation, knowledge injection with citation position mapping, and the suggestion-generation mode.
+
+## Requirements
 
 ### Requirement: Context Assembler assembles context before LLM invocation
 The system SHALL provide a `ContextAssembler` that accepts raw messages, tools, knowledge chunks, and session metadata, and returns an `AssembledContext` containing the final messages list, tool definitions, and metadata to pass to the LLM service. When the agent has associated knowledge bases, the assembler SHALL call `EnginePort.knowledge_query()` to retrieve relevant chunks and inject them into the context.

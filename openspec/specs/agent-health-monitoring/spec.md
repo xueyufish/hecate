@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines agent fleet health monitoring: fleet overview, per-agent metrics and trends, the health status taxonomy, configurable score formula and thresholds, trace-span sourcing, and the frontend dashboard.
+
+## Requirements
 
 ### Requirement: Agent fleet overview endpoint
 The system SHALL expose `GET /api/ops-center/agents/overview` that returns aggregate fleet health for a time range: total agents, distribution by health status (healthy/warning/critical/unknown counts), fleet-level error rate, fleet-level average P95 latency, and list of top degraded agents (sorted by health score ascending). Supports `start_date`, `end_date` query parameters.

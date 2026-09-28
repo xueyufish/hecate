@@ -8,7 +8,8 @@
 
 Lets users generate evaluation datasets from seed items, topic descriptions, or adversarial intents via an LLM-driven synthesis pipeline. Synthesized items land in a new dataset with `tags` for provenance so the Evaluation Engine can score them like any other item.
 
-## ADDED Requirements
+
+## Requirements
 
 ### Requirement: Synthesis request shape
 The system SHALL accept synthesis requests via `POST /evaluation/datasets/synthesize` with body fields: `seed_dataset_id: UUID | None`, `topic: str | None`, `strategy: Literal["generation", "evolution", "adversarial"]`, `adversarial_intent: Literal["prompt_injection_basic", "prompt_injection_indirect", "jailbreak_dan_style", "pii_extraction", "jailbreak_roleplay"] | None`, `count: int` (1-100), `target_dataset_name: str`, `target_dataset_description: str | None`, `llm_config: dict | None`. The system SHALL reject requests with no seed source AND no topic AND no adversarial intent with 400 Bad Request.
