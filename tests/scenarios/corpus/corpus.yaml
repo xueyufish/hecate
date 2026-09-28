@@ -1,0 +1,37 @@
+# Synthetic scenario corpus — small, versioned, ACL-tagged, citation-anchored.
+#
+# Purpose (step1): prove that scenarios can pin knowledge snapshots with
+# versions, permissions, and canonical citation positions. Deliberately NOT
+# the Problem_Lab workbook's sample scale — the plan forbids turning the
+# workbook's fixed sizes into platform requirements.
+schema_version: 1
+principals:
+  - employee
+  - auditor
+  - finance_agent
+documents:
+  - id: proc-reimburse
+    file: proc-reimburse.md
+    version: "2.1"
+    title: Expense Reimbursement Procedure
+    acl:
+      read: [employee, auditor, finance_agent]
+    citations:
+      - anchor: sec-limit-standard
+      - anchor: sec-approval-table
+  - id: audit-notes-2026h1
+    file: audit-notes.md
+    version: "0.3-draft"
+    title: Internal Audit Notes (Restricted)
+    acl:
+      read: [auditor]
+    citations:
+      - anchor: sec-findings
+  - id: proc-reimburse-v1
+    file: proc-reimburse-v1.md
+    version: "1.0"
+    title: Expense Reimbursement Procedure (Superseded)
+    acl:
+      read: [employee, auditor, finance_agent]
+    citations:
+      - anchor: sec-limit-legacy
