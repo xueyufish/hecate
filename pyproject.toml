@@ -62,6 +62,13 @@ hecate = "hecate.cli.main:app"
 hecate-migrate = "hecate.cli.migrate:main"
 hecate-flag-audit = "hecate.cli.flag_audit:main"
 
+[tool.uv]
+# fastmcp 4.x is beta-only, so resolution must allow pre-releases. Baking the
+# mode in here keeps uv.lock consistent with CI: `uv sync` then installs from
+# the lockfile instead of re-resolving on every run (a full re-resolution hits
+# the network for every package and breaks on transient PyPI errors).
+prerelease = "allow"
+
 [tool.uv.workspace]
 members = ["packages/*", "packages/channels/*"]
 # ``packages/*`` would otherwise match the channels/ bucket directory itself

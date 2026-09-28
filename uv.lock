@@ -8,6 +8,9 @@ resolution-markers = [
     "python_full_version < '3.13'",
 ]
 
+[options]
+prerelease-mode = "allow"
+
 [manifest]
 members = [
     "hecate",
@@ -2271,6 +2274,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-testmon" },
     { name = "pytest-xdist" },
+    { name = "pyyaml" },
     { name = "ruff" },
     { name = "wrapt" },
 ]
@@ -2393,6 +2397,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3.0" },
     { name = "python-multipart", specifier = ">=0.0.9" },
+    { name = "pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "qdrant-client", marker = "extra == 'rag'", specifier = ">=1.12.0" },
     { name = "ragas", marker = "extra == 'rag'", specifier = ">=0.2.0" },
     { name = "redis", specifier = ">=5.0.0" },
