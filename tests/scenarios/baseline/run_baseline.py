@@ -32,6 +32,32 @@ BASELINE_DIR = Path(__file__).resolve().parent
 OUTPUT_PATH = BASELINE_DIR.parent / "baselines" / "single_agent_baseline.json"
 RUBRIC_VERSION_KEY = "rubric_version"
 
+COST_BASELINE_SCHEMA: dict[str, Any] = {
+    "status": "not-collected",
+    "reason": (
+        "the deterministic rubric run performs no model call, so no usage "
+        "exists to record; this is a fact, not a zero-cost measurement"
+    ),
+    "gate": (
+        "a real-model cost baseline is blocked on G4 (reported/estimated/"
+        "reconciled usage accounting) — target step7/step10 of the plan"
+    ),
+    # Fields a model-backed run must record, per the platform-scenario-pack
+    # spec. reported = provider-returned usage; estimated = locally derived
+    # and never presented as a final cost.
+    "fields_when_collected": [
+        "token_prompt",
+        "token_completion",
+        "token_total",
+        "token_cached",
+        "usage_source",  # reported | estimated
+        "price_version",
+        "currency",
+        "cost_amount",
+        "latency_ms_total",
+    ],
+}
+
 
 def evaluate_item(item: dict[str, Any], index: CorpusIndex) -> list[Score]:
     """Score one dataset item with the deterministic retrieval rubric.
@@ -102,6 +128,7 @@ def main() -> Path:
             "rubric_version": dataset[RUBRIC_VERSION_KEY],
             "evaluator_format": "hecate.ops.evaluation.types (EvalInput/Score, source=deterministic)",
             "dataset": "tests/scenarios/baseline/dataset_p03.yaml",
+            "cost_baseline": dict(COST_BASELINE_SCHEMA),
         },
         "summary": summary,
         "items": per_item,

@@ -32,7 +32,7 @@
 - [x] 5.2 将工具解析、元数据授权和最终执行绑定到同一个确定的工具定义：数据库查询只含调用者可见范围；歧义和来源冲突在副作用前拒绝；允许的内置工具直接交给同一内置 executor，不再把名称交给 Registry 重新解析。外租户同名记录不会影响当前租户。
 - [x] 5.3 `approval_required=true`、`risk_level=HIGH`、未知风险或缺少授权绑定的工具在副作用前显式拒绝。此 MCP 直接入口只放行 `web_search`、`read_file`、`write_file`、`list_files`；代码执行、Memory、浏览器及远程工具在本入口拒绝，未来放行需独立的授权绑定。
 - [x] 5.4 文件工具仅使用服务端 workspace 根；调用者提供的 workspace、身份、根目录或绝对路径不得扩大权限。成功与拒绝记录主体、workspace、工具身份和判定结果，不记录参数或凭据；MCP 返回可观察的结果或错误。
-- [ ] 5.5 运行任务 2.3 的工具歧义、高风险/待审批拒绝、路径越界、符号链接逃逸和跨租户文件隔离用例；每个拒绝用例断言没有文件、数据库或远程调用副作用。此前受影响集合为 214 passed、1 skipped；最后新增的 MCP 正例已通过，但最终 MCP 重跑中 11 个 `tmp_path` 用例被 Windows 沙箱对 pytest 临时目录的访问限制阻断。符号链接负例还须在可创建符号链接的 CI 环境执行。
+- [x] 5.5 运行任务 2.3 的工具歧义、高风险/待审批拒绝、路径越界、符号链接逃逸和跨租户文件隔离用例；每个拒绝用例断言没有文件、数据库或远程调用副作用。最终复核（2026-09-28，step1-baseline-completion change）：于 main `221e233` 重跑完整 `tests/test_services/test_mcp_server.py` 为 41 passed、1 skipped——唯一 skip 是符号链接逃逸负例（`test_mcp_server.py:1068`，Windows 主机不允许创建 symlink）；该负例在 CI（Linux）的合并运行中执行。此前记录的 11 个 `tmp_path` 用例阻断未再复现。
 
 ## 6. `MCP_AUTH_TYPE=none` 失败关闭
 
@@ -41,7 +41,7 @@
 
 ## 7. 收尾验证与剩余门槛登记
 
-- [ ] 7.1 运行 `ruff check src/hecate/ tests/`、`ruff format --check src/ tests/`、`mypy src/`，以及受影响的 MCP、agent API、tenant isolation 和 tool 测试；以本次最终代码的实际结果为准更新证据。Ruff、mypy、OpenSpec 校验通过；此前受影响集合 214 passed、1 skipped，最终 MCP 重跑 31 passed、11 个因 pytest 临时目录访问限制报错，待可运行环境复核。
+- [x] 7.1 运行 `ruff check src/hecate/ tests/`、`ruff format --check src/ tests/`、`mypy src/`，以及受影响的 MCP、agent API、tenant isolation 和 tool 测试；以本次最终代码的实际结果为准更新证据。Ruff、mypy、OpenSpec 校验通过。最终复核（2026-09-28，step1-baseline-completion change）：完整 MCP 套件于 main `221e233` 重跑 41 passed、1 skipped（symlink 主机限制，CI 已覆盖），此前 11 个 `tmp_path` 用例阻断未再复现。
 - [x] 7.2 对照演进方案 §八的 MCP viewer 场景记录逐条验收证据；基线文档只标注本 change 实际关闭的入口和动作，不将 G1 总体标为已关闭。（`docs/research/platform-evolution-baseline.md` §7 G1 行已对齐 MCP 直接入口、REST/MCP 写入口及剩余边界）
 - [x] 7.3 登记未覆盖的 Workflow/Chat 工具入口(B2)、定时执行路径(B3)、其他 REST 配置写入口、评估调用、生产环境禁止 `MCP_AUTH_TYPE=none` 的启动门禁、step7 Action 服务统一接入，作为后续关闭 G1 的明确门槛。（基线文档 §7 G1 行内联登记）
-- [ ] 7.4 推送前确认当前分支为 `fix/g1-mcp-action-enforcement`；推送仍需用户在聊天中显式批准。
+- [x] 7.4 推送前确认当前分支为 `fix/g1-mcp-action-enforcement`；推送经用户在聊天中显式批准后完成（已随 #185 合并）。本勾选由 step1-baseline-completion change 于 2026-09-28 补记。

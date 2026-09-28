@@ -6,7 +6,23 @@
     "note": "Tier-2 recorded baseline; never executed by CI; not a pass/fail authority.",
     "rubric_version": "p03-retrieval-rubric-1",
     "evaluator_format": "hecate.ops.evaluation.types (EvalInput/Score, source=deterministic)",
-    "dataset": "tests/scenarios/baseline/dataset_p03.yaml"
+    "dataset": "tests/scenarios/baseline/dataset_p03.yaml",
+    "cost_baseline": {
+      "status": "not-collected",
+      "reason": "the deterministic rubric run performs no model call, so no usage exists to record; this is a fact, not a zero-cost measurement",
+      "gate": "a real-model cost baseline is blocked on G4 (reported/estimated/reconciled usage accounting) — target step7/step10 of the plan",
+      "fields_when_collected": [
+        "token_prompt",
+        "token_completion",
+        "token_total",
+        "token_cached",
+        "usage_source",
+        "price_version",
+        "currency",
+        "cost_amount",
+        "latency_ms_total"
+      ]
+    }
   },
   "summary": {
     "citation_correctness": {

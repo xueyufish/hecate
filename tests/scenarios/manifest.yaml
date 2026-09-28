@@ -21,7 +21,7 @@ _meta:
     Architecture evaluation pack for the platform evolution plan
     (docs/research/enterprise-agent-platform-evolution-plan.md, step1).
   baseline_doc: docs/research/platform-evolution-baseline.md
-  baseline_doc_sync: pending # flip to synced when that change lands and references this manifest
+  baseline_doc_sync: synced # step1-baseline-completion flipped this after the baseline doc gained the reference; test_baseline_doc_sync_obligation pins it
 tiers:
   tier1: >-
     CI-deterministic: stub model, in-memory SQLite, stub enterprise tools;
@@ -62,11 +62,16 @@ p_groups:
     reason: >-
       S02/S03/S09 verify REST-path authorization, approval fail-close, and
       corpus ACL; S06 adds MCP/REST parity, cross-tenant, and unapproved-write
-      negatives. Delegation chains belong to step7/step13.
+      negatives; S11 adds reviewer-identity separation on the full chain.
+      Delegation chains belong to step7/step13.
   P07:
     title: 流程与人工介入
     status: partial
-    reason: S03 verifies approval gating on the direct loop; durable cross-backend coordination belongs to step6/step13.
+    reason: >-
+      S03 verifies approval gating on the direct loop and S11 composes the
+      full acceptance chain (read -> draft -> independent review -> human
+      approval -> ticket write); durable cross-backend coordination belongs to
+      step6/step13.
   P08:
     title: 评测、观测与生产定位
     status: partial
@@ -178,3 +183,18 @@ scenarios:
       stream chunk sequence (recorded with a stub model). Assertions compare
       structure only — model text never compared verbatim. Migration baseline
       for step5 entry convergence.
+  - id: S11
+    title: 独立复核全链
+    status: implemented
+    tier: 1
+    entries: [rest_chat_agent]
+    p_groups: [P06, P07]
+    assertions: >-
+      Full acceptance chain: a corpus-read stub tool returns material once to
+      the draft agent; a second, distinct reviewer agent (own agent row and
+      session) receives the draft text plus review instructions only; review
+      rejection proposes no ticket and leaves zero side effects and zero
+      approval events; review pass routes the write through the ask rule, and
+      after the human approval the ticket service executes exactly once with
+      the final answer referencing the real ticket id. Content-quality review
+      stays in the Tier-2/step10 rubric scope.
