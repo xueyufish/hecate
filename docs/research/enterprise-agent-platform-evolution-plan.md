@@ -314,21 +314,21 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **操作：**
 
-- [ ] 记录当前目标分支与基线提交，检查 `git status --short`、`openspec list --json`，列出在途 change、负责人和影响模块。
+- [x] 记录当前目标分支与基线提交，检查 `git status --short`、`openspec list --json`，列出在途 change、负责人和影响模块。（基线 §1；基线提交 `b8fd926`，当时在途 change 为空）
 - [x] 核对 #174—#182 与前轮建议，建立第二节的已合并/部分完成/待实现快照；不再等待已合并的 auth-boundary-hardening。
-- [ ] 为 G1/G2 建立失败复现并单独修复；为 G3/G4/G5 记录启用门槛、owner 和目标 change。认证已修复不代表所有资源操作都授权正确。
-- [ ] 建立执行入口清单：Agent chat、普通工具 chat、Workflow、MCP、A2A、定时任务、IM、评估调用。逐一记录实际执行服务、安全入口、事件存储和取消方式。
-- [ ] 建立后端清单：Runtime、Memory、Knowledge、Evaluation、Observability、Sandbox；标明哪些接口已存在、哪些只有内置实现。
-- [ ] 为每种部署形态绘制信任与数据流拓扑：人类客户端、控制面、Runtime、工具/MCP/A2A 网关、Memory、凭据代理、外部系统及网络出口；列出每条可能绕过授权或审计的直连路径、当前阻断机制与待验证负例。
-- [ ] 为托管执行组合补 harness 会话、Sandbox、远程 MCP、应用回调和供应商内部工具的数据流；区分供应商可见的数据、企业实际持有的环境、可由平台强制的动作。记录当前驻留、保留/删除和服务可用地区限制，作为接入门禁输入。
-- [ ] 按第六节“已实现能力的边界复核清单”核对现有代码、启用状态、安装依赖、API/数据使用量及负责人；分别记录已是可选包、已拆包但仍为核心依赖、完全耦合在主应用中的情况。
-- [ ] 为七个能力域建立现有代码/数据库归属清单：文件与表的 owner、跨包 import、直接写表、API 调用和事件流；标出未来拆分会触及的共享事务与全局状态，作为逐步迁移基线。
-- [ ] 建立不依赖真实企业系统的验收样例：读取材料、产生摘要、独立复核、人工批准、向测试工单服务写入结果。
-- [ ] 固定架构评测包：输入材料及 ACL、测试工具和初始状态、预期产物 schema、禁止动作、审批人、故障注入点与环境复位。权限/副作用用确定性断言；内容质量使用明确 rubric 并记录 evaluator 版本，不能只判断 Agent 自称完成。
-- [ ] 建立 `Problem_Lab.xlsx` P01—P08 到平台保证、可选实现、责任 step、验收 fixture 与未支持能力的映射；先以少量带版本、权限和标准引用位置的合成文档及测试工具贯通，不把表格中的固定样本规模和金融案例变成平台最低要求。
-- [ ] 对同一评测包保留单 Agent 的成本/结果基线，再比较多 Agent；每次变更运行受影响场景。安全负例、重复写入和跨租户泄露不允许以平均质量分抵消。业务收益暂记未验证。
-- [ ] 保存旧路径的响应协议、任务结果、权限负例和事件样本，作为迁移比较基线；模型回答比较业务结果，不比较随机文本逐字相等。
-- [ ] 将旧分支已有失败调查归档到基线记录，不能直接标成“与本次无关”。
+- [x] 为 G1/G2 建立失败复现并单独修复；为 G3/G4/G5 记录启用门槛、owner 和目标 change。认证已修复不代表所有资源操作都授权正确。（G1/G2 已由 #185/#186 修复合并；G3—G5 门槛、复现指针与目标 change 记录于基线 §7，owner 指派暂缓（用户 2026-09-28 决定），对应 change 启动时指定）
+- [x] 建立执行入口清单：Agent chat、普通工具 chat、Workflow、MCP、A2A、定时任务、IM、评估调用。逐一记录实际执行服务、安全入口、事件存储和取消方式。（基线 §2，含入口层缺口 N1—N5）
+- [x] 建立后端清单：Runtime、Memory、Knowledge、Evaluation、Observability、Sandbox；标明哪些接口已存在、哪些只有内置实现。（基线 §3）
+- [x] 为每种部署形态绘制信任与数据流拓扑：人类客户端、控制面、Runtime、工具/MCP/A2A 网关、Memory、凭据代理、外部系统及网络出口；列出每条可能绕过授权或审计的直连路径、当前阻断机制与待验证负例。（基线 §4：B1—B5 直连路径带代码证据与当前阻断；部署层出口控制标注未核验）
+- [ ] 为托管执行组合补 harness 会话、Sandbox、远程 MCP、应用回调和供应商内部工具的数据流；区分供应商可见的数据、企业实际持有的环境、可由平台强制的动作。记录当前驻留、保留/删除和服务可用地区限制，作为接入门禁输入。（登记格式与已核验示例见基线 §5；实际组合数据流随 step4 Deployment 模型落地）
+- [x] 按第六节“已实现能力的边界复核清单”核对现有代码、启用状态、安装依赖、API/数据使用量及负责人；分别记录已是可选包、已拆包但仍为核心依赖、完全耦合在主应用中的情况。（基线 §11：十项能力逐项给出打包分类、依赖与挂载证据；运行时使用量标注【未核验】，owner 待指定）
+- [x] 为七个能力域建立现有代码/数据库归属清单：文件与表的 owner、跨包 import、直接写表、API 调用和事件流；标出未来拆分会触及的共享事务与全局状态，作为逐步迁移基线。（基线 §6：跨域读写样本、共享事务面与全局状态已登记，TODO-O1 关闭；反射式写入等动态路径标注未核验）
+- [x] 建立不依赖真实企业系统的验收样例：读取材料、产生摘要、独立复核、人工批准、向测试工单服务写入结果。（场景包 S11 全链；S01/S02/S03 覆盖分段）
+- [x] 固定架构评测包：输入材料及 ACL、测试工具和初始状态、预期产物 schema、禁止动作、审批人、故障注入点与环境复位。权限/副作用用确定性断言；内容质量使用明确 rubric 并记录 evaluator 版本，不能只判断 Agent 自称完成。（基线 §9 规格冻结 + `tests/scenarios/` 实现，manifest 一致性测试钉住漂移）
+- [x] 建立 `Problem_Lab.xlsx` P01—P08 到平台保证、可选实现、责任 step、验收 fixture 与未支持能力的映射；先以少量带版本、权限和标准引用位置的合成文档及测试工具贯通，不把表格中的固定样本规模和金融案例变成平台最低要求。（基线 §8 P 组摘要 + `tests/scenarios/manifest.yaml` 场景级唯一事实源）
+- [ ] 对同一评测包保留单 Agent 的成本/结果基线，再比较多 Agent；每次变更运行受影响场景。安全负例、重复写入和跨租户泄露不允许以平均质量分抵消。业务收益暂记未验证。（结果基线与成本采集口径已固定（Tier-2 记录 cost_baseline 块）；真实成本基线受 G4 门槛（目标 step7/10），多 Agent 比较随团队协作模型（step12/13）启用）
+- [x] 保存旧路径的响应协议、任务结果、权限负例和事件样本，作为迁移比较基线；模型回答比较业务结果，不比较随机文本逐字相等。（场景包 S10 黄金样本 + S02/S05—S08 负例与恢复样本）
+- [x] 将旧分支已有失败调查归档到基线记录，不能直接标成“与本次无关”。（基线 §10）
 
 **落点与交付：**建议新增 `docs/research/platform-evolution-baseline.md`；沿用 `tests/test_api/`、`tests/test_services/test_workflow/`，新增端到端场景 fixture；不接入实际发送或生产写入。
 
@@ -1055,7 +1055,7 @@ I-E 的绑定和评测服务可在 I-C 契约稳定后与 I-D 分别推进；I-F
 - [Pi](https://github.com/earendil-works/pi)、[Mem0](https://github.com/mem0ai/mem0)：仅作为运行时/记忆适配验证的候选示例。平台模型、配置字段、Feature ID 和验收不能绑定这些品牌。
 - [OpenSandbox 架构](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/architecture/index.md)与[生命周期 API](https://github.com/opensandbox-group/OpenSandbox/blob/main/specs/sandbox-lifecycle.yml)：生命周期与执行接口可独立于具体隔离后端；用于验证 SandboxProvider 的边界，不将其协议或产品指定为唯一实现。
 - [Daytona 生命周期](https://www.daytona.io/docs/sandboxes)与[持久化](https://www.daytona.io/docs/en/persistence/)：区分环境暂停/停止/归档和外部持久数据；支持本方案对工作区、快照与产物分别建模。具体恢复保证仍由后端能力测试确定。
-- [OpenShell 凭据管理](https://github.com/NVIDIA/OpenShell/blob/main/docs/sandboxes/manage-providers.mdx)：网络许可与凭据目标绑定分别校验，支持将凭据代理和环境出口作为独立强制边界。
+- [OpenShell 凭据管理](https://github.com/NVIDIA/OpenShell/blob/main/docs/how-it-works/providers/overview.mdx):网络许可与凭据目标绑定分别校验，支持将凭据代理和环境出口作为独立强制边界。
 - [AgentCore Code Interpreter 会话管理](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/code-interpreter-session-characteristics.html)：隔离会话、超时与回收说明，支持为环境定义明确生命周期；不将供应商隔离声明自动认定为 Hecate 已验证的部署保证。
 - [OpenAI Agents API 架构](https://developers.openai.com/api/docs/guides/agents-api/architecture)与[执行方式对比](https://developers.openai.com/api/docs/guides/agents)：托管 harness 持有模型/工具循环及会话，而 Sandbox 可单独选择；自托管循环与托管循环是不同的执行方式，不应把环境位置当成会话位置。
 - [OpenAI Agents API 数据限制](https://developers.openai.com/api/docs/guides/agents-api/overview)、[Sandbox 安全说明](https://developers.openai.com/api/docs/guides/agents-api/environments/security)与[观测/用量](https://developers.openai.com/api/docs/guides/agents-api/observability)：提供当前试点的数据驻留、MCP 连接来源、事件及用量核验依据；这些供应商条件可能变化，选型时须重新核验，不作为平台通用保证。

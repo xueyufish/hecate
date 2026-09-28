@@ -90,21 +90,39 @@
 | 评测 | `ops/evaluation/` | engine.py | EvaluationBackend 未抽象 |
 | MCP/A2A 接入层 | `tools/mcp/`、`channel/a2a/` | §2 证据 | 协议身份→平台授权映射不完整(G1) |
 
-跨域数据访问已证实样本(ORM 模型共享于 `models/`,按"每表一个领域负责读写"规则,以下为跨域**读** AgentModel 的实例):`ops/ops_center/overview.py`、`ops/api/traces.py`、`ops/evaluation/annotation/service.py`、`ops/prompt_optimization/service.py`、`ops/scheduling/executors.py`、`tools/mcp/server.py`、`tools/skill/loader.py`、`tools/skill_registry/registry.py`。跨域**写**路径未系统核验(TODO-O1)。
+跨域数据访问已证实样本(ORM 模型共享于 `models/`,按"每表一个领域负责读写"规则,以下为跨域**读** AgentModel 的实例):`ops/ops_center/overview.py`、`ops/api/traces.py`、`ops/evaluation/annotation/service.py`、`ops/prompt_optimization/service.py`、`ops/scheduling/executors.py`、`tools/mcp/server.py`、`tools/skill/loader.py`、`tools/skill_registry/registry.py`。
+
+跨域**写**路径已证实样本(TODO-O1 核验,方法:对非 studio 域 grep studio 拥有的模型导入面,再核对命中文件的写操作;为抽样而非全量):
+
+| 编号 | 写路径 | 证据 | 说明 |
+|---|---|---|---|
+| W1 | `tools/mcp/server.py` 建/改 AgentModel 行(MCP `agent_create`/`agent_update`) | server.py:422—434(`AgentModel(...)` + `db.add` + `flush` + `commit`)、489—491(更新后 commit) | tools 域直接写 agent 配置表(其 CRUD 归 studio/api/agents.py);G1 已为其加角色门槛,但表所有权仍在跨域直写 |
+| W2 | `tools/mcp/server.py` 建 KnowledgeBase 行(MCP `knowledge_create`) | server.py:663(`db.add(kb)`) | tools 域直写知识库表(归 hecate-memory/knowledge 域) |
+| W3 | `ops/prompt_optimization/review.py` 建 PromptVersionModel 行 | review.py:111—131(`PromptVersionModel(...)` + `db.add(version)`) | ops 域直写 prompt 版本表(prompt CRUD 归 studio/api/prompts.py,main.py:82) |
+
+已核对为**仅读**的疑点(排除误报):`ops/evaluation/engine.py:832—841` 只读 `WorkflowModel.current_version`;`enterprise/api/model_providers.py:137—142` 只读 WorkflowModel,其 `db.add`(274、290、597)写的是 enterprise 自有的 provider/model 表;`channel/publishing.py:93` 的 `db.add` 写 channel 自有表。
+
+共享事务与全局状态(未来拆分会触及的面):
+
+- **请求级 AsyncSession 跨域共用**:MCP 各 handler 共用同一请求级 session 并各自 `flush`+`commit`(如 server.py:432—434 与 663 在同一请求生命周期内先后落不同域的表);一个请求内跨域写处于同一事务面,拆分时需引入跨服务一致性语义。
+- **全局可变状态**:`hecate.channel.api.v1.chat.llm_service` 模块级单例(chat.py:452 附近;测试经 monkeypatch 替换,证明其为进程级可变点);`settings.WORKSPACE_ROOT` 全局路径根(B1/B2 依赖);模块级 `tool_registry` 单例(chat 旧循环直接调用,见 §4 B2)。
+- **跨域写与共享事务的剩余动态路径**(反射式写入、alembic 数据迁移、backup 恢复对全表的写)未逐一核验【未核验】;backup/restore 属 ops 域按设计触碰全部表,不计为违规。
 
 ## 7. G1—G5 门槛记录
 
 | 门槛 | 代码证据(本次复核) | 复现指针 | owner | 目标 change |
 |---|---|---|---|---|
-| G1 统一动作授权 | MCP `tool_execute` 无角色检查、无服务端资源上下文(server.py:707—751);`agent_*` 仅身份/workspace(server.py:344—446) | 以 viewer 身份经 MCP 调用写工具,观察与 REST 入口授权结果不一致 | 待指定 | `g1-mcp-action-enforcement` |
-| G2 副作用回执与恢复 | `get_tool_receipt` 只认 TOOL_RESULT、读取失败返回 None(tool_worker.py:81—99);`prior_status` 为空即放行重试(tool_worker.py:404—422);超时/异常兜底写 TOOL_RESULT(tool_worker.py:618—630)。**已关闭(g2-tool-receipt-recovery)**:恢复判定改为四态(never_started/claimed/outcome_unknown/store_unavailable),TOOL_CALL 升格为领取记录并在会话事件锁内原子领取,TOOL_CALL/TOOL_RESULT 记录 arguments_digest 且同键参数变化冲突拒绝,成功恢复从通道历史回填真实结果(不可得时显式待对账),store_unavailable 对写操作 fail-closed,`failed` 回执对非幂等类收紧为人工核对。PostgresEventStore 会话级 `pg_advisory_lock`(非 `_xact_` 变体,避免对 `session.begin()` 事务语义的依赖) | 方案 §二"本轮验证范围"最小复现(同 session/call_id 双调用);`tests/test_runtime/test_tool_receipts.py`;关闭证据:`tests/test_runtime/test_g2_recovery_states.py`(四个故障注入 + 四态判定 + 并发领取)、`tests/test_runtime/contracts/test_event_store_contract.py`(双实现领取契约)、`tests/test_services/test_event_state/test_postgres_store.py`(PG 锁) | 待指定 | `g2-tool-receipt-recovery`(已实现,待合并) |
+| G1 统一动作授权 | MCP `tool_execute` 无角色检查、无服务端资源上下文(server.py:707—751);`agent_*` 仅身份/workspace(server.py:344—446) | 以 viewer 身份经 MCP 调用写工具,观察与 REST 入口授权结果不一致 | 未指派(门槛已关闭) | `g1-mcp-action-enforcement` |
+| G2 副作用回执与恢复 | `get_tool_receipt` 只认 TOOL_RESULT、读取失败返回 None(tool_worker.py:81—99);`prior_status` 为空即放行重试(tool_worker.py:404—422);超时/异常兜底写 TOOL_RESULT(tool_worker.py:618—630)。**已关闭(g2-tool-receipt-recovery)**:恢复判定改为四态(never_started/claimed/outcome_unknown/store_unavailable),TOOL_CALL 升格为领取记录并在会话事件锁内原子领取,TOOL_CALL/TOOL_RESULT 记录 arguments_digest 且同键参数变化冲突拒绝,成功恢复从通道历史回填真实结果(不可得时显式待对账),store_unavailable 对写操作 fail-closed,`failed` 回执对非幂等类收紧为人工核对。PostgresEventStore 会话级 `pg_advisory_lock`(非 `_xact_` 变体,避免对 `session.begin()` 事务语义的依赖) | 方案 §二"本轮验证范围"最小复现(同 session/call_id 双调用);`tests/test_runtime/test_tool_receipts.py`;关闭证据:`tests/test_runtime/test_g2_recovery_states.py`(四个故障注入 + 四态判定 + 并发领取)、`tests/test_runtime/contracts/test_event_store_contract.py`(双实现领取契约)、`tests/test_services/test_event_state/test_postgres_store.py`(PG 锁) | 未指派(门槛已关闭) | `g2-tool-receipt-recovery`(已合并,#186) |
 | G3 入口与引擎收敛 | `CHAT_TOOL_LOOP_ENGINE_ENABLED: bool = False`(core/config.py:613);收敛测试存在但部分依赖 mock(`tests/test_runtime/test_chat_engine_convergence.py`) | 真实 HTTP/SSE 多轮 + 断线恢复测试缺失,见方案 G3 | 待指定 | step5 |
 | G4 可解释用量 | 统一常量单价 `_COST_PER_TOKEN = 0.00001`(core/composition/runtime_port_adapter.py:33),估算在 runtime_port_adapter.py:216 | 缺 reported/estimated/reconciled 区分,见方案 G4 | 待指定 | step7/step10 |
 | G5 规划数据权威来源 | `cmd_extract` 全量重建覆盖手填数据(scripts/feature_inventory.py:206、56);`check_inventory` 非严格模式宽松比对(feature_inventory.py:146、230) | 运行 extract 前后 diff YAML 手填字段丢失即复现 | 待指定 | step2 |
 
-owner 均留待用户指定;指定前对应修复 change 不得启动(方案 §七:人员由用户安排)。
+owner 指派决定(2026-09-28,用户):**暂缓**。对应修复 change(step2/step5/step7)启动时先补 owner 再开工(方案 §七:人员由用户安排);G1/G2 已关闭,owner 不再追溯指派。
 
 ## 8. P01—P08 映射
+
+场景级映射的唯一事实源是场景包清单 `tests/scenarios/manifest.yaml`(场景 ID ↔ P 组 ↔ 断言 ↔ 未支持能力,由 `test_manifest_consistency.py` 钉住);下表仅保留 P 组级摘要,场景明细以 manifest 为准,manifest 变更时本表不逐条跟改。
 
 从方案 §一映射表细化,增加 fixture 占位(编号指向 §9 场景)与未支持项:
 
@@ -146,6 +164,32 @@ tests/fixtures/evalpack/
 
 `platform-evolution-scenario-pack` 的 proposal 必须按编号引用本节(S1—S5 与目录名);目录改名、场景增删须先修订本节并在该 change 中注明"基线 §9 变更",防止规格与实现漂移。
 
+已实现的场景集扩展至 S01—S10(见 manifest),step1 收尾 change 增补:
+
+- **S11 独立复核全链**:补齐清单项"读取材料 → 产生摘要 → **独立复核** → 人工批准 → 写入测试工单"中的独立复核环节——语料读取 stub 工具 → 起草 Agent 产出摘要 → 独立复核 Agent(独立 Agent 行与独立会话,仅收到草稿)审阅 → ask 规则审批 → 工单写入恰一次;复核否决变体断言零副作用、零审批事件。内容质量复核仍属 Tier-2/step10 rubric 范围。
+- **成本基线口径**:Tier-2 记录的 `_meta.cost_baseline` 块固定采集字段(token 分类、usage 来源 reported/estimated、价格版本、延迟)与门禁指向(G4 → step7/step10)。确定性 rubric 运行无模型调用,采集状态为 `not-collected`,是事实登记而非缺陷;真实成本基线在 G4 关闭前不得声称。
+
 ## 10. 旧分支归档
 
 `origin/docs/platform-evolution-plan` 与 `origin/main` 经 `git diff` 核实**无内容差异**(该分支的方案文档已随 #183 squash 合入),无未归档的调查材料。历史失败调查以方案 §二"本轮验证范围"为权威记录(G2 双调用复现、分层测试跳过说明、feature_inventory 校验结果),本文件 §2/§7 已建立对应指针。该远程分支可在合并后删除。
+
+## 11. 已实现能力边界复核(方案 §六对照)
+
+方案 §六"已实现能力的边界复核清单"要求按"已是可选包 / 已拆包但仍为核心依赖 / 完全耦合在主应用"逐能力核对安装依赖、启用状态、调用面与负责人。三个打包分类的判据:`[project].dependencies` 是否包含(pyproject.toml:64—90)、路由是否 lazy 挂载(main.py 条件块)、CI 是否经 `uv sync --package` 显式安装(ci.yml:64)。运行时使用量(生产调用频次、数据量)无部署数据,统一标注【未核验】;owner 指派由用户决定暂缓(2026-09-28),对应能力实施或重构时再指定。
+
+| 能力(方案 §六行) | 打包分类 | 依赖与启用证据 | 调用面证据(代码级) | owner |
+|---|---|---|---|---|
+| Pregel 执行引擎 | 完全耦合在主应用 | `src/hecate/runtime/`,非包;无独立安装路径 | 被 chat/evaluation/scheduling 全部执行链经 `WorkflowExecutionService` 调用(§2);分层测试钉住边界 | 待指定 |
+| 多层 Memory/RAG(hecate-memory) | 已拆包、可选安装 | `packages/hecate-memory`;**不在** `[project].dependencies`;路由 lazy 挂载(main.py:449—456 try-import);CI 经 `uv sync --package hecate-memory` 显式安装(ci.yml:64) | 装载后挂 knowledge/memory 路由;`MemoryProvider` 经 composition 注入;生产是否启用【未核验】 | 待指定 |
+| 内置评估器 | 评估引擎完全耦合在主应用;hecate-ops 包为基础依赖 | 评估路由无条件挂载(main.py:419—426);`hecate-ops` 在 `[project].dependencies`,monitoring 路由 lazy(main.py:461—467) | 评估 engine 被七个 router 与在线任务 worker 调用;运行时评估量【未核验】 | 待指定 |
+| 模型微调/模型 Hub(hecate-llm) | 已拆包但仍为核心依赖 | `hecate-llm` 在 `[project].dependencies`;hub 路由 lazy 挂载(main.py:482—500) | litellm 为主应用基础依赖(dependencies 列表);hub 管理面启用率【未核验】 | 待指定 |
+| Prompt 自优化 / Skill 自演化 | 完全耦合在主应用 | `src/hecate/ops/prompt_optimization/`、`src/hecate/studio/self_evolution/`;路由无条件挂载(main.py:425、440) | 存在跨域写 PromptVersionModel(§6 W3);任务量【未核验】 | 待指定 |
+| 工作流编辑器 / Graph DSL | 完全耦合在主应用 | 后端 `src/hecate/studio/workflows/`(graph_dsl.py);前端 `web/src/components/workflow/`;非包 | workflow CRUD/test-run 路由无条件挂载(main.py:441);编辑器使用率【未核验】 | 待指定 |
+| 内置执行工具(浏览器/搜索/代码) | 框架耦合,执行器可选 | 工具框架在 `src/hecate/tools/`(主应用);浏览器执行在 `hecate-sandbox`(基础依赖);搜索依赖在 `tools` extra(pyproject tools extra:duckduckgo/tavily/playwright) | 工具注册面经 `ToolRegistry`;具体工具启用率【未核验】 | 待指定 |
+| 插件安装器 | 完全耦合在主应用 | `src/hecate/core/plugin/installer.py`;plugins 路由无条件挂载(main.py:564) | 安装/目录 API 存在;实际插件安装量【未核验】 | 待指定 |
+| IM 渠道(Slack/飞书) | 已是可选包 | `packages/channels/*` 独立包,不在 `[project].dependencies`;CI 显式安装;消息总线在主应用(`channel/im/message_bus.py`) | 挂载经渠道注册;渠道消息量【未核验】;消息→平台身份映射未核验(N4) | 待指定 |
+| SIEM 导出器 | 完全耦合在主应用 | `src/hecate/ops/siem/exporter.py`;无独立路由,经后台 wiring 启用 | 导出目标/启用量【未核验】 | 待指定 |
+
+补充登记(方案 §六未单列但影响同判定):`hecate-enterprise` 为 workspace 包,不在 `[project].dependencies`,/auth 依赖它且挂载为条件块(main.py:399—413 注释明示依赖)——**安装可选但身份是核心治理能力**,印证方案"打包状态与能力必要性是两个维度"的判断。
+
+方案 §六优先复核建议(模型微调/Hub、自优化、内置评测)的三项结论:三者均可明确停止"无验收的生产承诺"(对应方案第六节处置列),但代码删除/依赖收敛按 step19 的调用证据执行;本表只登记事实,不改变方案 §六的处置决定。
