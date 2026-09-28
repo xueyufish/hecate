@@ -1,0 +1,180 @@
+# Platform evolution scenario pack — machine-readable manifest.
+#
+# Single source of truth for scenario ↔ P-group ↔ assertion ↔ unsupported
+# capability mapping. `docs/research/platform-evolution-baseline.md` (change
+# `platform-evolution-baseline`) must REFERENCE this file, never copy it.
+# A consistency test (test_manifest_consistency.py) enforces bidirectional
+# binding between entries here and test functions in this directory.
+#
+# Scenario status semantics:
+#   implemented — a test function with the `test_s<nn>_` prefix exists here
+#   planned     — defined but gated on a named change; no test may exist yet
+#
+# P-group coverage status semantics:
+#   covered   — scenarios in this pack fully verify the group's step1 slice
+#   partial   — some aspects verified here, rest belongs to later steps
+#   planned   — gated scenario(ies) exist but not yet implemented
+#   deferred  — intentionally out of scope for step1; reason required
+schema_version: 1
+_meta:
+  purpose: >-
+    Architecture evaluation pack for the platform evolution plan
+    (docs/research/enterprise-agent-platform-evolution-plan.md, step1).
+  baseline_doc: docs/research/platform-evolution-baseline.md
+  baseline_doc_sync: pending # flip to synced when that change lands and references this manifest
+tiers:
+  tier1: >-
+    CI-deterministic: stub model, in-memory SQLite, stub enterprise tools;
+    runs with pytest, no network, no real model, no external systems.
+  tier2: >-
+    Recorded baselines: real-model or rubric-scored runs recorded as JSON;
+    never collected or executed by CI; business value marked unverified.
+p_groups:
+  P01:
+    title: 检索失败诊断
+    status: partial
+    reason: >-
+      Synthetic corpus carries versions, ACLs, and canonical citation anchors
+      (S09); retrieval-strategy comparison and stage diagnostics belong to
+      step9d/step10.
+  P02:
+    title: 企业知识接入
+    status: deferred
+    reason: Knowledge ingestion lifecycle (sources, sync watermarks, delete propagation) is step9c/step16 scope; only corpus version fixtures exist here.
+  P03:
+    title: RAG 评测
+    status: partial
+    reason: Tier-2 baseline dataset reuses the evaluation module's EvalInput/Score format (baselines/); publish-gate integration is step10/step11.
+  P04:
+    title: GraphRAG/KG
+    status: deferred
+    reason: No business scenario requires graph retrieval yet; stays optional/research per plan.
+  P05:
+    title: 工具调用可靠性
+    status: partial
+    reason: >-
+      S01/S02/S05/S07/S08 verify the allow/deny loop, duplicate-submit
+      idempotency, and four-state recovery at the ToolWorker boundary;
+      parameter-schema validation negative cases are not asserted yet.
+  P06:
+    title: 身份/权限/安全
+    status: partial
+    reason: >-
+      S02/S03/S09 verify REST-path authorization, approval fail-close, and
+      corpus ACL; S06 adds MCP/REST parity, cross-tenant, and unapproved-write
+      negatives. Delegation chains belong to step7/step13.
+  P07:
+    title: 流程与人工介入
+    status: partial
+    reason: S03 verifies approval gating on the direct loop; durable cross-backend coordination belongs to step6/step13.
+  P08:
+    title: 评测、观测与生产定位
+    status: partial
+    reason: S04 verifies explicit failure on backend loss and S10 pins old-path protocol structure as migration baseline; event pipeline comparison is step10.
+scenarios:
+  - id: S01
+    title: 正常执行
+    status: implemented
+    tier: 1
+    entries: [rest_chat_agent]
+    p_groups: [P05]
+    assertions: >-
+      Agent tool loop over POST /v1/agents/{id}/chat/completions: stub model
+      proposes a ticket write, stub ticket service executes exactly once, final
+      answer references the business result (ticket id), no verbatim text match.
+  - id: S02
+    title: 拒绝动作
+    status: implemented
+    tier: 1
+    entries: [rest_chat_agent]
+    p_groups: [P06]
+    assertions: >-
+      A deny rule on the ticket tool rejects the call before execution; the
+      tool result reports the denial, the stub records zero invocations, and
+      the conversation completes without the protected write.
+  - id: S03
+    title: 等待审批
+    status: implemented
+    tier: 1
+    entries: [rest_chat_agent]
+    p_groups: [P06, P07]
+    assertions: >-
+      An ask rule routes the call to the approval callback. Fail-closed path
+      (no answerer): APPROVAL_ASKED/APPROVAL_DECIDED pair persisted, action
+      not executed. Approved path (scripted answerer on the documented
+      _inner_backend plug point): action executes exactly once, approved
+      decision event persisted.
+  - id: S04
+    title: 后端失联
+    status: implemented
+    tier: 1
+    entries: [rest_chat]
+    p_groups: [P08]
+    assertions: >-
+      Model backend unreachable (scripted connection failure) surfaces as an
+      explicit 500 INTERNAL_ERROR envelope; no fabricated success, no partial
+      result presented as complete.
+  - id: S05
+    title: 重复提交
+    status: implemented
+    tier: 1
+    entries: [tool_worker]
+    p_groups: [P05]
+    assertions: >-
+      Re-dispatching the identical (session, tool_call_id) action at the engine
+      ToolWorker boundary produces the protected side effect exactly once; the
+      duplicate gets the original business result back, not a new ticket.
+  - id: S06
+    title: MCP 权限负例
+    status: implemented
+    tier: 1
+    entries: [mcp, rest_agents]
+    p_groups: [P06]
+    assertions: >-
+      Viewer agent creation is rejected at the MCP entry and at the REST entry
+      with no DB row leaked (entry-independent role enforcement from
+      server-side trusted context); a workspace token cannot execute another
+      workspace's tool; an approval_required tool is rejected before execution.
+  - id: S07
+    title: 结果缺失恢复
+    status: implemented
+    tier: 1
+    entries: [tool_worker]
+    p_groups: [P05]
+    assertions: >-
+      After a claimed dispatch (crash after TOOL_CALL, receipt missing) and
+      after an indeterminate backend failure (outcome_unknown), recovery at
+      the ToolWorker boundary withholds the protected write for review — the
+      side effect happened exactly once and is never blind-retried.
+  - id: S08
+    title: 恢复真实结果与参数冲突
+    status: implemented
+    tier: 1
+    entries: [tool_worker]
+    p_groups: [P05]
+    assertions: >-
+      Recovery of a succeeded call restores the real recorded business result
+      (ticket id) from the channel history, never a placeholder; the same
+      action key replayed with changed arguments is rejected as a conflict and
+      not executed.
+  - id: S09
+    title: 语料 ACL 与引用定位
+    status: implemented
+    tier: 1
+    entries: [corpus_index]
+    p_groups: [P06, P01]
+    assertions: >-
+      Corpus documents carry version/ACL/citation anchors; unauthorized
+      principals cannot retrieve protected documents; authorized retrieval
+      resolves citations to declared anchors.
+  - id: S10
+    title: 旧路径协议黄金样本
+    status: implemented
+    tier: 1
+    entries: [rest_chat]
+    p_groups: [P08]
+    assertions: >-
+      Golden files pin the old chat path's response protocol structure and
+      stream chunk sequence (recorded with a stub model). Assertions compare
+      structure only — model text never compared verbatim. Migration baseline
+      for step5 entry convergence.

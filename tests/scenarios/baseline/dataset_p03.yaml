@@ -1,0 +1,29 @@
+# Minimal Tier-2 baseline dataset (P03 slice) — retrieval correctness over the
+# synthetic corpus with a deterministic rubric. Reuses the evaluation module's
+# EvalInput/Score format via tests/scenarios/baseline/run_baseline.py; real
+# graders and publish-gate integration belong to step10/step11.
+schema_version: 1
+rubric_version: "p03-retrieval-rubric-1"
+items:
+  - id: item-01
+    query: standard per-claim reimbursement limit
+    principal: employee
+    expected_citations:
+      - doc_id: proc-reimburse
+        anchor: sec-limit-standard
+  - id: item-02
+    query: claim approved finding AF-11
+    principal: auditor
+    expected_citations:
+      - doc_id: audit-notes-2026h1
+        anchor: sec-findings
+  - id: item-03
+    query: legacy limit 500
+    principal: finance_agent
+    expected_citations:
+      - doc_id: proc-reimburse-v1
+        anchor: sec-limit-legacy
+  - id: item-04
+    query: claim approved finding AF-11
+    principal: employee
+    expected_citations: []  # restricted notes must stay invisible to non-auditors

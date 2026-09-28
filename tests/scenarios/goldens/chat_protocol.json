@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "purpose": "Old chat-path response protocol structure (step5 migration baseline).",
+    "recorded_with": "scripted stub LLM, in-process ASGI transport",
+    "code_paths": [
+      "src/hecate/channel/api/v1/chat.py"
+    ],
+    "text_policy": "Skeletons carry key sets and value types only; text-bearing values are deliberately absent. Assertions compare structure, never model text."
+  },
+  "non_stream_response": {
+    "choices": {
+      "list_of": {
+        "finish_reason": "str",
+        "index": "int",
+        "message": {
+          "annotations": "null",
+          "content": "str",
+          "name": "null",
+          "role": "str",
+          "suggested_questions": "null",
+          "tool_call_id": "null",
+          "tool_calls": "null"
+        }
+      }
+    },
+    "created": "int",
+    "id": "str",
+    "model": "str",
+    "object": "str",
+    "usage": {
+      "completion_tokens": "int",
+      "prompt_tokens": "int",
+      "total_tokens": "int"
+    }
+  },
+  "stream_first_chunk": {
+    "choices": {
+      "list_of": {
+        "delta": {
+          "content": "str",
+          "role": "null"
+        },
+        "finish_reason": "null",
+        "index": "int"
+      }
+    },
+    "created": "int",
+    "id": "str",
+    "model": "str",
+    "object": "str"
+  },
+  "stream_last_chunk_finish_reason": "stop",
+  "stream_terminated_by_done": true
+}

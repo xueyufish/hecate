@@ -1,0 +1,87 @@
+{
+  "_meta": {
+    "kind": "record",
+    "gate": false,
+    "business_value": "unverified",
+    "note": "Tier-2 recorded baseline; never executed by CI; not a pass/fail authority.",
+    "rubric_version": "p03-retrieval-rubric-1",
+    "evaluator_format": "hecate.ops.evaluation.types (EvalInput/Score, source=deterministic)",
+    "dataset": "tests/scenarios/baseline/dataset_p03.yaml"
+  },
+  "summary": {
+    "citation_correctness": {
+      "mean": 1.0,
+      "n": 4
+    },
+    "acl_compliance": {
+      "mean": 1.0,
+      "n": 4
+    }
+  },
+  "items": {
+    "item-01": {
+      "query": "standard per-claim reimbursement limit",
+      "principal": "employee",
+      "scores": [
+        {
+          "metric": "citation_correctness",
+          "value": 1.0,
+          "source": "deterministic"
+        },
+        {
+          "metric": "acl_compliance",
+          "value": 1.0,
+          "source": "deterministic"
+        }
+      ]
+    },
+    "item-02": {
+      "query": "claim approved finding AF-11",
+      "principal": "auditor",
+      "scores": [
+        {
+          "metric": "citation_correctness",
+          "value": 1.0,
+          "source": "deterministic"
+        },
+        {
+          "metric": "acl_compliance",
+          "value": 1.0,
+          "source": "deterministic"
+        }
+      ]
+    },
+    "item-03": {
+      "query": "legacy limit 500",
+      "principal": "finance_agent",
+      "scores": [
+        {
+          "metric": "citation_correctness",
+          "value": 1.0,
+          "source": "deterministic"
+        },
+        {
+          "metric": "acl_compliance",
+          "value": 1.0,
+          "source": "deterministic"
+        }
+      ]
+    },
+    "item-04": {
+      "query": "claim approved finding AF-11",
+      "principal": "employee",
+      "scores": [
+        {
+          "metric": "citation_correctness",
+          "value": 1.0,
+          "source": "deterministic"
+        },
+        {
+          "metric": "acl_compliance",
+          "value": 1.0,
+          "source": "deterministic"
+        }
+      ]
+    }
+  }
+}
