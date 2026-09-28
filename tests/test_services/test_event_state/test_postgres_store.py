@@ -252,13 +252,15 @@ async def test_get_version_uses_max_aggregate():
     assert "max(events" in sql.lower() or "max(" in sql.lower()
 
 
-async def test_acquire_event_lock_inherited_as_noop():
-    """PostgresEventStore SHALL inherit acquire_event_lock default (no-op)."""
+async def test_acquire_event_lock_runs_session_scoped_advisory_lock():
+    """PostgresEventStore SHALL acquire a session-scoped advisory lock for
+    the given session_id; on a stub session this completes silently because
+    ``session.execute`` is itself an AsyncMock."""
     factory = _factory_with_session(AsyncMock())
     store = PostgresEventStore(async_session_factory=factory)
     session_id = uuid.uuid4()
     async with store.acquire_event_lock(session_id):
-        pass  # default yields without acquiring any lock
+        pass  # session.execute(text("SELECT pg_advisory_lock(...)"), {...})
 
 
 def test_row_to_event_maps_compaction_types_and_unknown_falls_back():

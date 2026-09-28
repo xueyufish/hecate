@@ -261,6 +261,9 @@ async def test_check_access_threads_tenant_attribution_to_policy():
     port = _AllowPort()
     fake_store = MagicMock()
     fake_store.append = AsyncMock()
+    # Recovery resolution must see a readable store, or the dispatch is
+    # (correctly) withheld as store_unavailable before the policy runs.
+    fake_store.get_events = AsyncMock(return_value=[])
     worker = ToolWorker(
         port=port,
         access_policy=ToolAccessPolicy(),

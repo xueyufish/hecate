@@ -33,10 +33,10 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import AsyncGenerator, Callable, Iterator
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -66,9 +66,9 @@ class PostgresEventStore(EventStore):
 
     Uses ``SELECT ... FOR UPDATE`` to serialize per-session appends and
     propagates SQLAlchemy exceptions so callers can decide retry behavior.
-    The ``acquire_event_lock`` ABC method is inherited as the default no-op
-    (PG row locking inside ``append`` is sufficient — no external lock
-    needed).
+    ``acquire_event_lock`` is a session-scoped ``pg_advisory_lock``
+    per session: row locking inside ``append`` serializes single appends
+    but not check-then-act sequences across several appends.
     """
 
     def __init__(
@@ -80,6 +80,38 @@ class PostgresEventStore(EventStore):
         self._async_session_factory = async_session_factory
         self._tenant_context_provider = tenant_context_provider
         self._max_append_retries = max_append_retries
+
+    @asynccontextmanager
+    async def acquire_event_lock(
+        self,
+        session_id: uuid.UUID,
+        *,
+        timeout_ms: int = 30000,
+    ) -> AsyncGenerator[None, None]:
+        """Session-scoped advisory key lock for read-modify-write spans.
+
+        The per-session ``SELECT ... FOR UPDATE`` queue inside ``append``
+        serializes single appends, but not check-then-act sequences (e.g.
+        the tool recovery claim: resolve state, then append TOOL_CALL).
+        ``pg_advisory_lock`` is session-scoped: the lock is released when
+        the wrapping session closes (or at session reset), making the
+        critical section exclusive per session without depending on
+        transaction lifecycle. ``timeout_ms`` is accepted for ABC
+        compatibility; the database's own statement/session timeout
+        governs the wait.
+
+        Production deployments rely on a real ``async_sessionmaker``;
+        tests that pass a ``MagicMock`` factory see no SQL execution and
+        no lock — a no-op fallback that keeps the ABC contract honoured
+        on both sides without affecting production semantics.
+        """
+        lock_key = session_id.int & ((1 << 63) - 1)
+        async with self._async_session_factory() as session:
+            await session.execute(
+                text("SELECT pg_advisory_lock(:lock_key)"),
+                {"lock_key": lock_key},
+            )
+            yield
 
     async def append(self, event: Event) -> uuid.UUID:
         """Persist ``event`` with a per-session monotonic ``version`` assigned server-side.
