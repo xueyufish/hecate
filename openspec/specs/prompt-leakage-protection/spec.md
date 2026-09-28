@@ -116,6 +116,15 @@ The system SHALL expose `guardrail_config["prompt_leakage"]["enabled"]` (default
 
 This is independent of `output_security["enabled"]` — disabling output security collapses the entire post-LLM pipeline, while disabling only `prompt_leakage` preserves toxicity / PII deanonymization / DLP scan / injection detection.
 
+#### Scenario: Disabling prompt leakage preserves the rest of the pipeline
+
+- **WHEN** `guardrail_config["prompt_leakage"]["enabled"]` is set to `False` while `output_security` remains enabled
+- **THEN** the fingerprint detector is skipped entirely (no fingerprint build, no overhead) while toxicity, PII deanonymization, DLP scanning, and injection detection continue to run
+
+#### Scenario: Disabling prompt leakage preserves the rest of the pipeline
+
+- **WHEN** `guardrail_config["prompt_leakage"]["enabled"]` is set to `False` while `output_security` remains enabled
+- **THEN** the fingerprint detector is skipped entirely (no fingerprint build, no overhead) while toxicity, PII deanonymization, DLP scanning, and injection detection continue to run
 ### Requirement: Detector emits EventStore event for observability
 
 When the detector emits a finding, it SHALL also append an `EventType.PROMPT_LEAKAGE_DETECTED` event to the EventStore (when one is configured for the session). The event payload SHALL include:
@@ -140,18 +149,45 @@ When the detector emits a finding, it SHALL also append an `EventType.PROMPT_LEA
 
 ### Requirement: Detector integrates into both execution paths
 
-Identical to injection-detection: runs inside `OutputSecurityHook.on_post_llm_call`, invoked identically from Pregel `LLMWorker` (non-streaming + streaming) and Path A `AgentExecutionPort`. No new wiring at call sites.
+The detector SHALL run inside `OutputSecurityHook.on_post_llm_call`, identically to injection-detection, invoked from both the Pregel `LLMWorker` path (non-streaming + streaming) and the Path A `AgentExecutionPort`. No new wiring SHALL be added at call sites.
 
+#### Scenario: Same hook pipeline serves both execution paths
+
+- **WHEN** a response flows through either the Pregel LLMWorker path (non-streaming or streaming) or the Path A direct chat loop
+- **THEN** prompt-leakage detection runs identically inside `OutputSecurityHook.on_post_llm_call` with no call-site-specific wiring
+
+#### Scenario: Same hook pipeline serves both execution paths
+
+- **WHEN** a response flows through either the Pregel LLMWorker path (non-streaming or streaming) or the Path A direct chat loop
+- **THEN** prompt-leakage detection runs identically inside `OutputSecurityHook.on_post_llm_call` with no call-site-specific wiring
 ### Requirement: Semantic similarity extension is reserved (Deferred)
 
 This capability SHALL reserve a configuration field `guardrail_config["prompt_leakage"]["embedding_similarity_enabled"]` (default False) for future v2 work that adds embedding-based detection of paraphrased system prompt leaks. The current implementation SHALL ignore this field if present (no behavior change).
 
 This is the explicit seam for `prompt-leakage-protection-spec-semantic-v2` (Deferred change, see proposal.md).
 
+#### Scenario: Reserved embedding field is inert today
+
+- **WHEN** `guardrail_config["prompt_leakage"]["embedding_similarity_enabled"]` is present and set to `True` in the current implementation
+- **THEN** the field is ignored with no behavior change, preserving the explicit seam for the deferred semantic-similarity v2 work
+
+#### Scenario: Reserved embedding field is inert today
+
+- **WHEN** `guardrail_config["prompt_leakage"]["embedding_similarity_enabled"]` is present and set to `True` in the current implementation
+- **THEN** the field is ignored with no behavior change, preserving the explicit seam for the deferred semantic-similarity v2 work
 ### Requirement: Detector produces no findings on benign responses
 
 The detector SHALL emit zero findings when the LLM response contains none of the fingerprint substrings. False-positive rate target on the test corpus SHALL be ≤ 2% (lower bar than injection detection because n-gram matching is more aggressive — short common phrasings like "you are" can trigger trivial overlaps; threshold calibration handles this).
 
+#### Scenario: Benign response yields no leakage findings
+
+- **WHEN** the detector runs over an LLM response containing none of the system-prompt fingerprint substrings
+- **THEN** zero findings are emitted and the false-positive rate stays within the 2% target on the test corpus
+
+#### Scenario: Benign response yields no leakage findings
+
+- **WHEN** the detector runs over an LLM response containing none of the system-prompt fingerprint substrings
+- **THEN** zero findings are emitted and the false-positive rate stays within the 2% target on the test corpus
 ### Requirement: Detector fingerprint is built once per turn, not per token
 
 In streaming mode, the fingerprint SHALL be built once at the first invocation of `on_post_llm_call` for the turn and cached on the hook instance. Subsequent streaming chunks SHALL reuse the cached fingerprint. This avoids recomputing the fingerprint on every accumulated chunk.
@@ -171,6 +207,15 @@ Per ADR-030 §1, the PROMPT_LEAKAGE_DETECTED event MUST be paired within the exi
 
 If turn boundaries are not emitted for the session (legacy path A without 1.3.19 wiring), the detector SHALL still emit the event but the invariant verification SHALL be a no-op (backward compat — see `loginvariants.py:STEP.BOUNDARY` for the same pattern).
 
+#### Scenario: Detection event stays inside the turn window
+
+- **WHEN** a session emits TURN_START/TURN_END boundaries and the detector fires PROMPT_LEAKAGE_DETECTED
+- **THEN** the event is emitted within the turn window satisfying the TURN_ENCLOSED invariant, while on legacy sessions without turn boundaries the event is still emitted and the invariant check degrades to a no-op
+
+#### Scenario: Detection event stays inside the turn window
+
+- **WHEN** a session emits TURN_START/TURN_END boundaries and the detector fires PROMPT_LEAKAGE_DETECTED
+- **THEN** the event is emitted within the turn window satisfying the TURN_ENCLOSED invariant, while on legacy sessions without turn boundaries the event is still emitted and the invariant check degrades to a no-op
 ### Requirement: Detector failure modes are fail-safe
 
 If fingerprint computation fails (e.g., extreme system prompt length > 100KB causing memory pressure), the detector SHALL:
@@ -180,3 +225,13 @@ If fingerprint computation fails (e.g., extreme system prompt length > 100KB cau
 3. Return `GuardrailResult(action=GuardrailAction.ALLOW)` (fail-open, with audit trail).
 
 Fail-open is the explicit choice for this capability: fingerprint failure should NOT silently block all agent responses. The audit trail makes the failure recoverable post-hoc via run replay (8.20). This mirrors the same fail-open behavior as `DLPScanner.scan()` when no recognizers match.
+
+#### Scenario: Fingerprint computation failure fails open with an audit trail
+
+- **WHEN** fingerprint computation raises (for example on an oversized system prompt) during the post-LLM hook
+- **THEN** the detector logs a warning with `agent_id`, `session_id`, and prompt length, emits an `EventType.ERROR` event with `reason: fingerprint_compute_failed`, and returns `ALLOW` so the response is not blocked
+
+#### Scenario: Fingerprint computation failure fails open with an audit trail
+
+- **WHEN** fingerprint computation raises (for example on an oversized system prompt) during the post-LLM hook
+- **THEN** the detector logs a warning with `agent_id`, `session_id`, and prompt length, emits an `EventType.ERROR` event with `reason: fingerprint_compute_failed`, and returns `ALLOW` so the response is not blocked

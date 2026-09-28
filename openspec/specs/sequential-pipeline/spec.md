@@ -1,3 +1,9 @@
+# sequential-pipeline Specification
+
+## Purpose
+
+Defines the sequential pipeline: the sequential graph factory, the optional revision loop, stage validation, and the JSON template form.
+
 ## Requirements
 
 ### Requirement: Sequential pipeline factory function

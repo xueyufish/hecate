@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines typed edge visualization: per-type renderings for default, handoff, conditional, and fan-out edges, edge-type selection on connect, and changing the type after creation.
+
+## Requirements
 
 ### Requirement: Default edge type rendered as solid gray Bezier
 Default edges (no type or `type: "default"`) SHALL render as solid gray Bezier curves, matching React Flow's default rendering.

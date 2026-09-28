@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines pluggable node scheduling: the SchedulerStrategy ABC, the FIFO default that preserves sequential behavior, PregelRuntime integration with pre-dispatch calls, and transparent handling of FAN_OUT/MERGE nodes.
+
+## Requirements
 
 ### Requirement: SchedulerStrategy ABC defines pluggable node scheduling
 The engine SHALL define a `SchedulerStrategy` ABC in `runtime/scheduler.py` with abstract methods: `select_next` and `set_weights`.

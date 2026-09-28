@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines canvas support for multi-agent patterns: channel access summary in the config panel, routing-mode configuration for condition nodes, the dynamic handoff edge type, and the controller node.
+
+## Requirements
 
 ### Requirement: Channel access summary in config panel
 The agent node config panel SHALL display a channel access summary section showing which channels the selected agent can read from and write to. The summary SHALL group channels by type (LAST_VALUE, TOPIC, ACCUMULATOR) and highlight broadcast participation (TOPIC channels shared with other agents).

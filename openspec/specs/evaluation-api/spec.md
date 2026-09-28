@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the evaluation APIs: evaluator listing, run execution, run comparison, and regression triggering.
+
+## Requirements
 
 ### Requirement: Evaluator listing API
 The system SHALL expose `GET /api/evaluation/evaluators` that returns all registered evaluators with their name, description, category, source type (deterministic/llm_judge), and required input fields. Supports optional `category` query parameter for filtering.
@@ -25,7 +29,6 @@ The system SHALL expose `POST /api/evaluation/regression/run` that accepts `data
 - **WHEN** `POST /api/evaluation/regression/run` is called with a dataset ID and evaluator list
 - **THEN** the response SHALL include `run_id`, `passed`, `total_items`, `passed_items`, `failed_items`, `regressions`, and `metric_averages`
 
-## MODIFIED Requirements
 
 ### Requirement: Evaluation run API
 The system SHALL expose REST endpoints at `/api/evaluation/runs` for creating and retrieving evaluation runs. Runs SHALL support optional `tags` parameter for tag-filtered evaluation. Runs MAY be linked to an evaluation task via a nullable `task_id`; the run response SHALL include `task_id` (null for request-triggered runs) and a `summary` object (`total_items`, `passed_items`, `failed_items`, `pass_rate`, `metric_averages`, `regressions`) when pass/fail statistics have been computed. The run listing endpoint SHALL support an optional `task_id` query filter.

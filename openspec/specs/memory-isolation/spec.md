@@ -1,6 +1,6 @@
 # Memory Isolation — Multi-Tenant Memory Isolation
 
-## Overview
+## Purpose
 
 Enforces tenant-level workspace isolation across all memory layers (L1 working memory, L3 user memory, L4 knowledge memory). Every memory model has a `workspace_id` as a first-class column, and all service-layer queries filter by `workspace_id`.
 

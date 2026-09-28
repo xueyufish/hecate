@@ -1,7 +1,9 @@
 # dlp-streaming Specification
 
 ## Purpose
-TBD - created by archiving change outbound-dlp-engine. Update Purpose after archive.
+
+Defines streaming DLP scanning: the StreamingDLPWrapper and its configuration for scanning streamed LLM output.
+
 ## Requirements
 ### Requirement: StreamingDLPWrapper
 The system SHALL define `StreamingDLPWrapper` that buffers streaming output chunks, applies DLPScanner.scan() at configurable buffer threshold, and handles BLOCK/MASK/AUDIT actions during streaming.

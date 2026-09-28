@@ -1,7 +1,9 @@
 # event-retention Specification
 
 ## Purpose
-TBD - created by archiving change event-sourced-state. Update Purpose after archive.
+
+定义事件保留与删除:会话级 TTL 从终态起算、会话树与 conversation 关联对象级联删除、GDPR 级联与 PIIMapping 同步、有界载荷保留、warn-only 阈值、安全删除机制及 delete|archive 策略。
+
 ## Requirements
 ### Requirement: 会话级 TTL 从终态起算
 

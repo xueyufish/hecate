@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the conversation analytics dashboard: the overview page, quality and topic distributions, the low-quality conversation list, turn-level detail, feedback metrics, navigation entry, and empty states.
+
+## Requirements
 
 ### Requirement: Conversation analytics overview page
 The system SHALL provide a React dashboard page at `/ops-center/conversations` displaying conversation analytics: total conversations, scored conversations, average quality score, quality distribution (high/medium/low), and feedback summary.

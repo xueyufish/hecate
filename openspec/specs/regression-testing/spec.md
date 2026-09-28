@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines evaluation regression testing: dataset versioning, per-item assertions, dataset default thresholds, tag grouping, run comparison, per-item pass/fail computation, and CI/CD regression triggers with run summaries.
+
+## Requirements
 
 ### Requirement: Dataset versioning
 The system SHALL support dataset versioning via three new fields on `EvaluationDatasetModel`: `version` (String, default "v1.0"), `baseline_run_id` (UUID FK to EvaluationRunModel, nullable), and `is_locked` (Boolean, default False). When a dataset is locked, item additions, modifications, and deletions SHALL be rejected.

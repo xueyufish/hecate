@@ -1,7 +1,9 @@
 # fine-tuning-pipeline Specification
 
 ## Purpose
-TBD - created by archiving change model-hub-completion. Update Purpose after archive.
+
+Defines the fine-tuning pipeline: dataset management, the provider-agnostic FineTuningBackendABC with an OpenAI adapter, job lifecycle tracking, and one-click deployment of fine-tuned models.
+
 ## Requirements
 ### Requirement: System manages fine-tuning datasets
 The system SHALL provide `DatasetModel` with fields: name, description, format (jsonl/csv/json), version, row_count, schema_preview (JSON), file_storage_url (MinIO path), and workspace_id. Supports CRUD with versioning.

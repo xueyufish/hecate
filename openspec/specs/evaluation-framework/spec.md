@@ -1,4 +1,8 @@
-## MODIFIED Requirements
+## Purpose
+
+Defines the evaluation framework core: the shared evaluation input/output types and the evaluation execution engine.
+
+## Requirements
 
 ### Requirement: Evaluation input/output types
 The system SHALL define typed dataclasses for evaluation I/O: `EvalInput` (query, retrieved_contexts, generated_answer, expected_answer, tool_calls, conversation_history, system_prompt, agent_id, session_id, metadata), `EvalOutput` (scores list, metadata, duration_ms). The new fields `conversation_history`, `system_prompt`, `agent_id`, and `session_id` SHALL be optional with default values for backward compatibility.

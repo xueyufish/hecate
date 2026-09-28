@@ -1,7 +1,9 @@
 # dlp-egress-filter Specification
 
 ## Purpose
-TBD - created by archiving change outbound-dlp-engine. Update Purpose after archive.
+
+Defines MCP egress filtering: the EgressFilter ABC, EgressAction and EgressResult contracts, the DLP egress filter implementation, and response-direction scanning wired into HecateMCPClient.
+
 ## Requirements
 ### Requirement: EgressFilter abstract base class
 The system SHALL define `EgressFilter` ABC in `services/security/egress.py` with class attribute `name` (str) and abstract async method `filter(content: Any, direction: str, context: dict) -> EgressResult`.

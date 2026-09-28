@@ -1,7 +1,9 @@
 # backup-scheduling Specification
 
 ## Purpose
-TBD - created by archiving change data-backup-recovery. Update Purpose after archive.
+
+定义备份调度能力:定时全量备份的调度触发、备份记录与备份元数据的登记管理,以及备份状态的查询接口,使备份可被追踪与审计。
+
 ## Requirements
 ### Requirement: 定时全量备份调度
 系统 SHALL 支持通过 APScheduler 驱动的定时全量备份，默认每日凌晨 2:00 执行。

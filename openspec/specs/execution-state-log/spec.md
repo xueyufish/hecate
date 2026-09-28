@@ -1,7 +1,9 @@
 # execution-state-log Specification
 
 ## Purpose
-TBD - created by archiving change event-sourced-state. Update Purpose after archive.
+
+定义执行状态日志(事件溯源)的写入与投影语义:计划/裁决/通道写入的 WAL 顺序、提交点与撕裂尾部检测、扇出折叠不变式、fold 机器与投影等价断言、子图与 FORK 快照语义,以及以日志推导 Session 状态与恢复依据。
+
 ## Requirements
 ### Requirement: `_dispatch` 计划通道入日志
 

@@ -1,7 +1,9 @@
 # collaboration-pattern-engine Specification
 
 ## Purpose
-TBD - created by archiving change p2-collaboration-pattern-selection. Update Purpose after archive.
+
+Defines the collaboration pattern engine: the CollaborationPattern enum, pattern inference from graph structure, pattern-to-graph builders, metadata and graph-generation endpoints, and negotiation/debate JSON templates.
+
 ## Requirements
 ### Requirement: CollaborationPattern enum
 The engine SHALL define a `CollaborationPattern` StrEnum in `studio/workflows/patterns.py` with 7 values: `SEQUENTIAL`, `PARALLEL`, `HANDOFF`, `BROADCAST`, `NEGOTIATION`, `DEBATE`, `DYNAMIC`. Each value maps to a canonical collaboration topology; `DYNAMIC` denotes a runtime-emitted sub-graph produced by a COORDINATOR node.

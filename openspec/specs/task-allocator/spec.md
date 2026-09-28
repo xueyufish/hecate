@@ -1,7 +1,9 @@
 # task-allocator Specification
 
 ## Purpose
-TBD - created by archiving change multi-agent-advanced-collaboration. Update Purpose after archive.
+
+Defines pluggable task allocation: the TaskAllocator ABC for agent selection, the LLM-based semantic allocator, and the round-robin allocator for simple cases.
+
 ## Requirements
 ### Requirement: TaskAllocator ABC defines agent selection interface
 The engine SHALL define a `TaskAllocator` ABC in `runtime/task_allocator.py` with abstract method `allocate` that accepts a task description, a list of candidate agents, and optional configuration, returning the best-fit agent or None.

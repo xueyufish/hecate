@@ -1,7 +1,9 @@
 # agent-tool Specification
 
 ## Purpose
-TBD - created by archiving change multi-agent-advanced-collaboration. Update Purpose after archive.
+
+Defines the AgentTool wrapper that turns an agent into a callable tool: per-invocation AgentDefinition configuration, whitelist/blacklist resolution, timeout and max-turns enforcement, and remote A2A or workflow targets.
+
 ## Requirements
 ### Requirement: AgentDefinition dataclass for per-invocation configuration
 The engine SHALL define an `AgentDefinition` dataclass in `runtime/agent_tool.py` with fields: `agent_id` (UUID), `description` (str, visible to LLM), `prompt_override` (str | None, default None), `tools` (list[str] | None, default None), `disallowed_tools` (list[str], default `["agent_execute"]`), `skills` (list[str] | None, default None), `model_override` (str | None, default None), `context_mode` (Literal["inherited", "isolated"], default "inherited"), `max_turns` (int | None, default None), `timeout_seconds` (float | None, default None).

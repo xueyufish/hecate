@@ -1,7 +1,9 @@
 # model-monitoring-console Specification
 
 ## Purpose
-TBD - created by archiving change model-hub-completion. Update Purpose after archive.
+
+Defines the model monitoring console: performance aggregation API, drift detection, and frontend views for trends, side-by-side model comparison, and per-model cost analysis.
+
 ## Requirements
 ### Requirement: System provides model performance aggregation API
 The system SHALL aggregate TraceModel data into per-model performance metrics: average latency, TTFT (time-to-first-token), error rate, token throughput, and request count — grouped by time range and model.

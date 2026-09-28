@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the model debug playground: streaming response display, system prompt support, response-time measurement, token usage visualization, test history, and error display.
+
+## Requirements
 
 ### Requirement: Streaming Response Display
 The model debug page SHALL support streaming responses via `/v1/chat/completions` with `stream: true`. The response content SHALL appear progressively as chunks arrive, with a typing indicator while streaming is active.

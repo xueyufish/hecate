@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines granular tool security: dangerous-pattern dataclasses and evaluation, argument-conditional tool rules, workspace boundary policy, the extended evaluation order, and persistence of arg conditions.
+
+## Requirements
 
 ### Requirement: DangerousPattern dataclass
 The system SHALL define `DangerousPattern` as a dataclass in `runtime/tool_access.py` with four fields: `tool_pattern` (str, tool-name glob), `arg_key` (str, argument key to inspect), `arg_pattern` (str, glob pattern for argument value), and `description` (str, human-readable reason).

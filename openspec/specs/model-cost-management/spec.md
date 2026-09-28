@@ -1,7 +1,9 @@
 # model-cost-management Specification
 
 ## Purpose
-TBD - created by archiving change model-hub-completion. Update Purpose after archive.
+
+Defines model cost management: hierarchical cost budgets, z-score anomaly detection, configurable budget policy enforcement, monthly spend forecasting, chargeback reports, and LLM call-parameter passthrough with usage accounting.
+
 ## Requirements
 ### Requirement: System supports hierarchical cost budgets
 The system SHALL support cost budgets at three levels: workspace (global cap), agent (per-agent cap), and user (per-user cap). Each budget specifies a limit amount, period (daily/weekly/monthly), and currency.

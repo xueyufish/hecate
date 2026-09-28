@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the Agent Configurator experience: the form layout across basic, knowledge, tools, and advanced tabs, form submission, and selector data loading.
+
+## Requirements
 
 ### Requirement: Agent Configurator form layout
 The system SHALL provide an `AgentConfigurator` component that displays a tabbed form for configuring an Agent. The form SHALL have 5 tabs: Basic, Knowledge, Tools, Memory, and Advanced. The component SHALL support both create mode (empty form) and edit mode (pre-populated form).

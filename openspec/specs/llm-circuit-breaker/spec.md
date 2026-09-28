@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines LLM circuit breaking: per-prefix breaker management, the state machine with single-probe HALF_OPEN under a lock, fallback-chain filtering, LLMService integration, state-change callbacks, and thread safety.
+
+## Requirements
 
 ### Requirement: Per-prefix circuit breaker management
 The system SHALL maintain a separate `CircuitBreaker` instance per routing prefix extracted from LiteLLM model names. The prefix is the first segment before `"/"` (e.g., `"openai"` from `"openai/gpt-4o"`). For model names without a slash, the system SHALL resolve the prefix via a static mapping table (`gpt→openai`, `claude→anthropic`, `gemini→gemini`, `deepseek→deepseek`). Unmapped names SHALL default to `"unknown"`.

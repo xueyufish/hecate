@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines canvas editing for fan-out/merge: palette entries, branch configuration on fan-out nodes, source configuration on merge nodes, validation warnings, and visual badges.
+
+## Requirements
 
 ### Requirement: Fan-out and merge nodes in node palette
 The NodePalette component SHALL include fan-out and merge as draggable items, allowing users to create these nodes interactively.

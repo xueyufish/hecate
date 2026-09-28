@@ -1,6 +1,6 @@
 # Session Memory — In-Session Memory Integration
 
-## Overview
+## Purpose
 
 Wire the existing three-layer memory services (L1 working memory, L2 conversation compression, L3 user memory, L4 knowledge memory) into ConversationService, giving Agents full memory capabilities in every conversation turn.
 
@@ -14,6 +14,10 @@ Wire the existing three-layer memory services (L1 working memory, L2 conversatio
 - Agents SHALL be able to update memory blocks via the `update_memory_block(label, content)` tool
 - The frontend SHALL display active memory block labels as badges in the chat page header
 
+#### Scenario: Memory blocks load with server-derived workspace scope
+
+- **WHEN** ConversationService assembles context for a turn, calling `WorkingMemoryService.list_blocks(agent_id, workspace_id)` with `workspace_id` auto-injected from the authenticated context, and the agent later calls `update_memory_block(label, content)`
+- **THEN** the assembled context includes the loaded memory blocks, the update persists, and the chat page header shows the active block labels as badges
 ### REQ-2: L2 Conversation Compression
 
 - ConversationService checks the current message token count during `assemble()`
@@ -21,17 +25,29 @@ Wire the existing three-layer memory services (L1 working memory, L2 conversatio
 - Compressed messages replace original messages when sent to the LLM; original messages are kept in DB
 - Compression history is queryable after session ends (compression level, tokens saved)
 
+#### Scenario: History compression triggers above the threshold
+
+- **WHEN** the current message token count exceeds `compression_threshold` (default 4000) during `assemble()`
+- **THEN** `CompressionPipeline.compress()` compresses the history, the compressed messages (not the originals) are sent to the LLM, the originals remain in the database, and the compression level and tokens saved stay queryable after the session ends
 ### REQ-3: L3 User Memory Extraction and Retrieval
 
 - After Assistant response, ConversationService SHALL call `UserMemoryService.extract_facts(user_id, messages)` to extract new facts from the conversation
 - ConversationService SHALL call `store_memory()` to persist extracted facts, with `workspace_id` auto-set from the auth context
 - On the next turn, ConversationService SHALL call `retrieve_memories(user_id, query)` to get relevant user memories scoped to the authenticated workspace and inject them into context
 
+#### Scenario: Facts extracted after a turn are retrieved on the next turn
+
+- **WHEN** an assistant response completes, `UserMemoryService.extract_facts` derives new facts that are stored via `store_memory()` with the authenticated `workspace_id`, and the next turn calls `retrieve_memories(user_id, query)`
+- **THEN** only memories scoped to the authenticated workspace are injected into context
 ### REQ-4: Memory Tool Registration
 
 - Register `update_memory_block` tool in Agent tool list (when Agent has working memory configured)
 - Register `search_user_memory` tool (when user has L3 memory enabled)
 
+#### Scenario: Tools register only for configured memory layers
+
+- **WHEN** a conversation starts for an agent with working memory configured and a user with L3 memory enabled
+- **THEN** `update_memory_block` and `search_user_memory` are registered in the agent tool list; and when an agent has no working memory configured, `update_memory_block` is not registered
 ### REQ-5: L4 Knowledge Memory Tools
 
 - When an agent has knowledge memory enabled, the system SHALL register two agent tools: `knowledge_insert` and `knowledge_search`
@@ -40,10 +56,19 @@ Wire the existing three-layer memory services (L1 working memory, L2 conversatio
 - Tools SHALL be registered at conversation start based on agent configuration
 - When agent configuration explicitly disables knowledge memory, tools are not registered
 
+#### Scenario: Knowledge tools register at conversation start and stay workspace-scoped
+
+- **WHEN** a conversation starts for an agent with knowledge memory enabled, and the agent calls `knowledge_insert(content, tags)` followed by `knowledge_search(query, top_k=5)`
+- **THEN** insert creates a KnowledgeMemoryModel with `workspace_id` auto-set from auth context, generates an embedding, and upserts to Qdrant, while search performs hybrid search scoped to the authenticated workspace; and when agent configuration explicitly disables knowledge memory, neither tool is registered
 ### REQ-6: L4 Auto-Inject Knowledge Context
 
 - When agent has `auto_knowledge_inject=true`, the system MAY pre-fetch relevant knowledge memories based on user message and inject them into context on each turn
 - Default is `auto_knowledge_inject=false` — knowledge only accessible via explicit tool calls
+
+#### Scenario: Auto injection honors the opt-in default
+
+- **WHEN** an agent has `auto_knowledge_inject=true` and the user sends a message, relevant knowledge memories are pre-fetched and injected into context before the LLM call; and when another agent keeps the default `auto_knowledge_inject=false`
+- **THEN** that agent's knowledge is accessible only via explicit `knowledge_search` tool calls, with no pre-fetch injection
 
 ## Scenarios
 

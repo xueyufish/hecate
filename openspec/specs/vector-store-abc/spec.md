@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the vector store abstraction: the backend-agnostic VectorStore ABC with optional hybrid search and application-layer RRF fallback, the backend factory, Qdrant and Chroma implementations, and the shared SearchResult type.
+
+## Requirements
 
 ### Requirement: VectorStore ABC defines backend-agnostic vector operations
 The `VectorStore` abstract base class in `services/rag/vector_store.py` SHALL define the interface for all vector store backends: `create_collection`, `delete_collection`, `collection_exists`, `upsert`, `delete_by_ids`, `search_dense`, `search_sparse`, `count`, and `scroll`. All methods SHALL be async and use the shared `SearchResult` type from `services/rag/types.py`.

@@ -1,7 +1,9 @@
 # scheduled-tasks Specification
 
 ## Purpose
-TBD - created by archiving change p2-backend-features. Update Purpose after archive.
+
+Defines scheduled tasks: the task and execution models, APScheduler with a PostgreSQL job store, multi-node distributed execution via advisory locks, the schedule state machine, management APIs, concurrency control, and execution result binding.
+
 ## Requirements
 ### Requirement: ScheduledTask model
 The system SHALL persist scheduled task definitions in a `scheduled_tasks` table with fields: `id` (UUID PK), `org_id` (UUID, NOT NULL), `workspace_id` (UUID, nullable), `name` (VARCHAR(255), NOT NULL), `description` (TEXT, nullable), `cron_expression` (VARCHAR(100), NOT NULL), `agent_id` (UUID, nullable — if binding to agent), `workflow_id` (UUID, nullable — if binding to workflow), `execution_config` (JSONB — execution parameters), `state` (VARCHAR(20), one of: ACTIVE, PAUSED, COMPLETED, ERROR), `max_concurrent_runs` (INTEGER, default 1), `catch_up` (BOOLEAN, default false), `timezone` (VARCHAR(50), default "UTC"), `next_run_at` (TIMESTAMPTZ, nullable), `last_run_at` (TIMESTAMPTZ, nullable), `enabled` (BOOLEAN, default true), plus BaseModel inherited fields.

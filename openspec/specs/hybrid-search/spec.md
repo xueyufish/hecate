@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines hybrid retrieval: combining dense and sparse search, the knowledge-base service surface, EnginePort knowledge_query wiring, and sparse-vector storage at ingestion.
+
+## Requirements
 
 ### Requirement: Hybrid search combines dense and sparse retrieval
 The system SHALL perform hybrid search by calling `VectorStore.search_hybrid()` which transparently delegates to the backend's native hybrid (for backends like Qdrant that support it) or falls back to application-layer RRF fusion (for backends like Chroma that do not). The `HybridSearcher` SHALL no longer reference `qdrant_indexer` directly.

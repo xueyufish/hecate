@@ -1,7 +1,9 @@
 # dlp-recognizers Specification
 
 ## Purpose
-TBD - created by archiving change outbound-dlp-engine. Update Purpose after archive.
+
+Defines DLP recognizers: regex, secrets, Presidio, and dictionary recognizer implementations, plus the recognizer registry factory.
+
 ## Requirements
 ### Requirement: RegexRecognizer implementation
 The system SHALL define `RegexRecognizer(DLPRecognizer)` that detects entities using regex patterns, supporting entity_type → compiled regex mapping, optional Luhn validation for credit cards, and configurable confidence scores per entity.

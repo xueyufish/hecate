@@ -1,7 +1,9 @@
 # restore-engine Specification
 
 ## Purpose
-TBD - created by archiving change data-backup-recovery. Update Purpose after archive.
+
+定义恢复引擎:全量恢复、按数据类型恢复、按租户恢复、PITR 时间点恢复、恢复冲突策略与恢复前确认。
+
 ## Requirements
 ### Requirement: 全量恢复
 系统 SHALL 支持从备份文件全量恢复 PostgreSQL、Qdrant、MinIO 和文件系统数据。

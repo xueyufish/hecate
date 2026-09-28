@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines memory block management: the block editor component, block templates, custom block creation, in-chat block indicators, and the agent-detail page view.
+
+## Requirements
 
 ### Requirement: Memory Block Editor Component
 The system SHALL provide a `MemoryBlockEditor` component that displays a list of memory blocks for an agent with inline editing capabilities. Each block SHALL show its label, content preview, position, and token limit.

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines dynamic agent-to-agent handoff: the handoff edge type, injected handoff tools and their detection into Commands, per-target descriptions, context modes, message pairing, and execution-context plumbing in PregelRuntime.
+
+## Requirements
 
 ### Requirement: Dynamic handoff edge type
 The system SHALL support a `"dynamic_handoff"` edge trigger in the Graph DSL. When a handoff edge has `trigger: "dynamic_handoff"`, the `handoff_to_agent` tool SHALL be injected with multiple candidate targets. The LLM decides which target to hand off to at runtime.

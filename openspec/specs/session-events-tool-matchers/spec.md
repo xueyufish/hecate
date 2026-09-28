@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines session and tool event hooks: lifecycle hooks, tool-name matchers, shell command hooks, JSON configuration, and REST management APIs.
+
+## Requirements
 
 ### Requirement: Session lifecycle event hooks
 The system SHALL provide 4 session lifecycle hook ABCs: `SessionStartHook` (fires when a session begins or resumes), `SessionEndHook` (fires when a session ends), `UserPromptSubmitHook` (fires when a user submits a prompt, before LLM processing), and `PreCompactHook` (fires before context compaction). Each hook follows the existing GuardrailHook pattern with async execution.

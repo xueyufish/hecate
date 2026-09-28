@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines tool execution analytics: overview, per-tool detail, trend, and top-error endpoints, the aggregation service, and the frontend dashboard with its Ops Center navigation entry.
+
+## Requirements
 
 ### Requirement: Tool analytics overview endpoint
 The system SHALL expose `GET /api/ops-center/tools/overview` that returns aggregate tool execution metrics for a time range: total executions, overall success rate, average latency, P95 latency, unique tools used, and error count. Supports `start_date`, `end_date`, and optional `agent_id` filter.

@@ -4,7 +4,11 @@
 > previous spec described 41 evaluators that were never implemented; the
 > MODIFIED delta replaces the spec with the 16 actually-shipped evaluators.
 
-## ADDED Requirements
+## Purpose
+
+Defines the built-in evaluator set: scope and naming, single registration via PluginRegistry, graceful degradation when ragas is missing, LLM-free deterministic evaluators, OWASP-anchored safety evaluators, and manifest metadata.
+
+## Requirements
 
 ### Requirement: Built-in evaluator scope and naming
 The system SHALL ship 16 built-in evaluators organized by scope into four categories: Result Layer (output quality, 7 evaluators), Process Layer (tool and reasoning correctness, 2 evaluators), RAG Layer (retrieval-augmented generation quality, 4 evaluators), and Safety Layer (security and compliance, 3 evaluators). Each evaluator SHALL declare its scope via a `scope` class attribute taking one of `"result"` / `"process"` / `"rag"` / `"safety"`. The system SHALL use the canonical short names listed below as both the registry key and the `name` property of each evaluator class.

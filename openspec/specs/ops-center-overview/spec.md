@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the Ops Center overview: the unified aggregation endpoint, summary cards for agent health, tool analytics, and conversation quality, the recent activity feed, quick links, time-range selection, navigation, and empty states.
+
+## Requirements
 
 ### Requirement: Unified overview aggregation endpoint
 The system SHALL expose `GET /api/ops-center/overview` that aggregates metrics from all three Ops Center subsystems (Agent Health, Tool Analytics, Conversation Analytics) into a single response. The endpoint SHALL call the three existing services in parallel via `asyncio.gather(return_exceptions=True)`. Supports `start_date` and `end_date` query parameters.

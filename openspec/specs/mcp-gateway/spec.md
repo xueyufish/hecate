@@ -2,7 +2,8 @@
 
 MCP Gateway federates tools from multiple sources — converted OpenAPI/REST operations and external MCP servers — into the single `/mcp` endpoint, with workspace-scoped authorization at the MCP protocol boundary and server-side credential brokering, so external MCP clients see one unified, identity-filtered tool catalog.
 
-## ADDED Requirements
+
+## Requirements
 
 ### Requirement: REST target registration projects OpenAPI operations as tools
 The system SHALL allow registering a gateway target of kind `rest` consisting of a name, a base URL, an optional OpenAPI 3.x document, optional static credentials, and an owning workspace. When an OpenAPI document is provided, the system SHALL project each supported operation (path × method) as a tool row with `source="rest"`, named `<target>__<operationId or path-derived name>`, carrying the operation's parameter and request-body schemas as the tool's JSON Schema. Operations using unsupported constructs (callbacks, links) SHALL be skipped with import warnings; the import SHALL NOT fail partially without a report.

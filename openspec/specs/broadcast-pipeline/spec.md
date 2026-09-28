@@ -1,3 +1,9 @@
+# broadcast-pipeline Specification
+
+## Purpose
+
+Defines the broadcast pipeline: the round-robin broadcast graph factory, the optional moderator, participant validation, and the JSON template form.
+
 ## Requirements
 
 ### Requirement: Broadcast pipeline factory function

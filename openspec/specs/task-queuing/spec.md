@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines chat task queuing: per-session sequential processing, queue status feedback, queue timeout, cross-session independence, and the chat UI queue indicator.
+
+## Requirements
 
 ### Requirement: Per-Session Sequential Processing
 The system SHALL ensure that only one message is processed at a time within a single conversation/session. When a new message arrives for a session that is already processing, the system SHALL queue the message and process it after the current message completes.

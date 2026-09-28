@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines canvas layout persistence: node positions stored in localStorage, grid-layout fallback, and layout data independent of the DSL.
+
+## Requirements
 
 ### Requirement: Node positions persist to localStorage
 When nodes are moved or the workflow is saved, the system SHALL persist each node's x/y position to localStorage, keyed by `hecate-layout-{workflowId}`.

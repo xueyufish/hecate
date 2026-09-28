@@ -1,7 +1,9 @@
 # multi-database Specification
 
 ## Purpose
-TBD - created by archiving change multi-database-support. Update Purpose after archive.
+
+Defines multi-database support: deploy-time database backend selection, portable schema definitions, and the optional MySQL dependency.
+
 ## Requirements
 ### Requirement: Deploy-time database backend selection
 The system SHALL support PostgreSQL, MySQL, and SQLite as database backends, selected at deploy time via the `DATABASE_URL` environment variable. The database dialect SHALL be automatically detected from the URL scheme.

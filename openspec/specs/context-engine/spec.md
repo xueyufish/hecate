@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the pluggable context engine: the ContextEngine ABC, the default in-memory implementation, PregelRuntime and LLMWorker integration, non-destructive pipelines, token budget resolution, and tool-result truncation.
+
+## Requirements
 
 ### Requirement: ContextEngine ABC defines pluggable context management
 The engine SHALL define a `ContextEngine` ABC in `runtime/context.py` with methods: `select_messages`, `compress`, `estimate_tokens`.

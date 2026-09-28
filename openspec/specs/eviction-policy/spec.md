@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines pluggable channel eviction: the EvictionPolicy ABC, the no-eviction default that preserves unbounded behavior, size-based eviction, and ChannelManager integration.
+
+## Requirements
 
 ### Requirement: EvictionPolicy ABC defines pluggable channel eviction
 The engine SHALL define an `EvictionPolicy` ABC in `runtime/eviction.py` with methods: `should_evict` and `select_victim`.

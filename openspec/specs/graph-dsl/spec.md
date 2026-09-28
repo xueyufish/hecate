@@ -1,4 +1,8 @@
-## MODIFIED Requirements
+## Purpose
+
+Defines the Graph DSL surface: parser validation against JSON Schema, compilation checks for entry points, edges, and handoff cycles, declarative interrupt lists, map-over-channel fan-out configuration, and node cache policy blocks.
+
+## Requirements
 
 ### Requirement: Compiler validates entry point, edges, and handoff cycles
 The `GraphCompiler.compile()` SHALL perform validation stages before producing a `CompiledGraph`: entry point, edges, handoff cycles, fan-out/merge structural constraints, execution-mode-aware node restrictions, channel access validation, routing config validation, declarative interrupt list validation（列表引用的 node ID 必须存在），and node cache policy validation（`key_func` 引用的函数必须已注册）。When `execution_mode="task"` is passed to compile(), the compiler SHALL reject graphs containing SUGGESTION node types or non-empty `interrupt_before`/`interrupt_after` lists by raising `GraphValidationError`.
@@ -79,7 +83,6 @@ The `GraphCompiler.compile()` SHALL perform validation stages before producing a
 - **WHEN** a conversation node, a knowledge-retrieval node, and a tool-call node each declare a valid `cache` block
 - **THEN** the compiler SHALL accept all three without type-based rejection（纯度判断归作者，见 cache 语义需求）
 
-## ADDED Requirements
 
 ### Requirement: Declarative interrupt lists
 The Graph DSL document SHALL accept optional top-level `interrupt_before` and `interrupt_after` arrays of node IDs. `parse_graph()` SHALL propagate both lists into the parsed graph configuration, the compiler SHALL carry them onto the compiled graph, and `CompiledGraph.to_json()` SHALL roundtrip both lists so persisted graph definitions keep their interrupt configuration. Absent lists SHALL behave as empty（不产生任何暂停点）。
@@ -96,7 +99,6 @@ The Graph DSL document SHALL accept optional top-level `interrupt_before` and `i
 - **WHEN** a DSL document omits both `interrupt_before` and `interrupt_after`
 - **THEN** parsing and compilation SHALL succeed and the compiled graph SHALL carry empty lists
 
-## MODIFIED Requirements
 
 ### Requirement: Graph DSL parser validates against JSON Schema
 The `parse_graph()` function SHALL accept a JSON string or dict and validate it against `schemas/graph-dsl.schema.json`. The schema SHALL include `"persistent"` as an optional boolean property on channel definitions. The parser SHALL auto-migrate deprecated `"persistent_topic"` to `"topic"` with `persistent=True`. The schema SHALL also support `routing_mode` and `routing_config` fields on CONDITION node config, and `"dynamic_handoff"` as a valid edge trigger value.
@@ -167,5 +169,3 @@ The Graph DSL document SHALL accept an optional per-node `cache` config object c
 #### Scenario: Invalid ttl rejected
 - **WHEN** a node declares `"cache": {}`（缺 ttl）or `"cache": {"ttl": 0}` or `"cache": {"ttl": -5}` or a non-integer ttl
 - **THEN** the DSL SHALL reject the document with `GraphValidationError` indicating the cache path
-
-## Requirements

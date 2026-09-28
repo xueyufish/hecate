@@ -1,6 +1,6 @@
 # Knowledge Memory — L4 Long-Term Agent Knowledge
 
-## Overview
+## Purpose
 
 L4 knowledge memory provides persistent, searchable storage for agent knowledge as atomic facts. It uses a dual-store architecture: PostgreSQL for metadata and Qdrant for vector embeddings (dense + sparse) with hybrid search.
 

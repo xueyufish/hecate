@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines the frontend visual system for fan-out/merge: node types in the frontend type system, distinct visual components, exclusion from the palette, and DSL label mapping.
+
+## Requirements
 
 ### Requirement: Fan-out and merge node types defined in frontend type system
 The frontend NodeTypeSchema SHALL include "fan-out" and "merge" as valid node type enum values, matching the backend DSL schema.

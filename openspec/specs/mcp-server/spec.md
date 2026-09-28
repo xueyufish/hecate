@@ -1,3 +1,9 @@
+# mcp-server Specification
+
+## Purpose
+
+Defines the inbound MCP server: exposing agent runtime, CRUD, knowledge-base, and tool-execution tools plus resources and prompts, API-key authentication, configuration, discovery and capability advertisement, streamable-HTTP handling, and fail-closed execution without transport identity.
+
 ## Requirements
 
 ### Requirement: MCP Server exposes Hecate capabilities as MCP tools

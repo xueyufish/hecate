@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines web crawling: single and batch URL crawling, metadata extraction, content size limits, and the frontend URL input.
+
+## Requirements
 
 ### Requirement: Single URL Crawling
 The system SHALL provide a `POST /api/knowledge-bases/{id}/urls` endpoint that accepts a URL, fetches the content, extracts text, and ingests it into the knowledge base.

@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines turn-level user feedback: capture, the feedback API endpoint, conversation-level summaries, and display in the analytics dashboard.
+
+## Requirements
 
 ### Requirement: Turn-level user feedback capture
 The system SHALL allow users to rate individual assistant turns with a positive or negative rating and an optional comment. Feedback SHALL be stored in the ConversationTurnScoreModel alongside automated quality scores.

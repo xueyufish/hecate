@@ -1,7 +1,9 @@
 # dlp-scanner Specification
 
 ## Purpose
-TBD - created by archiving change outbound-dlp-engine. Update Purpose after archive.
+
+Defines the DLP scanner core: the DLPAction/DLPFinding/DLPResult contracts, the recognizer ABC and registry, and the three-layer scanner orchestration.
+
 ## Requirements
 ### Requirement: DLPAction enum
 The system SHALL define `DLPAction` as a `StrEnum` with four members: `ALLOW`, `BLOCK`, `MASK`, `AUDIT`.

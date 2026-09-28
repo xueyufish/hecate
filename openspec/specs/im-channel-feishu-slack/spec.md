@@ -1,7 +1,9 @@
 # im-channel-feishu-slack Specification
 
 ## Purpose
-TBD - created by archiving change multi-channel-feishu-slack. Update Purpose after archive.
+
+Defines the Feishu and Slack IM channel adapters: ChannelABC implementations, webhook dispatch, mandatory identity binding, MessageBus decoupling of ACK from execution, cross-channel session history via deterministic hashing, secret-backed credentials, channel-provenance records, PluginRegistry registration, and per-channel agent routing.
+
 ## Requirements
 ### Requirement: Feishu IM channel adapter implements ChannelABC
 

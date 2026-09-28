@@ -1,4 +1,8 @@
-## ADDED Requirements
+## Purpose
+
+Defines prompt version management: commit messages on versions, protected label enforcement, and version trace linkage.
+
+## Requirements
 
 ### Requirement: Commit message on prompt version
 The system SHALL support a `commit_message: str | None` field on `PromptVersionModel`. When provided during prompt update, the commit message SHALL be persisted on the newly created version record.
