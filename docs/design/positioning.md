@@ -4,17 +4,19 @@ This document explains **where Hecate sits in the agent platform landscape**, wh
 
 Hecate is currently in **alpha**. The positioning is provisional — it will sharpen as the project matures toward 1.0.
 
+The strategic target is being revised toward an **enterprise Agent governance and integration platform** whose execution components can also be consumed by products without deploying the management plane. This target describes the direction under review; it does not mean independent Runtime distribution or production governance profiles are already shipped. The [platform evolution plan](../research/enterprise-agent-platform-evolution-plan.md) tracks that work and its acceptance gates. This page's detailed feature and competitor claims remain subject to a step2 evidence and catalogue review.
+
 ---
 
 ## 30-second summary
 
-> Hecate is an **open-source, self-hosted, Python-first agent platform** for engineering teams building **production agents** that need to live inside an organization's own infrastructure. It is **not** a no-code SaaS (use Dify for that) and **not** a thin framework (use LangGraph if you only need an orchestration library). It is the **engine-level platform layer in between**: a self-developed Pregel runtime, multi-tenant by default, OpenAI-compatible on the API surface, MCP + A2A on the protocol surface, and **many engine extension interfaces (multiple Core + multiple SPI)** per [ADR-016](adr/016-platform-spi-architecture.md) when you need to go deep.
+> Hecate's target is an **open-source enterprise Agent governance and integration platform**: organizations can register and govern Agents built with different runtimes, models, and languages, while products can consume a separately deployable execution component when they need one. The current implementation is Python-based and includes a Pregel Runtime, APIs, MCP/A2A integrations, and enterprise capabilities at varying maturity. Hecate remains in alpha; independent Runtime distribution, cross-runtime governance, and production support profiles require the implementation and evidence in the evolution plan. Python, Pregel, and any one provider are reference choices, not requirements imposed on every connected Agent.
 
 ---
 
 ## The agent platform landscape
 
-There are roughly **four categories** of tools in this space. Hecate is the only one that combines **all four** in a single project:
+Agent products span hosted platforms, self-hosted systems, execution frameworks, automation tools, and coding agents. These categories overlap; this diagram is orientation, not a complete taxonomy or a claim that Hecate uniquely combines them.
 
 ```
                          ┌──────────────────────────────────────────────────────────────┐
@@ -60,7 +62,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 | **OpenAI-compatible API** | ✅ Wire-compatible | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
 | **Multi-tenancy native** | ✅ Org → Workspace → RBAC | ✅ | ❌ Add-on | ✅ | ✅ | ✅ (AWS accounts) | ✅ |
 | **Visual canvas** | ✅ (`web/`) | ✅ | ❌ | ✅ | ✅ | ❌ | ✅ (primary UX) |
-| **Engine-level extensibility** | ✅ many (multiple Core + SPI) | Plugins | Decorators | Limited | Limited | Bring your framework | Nodes |
+| **Execution extensibility** | Built-in Pregel Runtime today; target accepts external backends through versioned contracts | Plugins | Library APIs | Framework APIs | Product-specific | Bring your framework | Nodes |
 | **Self-evolution loop** | ✅ skill-package loop: eval-gate + human review before any learned skill persists (1.3.6f) | ❌ | ❌ | ❌ | Partial (frozen-weight whitepaper + observability) | ✅ prompt-optimization API (A/B + promote) | ❌ |
 | **Runtime hallucination mitigation** | ✅ citation provenance layer (tool-result chunk markers + session-resolvable registry + uncited-claim risk signal) + grounding scoring layer (dual-backend entailment seam, fallback retrieval, three-way verdicts, shadow disposition) (1.3.5e Stage 1-2); disposition actions staged next | ❌ | ❌ | ❌ | Partial (Einstein Trust Layer grounding, no public scoring API) | ✅ Guardrails contextual grounding check (caller supplies the grounding source) | ❌ |
 | **Target user** | Engineers building internal agent platforms | Business / non-developers | Engineers prototyping | Mixed business + engineers | Enterprise admins | AWS-native engineers | Ops + IT |
@@ -204,13 +206,13 @@ Hecate's positioning line:
 
 ## When to choose Hecate
 
-Pick Hecate when **all** of these are true:
+Consider Hecate when these needs matter:
 
-1. **Self-hosted is required** (data residency, compliance, or cost reasons)
-2. **Multi-tenancy is required** (you're building a platform for many teams / customers)
-3. **Protocol surface matters** (you need MCP, A2A, OpenAI-compatible — not just one)
-4. **Engine-level extensibility is required** (you'll write custom scheduler, guardrail hooks, or checkpoint store)
-5. **MIT-licensed OSS is required** (no per-seat fees, no telemetry)
+1. You need an enterprise layer for Agent identity, access, approval, audit, evaluation, and lifecycle across different execution technologies.
+2. You need to self-host the management plane or consume an execution component from a product you operate.
+3. You want to choose Runtime, Memory/Knowledge, evaluation, observability, sandbox, and gateway implementations independently, subject to tested compatibility.
+4. Your Agents use protocols such as MCP or A2A, and you need enterprise identity and action controls around those connections.
+5. You want an open-source reference implementation and can assess its current alpha maturity against your deployment requirements.
 
 ## When NOT to choose Hecate
 
@@ -230,14 +232,15 @@ Pick something else when:
 
 ## Strategic positioning summary
 
-Hecate occupies **the engineering platform niche** between:
+Hecate's target position is the **enterprise integration and governance layer around Agents**, with an optional, independently consumable reference execution component. It should let organizations use different frameworks, hosted Agent services, models, and languages while applying consistent identity, policy, approval, evidence, evaluation, and lifecycle rules where the connected backend permits those controls.
 
-- **Frameworks** (LangGraph, CrewAI, AutoGen) — too low-level; you bring the runtime
-- **SaaS platforms** (Dify Cloud, Agentforce, Bedrock) — too high-level; no source code
+The built-in Pregel Runtime remains a product capability and a reference implementation. Its event-sourced execution model, context processing, workflow tooling, and other engine features can differentiate Hecate's own Runtime; external Agents do not need to adopt its graph DSL or internal state model. The Runtime's current import boundaries do not by themselves prove it can be installed and run independently. The [evolution plan](../research/enterprise-agent-platform-evolution-plan.md) defines that work and separates a standalone execution profile from the management platform.
 
-It is the **Linux of agent platforms**: self-hosted, MIT-licensed, engine-level control, multi-protocol, multi-tenant. The audience is engineering teams building internal agent platforms or shipping agents as a product.
+Hecate's governing promise must follow evidence: registration is not production approval, a provider's declared feature is not enforcement, and a trace is not proof that an action was authorized. Each backend and deployment combination earns only the control and support level demonstrated by conformance tests. The platform may report limited observability or control for hosted systems rather than infer hidden provider behavior.
 
-**Engine differentiator**: Hecate's runtime is **event-sourced (Log-as-Truth, [ADR-030](adr/030-event-sourced-execution-state.md))** — the event log, not per-step snapshots, is the source of execution state. Execution state is replayable (WAL ordering, `STEP_END`/`INTERRUPT`/`FORK` commit points), checkpoints are materialized caches, and interrupt/resume is log-derived. **Declarative interrupts (1.3.21①)** add compile-time `interrupt_before`/`interrupt_after` superstep-boundary pauses — HITL without worker-authored code, phase-aware resume derived from the interrupt descriptor in the log (2026-09 industry research: only LangGraph/Dify/IBM/Google ADK ship graph-level declarative HITL, and none derive resume from a log fold). **Time-travel resume + update_state (1.3.21②)** extends the same log-derived substrate to executable time travel: resumable anchors are listed from the log (`/commit-points`), a fork bootstraps a new child session with a single self-contained `FORK` snapshot event (lineage + folded state + derived continuation; the parent log is never touched), and state mutation is append-recorded (`update_state` batches land as audited `CHANNEL_WRITE` events closed by a `STEP_END`). 2026-09 research across 23 systems: full time-travel exists only in single-user CLI/SDK tools or infra (LangGraph, Temporal, Pi, dsh) — no enterprise multi-tenant platform ships it; Hecate is first. **Send-style dynamic fan-out (1.3.21③)** turns a planner's `_dispatch` plan into N parallel per-slice invocations inside one superstep, log-controlled and fork-faithful (T2b invariant). **Node-level CachePolicy (1.3.21④)** extends LangGraph-parity per-node result caching (`cache: {ttl, key_func, scope}`) to Hecate's log-as-truth substrate: a hit skips the worker but leaves the log trajectory byte-identical to a miss (cache is advisory, ADR-030), with session/tenant key scoping and fail-closed tenant isolation — 2026-09 research across 19 platforms found node-level result caching nowhere else in the industry outside LangGraph. This is the substrate for execution replay (8.20), what-if checkpoint branching (6.26 E5), durable HITL audit pairs (1.3.4), and middleware waterfall events (1.3.5i E3) that no competitor's engine ships today.
+### Reading feature priorities and delivery status
+
+The **P1→P5 catalogue** remains in [feature-catalog.md](../features/feature-catalog.md), with sequencing in [roadmap.md](../features/roadmap.md). Those files contain historical implementation priorities and need the step2 reclassification defined in the evolution plan; their existing priority or ✅ markers do not certify a production capability, an independent package, or acceptance of the new target architecture. The current plan's first independent-consumer path is baseline → contracts → shared Runtime assembly → standalone preview → local reliability/governance → scoped production conformance. Team federation, public ecosystem distribution, and bounded self-governance are conditional follow-on work, not prerequisites for that first path.
 
 **Observability differentiator (8.20 Execution Replay)**: On top of the event-sourced substrate, Hecate ships a built-in **execution replay dashboard** — trace-partitioned timeline (vocabulary: `session → trace → event`, aligning with LangFuse/LangSmith/IBM rather than the unanchored "runId" that competitors often leave ambiguous), DAG step-through, and fold-to-version time-travel ("show me what the model saw at step N"). Pure read-side consumer of the enriched log: zero schema change, tenant-scoped, no extra runtime hook. Guardrail blocks are derived from synthetic tool-error messages (Phase 1) and upgrade cleanly to the planned waterfall middleware stage events (1.3.5i E3) when shipped. Empty-log sessions (path A/C calls) hide the tab rather than render an empty view; UI labels coverage boundaries so users aren't misled about replay semantics. Time-travel reuses the same `fold_session` path that live mutation uses, eliminating projection drift between replay and execution.
 
