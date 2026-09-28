@@ -75,7 +75,7 @@ async def test_denied_call_is_not_resurrected_by_later_allow_rule():
         access_policy=ToolAccessPolicy(),
         tool_rules=deny_rules,
         denial_tracker=tracker,
-        event_store=MagicMock(append=AsyncMock()),
+        event_store=MagicMock(append=AsyncMock(), get_events=AsyncMock(return_value=[])),
     )
     snapshot = _payload("tc-monotonic", "bash", {"command": "ls"})
     exec_ctx = {"session_id": uuid.uuid4(), "superstep": 0}
@@ -114,7 +114,7 @@ async def test_denied_call_is_not_resurrected_by_callback_approval():
         tool_rules=deny_rules,
         approval_callback=_Approve(),
         denial_tracker=tracker,
-        event_store=MagicMock(append=AsyncMock()),
+        event_store=MagicMock(append=AsyncMock(), get_events=AsyncMock(return_value=[])),
     )
     snapshot = _payload("tc-revive", "bash", {"command": "ls"})
     exec_ctx = {"session_id": uuid.uuid4(), "superstep": 0}
@@ -144,7 +144,7 @@ async def test_different_tool_call_ids_are_independent():
         access_policy=ToolAccessPolicy(),
         tool_rules=deny_a,
         denial_tracker=tracker,
-        event_store=MagicMock(append=AsyncMock()),
+        event_store=MagicMock(append=AsyncMock(), get_events=AsyncMock(return_value=[])),
     )
 
     # A is denied.

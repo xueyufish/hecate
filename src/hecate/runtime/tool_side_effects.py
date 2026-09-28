@@ -7,8 +7,9 @@ static mapping, everything else defaults to ``unknown`` — the most
 conservative treatment (never auto-retry).
 
 Result states live on the TOOL_RESULT receipt (see ToolWorker):
-``succeeded`` / ``failed`` (definitively did not take effect) /
-``unknown`` (outcome indeterminate — timeout, lost connection).
+``succeeded`` / ``failed`` (the tool reported failure — does NOT prove a
+non-idempotent side effect was skipped) / ``unknown`` (outcome
+indeterminate — timeout, lost connection).
 """
 
 from __future__ import annotations
@@ -72,17 +73,22 @@ def should_auto_retry(classification: SideEffectClass, receipt_status: str | Non
     """Whether a recovery flow may automatically retry this execution.
 
     ``receipt_status`` is the TOOL_RESULT receipt state for the attempt in
-    question (None = no receipt found, e.g. log loss). Only provably-safe
-    combinations auto-retry; anything indeterminate goes to human review.
+    question (None = claimed-but-unresolved or no record at all). Only
+    class-safe combinations auto-retry; anything else goes to human review.
+    A ``failed`` receipt no longer proves "did not take effect" — an
+    exception raised by the tool does not exclude a landed side effect —
+    so non-idempotent and external classes are never auto-retried on it
+    (plan G2: retry requires an explicit idempotency guarantee or a done
+    reconciliation).
     """
     if receipt_status == RECEIPT_SUCCEEDED:
         return False  # already took effect
     if receipt_status == RECEIPT_UNKNOWN:
         return False  # indeterminate — human review
     if receipt_status == RECEIPT_FAILED:
-        # Definitively did not take effect — safe to redo any class whose
-        # semantics we know; unknown stays with human review.
-        return classification is not SideEffectClass.UNKNOWN
+        # Only classes whose retry is safe by definition may re-execute;
+        # a non-idempotent write may have landed before the failure.
+        return classification in (SideEffectClass.READONLY, SideEffectClass.IDEMPOTENT_WRITE)
     # No receipt at all (log gap / worker died pre-receipt): retry only
     # what is repeat-safe by definition; everything else goes to review.
     return classification in (SideEffectClass.READONLY, SideEffectClass.IDEMPOTENT_WRITE)

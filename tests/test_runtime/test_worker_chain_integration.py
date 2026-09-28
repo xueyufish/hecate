@@ -65,6 +65,9 @@ class _StubPort:
 def _fake_event_store():
     s = MagicMock()
     s.append = AsyncMock()
+    # Recovery resolution must see a readable store, or side-effecting
+    # dispatches are (correctly) withheld as store_unavailable.
+    s.get_events = AsyncMock(return_value=[])
     return s
 
 

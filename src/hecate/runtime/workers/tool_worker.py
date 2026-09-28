@@ -15,9 +15,13 @@ per call in the same order as the LLM emitted them.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 import uuid
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from hecate.runtime.citation_provenance import (
@@ -47,6 +51,7 @@ from hecate.runtime.tool_side_effects import (
     RECEIPT_FAILED,
     RECEIPT_SUCCEEDED,
     RECEIPT_UNKNOWN,
+    SideEffectClass,
     classify,
     should_auto_retry,
 )
@@ -62,8 +67,9 @@ def _is_indeterminate_error(exc: Exception) -> bool:
 
     Timeout and connection failures are indeterminate: the tool may have
     completed remotely after the client gave up. Everything else (bad
-    arguments, permission denial, missing tool) provably did not take
-    effect. Deliberately narrow — prefer human review over blind retry.
+    arguments, permission denial, missing tool) reports a failure — which
+    still does not prove a non-idempotent side effect was skipped.
+    Deliberately narrow — prefer human review over blind retry.
     """
     import httpx
 
@@ -76,6 +82,92 @@ def _is_indeterminate_error(exc: Exception) -> bool:
             httpx.ConnectError,
         ),
     )
+
+
+class ToolExecutionState(StrEnum):
+    """Recovery state of a dispatched tool execution (plan G2).
+
+    ``claimed`` is the crash window — TOOL_CALL persisted, outcome missing —
+    and is deliberately distinct from ``never_started``; ``store_unavailable``
+    is a failed lookup, which must never degrade to "no record".
+    """
+
+    NEVER_STARTED = "never_started"
+    CLAIMED = "claimed"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    STORE_UNAVAILABLE = "store_unavailable"
+
+
+@dataclass(frozen=True)
+class ToolExecutionResolution:
+    """Outcome of a recovery lookup for one ``execution_id``."""
+
+    state: ToolExecutionState
+    arguments_digest: str | None = None
+    result_digest: str | None = None
+
+
+def tool_arguments_digest(arguments: Any) -> str:
+    """Stable digest of tool arguments for action-key conflict detection.
+
+    Canonical JSON (sorted keys, compact separators) so equivalent payloads
+    hash identically regardless of key order; arguments that cannot be
+    serialized degrade to the empty-arguments digest.
+    """
+    try:
+        canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):
+        canonical = "{}"
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+async def resolve_tool_execution_state(event_store: Any, session_id: Any, execution_id: str) -> ToolExecutionResolution:
+    """Resolve the recovery state of a tool execution from the event log.
+
+    Consumes both ``TOOL_CALL`` (the claim) and ``TOOL_RESULT`` (the
+    receipt) so recovery decisions rest on recorded state instead of the
+    absence of records. The latest TOOL_RESULT wins when retries produced
+    several receipts; legacy events without ``arguments_digest`` resolve
+    with ``None`` (conflict checking is skipped, not guessed).
+    """
+    if event_store is None:
+        return ToolExecutionResolution(state=ToolExecutionState.NEVER_STARTED)
+    try:
+        events = await event_store.get_events(session_id)
+    except Exception:
+        logger.warning("Tool recovery lookup failed; state is store_unavailable", exc_info=True)
+        return ToolExecutionResolution(state=ToolExecutionState.STORE_UNAVAILABLE)
+    claim: dict[str, Any] | None = None
+    receipt: dict[str, Any] | None = None
+    for event in events:
+        payload = event.payload
+        if payload.get("execution_id") != execution_id:
+            continue
+        if event.event_type is EventType.TOOL_CALL:
+            claim = payload
+        elif event.event_type is EventType.TOOL_RESULT:
+            receipt = payload
+    if receipt is not None:
+        status = receipt.get("status")
+        if status == RECEIPT_SUCCEEDED:
+            state = ToolExecutionState.SUCCEEDED
+        elif status == RECEIPT_UNKNOWN:
+            state = ToolExecutionState.OUTCOME_UNKNOWN
+        else:
+            state = ToolExecutionState.FAILED
+        return ToolExecutionResolution(
+            state=state,
+            arguments_digest=receipt.get("arguments_digest") or (claim or {}).get("arguments_digest"),
+            result_digest=receipt.get("result_digest"),
+        )
+    if claim is not None:
+        return ToolExecutionResolution(
+            state=ToolExecutionState.CLAIMED,
+            arguments_digest=claim.get("arguments_digest"),
+        )
+    return ToolExecutionResolution(state=ToolExecutionState.NEVER_STARTED)
 
 
 async def get_tool_receipt(event_store: Any, session_id: Any, execution_id: str) -> dict[str, Any] | None:
@@ -351,6 +443,146 @@ class ToolWorker(Worker):
             eval_context.setdefault("on_behalf_of_user", execution_context.get("on_behalf_of_user"))
         return self._access_policy.evaluate(tool_meta, rules, eval_context, arguments=arguments)
 
+    @staticmethod
+    def _withheld_result(tc_id: str, content: str) -> dict[str, Any]:
+        """Terminal tool-result message for a dispatch that must not run."""
+        return {"role": "tool", "tool_call_id": tc_id, "content": content, "is_error": True}
+
+    async def _append_tool_call(
+        self,
+        *,
+        execution_context: dict,
+        tool_name: str,
+        arguments: dict,
+        arguments_digest: str,
+        tool_call_id: str,
+        execution_id: str,
+        side_effect_class: str,
+    ) -> None:
+        """Record the claim for an execution (TOOL_CALL event)."""
+        from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
+
+        await self._event_store.append(
+            Event(
+                session_id=execution_context["session_id"],
+                superstep=execution_context["superstep"],
+                event_type=EventType.TOOL_CALL,
+                node_id=None,
+                trace_id=execution_context.get("trace_id"),
+                payload={
+                    "tool_name": tool_name,
+                    "arguments": arguments,
+                    "arguments_digest": arguments_digest,
+                    "tool_call_id": tool_call_id,
+                    "execution_id": execution_id,
+                    "side_effect_class": side_effect_class,
+                    "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
+                },
+            )
+        )
+
+    async def _recovery_outcome(
+        self,
+        *,
+        session_key: Any,
+        execution_id: str,
+        tc_id: str,
+        arguments_digest: str,
+        classification: SideEffectClass,
+        messages: list[dict],
+        claim: bool,
+        execution_context: dict | None = None,
+        tool_name: str = "",
+        arguments: dict | None = None,
+    ) -> dict[str, Any] | None:
+        """Resolve the execution's recovery state into an action.
+
+        Returns a terminal tool-result message when the dispatch must not
+        execute (succeeded backfill, review markers, digest conflict), or
+        None when execution may proceed. With ``claim=True`` — the call
+        inside the session event lock — a ``never_started`` resolution is
+        claimed by appending the TOOL_CALL event; with ``claim=False`` this
+        is a read-only pre-filter. Decisions by state:
+
+        - succeeded → backfill the real result from channel history; when
+          the content never reached the channel, return an explicit
+          reconciliation marker (never fabricated content, never re-run)
+        - outcome_unknown → human review
+        - claimed → class-safe re-execution (readonly/idempotent) under the
+          same execution id; everything else stops for review
+        - failed → ``should_auto_retry`` (readonly/idempotent only)
+        - store_unavailable → readonly proceeds; side effects fail closed
+        """
+        if self._event_store is None or not session_key:
+            return None
+        resolution = await resolve_tool_execution_state(self._event_store, session_key, execution_id)
+        if resolution.arguments_digest is not None and resolution.arguments_digest != arguments_digest:
+            logger.warning(
+                "Tool execution %s arguments digest mismatch — conflict, not executed",
+                execution_id,
+            )
+            return self._withheld_result(
+                tc_id,
+                "[conflict] arguments differ from the recorded execution for this call id; execution withheld",
+            )
+        state = resolution.state
+        if state is ToolExecutionState.NEVER_STARTED:
+            if claim and execution_context is not None and arguments is not None:
+                await self._append_tool_call(
+                    execution_context=execution_context,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    arguments_digest=arguments_digest,
+                    tool_call_id=tc_id,
+                    execution_id=execution_id,
+                    side_effect_class=classification.value,
+                )
+            return None
+        if state is ToolExecutionState.SUCCEEDED:
+            for msg in reversed(messages):
+                if msg.get("role") == "tool" and msg.get("tool_call_id") == tc_id:
+                    return {
+                        "role": "tool",
+                        "tool_call_id": tc_id,
+                        "content": msg.get("content", ""),
+                    }
+            digest_suffix = f" (result_digest={resolution.result_digest})" if resolution.result_digest else ""
+            logger.warning(
+                "Tool execution %s recorded succeeded but result content is unavailable — reconciliation required",
+                execution_id,
+            )
+            return self._withheld_result(
+                tc_id,
+                "[reconciliation required] execution recorded succeeded but recorded result "
+                f"content is unavailable{digest_suffix}; not re-executed",
+            )
+        if state is ToolExecutionState.OUTCOME_UNKNOWN:
+            return self._withheld_result(
+                tc_id,
+                "[needs review] previous execution outcome indeterminate; retry withheld",
+            )
+        if state is ToolExecutionState.CLAIMED:
+            if should_auto_retry(classification, None):
+                return None
+            return self._withheld_result(
+                tc_id,
+                "[needs review] dispatch recorded but no outcome receipt (interrupted execution); retry withheld",
+            )
+        if state is ToolExecutionState.FAILED:
+            if should_auto_retry(classification, RECEIPT_FAILED):
+                return None
+            return self._withheld_result(
+                tc_id,
+                "[needs review] previous execution failed; retry withheld for this side-effect class",
+            )
+        # STORE_UNAVAILABLE: fail closed for anything side-effecting.
+        if classification is SideEffectClass.READONLY:
+            return None
+        return self._withheld_result(
+            tc_id,
+            "[withheld] tool receipt store unavailable; side-effecting execution withheld",
+        )
+
     async def _execute_single_tool(
         self,
         tool_call: dict,
@@ -393,40 +625,25 @@ class ToolWorker(Worker):
             execution_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"tool-exec:{session_key}:{tc_id}"))
         else:
             execution_id = str(uuid.uuid4())
-        side_effect_class = classify(name).value
+        side_effect_class = classify(name)
+        arguments_digest = tool_arguments_digest(arguments)
+        messages = context.get("messages", []) if context else []
 
-        # Recovery (unified-chat-execution): an existing receipt means this
-        # dispatch is a resume replay of an already-attempted call — never
-        # re-run it blindly. succeeded → skip; unknown/failed-unretryable →
-        # human review. Retryable combinations fall through and re-execute
-        # under the same execution_id (latest receipt wins).
-        if self._event_store is not None and session_key:
-            prior_receipt = await get_tool_receipt(self._event_store, session_key, execution_id)
-            prior_status = (prior_receipt or {}).get("status")
-            if prior_status is not None and not should_auto_retry(classify(name), prior_status):
-                if prior_status == RECEIPT_SUCCEEDED:
-                    logger.info(
-                        "Tool '%s' execution %s already succeeded (resume) — skipping re-execution",
-                        name,
-                        execution_id,
-                    )
-                    return {
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "content": "[recovered] result restored from execution receipt; not re-executed",
-                    }
-                logger.warning(
-                    "Tool '%s' execution %s outcome %s — human review, not re-executed",
-                    name,
-                    execution_id,
-                    prior_status,
-                )
-                return {
-                    "role": "tool",
-                    "tool_call_id": tc_id,
-                    "content": "[needs review] previous execution outcome indeterminate; retry withheld",
-                    "is_error": True,
-                }
+        # Recovery pre-filter (read-only, no claim): terminal states resolve
+        # before access checks so a replay never re-triggers approval or
+        # denial bookkeeping for an already-resolved execution. Executable
+        # states fall through to the authoritative locked check below.
+        recovery = await self._recovery_outcome(
+            session_key=session_key,
+            execution_id=execution_id,
+            tc_id=tc_id,
+            arguments_digest=arguments_digest,
+            classification=side_effect_class,
+            messages=messages,
+            claim=False,
+        )
+        if recovery is not None:
+            return recovery
 
         access_decision = self._check_access(name, arguments, context, tc_id=tc_id, execution_context=execution_context)
         if access_decision is not None:
@@ -558,26 +775,39 @@ class ToolWorker(Worker):
             name=f"tool:{name}",
             attributes={"tool_name": name, "gen_ai.tool.name": name, "arguments": str(arguments)[:500]},
         )
-        if self._event_store and execution_context:
-            from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
-
-            await self._event_store.append(
-                Event(
-                    session_id=execution_context["session_id"],
-                    superstep=execution_context["superstep"],
-                    event_type=EventType.TOOL_CALL,
-                    node_id=None,
-                    trace_id=execution_context.get("trace_id"),
-                    payload={
-                        "tool_name": name,
-                        "arguments": arguments,
-                        "tool_call_id": tc_id,
-                        "execution_id": execution_id,
-                        "side_effect_class": side_effect_class,
-                        "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
-                    },
+        # Authoritative recovery + claim, inside the session event lock:
+        # re-resolve against the log and claim never-started executions so
+        # concurrent dispatches (duplicate workers) admit at most one first
+        # executor. A failed lock must not silently re-run side effects.
+        if self._event_store is not None and execution_context and session_key:
+            try:
+                async with self._event_store.acquire_event_lock(session_key):
+                    recovery = await self._recovery_outcome(
+                        session_key=session_key,
+                        execution_id=execution_id,
+                        tc_id=tc_id,
+                        arguments_digest=arguments_digest,
+                        classification=side_effect_class,
+                        messages=messages,
+                        claim=True,
+                        execution_context=execution_context,
+                        tool_name=name,
+                        arguments=arguments,
+                    )
+            except Exception:
+                logger.warning("Event lock failed for tool execution %s — fail closed", execution_id, exc_info=True)
+                recovery = (
+                    None
+                    if side_effect_class is SideEffectClass.READONLY
+                    else self._withheld_result(
+                        tc_id,
+                        "[withheld] tool receipt store unavailable; side-effecting execution withheld",
+                    )
                 )
-            )
+            if recovery is not None:
+                if span_ctx:
+                    await self._port.end_span(span_ctx.span_id, output_data={"withheld": "recovery"})
+                return recovery
         try:
             tool_start = time.monotonic()
             # Thread agent/workspace attribution into tool context so
@@ -634,7 +864,8 @@ class ToolWorker(Worker):
                             "tool_name": name,
                             "tool_call_id": tc_id,
                             "execution_id": execution_id,
-                            "side_effect_class": side_effect_class,
+                            "arguments_digest": arguments_digest,
+                            "side_effect_class": side_effect_class.value,
                             "status": status,
                             "error": str(e)[:500],
                             "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
@@ -684,7 +915,8 @@ class ToolWorker(Worker):
                         "result_digest": _hashlib.sha256(str(result).encode()).hexdigest(),
                         "tool_call_id": tc_id,
                         "execution_id": execution_id,
-                        "side_effect_class": side_effect_class,
+                        "arguments_digest": arguments_digest,
+                        "side_effect_class": side_effect_class.value,
                         "status": RECEIPT_SUCCEEDED,
                         "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
                     },

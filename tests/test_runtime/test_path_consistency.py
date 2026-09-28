@@ -103,6 +103,7 @@ async def test_both_paths_deny_critical_risk_when_no_callback_configured():
     # Pregel path: ToolWorker with the same policy/rules/callback=None.
     fake_store = MagicMock()
     fake_store.append = AsyncMock()
+    fake_store.get_events = AsyncMock(return_value=[])
     port = _StubPort()
     worker = ToolWorker(
         port=port,
@@ -147,6 +148,7 @@ async def test_both_paths_legacy_behavior_unchanged_when_policy_absent():
 
     fake_store = MagicMock()
     fake_store.append = AsyncMock()
+    fake_store.get_events = AsyncMock(return_value=[])
     port = _StubPort()
     worker = ToolWorker(port=port, event_store=fake_store)
     snapshot = _tc_payload("t-B", "bash", {"command": "ls"})
@@ -187,6 +189,7 @@ async def test_both_paths_approve_when_callback_returns_approved():
 
     fake_store = MagicMock()
     fake_store.append = AsyncMock()
+    fake_store.get_events = AsyncMock(return_value=[])
     port = _StubPort()
     worker = ToolWorker(
         port=port,

@@ -11,6 +11,7 @@ incremental replay capability.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
@@ -255,6 +256,25 @@ class InMemoryEventStore(EventStore):
 
     def __init__(self) -> None:
         self._store: dict[uuid.UUID, list[Event]] = {}
+        # One process-wide lock: the base no-op only serializes individual
+        # appends, but check-then-act sequences (e.g. the tool recovery
+        # claim: resolve state, then append TOOL_CALL) need a mutual-exclusion
+        # region spanning several awaits.
+        self._event_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def acquire_event_lock(
+        self,
+        session_id: uuid.UUID,
+        *,
+        timeout_ms: int = 30000,
+    ) -> AsyncGenerator[None, None]:
+        """Exclusive region for event read-modify-write sequences."""
+        await self._event_lock.acquire()
+        try:
+            yield
+        finally:
+            self._event_lock.release()
 
     async def append(self, event: Event) -> uuid.UUID:
         """Append an event with an auto-assigned version number.

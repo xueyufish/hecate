@@ -62,23 +62,23 @@ class _StubPort:
         return None
 
 
-def _payload(call_id: str, name: str, args: dict) -> dict:
-    return {
-        "messages": [
-            {"role": "user", "content": "go"},
-            {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": call_id,
-                        "type": "function",
-                        "function": {"name": name, "arguments": json.dumps(args)},
-                    }
-                ],
-            },
-        ]
-    }
+def _payload(call_id: str, name: str, args: dict, *, history: list[dict] | None = None) -> dict:
+    messages: list[dict] = [
+        {"role": "user", "content": "go"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": call_id,
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(args)},
+                }
+            ],
+        },
+    ]
+    messages.extend(history or [])
+    return {"messages": messages}
 
 
 def _make_worker(event_store: InMemoryEventStore, port: _StubPort) -> ToolWorker:
@@ -205,9 +205,13 @@ def test_retry_decision_matrix():
     # Idempotent write: same as readonly.
     assert should_auto_retry(SideEffectClass.IDEMPOTENT_WRITE, RECEIPT_FAILED) is True
     assert should_auto_retry(SideEffectClass.IDEMPOTENT_WRITE, RECEIPT_UNKNOWN) is False
-    # Non-idempotent / external: only on definitive failure.
-    assert should_auto_retry(SideEffectClass.NON_IDEMPOTENT_WRITE, RECEIPT_FAILED) is True
+    # Non-idempotent / external: a failed receipt no longer proves "did
+    # not take effect" (exception type cannot), so these go to human review
+    # — re-execution requires a confirmed idempotency guarantee or a done
+    # reconciliation (plan G2).
+    assert should_auto_retry(SideEffectClass.NON_IDEMPOTENT_WRITE, RECEIPT_FAILED) is False
     assert should_auto_retry(SideEffectClass.NON_IDEMPOTENT_WRITE, RECEIPT_UNKNOWN) is False
+    assert should_auto_retry(SideEffectClass.EXTERNAL_SIDE_EFFECT, RECEIPT_FAILED) is False
     assert should_auto_retry(SideEffectClass.EXTERNAL_SIDE_EFFECT, None) is False
     # Unknown classification: never.
     assert should_auto_retry(SideEffectClass.UNKNOWN, RECEIPT_FAILED) is False
@@ -264,21 +268,29 @@ async def test_temporal_run_worker_rejects_empty_activities():
 @pytest.mark.asyncio
 async def test_resume_does_not_reexecute_succeeded_call():
     """A re-dispatch of the same (session, tool_call_id) after a succeeded
-    receipt must not re-run the tool — the result is restored from the
-    receipt (deterministic execution_id makes the replay match)."""
+    receipt must not re-run the tool — the real recorded result is restored
+    from the channel history (deterministic execution_id makes the replay
+    match); without the content, an explicit reconciliation marker is
+    returned instead of a placeholder."""
     store = InMemoryEventStore()
     session_id = uuid.uuid4()
     port = _StubPort()
     worker = _make_worker(store, port)
     ctx = _execution_context(session_id)
 
-    await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
+    first = await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
     assert len(port.calls) == 1
+    first_msg = first.channel_updates["messages"][0]
 
-    replay = await worker.execute("tools", {}, _payload("call-1", "web_search", {"query": "x"}), ctx)
+    replay = await worker.execute(
+        "tools",
+        {},
+        _payload("call-1", "web_search", {"query": "x"}, history=[first_msg]),
+        ctx,
+    )
     assert len(port.calls) == 1, "succeeded tool must not re-execute on resume"
     replay_msg = replay.channel_updates["messages"][0]
-    assert "[recovered]" in replay_msg["content"]
+    assert replay_msg["content"] == first_msg["content"], "the real result is restored"
 
 
 @pytest.mark.asyncio

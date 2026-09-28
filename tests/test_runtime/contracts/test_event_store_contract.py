@@ -8,25 +8,42 @@ EventStore implementations must register themselves in
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
 
 from hecate.runtime.eventstore import Event, EventType, InMemoryEventStore
-from hecate.runtime.workers.tool_worker import ToolWorker, get_tool_receipt
+from hecate.runtime.workers.tool_worker import (
+    ToolExecutionState,
+    ToolWorker,
+    get_tool_receipt,
+    resolve_tool_execution_state,
+)
 
 
 class FakeEventStore:
     """Hand-written second implementation of the EventStore contract.
 
     Deliberately NOT derived from InMemoryEventStore: it shares only the
-    contract surface the Workers use (append / append_batch / get_events).
+    contract surface the Workers use (append / append_batch / get_events /
+    acquire_event_lock).
     """
 
     def __init__(self) -> None:
         self._store: dict[uuid.UUID, list[Event]] = {}
+        self._event_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def acquire_event_lock(self, session_id: uuid.UUID, *, timeout_ms: int = 30000) -> Any:
+        await self._event_lock.acquire()
+        try:
+            yield
+        finally:
+            self._event_lock.release()
 
     async def append(self, event: Event) -> uuid.UUID:
         events = self._store.setdefault(event.session_id, [])
@@ -149,15 +166,92 @@ async def test_contract_worker_receipt_flow_identical(event_store) -> None:
 
 @pytest.mark.asyncio
 async def test_contract_worker_resume_skips_on_either_store(event_store) -> None:
-    """Resume replay (same session + tool_call_id) skips re-execution on
-    both implementations — swapability covers the recovery path too."""
+    """Resume replay (same session + tool_call_id) skips re-execution and
+    backfills the real recorded result on both implementations —
+    swapability covers the recovery path too."""
+    session_id = uuid.uuid4()
+    port = _StubPort()
+    worker = ToolWorker(port=port, event_store=event_store)
+    ctx = _execution_context(session_id)
+
+    first = await worker.execute("tools", {}, _payload("call-1", "web_search"), ctx)
+    first_msg = first.channel_updates["messages"][0]
+    history_payload = _payload("call-1", "web_search")
+    history_payload["messages"].append(dict(first_msg))
+
+    replay = await worker.execute("tools", {}, history_payload, ctx)
+
+    assert len(port.calls) == 1
+    assert replay.channel_updates["messages"][0]["content"] == first_msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_contract_worker_claim_is_atomic_on_either_store(event_store) -> None:
+    """Concurrent dispatches of the same fresh non-idempotent call admit
+    exactly one execution: the claim (TOOL_CALL append) is exclusive."""
+    session_id = uuid.uuid4()
+    port = _StubPort()
+    ctx = _execution_context(session_id)
+    worker_a = ToolWorker(port=port, event_store=event_store)
+    worker_b = ToolWorker(port=port, event_store=event_store)
+    payload = _payload("call-1", "memory_add")
+
+    await asyncio.gather(
+        worker_a.execute("tools", {}, payload, ctx),
+        worker_b.execute("tools", {}, payload, ctx),
+    )
+
+    assert len(port.calls) == 1
+    events = await event_store.get_events(session_id)
+    claims = [e for e in events if e.event_type is EventType.TOOL_CALL]
+    assert len(claims) == 1, "exactly one claim is recorded"
+
+
+@pytest.mark.asyncio
+async def test_contract_worker_arguments_conflict_on_either_store(event_store) -> None:
+    """A receipt recorded for one argument set is a conflict for a
+    re-dispatch with different arguments — on every implementation."""
     session_id = uuid.uuid4()
     port = _StubPort()
     worker = ToolWorker(port=port, event_store=event_store)
     ctx = _execution_context(session_id)
 
     await worker.execute("tools", {}, _payload("call-1", "web_search"), ctx)
-    replay = await worker.execute("tools", {}, _payload("call-1", "web_search"), ctx)
+    conflicting = _payload("call-1", "web_search")
+    conflicting["messages"][1]["tool_calls"][0]["function"]["arguments"] = json.dumps({"query": "DIFFERENT"})
+
+    result = await worker.execute("tools", {}, conflicting, ctx)
 
     assert len(port.calls) == 1
-    assert "[recovered]" in replay.channel_updates["messages"][0]["content"]
+    msg = result.channel_updates["messages"][0]
+    assert "conflict" in msg["content"]
+
+
+@pytest.mark.asyncio
+async def test_contract_recovery_state_resolution_on_either_store(event_store) -> None:
+    """Four-state resolution reads identically on either implementation:
+    a TOOL_CALL without TOOL_RESULT resolves as claimed (with digest when
+    recorded), an unknown execution as never_started."""
+    session_id = uuid.uuid4()
+    execution_id = str(uuid.uuid4())
+    await event_store.append(
+        Event(
+            session_id=session_id,
+            superstep=0,
+            event_type=EventType.TOOL_CALL,
+            payload={
+                "tool_name": "memory_add",
+                "tool_call_id": "c1",
+                "execution_id": execution_id,
+                "arguments_digest": "digest-1",
+                "side_effect_class": "non_idempotent_write",
+            },
+        )
+    )
+
+    claimed = await resolve_tool_execution_state(event_store, session_id, execution_id)
+    assert claimed.state is ToolExecutionState.CLAIMED
+    assert claimed.arguments_digest == "digest-1"
+
+    fresh = await resolve_tool_execution_state(event_store, session_id, str(uuid.uuid4()))
+    assert fresh.state is ToolExecutionState.NEVER_STARTED
