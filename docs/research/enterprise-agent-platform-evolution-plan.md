@@ -1055,7 +1055,7 @@ I-E 的绑定和评测服务可在 I-C 契约稳定后与 I-D 分别推进；I-F
 - [Pi](https://github.com/earendil-works/pi)、[Mem0](https://github.com/mem0ai/mem0)：仅作为运行时/记忆适配验证的候选示例。平台模型、配置字段、Feature ID 和验收不能绑定这些品牌。
 - [OpenSandbox 架构](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/architecture/index.md)与[生命周期 API](https://github.com/opensandbox-group/OpenSandbox/blob/main/specs/sandbox-lifecycle.yml)：生命周期与执行接口可独立于具体隔离后端；用于验证 SandboxProvider 的边界，不将其协议或产品指定为唯一实现。
 - [Daytona 生命周期](https://www.daytona.io/docs/sandboxes)与[持久化](https://www.daytona.io/docs/en/persistence/)：区分环境暂停/停止/归档和外部持久数据；支持本方案对工作区、快照与产物分别建模。具体恢复保证仍由后端能力测试确定。
-- [OpenShell 凭据管理](https://github.com/NVIDIA/OpenShell/blob/main/docs/sandboxes/manage-providers.mdx)：网络许可与凭据目标绑定分别校验，支持将凭据代理和环境出口作为独立强制边界。
+- [OpenShell 凭据管理](https://github.com/NVIDIA/OpenShell/blob/main/docs/how-it-works/providers/overview.mdx):网络许可与凭据目标绑定分别校验，支持将凭据代理和环境出口作为独立强制边界。
 - [AgentCore Code Interpreter 会话管理](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/code-interpreter-session-characteristics.html)：隔离会话、超时与回收说明，支持为环境定义明确生命周期；不将供应商隔离声明自动认定为 Hecate 已验证的部署保证。
 - [OpenAI Agents API 架构](https://developers.openai.com/api/docs/guides/agents-api/architecture)与[执行方式对比](https://developers.openai.com/api/docs/guides/agents)：托管 harness 持有模型/工具循环及会话，而 Sandbox 可单独选择；自托管循环与托管循环是不同的执行方式，不应把环境位置当成会话位置。
 - [OpenAI Agents API 数据限制](https://developers.openai.com/api/docs/guides/agents-api/overview)、[Sandbox 安全说明](https://developers.openai.com/api/docs/guides/agents-api/environments/security)与[观测/用量](https://developers.openai.com/api/docs/guides/agents-api/observability)：提供当前试点的数据驻留、MCP 连接来源、事件及用量核验依据；这些供应商条件可能变化，选型时须重新核验，不作为平台通用保证。
