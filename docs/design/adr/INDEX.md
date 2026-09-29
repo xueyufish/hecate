@@ -1,6 +1,6 @@
 # ADR Index — by Topic
 
-The 32 ADRs in this directory cover every significant architectural decision since Hecate started. They are listed chronologically in the [README](../README.md#architecture-decision-records-adrs). This index provides an alternative **topic-grouped** view to help you find the ADRs relevant to a specific concern.
+The ADRs in this directory cover every significant architectural decision since Hecate started. They are listed chronologically in the [README](../README.md#architecture-decision-records-adrs). This index provides an alternative **topic-grouped** view to help you find the ADRs relevant to a specific concern.
 
 Each ADR row links to the full document. Use this index as a **map**; read the individual ADRs for the "why" behind each decision.
 
@@ -21,6 +21,8 @@ The big-picture design that everything else builds on.
 | [ADR-030](030-event-sourced-execution-state.md) | Event-Sourced Execution State (Log-as-Truth) | Event log as state source; WAL ordering; projection cache; 1.3.19 |
 | [ADR-031](031-web-widget-iframe-architecture.md) | Web Widget Iframe Architecture (Bypassing ChannelBase) | Widget scope boundary; iframe + employee JWT; defer anonymous to-C to P5 |
 | [ADR-033](033-context-compaction-surface-replacement.md) | LLM-Managed Context Compaction via Surface Replacement | Bracket events + shadowed ranges on the execution log; summary node in the fold; checkpoint source; 4.13 durable backend |
+| [ADR-034](034-platform-governance-semantics.md) | Platform Governance Semantics and Execution Backend Standing | Governance results vs replaceable implementations; built-in Runtime as reference; harness×environment dual-axis; single-writer state ownership; capability negotiation; no lossless state migration |
+| [ADR-035](035-standalone-execution-package-direction.md) | Standalone Execution Component — Package and Directory Migration Direction | `hecate-runtime`/`hecate-runner` package target; contracts→domain→adapter dependency direction; compatibility shims; distribution units, not a microservice split |
 
 ### ⚙️ Engine runtime
 
@@ -148,6 +150,7 @@ Marketplace, plugins, distribution.
 |---|---|---|
 | [ADR-027](027-ecosystem-enhancement.md) | Ecosystem Enhancement Architecture | Marketplace, community |
 | [ADR-029](029-trust-tiered-kernel-plugin-architecture.md) | Trust-Tiered Kernel and Plugin Architecture | (also under Architecture & Security) Marketplace trust model, isolation tiers, install authority |
+| [ADR-035](035-standalone-execution-package-direction.md) | Standalone Execution Component — Package and Directory Migration Direction | (also under Architecture) Distribution units for the standalone execution component |
 
 ---
 
@@ -168,7 +171,7 @@ Multi-agent maturity + observability deepening:
 ### P3+ (Post-1.0)
 Future capabilities:
 
-`ADR-013`, `ADR-014`, `ADR-015`, `ADR-017`, `ADR-020`, `ADR-027`, `ADR-030`, `ADR-031`, `ADR-032`
+`ADR-013`, `ADR-014`, `ADR-015`, `ADR-017`, `ADR-020`, `ADR-027`, `ADR-030`, `ADR-031`, `ADR-032`, `ADR-034`, `ADR-035`
 
 ---
 

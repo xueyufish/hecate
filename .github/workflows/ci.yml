@@ -44,11 +44,13 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install ruff
+          pip install ruff pyyaml
       - name: Lint
         run: ruff check src/hecate/ packages/ tests/
       - name: Format check
         run: ruff format --check src/hecate/ packages/ tests/
+      - name: Feature inventory check (non-strict; strict regions still fail on drift)
+        run: python scripts/feature_inventory.py check
 
   typecheck:
     needs: changes

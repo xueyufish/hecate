@@ -4,13 +4,37 @@ This document explains **where Hecate sits in the agent platform landscape**, wh
 
 Hecate is currently in **alpha**. The positioning is provisional — it will sharpen as the project matures toward 1.0.
 
-The strategic target is being revised toward an **enterprise Agent governance and integration platform** whose execution components can also be consumed by products without deploying the management plane. This target describes the direction under review; it does not mean independent Runtime distribution or production governance profiles are already shipped. The [platform evolution plan](../research/enterprise-agent-platform-evolution-plan.md) tracks that work and its acceptance gates. This page's detailed feature and competitor claims remain subject to a step2 evidence and catalogue review.
+The strategic target is being revised toward an **enterprise Agent governance and integration platform** whose execution components can also be consumed by products without deploying the management plane. This target describes the direction under review; it does not mean independent Runtime distribution or production governance profiles are already shipped. The [platform evolution plan](../refactor/enterprise-agent-platform-evolution-plan.md) tracks that work and its acceptance gates. This page's detailed feature and competitor claims remain subject to a step2 evidence and catalogue review.
 
 ---
 
 ## 30-second summary
 
 > Hecate's target is an **open-source enterprise Agent governance and integration platform**: organizations can register and govern Agents built with different runtimes, models, and languages, while products can consume a separately deployable execution component when they need one. The current implementation is Python-based and includes a Pregel Runtime, APIs, MCP/A2A integrations, and enterprise capabilities at varying maturity. Hecate remains in alpha; independent Runtime distribution, cross-runtime governance, and production support profiles require the implementation and evidence in the evolution plan. Python, Pregel, and any one provider are reference choices, not requirements imposed on every connected Agent.
+
+---
+
+## Delivery boundaries and deployment modes
+
+Hecate separates what it must guarantee (governance semantics, trust boundaries, enforcement points, verifiable evidence) from what it ships as replaceable implementations. Three delivery boundaries follow; none of them requires a separate repository or an immediate microservice split, and no single algorithm, database, or vendor SDK may become a mandatory dependency across all boundaries.
+
+| Delivery boundary | Minimum responsibility and callers | Optional parts and exclusions |
+|---|---|---|
+| Neutral contracts and clients | Publish schemas, request/event/receipt samples, and versioning rules per capability; usable by business apps, the management platform, and per-language adapters | SDKs are convenience wrappers — they never pull in full Hecate, the ORM, the Pregel DSL, or vendor-private state |
+| Standalone execution component | Built-in Runtime plus an execution host that loads definitions, assembles selected adapters, verifies caller identity and permissions, manages execution state and local evidence, and serves a business-app entry point | Model implementations, Memory/RAG, sandbox, persistence, and security services are configurable; the standalone host needs neither Studio, an org directory, nor the management platform to start |
+| Enterprise management platform | Registration/deployment, centralized admission, release, teams, human intervention, evaluation management, and evidence queries | Manages built-in and external runtimes; customers never need the management platform just to use the reference execution component |
+
+Three deployment modes are accepted separately — passing one never counts as passing another:
+
+| Deployment mode | Must deploy | Source of definitions, authorization, and state | First delivery gate |
+|---|---|---|---|
+| Standalone | Execution host, selected model/business adapters, profile-required storage | Locally pinned artifacts; the business app's verified identity and local policy; the host owns local tasks and execution facts | Read-only technical preview on the evolution plan's standalone path; scoped production only after its reliability/governance slice passes |
+| Managed | The same execution host or a qualified external backend, plus a reachable (or policy-disconnected) control plane | Control plane publishes desired configuration and authorization; the executor keeps actual bindings, execution facts, and command receipts | After the managed connect/disconnect/reconnect slice passes its gates |
+| Full private platform | Management platform, execution components, and chosen infrastructure inside the customer environment | The local enterprise domain owns centralized governance; the executor still owns execution facts | Per the full-platform conformance profile |
+
+**Consumer contract for business-App standalone delivery** (example scenario: a structured inventory-type business app). The business API keeps final authority over inventory reads/writes and the business state machine; the standalone host never depends on the example business's data model, and Hecate implements no inventory, pricing, or customer management. Delivery gates are tiered: a read-only technical preview (no production writes), scoped standalone production (local identity/approval, durable tasks, evidence retention), and managed production (control-plane enrollment with bounded authorization leases). The first standalone service entry point is HTTP/JSON; in-process Python embedding is certified separately against its own lifecycle and isolation constraints; no up-front promise is made about SDKs in other languages.
+
+**Hosted Agent services are a first-class execution backend.** Vendor-hosted Agent services (which hold the reasoning loop and session) register on two axes — harness/session owner and sandbox/file-and-command owner — plus the tool-and-data enforcement point, instead of a single hosted/self-hosted tag. Self-hosting Hecate does not make every bound backend satisfy private-deployment or local data-residency requirements; vendor conditions (residency, retention, deletion, revocation effectiveness) are admission inputs verified per service version at binding time.
 
 ---
 
@@ -56,7 +80,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 |---|---|---|---|---|---|---|---|
 | **Deployment** | Self-hosted OSS (MIT) | Cloud + self-host | OSS library | Cloud + enterprise | Cloud SaaS | Cloud (AWS) | Cloud + self-host (Fair-code) |
 | **Primary UX** | Code (Python) + Visual | Visual-first | Code (Python) | Code + Visual | Visual + code | Code (any framework) | Visual + code |
-| **Engine** | Self-developed Pregel/BSP + event-sourced execution state (Log-as-Truth, 1.3.19) | DAG-based | Pregel (Google) inspired | Custom | Atlas Reasoning Engine | Wraps frameworks | DAG-based |
+| **Engine** | Built-in Pregel/BSP Runtime (the reference implementation) + event-sourced execution state (Log-as-Truth); external execution backends plug in through versioned contracts | DAG-based | Pregel (Google) inspired | Custom | Atlas Reasoning Engine | Wraps frameworks | DAG-based |
 | **MCP server + client** | ✅ Bidirectional (latest spec) | ✅ Client only | Partial | ✅ | ✅ | ✅ | ✅ |
 | **A2A protocol** | ✅ (server + client) | ❌ | ❌ | Partial | ✅ | ✅ | ❌ |
 | **OpenAI-compatible API** | ✅ Wire-compatible | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
@@ -96,7 +120,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 | | LangGraph | Hecate |
 |---|---|---|
 | **Mental model** | Python library — you bring the runtime | Platform — runtime included |
-| **Production deployment** | Pair with LangSmith Deployment (paid) | Self-hosted, production-ready out of the box |
+| **Production deployment** | Pair with LangSmith Deployment (paid) | Self-hosted; production support is granted per deployment profile as evidence lands (alpha today) |
 | **MCP** | Partial (client) | Bidirectional (server + client, latest spec) |
 | **A2A** | ❌ | ✅ (server + client) |
 | **Multi-tenancy** | Add-on (you build it) | Native (Org → Workspace → RBAC) |
@@ -234,7 +258,7 @@ Pick something else when:
 
 Hecate's target position is the **enterprise integration and governance layer around Agents**, with an optional, independently consumable reference execution component. It should let organizations use different frameworks, hosted Agent services, models, and languages while applying consistent identity, policy, approval, evidence, evaluation, and lifecycle rules where the connected backend permits those controls.
 
-The built-in Pregel Runtime remains a product capability and a reference implementation. Its event-sourced execution model, context processing, workflow tooling, and other engine features can differentiate Hecate's own Runtime; external Agents do not need to adopt its graph DSL or internal state model. The Runtime's current import boundaries do not by themselves prove it can be installed and run independently. The [evolution plan](../research/enterprise-agent-platform-evolution-plan.md) defines that work and separates a standalone execution profile from the management platform.
+The built-in Pregel Runtime remains a product capability and a reference implementation. Its event-sourced execution model, context processing, workflow tooling, and other engine features can differentiate Hecate's own Runtime; external Agents do not need to adopt its graph DSL or internal state model. The Runtime's current import boundaries do not by themselves prove it can be installed and run independently. The [evolution plan](../refactor/enterprise-agent-platform-evolution-plan.md) defines that work and separates a standalone execution profile from the management platform.
 
 Hecate's governing promise must follow evidence: registration is not production approval, a provider's declared feature is not enforcement, and a trace is not proof that an action was authorized. Each backend and deployment combination earns only the control and support level demonstrated by conformance tests. The platform may report limited observability or control for hosted systems rather than infer hidden provider behavior.
 

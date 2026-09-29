@@ -14,7 +14,7 @@ Hecate enables enterprises to build, orchestrate, and run AI Agent applications 
 >
 > Security Shield (left sidebar) and Ecosystem (right sidebar) are cross-cutting concerns that span all platform modules. Each module in the L1 diagram has a corresponding L2 breakdown — see [Module Architecture](#module-architecture) below.
 
-The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** with checkpoints as materialized caches, supports **Execution Replay** for time-travel debugging, and dispatches node execution to a Worker Pool.
+The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** with checkpoints as materialized caches, supports **Execution Replay** for time-travel debugging, and dispatches node execution to a Worker Pool. The built-in Runtime is the reference implementation; external execution backends are first-class and plug in through the boundaries described in [Control Plane, Execution Access, and Trust Boundaries](#control-plane-execution-access-and-trust-boundaries) below.
 
 **Engine Extension Interfaces** — engine-level extensibility:
 
@@ -135,6 +135,43 @@ Cross-cutting security shield spanning all platform layers. Engine-level guardra
 Integration and extensibility layer. Native MCP support (Client + Server with Streamable HTTP transport, **latest MCP spec · stateless core**, shipped recently), webhook notifications, event dispatcher, and OpenAI-compatible API ensure broad interoperability. A2A Protocol enables cross-framework agent communication — Hecate agents can be discovered and invoked by external platforms, and external agents can be used as sub-agents in Hecate workflows.
 
 > See [Ecosystem Design](ecosystem-design.md) for L2 architecture, marketplace, and protocol integrations.
+
+---
+
+## Control Plane, Execution Access, and Trust Boundaries
+
+Hecate's management and governance layers remain a **modular monolith**: capability domains live as sub-packages inside the same process and codebase, and no present requirement justifies splitting the control plane into microservices. External runtimes and process-isolated components (gateways, non-Python backends) join as separate processes, containers, or remote services through versioned contracts — not by being absorbed into the monolith.
+
+**Runtime call chains vs source dependency directions.** At runtime, a request flows protocol/UI entry → domain application service → injected adapter → backend; neutral contracts are types, not a forwarding service. In source, domain services and adapters each depend on neutral contracts, adapters may depend on vendor SDKs, and domain services must never import concrete adapters — `core/composition/` assembles implementations. Contracts depend on no domain, ORM, web framework, or vendor SDK. Same-process callers invoke public interfaces only; reaching around them through a shared database is prohibited. Interface naming follows the repo rules (`XxxPort` is reserved for runtime↔domain hexagonal seams).
+
+**Trust boundaries and enforcement points.** Every protected side-effect path names an enforcement point and an authoritative state writer. External identity/policy services may make decisions, but actions execute only through Hecate's tool gateway or a verified execution gateway, which link the policy decision and the execution receipt. Each piece of state has a single authoritative writer: the control plane owns platform task responsibility/acceptance and desired configuration, while executors own actual run state, checkpoints, and internal loops — the platform stores projections with source and sequence, never dual-writes executor state. Hosted vendor harnesses register on two axes (harness/session owner × sandbox/file-and-command owner) plus the tool-and-data enforcement point; the platform only claims control it actually exercises, and unverifiable controls are reported as `unsupported`/`cooperative` rather than `enforced`.
+
+**Capability domains.** The platform's responsibilities group into seven capability domains — Agent Engineering, AgentOps, Agent Control Plane, Agent Governance, Security, Evaluation, and the MCP/A2A enterprise access layer. They are organizational boundaries for ownership and future extraction, not today's deployment units: the domains must not each build a second Agent identity, task state, or approval source of truth.
+
+## Capability Domains and Target Sub-Packages
+
+Each separable candidate unit designates an internal package, a public application interface, the data/state it owns, and its events. Cross-package calls go only through public interfaces and neutral DTOs/events; built-in Python implementations may be injected in-process, while cross-language or isolated deployments join through out-of-process adapters of the same interface — no speculative RPC layer is built in advance.
+
+| Capability domain | Current code location (candidate) | Target sub-package | Owns | Explicitly does not own |
+|---|---|---|---|---|
+| Agent Engineering | `studio/` (agents, workflows, templates, prompts) | `studio/engineering/` | Drafts and build records; submits artifacts through the release interface | Release admission state; execution |
+| AgentOps | `ops/` (health, costs, traces, alerts, quotas) | `ops/agentops/` | Alerting and disposition records | Task/Run state (queried from the control-plane package) |
+| Agent Control Plane | scattered across `studio/`/`channel/` | `execution/` + `collaboration/` | Deployment desired config, platform task responsibility/acceptance, run projections, control requests; teams, assignments, delegation acceptance | Runtime-internal checkpoints; rewriting backend execution facts |
+| Agent Governance | `enterprise/`, `ops/api/audit.py`, `tools/policy/` | `enterprise/governance/` (+ `ops/evidence/` as needed) | Policy/approval/release decisions; governance evidence write & query | Enforcement itself (delegated to gateways via versioned receipts) |
+| Security | `enterprise/auth/`, `enterprise/vault/`, `tools/gateway/`, `tools/policy/` | existing packages stay separate | Identity resolution, credentials, action enforcement — coordinated via versioned authorization request/decision/execution receipts | A merged mega-package |
+| Evaluation | `ops/evaluation/` | existing package, external evaluators in adapter sub-package | Evaluation tasks and results | Release approval (consumed by Governance as evidence references) |
+| MCP/A2A access | `tools/mcp/`, `channel/a2a/` | existing packages + gateway adapters | Protocol sessions and mappings | Task/Run, identity authorization, and Action state (owned by platform packages) |
+
+**Boundary rules in effect now.** The ORM may stay in shared `models/`, but each table has exactly one domain responsible for its reads/writes; other domains query through the owning domain's service and must not import its repository or write its tables. `core/composition/` only assembles implementations and gains no new business logic. New cross-package dependencies are blocked by the domain layering tests; the planned package-internal boundary checks extend `tests/test_layering_domain.py` with per-subpackage rules (no cross-subpackage implementation imports, no direct writes to another domain's tables) so that new code cannot reintroduce them.
+
+**Registered exceptions** (each carries an owner, migration step, and exit condition; owners are assigned when the owning change starts, per the repo's assignment policy):
+
+| Exception | Location | Migration step | Exit condition |
+|---|---|---|---|
+| MCP handlers write `AgentModel` rows directly | `tools/mcp/server.py` (agent create/update) | Action-enforcement work moves CRUD behind the owning service | MCP handlers no longer write agent tables |
+| MCP handlers write `KnowledgeBase` rows directly | `tools/mcp/server.py` (knowledge create) | Knowledge ownership lands with the knowledge domain service | MCP handlers no longer write knowledge tables |
+| Prompt-optimization writes `PromptVersionModel` directly | `ops/prompt_optimization/review.py` | Candidate/review flow moves behind the prompt-owning service | ops stops writing prompt version tables |
+| Function-level lazy imports crossing domains | `src/hecate/runtime/` (inventory in `src/hecate/runtime/AGENTS.md`, each row with its own exit condition) | Tracked per row in that inventory; standalone-profile cleanup lands with the shared-assembly work | Each row's recorded exit condition |
 
 ---
 
@@ -287,7 +324,7 @@ Sub-domain deep-dives beyond the module-level documents.
 
 ### Architecture Decision Records
 
-- [ADR Directory](adr/) — 32 decisions with context and rationale; topic-grouped index at `adr/INDEX.md`
+- [ADR Directory](adr/) — architecture decisions with context and rationale; topic-grouped index at `adr/INDEX.md`
 
 ### Project Process
 
