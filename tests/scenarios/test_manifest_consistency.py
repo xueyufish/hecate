@@ -27,6 +27,11 @@ P_GROUP_IDS = {f"P{n:02d}" for n in range(1, 9)}
 SCENARIO_STATUSES = {"implemented", "planned"}
 P_GROUP_STATUSES = {"covered", "partial", "planned", "deferred"}
 TEST_DEF_PATTERN = re.compile(r"def (test_s(\d+)[0-9a-z_]*)\s*\(")
+SC_TEST_DEF_PATTERN = re.compile(r"def (test_sc(\d+)[0-9a-z_]*)\s*\(")
+SC_RUN_MODES = {"standalone", "managed", "conditional"}
+# When an SC scenario is still `planned`, its registration row in the
+# standalone baseline doc (§5) must not claim delivered status.
+SC_DELIVERED_MARKERS = ("已支持", "已通过")
 
 
 def _load_manifest() -> dict:
@@ -105,3 +110,85 @@ def test_baseline_doc_sync_obligation() -> None:
     assert "tests/scenarios/manifest.yaml" in baseline.read_text(encoding="utf-8"), (
         "synced baseline doc must reference tests/scenarios/manifest.yaml (reference, not copy)"
     )
+
+
+def test_sc_group_is_structurally_valid() -> None:
+    """SC (standalone-consumption) entries follow their own contract.
+
+    They live under a dedicated ``sc_scenarios`` key so the S/P validation
+    above keeps its original semantics. ``planned`` entries must name their
+    responsible step and gating change; ``implemented`` entries must not
+    carry ``blocked_by`` (same rule as S scenarios).
+    """
+    manifest = _load_manifest()
+    sc_entries = manifest["sc_scenarios"]
+    assert sc_entries, "sc_scenarios must exist and be non-empty"
+
+    ids = [entry["id"] for entry in sc_entries]
+    assert len(ids) == len(set(ids)), "SC ids must be unique"
+    for entry in sc_entries:
+        sid = entry["id"]
+        assert re.fullmatch(r"SC\d+", sid), f"{sid}: id must look like SC<nn>"
+        assert entry["status"] in SCENARIO_STATUSES, f"{sid}: unknown status"
+        assert entry["run_mode"] in SC_RUN_MODES, f"{sid}: unknown run_mode"
+        assert entry["tier"] in (1, 2), f"{sid}: tier must be 1 or 2"
+        assert entry["title"].strip(), f"{sid}: title must be non-empty"
+        assert entry["assertions"].strip(), f"{sid}: assertions must be described"
+        if entry["status"] == "planned":
+            assert entry.get("responsible_step"), f"{sid}: planned SC must name its responsible step"
+            assert entry.get("blocked_by"), f"{sid}: planned SC must name its gating change"
+        else:
+            assert not entry.get("blocked_by"), f"{sid}: implemented SC must not carry blocked_by"
+
+
+def test_sc_implemented_tests_binding() -> None:
+    """Bidirectional binding between implemented SC entries and tests.
+
+    Mirrors ``test_implemented_scenarios_have_tests_and_vice_versa`` for the
+    ``test_sc<nn>_*`` prefix. Fixture-level helpers (``test_sc_fixture_*``)
+    deliberately do not match either regex: they verify stub behavior, not a
+    scenario delivery.
+    """
+    manifest = _load_manifest()
+    implemented = {e["id"].lower() for e in manifest["sc_scenarios"] if e["status"] == "implemented"}
+    found = {
+        f"sc{match.group(2)}"
+        for path in sorted(SCENARIO_DIR.glob("test_*.py"))
+        for match in SC_TEST_DEF_PATTERN.finditer(path.read_text(encoding="utf-8"))
+    }
+    missing_tests = implemented - found
+    assert not missing_tests, f"implemented SC scenarios without test_sc<nn>_* tests: {sorted(missing_tests)}"
+    orphan_tests = found - implemented
+    assert not orphan_tests, f"test_sc<nn>_* tests without an implemented SC entry: {sorted(orphan_tests)}"
+
+
+def test_standalone_baseline_doc_registration_alignment() -> None:
+    """The standalone baseline doc's §5 registration table tracks the SC group.
+
+    - when ``standalone_baseline_doc_sync`` is ``synced``, the doc must exist
+      and reference this manifest (reference, not copy);
+    - every SC id in the manifest must have a registration row in the doc;
+    - while an SC entry is ``planned``, its doc row must not claim delivered
+      status (已支持/已通过).
+    """
+    manifest = _load_manifest()
+    doc_path = manifest["_meta"].get("standalone_baseline_doc")
+    assert doc_path, "_meta.standalone_baseline_doc must name the standalone baseline document"
+    doc = REPO_ROOT / doc_path
+    if manifest["_meta"]["standalone_baseline_doc_sync"] == "synced":
+        assert doc.exists(), f"synced standalone baseline doc missing: {doc}"
+        assert "tests/scenarios/manifest.yaml" in doc.read_text(encoding="utf-8"), (
+            "synced standalone baseline doc must reference tests/scenarios/manifest.yaml"
+        )
+    if not doc.exists():
+        return
+
+    doc_text = doc.read_text(encoding="utf-8")
+    rows = {match.group(1): match.group(0) for match in re.finditer(r"^\|\s*(SC\d+)\s*\|.*$", doc_text, re.MULTILINE)}
+    for entry in manifest["sc_scenarios"]:
+        sid = entry["id"]
+        assert sid in rows, f"{sid}: no registration row in {doc_path} (§5 table)"
+        if entry["status"] == "planned":
+            assert not any(marker in rows[sid] for marker in SC_DELIVERED_MARKERS), (
+                f"{sid}: planned SC row must not claim delivered status"
+            )
