@@ -132,7 +132,7 @@ class TestToolWorker:
             },
         )
         call_args = port.tool_execute.call_args
-        assert call_args.kwargs["args"] == {}
+        assert call_args is None
 
     async def test_pre_hook_blocks(self) -> None:
         port = _make_port()
