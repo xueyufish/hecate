@@ -371,14 +371,14 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **独立消费增量（新 change，不重做上面的已完成项）：**
 
-- [ ] 重新记录此次实施所用提交、在途 change 和包版本；历史 `platform-evolution-baseline.md` 保持快照性质，新增 `docs/research/standalone-consumption-baseline.md` 并链接原证据，不覆盖原结论。
-- [ ] 从实际生产执行链梳理定义加载、图编译、Worker、身份/策略、模型/工具、checkpoint、证据和启动配置的依赖闭包；包括 `runtime/AGENTS.md` 的函数内 import。逐项写明代码位置、是否执行必需、可由宿主注入/可选安装/待解除耦合及责任 step。核对 wheel 依赖，不以 import 探针通过代替可独立安装。
-- [ ] 为独立、受管、完整私有平台模式补拓扑；另记网络模式、可信身份来源、任务/执行状态 owner、凭据和数据出口。受管断连明确授权有效期及重新连接的责任方，不能沿用在线撤权保证。
-- [ ] 在现有 `tests/scenarios/manifest.yaml` 追加独立消费场景组（建议前缀 `SC`，实施时检查未占用），保留 S/P 组 ID。提供模拟库存 API、两个隔离的数据域、只读身份与需审批的测试写动作；业务规则放 fixture，不新增 Hecate 车商领域模型，不引入 RAG 前置。
-- [ ] 固定验收规格：干净安装且无管理平台冷启动、读取/生成建议、无权调用拒绝、持久任务重启、受保护写入未知结果、断连授权过期、审计存储失败、重连重复命令及数据外发检查。记录当前支持/未支持/未验证及责任 step；尚未实现的能力不伪造通过报告，也不以永久 skip 当完成。
-- [ ] 建立差距表：step5 负责安装和只读执行，step6/7 负责持久化/本地强制策略和受管断连，step10/11 负责证据与制品门禁，step16 负责组合认证。每项挂实现 owner、验收 owner 的待指派字段和指派时点，不虚构人员或工期。
+- [x] 重新记录此次实施所用提交、在途 change 和包版本；历史 `platform-evolution-baseline.md` 保持快照性质，新增 `docs/refactor/standalone-consumption-baseline.md` 并链接原证据，不覆盖原结论。（独立基线 §1；基线提交 `a4851bb`，在途 change 为本 change 与 `openspec-spec-hygiene`；仅静态核对，无安装/运行验证）
+- [x] 从实际生产执行链梳理定义加载、图编译、Worker、身份/策略、模型/工具、checkpoint、证据和启动配置的依赖闭包；包括 `runtime/AGENTS.md` 的函数内 import。逐项写明代码位置、是否执行必需、可由宿主注入/可选安装/待解除耦合及责任 step。核对 wheel 依赖，不以 import 探针通过代替可独立安装。（独立基线 §2 八链段闭包表 + 懒加载清单逐行归类，§3 wheel 交叉核对；全部为静态核对，安装性验证归 step5b）
+- [x] 为独立、受管、完整私有平台模式补拓扑；另记网络模式、可信身份来源、任务/执行状态 owner、凭据和数据出口。受管断连明确授权有效期及重新连接的责任方，不能沿用在线撤权保证。（独立基线 §4；断连授权有效期、最大陈旧窗口与重连责任方登记为目标语义，待 step6/7 落地）
+- [x] 在现有 `tests/scenarios/manifest.yaml` 追加独立消费场景组（建议前缀 `SC`，实施时检查未占用），保留 S/P 组 ID。提供模拟库存 API、两个隔离的数据域、只读身份与需审批的测试写动作；业务规则放 fixture，不新增 Hecate 车商领域模型，不引入 RAG 前置。（manifest `sc_scenarios` SC01—SC10 全部 `planned` 并绑定责任 step 与门禁 change，S/P 组零改动；fixture `tests/scenarios/tools/inventory_api.py` + `test_sc_fixture_inventory.py` 仅验证 stub 自身行为，不声称宿主能力）
+- [x] 固定验收规格：干净安装且无管理平台冷启动、读取/生成建议、无权调用拒绝、持久任务重启、受保护写入未知结果、断连授权过期、审计存储失败、重连重复命令及数据外发检查。记录当前支持/未支持/未验证及责任 step；尚未实现的能力不伪造通过报告，也不以永久 skip 当完成。（独立基线 §5 登记表 SC01—SC10 当前状态均为未支持，与 manifest 由 `test_manifest_consistency.py` 钉住一致；SC 实现测试随责任 change 交付后翻转）
+- [x] 建立差距表：step5 负责安装和只读执行，step6/7 负责持久化/本地强制策略和受管断连，step10/11 负责证据与制品门禁，step16 负责组合认证。每项挂实现 owner、验收 owner 的待指派字段和指派时点，不虚构人员或工期。（独立基线 §6 step5a—step16 差距行，owner 待指派、指派时点为 change 启动时；条件性延期项另见 §7）
 
-**落点与交付：**沿用既有 `docs/research/platform-evolution-baseline.md` 与场景包；独立消费增量写入单独基线文档及 manifest/fixture。step1 交付现状证据与可重复输入、预期断言，不要求目标 Runtime 已经独立运行；实际运行通过证据由所属步骤补齐。不接入实际发送或生产写入。
+**落点与交付：**沿用既有 `docs/refactor/platform-evolution-baseline.md` 与场景包；独立消费增量写入单独基线文档及 manifest/fixture。step1 交付现状证据与可重复输入、预期断言，不要求目标 Runtime 已经独立运行；实际运行通过证据由所属步骤补齐。不接入实际发送或生产写入。
 
 **验收：**每个外部入口能指向具体执行调用链；至少有正常执行、拒绝动作、等待审批、后端失联、重复提交这些可重复场景。跨包实现依赖、共享表写入和共享事务已列入归属清单。每条受保护副作用路径都能指出强制执行点及潜在旁路；后续 step 对比的是同一基线。
 

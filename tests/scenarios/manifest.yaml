@@ -9,6 +9,14 @@
 # Scenario status semantics:
 #   implemented — a test function with the `test_s<nn>_` prefix exists here
 #   planned     — defined but gated on a named change; no test may exist yet
+
+# SC group (standalone-consumption) semantics:
+#   Entries live under `sc_scenarios` (independent top-level key) because their
+#   contract differs from S entries: run_mode + responsible_step + gating on
+#   later-step changes. `implemented` requires a `test_sc<nn>_*` test function
+#   here; `planned` entries must NOT have one. `blocked_by` names are the
+#   plan's suggested change names (plan §7) — rename there first if steps
+#   change, then flip entries. Titles are verbatim from plan §8 matrix rows.
 #
 # P-group coverage status semantics:
 #   covered   — scenarios in this pack fully verify the group's step1 slice
@@ -19,9 +27,11 @@ schema_version: 1
 _meta:
   purpose: >-
     Architecture evaluation pack for the platform evolution plan
-    (docs/research/enterprise-agent-platform-evolution-plan.md, step1).
-  baseline_doc: docs/research/platform-evolution-baseline.md
+    (docs/refactor/enterprise-agent-platform-evolution-plan.md, step1).
+  baseline_doc: docs/refactor/platform-evolution-baseline.md
   baseline_doc_sync: synced # step1-baseline-completion flipped this after the baseline doc gained the reference; test_baseline_doc_sync_obligation pins it
+  standalone_baseline_doc: docs/refactor/standalone-consumption-baseline.md
+  standalone_baseline_doc_sync: synced # standalone-consumption-baseline flipped this after the standalone doc gained the reference; test_standalone_baseline_doc_registration_alignment pins it
 tiers:
   tier1: >-
     CI-deterministic: stub model, in-memory SQLite, stub enterprise tools;
@@ -198,3 +208,126 @@ scenarios:
       after the human approval the ticket service executes exactly once with
       the final answer referencing the real ticket id. Content-quality review
       stays in the Tier-2/step10 rubric scope.
+sc_scenarios:
+  # Standalone-consumption acceptance scenarios (plan §8 SC rows). All entries
+  # start `planned`: the standalone runner/wheel does not exist yet. Each flips
+  # to `implemented` only when its gating change delivers a `test_sc<nn>_*`
+  # test; registration alone never counts as delivery.
+  - id: SC01
+    title: 干净安装与无控制面冷启动
+    run_mode: standalone
+    status: planned
+    tier: 1
+    responsible_step: 5b/5c（认证 step16）
+    blocked_by: runtime-standalone-distribution
+    assertions: >-
+      No full-Hecate install, no repo mount, no platform management tables;
+      only the profile's required adapters are configured and the host starts;
+      the management service is never connected and unreachable, and a
+      read-only execution still completes with local evidence.
+  - id: SC02
+    title: 结构化库存读取与越权调用
+    run_mode: standalone
+    status: planned
+    tier: 1
+    responsible_step: 5c（生产权限 step7）
+    blocked_by: runtime-standalone-distribution
+    assertions: >-
+      Authorized data domain is read through the structured business-API
+      fixture; cross-domain and forged-role requests are rejected; generated
+      advice triggers no write; execution works with no Memory/RAG/vector
+      store installed and leaves local evidence.
+  - id: SC03
+    title: 本地批准写入与重启
+    run_mode: standalone
+    status: planned
+    tier: 1
+    responsible_step: 6/7
+    blocked_by: standalone-durable-actions
+    assertions: >-
+      The protected write executes only with valid parameter binding, current
+      permission, and approval; after restart the wait/result is recoverable
+      or reconciled, unknown results are never rewritten, and no platform
+      approval service is involved.
+  - id: SC04
+    title: 受管断连与授权过期
+    run_mode: managed
+    status: planned
+    tier: 1
+    responsible_step: 7
+    blocked_by: managed-runner-enrollment
+    assertions: >-
+      Execution continues only within the granted scope and validity window;
+      expired grants and untrustworthy time are rejected per policy;
+      online-judgment operations stop; the host never falls back to local
+      self-authorization.
+  - id: SC05
+    title: 重连与重复控制命令
+    run_mode: managed
+    status: planned
+    tier: 1
+    responsible_step: 4/6/7
+    blocked_by: managed-runner-enrollment
+    assertions: >-
+      After re-verifying trust and authorization the host accepts new work;
+      historical events are deduplicated on replay; duplicate commands and
+      stale ownership do not repeat business actions, and state projection
+      never overwrites local execution facts.
+  - id: SC06
+    title: 本地审计不可写、中心上传不可用
+    run_mode: standalone
+    status: planned
+    tier: 1
+    responsible_step: 6/7/10
+    blocked_by: standalone-durable-actions
+    assertions: >-
+      Local evidence-store failure stops new protected actions; central
+      unavailability with valid local retention buffers uploads up to the
+      declared limit with an explicit gap report; recovery retransmits
+      evidence only, never business actions.
+  - id: SC07
+    title: 制品篡改、不兼容与回滚
+    run_mode: standalone
+    status: planned
+    tier: 1
+    responsible_step: 5（最小校验）、11/16（完整门禁）
+    blocked_by: standalone-release-conformance
+    assertions: >-
+      Tampered or incompatible artifacts are refused activation and the last
+      verified version stays active; rollback never restores revoked grants,
+      consumed approvals, or executed actions.
+  - id: SC08
+    title: 默认遥测与外部模型数据流
+    run_mode: standalone
+    status: planned
+    tier: 1
+    responsible_step: 5/7/10、16
+    blocked_by: runtime-standalone-distribution
+    assertions: >-
+      No business content is sent to any center without authorization; model
+      and tool network targets and data categories match configuration;
+      disabling telemetry is never conflated with forbidding external model
+      calls.
+  - id: SC09
+    title: 完全隔离网络配置（条件性）
+    run_mode: conditional
+    status: planned
+    tier: 1
+    responsible_step: 11/16（启用时单独认证）
+    blocked_by: standalone-release-conformance
+    assertions: >-
+      With external network blocked, the profile passes its scenarios only if
+      local models, dependencies, artifacts, and valid trust material are all
+      provisioned; any missing item leaves the profile explicitly unsupported.
+  - id: SC10
+    title: 独立升级 Runtime/宿主
+    run_mode: standalone
+    status: planned
+    tier: 1
+    responsible_step: 5/11/16
+    blocked_by: standalone-release-conformance
+    assertions: >-
+      Runtime or host upgrades require no management platform and no
+      synchronized upgrades of unchanged components; incompatible contract or
+      state formats refuse activation or migrate first; active runs stay on
+      their fixed versions.
