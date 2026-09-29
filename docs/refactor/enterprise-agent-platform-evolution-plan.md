@@ -392,24 +392,24 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **操作：**
 
-- [ ] 更新 `docs/design/positioning.md`，采用本方案定位，明确 Runtime-independent、企业自主治理、可自托管和团队协作。
-- [ ] 同步第一节的交付边界与部署模式：管理平台可缺席、执行宿主可独立消费、外部 Runtime 可替换内置实现；明确契约包、Runtime 包、宿主及平台 adapter 的依赖方向和版本所有权。批准包名/目录迁移 ADR，保留模块化控制面，不把独立消费解释为立即拆完全部微服务。
-- [ ] 为车商 App 记录消费者契约：以业务 API 提供库存读写与最终授权，独立宿主不依赖车商数据模型；固定技术预览、独立生产和受管生产的不同门槛。首次独立服务入口为 HTTP/JSON，进程内 Python 嵌入单列认证，不提前承诺所有语言 SDK。
-- [ ] 在定位与架构中将供应商托管 Agent 服务列为正式执行后端；声明企业自托管 Hecate 不代表所有绑定的后端均满足私有部署或本地数据驻留。
-- [ ] 更新 `docs/design/architecture.md`，补充控制面、执行接入层、后端与信任边界；保留模块化单体。
-- [ ] 新增 ADR，记录核心职责、内置 Runtime 地位、托管 harness 与 Sandbox 的独立选择、事件/会话所有权、能力协商和不承诺无损状态迁移；按 ADR 索引分配编号，不预占编号。
-- [ ] 按第六节映射调整 `feature-catalog.md`：保留已有 ID，新增能力追加未使用的后缀；将合并、替代、废弃状态从“待完成”中分离。
-- [ ] 为上述 P01—P08 映射中的新增平台责任核对 Feature ID：Memory 与 Knowledge 各自绑定；整体 Knowledge 服务与组件化检索分别认证；来源同步/索引水位/权限删除；实验快照/逐样本结果/阶段诊断。已有能力补验收，不把每项实验算法另立为核心 Feature；GraphRAG、行业流程及完整实验 UI 保持可选/研究状态。
-- [ ] 将 `roadmap.md` 的未完成部分改为第七节里程碑；把已完成 Sprint 历史迁入历史说明，不继续作为未来排期。
-- [ ] 沿用现有 `feature-inventory.yaml`，先关闭 G5，按 ID 保留已有 status/maturity/dependencies/evidence/acceptance，不运行破坏性重提取。明确 YAML 拥有机器可读状态、依赖、验收与证据，Markdown 拥有说明性正文；冲突显式报告，不静默覆盖。
-- [ ] 在字段稳定后增加确定性的受管表格生成；迁移期逐字段检测漂移。CI 对新/变更条目和 production 声明严格检查，历史未补证据条目保留显式欠账，不用一次全量标记 production 消除告警。
-- [ ] 为 research/Labs 条目指定 owner、验证假设、投入边界、复核触发条件和退出决定；晋级必须有可复现结果、契约/安全验收及维护者，缺证据时继续实验或归档。基础治理契约可用合成场景晋级技术成熟度，行业功能需真实场景证据。
-- [ ] 对身份、策略、调度、审批、发布、证据和资产目录等能力，逐项标明 Hecate 的治理责任、可替换实现提供方、强制执行点、权威状态写入方和验收证据；先保留已有能力，不因可替换而默认删除内置实现。
-- [ ] 在目录和 roadmap 中按“基础能力域与未来组件边界”标注 Agent Engineering、AgentOps、Agent Control Plane、Agent Governance、安全、评测、MCP/A2A 企业接入层的覆盖和缺口；能力域标签不等于现在的部署单元。
-- [ ] 在架构文档中固定上表的子包 owner、允许的依赖方向与跨包公开接口；为 `tests/test_layering_domain.py` 规划包内边界检查，禁止新代码跨子包导入实现或直接写其他领域表。历史例外逐项登记 owner、迁移步骤和退出条件。
-- [ ] 为 Runtime、Memory/Knowledge、Evaluation、Observability 和 Gateway 分别登记契约 owner、发布单元、状态/数据 owner、当前版本与支持窗口；明确同进程实现随主应用发布，进程外实现可以独立发布，不能用“有 SPI”代替独立部署能力。
-- [ ] 对下方已实现能力逐项给出 `core-contract / builtin-reference / optional-component / integration / retire-candidate` 处置；保留现有 Feature ID、已交付事实和迁移记录，不把“移出核心”改写成“从未实现”。
-- [ ] 在 `feature-catalog.md` 中为托管执行准入、供应商会话对账、托管工具强制入口和数据驻留门禁设独立验收条目；在 `roadmap.md` 的跨后端治理里程碑纳入真实托管服务验证，不把它写成 OpenAI 专属能力。
+- [x] 更新 `docs/design/positioning.md`，采用本方案定位。（positioning.md 战略摘要/边界章节已对齐;本次新增交付边界/部署模式/消费者契约章节,失效链接修复）
+- [x] 同步第一节的交付边界与部署模式。（positioning.md「Delivery boundaries and deployment modes」三边界+三模式表;ADR-035 批准包名方向）
+- [x] 为车商 App 记录消费者契约。（positioning.md 消费者契约段(中性表述:业务 App 私有化交付示例;技术预览/独立生产/受管生产三级门槛;HTTP/JSON 首入口)）
+- [x] 在定位与架构中将供应商托管 Agent 服务列为正式执行后端。（positioning.md hosted-backend 段(双轴登记+自托管≠数据驻留);ADR-034 §3;架构文档信任边界节）
+- [x] 更新 `docs/design/architecture.md`。（architecture.md 新增「Control Plane, Execution Access, and Trust Boundaries」与能力域/子包/例外登记章节;模块化单体保留）
+- [x] 新增 ADR，记录核心职责。（ADR-034(治理语义六决策)+ADR-035(包迁移方向);编号按 INDEX 实时取号）
+- [x] 按第六节映射调整 `feature-catalog.md`。（catalog 新增「Platform Governance Dispositions」受管区(55 条处置行);9 个新 ID(1.3.11b/c、2.10c—e、8.13、9.18—9.20);保留转后端/移出核心以 disposition+milestone 表达）
+- [x] 为上述 P01—P08 映射中的新增平台责任核对 Feature ID。（8.13(实验快照/逐样本)、9.18(知识接入生命周期)、9.19(组件化检索替换)、9.20(检索快照/阶段诊断);Memory/Knowledge 绑定复用 9.x 既有条目补验收）
+- [x] 将 `roadmap.md` 的未完成部分改为第七节里程碑。（roadmap 新增「Delivery Iterations」(I-A…I-H)与「Stage Milestones」(M-S…M-R)受管区;Next Phase/Sprint 章节标注 Historical）
+- [x] 沿用现有 `feature-inventory.yaml`，先关闭 G5。（G5 已由 #194 关闭;本次 schema 1→2 全量迁移零字段丢失;extract/check 幂等;YAML 头注释覆盖 v2 字段所有权）
+- [x] 在字段稳定后增加确定性的受管表格生成。（受管标记+sync 子命令+逐字段漂移检测(strict 属性);CI 接入非严格 check;6 个受管区已翻转为 strict=true 且篡改测试通过）
+- [x] 为 research/Labs 条目指定 owner。（8 个 research-candidate 条目(6.15/6.20/6.22/2.12/6.38/6.39/6.42/6.43)生命周期五字段已填(owner=pending 显式待定)）
+- [x] 对身份、策略、调度、审批、发布、证据和资产目录等能力，逐项标明。（七类能力约 25 个 ID 已填五元组(responsibility/implementation_mode/enforcement_point/state_owner/milestone),见 catalog 受管处置表）
+- [x] 在目录和 roadmap 中按“基础能力域与未来组件边界”标注 Agent Engineering、AgentOps、Agent Control Plane、Agent Governance、安全、评测、MCP/A2A 企业接入层的覆盖和缺口；能力域标签不等于现在的部署单元。（catalog/roadmap 各含「Capability Domains Coverage」受管表:七域现位置/目标子包/职责/缺口;与 architecture.md 能力域归属一致）
+- [x] 在架构文档中固定上表的子包 owner。（architecture.md 依赖方向+公开接口规则+分层检查规划+例外登记表(4 项历史例外带迁移步骤/退出条件;owner 按 2026-09-28 决定于 change 启动时指派)）
+- [x] 为 Runtime、Memory/Knowledge、Evaluation、Observability 和 Gateway 分别登记契约 owner。（catalog「Capability Contract Registry」受管表(五能力×契约/发布单元/状态 owner/版本窗口)）
+- [x] 对下方已实现能力逐项给出 `core-contract / builtin-reference / optional-component / integration / retire-candidate` 处置；保留现有 Feature ID、已交付事实和迁移记录，不把“移出核心”改写成“从未实现”。（§六十行全部映射至 inventory v2 治理字段并以 catalog 受管处置表呈现;无 ID 删除;实施中发现解析器盲区——✅ 写在 ID 格的 46 行此前被静默跳过,已修复并补入清单）
+- [x] 在 `feature-catalog.md` 中为托管执行准入、供应商会话对账、托管工具强制入口和数据驻留门禁设独立验收条目。（2.10c/2.10d/2.10e 新条目(准入+驻留门禁/会话对账/强制入口回执);roadmap M-A 行明示 hosted verification 属里程碑本身,不写为单一供应商专属）
 
 **清单字段迁移：**保留现有 `id/title/phase/category/status/maturity/dependencies/evidence/acceptance` 名称，不新建同义的 feature_id/depends_on/acceptance_evidence。增量增加 `responsibility`、`implementation_mode`、`provider_or_adapter`、`enforcement_point`、`state_owner`、`milestone`、`superseded_by`，并升级 schema/校验器；未适用字段允许显式不适用。`responsibility` 使用 `platform-guarantee / shared-contract / provider-guarantee / optional-ecosystem`；`implementation_mode` 表示 builtin/in-process-plugin/out-of-process/external-service/asset 等实现方式，延期和退役归 status，不混入实现方式。maturity 独立表示验证程度，不由 delivered 自动推导 production。
 

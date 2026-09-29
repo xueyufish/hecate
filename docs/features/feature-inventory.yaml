@@ -5,10 +5,19 @@
 #     title / phase / category          (refreshed by every extract run)
 #   this YAML owns machine-readable status and governance data
 #     status / maturity / dependencies / evidence / acceptance
+#     responsibility / implementation_mode / provider_or_adapter
+#     enforcement_point / state_owner / milestone / superseded_by
 #     plus any other per-entry keys     (preserved verbatim; hand-edit here)
+#   research-lifecycle fields (research_owner / hypothesis /
+#     investment_boundary / review_trigger / exit_decision) apply to
+#     status=research-candidate entries; explicit "pending" is accepted
+#   conventions: "n/a" = explicitly not applicable (never debt);
+#     "pending" = explicitly deferred; maturity is independent of status —
+#     delivered never implies production; deferral and retirement live in
+#     status, never in implementation_mode
 # A catalog ✅ mark contradicting status=delivered (either direction) fails
 # extract and check until resolved in this file (which owns status).
-schema: 1
+schema: 2
 features:
 - id: 1.3.1
   title: ReAct Agent Loop
@@ -17,8 +26,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
 - id: 1.3.1a
   title: Plan-Execute Task Decomposition
   phase: P1
@@ -28,6 +44,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.2
   title: Tool Calling
   phase: P1
@@ -37,6 +60,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.3
   title: Streaming Output
   phase: P1
@@ -46,6 +76,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.4
   title: Human Intervention
   phase: P1
@@ -55,6 +92,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.5
   title: Error Recovery
   phase: P1
@@ -64,6 +108,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.1.1
   title: Document Parsing
   phase: P1
@@ -71,8 +122,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: hecate-memory package; plan §六 Memory row
   acceptance: null
+  responsibility: provider-guarantee
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: ProviderBinding + ACL/deletion-propagation acceptance (step9)
+  state_owner: memory/knowledge provider; platform keeps references+evidence
+  milestone: M-B
+  superseded_by: null
 - id: 3.2.1
   title: Vector Search
   phase: P1
@@ -80,8 +138,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: hecate-memory package; plan §六 Memory row
   acceptance: null
+  responsibility: provider-guarantee
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: ProviderBinding + ACL/deletion-propagation acceptance (step9)
+  state_owner: memory/knowledge provider; platform keeps references+evidence
+  milestone: M-B
+  superseded_by: null
 - id: 3.2.6
   title: Chunking Strategy
   phase: P1
@@ -91,6 +156,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.3.1
   title: Knowledge Base CRUD
   phase: P1
@@ -100,6 +172,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.1'
   title: Built-in Tools
   phase: P1
@@ -107,8 +186,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §六 builtin-tools row
   acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: tool gateway policy + receipt (step7)
+  state_owner: tool platform
+  milestone: M-A
+  superseded_by: null
 - id: '5.2'
   title: Custom Tools
   phase: P1
@@ -118,6 +204,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.3'
   title: MCP Client
   phase: P1
@@ -127,6 +220,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.9'
   title: Skill Loading & Management
   phase: P1
@@ -136,6 +236,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.1'
   title: Multi-Model Access
   phase: P1
@@ -145,6 +252,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.3'
   title: Model Degradation
   phase: P1
@@ -154,6 +268,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.4'
   title: Conversation Logs
   phase: P1
@@ -163,6 +284,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.1'
   title: API Interface
   phase: P1
@@ -172,6 +300,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.2'
   title: Self-Hosted Deployment
   phase: P1
@@ -181,6 +316,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.1
   title: Agent Configurator
   phase: P2
@@ -190,6 +332,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.2
   title: Visual Workflow Canvas
   phase: P2
@@ -197,8 +346,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §六 editor row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: release manifest admission (step11); external agents register without the DSL
+  state_owner: studio/engineering
+  milestone: M-B
+  superseded_by: null
 - id: 1.1.3
   title: Workflow Node Type Library
   phase: P2
@@ -206,8 +362,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §六 editor row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: release manifest admission (step11); external agents register without the DSL
+  state_owner: studio/engineering
+  milestone: M-B
+  superseded_by: null
 - id: 1.1.4
   title: Workflow Test Run
   phase: P2
@@ -217,6 +380,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.5
   title: Scenario-based Agent Packaging
   phase: P2
@@ -226,6 +396,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.1'
   title: Hierarchical Delegation
   phase: P2
@@ -235,6 +412,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.2'
   title: Handoff
   phase: P2
@@ -244,6 +428,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.3'
   title: Pipeline
   phase: P2
@@ -253,6 +444,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.4'
   title: Broadcast
   phase: P2
@@ -262,6 +460,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.7a
   title: Collaboration Pattern Selection
   phase: P2
@@ -271,6 +476,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.7b
   title: Agent Communication Configuration
   phase: P2
@@ -280,6 +492,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.7c
   title: Routing Rule Configuration
   phase: P2
@@ -289,6 +508,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.1'
   title: Working Memory (L1)
   phase: P2
@@ -296,8 +522,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: hecate-memory package; plan §六 Memory row
   acceptance: null
+  responsibility: provider-guarantee
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: ProviderBinding + ACL/deletion-propagation acceptance (step9)
+  state_owner: memory/knowledge provider; platform keeps references+evidence
+  milestone: M-B
+  superseded_by: null
 - id: '4.2'
   title: Session Memory (L2)
   phase: P2
@@ -307,6 +540,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.3'
   title: User Memory (L3)
   phase: P2
@@ -316,6 +556,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.1.5
   title: Web Scraping
   phase: P2
@@ -325,6 +572,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.2.2
   title: Keyword Search
   phase: P2
@@ -334,6 +588,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.2.3
   title: Hybrid Search
   phase: P2
@@ -343,6 +604,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.2.7
   title: Multi-Knowledge Base Association
   phase: P2
@@ -352,6 +620,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.7'
   title: CLI
   phase: P2
@@ -361,6 +636,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.2.8
   title: Knowledge Base Hit Testing
   phase: P2
@@ -370,6 +652,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.7
   title: Citation Display
   phase: P2
@@ -379,6 +668,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.8
   title: Opening Remarks & Follow-up Suggestions
   phase: P2
@@ -388,6 +684,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.9
   title: Task Queuing
   phase: P2
@@ -397,6 +700,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.8
   title: Conversational vs Task Workflows
   phase: P2
@@ -406,6 +716,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.9
   title: Workflow Version Management
   phase: P2
@@ -415,6 +732,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.10
   title: App Import/Export
   phase: P2
@@ -424,6 +748,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.7'
   title: Model Playground
   phase: P2
@@ -433,6 +764,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.14
   title: Agent Node Config Enhancement
   phase: P2
@@ -442,6 +780,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.15
   title: Template Customization
   phase: P2
@@ -451,6 +796,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.16
   title: Typed Edge Visualization
   phase: P2
@@ -460,6 +812,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.17
   title: Fan-Out/Merge Node Editing
   phase: P2
@@ -469,6 +828,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.9'
   title: Scheduled Tasks
   phase: P2
@@ -478,6 +844,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.7'
   title: Context Assembler
   phase: P2
@@ -487,6 +860,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.8'
   title: Evidence Tracker
   phase: P2
@@ -496,6 +876,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.9'
   title: Task Phase Detection
   phase: P2
@@ -505,6 +892,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.10'
   title: Token Budget Governance
   phase: P2
@@ -514,6 +908,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.11'
   title: Provider-Shaped Context
   phase: P2
@@ -523,6 +924,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.12'
   title: Message Prioritization
   phase: P2
@@ -532,6 +940,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.3a
   title: Agent Message Bus
   phase: P2
@@ -541,6 +956,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.3b
   title: P2P Agent Negotiation
   phase: P2
@@ -550,6 +972,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.3c
   title: Dynamic Task Allocation
   phase: P2
@@ -559,6 +988,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.3d
   title: Agent-as-Tool Pattern
   phase: P2
@@ -568,6 +1004,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.5a
   title: Output Schema Validation
   phase: P2
@@ -577,6 +1020,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.5b
   title: Tool Result Validation
   phase: P2
@@ -586,6 +1036,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.5c
   title: Retry Policy & Circuit Breaker
   phase: P2
@@ -595,6 +1052,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.5d
   title: LLM Circuit Breaker
   phase: P2
@@ -604,6 +1068,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.9a
   title: Session Locking
   phase: P2
@@ -613,6 +1084,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.5a
   title: Prompt CRUD & Versioning
   phase: P2
@@ -622,6 +1100,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.2'
   title: Model Routing
   phase: P2
@@ -631,6 +1116,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.13'
   title: Multi-Database Support
   phase: P2
@@ -640,6 +1132,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.3'
   title: Offline Deployment
   phase: P2
@@ -649,6 +1148,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '14.2'
   title: Webhook Callbacks
   phase: P2
@@ -658,6 +1164,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.1.7
   title: Multi-Vector-DB Support
   phase: P2
@@ -667,6 +1180,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 5.9a
   title: MCP Server Mode
   phase: P2
@@ -676,6 +1196,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '10.1'
   title: Organization Management
   phase: P2
@@ -685,6 +1212,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '10.2'
   title: RBAC
   phase: P2
@@ -694,6 +1228,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '10.5'
   title: Tenant Isolation
   phase: P2
@@ -703,6 +1244,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '7.1'
   title: RAG Evaluation
   phase: P2
@@ -712,6 +1260,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '7.2'
   title: Agent Evaluation
   phase: P2
@@ -721,6 +1276,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.1'
   title: Input Security
   phase: P2
@@ -730,6 +1292,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 9.1a
   title: Output Injection Type Detection
   phase: P2
@@ -739,6 +1308,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.2'
   title: System Prompt Leakage Protection
   phase: P2
@@ -748,6 +1324,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.1'
   title: Full-Chain Tracing
   phase: P2
@@ -757,6 +1340,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.7'
   title: Audit Logs  (SIEM Pipeline )
   phase: P2
@@ -764,8 +1354,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §六 SIEM row
   acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: evidence export contract, unsampled governance events kept (step10)
+  state_owner: ops/evidence
+  milestone: M-B
+  superseded_by: null
 - id: '10.3'
   title: SSO/LDAP
   phase: P3
@@ -775,6 +1372,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '10.4'
   title: Quota Management
   phase: P3
@@ -784,6 +1388,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.2a
   title: 40+ Built-in Evaluators
   phase: P3
@@ -793,6 +1404,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '7.6'
   title: Regression Test Set
   phase: P3
@@ -802,6 +1420,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.4'
   title: Execution Security
   phase: P3
@@ -811,6 +1436,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 9.4a
   title: Granular Operation Approval
   phase: P3
@@ -820,6 +1452,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 9.4b
   title: Trusted Workspace
   phase: P3
@@ -829,6 +1468,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.5'
   title: Data Security
   phase: P3
@@ -838,6 +1484,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.12'
   title: Environment Network Egress Control
   phase: P3
@@ -847,6 +1500,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.13'
   title: Sandbox Enforcement Integration
   phase: P3
@@ -856,6 +1516,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.14'
   title: Structured Security Audit Pipeline
   phase: P3
@@ -865,6 +1532,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.15'
   title: Per-Execution Credential Scoping
   phase: P3
@@ -874,6 +1548,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.2'
   title: Real-Time Monitoring
   phase: P3
@@ -883,6 +1564,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.3'
   title: Cost Dashboard
   phase: P3
@@ -892,6 +1580,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.5'
   title: Prompt Version Management
   phase: P3
@@ -901,6 +1596,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.5b
   title: Prompt Analytics & Diff
   phase: P3
@@ -910,6 +1612,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.6'
   title: Alerting
   phase: P3
@@ -919,6 +1628,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.4'
   title: Cost Tracking
   phase: P3
@@ -928,6 +1644,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.8'
   title: Multi-Auth Support
   phase: P3
@@ -937,6 +1660,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.11'
   title: Model Classification Management
   phase: P3
@@ -946,6 +1676,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.14'
   title: Environment Security
   phase: P3
@@ -955,6 +1692,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.8'
   title: Collaborative Conflict Handling
   phase: P3
@@ -964,6 +1708,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.9'
   title: Unified Skill Registry
   phase: P3
@@ -973,6 +1724,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.9a
   title: Agent-Workflow Mutual Embedding
   phase: P3
@@ -982,6 +1740,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.10'
   title: A2A Protocol
   phase: P3
@@ -991,6 +1756,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.10a
   title: Signed Agent Cards
   phase: P3
@@ -1000,6 +1772,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.4'
   title: Knowledge Memory (L4)
   phase: P3
@@ -1009,6 +1788,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '4.6'
   title: Memory Isolation
   phase: P3
@@ -1018,6 +1804,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.2'
   title: Web Widget (Simplified)
   phase: P3
@@ -1027,6 +1820,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.3'
   title: Feishu (Lark)
   phase: P3
@@ -1036,6 +1836,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.9'
   title: Slack
   phase: P3
@@ -1043,8 +1850,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: channel packages; baseline §2 IM row
   acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: out-of-process
+  provider_or_adapter: null
+  enforcement_point: channel identity mapping + audit (step5/7)
+  state_owner: channel adapter
+  milestone: M-A
+  superseded_by: null
 - id: 13.4a
   title: Distributed Session State Store (Redis)  (5/5)
   phase: P3
@@ -1054,6 +1868,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.5'
   title: Data Backup & Recovery
   phase: P3
@@ -1063,6 +1884,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.6'
   title: Version Upgrade
   phase: P3
@@ -1072,6 +1900,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.7a
   title: Failure Classification
   phase: P3
@@ -1081,6 +1916,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.7b
   title: Constraint Rule Generation
   phase: P3
@@ -1090,6 +1932,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.7c
   title: Constraint Injection
   phase: P3
@@ -1099,6 +1948,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 13.9a
   title: Meta-Agent Scheduler
   phase: P3
@@ -1108,6 +1964,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 13.9b
   title: Garbage Collector Agent
   phase: P3
@@ -1117,6 +1980,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 13.9c
   title: Configuration Drift Detection
   phase: P3
@@ -1126,6 +1996,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 13.9d
   title: Compliance Checker Agent
   phase: P3
@@ -1135,6 +2012,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 6.8a
   title: A/B Testing for Models
   phase: P3
@@ -1144,6 +2028,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 6.8b
   title: Gray Release for Models
   phase: P3
@@ -1153,6 +2044,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 6.8c
   title: Per-Prefix Circuit Breaker
   phase: P3
@@ -1162,6 +2060,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 6.8d
   title: API Key Encryption
   phase: P3
@@ -1171,6 +2076,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 6.8e
   title: Model Provider CRUD
   phase: P3
@@ -1180,6 +2092,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 9.4c
   title: Docker Sandbox Executor
   phase: P3
@@ -1189,6 +2108,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 9.4d
   title: Sandbox Container Pool
   phase: P3
@@ -1198,6 +2124,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.1a
   title: Distributed Tracing
   phase: P3
@@ -1207,6 +2140,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.1b
   title: Metrics Collection
   phase: P3
@@ -1216,6 +2156,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.1c
   title: Structured Logging
   phase: P3
@@ -1225,6 +2172,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.20'
   title: Execution Replay & Debug Dashboard
   phase: P3
@@ -1234,6 +2188,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '10.6'
   title: Authentication Service
   phase: P3
@@ -1243,6 +2204,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.8'
   title: Event Store
   phase: P3
@@ -1252,6 +2220,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.10'
   title: Channel Update Conflict Resolution
   phase: P3
@@ -1261,6 +2236,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.5f
   title: Platform-Level Tool Gating
   phase: P3
@@ -1270,6 +2252,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.5g
   title: Unified Exception Hierarchy
   phase: P3
@@ -1279,6 +2268,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.5h
   title: Framework-Level Auto-Retry
   phase: P3
@@ -1288,6 +2284,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.18
   title: Dynamic Orchestration  *(see [ADR-032](../design/adr/032-dynamic-orchestration.md))*
   phase: P3
@@ -1297,6 +2300,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.19
   title: Event-Sourced Execution State / Log-as-Truth
   phase: P3
@@ -1306,6 +2316,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 5.5a
   title: Plugin SPI Core
   phase: P3
@@ -1315,6 +2332,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.2-abc
   title: EvaluatorBase
   phase: P3
@@ -1324,6 +2348,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 11.1-abc
   title: ChannelBase
   phase: P3
@@ -1333,6 +2364,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 10.3-abc
   title: AuthProvider
   phase: P3
@@ -1342,6 +2380,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.6-abc
   title: NotifierABC 🔀
   phase: P3
@@ -1351,6 +2396,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '15.1'
   title: i18n SPI
   phase: P3
@@ -1360,6 +2412,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.10'
   title: Outbound DLP Engine
   phase: P3
@@ -1369,6 +2428,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.44'
   title: Model Catalog
   phase: P3
@@ -1376,8 +2442,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: hecate-llm hub; plan §六 model-hub row (external integration / optional)
   acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: model admission/budget gateway (step7)
+  state_owner: model hub service
+  milestone: M-B
+  superseded_by: null
 - id: '6.45'
   title: Model Lifecycle Manager
   phase: P3
@@ -1385,8 +2458,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: hecate-llm hub; plan §六 model-hub row (external integration / optional)
   acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: model admission/budget gateway (step7)
+  state_owner: model hub service
+  milestone: M-B
+  superseded_by: null
 - id: '10.7'
   title: Budget Management & Cost Governance
   phase: P3
@@ -1396,6 +2476,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '10.8'
   title: Enterprise Vault Integration
   phase: P3
@@ -1405,6 +2492,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.2a-OE8
   title: Evaluation Metrics Three-Dimension Structuring
   phase: P4
@@ -1414,6 +2508,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.2a-OE9
   title: Reasoning Efficiency Evaluator
   phase: P4
@@ -1423,6 +2524,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.6-O9
   title: Incident & Alert Management Console
   phase: P4
@@ -1432,6 +2540,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.9-O8
   title: Custom Dashboard Builder
   phase: P4
@@ -1441,6 +2556,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.9b-OE5
   title: Conversation Topic Clustering + Low-Score Analysis
   phase: P4
@@ -1450,6 +2572,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 13.10-E4
   title: Saga/Compensation Pattern
   phase: P4
@@ -1459,6 +2588,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 6.8-EF5
   title: Zero Data Retention Policy
   phase: P4
@@ -1468,6 +2604,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.2b
   title: AI-Synthesized Evaluation Dataset
   phase: P4
@@ -1475,8 +2618,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: ops/evaluation engine; plan §六 evaluation row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: EvaluationBackend result contract (step10)
+  state_owner: evaluation backend; governance consumes evidence references
+  milestone: M-B
+  superseded_by: null
 - id: 7.2c
   title: Online/Offline Evaluation Tasks
   phase: P4
@@ -1484,8 +2634,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: ops/evaluation engine; plan §六 evaluation row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: EvaluationBackend result contract (step10)
+  state_owner: evaluation backend; governance consumes evidence references
+  milestone: M-B
+  superseded_by: null
 - id: 7.2d
   title: Trace Backflow Dataset
   phase: P4
@@ -1493,8 +2650,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: ops/evaluation engine; plan §六 evaluation row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: EvaluationBackend result contract (step10)
+  state_owner: evaluation backend; governance consumes evidence references
+  milestone: M-B
+  superseded_by: null
 - id: 7.2e
   title: Evaluation Report Dashboard
   phase: P4
@@ -1502,8 +2666,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: ops/evaluation engine; plan §六 evaluation row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: EvaluationBackend result contract (step10)
+  state_owner: evaluation backend; governance consumes evidence references
+  milestone: M-B
+  superseded_by: null
 - id: '7.3'
   title: Workflow Evaluation
   phase: P4
@@ -1511,8 +2682,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: ops/evaluation engine; plan §六 evaluation row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: EvaluationBackend result contract (step10)
+  state_owner: evaluation backend; governance consumes evidence references
+  milestone: M-B
+  superseded_by: null
 - id: '7.4'
   title: Human Annotation
   phase: P4
@@ -1520,8 +2698,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: ops/evaluation engine; plan §六 evaluation row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: EvaluationBackend result contract (step10)
+  state_owner: evaluation backend; governance consumes evidence references
+  milestone: M-B
+  superseded_by: null
 - id: 7.4a
   title: Human Score Calibration
   phase: P4
@@ -1531,6 +2716,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 9.5a
   title: Sensitive Data Auto-Masking
   phase: P4
@@ -1540,6 +2732,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.11'
   title: Agent Runtime Protection
   phase: P4
@@ -1549,6 +2748,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '7.10'
   title: Automated Continuous Red Teaming
   phase: P4
@@ -1558,6 +2764,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.10b
   title: Multi-Agent Trust Verification
   phase: P4
@@ -1567,6 +2780,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '7.7'
   title: Security Testing
   phase: P4
@@ -1576,6 +2796,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.1'
   title: SaaS Deployment
   phase: P4
@@ -1585,6 +2812,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 13.1a
   title: Canary Release
   phase: P4
@@ -1592,8 +2826,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 release-gate row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: release manifest gate consuming versioned evaluation results (step11)
+  state_owner: enterprise/governance
+  milestone: M-A; M-B
+  superseded_by: null
 - id: 13.1b
   title: Agent Identity Service
   phase: P4
@@ -1603,8 +2844,15 @@ features:
   dependencies:
   - '11.16'
   - '11.17'
-  evidence: planned next phase — agent identity change
+  evidence: 'plan §一 identity row; #174/#175'
   acceptance: agents carry pinned identity across version/execution/audit surfaces
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: verified server-side auth context at every entry (step7)
+  state_owner: enterprise/auth
+  milestone: M-A
+  superseded_by: null
 - id: '13.4'
   title: Horizontal Scaling (K8s harness)
   phase: P4
@@ -1614,6 +2862,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 13.4b
   title: K8s Scaling Test Enhancements
   phase: P4
@@ -1623,6 +2878,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.17'
   title: Environment Management & ALM Pipeline
   phase: P4
@@ -1631,9 +2893,16 @@ features:
   maturity: null
   dependencies:
   - 13.1b
-  evidence: planned next phase — environment & release management change
+  evidence: plan §一 release-gate row
   acceptance: config -> pinned version -> regression eval -> approval -> release -> rollback path exists
     end to end
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: release manifest gate consuming versioned evaluation results (step11)
+  state_owner: enterprise/governance
+  milestone: M-A; M-B
+  superseded_by: null
 - id: '13.18'
   title: API Management & Developer Portal
   phase: P4
@@ -1643,6 +2912,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.10'
   title: CI/CD Evaluation Gating
   phase: P4
@@ -1651,8 +2927,15 @@ features:
   maturity: null
   dependencies:
   - '13.17'
-  evidence: planned next phase — CI/CD eval gate change
+  evidence: plan §一 release-gate row
   acceptance: regression eval failure blocks release; gate consumes the existing evaluation platform
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: release manifest gate consuming versioned evaluation results (step11)
+  state_owner: enterprise/governance
+  milestone: M-A; M-B
+  superseded_by: null
 - id: '8.12'
   title: Agent Catalog Governance & Quality Gateway
   phase: P4
@@ -1660,8 +2943,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 release-gate row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: release manifest gate consuming versioned evaluation results (step11)
+  state_owner: enterprise/governance
+  milestone: M-A; M-B
+  superseded_by: null
 - id: 3.3.2
   title: Incremental Update
   phase: P4
@@ -1671,6 +2961,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.3.3
   title: Knowledge Quality Evaluation
   phase: P4
@@ -1680,6 +2977,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.4.1
   title: Batch Document Indexing
   phase: P4
@@ -1689,6 +2993,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.24
   title: Human Input / Form Node
   phase: P4
@@ -1696,8 +3007,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 approval row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: approval bound to params/resources; ask-rule fail-close (step7)
+  state_owner: enterprise/governance
+  milestone: M-A
+  superseded_by: null
 - id: 1.1.25
   title: Trigger Node
   phase: P4
@@ -1707,6 +3025,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 4.3a
   title: Memory Engine Enhancement
   phase: P4
@@ -1716,6 +3041,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.16'
   title: NL2Agent / NL2Flow
   phase: P4
@@ -1725,6 +3057,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.18'
   title: Trace Annotation
   phase: P4
@@ -1734,6 +3073,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.8'
   title: Enterprise System Integration Framework
   phase: P4
@@ -1743,6 +3089,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.16'
   title: Per-Token-Type Auth Pipeline
   phase: P4
@@ -1750,9 +3103,16 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: planned next phase — identity pipeline change
+  evidence: 'plan §一 identity row; #174/#175'
   acceptance: identity resolution covers user/org/workspace with revocation semantics; membership revalidated
     on refresh and per request
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: verified server-side auth context at every entry (step7)
+  state_owner: enterprise/auth
+  milestone: M-A
+  superseded_by: null
 - id: '11.17'
   title: Two-Tier Identity Model
   phase: P4
@@ -1761,9 +3121,16 @@ features:
   maturity: null
   dependencies:
   - '11.16'
-  evidence: planned next phase — identity pipeline change
+  evidence: 'plan §一 identity row; #174/#175'
   acceptance: resource-level authorization enforced across REST/MCP entries; cross-tenant access returns
     404
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: verified server-side auth context at every entry (step7)
+  state_owner: enterprise/auth
+  milestone: M-A
+  superseded_by: null
 - id: 1.3.6
   title: Self-Learning Agent Runtime ⊕ superseded by 1.3.6f
   phase: P4
@@ -1773,6 +3140,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.6a
   title: Trajectory Analysis ⊕ superseded by 1.3.6f
   phase: P4
@@ -1782,6 +3156,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.6b
   title: Policy Evolution ⊕ superseded by 1.3.6f
   phase: P4
@@ -1791,6 +3172,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.6c
   title: Evolution Integration ⊕ superseded by 1.3.6f
   phase: P4
@@ -1800,6 +3188,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.6d
   title: Synthetic Environment Generation ⊕ deferred
   phase: P4
@@ -1809,6 +3204,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.6e
   title: Self-Evolution Closed Loop ⊕ superseded by 1.3.6f
   phase: P4
@@ -1818,6 +3220,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.10
   title: Multi-Level Intent Recognition ⊕ superseded by 6.23
   phase: P4
@@ -1827,6 +3236,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.15'
   title: Agentic RL Framework
   phase: P4
@@ -1836,6 +3252,18 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+  research_owner: pending
+  hypothesis: Agentic RL beats prompted baselines on tool/policy selection
+  investment_boundary: external training integration only; no in-house training framework
+  review_trigger: real optimization task with data authorization and compute budget
+  exit_decision: move to external integration or archive
 - id: '6.20'
   title: Ontology Action System
   phase: P4
@@ -1845,6 +3273,18 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+  research_owner: pending
+  hypothesis: industry ontology adds governance value
+  investment_boundary: no full KG/Ontology product in core
+  review_trigger: industry customer with external-graph-service gap
+  exit_decision: industry extension or archive
 - id: '6.22'
   title: OAG (Ontology-Augmented Generation)
   phase: P4
@@ -1854,6 +3294,18 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+  research_owner: pending
+  hypothesis: industry knowledge graphs need decision execution
+  investment_boundary: no full KG/Ontology product in core
+  review_trigger: industry customer with external-graph-service gap
+  exit_decision: industry extension or archive
 - id: '2.5'
   title: Peer Selection (Selector)
   phase: P4
@@ -1863,6 +3315,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.11'
   title: Agent Team Templates
   phase: P4
@@ -1872,6 +3331,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.13'
   title: ACP (Agent Client Protocol) Support (NEW)
   phase: P4
@@ -1881,6 +3347,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.15'
   title: Distributed Team Orchestration
   phase: P4
@@ -1890,6 +3363,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.3.11
   title: Asynchronous Execution API Mode
   phase: P4
@@ -1897,8 +3377,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 task/run row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: Task/Run API + durable worker with leases (step6)
+  state_owner: execution/ (control plane); executor owns run facts
+  milestone: M-A
+  superseded_by: null
 - id: '4.13'
   title: Context Engine Processor Chain
   phase: P4
@@ -1906,8 +3393,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: hecate-memory package; plan §六 Memory row
   acceptance: null
+  responsibility: provider-guarantee
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: ProviderBinding + ACL/deletion-propagation acceptance (step9)
+  state_owner: memory/knowledge provider; platform keeps references+evidence
+  milestone: M-B
+  superseded_by: null
 - id: 1.2.1
   title: Python SDK
   phase: P4
@@ -1917,6 +3411,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.2.2
   title: TypeScript SDK
   phase: P4
@@ -1926,6 +3427,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.2.3
   title: CLI Development Tools
   phase: P4
@@ -1935,6 +3443,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.2.4
   title: Code Sandbox
   phase: P4
@@ -1944,6 +3459,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.2.5
   title: Local Dev Environment
   phase: P4
@@ -1953,6 +3475,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.2.6
   title: Managed Runtime
   phase: P4
@@ -1962,6 +3491,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.7
   title: NL2Agent
   phase: P4
@@ -1971,6 +3507,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.11
   title: NL2Workflow
   phase: P4
@@ -1980,6 +3523,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.13
   title: Workflow Self-Optimization
   phase: P4
@@ -1989,6 +3539,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.5a
   title: Expert Panel Deliberation
   phase: P4
@@ -1998,6 +3555,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.6'
   title: Inter-Agent Communication
   phase: P4
@@ -2007,6 +3571,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 2.6a
   title: Multi-Agent Central Controller
   phase: P4
@@ -2016,6 +3587,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.21
   title: Multi-Agent Controller Canvas
   phase: P4
@@ -2025,6 +3603,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.22
   title: Orchestration Mode Switching
   phase: P4
@@ -2034,6 +3619,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.23
   title: Execution State Visualization
   phase: P4
@@ -2041,8 +3633,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 approval row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: approval bound to params/resources; ask-rule fail-close (step7)
+  state_owner: enterprise/governance
+  milestone: M-A
+  superseded_by: null
 - id: 1.1.26
   title: Object CRUD Node
   phase: P4
@@ -2052,6 +3651,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.27
   title: Side-by-side Chat + Canvas
   phase: P4
@@ -2061,6 +3667,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.1.6
   title: Multi-Modal Documents
   phase: P4
@@ -2070,6 +3683,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.2.4
   title: Reranking
   phase: P4
@@ -2079,6 +3699,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.2.5
   title: GraphRAG
   phase: P4
@@ -2088,6 +3715,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.2.9
   title: FAQ Search Mode
   phase: P4
@@ -2097,6 +3731,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.2.10
   title: Agentic RAG
   phase: P4
@@ -2106,6 +3747,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.3.5
   title: Chunk Editing
   phase: P4
@@ -2115,6 +3763,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.4.3
   title: Distributed Storage
   phase: P4
@@ -2124,6 +3779,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.4
   title: GraphRAG Query Engine
   phase: P4
@@ -2133,6 +3795,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.6
   title: Agent-Native Graph Memory
   phase: P4
@@ -2142,6 +3811,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.13
   title: Temporal Memory & Reasoning
   phase: P4
@@ -2151,6 +3827,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.14
   title: Lazy GraphRAG
   phase: P4
@@ -2160,6 +3843,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.4'
   title: MCP Server
   phase: P4
@@ -2169,6 +3859,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 5.9f
   title: Skill 长尾词法检索
   phase: P4
@@ -2178,6 +3875,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.12'
   title: MCP Sandbox Security
   phase: P4
@@ -2187,6 +3891,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.5'
   title: Self-Hosted Inference
   phase: P4
@@ -2196,6 +3907,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.6'
   title: Model Fine-Tuning
   phase: P4
@@ -2203,8 +3921,15 @@ features:
   status: delivered
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: hecate-llm hub; plan §六 model-hub row (external integration / optional)
   acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: model admission/budget gateway (step7)
+  state_owner: model hub service
+  milestone: M-B
+  superseded_by: null
 - id: '6.14'
   title: Intelligent Router with Caching
   phase: P4
@@ -2214,6 +3939,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '7.5'
   title: A/B Testing (rescoped to Agent-Level, 2026-08-14)
   phase: P4
@@ -2221,8 +3953,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 release-gate row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: release manifest gate consuming versioned evaluation results (step11)
+  state_owner: enterprise/governance
+  milestone: M-A; M-B
+  superseded_by: null
 - id: '7.8'
   title: Agentic RL Optimization & Data Flywheel
   phase: P4
@@ -2232,6 +3971,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '7.9'
   title: Testing Center / Sandbox
   phase: P4
@@ -2241,6 +3987,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.3'
   title: Retrieval Security
   phase: P4
@@ -2250,6 +4003,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.7'
   title: Network Isolation
   phase: P4
@@ -2259,6 +4019,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.16'
   title: External Policy Engine Interface
   phase: P4
@@ -2266,8 +4033,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 policy row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: policy pipeline + action gateway with decision/execution receipts (step7)
+  state_owner: tools/policy
+  milestone: M-A
+  superseded_by: null
 - id: 9.16a
   title: Chaos Engineering for Multi-Replica
   phase: P4
@@ -2279,6 +4053,13 @@ features:
   evidence: planned next phase — multi-replica fault tests change
   acceptance: kill-during-external-write scenarios recover without duplicate side effects; indeterminate
     outcomes enter human review
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.17'
   title: AI Auto-Approval
   phase: P4
@@ -2288,6 +4069,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.3.4
   title: Third-Party KB Integration
   phase: P4
@@ -2297,6 +4085,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.11'
   title: Deep Research
   phase: P4
@@ -2306,6 +4101,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 10.3b
   title: SCIM Directory Sync
   phase: P4
@@ -2315,6 +4117,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '15.2'
   title: Community Translations
   phase: P4
@@ -2324,6 +4133,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.23'
   title: 5-Level Intent Recognition
   phase: P4
@@ -2333,6 +4149,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.49'
   title: Intent Package Asset
   phase: P4
@@ -2342,6 +4165,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.24'
   title: Object Log & Decision Log
   phase: P4
@@ -2349,8 +4179,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 evidence row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: versioned event envelope + evidence store, never sampled (step6/10)
+  state_owner: ops/evidence
+  milestone: M-A
+  superseded_by: null
 - id: '6.25'
   title: Object History Analysis
   phase: P4
@@ -2360,6 +4197,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.26'
   title: Simulation Environment
   phase: P4
@@ -2369,6 +4213,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 6.27a
   title: Computer-use (NEW — split from 6.27)
   phase: P4
@@ -2378,6 +4229,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.28'
   title: DataAgent (NL2SQL)
   phase: P4
@@ -2387,6 +4245,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.29'
   title: VibeCoding Tool Set
   phase: P4
@@ -2396,6 +4261,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.30'
   title: Fine-Grained Permission Control
   phase: P4
@@ -2403,8 +4275,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 policy row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: policy pipeline + action gateway with decision/execution receipts (step7)
+  state_owner: tools/policy
+  milestone: M-A
+  superseded_by: null
 - id: '6.31'
   title: Data Integration Framework
   phase: P4
@@ -2414,6 +4293,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.19'
   title: Service Mesh Integration
   phase: P4
@@ -2423,6 +4309,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.32'
   title: gVisor Enhanced Sandbox
   phase: P4
@@ -2432,6 +4325,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 6.32a
   title: Kata Containers Sandbox
   phase: P4
@@ -2441,6 +4341,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.33'
   title: Decision Simulation
   phase: P4
@@ -2450,6 +4357,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.40'
   title: Firecracker microVM Backend
   phase: P4
@@ -2459,6 +4373,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 13.4c
   title: Session-Level microVM Isolation (Paradigm B)
   phase: P4
@@ -2468,6 +4389,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.41'
   title: WASM Runtime Backend
   phase: P4
@@ -2477,6 +4405,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.18'
   title: Multi-Stream Modes
   phase: P4
@@ -2486,6 +4421,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '8.21'
   title: Projection Registry (NEW)
   phase: P4
@@ -2495,6 +4437,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.20'
   title: Atomic File Writes & Cross-Process File Locking (NEW)
   phase: P4
@@ -2504,6 +4453,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.11'
   title: Voice Agent Pipeline (moved from P5)
   phase: P4
@@ -2513,6 +4469,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '12.0'
   title: Asset Marketplace
   phase: P5
@@ -2520,8 +4483,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 ecosystem row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: asset
+  provider_or_adapter: null
+  enforcement_point: neutral manifest + admission receipt; internal catalog before any marketplace (step11/18)
+  state_owner: registry service
+  milestone: M-E (conditional)
+  superseded_by: null
 - id: '12.1'
   title: Industry Templates
   phase: P5
@@ -2531,6 +4501,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '12.2'
   title: Industry Knowledge Packs
   phase: P5
@@ -2540,6 +4517,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '12.3'
   title: Industry Skill Packs
   phase: P5
@@ -2549,6 +4533,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '12.4'
   title: Industry Integration Guide
   phase: P5
@@ -2558,6 +4549,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '12.5'
   title: Partner Monetization Infrastructure
   phase: P5
@@ -2567,6 +4565,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.6
   title: Template Marketplace
   phase: P5
@@ -2576,6 +4581,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.10'
   title: Prompt Template Marketplace
   phase: P5
@@ -2585,6 +4597,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.12
   title: Dify Workflow Import
   phase: P5
@@ -2594,6 +4613,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.6'
   title: Compliance Framework
   phase: P5
@@ -2603,6 +4629,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 9.6a
   title: EU AI Act Compliance
   phase: P5
@@ -2612,6 +4645,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.9'
   title: Compliance & Audit Center
   phase: P5
@@ -2619,8 +4659,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 evidence row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: versioned event envelope + evidence store, never sampled (step6/10)
+  state_owner: ops/evidence
+  milestone: M-A
+  superseded_by: null
 - id: '6.46'
   title: Model Governance
   phase: P5
@@ -2628,8 +4675,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: hecate-llm hub; plan §六 model-hub row (external integration / optional)
   acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: model admission/budget gateway (step7)
+  state_owner: model hub service
+  milestone: M-B
+  superseded_by: null
 - id: 3.5.7
   title: Knowledge Graph Visualization
   phase: P5
@@ -2639,6 +4693,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.8
   title: Knowledge Graph UI Editor
   phase: P5
@@ -2648,6 +4709,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.9
   title: Ontology Schema Definition
   phase: P5
@@ -2657,6 +4725,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.10
   title: SHACL Validation
   phase: P5
@@ -2666,6 +4741,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.11
   title: Ontology Import/Export
   phase: P5
@@ -2675,6 +4757,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.12
   title: Ontology Versioning
   phase: P5
@@ -2684,6 +4773,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 8.1d
   title: W3C Trace Context Propagation
   phase: P5
@@ -2693,6 +4789,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.8a
   title: Agent Benchmark Integration
   phase: P5
@@ -2702,6 +4805,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 11.11a
   title: Vision Input (Multi-Modal)
   phase: P5
@@ -2711,6 +4821,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.12'
   title: Desktop Client
   phase: P5
@@ -2720,6 +4837,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.13'
   title: AgentSpace SDK (Embedded Integration)
   phase: P5
@@ -2729,6 +4853,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.14'
   title: PyPI Package Distribution
   phase: P5
@@ -2738,6 +4869,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '13.16'
   title: Edge/Lite Deployment
   phase: P5
@@ -2747,6 +4885,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '2.12'
   title: Agent Payments (AP2)
   phase: P5
@@ -2756,6 +4901,18 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+  research_owner: pending
+  hypothesis: payment-protocol agents reach enterprise demand
+  investment_boundary: no settlement semantics in core
+  review_trigger: authorized transaction scenario with responsibility and settlement boundary
+  exit_decision: defer until then
 - id: '11.14'
   title: End-User Application
   phase: P5
@@ -2765,6 +4922,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.15'
   title: Mobile GUI
   phase: P5
@@ -2774,6 +4938,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.6'
   title: WeChat Official Account / Mini Program
   phase: P5
@@ -2783,6 +4954,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.10'
   title: Custom Channel SDK
   phase: P5
@@ -2792,6 +4970,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 11.2 (full)
   title: Web Widget (Full — anonymous to-C)
   phase: P5
@@ -2801,6 +4986,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.4'
   title: WeCom (WeChat Work)
   phase: P5
@@ -2810,6 +5002,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '11.5'
   title: DingTalk
   phase: P5
@@ -2819,6 +5018,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 11.9 (D/T)
   title: Discord / Telegram
   phase: P5
@@ -2828,6 +5034,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.34'
   title: AI Office
   phase: P5
@@ -2837,6 +5050,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.35'
   title: Industrial Data Integration
   phase: P5
@@ -2846,6 +5066,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.36'
   title: Asset Marketplace Operations
   phase: P5
@@ -2855,6 +5082,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '5.13'
   title: Plugin Security & Signing
   phase: P5
@@ -2862,8 +5096,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 ecosystem row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: asset
+  provider_or_adapter: null
+  enforcement_point: neutral manifest + admission receipt; internal catalog before any marketplace (step11/18)
+  state_owner: registry service
+  milestone: M-E (conditional)
+  superseded_by: null
 - id: '6.37'
   title: Memory Clustering & Conflict Resolution
   phase: P5
@@ -2873,6 +5114,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.38'
   title: Self-Planning (PDDL + MCTS)
   phase: P5
@@ -2882,6 +5130,18 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+  research_owner: pending
+  hypothesis: PDDL/MCTS planner beats existing strategies on a business baseline
+  investment_boundary: planner/Runtime plugin only
+  review_trigger: demonstrated win over current strategies on business tasks
+  exit_decision: plugin or archive
 - id: '6.39'
   title: Tool Auto-Creation
   phase: P5
@@ -2891,6 +5151,18 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+  research_owner: pending
+  hypothesis: recurring tool-development demand justifies automation
+  investment_boundary: candidate generation → sandbox verification → human publish
+  review_trigger: recurring demand with a named maintainer
+  exit_decision: optional capability or archive
 - id: 6.41b
   title: Cloud Document Connector
   phase: P5
@@ -2900,6 +5172,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.42'
   title: Global Branching
   phase: P5
@@ -2909,6 +5188,18 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+  research_owner: pending
+  hypothesis: large-object simulation serves a concrete industry scenario
+  investment_boundary: industry extension; basic test sandbox retained
+  review_trigger: concrete simulation model with acceptance data
+  exit_decision: industry extension or archive
 - id: '6.43'
   title: Embedded Ontology
   phase: P5
@@ -2918,6 +5209,18 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+  research_owner: pending
+  hypothesis: industry simulation reaches deployable accuracy
+  investment_boundary: industry extension; basic fork retained
+  review_trigger: concrete scenario + acceptance data
+  exit_decision: industry extension or archive
 - id: '11.19'
   title: Platform-Level Governance
   phase: P5
@@ -2925,8 +5228,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 policy row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: policy pipeline + action gateway with decision/execution receipts (step7)
+  state_owner: tools/policy
+  milestone: M-A
+  superseded_by: null
 - id: '11.20'
   title: Zero Trust Architecture
   phase: P5
@@ -2934,8 +5244,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: 'plan §一 identity row; #174/#175'
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: verified server-side auth context at every entry (step7)
+  state_owner: enterprise/auth
+  milestone: M-A
+  superseded_by: null
 - id: '14.1'
   title: Agentic Resource Discovery (ARD)
   phase: P5
@@ -2943,8 +5260,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 ecosystem row
   acceptance: null
+  responsibility: shared-contract
+  implementation_mode: asset
+  provider_or_adapter: null
+  enforcement_point: neutral manifest + admission receipt; internal catalog before any marketplace (step11/18)
+  state_owner: registry service
+  milestone: M-E (conditional)
+  superseded_by: null
 - id: 3.1.2
   title: OCR
   phase: P5
@@ -2954,6 +5278,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.1.3
   title: Table Extraction
   phase: P5
@@ -2963,6 +5294,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.1.4
   title: Layout Analysis
   phase: P5
@@ -2972,6 +5310,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.4.2
   title: High-Throughput Retrieval
   phase: P5
@@ -2981,6 +5326,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.1
   title: Knowledge Graph Construction
   phase: P5
@@ -2990,6 +5342,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.2
   title: Graph Database Integration
   phase: P5
@@ -2999,6 +5358,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.3
   title: Community Detection & Summarization
   phase: P5
@@ -3008,6 +5374,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.5.5
   title: Knowledge Graph API
   phase: P5
@@ -3017,6 +5390,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 3.1.8
   title: Extended Document Processing
   phase: P5
@@ -3026,6 +5406,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.9'
   title: Provider Info Enhancement
   phase: P5
@@ -3035,6 +5422,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.10'
   title: Key Security Enhancement
   phase: P5
@@ -3044,6 +5438,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.12'
   title: Provider Auth State Management
   phase: P5
@@ -3053,6 +5454,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.13'
   title: Model Management UI Redesign
   phase: P5
@@ -3062,6 +5470,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.18
   title: Agent-Workflow Canvas Embedding
   phase: P5
@@ -3071,6 +5486,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.19
   title: Unified Skill Selector
   phase: P5
@@ -3080,6 +5502,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 1.1.20
   title: Nested Graph Visualization
   phase: P5
@@ -3089,6 +5518,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.21'
   title: Decision Lineage
   phase: P5
@@ -3096,8 +5532,15 @@ features:
   status: planned
   maturity: null
   dependencies: []
-  evidence: null
+  evidence: plan §一 evidence row
   acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: versioned event envelope + evidence store, never sampled (step6/10)
+  state_owner: ops/evidence
+  milestone: M-A
+  superseded_by: null
 - id: 7.6a
   title: Prompt Auto-Optimization
   phase: other
@@ -3107,6 +5550,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 7.6b
   title: Prompt Comparison
   phase: other
@@ -3116,6 +5566,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: 9.2a
   title: Content Moderation
   phase: other
@@ -3125,6 +5582,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '6.17'
   title: DSL Conversion Framework
   phase: other
@@ -3134,6 +5598,13 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
 - id: '9.8'
   title: Full-Chain Network Security
   phase: other
@@ -3143,3 +5614,892 @@ features:
   dependencies: []
   evidence: null
   acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.4b
+  title: MCP Streamable HTTP Transport (2026-07-28 spec)
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.4c
+  title: MCP Server Registry & Connection Management
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '5.5'
+  title: Plugin System
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.5 (TP5)
+  title: Plugin Type Taxonomy + Developer SDK
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.5c
+  title: Agent Plugins 1.0 Standard Ingestion
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: plan §六 plugin-installer row
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: asset manifest admission + revocable binding (step11/18)
+  state_owner: registry service
+  milestone: M-E (conditional)
+  superseded_by: null
+- id: 5.13a
+  title: Plugin Content Scanning (split from 5.13)
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: plan §六 plugin-installer row
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: asset manifest admission + revocable binding (step11/18)
+  state_owner: registry service
+  milestone: M-E (conditional)
+  superseded_by: null
+- id: '5.6'
+  title: Tool Permission Control
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '5.7'
+  title: Tool Caching
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '6.27'
+  title: Browser Automation Tool
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: plan §六 builtin-tools row
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: tool gateway policy + receipt (step7)
+  state_owner: tool platform
+  milestone: M-A
+  superseded_by: null
+- id: '8.9'
+  title: Unified Ops Center Dashboard
+  phase: P3
+  category: Observability & Operations
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 8.9a
+  title: Agent Health Monitoring Dashboard
+  phase: P3
+  category: Observability & Operations
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 8.9b
+  title: Conversation Analytics & Quality Scoring
+  phase: P3
+  category: Observability & Operations
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 8.9c
+  title: Tool Execution Analytics Dashboard
+  phase: P3
+  category: Observability & Operations
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.5b
+  title: Plugin Packaging & Distribution
+  phase: P3
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: plan §六 plugin-installer row
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: asset manifest admission + revocable binding (step11/18)
+  state_owner: registry service
+  milestone: M-E (conditional)
+  superseded_by: null
+- id: 5.4a
+  title: MCP Gateway
+  phase: P4
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.9-enh
+  title: Skill Provider Registry
+  phase: P4
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 1.3.5i
+  title: Deterministic Hooks (Lifecycle Events)
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: 1.3.15
+  title: Agent Environment
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: 1.3.16
+  title: Agent State Separation
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: 1.3.15a
+  title: 'Environment Backend: Docker'
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: 1.3.15b
+  title: Context Offloading
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: 1.3.15c
+  title: Sandbox Environment Mount
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: 1.3.17
+  title: Agent Invocation Mode
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: 5.5d
+  title: Dual-Format Plugin Convergence & Export
+  phase: P4
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: plan §六 plugin-installer row
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: asset manifest admission + revocable binding (step11/18)
+  state_owner: registry service
+  milestone: M-E (conditional)
+  superseded_by: null
+- id: '4.14'
+  title: Memory Importance Scoring
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.15'
+  title: Multi-Signal Fusion Retrieval
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.16'
+  title: LLM-Managed Memory
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.17'
+  title: Memory Pressure Alert
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.25'
+  title: Layered Memory System
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.21'
+  title: Task Memory
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 1.3.6f
+  title: Self-Evolution Skill Loop
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: plan §六 self-optimization row (paused core expansion)
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: candidate → evaluation → gated publish (step11/15)
+  state_owner: studio/self-evolution
+  milestone: M-B (conditional)
+  superseded_by: null
+- id: 1.3.20
+  title: Agent Versioning & Channel Publishing
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: '6.19'
+  title: Prompt Self-Optimization
+  phase: P4
+  category: Agent Intelligence
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: plan §六 self-optimization row (paused core expansion)
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: candidate → evaluation → gated publish (step11/15)
+  state_owner: studio/self-evolution
+  milestone: M-B (conditional)
+  superseded_by: null
+- id: '4.5'
+  title: Sleep-time Memory Consolidation
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.18'
+  title: Conversation Recall Storage
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.19'
+  title: Self-Editing Memory
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.20'
+  title: Retrieval Escalation (was Multi-Step Memory Retrieval)
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.22'
+  title: Tool Memory
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '4.23'
+  title: Cross-Thread Memory Store
+  phase: P4
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.9c
+  title: Skill Auto-Detection
+  phase: P4
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.9d
+  title: Skill Versioning
+  phase: P4
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 5.9e
+  title: Skill Dependency Declaration
+  phase: P4
+  category: Tools & Plugins
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: '6.47'
+  title: Model Service Publishing
+  phase: P4
+  category: Model Management
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: hecate-llm hub; plan §六 model-hub row (external integration / optional)
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: model admission/budget gateway (step7)
+  state_owner: model hub service
+  milestone: M-B
+  superseded_by: null
+- id: '6.48'
+  title: Model Management Quick Wins
+  phase: P4
+  category: Model Management
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: hecate-llm hub; plan §六 model-hub row (external integration / optional)
+  acceptance: null
+  responsibility: optional-ecosystem
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: model admission/budget gateway (step7)
+  state_owner: model hub service
+  milestone: M-B
+  superseded_by: null
+- id: 1.3.21
+  title: 'Engine Parity: Dynamic Fan-out, Time-Travel Resume, Declarative Interrupts (NEW — 2026-09-07
+    deer-flow/LangGraph engine comparison)'
+  phase: P4
+  category: Agent Runtime
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: docs/refactor/platform-evolution-baseline.md §11; ADR-034
+  acceptance: null
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: execution-backend contract (ADR-034; step3/8 certification)
+  state_owner: executor owns run facts; control plane owns platform task records
+  milestone: M-S; M-A
+  superseded_by: null
+- id: '4.24'
+  title: Memory Versioning
+  phase: P5
+  category: Memory System
+  status: delivered
+  maturity: null
+  dependencies: []
+  evidence: null
+  acceptance: null
+  responsibility: null
+  implementation_mode: null
+  provider_or_adapter: null
+  enforcement_point: null
+  state_owner: null
+  milestone: null
+  superseded_by: null
+- id: 1.3.11b
+  title: Standalone Runtime Distribution & Execution Host
+  phase: P1
+  category: Agent Runtime
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: ADR-035; standalone-consumption-baseline §2/§3
+  acceptance: wheel installs without repo path or full Hecate; cold start with no control plane passes
+    SC01/SC02
+  responsibility: platform-guarantee
+  implementation_mode: out-of-process
+  provider_or_adapter: null
+  enforcement_point: clean-install verification; SC01/SC02 (step5b/5c)
+  state_owner: hecate-runner host owns local task/run/action records
+  milestone: M-S
+  superseded_by: null
+- id: 1.3.11c
+  title: Managed Enrollment, State Projection, Leased Authorization & Reconnect
+  phase: P1
+  category: Agent Runtime
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: plan §一 managed-mode table
+  acceptance: disconnect narrows to lease; reconnect dedupes; active runs never re-dispatched
+  responsibility: platform-guarantee
+  implementation_mode: out-of-process
+  provider_or_adapter: null
+  enforcement_point: enrollment + fencing + lease windows; SC04/SC05 (step4/6/7)
+  state_owner: control plane owns desired config; host owns execution facts
+  milestone: M-A
+  superseded_by: null
+- id: 2.10c
+  title: Hosted-Backend Admission & Data-Residency Gate
+  phase: P2
+  category: Governance & Compliance
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: plan §一 hosted-combination table
+  acceptance: unverifiable residency/retention refuses or downgrades the binding
+  responsibility: platform-guarantee
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: deployment admission per service version (step8/11)
+  state_owner: enterprise/governance
+  milestone: M-A
+  superseded_by: null
+- id: 2.10d
+  title: Vendor Session/Turn Reconciliation & Usage Verification
+  phase: P2
+  category: Governance & Compliance
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: plan §一 hosted-combination table
+  acceptance: lost submissions reconcile or mark unknown; usage never treated as final billing
+  responsibility: shared-contract
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: session reconciliation by provider idempotency (step8/10)
+  state_owner: execution/ keeps mapping+cursors; vendor owns session
+  milestone: M-A
+  superseded_by: null
+- id: 2.10e
+  title: Hosted-Tool Enforcement Point & Gateway Receipts
+  phase: P2
+  category: Governance & Compliance
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: plan §一 enforcement-point rules
+  acceptance: protected hosted actions execute only via gateway with receipts
+  responsibility: platform-guarantee
+  implementation_mode: out-of-process
+  provider_or_adapter: null
+  enforcement_point: enterprise gateway receipts; unblockable tools downgrade tier (step7/8)
+  state_owner: tools/gateway
+  milestone: M-A
+  superseded_by: null
+- id: '8.13'
+  title: Experiment Snapshot & Per-Sample Evaluation Results
+  phase: P3
+  category: Evaluation & Observability
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: plan §八 P03 rows
+  acceptance: missing required samples never pass the release gate
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: null
+  enforcement_point: evaluation envelope gate (step10/11)
+  state_owner: ops/evaluation
+  milestone: M-B
+  superseded_by: null
+- id: '9.18'
+  title: Knowledge Ingestion & Lifecycle Governance
+  phase: P3
+  category: Knowledge & Memory
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: plan §八 P02 rows
+  acceptance: revocation/deletion cover source+index+cache+derivatives; half-built indexes never publish
+  responsibility: platform-guarantee
+  implementation_mode: external-service
+  provider_or_adapter: null
+  enforcement_point: source ACL + deletion-propagation receipts (step9c)
+  state_owner: knowledge provider
+  milestone: M-B
+  superseded_by: null
+- id: '9.19'
+  title: Componentized Retrieval Composition & Replacement Conformance
+  phase: P3
+  category: Knowledge & Memory
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: hecate-memory vector-store adapters as reference
+  acceptance: single-component swap passes tenant/ACL/deletion tests without control-plane changes
+  responsibility: shared-contract
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: component contracts + conformance tests (step9d)
+  state_owner: knowledge components
+  milestone: M-B
+  superseded_by: null
+- id: '9.20'
+  title: Retrieval Experiment Snapshots & Stage-Diagnosis Declaration
+  phase: P3
+  category: Knowledge & Memory
+  status: planned
+  maturity: null
+  dependencies: []
+  evidence: plan §八 P01 rows
+  acceptance: same-snapshot comparison reproducible; stage-invisible backends declare it
+  responsibility: shared-contract
+  implementation_mode: in-process-plugin
+  provider_or_adapter: null
+  enforcement_point: experiment snapshot + stage-visibility declaration (step9d/10)
+  state_owner: knowledge + evaluation
+  milestone: M-B
+  superseded_by: null

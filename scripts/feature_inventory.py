@@ -11,8 +11,16 @@ validates the inventory against the catalog and its own governance rules:
 - yaml/catalog id-set drift (ERROR)
 - delivery-status contradiction between catalog ✅ and inventory
   ``delivered`` (ERROR, either direction)
-- missing evidence/acceptance (WARNING, summarized — promoted to ERROR
-  under ``--strict``)
+- inventory schema version other than the current one (ERROR — run extract)
+- invalid enum values for ``responsibility`` / ``implementation_mode``
+  (ERROR); the explicit ``n/a`` marker is accepted for not-applicable
+- governance fields missing (WARNING, reported per entry — promoted to
+  ERROR under ``--strict``); ``maturity`` is never derived from
+  ``status: delivered``
+- research entries with all lifecycle governance fields missing (WARNING;
+  strict fails); explicit ``pending`` is accepted. A research entry that
+  flips to ``delivered`` without a catalog ✅ is blocked by the delivery
+  contradiction rule above.
 
 Field ownership
 ---------------
@@ -21,9 +29,11 @@ Field ownership
   ``title`` / ``phase`` / ``category`` — refreshed by every extract run.
 - The YAML inventory (``docs/features/feature-inventory.yaml``) owns the
   machine-readable status and governance data (``status``, ``maturity``,
-  ``dependencies``, ``evidence``, ``acceptance``) plus any other per-entry
-  keys — extract preserves them verbatim; new ids are seeded with empty
-  governance fields.
+  ``dependencies``, ``evidence``, ``acceptance``, ``responsibility``,
+  ``implementation_mode``, ``provider_or_adapter``, ``enforcement_point``,
+  ``state_owner``, ``milestone``, ``superseded_by``) plus any other
+  per-entry keys — extract preserves them verbatim; new ids are seeded
+  with empty governance fields.
 
 A catalog ✅ mark that disagrees with the inventory's ``delivered`` status
 (either direction) is a contradiction: extract and check both fail loudly
@@ -54,13 +64,64 @@ INVENTORY_PATH = REPO_ROOT / "docs" / "features" / "feature-inventory.yaml"
 # ``1.3.21④``, ``13.14`` — must contain a digit and no markdown markers.
 _ID_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z.\-—]*(\s*\([^)]*\))?$")
 
+# Current inventory schema version; extract writes it, check requires it.
+_INVENTORY_SCHEMA_VERSION = 2
+
+# Explicit markers accepted in place of a concrete value. ``n/a`` declares a
+# field not applicable to the entry; ``pending`` declares a value deferred on
+# purpose (research lifecycle fields). Both are "explicit", never debt.
+_NOT_APPLICABLE = "n/a"
+_PENDING = "pending"
+
+_RESPONSIBILITY_VALUES = ("platform-guarantee", "shared-contract", "provider-guarantee", "optional-ecosystem")
+_IMPLEMENTATION_MODE_VALUES = ("builtin", "in-process-plugin", "out-of-process", "external-service", "asset")
+
+# Fields whose absence counts as governance debt on non-research entries.
+# ``dependencies`` is seeded as a list (empty is a valid value), and
+# ``evidence`` / ``acceptance`` keep their dedicated summarized warnings, so
+# they are not repeated here.
+_REQUIRED_GOVERNANCE_FIELDS = (
+    "maturity",
+    "responsibility",
+    "implementation_mode",
+    "provider_or_adapter",
+    "enforcement_point",
+    "state_owner",
+    "milestone",
+    "superseded_by",
+)
+
+_RESEARCH_STATUSES = {"research-candidate"}
+_RESEARCH_LIFECYCLE_FIELDS = ("research_owner", "hypothesis", "investment_boundary", "review_trigger", "exit_decision")
+
 # First-import seeds for the inventory-owned governance fields; extract
 # seeds them only for new ids and never rewrites them on existing entries.
+_DATE_PAREN_RE = re.compile(r"\s*\([^)]*\d{4}-\d{2}-\d{2}[^)]*\)\s*$")
+
+
+def _normalize_id_cell(cell: str) -> str:
+    """Strip the ✅ mark and date annotations from an ID cell.
+
+    ``6.27 ✅ (2026-09-21)`` → ``6.27``; code suffixes like ``11.9 (D/T)``
+    are kept — only parentheticals containing a calendar date are removed.
+    """
+    cleaned = cell.replace("✅", "")
+    cleaned = _DATE_PAREN_RE.sub("", cleaned)
+    return " ".join(cleaned.split())
+
+
 _GOVERNANCE_FIELD_SEEDS: dict[str, Any] = {
     "maturity": None,
     "dependencies": [],
     "evidence": None,
     "acceptance": None,
+    "responsibility": None,
+    "implementation_mode": None,
+    "provider_or_adapter": None,
+    "enforcement_point": None,
+    "state_owner": None,
+    "milestone": None,
+    "superseded_by": None,
 }
 _GOVERNANCE_FIELDS = tuple(_GOVERNANCE_FIELD_SEEDS)
 
@@ -79,10 +140,235 @@ _INVENTORY_HEADER = """\
 #     title / phase / category          (refreshed by every extract run)
 #   this YAML owns machine-readable status and governance data
 #     status / maturity / dependencies / evidence / acceptance
+#     responsibility / implementation_mode / provider_or_adapter
+#     enforcement_point / state_owner / milestone / superseded_by
 #     plus any other per-entry keys     (preserved verbatim; hand-edit here)
+#   research-lifecycle fields (research_owner / hypothesis /
+#     investment_boundary / review_trigger / exit_decision) apply to
+#     status=research-candidate entries; explicit "pending" is accepted
+#   conventions: "n/a" = explicitly not applicable (never debt);
+#     "pending" = explicitly deferred; maturity is independent of status —
+#     delivered never implies production; deferral and retirement live in
+#     status, never in implementation_mode
 # A catalog ✅ mark contradicting status=delivered (either direction) fails
 # extract and check until resolved in this file (which owns status).
 """
+
+# Managed-region markers embedded in governed markdown documents. Content
+# between a begin/end pair is generated from the inventory; outside text is
+# hand-written and never touched. ``strict="true"`` regions make check fail
+# on drift; ``strict="false"`` regions only report it (migration period).
+_MANAGED_BEGIN = re.compile(r"<!--\s*feature-inventory:managed:(?P<name>[a-z0-9:-]+)\s+(?P<attrs>[^>]*)begin\s*-->")
+_MANAGED_END = re.compile(r"<!--\s*feature-inventory:managed:(?P<name>[a-z0-9:-]+)\s+end\s*-->")
+_MANAGED_STRICT = re.compile(r'strict="(true|false)"')
+
+# Known managed regions: name -> renderer. Registered by the govern step
+# (task 4.1 renders entries and derived registration tables); unknown region
+# names fail loudly so renames cannot strand content unmanaged.
+_MANAGED_RENDERERS: dict[str, Any] = {}
+
+
+def register_managed_region(name: str, renderer: Any) -> None:
+    """Register a renderer for a managed region name (used by tests too)."""
+    _MANAGED_RENDERERS[name] = renderer
+
+
+# ---------------------------------------------------------------------------
+# Governed registration tables (data-as-code; deterministic, PR-reviewable).
+# These are per-capability/per-process registries, not per-feature data, so
+# they live in scripts/feature_inventory_tables.yaml (loaded below) rather
+# than in the feature inventory. Edit the YAML and re-run `sync`.
+# ---------------------------------------------------------------------------
+
+_TABLES_PATH = Path(__file__).resolve().parent / "feature_inventory_tables.yaml"
+
+
+def _load_tables() -> dict[str, list[tuple[str, ...]]]:
+    data = yaml.safe_load(_TABLES_PATH.read_text(encoding="utf-8"))
+    return {name: [tuple(row) for row in rows] for name, rows in data.items()}
+
+
+_TABLES = _load_tables()
+_CONTRACT_REGISTRY = _TABLES["contract_registry"]
+_CAPABILITY_DOMAINS = _TABLES["capability_domains"]
+_ITERATIONS = _TABLES["iterations"]
+_MILESTONES = _TABLES["milestones"]
+
+
+def _render_dispositions(inventory: dict[str, Any]) -> str:
+    """Governed disposition table: every entry with governance fields filled."""
+    lines = [
+        "Governed entries carry plan-§六 dispositions and plan-§一 governance five-tuples in the"
+        " inventory (single source of truth). Unlisted entries keep explicit debt until their step fills them.",
+        "",
+        "| ID | Responsibility | Implementation | Enforcement point | State owner | Milestone |",
+        "|---|---|---|---|---|---|",
+    ]
+    for entry in inventory.get("features", []):
+        if not entry.get("milestone") or not entry.get("responsibility"):
+            continue
+        lines.append(
+            f"| {entry['id']} | {entry['responsibility']} | {entry.get('implementation_mode') or '-'}"
+            f" | {entry.get('enforcement_point') or '-'} | {entry.get('state_owner') or '-'}"
+            f" | {entry['milestone']} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _render_contract_registry(_inventory: dict[str, Any]) -> str:
+    lines = [
+        "Contract ownership, publish units, and state owners per replaceable capability (ADR-034/035).",
+        "",
+        "| Capability | Public contract | Publish unit | State owner | Current version / window |",
+        "|---|---|---|---|---|",
+    ]
+    for row in _CONTRACT_REGISTRY:
+        lines.append("| " + " | ".join(row) + " |")
+    lines.append("")
+    lines.append(
+        "In-process implementations ship with the main app; out-of-process implementations may release"
+        " independently — having an SPI is not standalone-deployability."
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _render_capability_domains(_inventory: dict[str, Any]) -> str:
+    lines = [
+        "Capability-domain labels are ownership boundaries and future extraction candidates,"
+        " not today's deployment units.",
+        "",
+        "| Domain | Current location | Target sub-package | Owns | Known gap |",
+        "|---|---|---|---|---|",
+    ]
+    for row in _CAPABILITY_DOMAINS:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _render_iterations(_inventory: dict[str, Any]) -> str:
+    lines = [
+        "Delivery iterations (execution order; each slice is independently acceptable). Full definitions:"
+        " evolution plan §七.",
+        "",
+        "| Iteration | Scope | Work packages | Independently acceptable result | Out of scope this round |",
+        "|---|---|---|---|---|",
+    ]
+    for row in _ITERATIONS:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines) + "\n"
+
+
+def _render_milestones(_inventory: dict[str, Any]) -> str:
+    lines = [
+        "Stage gates. A milestone's exit conditions bind its covered steps; nothing earlier is promised.",
+        "",
+        "| Milestone | Covers | Exit conditions | Not yet promised |",
+        "|---|---|---|---|",
+    ]
+    for row in _MILESTONES:
+        lines.append("| " + " | ".join(row) + " |")
+    return "\n".join(lines) + "\n"
+
+
+register_managed_region("catalog:dispositions", _render_dispositions)
+register_managed_region("catalog:contract-registry", _render_contract_registry)
+register_managed_region("catalog:capability-domains", _render_capability_domains)
+register_managed_region("roadmap:iterations", _render_iterations)
+register_managed_region("roadmap:milestones", _render_milestones)
+register_managed_region("roadmap:capability-domains", _render_capability_domains)
+
+
+def _render_managed_region(name: str, inventory: dict[str, Any]) -> str:
+    renderer = _MANAGED_RENDERERS.get(name)
+    if renderer is None:
+        raise SystemExit(
+            f"ERROR: unknown managed region {name!r} — no renderer registered;"
+            " update the renderer registry in scripts/feature_inventory.py"
+        )
+    return renderer(inventory)
+
+
+def _iter_managed_regions(text: str, source: Path) -> list[tuple[str, bool, int, int, int, int]]:
+    """Locate begin/end marker pairs.
+
+    Returns (name, strict, content_start, content_end, region_start, region_end)
+    with begin/end lines included in region bounds. Unpaired markers fail.
+    """
+    regions: list[tuple[str, bool, int, int, int, int]] = []
+    lines = text.splitlines(keepends=True)
+    open_at: dict[str, tuple[int, bool]] = {}
+    for lineno, line in enumerate(lines):
+        begin = _MANAGED_BEGIN.search(line)
+        end = _MANAGED_END.search(line)
+        if begin:
+            name = begin.group("name")
+            if name in open_at:
+                raise SystemExit(f"ERROR: {source}:{lineno + 1} nested/duplicate begin for managed region {name!r}")
+            strict_attr = _MANAGED_STRICT.search(begin.group("attrs") or "")
+            open_at[name] = (lineno, strict_attr is not None and strict_attr.group(1) == "true")
+        elif end:
+            name = end.group("name")
+            if name not in open_at:
+                raise SystemExit(f"ERROR: {source}:{lineno + 1} end marker without begin for managed region {name!r}")
+            begin_line, strict = open_at.pop(name)
+            content_start = sum(len(line_text) for line_text in lines[: begin_line + 1])
+            content_end = sum(len(line_text) for line_text in lines[:lineno])
+            regions.append((name, strict, content_start, content_end, 0, 0))
+    if open_at:
+        names = ", ".join(sorted(open_at))
+        raise SystemExit(f"ERROR: {source} unterminated managed region(s): {names}")
+    return regions
+
+
+def sync_managed_regions(
+    inventory: dict[str, Any],
+    documents: dict[Path, str],
+    *,
+    write: bool,
+) -> int:
+    """Regenerate managed regions and report drift per entry+field.
+
+    With ``write=True`` regions are rewritten from the inventory (idempotent;
+    text outside regions is preserved byte-for-byte). With ``write=False``
+    nothing is written and drift is only reported; region-level ``strict``
+    attributes decide whether drift is an error.
+    """
+    failures = 0
+    for path, original in documents.items():
+        regions = _iter_managed_regions(original, path)
+        if not regions:
+            continue
+        result = original
+        # Replace from the end so earlier offsets stay valid.
+        for name, _strict, content_start, content_end, _rs, _re in sorted(regions, key=lambda r: -r[2]):
+            rendered = _render_managed_region(name, inventory)
+            current = result[content_start:content_end]
+            if current != rendered:
+                if write:
+                    result = result[:content_start] + rendered + result[content_end:]
+                else:
+                    drift = _first_line_diff(current, rendered)
+                    marker = "DRIFT" if _strict else "drift (report-only)"
+                    print(f"{marker}: {path.name} [{name}] {drift}", file=sys.stderr)
+                    if _strict:
+                        failures += 1
+        if write and result != original:
+            path.write_text(result, encoding="utf-8")
+            print(f"synced {len(regions)} managed region(s) -> {path}")
+        elif write:
+            print(f"managed regions already in sync -> {path}")
+    return 1 if failures else 0
+
+
+def _first_line_diff(current: str, rendered: str) -> str:
+    """Human-pointing summary of where a region differs (not a full diff)."""
+    cur_lines, ren_lines = current.splitlines(), rendered.splitlines()
+    for idx in range(max(len(cur_lines), len(ren_lines))):
+        cur = cur_lines[idx] if idx < len(cur_lines) else "<missing>"
+        ren = ren_lines[idx] if idx < len(ren_lines) else "<missing>"
+        if cur != ren:
+            return f"line {idx + 1}: current={cur.strip()!r} expected={ren.strip()!r}"
+    return "identical"
 
 
 def _governance_seed() -> dict[str, Any]:
@@ -116,8 +402,28 @@ def extract_entries(catalog_path: Path) -> tuple[list[dict[str, Any]], list[str]
     phase = "other"
     seen_ids: set[str] = set()
 
+    text = catalog_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    # Managed regions render FROM the inventory — their table rows are
+    # generated output, never extraction sources. Collect their line spans
+    # and skip anything inside them.
+    managed_lines: set[int] = set()
+    open_at: dict[str, int] = {}
+    for lineno, line in enumerate(lines, start=1):
+        begin = _MANAGED_BEGIN.search(line)
+        end = _MANAGED_END.search(line)
+        if begin:
+            open_at[begin.group("name")] = lineno
+        elif end:
+            name = end.group("name")
+            begin_line = open_at.pop(name, None)
+            if begin_line is not None:
+                managed_lines.update(range(begin_line, lineno + 1))
+
     in_pool_section = False
-    for lineno, line in enumerate(catalog_path.read_text(encoding="utf-8").splitlines(), start=1):
+    for lineno, line in enumerate(lines, start=1):
+        if lineno in managed_lines:
+            continue
         heading = re.match(r"^##\s+(.*)$", line)
         if heading:
             # The research-candidate pool restates ids as governance notes —
@@ -134,17 +440,23 @@ def extract_entries(catalog_path: Path) -> tuple[list[dict[str, Any]], list[str]
         if len(cells) < 4:
             continue
         first = cells[1]
-        if not _is_id_cell(first):
+        # Two ✅ styles exist in the catalog: inside the Feature cell and
+        # appended to the ID cell (optionally with a date suffix like
+        # "✅ (2026-09-21)"). Normalize the ID cell so both parse; either
+        # mark counts as the delivered mark.
+        id_mark = "✅" in first
+        first_normalized = _normalize_id_cell(first)
+        if not _is_id_cell(first_normalized):
             continue
         feature_cell = cells[2]
         if feature_cell.startswith(":") or set(feature_cell) <= {"-"}:
             continue
-        entry_id = " ".join(first.split())
+        entry_id = first_normalized
         if entry_id in seen_ids:
             failures.append(f"{catalog_path.name}:{lineno} duplicate id {entry_id!r}")
             continue
         seen_ids.add(entry_id)
-        delivered = "✅" in feature_cell
+        delivered = id_mark or "✅" in feature_cell
         title = feature_cell.replace("✅", "").strip()
         entries.append(
             {
@@ -220,6 +532,15 @@ def merge_entries(
             merged.append(entry)
             report["new"].append(entry["id"])
 
+    # Schema migration: seed governance fields that a pre-v2 entry lacks.
+    # Filling the seed value (None / []) for an absent key never overwrites
+    # an existing YAML-owned value, keeps output shape uniform per schema
+    # version, and stays idempotent.
+    for entry in merged:
+        for field, seed in _GOVERNANCE_FIELD_SEEDS.items():
+            if field not in entry:
+                entry[field] = list(seed) if isinstance(seed, list) else seed
+
     return merged, report, contradictions
 
 
@@ -260,6 +581,13 @@ def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, A
     errors: list[str] = []
     warnings: list[str] = []
 
+    schema = inventory.get("schema")
+    if schema != _INVENTORY_SCHEMA_VERSION:
+        errors.append(
+            f"inventory schema is {schema!r}; expected {_INVENTORY_SCHEMA_VERSION} —"
+            " run `python scripts/feature_inventory.py extract` to migrate"
+        )
+
     ids = [e["id"] for e in entries]
     duplicates = sorted({i for i in ids if ids.count(i) > 1})
     if duplicates:
@@ -281,6 +609,37 @@ def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, A
         if entry.get("maturity") == "production" and not entry.get("evidence"):
             errors.append(
                 f"{entry['id']}: maturity=production requires evidence (an interface existing is not production)"
+            )
+
+    for entry in entries:
+        entry_id = entry["id"]
+        for field, allowed in (
+            ("responsibility", _RESPONSIBILITY_VALUES),
+            ("implementation_mode", _IMPLEMENTATION_MODE_VALUES),
+        ):
+            value = entry.get(field)
+            if value is not None and value not in (*allowed, _NOT_APPLICABLE):
+                errors.append(f"{entry_id}: {field}={value!r} is not one of {list(allowed)} or {_NOT_APPLICABLE!r}")
+
+    # Governance debt: missing fields are explicit debt (per-entry report,
+    # never auto-filled); "n/a" is an explicit not-applicable, not debt.
+    for entry in entries:
+        if entry.get("status") in _RESEARCH_STATUSES:
+            continue
+        missing = [field for field in _REQUIRED_GOVERNANCE_FIELDS if entry.get(field) is None]
+        if missing:
+            warnings.append(f"{entry['id']}: missing governance fields (explicit debt): {', '.join(missing)}")
+
+    # Research lifecycle: fields may be explicitly "pending", but the whole
+    # block must not be silently absent. Promotion to delivered without a
+    # catalog ✅ is already blocked by the delivery-contradiction rule below.
+    for entry in entries:
+        if entry.get("status") not in _RESEARCH_STATUSES:
+            continue
+        if all(entry.get(field) is None for field in _RESEARCH_LIFECYCLE_FIELDS):
+            warnings.append(
+                f"{entry['id']}: research entry missing all lifecycle governance fields"
+                f" ({', '.join(_RESEARCH_LIFECYCLE_FIELDS)}); use explicit values or {_PENDING!r}"
             )
 
     for entry in entries:
@@ -354,9 +713,12 @@ def cmd_extract(
             print(f"  {contradiction}", file=sys.stderr)
         return 1
     inventory = {
-        "schema": 1,
+        "schema": _INVENTORY_SCHEMA_VERSION,
         # Governance fields this inventory owns per entry: status, maturity,
-        # dependencies, evidence, acceptance (titles are extracted indexes).
+        # dependencies, evidence, acceptance, responsibility,
+        # implementation_mode, provider_or_adapter, enforcement_point,
+        # state_owner, milestone, superseded_by (titles are extracted
+        # indexes; research lifecycle fields ride on research entries).
         "features": merged,
     }
     inventory_path.write_text(
@@ -399,7 +761,33 @@ def cmd_check(
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 1
-    return check_inventory(inventory, entries, strict=args.strict)
+    result = check_inventory(inventory, entries, strict=args.strict)
+    if result != 0:
+        return result
+    # Governed-document drift: strict regions fail check, loose ones only
+    # report (migration period). Runs after inventory validation passes.
+    return sync_managed_regions(inventory, _governed_documents(), write=False)
+
+
+_GOVERNED_DOC_PATHS = (
+    REPO_ROOT / "docs" / "features" / "feature-catalog.md",
+    REPO_ROOT / "docs" / "features" / "roadmap.md",
+)
+
+
+def _governed_documents() -> dict[Path, str]:
+    return {path: path.read_text(encoding="utf-8") for path in _GOVERNED_DOC_PATHS if path.exists()}
+
+
+def cmd_sync(
+    args: argparse.Namespace,
+    inventory_path: Path = INVENTORY_PATH,
+) -> int:
+    inventory = yaml.safe_load(inventory_path.read_text(encoding="utf-8"))
+    documents = _governed_documents()
+    if args.check:
+        return sync_managed_regions(inventory, documents, write=False)
+    return sync_managed_regions(inventory, documents, write=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -411,6 +799,9 @@ def main(argv: list[str] | None = None) -> int:
     check_parser = sub.add_parser("check", help="validate the inventory against the catalog")
     check_parser.add_argument("--strict", action="store_true", help="treat warnings as errors")
     check_parser.set_defaults(func=cmd_check)
+    sync_parser = sub.add_parser("sync", help="regenerate managed regions in governed documents from the inventory")
+    sync_parser.add_argument("--check", action="store_true", help="report drift without writing (strict regions fail)")
+    sync_parser.set_defaults(func=cmd_sync)
     args = parser.parse_args(argv)
     return args.func(args)
 

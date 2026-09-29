@@ -55,6 +55,9 @@ Execution Engine → Model Access → Tool System → Skill Loading → Agent Ru
 
 ---
 
+| 1.3.11b | Standalone Runtime Distribution & Execution Host | Agent Runtime | `hecate-runtime` wheel + `hecate-runner` host per ADR-035: local manifest loading, business identity/policy adapters, minimal execution/state/evidence interfaces, clean-install verification (SC01/SC02); read-only technical preview first. Gated by the standalone-consumption path (step5). | AWS AgentCore Runtime (self-hosted counterpart) |
+| 1.3.11c | Managed Enrollment, State Projection, Leased Authorization & Reconnect | Agent Runtime | Host enrolls with the control plane: desired-config projection, command receipts with fencing, authorization leases with max-staleness windows, reconnect re-verification without re-running active work (SC04/SC05). Gated by the managed slice (step4/6/7). | AWS AgentCore control plane; Google Agent Identity |
+
 ## P2: Enterprise-Ready (Months 4-6)
 
 > Visual canvas drag-and-drop workflow builder, multi-Agent collaboration, persistent memory, multi-tenant organization, RBAC, basic evaluation, basic security, basic observability, scheduled tasks, authentication.
@@ -241,6 +244,10 @@ Multi-Database → Multi-Vector-DB → MCP Server Mode
 ```
 
 ---
+
+| 2.10c | Hosted-Backend Admission & Data-Residency Gate | Governance & Compliance | Admission for vendor-hosted harnesses on two axes (harness/session owner x environment owner) plus enforcement point; residency/retention/deletion verified per service version; unverifiable combinations are rejected or downgraded (plan §一 execution-combination table). Gated at step8/11. | OpenAI Agents API data-residency terms; Bedrock AgentCore |
+| 2.10d | Vendor Session/Turn Reconciliation & Usage Verification | Governance & Compliance | Platform Task/Run to vendor session/turn mapping with cursors; submission-loss and cancellation reconciliation by provider idempotency; provider usage marked estimated/unverified, never final billing. Gated at step8/10. | LangSmith usage reconciliation; A2A task semantics |
+| 2.10e | Hosted-Tool Enforcement Point & Gateway Receipts | Governance & Compliance | Enterprise-protected actions of hosted backends execute only through the Hecate (or certified) gateway with caller/delegation/parameter/approval verification and receipts; unblockable vendor-internal tools downgrade the deployment's governance tier explicitly. Gated at step7/8. | Google agent identity + gateway model; MCP authorization spec |
 
 ## P3: Trustworthy (Months 7-14)
 
@@ -544,6 +551,11 @@ CheckpointStore → Distributed Session State Store (13.4a) ✅ (5/5) → Horizo
 ```
 
 ---
+
+| 8.13 | Experiment Snapshot & Per-Sample Evaluation Results | Evaluation & Observability | Versioned experiment references (dataset/knowledge/permission snapshots, retrieval pipeline versions), per-sample trials with recomputable aggregates, grouped slicing by question type/permission/backend version; missing samples never pass the gate. Gated at step10/11. | LangSmith evaluation types; Anthropic evals practice |
+| 9.18 | Knowledge Ingestion & Lifecycle Governance | Knowledge & Memory | Source connectors with authorized source references; sync watermark and index-job state per stage; atomic switch to verified index versions; permission revocation and deletion propagate across source/index/cache/derivatives with receipts; half-built indexes never publish. Gated at step9c. | Enterprise RAG platforms (Dify KB, AgentArts) |
+| 9.19 | Componentized Retrieval Composition & Replacement Conformance | Knowledge & Memory | Optional Knowledge assembly from Loader/Parser, Chunker, Embedding, dense/sparse/full-text stores, Retriever, Reranker, Query Processor with per-component versions and public contracts; single-component replacement without control-plane/Runtime changes; incompatible index combos refuse new bindings. Gated at step9d. | LlamaIndex/LangChain component models (as external references) |
+| 9.20 | Retrieval Experiment Snapshots & Stage-Diagnosis Declaration | Knowledge & Memory | Same-snapshot comparison of dense/full-text/hybrid/rerank strategies; stage events (query rewrite, recall, fusion, rerank) when the backend exposes them; black-box services declare stage-visibility limits instead of fabricating traces. Gated at step9d/10. | RAG evaluation suites (Ragas et al.) |
 
 ## P4: Intelligent (Months 15-18)
 
@@ -1004,6 +1016,115 @@ Memory Clustering → Conflict Resolution → Memory Traceability
 ```
 
 ---
+
+## Platform Governance Dispositions
+
+<!-- feature-inventory:managed:catalog:dispositions strict="true" begin -->
+Governed entries carry plan-§六 dispositions and plan-§一 governance five-tuples in the inventory (single source of truth). Unlisted entries keep explicit debt until their step fills them.
+
+| ID | Responsibility | Implementation | Enforcement point | State owner | Milestone |
+|---|---|---|---|---|---|
+| 1.3.1 | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 3.1.1 | provider-guarantee | external-service | ProviderBinding + ACL/deletion-propagation acceptance (step9) | memory/knowledge provider; platform keeps references+evidence | M-B |
+| 3.2.1 | provider-guarantee | external-service | ProviderBinding + ACL/deletion-propagation acceptance (step9) | memory/knowledge provider; platform keeps references+evidence | M-B |
+| 5.1 | optional-ecosystem | builtin | tool gateway policy + receipt (step7) | tool platform | M-A |
+| 1.1.2 | shared-contract | builtin | release manifest admission (step11); external agents register without the DSL | studio/engineering | M-B |
+| 1.1.3 | shared-contract | builtin | release manifest admission (step11); external agents register without the DSL | studio/engineering | M-B |
+| 4.1 | provider-guarantee | external-service | ProviderBinding + ACL/deletion-propagation acceptance (step9) | memory/knowledge provider; platform keeps references+evidence | M-B |
+| 8.7 | optional-ecosystem | in-process-plugin | evidence export contract, unsampled governance events kept (step10) | ops/evidence | M-B |
+| 11.9 | optional-ecosystem | out-of-process | channel identity mapping + audit (step5/7) | channel adapter | M-A |
+| 6.44 | optional-ecosystem | external-service | model admission/budget gateway (step7) | model hub service | M-B |
+| 6.45 | optional-ecosystem | external-service | model admission/budget gateway (step7) | model hub service | M-B |
+| 7.2b | shared-contract | in-process-plugin | EvaluationBackend result contract (step10) | evaluation backend; governance consumes evidence references | M-B |
+| 7.2c | shared-contract | in-process-plugin | EvaluationBackend result contract (step10) | evaluation backend; governance consumes evidence references | M-B |
+| 7.2d | shared-contract | in-process-plugin | EvaluationBackend result contract (step10) | evaluation backend; governance consumes evidence references | M-B |
+| 7.2e | shared-contract | in-process-plugin | EvaluationBackend result contract (step10) | evaluation backend; governance consumes evidence references | M-B |
+| 7.3 | shared-contract | in-process-plugin | EvaluationBackend result contract (step10) | evaluation backend; governance consumes evidence references | M-B |
+| 7.4 | shared-contract | in-process-plugin | EvaluationBackend result contract (step10) | evaluation backend; governance consumes evidence references | M-B |
+| 13.1a | platform-guarantee | builtin | release manifest gate consuming versioned evaluation results (step11) | enterprise/governance | M-A; M-B |
+| 13.1b | platform-guarantee | builtin | verified server-side auth context at every entry (step7) | enterprise/auth | M-A |
+| 13.17 | platform-guarantee | builtin | release manifest gate consuming versioned evaluation results (step11) | enterprise/governance | M-A; M-B |
+| 8.10 | platform-guarantee | builtin | release manifest gate consuming versioned evaluation results (step11) | enterprise/governance | M-A; M-B |
+| 8.12 | platform-guarantee | builtin | release manifest gate consuming versioned evaluation results (step11) | enterprise/governance | M-A; M-B |
+| 1.1.24 | platform-guarantee | builtin | approval bound to params/resources; ask-rule fail-close (step7) | enterprise/governance | M-A |
+| 11.16 | platform-guarantee | builtin | verified server-side auth context at every entry (step7) | enterprise/auth | M-A |
+| 11.17 | platform-guarantee | builtin | verified server-side auth context at every entry (step7) | enterprise/auth | M-A |
+| 1.3.11 | platform-guarantee | builtin | Task/Run API + durable worker with leases (step6) | execution/ (control plane); executor owns run facts | M-A |
+| 4.13 | provider-guarantee | external-service | ProviderBinding + ACL/deletion-propagation acceptance (step9) | memory/knowledge provider; platform keeps references+evidence | M-B |
+| 1.1.23 | platform-guarantee | builtin | approval bound to params/resources; ask-rule fail-close (step7) | enterprise/governance | M-A |
+| 6.6 | optional-ecosystem | external-service | model admission/budget gateway (step7) | model hub service | M-B |
+| 7.5 | platform-guarantee | builtin | release manifest gate consuming versioned evaluation results (step11) | enterprise/governance | M-A; M-B |
+| 9.16 | platform-guarantee | builtin | policy pipeline + action gateway with decision/execution receipts (step7) | tools/policy | M-A |
+| 6.24 | platform-guarantee | builtin | versioned event envelope + evidence store, never sampled (step6/10) | ops/evidence | M-A |
+| 6.30 | platform-guarantee | builtin | policy pipeline + action gateway with decision/execution receipts (step7) | tools/policy | M-A |
+| 12.0 | shared-contract | asset | neutral manifest + admission receipt; internal catalog before any marketplace (step11/18) | registry service | M-E (conditional) |
+| 9.9 | platform-guarantee | builtin | versioned event envelope + evidence store, never sampled (step6/10) | ops/evidence | M-A |
+| 6.46 | optional-ecosystem | external-service | model admission/budget gateway (step7) | model hub service | M-B |
+| 5.13 | shared-contract | asset | neutral manifest + admission receipt; internal catalog before any marketplace (step11/18) | registry service | M-E (conditional) |
+| 11.19 | platform-guarantee | builtin | policy pipeline + action gateway with decision/execution receipts (step7) | tools/policy | M-A |
+| 11.20 | platform-guarantee | builtin | verified server-side auth context at every entry (step7) | enterprise/auth | M-A |
+| 14.1 | shared-contract | asset | neutral manifest + admission receipt; internal catalog before any marketplace (step11/18) | registry service | M-E (conditional) |
+| 6.21 | platform-guarantee | builtin | versioned event envelope + evidence store, never sampled (step6/10) | ops/evidence | M-A |
+| 5.5c | optional-ecosystem | in-process-plugin | asset manifest admission + revocable binding (step11/18) | registry service | M-E (conditional) |
+| 5.13a | optional-ecosystem | in-process-plugin | asset manifest admission + revocable binding (step11/18) | registry service | M-E (conditional) |
+| 6.27 | optional-ecosystem | builtin | tool gateway policy + receipt (step7) | tool platform | M-A |
+| 5.5b | optional-ecosystem | in-process-plugin | asset manifest admission + revocable binding (step11/18) | registry service | M-E (conditional) |
+| 1.3.5i | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 1.3.15 | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 1.3.16 | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 1.3.15a | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 1.3.15b | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 1.3.15c | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 1.3.17 | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 5.5d | optional-ecosystem | in-process-plugin | asset manifest admission + revocable binding (step11/18) | registry service | M-E (conditional) |
+| 1.3.6f | optional-ecosystem | in-process-plugin | candidate → evaluation → gated publish (step11/15) | studio/self-evolution | M-B (conditional) |
+| 1.3.20 | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 6.19 | optional-ecosystem | in-process-plugin | candidate → evaluation → gated publish (step11/15) | studio/self-evolution | M-B (conditional) |
+| 6.47 | optional-ecosystem | external-service | model admission/budget gateway (step7) | model hub service | M-B |
+| 6.48 | optional-ecosystem | external-service | model admission/budget gateway (step7) | model hub service | M-B |
+| 1.3.21 | platform-guarantee | builtin | execution-backend contract (ADR-034; step3/8 certification) | executor owns run facts; control plane owns platform task records | M-S; M-A |
+| 1.3.11b | platform-guarantee | out-of-process | clean-install verification; SC01/SC02 (step5b/5c) | hecate-runner host owns local task/run/action records | M-S |
+| 1.3.11c | platform-guarantee | out-of-process | enrollment + fencing + lease windows; SC04/SC05 (step4/6/7) | control plane owns desired config; host owns execution facts | M-A |
+| 2.10c | platform-guarantee | external-service | deployment admission per service version (step8/11) | enterprise/governance | M-A |
+| 2.10d | shared-contract | external-service | session reconciliation by provider idempotency (step8/10) | execution/ keeps mapping+cursors; vendor owns session | M-A |
+| 2.10e | platform-guarantee | out-of-process | enterprise gateway receipts; unblockable tools downgrade tier (step7/8) | tools/gateway | M-A |
+| 8.13 | platform-guarantee | builtin | evaluation envelope gate (step10/11) | ops/evaluation | M-B |
+| 9.18 | platform-guarantee | external-service | source ACL + deletion-propagation receipts (step9c) | knowledge provider | M-B |
+| 9.19 | shared-contract | in-process-plugin | component contracts + conformance tests (step9d) | knowledge components | M-B |
+| 9.20 | shared-contract | in-process-plugin | experiment snapshot + stage-visibility declaration (step9d/10) | knowledge + evaluation | M-B |
+<!-- feature-inventory:managed:catalog:dispositions end -->
+
+## Capability Contract Registry
+
+<!-- feature-inventory:managed:catalog:contract-registry strict="true" begin -->
+Contract ownership, publish units, and state owners per replaceable capability (ADR-034/035).
+
+| Capability | Public contract | Publish unit | State owner | Current version / window |
+|---|---|---|---|---|
+| Runtime (execution backend) | Platform→Runtime direction: `AgentExecutionBackend` (step3 draft, frozen at step8) | execution/ | control plane owns platform records; backend owns run facts | draft; support window defined at freeze |
+| Memory / Knowledge | ProviderBinding + capability declaration (step9a); Knowledge service vs componentized retrieval certified separately | knowledge/memory providers | provider owns data/indexes; platform keeps references+evidence | existing specs; v2 fields land with step9 |
+| Evaluation | `EvaluationBackend` submit/query/cancel/result envelope (step10) | ops/evaluation | evaluation backend owns results; governance consumes evidence | existing evaluation specs; backend seam lands at step10 |
+| Observability | OTLP export + trace-association fields (step10); evidence store stays independent | ops (hecate-ops) | trace backend owns diagnostics; platform owns governance evidence | existing monitoring specs; exporter seam at step10 |
+| Gateway (tool/action) | Policy decision + execution receipt contract (step7) | tools/gateway + tools/policy | gateway owns action receipts | action-authorization spec; cross-backend version at step7 |
+
+In-process implementations ship with the main app; out-of-process implementations may release independently — having an SPI is not standalone-deployability.
+<!-- feature-inventory:managed:catalog:contract-registry end -->
+
+## Capability Domains Coverage
+
+<!-- feature-inventory:managed:catalog:capability-domains strict="true" begin -->
+Capability-domain labels are ownership boundaries and future extraction candidates, not today's deployment units.
+
+| Domain | Current location | Target sub-package | Owns | Known gap |
+|---|---|---|---|---|
+| Agent Engineering | `studio/` (agents, workflows, templates, prompts) | `studio/engineering/` | drafts, build records; release via manifest | engineering↔release seam not separated |
+| AgentOps | `ops/` (health, costs, traces, alerts, quotas) | `ops/agentops/` | alerting, disposition records | no authoritative Task/Run query source yet |
+| Agent Control Plane | scattered (`studio/`, `channel/`) | `execution/` + `collaboration/` | deployment desired config, platform task records, run projections, control requests; teams/delegation | Deployment/Task/Run model lands at step4 |
+| Agent Governance | `enterprise/`, `ops/api/audit.py`, `tools/policy/` | `enterprise/governance/` (+`ops/evidence/`) | policy/approval/release decisions; evidence write+query | approval records vs runtime pause not separated |
+| Security | `enterprise/auth/`, `enterprise/vault/`, `tools/gateway/`, `tools/policy/` | existing packages stay separate | identity resolution, credentials, action enforcement | enforcement not yet covering all entries (B1—B3 follow-ups) |
+| Evaluation | `ops/evaluation/` | existing package (+adapter sub-package) | evaluation tasks and results | `EvaluationBackend` seam lands at step10 |
+| MCP/A2A access | `tools/mcp/`, `channel/a2a/` | existing packages + gateway adapters | protocol sessions/mappings | protocol identity→platform authorization incomplete |
+<!-- feature-inventory:managed:catalog:capability-domains end -->
 
 ## Reference Platforms
 
