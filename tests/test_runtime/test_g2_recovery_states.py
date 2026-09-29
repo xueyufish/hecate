@@ -21,6 +21,7 @@ from hecate.runtime.workers.tool_worker import (
     ToolExecutionState,
     ToolWorker,
     resolve_tool_execution_state,
+    tool_arguments_digest,
 )
 
 
@@ -244,7 +245,7 @@ async def test_crash_window_resolves_as_claimed():
     resolution = await resolve_tool_execution_state(store, session_id, execution_id)
 
     assert resolution.state is ToolExecutionState.CLAIMED
-    assert resolution.arguments_digest is None, "legacy claim without digest reads as unknown"
+    assert resolution.arguments_digest == tool_arguments_digest({"content": "x"})
 
     other = await resolve_tool_execution_state(store, session_id, str(uuid.uuid4()))
     assert other.state is ToolExecutionState.NEVER_STARTED
@@ -376,3 +377,122 @@ async def test_lock_failure_does_not_execute_write():
     assert len(port.calls) == 0, "a lost claim race must not run a side-effecting tool"
     msg = result.channel_updates["messages"][0]
     assert msg["is_error"] is True
+
+
+@pytest.mark.parametrize("name", ["memory_add", "write_file"])
+async def test_claimed_write_cannot_change_tool_identity(name):
+    """A caller cannot turn a claimed write into a retryable read."""
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    await _inject_crash_window(store, session_id, "same", name, {"path": "x"})
+    port = _StubPort()
+    result = await ToolWorker(port=port, event_store=store).execute(
+        "tools", {}, _payload("same", "read_file", {"path": "x"}), _execution_context(session_id)
+    )
+    assert not port.calls
+    assert "conflict" in result.channel_updates["messages"][0]["content"]
+
+
+async def test_claimed_idempotent_write_stops_for_review():
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    args = {"path": "x", "content": "x"}
+    await _inject_crash_window(store, session_id, "same", "write_file", args)
+    port = _StubPort()
+    result = await ToolWorker(port=port, event_store=store).execute(
+        "tools", {}, _payload("same", "write_file", args), _execution_context(session_id)
+    )
+    assert not port.calls
+    assert "review" in result.channel_updates["messages"][0]["content"]
+
+
+async def test_legacy_arguments_still_detect_conflict():
+    store = InMemoryEventStore()
+    session_id = uuid.uuid4()
+    await _inject_crash_window(store, session_id, "same", "read_file", {"path": "original"})
+    port = _StubPort()
+    result = await ToolWorker(port=port, event_store=store).execute(
+        "tools", {}, _payload("same", "read_file", {"path": "changed"}), _execution_context(session_id)
+    )
+    assert not port.calls
+    assert "conflict" in result.channel_updates["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("arguments", ['{"broken":', "[]", "null", {"bad": object()}, {"bad": float("nan")}])
+async def test_invalid_arguments_never_reach_executor(arguments):
+    port = _StubPort()
+    result = await ToolWorker(port=port, event_store=InMemoryEventStore())._execute_single_tool(
+        {"id": "invalid", "function": {"name": "write_file", "arguments": arguments}},
+        {},
+        _execution_context(uuid.uuid4()),
+    )
+    assert not port.calls
+    assert result["is_error"] is True
+
+
+@pytest.mark.parametrize("status", [None, "invalid"])
+async def test_unrecognized_receipt_status_is_unknown(status):
+    store = InMemoryEventStore()
+    sid = uuid.uuid4()
+    eid = await _inject_crash_window(store, sid, "same", "write_file", {"path": "x"})
+    await store.append(
+        Event(
+            session_id=sid,
+            superstep=0,
+            event_type=EventType.TOOL_RESULT,
+            payload={"execution_id": eid, "status": status},
+        )
+    )
+    assert (await resolve_tool_execution_state(store, sid, eid)).state is ToolExecutionState.OUTCOME_UNKNOWN
+
+
+async def test_new_claim_supersedes_prior_failed_receipt():
+    store = InMemoryEventStore()
+    sid = uuid.uuid4()
+    eid = await _inject_crash_window(store, sid, "same", "write_file", {"path": "x"})
+    await store.append(
+        Event(
+            session_id=sid,
+            superstep=0,
+            event_type=EventType.TOOL_RESULT,
+            payload={"execution_id": eid, "status": "failed"},
+        )
+    )
+    await _inject_crash_window(store, sid, "same", "write_file", {"path": "x"})
+    assert (await resolve_tool_execution_state(store, sid, eid)).state is ToolExecutionState.CLAIMED
+
+
+async def test_failed_write_retry_is_claimed_before_execution():
+    """An in-flight retry must not leave the previous failure retryable."""
+    store = InMemoryEventStore()
+    sid = uuid.uuid4()
+    args = {"path": "x", "content": "x"}
+    payload = _payload("same", "write_file", args)
+    ctx = _execution_context(sid)
+    failing = _StubPort(raise_exc=ValueError("failed"))
+    await ToolWorker(port=failing, event_store=store).execute("tools", {}, payload, ctx)
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class DelayedPort(_StubPort):
+        async def tool_execute(self, name, args, context=None):
+            self.calls.append((name, args))
+            entered.set()
+            await release.wait()
+            return {"executed": True}
+
+    port = DelayedPort()
+    worker = ToolWorker(port=port, event_store=store)
+    task = asyncio.create_task(worker.execute("tools", {}, payload, ctx))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        assert (
+            await resolve_tool_execution_state(store, sid, _execution_id(sid, "same"))
+        ).state is ToolExecutionState.CLAIMED
+        replay = await worker.execute("tools", {}, payload, ctx)
+        assert len(port.calls) == 1
+        assert replay.channel_updates["messages"][0]["is_error"]
+    finally:
+        release.set()
+        await task

@@ -89,6 +89,6 @@ def should_auto_retry(classification: SideEffectClass, receipt_status: str | Non
         # Only classes whose retry is safe by definition may re-execute;
         # a non-idempotent write may have landed before the failure.
         return classification in (SideEffectClass.READONLY, SideEffectClass.IDEMPOTENT_WRITE)
-    # No receipt at all (log gap / worker died pre-receipt): retry only
-    # what is repeat-safe by definition; everything else goes to review.
-    return classification in (SideEffectClass.READONLY, SideEffectClass.IDEMPOTENT_WRITE)
+    # An unresolved claim may still be executing. Idempotent writes do not
+    # imply a concurrent execution guarantee; unrecognized statuses stop too.
+    return receipt_status is None and classification is SideEffectClass.READONLY

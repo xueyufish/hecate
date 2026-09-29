@@ -1,9 +1,9 @@
 """Unit tests for ``PostgresEventStore`` with mocked PG session.
 
-The actual SQL is exercised in ``test_integration_*.py`` (testcontainers
-gated by ``RUN_INTEGRATION_TESTS=1``). Here we validate the ABC contract:
-the store calls the expected SQLAlchemy methods (``SELECT MAX ... FOR
-UPDATE``, ``INSERT ... ON CONFLICT DO NOTHING``, ordered ``SELECT``) and
+The actual SQL is exercised in ``test_integration_postgres.py`` using a
+disposable database via ``HECATE_TEST_POSTGRES_URL``. Here we validate the
+store calls (transaction advisory lock, MAX version allocation, INSERT
+with conflict handling, and ordered SELECT) and
 propagates exceptions when the underlying driver fails.
 """
 
@@ -78,10 +78,10 @@ def _make_row(session_id: uuid.UUID, version: int) -> EventModel:
     )
 
 
-async def test_append_executes_select_max_for_update_then_insert():
-    """``append`` SHALL execute SELECT MAX(version) ... FOR UPDATE then INSERT ... ON CONFLICT DO NOTHING."""
+async def test_append_locks_then_allocates_version_and_inserts():
+    """Version allocation SHALL be locked before reading MAX and inserting."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_result_scalar_one(0), MagicMock(rowcount=1)])
+    session.execute = AsyncMock(side_effect=[MagicMock(), _result_scalar_one(0), MagicMock(rowcount=1)])
     session.commit = AsyncMock()
     factory = _factory_with_session(session)
     store = PostgresEventStore(async_session_factory=factory)
@@ -89,13 +89,14 @@ async def test_append_executes_select_max_for_update_then_insert():
     session_id = uuid.uuid4()
     await store.append(_make_event(session_id))
 
-    assert session.execute.await_count == 2
-    lock_stmt = session.execute.await_args_list[0].args[0]
-    insert_stmt = session.execute.await_args_list[1].args[0]
+    assert session.execute.await_count == 3
+    lock_stmt = session.execute.await_args_list[1].args[0]
+    insert_stmt = session.execute.await_args_list[2].args[0]
     lock_sql = _compile_sql(lock_stmt)
     insert_sql = _compile_sql(insert_stmt)
     assert "max(events" in lock_sql.lower() or "max(" in lock_sql.lower()
-    assert "FOR UPDATE" in lock_sql
+    assert "FOR UPDATE" not in lock_sql
+    assert "pg_advisory_xact_lock" in str(session.execute.await_args_list[0].args[0])
     assert "INSERT INTO events" in insert_sql
     assert "ON CONFLICT" in insert_sql
     assert "DO NOTHING" in insert_sql
@@ -104,7 +105,7 @@ async def test_append_executes_select_max_for_update_then_insert():
 async def test_append_assigns_next_version_when_no_existing_rows():
     """Empty session: ``MAX(version)`` returns None, next_version SHALL be 1."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_result_scalar_one(None), MagicMock(rowcount=1)])
+    session.execute = AsyncMock(side_effect=[MagicMock(), _result_scalar_one(None), MagicMock(rowcount=1)])
     session.commit = AsyncMock()
     factory = _factory_with_session(session)
     store = PostgresEventStore(async_session_factory=factory)
@@ -117,7 +118,7 @@ async def test_append_assigns_next_version_when_no_existing_rows():
 async def test_append_assigns_next_version_when_existing_rows():
     """Existing rows with MAX(version)=5: next_version SHALL be 6."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_result_scalar_one(5), MagicMock(rowcount=1)])
+    session.execute = AsyncMock(side_effect=[MagicMock(), _result_scalar_one(5), MagicMock(rowcount=1)])
     session.commit = AsyncMock()
     factory = _factory_with_session(session)
     store = PostgresEventStore(async_session_factory=factory)
@@ -128,19 +129,32 @@ async def test_append_assigns_next_version_when_existing_rows():
 async def test_append_conflict_raises_event_version_conflict_error_when_no_retry():
     """ON CONFLICT hit with rowcount=0 and max_append_retries=0 SHALL raise."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_result_scalar_one(0), MagicMock(rowcount=0)])
+    session.execute = AsyncMock(side_effect=[MagicMock(), _result_scalar_one(0), MagicMock(rowcount=0)])
     session.commit = AsyncMock()
     factory = _factory_with_session(session)
     store = PostgresEventStore(async_session_factory=factory, max_append_retries=0)
 
     with pytest.raises(EventVersionConflictError):
         await store.append(_make_event(uuid.uuid4()))
+    session.commit.assert_not_awaited()
+
+
+async def test_batch_partial_conflict_never_commits():
+    """A failed batch must not commit the subset accepted by ON CONFLICT."""
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[MagicMock(), _result_scalar_one(0), MagicMock(rowcount=1)])
+    factory = _factory_with_session(session)
+    store = PostgresEventStore(async_session_factory=factory, max_append_retries=0)
+    sid = uuid.uuid4()
+    with pytest.raises(EventVersionConflictError):
+        await store.append_batch([_make_event(sid), _make_event(sid)])
+    session.commit.assert_not_awaited()
 
 
 async def test_append_tenant_context_provider_populates_columns():
     """When tenant_context_provider is set, its (org_id, user_id) SHALL be used in INSERT."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_result_scalar_one(0), MagicMock(rowcount=1)])
+    session.execute = AsyncMock(side_effect=[MagicMock(), _result_scalar_one(0), MagicMock(rowcount=1)])
     session.commit = AsyncMock()
     factory = _factory_with_session(session)
 
@@ -150,7 +164,7 @@ async def test_append_tenant_context_provider_populates_columns():
 
     await store.append(_make_event(uuid.uuid4()))
 
-    insert_stmt = session.execute.await_args_list[1].args[0]
+    insert_stmt = session.execute.await_args_list[2].args[0]
     compiled = insert_stmt.compile(dialect=postgresql.dialect())
     assert org_id in compiled.params.values()
     assert user_id in compiled.params.values()
@@ -159,14 +173,14 @@ async def test_append_tenant_context_provider_populates_columns():
 async def test_append_no_provider_passes_none_columns():
     """Without tenant_context_provider, org_id/user_id SHALL be None in INSERT."""
     session = AsyncMock()
-    session.execute = AsyncMock(side_effect=[_result_scalar_one(0), MagicMock(rowcount=1)])
+    session.execute = AsyncMock(side_effect=[MagicMock(), _result_scalar_one(0), MagicMock(rowcount=1)])
     session.commit = AsyncMock()
     factory = _factory_with_session(session)
     store = PostgresEventStore(async_session_factory=factory)
 
     await store.append(_make_event(uuid.uuid4()))
 
-    insert_stmt = session.execute.await_args_list[1].args[0]
+    insert_stmt = session.execute.await_args_list[2].args[0]
     compiled = insert_stmt.compile(dialect=postgresql.dialect())
     params = compiled.params
     assert params["org_id"] is None
@@ -252,15 +266,29 @@ async def test_get_version_uses_max_aggregate():
     assert "max(events" in sql.lower() or "max(" in sql.lower()
 
 
-async def test_acquire_event_lock_runs_session_scoped_advisory_lock():
-    """PostgresEventStore SHALL acquire a session-scoped advisory lock for
-    the given session_id; on a stub session this completes silently because
-    ``session.execute`` is itself an AsyncMock."""
-    factory = _factory_with_session(AsyncMock())
+@pytest.mark.parametrize("raises", [False, True])
+async def test_acquire_event_lock_uses_transaction_and_local_timeout(raises):
+    """Transaction exit releases locks before a pooled connection is reused."""
+    session = AsyncMock()
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock()
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    session.begin = MagicMock(return_value=transaction)
+    factory = _factory_with_session(session)
     store = PostgresEventStore(async_session_factory=factory)
     session_id = uuid.uuid4()
-    async with store.acquire_event_lock(session_id):
-        pass  # session.execute(text("SELECT pg_advisory_lock(...)"), {...})
+    try:
+        async with store.acquire_event_lock(session_id, timeout_ms=25):
+            if raises:
+                raise ValueError("body failed")
+    except ValueError:
+        assert raises
+    transaction.__aenter__.assert_awaited_once()
+    transaction.__aexit__.assert_awaited_once()
+    calls = session.execute.await_args_list
+    assert "set_config" in str(calls[0].args[0])
+    assert calls[0].args[1]["timeout"] == "25ms"
+    assert "pg_advisory_xact_lock" in str(calls[1].args[0])
 
 
 def test_row_to_event_maps_compaction_types_and_unknown_falls_back():
