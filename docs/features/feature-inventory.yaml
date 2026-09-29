@@ -1,3 +1,13 @@
+# Feature inventory — generated/merged by `scripts/feature_inventory.py extract`.
+#
+# Field ownership:
+#   docs/features/feature-catalog.md owns the index fields
+#     title / phase / category          (refreshed by every extract run)
+#   this YAML owns machine-readable status and governance data
+#     status / maturity / dependencies / evidence / acceptance
+#     plus any other per-entry keys     (preserved verbatim; hand-edit here)
+# A catalog ✅ mark contradicting status=delivered (either direction) fails
+# extract and check until resolved in this file (which owns status).
 schema: 1
 features:
 - id: 1.3.1
