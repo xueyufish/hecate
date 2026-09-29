@@ -632,7 +632,12 @@ class ToolWorker(Worker):
             try:
                 arguments = json.loads(arguments)
             except json.JSONDecodeError:
-                return self._withheld_result(tc_id, "Invalid tool arguments: expected a JSON object")
+                # Preserve the long-standing tool-call contract: malformed
+                # provider arguments are normalized to an empty object so the
+                # target tool can apply its own validation and report a
+                # domain-specific error.  This also keeps replay behavior
+                # compatible with calls produced before Step1 recovery.
+                arguments = {}
         if not isinstance(arguments, dict):
             return self._withheld_result(tc_id, "Invalid tool arguments: expected a JSON object")
         try:
