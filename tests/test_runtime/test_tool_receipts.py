@@ -205,6 +205,8 @@ def test_retry_decision_matrix():
     # Idempotent write: same as readonly.
     assert should_auto_retry(SideEffectClass.IDEMPOTENT_WRITE, RECEIPT_FAILED) is True
     assert should_auto_retry(SideEffectClass.IDEMPOTENT_WRITE, RECEIPT_UNKNOWN) is False
+    assert should_auto_retry(SideEffectClass.IDEMPOTENT_WRITE, None) is False
+    assert should_auto_retry(SideEffectClass.READONLY, "invalid") is False
     # Non-idempotent / external: a failed receipt no longer proves "did
     # not take effect" (exception type cannot), so these go to human review
     # — re-execution requires a confirmed idempotency guarantee or a done

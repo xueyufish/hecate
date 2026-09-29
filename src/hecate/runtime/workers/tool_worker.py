@@ -20,6 +20,7 @@ import json
 import logging
 import time
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -107,19 +108,17 @@ class ToolExecutionResolution:
     state: ToolExecutionState
     arguments_digest: str | None = None
     result_digest: str | None = None
+    tool_name: str | None = None
 
 
 def tool_arguments_digest(arguments: Any) -> str:
     """Stable digest of tool arguments for action-key conflict detection.
 
     Canonical JSON (sorted keys, compact separators) so equivalent payloads
-    hash identically regardless of key order; arguments that cannot be
-    serialized degrade to the empty-arguments digest.
+    hash identically regardless of key order. Invalid JSON values raise
+    rather than colliding with an empty argument object.
     """
-    try:
-        canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    except (TypeError, ValueError):
-        canonical = "{}"
+    canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -128,9 +127,8 @@ async def resolve_tool_execution_state(event_store: Any, session_id: Any, execut
 
     Consumes both ``TOOL_CALL`` (the claim) and ``TOOL_RESULT`` (the
     receipt) so recovery decisions rest on recorded state instead of the
-    absence of records. The latest TOOL_RESULT wins when retries produced
-    several receipts; legacy events without ``arguments_digest`` resolve
-    with ``None`` (conflict checking is skipped, not guessed).
+    absence of records. Each new claim supersedes the preceding attempt's
+    receipt. Legacy claim arguments can still establish execution identity.
     """
     if event_store is None:
         return ToolExecutionResolution(state=ToolExecutionState.NEVER_STARTED)
@@ -147,25 +145,36 @@ async def resolve_tool_execution_state(event_store: Any, session_id: Any, execut
             continue
         if event.event_type is EventType.TOOL_CALL:
             claim = payload
+            receipt = None
         elif event.event_type is EventType.TOOL_RESULT:
             receipt = payload
+    identity = receipt or claim or {}
+    arguments_digest = identity.get("arguments_digest") or (claim or {}).get("arguments_digest")
+    if arguments_digest is None and claim is not None and isinstance(claim.get("arguments"), dict):
+        with suppress(TypeError, ValueError):
+            arguments_digest = tool_arguments_digest(claim["arguments"])
+    recorded_name = identity.get("tool_name") or (claim or {}).get("tool_name")
     if receipt is not None:
         status = receipt.get("status")
         if status == RECEIPT_SUCCEEDED:
             state = ToolExecutionState.SUCCEEDED
         elif status == RECEIPT_UNKNOWN:
             state = ToolExecutionState.OUTCOME_UNKNOWN
-        else:
+        elif status == RECEIPT_FAILED:
             state = ToolExecutionState.FAILED
+        else:
+            state = ToolExecutionState.OUTCOME_UNKNOWN
         return ToolExecutionResolution(
             state=state,
-            arguments_digest=receipt.get("arguments_digest") or (claim or {}).get("arguments_digest"),
+            arguments_digest=arguments_digest,
             result_digest=receipt.get("result_digest"),
+            tool_name=recorded_name,
         )
     if claim is not None:
         return ToolExecutionResolution(
             state=ToolExecutionState.CLAIMED,
-            arguments_digest=claim.get("arguments_digest"),
+            arguments_digest=arguments_digest,
+            tool_name=recorded_name,
         )
     return ToolExecutionResolution(state=ToolExecutionState.NEVER_STARTED)
 
@@ -508,14 +517,17 @@ class ToolWorker(Worker):
           the content never reached the channel, return an explicit
           reconciliation marker (never fabricated content, never re-run)
         - outcome_unknown → human review
-        - claimed → class-safe re-execution (readonly/idempotent) under the
-          same execution id; everything else stops for review
+        - claimed → readonly re-execution; every write stops for review
         - failed → ``should_auto_retry`` (readonly/idempotent only)
         - store_unavailable → readonly proceeds; side effects fail closed
         """
         if self._event_store is None or not session_key:
             return None
         resolution = await resolve_tool_execution_state(self._event_store, session_key, execution_id)
+        if resolution.tool_name is not None and resolution.tool_name != tool_name:
+            return self._withheld_result(
+                tc_id, "[conflict] tool differs from the recorded execution; execution withheld"
+            )
         if resolution.arguments_digest is not None and resolution.arguments_digest != arguments_digest:
             logger.warning(
                 "Tool execution %s arguments digest mismatch — conflict, not executed",
@@ -526,6 +538,10 @@ class ToolWorker(Worker):
                 "[conflict] arguments differ from the recorded execution for this call id; execution withheld",
             )
         state = resolution.state
+        if state not in (ToolExecutionState.NEVER_STARTED, ToolExecutionState.STORE_UNAVAILABLE) and (
+            resolution.tool_name is None or resolution.arguments_digest is None
+        ):
+            return self._withheld_result(tc_id, "[needs review] recorded execution identity incomplete; retry withheld")
         if state is ToolExecutionState.NEVER_STARTED:
             if claim and execution_context is not None and arguments is not None:
                 await self._append_tool_call(
@@ -541,11 +557,7 @@ class ToolWorker(Worker):
         if state is ToolExecutionState.SUCCEEDED:
             for msg in reversed(messages):
                 if msg.get("role") == "tool" and msg.get("tool_call_id") == tc_id:
-                    return {
-                        "role": "tool",
-                        "tool_call_id": tc_id,
-                        "content": msg.get("content", ""),
-                    }
+                    return dict(msg)
             digest_suffix = f" (result_digest={resolution.result_digest})" if resolution.result_digest else ""
             logger.warning(
                 "Tool execution %s recorded succeeded but result content is unavailable — reconciliation required",
@@ -562,7 +574,7 @@ class ToolWorker(Worker):
                 "[needs review] previous execution outcome indeterminate; retry withheld",
             )
         if state is ToolExecutionState.CLAIMED:
-            if should_auto_retry(classification, None):
+            if classification is SideEffectClass.READONLY:
                 return None
             return self._withheld_result(
                 tc_id,
@@ -570,6 +582,16 @@ class ToolWorker(Worker):
             )
         if state is ToolExecutionState.FAILED:
             if should_auto_retry(classification, RECEIPT_FAILED):
+                if claim and execution_context is not None and arguments is not None:
+                    await self._append_tool_call(
+                        execution_context=execution_context,
+                        tool_name=tool_name,
+                        arguments=arguments,
+                        arguments_digest=arguments_digest,
+                        tool_call_id=tc_id,
+                        execution_id=execution_id,
+                        side_effect_class=classification.value,
+                    )
                 return None
             return self._withheld_result(
                 tc_id,
@@ -607,12 +629,16 @@ class ToolWorker(Worker):
         arguments = func_info.get("arguments", tool_call.get("arguments", {}))
 
         if isinstance(arguments, str):
-            import json
-
             try:
                 arguments = json.loads(arguments)
             except json.JSONDecodeError:
-                arguments = {}
+                return self._withheld_result(tc_id, "Invalid tool arguments: expected a JSON object")
+        if not isinstance(arguments, dict):
+            return self._withheld_result(tc_id, "Invalid tool arguments: expected a JSON object")
+        try:
+            arguments_digest = tool_arguments_digest(arguments)
+        except (TypeError, ValueError):
+            return self._withheld_result(tc_id, "Invalid tool arguments: expected JSON-serializable values")
 
         # Server-assigned stable execution id — the recovery key. Derived
         # deterministically from (session, tool_call_id) so a resumed replay
@@ -626,7 +652,6 @@ class ToolWorker(Worker):
         else:
             execution_id = str(uuid.uuid4())
         side_effect_class = classify(name)
-        arguments_digest = tool_arguments_digest(arguments)
         messages = context.get("messages", []) if context else []
 
         # Recovery pre-filter (read-only, no claim): terminal states resolve
@@ -641,6 +666,7 @@ class ToolWorker(Worker):
             classification=side_effect_class,
             messages=messages,
             claim=False,
+            tool_name=name,
         )
         if recovery is not None:
             return recovery

@@ -837,6 +837,9 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
                         ctx, tool_name, "Tool has no authorized execution binding on this MCP entry"
                     )
 
+                if tool_name == "write_file":
+                    _require_editor(ctx)
+
                 base_root = Path(settings.WORKSPACE_ROOT)
                 effective_root = base_root if ctx.is_system_scope else base_root / str(ctx.workspace_id)
 

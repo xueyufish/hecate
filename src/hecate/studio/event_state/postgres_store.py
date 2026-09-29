@@ -13,19 +13,17 @@ Key design:
 - Uses the project's existing ``async_session_factory`` from
   ``hecate.core.database`` so the store inherits the same connection pool,
   async driver, and PG dialect handling as the rest of the codebase.
-- ``append`` serializes concurrent writes for the same ``session_id`` via
-  ``SELECT COALESCE(MAX(version), 0) + 1 ... FOR UPDATE``. The PG row lock
-  forms a natural queue without requiring an external lock service.
-- ``(session_id, version)`` composite primary key plus ``ON CONFLICT DO
-  NOTHING`` is the last-line defense against version collisions; the rare
-  collision re-raises as ``EventVersionConflictError`` after one retry.
+- ``append`` serializes version allocation with a per-session transaction
+  advisory lock before reading ``MAX(version)``. Its two-integer key space
+  is disjoint from the outer recovery claim's bigint key space.
+- ``(session_id, version)`` is the final defense against version collisions;
+  conflicts are checked before commit and retried as a whole transaction.
 - ``org_id`` / ``user_id`` are operational columns populated via an optional
   ``tenant_context_provider`` closure; they enable GDPR deletes and
   per-tenant retention queries but are NOT part of the ABC contract.
 
-See ``design.md`` decision 2 for the rationale behind ``MAX+1 FOR UPDATE``
-vs alternatives (advisory locks, Redis distributed locks, separate counter
-table).
+Recovery lock and version-allocation lock have separate lifecycles so a
+claim can append durable events through another pooled connection.
 """
 
 from __future__ import annotations
@@ -38,7 +36,7 @@ from typing import Any
 
 from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hecate.runtime.eventstore import Event, EventStore, EventVersionConflictError
 from hecate.studio.event_state.models import EventModel
@@ -64,9 +62,9 @@ def _get_tracer() -> Any:
 class PostgresEventStore(EventStore):
     """``EventStore`` implementation backed by the ``events`` PG table.
 
-    Uses ``SELECT ... FOR UPDATE`` to serialize per-session appends and
+    Uses transaction advisory locks to serialize per-session appends and
     propagates SQLAlchemy exceptions so callers can decide retry behavior.
-    ``acquire_event_lock`` is a session-scoped ``pg_advisory_lock``
+    ``acquire_event_lock`` is a transaction-scoped ``pg_advisory_xact_lock``
     per session: row locking inside ``append`` serializes single appends
     but not check-then-act sequences across several appends.
     """
@@ -88,27 +86,25 @@ class PostgresEventStore(EventStore):
         *,
         timeout_ms: int = 30000,
     ) -> AsyncGenerator[None, None]:
-        """Session-scoped advisory key lock for read-modify-write spans.
+        """Transaction-scoped advisory key lock for read-modify-write spans.
 
-        The per-session ``SELECT ... FOR UPDATE`` queue inside ``append``
+        The per-session version-allocation lock inside ``append``
         serializes single appends, but not check-then-act sequences (e.g.
         the tool recovery claim: resolve state, then append TOOL_CALL).
-        ``pg_advisory_lock`` is session-scoped: the lock is released when
-        the wrapping session closes (or at session reset), making the
-        critical section exclusive per session without depending on
-        transaction lifecycle. ``timeout_ms`` is accepted for ABC
-        compatibility; the database's own statement/session timeout
-        governs the wait.
-
-        Production deployments rely on a real ``async_sessionmaker``;
-        tests that pass a ``MagicMock`` factory see no SQL execution and
-        no lock — a no-op fallback that keeps the ABC contract honoured
-        on both sides without affecting production semantics.
+        The transaction releases the lock on every exit path, before the
+        physical connection returns to the pool. A local lock timeout
+        bounds acquisition without changing the pooled connection's settings.
         """
+        if timeout_ms <= 0:
+            raise ValueError("timeout_ms must be positive")
         lock_key = session_id.int & ((1 << 63) - 1)
-        async with self._async_session_factory() as session:
+        async with self._async_session_factory() as session, session.begin():
             await session.execute(
-                text("SELECT pg_advisory_lock(:lock_key)"),
+                text("SELECT set_config('lock_timeout', :timeout, true)"),
+                {"timeout": f"{timeout_ms}ms"},
+            )
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_key)"),
                 {"lock_key": lock_key},
             )
             yield
@@ -116,8 +112,8 @@ class PostgresEventStore(EventStore):
     async def append(self, event: Event) -> uuid.UUID:
         """Persist ``event`` with a per-session monotonic ``version`` assigned server-side.
 
-        Concurrency contract: within one transaction, ``SELECT ... FOR UPDATE``
-        on existing rows for the same ``session_id`` forms a queue. The
+        Concurrency contract: a transaction advisory lock serializes version
+        allocation, including the first append to an empty session. The
         ``INSERT ... ON CONFLICT DO NOTHING`` is the last-line defense; if it
         still hits a conflict (extremely rare race), the whole append is
         retried up to ``max_append_retries`` times, then raises
@@ -176,9 +172,8 @@ class PostgresEventStore(EventStore):
         payload_dict: dict[str, Any],
     ) -> uuid.UUID:
         async with self._async_session_factory() as session:
-            lock_stmt = (
-                select(func.max(EventModel.version)).where(EventModel.session_id == event.session_id).with_for_update()
-            )
+            await self._acquire_append_lock(session, event.session_id)
+            lock_stmt = select(func.max(EventModel.version)).where(EventModel.session_id == event.session_id)
             result = await session.execute(lock_stmt)
             current_max = result.scalar_one()
             next_version = (current_max or 0) + 1
@@ -200,16 +195,25 @@ class PostgresEventStore(EventStore):
                 .on_conflict_do_nothing(index_elements=["session_id", "version"])
             )
             insert_result = await session.execute(insert_stmt)
-            await session.commit()
-
             if insert_result.rowcount == 0:
                 raise EventVersionConflictError(event.session_id, next_version)
+            await session.commit()
             return event.id
+
+    @staticmethod
+    async def _acquire_append_lock(session: AsyncSession, session_id: uuid.UUID) -> None:
+        """Serialize version allocation independently from outer claim locks."""
+        # PostgreSQL's two-integer key space is disjoint from its bigint
+        # claim keys; append uses another connection inside a claim section.
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:namespace, :session_key)"),
+            {"namespace": 0x48454341, "session_key": session_id.int & ((1 << 31) - 1)},
+        )
 
     async def append_batch(self, events: list[Event]) -> list[uuid.UUID]:
         """Persist a list of events in a single transaction with batch-internal order preserved.
 
-        Acquires the per-session ``FOR UPDATE`` lock once, assigns sequential
+        Acquires version-allocation locks in key order, assigns per-session
         versions in input order, and inserts all rows in one INSERT statement
         (PG-specific multi-row VALUES). Any version collision raises
         :class:`EventVersionConflictError` after the configured retries.
@@ -252,15 +256,20 @@ class PostgresEventStore(EventStore):
             for _attempt in range(self._max_append_retries + 1):
                 try:
                     async with self._async_session_factory() as session:
-                        lock_stmt = (
-                            select(func.max(EventModel.version))
-                            .where(EventModel.session_id == events[0].session_id)
-                            .with_for_update()
+                        versions: dict[uuid.UUID, int] = {}
+                        session_ids = sorted(
+                            {event.session_id for event in events}, key=lambda sid: sid.int & ((1 << 31) - 1)
                         )
-                        result = await session.execute(lock_stmt)
-                        current_max = result.scalar_one() or 0
-                        for offset, row in enumerate(rows, start=1):
-                            row["version"] = current_max + offset
+                        for session_id in session_ids:
+                            await self._acquire_append_lock(session, session_id)
+                        for session_id in session_ids:
+                            result = await session.execute(
+                                select(func.max(EventModel.version)).where(EventModel.session_id == session_id)
+                            )
+                            versions[session_id] = result.scalar_one() or 0
+                        for row in rows:
+                            versions[row["session_id"]] += 1
+                            row["version"] = versions[row["session_id"]]
 
                         insert_stmt = (
                             pg_insert(EventModel)
@@ -268,10 +277,9 @@ class PostgresEventStore(EventStore):
                             .on_conflict_do_nothing(index_elements=["session_id", "version"])
                         )
                         insert_result = await session.execute(insert_stmt)
-                        await session.commit()
-
                         if insert_result.rowcount != len(rows):
-                            raise EventVersionConflictError(events[0].session_id, current_max + 1)
+                            raise EventVersionConflictError(events[0].session_id, rows[0]["version"])
+                        await session.commit()
 
                         if span is not None:
                             span.set_attributes(

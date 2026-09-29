@@ -112,13 +112,13 @@
 
 | 门槛 | 代码证据(本次复核) | 复现指针 | owner | 目标 change |
 |---|---|---|---|---|
-| G1 统一动作授权 | MCP `tool_execute` 无角色检查、无服务端资源上下文(server.py:707—751);`agent_*` 仅身份/workspace(server.py:344—446) | 以 viewer 身份经 MCP 调用写工具,观察与 REST 入口授权结果不一致 | 未指派(门槛已关闭) | `g1-mcp-action-enforcement` |
-| G2 副作用回执与恢复 | `get_tool_receipt` 只认 TOOL_RESULT、读取失败返回 None(tool_worker.py:81—99);`prior_status` 为空即放行重试(tool_worker.py:404—422);超时/异常兜底写 TOOL_RESULT(tool_worker.py:618—630)。**已关闭(g2-tool-receipt-recovery)**:恢复判定改为四态(never_started/claimed/outcome_unknown/store_unavailable),TOOL_CALL 升格为领取记录并在会话事件锁内原子领取,TOOL_CALL/TOOL_RESULT 记录 arguments_digest 且同键参数变化冲突拒绝,成功恢复从通道历史回填真实结果(不可得时显式待对账),store_unavailable 对写操作 fail-closed,`failed` 回执对非幂等类收紧为人工核对。PostgresEventStore 会话级 `pg_advisory_lock`(非 `_xact_` 变体,避免对 `session.begin()` 事务语义的依赖) | 方案 §二"本轮验证范围"最小复现(同 session/call_id 双调用);`tests/test_runtime/test_tool_receipts.py`;关闭证据:`tests/test_runtime/test_g2_recovery_states.py`(四个故障注入 + 四态判定 + 并发领取)、`tests/test_runtime/contracts/test_event_store_contract.py`(双实现领取契约)、`tests/test_services/test_event_state/test_postgres_store.py`(PG 锁) | 未指派(门槛已关闭) | `g2-tool-receipt-recovery`(已合并,#186) |
+| G1 统一动作授权 | 原始缺口为 MCP 变更入口缺少角色校验；初次修复见 `g1-mcp-action-enforcement`。复核仍发现 `tool_execute(write_file)` 的 viewer 越权，已在 `step1-review-hardening` 增加执行前 editor 校验 | `tests/test_services/test_mcp_server.py` 的 viewer 文件写入负例与 workspace 隔离；REST parity 测试 | 未指派（Step1 最小保护已修复，待本轮合入） | `g1-mcp-action-enforcement`、`step1-review-hardening` |
+| G2 副作用回执与恢复 | 初次修复见 `g2-tool-receipt-recovery`；复核补齐工具身份、遗留参数校验、非法输入及未知状态安全停止、失败重试重新领取。所有 claimed 写操作（含幂等写）停止；Postgres 使用事务级领取锁和独立版本分配锁，纠正非法的聚合 FOR UPDATE SQL及锁残留 | `test_g2_recovery_states.py`、双实现 EventStore 契约、Postgres SQL 单测及真实数据库回归；详细边界见下文 | 未指派（Step1 最小保护已修复，待本轮合入） | `g2-tool-receipt-recovery`、`step1-review-hardening` |
 | G3 入口与引擎收敛 | `CHAT_TOOL_LOOP_ENGINE_ENABLED: bool = False`(core/config.py:613);收敛测试存在但部分依赖 mock(`tests/test_runtime/test_chat_engine_convergence.py`) | 真实 HTTP/SSE 多轮 + 断线恢复测试缺失,见方案 G3 | 待指定 | step5 |
 | G4 可解释用量 | 统一常量单价 `_COST_PER_TOKEN = 0.00001`(core/composition/runtime_port_adapter.py:33),估算在 runtime_port_adapter.py:216 | 缺 reported/estimated/reconciled 区分,见方案 G4 | 待指定 | step7/step10 |
 | G5 规划数据权威来源 | `cmd_extract` 全量重建覆盖手填数据(scripts/feature_inventory.py:206、56);`check_inventory` 非严格模式宽松比对(feature_inventory.py:146、230) | 运行 extract 前后 diff YAML 手填字段丢失即复现 | 待指定 | step2 |
 
-owner 指派决定(2026-09-28,用户):**暂缓**。对应修复 change(step2/step5/step7)启动时先补 owner 再开工(方案 §七:人员由用户安排);G1/G2 已关闭,owner 不再追溯指派。
+owner 指派决定(2026-09-28,用户):**暂缓**。对应修复 change(step2/step5/step7)启动时先补 owner 再开工(方案 §七:人员由用户安排);G1/G2 的初次修复已合并，本轮补充修复仍待合入；owner 不再追溯指派。
 
 ## 8. P01—P08 映射
 
@@ -193,3 +193,17 @@ tests/fixtures/evalpack/
 补充登记(方案 §六未单列但影响同判定):`hecate-enterprise` 为 workspace 包,不在 `[project].dependencies`,/auth 依赖它且挂载为条件块(main.py:399—413 注释明示依赖)——**安装可选但身份是核心治理能力**,印证方案"打包状态与能力必要性是两个维度"的判断。
 
 方案 §六优先复核建议(模型微调/Hub、自优化、内置评测)的三项结论:三者均可明确停止"无验收的生产承诺"(对应方案第六节处置列),但代码删除/依赖收敛按 step19 的调用证据执行;本表只登记事实,不改变方案 §六的处置决定。
+
+## Step1 review 补充与验收边界
+
+本轮 corrective change 为 `step1-review-hardening`。保留场景包、执行入口与能力清单的方向；新增反例修复下列遗漏：
+
+- MCP viewer 经 `tool_execute(write_file)` 写文件：执行前检查 editor，不改变只读访问。
+- PostgreSQL 领取锁留在物理连接上且未落实等待超时：改为事务级锁与事务局部 timeout；真实数据库覆盖正常、异常、取消退出及跨连接重新领取。
+- PostgreSQL 版本分配使用非法 `MAX(version) FOR UPDATE`：先取得独立 append 事务锁，再查询版本并提交；单条/批量并发与重复 worker 均在真实数据库验证。
+- 同调用键更换工具、遗留参数缺摘要、非法参数退化为空对象、未知 receipt 状态被当作 failed：改为校验或安全停止。
+- claimed 幂等写可被重复 worker 再派发、失败重试不重新领取：未决写停止；失败终态允许的重试先领取，最新领取覆盖旧终态。
+
+验证证据区分：`test_event_store_contract.py` 是内存与 fake 契约，不能代表 Postgres；`test_postgres_store.py` 是 SQL/mock 单测；`test_integration_postgres.py` 才验证真实 PostgreSQL。该文件通过 `HECATE_TEST_POSTGRES_URL` 接入独立测试数据库，本轮使用临时 PostgreSQL 容器，不接入企业系统。默认测试跳过它时不能宣称真实数据库验证已运行。
+
+这仅关闭 Step1 最小保护的上述反例，仍不等于统一 Action 服务、生产 exactly-once、多进程压测、第三方认证或生产出口隔离。当前 EventStore 锁仍占用池连接，锁内读写使用额外连接，部署须约束同时领取并留出连接余量；高并发连接池耗尽与跨进程容量验证仍是生产门槛。结果尚未持久化为 ACL 保护的产物引用，已成功但通道结果丢失时安全停止待对账，由 step6/7 完成闭环。托管执行数据流尚未完成实测登记，随实际 Deployment 接入验收。

@@ -781,6 +781,27 @@ class TestMCPG1ToolExecute:
     def _call_text(resp_json: dict) -> str:
         return resp_json["result"]["content"][0]["text"]
 
+    async def test_viewer_tool_execute_write_file_rejected(self, monkeypatch, db_session, tmp_path) -> None:
+        """Viewer access cannot mutate files through the direct MCP tool."""
+        ws, _agent, token = await _seed_workspace_with_agent(db_session, "viewer-file", role=WorkspaceRole.VIEWER)
+        async with self._client(monkeypatch, workspace_root=tmp_path) as client:
+            body, headers = _modern_envelope(
+                "tools/call",
+                {
+                    "name": "tool_execute",
+                    "arguments": {"tool_name": "write_file", "arguments": {"path": "forbidden.txt", "content": "x"}},
+                },
+                name="tool_execute",
+            )
+            response = await client.post(
+                "/",
+                json=body,
+                headers={**headers, "Authorization": f"Bearer {token}"},
+            )
+        text = self._call_text(response.json())
+        assert "editor" in text.lower(), text
+        assert not (tmp_path / str(ws.id) / "forbidden.txt").exists()
+
     async def test_tool_execute_write_file_workspace_isolation(self, monkeypatch, db_session, tmp_path) -> None:
         """Different workspaces can use the same relative path independently."""
         ws_a, _agent_a, token_a = await _seed_workspace_with_agent(db_session, "iso-ws-a", role=WorkspaceRole.ADMIN)
