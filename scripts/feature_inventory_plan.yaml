@@ -1,0 +1,1085 @@
+# Plan section-six row mappings. IDs are explicit after review; maturity/status are never inferred from a mapping.
+mappings:
+- key: review-01
+  section: review
+  scope: Pregel/agent execution
+  ids:
+  - 1.3.1
+  disposition: builtin-reference
+  responsibility: provider-guarantee
+  target_mode: out-of-process
+  provider_or_adapter: current src/hecate/runtime; target hecate-runtime/hecate-runner
+  state_owner: executor run facts; platform task responsibility
+  step: 5/8/19
+  milestone: M-S; M-A
+  acceptance: Clean wheel install and shared assembly; external backend never imports Graph/Channel
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-02
+  section: review
+  scope: Memory/RAG
+  ids:
+  - '4.1'
+  - '4.2'
+  - '4.3'
+  - '4.7'
+  - '4.8'
+  - '4.9'
+  - '4.10'
+  - '4.11'
+  - '4.12'
+  - '4.4'
+  - '4.6'
+  - 4.3a
+  - '4.13'
+  - '4.14'
+  - '4.15'
+  - '4.16'
+  - '4.17'
+  - '4.25'
+  - '4.21'
+  - '4.5'
+  - '4.18'
+  - '4.19'
+  - '4.20'
+  - '4.22'
+  - '4.23'
+  - '4.24'
+  - 3.1.1
+  - 3.1.5
+  - 3.1.7
+  - 3.1.6
+  - 3.1.2
+  - 3.1.3
+  - 3.1.4
+  - 3.1.8
+  - 3.2.1
+  - 3.2.6
+  - 3.2.2
+  - 3.2.3
+  - 3.2.7
+  - 3.2.8
+  - 3.2.4
+  - 3.2.5
+  - 3.2.9
+  - 3.2.10
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: current optional hecate-memory; target selectable providers
+  state_owner: Memory/Knowledge provider data; platform bindings
+  step: 9/19
+  milestone: M-B
+  acceptance: ACL/provenance/delete/export preserved under real provider replacement
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-03
+  section: review
+  scope: Builtin evaluators
+  ids:
+  - 7.2b
+  - 7.2c
+  - 7.2d
+  - 7.2e
+  - '7.3'
+  - '7.4'
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: current builtin ops/evaluation; target EvaluationBackend
+  state_owner: evaluator results; governance release decision
+  step: 10/19
+  milestone: M-B
+  acceptance: Versioned dataset/evaluator/results; release consumes evidence without scoring implementation
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-04
+  section: review
+  scope: Model fine tuning/Hub
+  ids:
+  - '6.6'
+  - '6.44'
+  - '6.45'
+  - '6.46'
+  - '6.47'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: current hecate-llm default dependency; target optional Model Hub/adapters
+  state_owner: model Hub data; governance allowed bindings
+  step: 7/19
+  milestone: M-B
+  acceptance: Core execution starts without Hub; existing API/data migration and rollback verified
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-05
+  section: review
+  scope: Prompt/Skill learning
+  ids:
+  - '6.19'
+  - 1.3.6f
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: in-process-plugin
+  provider_or_adapter: current prompt_optimization/self_evolution; target optional optimization backend
+  state_owner: candidate assets; governance approval/release
+  step: 11/15/19
+  milestone: M-B (conditional)
+  acceptance: Candidate/evaluation/human release; cannot self-authorize; usage unverified
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-06
+  section: review
+  scope: Graph editor/DSL
+  ids:
+  - 1.1.2
+  - 1.1.3
+  disposition: builtin-reference
+  responsibility: provider-guarantee
+  target_mode: builtin
+  provider_or_adapter: current studio/workflows + web canvas
+  state_owner: studio definitions; governance release
+  step: 11/18
+  milestone: M-B
+  acceptance: Existing canvas preserved; external agents register/publish without Graph DSL
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-07
+  section: review
+  scope: Builtin execution tools
+  ids:
+  - '5.1'
+  - '6.27'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: in-process-plugin
+  provider_or_adapter: current tools framework + hecate-sandbox; target selected tools/environment
+  state_owner: tool owner results; action service receipts
+  step: 7/18/19
+  milestone: M-A
+  acceptance: All protected calls pass gateway; unused browser/search not a core dependency
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-08
+  section: review
+  scope: Plugin installer
+  ids:
+  - 5.5b
+  disposition: builtin-reference
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: current core/plugin installer; target replaceable catalog/install service
+  state_owner: asset lifecycle service
+  step: 18/19
+  milestone: M-E (conditional)
+  acceptance: Neutral manifest/scan/admission/revocation; no marketplace product required
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-09
+  section: review
+  scope: IM channels
+  ids:
+  - '11.9'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: in-process-plugin
+  provider_or_adapter: current optional Slack/Feishu channel packages
+  state_owner: channel mappings; execution Task/Run
+  step: 5/19
+  milestone: M-A
+  acceptance: No mandatory channel SDK; inbound identity authorized without second task truth
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: review-10
+  section: review
+  scope: SIEM exporter
+  ids:
+  - '8.7'
+  disposition: integration
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: current ops/siem exporter; target selected export adapter
+  state_owner: evidence retention owner; SIEM diagnostics
+  step: 10/19
+  milestone: M-B
+  acceptance: Unsampled governance envelope/ACL/retention; exporter failure never loses core evidence
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-01
+  section: core
+  scope: Identity
+  ids:
+  - 13.1b
+  - '11.16'
+  - '11.17'
+  - '11.20'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: enterprise/auth
+  step: 4/7
+  milestone: M-A
+  acceptance: Verify human/application/Agent/workload/delegation identity and audience; no automatic elevation
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-02
+  section: core
+  scope: Action policy
+  ids:
+  - '11.19'
+  - '9.16'
+  - '6.30'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: enterprise/governance + tools/policy
+  step: '7'
+  milestone: M-A
+  acceptance: Resource policy independent of Ontology; external decision enforced at certified gateway
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-03
+  section: core
+  scope: Trust admission
+  ids:
+  - 2.10b
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: execution admission + enterprise/governance
+  step: 8/11/17
+  milestone: M-A; M-E (conditional)
+  acceptance: Per-capability attestation, delegation limits and revocation; unified trust scoring deferred
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-04
+  section: core
+  scope: Durable Task/Run
+  ids:
+  - 1.3.11
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: execution; executor actual state
+  step: '6'
+  milestone: M-A
+  acceptance: Durable Task/Run/control receipts; sync/stream are views; no blind retry of unknown side effects
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-05
+  section: core
+  scope: Enterprise Team lifecycle
+  ids:
+  - '2.11'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: collaboration
+  step: '12'
+  milestone: M-C
+  acceptance: Team/Membership roles and lifecycle; templates optional; no implicit credentials from membership
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-06
+  section: core
+  scope: Durable coordination
+  ids:
+  - '13.15'
+  - '2.6'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: collaboration delegation; executor run facts
+  step: '13'
+  milestone: M-C
+  acceptance: Cross-runtime durable assignments/handoff/acceptance via negotiated transport; no mandatory ZMQ/gRPC
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-07
+  section: core
+  scope: Human input/control
+  ids:
+  - 1.1.24
+  - 1.1.23
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: governance approval; execution commands
+  step: 7/14
+  milestone: M-A; M-C
+  acceptance: Cross-backend input/approval/command receipts show requested/acknowledged/applied truth
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-08
+  section: core
+  scope: Trace correlation
+  ids:
+  - 8.1d
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: ops/agentops diagnostics; ops/evidence
+  step: 6/10
+  milestone: M-A; M-B
+  acceptance: Task/Run/action/call correlation and source/sequence; trace sampling cannot replace governance evidence
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-09
+  section: core
+  scope: Decision evidence
+  ids:
+  - '6.21'
+  - '6.24'
+  - '9.9'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: ops/evidence
+  step: 6/10
+  milestone: M-A
+  acceptance: Input/version/policy/approval/artifact evidence without knowledge graph prerequisite
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-10
+  section: core
+  scope: Evaluation-driven release
+  ids:
+  - '8.10'
+  - '8.12'
+  - '13.17'
+  - 13.1a
+  - '7.5'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: enterprise/governance
+  step: 10/11
+  milestone: M-A; M-B
+  acceptance: Pinned manifest/results/approval; reject outdated/missing evidence; rollback routes only new Runs
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-11
+  section: core
+  scope: Data handling
+  ids:
+  - 9.5a
+  - 6.8-EF5
+  - '9.6'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: enterprise/governance data rules; ops/evidence
+  step: 7/10
+  milestone: M-A; M-B
+  acceptance: Classification/minimization/retention/export by profile; legal packages require separate applicable review
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-12
+  section: core
+  scope: Bounded disposition
+  ids:
+  - '9.11'
+  - '9.17'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: enterprise/governance; ops/agentops
+  step: '15'
+  milestone: M-D (conditional)
+  acceptance: Deterministic detection/authorized response; AI suggestion cannot override hard denial or self-approve
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-13
+  section: core
+  scope: Production profiles
+  ids:
+  - '13.4'
+  - 13.4b
+  - 9.16a
+  - '13.1'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: ops/agentops conformance; deployment operator
+  step: '16'
+  milestone: M-D
+  acceptance: Multi-replica/worker/recovery/isolation measured per profile before SaaS production support
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-14
+  section: core
+  scope: Enterprise integration
+  ids:
+  - '5.8'
+  - 3.3.4
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: tool/Knowledge resource owner
+  step: 7/9
+  milestone: M-A; M-B
+  acceptance: Existing tools/knowledge honor identity/ACL/update/delete; no general ETL dependency
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-15
+  section: core
+  scope: Neutral clients/distribution
+  ids:
+  - 1.2.1
+  - 1.2.2
+  - '13.14'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: per-capability contracts; execution host
+  step: 3/5/8/18
+  milestone: M-S; M-E (conditional)
+  acceptance: Minimal public clients/HTTP samples; no builtin DSL/full-platform SDK dependency
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-16
+  section: core
+  scope: Internal trusted assets
+  ids:
+  - '5.13'
+  - '12.0'
+  - '14.1'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference or enterprise-selected service
+  state_owner: asset registry owner; governance admission
+  step: 11/18
+  milestone: M-A; M-E (conditional)
+  acceptance: Internal admission/ACL/versioned discovery precede optional public distribution
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-01
+  section: backend
+  scope: Pregel internals
+  ids:
+  - 1.3.5i
+  - 1.3.15
+  - 1.3.16
+  - 1.3.15a
+  - 1.3.15b
+  - 1.3.15c
+  - 1.3.17
+  - 1.3.20
+  - 1.3.21
+  - '4.13'
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: runtime
+  step: 5/8/19
+  milestone: M-S; M-A
+  acceptance: Backend capability declaration; never force external implementations to replicate checkpoints
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-02
+  section: backend
+  scope: ACP transport
+  ids:
+  - '2.13'
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: execution adapter
+  step: '8'
+  milestone: M-A
+  acceptance: ACP optional adapter; A2A/HTTP/SDK/RPC chosen per backend
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-03
+  section: backend
+  scope: Advanced planning
+  ids:
+  - '2.5'
+  - 2.5a
+  - 1.3.18
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: runtime planning strategy
+  step: 12/13
+  milestone: M-C (conditional)
+  acceptance: Planner/selection plugins only after reliable tasks and team authorization
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-04
+  section: backend
+  scope: Advanced Memory
+  ids:
+  - '4.1'
+  - '4.2'
+  - '4.3'
+  - '4.7'
+  - '4.8'
+  - '4.9'
+  - '4.10'
+  - '4.11'
+  - '4.12'
+  - '4.4'
+  - '4.6'
+  - 4.3a
+  - '4.13'
+  - '4.14'
+  - '4.15'
+  - '4.16'
+  - '4.17'
+  - '4.25'
+  - '4.21'
+  - '4.5'
+  - '4.18'
+  - '4.19'
+  - '4.20'
+  - '4.22'
+  - '4.23'
+  - '4.24'
+  - 3.5.6
+  - 3.5.13
+  - 3.5.14
+  - '6.37'
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: Memory provider
+  step: '9'
+  milestone: M-B
+  acceptance: Binding/sharing/provenance/delete/data-exit tested for actual provider
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-05
+  section: backend
+  scope: Evaluation computation
+  ids:
+  - '7.1'
+  - '7.2'
+  - 7.2a
+  - '7.6'
+  - 7.7a
+  - 7.7b
+  - 7.7c
+  - 7.2-abc
+  - 7.2a-OE8
+  - 7.2a-OE9
+  - 7.2b
+  - 7.2c
+  - 7.2d
+  - 7.2e
+  - '7.3'
+  - '7.4'
+  - 7.4a
+  - '7.10'
+  - '7.7'
+  - '7.5'
+  - '7.8'
+  - '7.9'
+  - 7.8a
+  - 7.6a
+  - 7.6b
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: evaluation provider
+  step: '10'
+  milestone: M-B
+  acceptance: Replace evaluator/generation/report via versioned result contracts
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-06
+  section: backend
+  scope: Observability UI
+  ids:
+  - 8.9-O8
+  - 8.9b-OE5
+  - 8.6-O9
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: observability provider
+  step: 10/14
+  milestone: M-B
+  acceptance: Integrate existing diagnostics; platform retains necessary task intervention UI
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-07
+  section: backend
+  scope: Model infrastructure
+  ids:
+  - '6.5'
+  - '6.6'
+  - '6.14'
+  - '6.44'
+  - '6.45'
+  - '6.46'
+  - '6.47'
+  - '6.48'
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: model infrastructure provider
+  step: 7/19
+  milestone: M-B
+  acceptance: Optional service adapters; core keeps admission/credentials/budget rather than full training product
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-08
+  section: backend
+  scope: Knowledge algorithms
+  ids:
+  - 3.1.1
+  - 3.1.5
+  - 3.1.7
+  - 3.1.6
+  - 3.1.2
+  - 3.1.3
+  - 3.1.4
+  - 3.1.8
+  - 3.2.1
+  - 3.2.6
+  - 3.2.2
+  - 3.2.3
+  - 3.2.7
+  - 3.2.8
+  - 3.2.4
+  - 3.2.5
+  - 3.2.9
+  - 3.2.10
+  - 3.3.1
+  - 3.3.2
+  - 3.3.3
+  - 3.3.5
+  - 3.3.4
+  - 3.4.1
+  - 3.4.3
+  - 3.4.2
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: Knowledge provider
+  step: '9'
+  milestone: M-B
+  acceptance: Selected parsing/retrieval/index implementation honors public ACL/provenance contracts
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-09
+  section: backend
+  scope: Browser/computer use
+  ids:
+  - '6.27'
+  - 6.27a
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: tool/environment provider
+  step: 7/8/16
+  milestone: M-A
+  acceptance: Separate tool authority and environment isolation/egress evidence
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-10
+  section: backend
+  scope: Sandbox/isolation
+  ids:
+  - '6.32'
+  - 6.32a
+  - '6.40'
+  - '6.41'
+  - 13.4c
+  - '13.19'
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: environment provider; platform resource binding
+  step: 3/8/11/16
+  milestone: M-A; M-D
+  acceptance: Lifecycle/lease/command/workspace/template/snapshot and resource reconciliation; no engine upgrade ladder
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-11
+  section: backend
+  scope: Channels/modalities
+  ids:
+  - '11.4'
+  - '11.5'
+  - '11.6'
+  - '11.9'
+  - '11.10'
+  - '11.11'
+  - 11.11a
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: channel provider
+  step: 5/7/19
+  milestone: M-A (per entry)
+  acceptance: Only enabled entry profiles certified; protocol mapping cannot create separate authority
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-12
+  section: backend
+  scope: Candidate generators
+  ids:
+  - 1.1.7
+  - 1.1.11
+  - '6.16'
+  - 1.1.13
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: engineering candidate assets
+  step: 11/18
+  milestone: M-B (conditional)
+  acceptance: Generated config/plans undergo same admission/version/release gates
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: backend-13
+  section: backend
+  scope: Learning/optimization
+  ids:
+  - 1.3.6f
+  - '6.19'
+  disposition: optional-component
+  responsibility: provider-guarantee
+  target_mode: external-service
+  provider_or_adapter: builtin reference or external adapter
+  state_owner: optimization provider; governance release
+  step: 11/15
+  milestone: M-B (conditional)
+  acceptance: Keep delivered capability; learned artifacts need evidence and human/gated publishing
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: defer-01
+  section: defer
+  scope: Agentic RL
+  ids:
+  - '6.15'
+  - '7.8'
+  disposition: integration
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: external optimization service
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Real optimization task, authorized data, evaluation and compute budget
+- key: defer-02
+  section: defer
+  scope: PDDL/MCTS
+  ids:
+  - '6.38'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: planner/runtime plugin
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Business baseline demonstrates benefit over existing strategies
+- key: defer-03
+  section: defer
+  scope: Tool generation
+  ids:
+  - '6.39'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: candidate generation service
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Repeated tool development demand and maintainer; sandbox + human release
+- key: defer-04
+  section: defer
+  scope: Full KG/Ontology
+  ids:
+  - '6.20'
+  - '6.22'
+  - 3.5.4
+  - 3.5.6
+  - 3.5.7
+  - 3.5.8
+  - 3.5.9
+  - 3.5.10
+  - 3.5.11
+  - 3.5.12
+  - 3.5.1
+  - 3.5.2
+  - 3.5.3
+  - 3.5.5
+  - '6.42'
+  - '6.43'
+  disposition: integration
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: industry graph provider
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Named industry consumer and proof existing graph services cannot meet need
+- key: defer-05
+  section: defer
+  scope: Example Agents
+  ids:
+  - '6.28'
+  - '6.29'
+  - '6.34'
+  - '5.11'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: scenario package
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Explicit scenario; packaged separately from core
+- key: defer-06
+  section: defer
+  scope: AP2
+  ids:
+  - '2.12'
+  disposition: integration
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: transaction adapter
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Authorized transaction responsibility and settlement boundary
+- key: defer-07
+  section: defer
+  scope: Public marketplace
+  ids:
+  - '12.5'
+  - '6.36'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: optional distribution service
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Stable asset supply and demand; internal catalog remains
+- key: defer-08
+  section: defer
+  scope: Generic IDE/frontends
+  ids:
+  - '11.12'
+  - '11.14'
+  - '11.15'
+  - '11.2'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: product-specific frontend
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Concrete delivery team and integration need; management/minimal entry remains
+- key: defer-09
+  section: defer
+  scope: Business simulation
+  ids:
+  - '6.26'
+  - '6.33'
+  disposition: optional-component
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: scenario simulation backend
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Concrete simulation model and acceptance data; runtime replay remains
+- key: defer-10
+  section: defer
+  scope: Industrial/general data platform
+  ids:
+  - '6.35'
+  - '6.31'
+  disposition: integration
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: industry connector
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Deliverable industry project and bounded maintenance
+- key: defer-11
+  section: defer
+  scope: Regulatory packages
+  ids:
+  - 9.6a
+  disposition: integration
+  responsibility: optional-ecosystem
+  target_mode: external-service
+  provider_or_adapter: applicable reviewed rule pack
+  state_owner: asset/provider owner; core admission unchanged
+  step: 18/19 (conditional)
+  milestone: M-E (conditional)
+  acceptance: Restart only with recorded scenario/owner/budget and contract/security acceptance
+  restart_or_exit: Specified region, use and professional responsibility; no blanket certification
+- key: standalone-01
+  section: standalone
+  scope: Runtime wheel/shared assembly/host
+  ids:
+  - 1.3.11b
+  disposition: builtin-reference
+  responsibility: shared-contract
+  target_mode: out-of-process
+  provider_or_adapter: hecate-runtime/hecate-runner + per-profile adapters
+  state_owner: host local records; control plane desired config/projections
+  step: 5a/5b/5c
+  milestone: M-S
+  acceptance: SC01/SC02 clean install; no full platform/repo paths; read-only technical preview
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: standalone-02
+  section: standalone
+  scope: Local definition/manifest
+  ids:
+  - 1.3.11d
+  - 1.3.11g
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: out-of-process
+  provider_or_adapter: hecate-runtime/hecate-runner + per-profile adapters
+  state_owner: host local records; control plane desired config/projections
+  step: 3/5/11
+  milestone: M-S
+  acceptance: Neutral manifest + namespaced backend content; digest-pinned load without platform ID lookup
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: standalone-03
+  section: standalone
+  scope: Local reliable authorized execution
+  ids:
+  - 1.3.11f
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: out-of-process
+  provider_or_adapter: hecate-runtime/hecate-runner + per-profile adapters
+  state_owner: host local records; control plane desired config/projections
+  step: 6/7/10
+  milestone: M-S
+  acceptance: SC03/SC06/SC08 durable actions, local policy/approval/evidence; no platform tables
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: standalone-04
+  section: standalone
+  scope: Managed registration/projection/lease
+  ids:
+  - 1.3.11c
+  - 1.3.11e
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: out-of-process
+  provider_or_adapter: hecate-runtime/hecate-runner + per-profile adapters
+  state_owner: host local records; control plane desired config/projections
+  step: 4/6/7
+  milestone: M-A
+  acceptance: SC04/SC05 no retroactive approval, no active Run migration, no disconnected self-authorization
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: standalone-05
+  section: standalone
+  scope: Local upgrades/network conformance
+  ids:
+  - 1.3.11g
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: out-of-process
+  provider_or_adapter: hecate-runtime/hecate-runner + per-profile adapters
+  state_owner: host local records; control plane desired config/projections
+  step: 11/16
+  milestone: M-S
+  acceptance: SC07/SC09/SC10 tamper/incompatibility/rollback and conditional air-gap certification
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: labs-01
+  section: labs
+  scope: P01/P02 Knowledge lifecycle
+  ids:
+  - '9.18'
+  - '9.19'
+  - '9.20'
+  - '9.22'
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: external-service
+  provider_or_adapter: selected provider + neutral binding/receipt contract
+  state_owner: knowledge provider; platform binding
+  step: 9c/9d/10
+  milestone: M-B
+  acceptance: Source/version/ACL/sync/index/deletion and explicit diagnostic visibility
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: labs-02
+  section: labs
+  scope: P03/P08 evaluation
+  ids:
+  - '8.13'
+  - '8.10'
+  - '8.12'
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: external-service
+  provider_or_adapter: selected provider + neutral binding/receipt contract
+  state_owner: evaluation provider; governance release
+  step: 10/11
+  milestone: M-B
+  acceptance: Snapshot/per-sample/grouped results and failure classes; missing/citation-error samples block gate
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: labs-03
+  section: labs
+  scope: P04 optional graph retrieval
+  ids:
+  - 3.5.4
+  disposition: optional-component
+  responsibility: shared-contract
+  target_mode: external-service
+  provider_or_adapter: selected provider + neutral binding/receipt contract
+  state_owner: graph Knowledge provider
+  step: 9d/10 (conditional)
+  milestone: M-A; M-C
+  acceptance: Graph provenance/ACL/same-input comparison; no graph mandatory for basic Knowledge
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: labs-04
+  section: labs
+  scope: P05/P06 tool/data security
+  ids:
+  - 2.10e
+  - 9.4a
+  - '9.14'
+  - '11.17'
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: external-service
+  provider_or_adapter: selected provider + neutral binding/receipt contract
+  state_owner: gateway/identity owner; protected resource owner
+  step: 3/7/9
+  milestone: M-A; M-C
+  acceptance: Tool schema/error/receipt, resource/derived-index ACL and delegation/approval negative tests
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: labs-05
+  section: labs
+  scope: P07 deterministic process/Agent link
+  ids:
+  - '13.15'
+  - '2.6'
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: external-service
+  provider_or_adapter: selected provider + neutral binding/receipt contract
+  state_owner: business state-machine owner; collaboration execution
+  step: 6/13/14
+  milestone: M-A; M-C
+  acceptance: Business-authorized transition/callback/compensation receipts; unsupported resume becomes linked new Run
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: labs-06
+  section: labs
+  scope: Memory independently bound
+  ids:
+  - '9.21'
+  disposition: core-contract
+  responsibility: shared-contract
+  target_mode: external-service
+  provider_or_adapter: selected provider + neutral binding/receipt contract
+  state_owner: Memory provider; platform binding
+  step: 9a/9b/16
+  milestone: M-B
+  acceptance: Export/delete/provenance/isolation and independently upgradable provider
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence

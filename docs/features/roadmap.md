@@ -1,16 +1,18 @@
 # Hecate Implementation Roadmap
 
-> **Status**: Active — P1, P2 complete; **P3 complete (87/87)** — all four close-out items delivered (9.1a + 9.2 / 6.27 / 5.4b); P4, P5 in progress.
-> **2026-08-22 release-scope reclassification**: P3 close-out items (5.4b / 9.1a / 9.2 / 6.27) → 9.1a + 9.2 delivered (change `output-side-typed-findings`), leaving **2 remaining** (5.4b MCP Streamable HTTP Server 端 / 6.27 Browser Automation). 48 items moved P3→P4 (see feature-catalog "Deferred from P3"); 11.4/11.5/11.9-Discord/Telegram moved P3→P5 (channel Wave 2/3); 11.8 Intent Recognition & Routing dropped (overlaps chat routing + multi-agent handoff + CONDITION intent routing). P4/P5 scope grows accordingly — no feature lost; one dropped.
-> **Update (2026-08-22, later)**: 6.27 Browser Automation delivered (change `browser-automation`) — **P3 down to 1 remaining item: 5.4b**.
-> **Update (2026-08-22, latest)**: **5.4b delivered (change `mcp-streamable-http`)** — MCP 栈升级到 2026-07-28 规范（fastmcp 4.0.0b3 + mcp SDK 2.0 + mcp-types 2.0；stateless `/mcp` 端点 + 客户端自动协议时代协商）。**P3 全部关闭：87/87。**
-> **Update (2026-09-19)**: **4.13 durable compaction（surface replacement 后端）delivered** (change `durable-compaction-surface-replacement`, archive `2026-09-19-durable-compaction-surface-replacement`) — per ADR-033：bracket 事件 + 影子化账本视图（端点锚点 fail-open + 触发自愈）+ 容量轴触发（有效 surface，独立于预算轴）+ bracket 锁（TURN_END stale / COMPACTION_FAILED 消解）+ 滚动再压缩 + eviction 互斥；通道与 fold 零改动。
-> **Scope**: 12-month implementation plan covering unimplemented features across P3–P5.
-> **Basis**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
+> **Status**: Active — execution order follows the governed I/M iterations and milestones. Feature completion and maturity are tracked in feature-inventory.yaml.
+> **Historical release-scope reclassification (2026-08-22)**: P3 close-out items (5.4b / 9.1a / 9.2 / 6.27) → 9.1a + 9.2 delivered (change `output-side-typed-findings`), leaving **2 remaining** (5.4b MCP Streamable HTTP Server 端 / 6.27 Browser Automation). 48 items moved P3→P4 (see feature-catalog "Deferred from P3"); 11.4/11.5/11.9-Discord/Telegram moved P3→P5 (channel Wave 2/3); 11.8 Intent Recognition & Routing dropped (overlaps chat routing + multi-agent handoff + CONDITION intent routing). P4/P5 scope grows accordingly — no feature lost; one dropped.
+> **Historical update (2026-08-22, later)**: 6.27 Browser Automation delivered (change `browser-automation`) — **P3 down to 1 remaining item: 5.4b**.
+> **Historical update (2026-08-22, latest)**: **5.4b delivered (change `mcp-streamable-http`)** — MCP 栈升级到 2026-07-28 规范（fastmcp 4.0.0b3 + mcp SDK 2.0 + mcp-types 2.0；stateless `/mcp` 端点 + 客户端自动协议时代协商）。**P3 全部关闭：87/87。**
+> **Historical update (2026-09-19)**: **4.13 durable compaction（surface replacement 后端）delivered** (change `durable-compaction-surface-replacement`, archive `2026-09-19-durable-compaction-surface-replacement`) — per ADR-033：bracket 事件 + 影子化账本视图（端点锚点 fail-open + 触发自愈）+ 容量轴触发（有效 surface，独立于预算轴）+ bracket 锁（TURN_END stale / COMPACTION_FAILED 消解）+ 滚动再压缩 + eviction 互斥；通道与 fold 零改动。
+> **Active scope**: The Delivery Iterations and Stage Milestones below define current execution order. P1–P5 remain Feature ID classifications; historical month/sprint estimates do not schedule future work.
+> **Historical planning basis (retained, not current inventory totals)**: Feature catalog (352 features, 162 done) + architecture compatibility assessment + competitive timeline benchmarks + 2026-06 deep competitive analysis + industry feature delivery timeline validation + Core vs Pluggable architecture framework (Platform SPI ABCs prioritized) + A2A Protocol Stack (MCP+A2A+AP2) convergence analysis + MCP/Skill Resource Management + Agentic RAG + Knowledge Graph (8 features) + Ontology Modeling (4 features) + Memory (11 features) + AIP Capabilities (29 features) + Access Channel (5 features) + Agent Studio enhancements (4 features + 5 enhancements) + Agent Engine enhancements (2 features + 4 enhancements) + Ops Center (9 new features + 6 enhancements) + Model Hub (3 new features + 5 enhancements) + Tool Platform (2 new features + 4 enhancements) + Knowledge & Memory (2 new features + 4 enhancements) + Enterprise Foundation (2 new features + 4 enhancements) + Security Shield (2 new features + 6 enhancements) + Ecosystem (2 new features + 4 enhancements) + Observability & Evaluation (2 new features + 8 enhancements)
 
 ---
 
-## Current State
+## Historical Phase Snapshot
+
+This inherited snapshot is retained for scope history. Current feature status and verification maturity come from `feature-inventory.yaml`; these old totals are not a current progress report.
 
 | Priority | Features | Done | Remaining |
 |----------|----------|------|-----------|
@@ -23,7 +25,7 @@
 
 > **2026-09-26 research-candidate reclassification (review item #15)**: eight planned rows moved out of the committed roadmap into the [Research Candidate Pool](feature-catalog.md#research-candidate-pool) (6.15 from P4; 2.12, 6.38, 6.39, 6.42, 6.43, and the full 6.20+6.22 ontology/OAG closed loop from P5). None were delivered; none dropped — each carries documented restart conditions. Statuses tracked as `research-candidate` in `feature-inventory.yaml`. The pool table's ids restate catalog ids and are excluded from physical-row counts.
 
-> Row counts mirror the feature-catalog counting basis (2026-09-25 re-audit: physical ID rows per phase section; delivered = ✅ in the ID or Feature column). The feature-catalog counting note is the single source of truth — update it there first, then sync this table. Prior figures (393/198) predated the re-audit and had drifted from the catalog.
+> Historical row counts used the feature-catalog counting basis (2026-09-25 re-audit: physical ID rows per phase section; delivered = ✅ in the ID or Feature column). This snapshot is not synchronized to the active inventory; do not use it as a current progress total. Prior figures (393/198) predated the re-audit and had drifted from the catalog.
 
 ---
 
@@ -34,7 +36,7 @@ Delivery iterations (execution order; each slice is independently acceptable). F
 
 | Iteration | Scope | Work packages | Independently acceptable result | Out of scope this round |
 |---|---|---|---|---|
-| I-A | Baseline increments & boundary close-out | step1 + step2 (this change); G1/G2 fixes merged | Dependency closure, deployment topologies, SC specs, governed catalogue | No new runtime, no wholesale directory moves |
+| I-A | Baseline increments & boundary close-out | step1 + step2; G1/G2 fixes merged | Dependency closure, deployment topologies, SC specs, governed catalogue | No new runtime, no wholesale directory moves |
 | I-B | Contracts & shared assembly | step3 draft + real non-Python no-side-effect probe; step5a shared assembly; step4 tables | Public contract free of Pregel/platform ORM; old service runs shared assembly | No production writes, no advanced capability freeze |
 | I-Ba | Standalone execution technical preview | step5b/5c wheel + host; step5d one entry in parallel | Clean-install cold start; read-only SC01/SC02 with local evidence | No production writes, durable recovery, or managed lease |
 | I-Ca | Standalone product reliability loop | step6 local persistence; step7 local actions/approval; minimal step10/11; step16 SC faults | No-control-plane tasks with local approval, restart recovery, artifact update/rollback | No platform tables, management UI, teams, or full Knowledge |
@@ -51,8 +53,8 @@ Delivery iterations (execution order; each slice is independently acceptable). F
 <!-- feature-inventory:managed:roadmap:milestones strict="true" begin -->
 Stage gates. A milestone's exit conditions bind its covered steps; nothing earlier is promised.
 
-| Milestone | Covers | Exit conditions | Not yet promised |
-|---|---|---|---|
+| Milestone | Scope | Covers | Exit conditions | Not yet promised |
+|---|---|---|---|---|
 | M-S | Standalone execution delivery | step1 increments; step2/3; step5a—5c; production needs step6/7 local slices + minimal step10/11 + step16 | I-Ba clean install + read-only run; I-Ca local identity/approval, recovery, artifact gates | Full management-plane features; un-certified air-gapped/Python-embedding modes; RAG/vector stores are not prerequisites |
 | M-A | Cross-backend governance loop | step1—8 with minimal step10/11/14 and staged step16 | Built-in managed loop first (I-Cb), then self-hosted heterogeneous and hosted harness pass the same task/policy/approval/release/event contracts; per-combination data-flow + session reconciliation | Lossless state migration; enforced control over cross-enterprise or vendor-internal actions — hosted verification is part of this milestone, not vendor-specific |
 | M-B | Replaceable enterprise capabilities & release | step9—11, step16 per scope | Memory/full-Knowledge/componentized retrieval replaceable; per-sample grouped comparison; at least one Memory and one Knowledge component independently upgradable | Identical advanced capabilities on all backends; reconstructing vendor-internal state; stage traces from every external RAG |
@@ -97,7 +99,7 @@ Delivery path: **develop config → pin version → regression eval → approval
 
 ---
 
-## Architecture Readiness
+## Historical Architecture Readiness
 
 Before starting implementation, the following architectural prerequisites have been assessed:
 
@@ -133,7 +135,7 @@ Before starting implementation, the following architectural prerequisites have b
 
 ## Historical Sprints
 
-> Completed sprint history, kept as record only — the go-forward schedule is the managed **Delivery Iterations** above.
+> Historical scheduling, including delivered and unfinished items, kept as record only — the go-forward schedule is the managed **Delivery Iterations** above.
 
 ```
 Sprint 1 (M1-2):   P1 Close-Out + Architecture Hardening
@@ -150,7 +152,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ---
 
-## Sprint 1: P1 Close-Out + Architecture Hardening (Month 1–2)
+## Historical Sprint 1: P1 Close-Out + Architecture Hardening (Month 1–2)
 
 > **Goal**: Complete P1 (19/19), wire 4 unconnected ABCs, fix layering violations. Prepare the engine for P2 feature velocity.
 
@@ -182,7 +184,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ---
 
-## Sprint 2: P2 Core (Month 3–4)
+## Historical Sprint 2: P2 Core (Month 3–4)
 
 > **Goal**: Three marquee P2 deliverables — Visual Canvas, Multi-Agent orchestration, Multi-DB/Multi-Vector-DB.
 
@@ -242,7 +244,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ---
 
-## Sprint 3: P2 Complete (Month 5–6)
+## Historical Sprint 3: P2 Complete (Month 5–6)
 
 > **Goal**: Finish P2 — Memory enhancement, Multi-Channel, Evaluation foundation, Prompt management, Open Platform.
 
@@ -297,7 +299,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ---
 
-## Sprint 4: P3 Core (Month 7–8)
+## Historical Sprint 4: P3 Core (Month 7–8)
 
 > **Goal**: Enterprise-grade core — Resilience infrastructure, Multi-Tenant RBAC, full security system, end-to-end observability, ContextEngine Phase 1 integration. Ops Center foundational features begin.
 
@@ -379,7 +381,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ---
 
-## Sprint 5: P3 Enterprise (Month 9–10)
+## Historical Sprint 5: P3 Enterprise (Month 9–10)
 
 > **Goal**: P3 enterprise core — Platform SPI, Multi-Agent Protocol (A2A), Model Hub, Enterprise Identity. Define extension interfaces before building implementations.
 
@@ -449,7 +451,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ---
 
-## Sprint 6: P3 Security & Ops (Month 11–12)
+## Historical Sprint 6: P3 Security & Ops (Month 11–12)
 
 > **Goal**: Production hardening — Ops Center, Security Enhancement, Plugin System, Deployment infrastructure. Close the enterprise trust gap.
 
@@ -582,7 +584,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ---
 
-## Sprint 7: P3 Complete (Month 13–14)
+## Historical Sprint 7: P3 Complete (Month 13–14)
 
 > **Goal (2026-08-22 release-scope reclassification)**: P3 closes with **2 close-out items** — 5.4b MCP Streamable HTTP Server 端 / 6.27 Browser Automation. 9.1a + 9.2 delivered via change `output-side-typed-findings` (regex recognizer registry + winnowing fingerprint; typed findings persist to `SecurityFindingModel` and emit `EventType.INJECTION_DETECTED` / `EventType.PROMPT_LEAKAGE_DETECTED`). All other remaining Sprint 7 scope moved to P4 (48 items — see feature-catalog "Deferred from P3") or P5 (channel Wave 2/3); 11.8 dropped. Sub-tables below retain delivery history (✅ rows) with → P4/P5 annotations on moved items.
 
@@ -737,7 +739,7 @@ Sprint 10 (M19-20): P5 Ecosystem — Marketplace + Community + Industry + Compli
 
 ---
 
-## Sprint 8: P4 Kickoff — Intelligence (Month 15–16)
+## Historical Sprint 8: P4 Kickoff — Intelligence (Month 15–16)
 
 > **Goal**: P4 intelligence features — Self-Learning, Agentic AI (RL, Prompt Optimization, Ontology Actions, OAG), Memory Intelligence. Make agents genuinely smart.
 >
@@ -849,7 +851,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 ---
 
-## Sprint 9: P4 Complete — Knowledge & Execution Intelligence (Month 17–18)
+## Historical Sprint 9: P4 Complete — Knowledge & Execution Intelligence (Month 17–18)
 
 > **Goal**: Complete P4 — Knowledge Intelligence (GraphRAG, Agentic RAG), Multi-Agent Intelligence (Peer Selection, Agent Teams, ACP), Execution Intelligence (Simulation, Computer-use, DataAgent, VibeCoding, Voice Pipeline).
 
@@ -936,7 +938,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 ---
 
-## Sprint 10: P5 Ecosystem (Month 19–20)
+## Historical Sprint 10: P5 Ecosystem (Month 19–20)
 
 > **Goal**: Build the ecosystem — Marketplace, Community, Industry capabilities, Compliance certification, Distribution.
 
@@ -1053,7 +1055,7 @@ Order is priority, not mandate — any change still goes through independent `/o
 
 ---
 
-## Critical Path Analysis
+## Historical Critical Path Analysis
 
 ```
 P1 Close-Out → Multi-DB → Multi-Tenant RBAC → SaaS Deployment
@@ -1084,7 +1086,7 @@ EventStore Wiring → Tracing → Monitoring → Alerting ─────┘
 
 ---
 
-## Competitive Timeline Benchmarks
+## Historical Competitive Timeline Benchmarks
 
 Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, and Google A2A:
 
@@ -1102,7 +1104,7 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 
 ---
 
-## Milestone Summary
+## Historical Milestone Summary
 
 | Milestone | Date | Verification Criteria |
 |-----------|------|-----------------------|
@@ -1119,7 +1121,7 @@ Based on research of AutoGen, CrewAI, Coze, Dify, Bisheng, LangFuse, Langflow, a
 
 ---
 
-## Dependency Chains (by Sprint)
+## Historical Dependency Chains (by Sprint)
 
 ### P1 (Sprint 1)
 

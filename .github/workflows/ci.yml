@@ -39,6 +39,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -46,11 +48,18 @@ jobs:
         run: |
           pip install ruff pyyaml
       - name: Lint
-        run: ruff check src/hecate/ packages/ tests/
+        run: ruff check src/hecate/ packages/ tests/ scripts/feature_inventory.py
       - name: Format check
-        run: ruff format --check src/hecate/ packages/ tests/
-      - name: Feature inventory check (non-strict; strict regions still fail on drift)
-        run: python scripts/feature_inventory.py check
+        run: ruff format --check src/hecate/ packages/ tests/ scripts/feature_inventory.py
+      - name: Feature inventory admission (changed entries strict; historical debt reported)
+        env:
+          INVENTORY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: |
+          if [ -z "$INVENTORY_BASE_SHA" ] || [ "$INVENTORY_BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            python scripts/feature_inventory.py check --strict
+          else
+            python scripts/feature_inventory.py check --base-ref "$INVENTORY_BASE_SHA"
+          fi
 
   typecheck:
     needs: changes

@@ -17,10 +17,11 @@ validates the inventory against the catalog and its own governance rules:
 - governance fields missing (WARNING, reported per entry — promoted to
   ERROR under ``--strict``); ``maturity`` is never derived from
   ``status: delivered``
-- research entries with all lifecycle governance fields missing (WARNING;
-  strict fails); explicit ``pending`` is accepted. A research entry that
-  flips to ``delivered`` without a catalog ✅ is blocked by the delivery
-  contradiction rule above.
+- research lifecycle fields missing (WARNING; strict fails); explicit
+  pending is accepted. Research promotion requires evidence and acceptance
+  even with a matching catalog checkmark.
+- --base-ref performs strict admission on new/changed entries while keeping
+  unchanged historical debt visible; invalid baselines fail closed.
 
 Field ownership
 ---------------
@@ -42,7 +43,7 @@ until a human resolves it in the YAML (which owns status).
 Usage::
 
     python scripts/feature_inventory.py extract
-    python scripts/feature_inventory.py check [--strict]
+    python scripts/feature_inventory.py check [--strict] [--base-ref REF]
 """
 
 from __future__ import annotations
@@ -50,6 +51,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -142,7 +145,8 @@ _INVENTORY_HEADER = """\
 #     status / maturity / dependencies / evidence / acceptance
 #     responsibility / implementation_mode / provider_or_adapter
 #     enforcement_point / state_owner / milestone / superseded_by
-#     plus any other per-entry keys     (preserved verbatim; hand-edit here)
+#     disposition / plan_mappings / target_boundary / restart_or_exit
+#     profile_support and any other per-entry keys (preserved; hand-edit here)
 #   research-lifecycle fields (research_owner / hypothesis /
 #     investment_boundary / review_trigger / exit_decision) apply to
 #     status=research-candidate entries; explicit "pending" is accepted
@@ -185,7 +189,25 @@ _TABLES_PATH = Path(__file__).resolve().parent / "feature_inventory_tables.yaml"
 
 def _load_tables() -> dict[str, list[tuple[str, ...]]]:
     data = yaml.safe_load(_TABLES_PATH.read_text(encoding="utf-8"))
-    return {name: [tuple(row) for row in rows] for name, rows in data.items()}
+    widths = {"contract_registry": 6, "capability_domains": 5, "iterations": 5, "milestones": 5}
+    if not isinstance(data, dict):
+        raise ValueError("governed registration data must be an object")
+    for name, width in widths.items():
+        rows = data.get(name)
+        if not isinstance(rows, list):
+            raise ValueError(f"{name}: expected registration rows")
+        keys: set[str] = set()
+        for index, row in enumerate(rows, 1):
+            if (
+                not isinstance(row, list)
+                or len(row) != width
+                or any(not isinstance(cell, str) or not cell.strip() for cell in row)
+            ):
+                raise ValueError(f"{name} row {index}: expected {width} nonempty string columns")
+            if row[0] in keys:
+                raise ValueError(f"{name}: duplicate key {row[0]!r}")
+            keys.add(row[0])
+    return {name: [tuple(row) for row in data[name]] for name in widths}
 
 
 _TABLES = _load_tables()
@@ -195,35 +217,152 @@ _ITERATIONS = _TABLES["iterations"]
 _MILESTONES = _TABLES["milestones"]
 
 
+def _markdown_row(cells: list[str] | tuple[str, ...]) -> str:
+    """Keep data pipes and newlines from changing generated table structure."""
+    return "| " + " | ".join(cell.replace("|", "\\|").replace("\n", "<br>") for cell in cells) + " |"
+
+
 def _render_dispositions(inventory: dict[str, Any]) -> str:
     """Governed disposition table: every entry with governance fields filled."""
     lines = [
         "Governed entries carry plan-§六 dispositions and plan-§一 governance five-tuples in the"
         " inventory (single source of truth). Unlisted entries keep explicit debt until their step fills them.",
         "",
-        "| ID | Responsibility | Implementation | Enforcement point | State owner | Milestone |",
-        "|---|---|---|---|---|---|",
+        "Implementation/provider columns describe the current implementation for delivered entries;"
+        " target boundaries are planning only.",
+        "",
+        "| ID | Disposition | Responsibility | Implementation | Provider/adapter"
+        " | Enforcement point | State owner | Milestone |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for entry in inventory.get("features", []):
         if not entry.get("milestone") or not entry.get("responsibility"):
             continue
         lines.append(
-            f"| {entry['id']} | {entry['responsibility']} | {entry.get('implementation_mode') or '-'}"
-            f" | {entry.get('enforcement_point') or '-'} | {entry.get('state_owner') or '-'}"
-            f" | {entry['milestone']} |"
+            _markdown_row(
+                [
+                    entry["id"],
+                    entry.get("disposition") or "-",
+                    entry["responsibility"],
+                    entry.get("implementation_mode") or "-",
+                    entry.get("provider_or_adapter") or "-",
+                    entry.get("enforcement_point") or "-",
+                    entry.get("state_owner") or "-",
+                    entry["milestone"],
+                ]
+            )
         )
     return "\n".join(lines) + "\n"
+
+
+_PLAN_PATH = Path(__file__).resolve().parent / "feature_inventory_plan.yaml"
+_DISPOSITION_VALUES = {"core-contract", "builtin-reference", "optional-component", "integration", "retire-candidate"}
+_EXPECTED_PLAN_ROWS = {"review": 10, "core": 16, "backend": 13, "defer": 11, "standalone": 5, "labs": 6}
+
+
+def _load_plan_mappings() -> list[dict[str, Any]]:
+    """Load reviewed row mappings; a missing decision is never inferred."""
+    data = yaml.safe_load(_PLAN_PATH.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("mappings"), list):
+        raise ValueError("plan mappings must contain a mappings list")
+    required = (
+        "key",
+        "section",
+        "scope",
+        "ids",
+        "disposition",
+        "responsibility",
+        "target_mode",
+        "provider_or_adapter",
+        "state_owner",
+        "step",
+        "milestone",
+        "acceptance",
+        "restart_or_exit",
+    )
+    seen: set[str] = set()
+    for row in data["mappings"]:
+        if not isinstance(row, dict) or any(
+            field not in row or (field != "ids" and (not isinstance(row[field], str) or not row[field].strip()))
+            for field in required
+        ):
+            raise ValueError("plan mapping missing required decision fields")
+        if (
+            not isinstance(row["ids"], list)
+            or not row["ids"]
+            or any(not isinstance(key, str) or not key.strip() for key in row["ids"])
+            or len(set(row["ids"])) != len(row["ids"])
+        ):
+            raise ValueError(f"{row['key']}: ids must be nonempty unique strings")
+        if (
+            row["disposition"] not in _DISPOSITION_VALUES
+            or row["responsibility"] not in _RESPONSIBILITY_VALUES
+            or row["target_mode"] not in _IMPLEMENTATION_MODE_VALUES
+            or row["section"] not in {"review", "core", "backend", "defer", "standalone", "labs"}
+            or row["key"] in seen
+        ):
+            raise ValueError(f"{row['key']}: invalid/duplicate disposition mapping")
+        seen.add(row["key"])
+    for section, count in _EXPECTED_PLAN_ROWS.items():
+        found = sum(row["section"] == section for row in data["mappings"])
+        if found != count:
+            raise ValueError(f"{section}: expected {count} plan decisions, got {found}")
+    return data["mappings"]
+
+
+def _render_plan_mappings(_inventory: dict[str, Any]) -> str:
+    """Generate one explicit decision row per plan-section-six mapping."""
+    lines = [
+        "Plan section-six row decisions; current implementation/status stay in the inventory.",
+        "Target services and milestones are not certifications. Runtime usage remains unverified.",
+        "",
+        "| Mapping | Scope | Feature IDs | Disposition | Target boundary | Owner"
+        " | Step / milestone | Acceptance / restart condition |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for row in _load_plan_mappings():
+        lines.append(
+            _markdown_row(
+                [
+                    row["key"],
+                    row["scope"],
+                    ", ".join(row["ids"]),
+                    row["disposition"],
+                    f"{row['provider_or_adapter']} ({row['target_mode']})",
+                    row["state_owner"],
+                    f"step{row['step']} / {row['milestone']}",
+                    f"{row['acceptance']}; {row['restart_or_exit']}",
+                ]
+            )
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _check_plan_mappings(inventory: dict[str, Any]) -> list[str]:
+    """Check registry coverage against feature decisions without inventing data."""
+    errors: list[str] = []
+    entries = {entry["id"]: entry for entry in inventory.get("features", [])}
+    for row in _load_plan_mappings():
+        for key in row["ids"]:
+            entry = entries.get(key)
+            if entry is None:
+                errors.append(f"{row['key']}: unknown feature {key}")
+            elif (
+                row["key"] not in entry.get("plan_mappings", []) or entry.get("disposition") not in _DISPOSITION_VALUES
+            ):
+                errors.append(f"{key}: missing disposition or plan mapping {row['key']}")
+    return errors
 
 
 def _render_contract_registry(_inventory: dict[str, Any]) -> str:
     lines = [
         "Contract ownership, publish units, and state owners per replaceable capability (ADR-034/035).",
         "",
-        "| Capability | Public contract | Publish unit | State owner | Current version / window |",
-        "|---|---|---|---|---|",
+        "| Capability | Contract owner | Public contract | Publish unit | State owner | Current version / window |",
+        "|---|---|---|---|---|---|",
     ]
     for row in _CONTRACT_REGISTRY:
-        lines.append("| " + " | ".join(row) + " |")
+        lines.append(_markdown_row(row))
     lines.append("")
     lines.append(
         "In-process implementations ship with the main app; out-of-process implementations may release"
@@ -241,7 +380,7 @@ def _render_capability_domains(_inventory: dict[str, Any]) -> str:
         "|---|---|---|---|---|",
     ]
     for row in _CAPABILITY_DOMAINS:
-        lines.append("| " + " | ".join(row) + " |")
+        lines.append(_markdown_row(row))
     return "\n".join(lines) + "\n"
 
 
@@ -254,7 +393,7 @@ def _render_iterations(_inventory: dict[str, Any]) -> str:
         "|---|---|---|---|---|",
     ]
     for row in _ITERATIONS:
-        lines.append("| " + " | ".join(row) + " |")
+        lines.append(_markdown_row(row))
     return "\n".join(lines) + "\n"
 
 
@@ -262,15 +401,16 @@ def _render_milestones(_inventory: dict[str, Any]) -> str:
     lines = [
         "Stage gates. A milestone's exit conditions bind its covered steps; nothing earlier is promised.",
         "",
-        "| Milestone | Covers | Exit conditions | Not yet promised |",
-        "|---|---|---|---|",
+        "| Milestone | Scope | Covers | Exit conditions | Not yet promised |",
+        "|---|---|---|---|---|",
     ]
     for row in _MILESTONES:
-        lines.append("| " + " | ".join(row) + " |")
+        lines.append(_markdown_row(row))
     return "\n".join(lines) + "\n"
 
 
 register_managed_region("catalog:dispositions", _render_dispositions)
+register_managed_region("catalog:plan-mappings", _render_plan_mappings)
 register_managed_region("catalog:contract-registry", _render_contract_registry)
 register_managed_region("catalog:capability-domains", _render_capability_domains)
 register_managed_region("roadmap:iterations", _render_iterations)
@@ -297,13 +437,15 @@ def _iter_managed_regions(text: str, source: Path) -> list[tuple[str, bool, int,
     regions: list[tuple[str, bool, int, int, int, int]] = []
     lines = text.splitlines(keepends=True)
     open_at: dict[str, tuple[int, bool]] = {}
+    seen: set[str] = set()
     for lineno, line in enumerate(lines):
         begin = _MANAGED_BEGIN.search(line)
         end = _MANAGED_END.search(line)
         if begin:
             name = begin.group("name")
-            if name in open_at:
+            if open_at or name in seen:
                 raise SystemExit(f"ERROR: {source}:{lineno + 1} nested/duplicate begin for managed region {name!r}")
+            seen.add(name)
             strict_attr = _MANAGED_STRICT.search(begin.group("attrs") or "")
             open_at[name] = (lineno, strict_attr is not None and strict_attr.group(1) == "true")
         elif end:
@@ -333,23 +475,33 @@ def sync_managed_regions(
     nothing is written and drift is only reported; region-level ``strict``
     attributes decide whether drift is an error.
     """
-    failures = 0
+    prepared: dict[Path, tuple[list[tuple[str, bool, int, int, int, int]], dict[str, str]]] = {}
     for path, original in documents.items():
         regions = _iter_managed_regions(original, path)
+        rendered_regions = {name: _render_managed_region(name, inventory) for name, *_ in regions}
+        for name, rendered in rendered_regions.items():
+            try:
+                _table_rows(rendered)
+            except ValueError as exc:
+                raise SystemExit(f"ERROR: {path.name} [{name}] invalid generated table: {exc}") from exc
+        prepared[path] = (regions, rendered_regions)
+    failures = 0
+    for path, original in documents.items():
+        regions, rendered_regions = prepared[path]
         if not regions:
             continue
         result = original
         # Replace from the end so earlier offsets stay valid.
         for name, _strict, content_start, content_end, _rs, _re in sorted(regions, key=lambda r: -r[2]):
-            rendered = _render_managed_region(name, inventory)
+            rendered = rendered_regions[name]
             current = result[content_start:content_end]
             if current != rendered:
                 if write:
                     result = result[:content_start] + rendered + result[content_end:]
                 else:
-                    drift = _first_line_diff(current, rendered)
                     marker = "DRIFT" if _strict else "drift (report-only)"
-                    print(f"{marker}: {path.name} [{name}] {drift}", file=sys.stderr)
+                    for drift in _field_drift(current, rendered):
+                        print(f"{marker}: {path.name} [{name}] {drift}", file=sys.stderr)
                     if _strict:
                         failures += 1
         if write and result != original:
@@ -358,6 +510,57 @@ def sync_managed_regions(
         elif write:
             print(f"managed regions already in sync -> {path}")
     return 1 if failures else 0
+
+
+def _table_rows(text: str) -> tuple[list[str], dict[str, list[str]]]:
+    """Parse a governed table while rejecting ambiguous rows."""
+    rows = [
+        [cell.strip() for cell in re.split(r"(?<!\\)\|", line.strip())[1:-1]]
+        for line in text.splitlines()
+        if line.strip().startswith("|")
+    ]
+    if not rows:
+        return [], {}
+    header = rows[0]
+    if len(rows) < 2 or len(rows[1]) != len(header) or any(not re.fullmatch(r":?-+:?", cell) for cell in rows[1]):
+        raise ValueError("table separator/header mismatch")
+    keyed: dict[str, list[str]] = {}
+    for row in rows[2:]:
+        if len(row) != len(header):
+            raise ValueError(f"{row[0] if row else '<empty>'}: expected {len(header)} columns, got {len(row)}")
+        if row[0] in keyed:
+            raise ValueError(f"duplicate row {row[0]!r}")
+        keyed[row[0]] = row
+    return header, keyed
+
+
+def _field_drift(current: str, rendered: str) -> list[str]:
+    """Report every changed field, row and surrounding managed prose."""
+    try:
+        header, current_rows = _table_rows(current)
+        expected_header, expected_rows = _table_rows(rendered)
+    except ValueError as exc:
+        return [f"table structure: {exc}"]
+    messages: list[str] = []
+    if header != expected_header:
+        messages.append(f"table header drifted: current={header!r} expected={expected_header!r}")
+    else:
+        for key in sorted(current_rows.keys() | expected_rows.keys()):
+            if key not in current_rows:
+                messages.append(f"{key}: row missing")
+            elif key not in expected_rows:
+                messages.append(f"{key}: unexpected row")
+            else:
+                for field, value, expected in zip(header, current_rows[key], expected_rows[key], strict=True):
+                    if value != expected:
+                        messages.append(f"{key}: {field} drifted: current={value!r} expected={expected!r}")
+    current_prose = [line for line in current.splitlines() if not line.strip().startswith("|")]
+    expected_prose = [line for line in rendered.splitlines() if not line.strip().startswith("|")]
+    if current_prose != expected_prose:
+        messages.append(f"managed prose drifted: {_first_line_diff(current, rendered)}")
+    if not messages:
+        messages.append(f"table formatting drifted: {_first_line_diff(current, rendered)}")
+    return messages
 
 
 def _first_line_diff(current: str, rendered: str) -> str:
@@ -576,10 +779,66 @@ def _find_cycle(ids_with_deps: dict[str, list[str]]) -> list[str] | None:
     return None
 
 
-def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, Any]], strict: bool) -> int:
+def _missing(value: Any) -> bool:
+    """Treat blank text and empty collections as unfilled governance data."""
+    return value is None or (isinstance(value, str) and not value.strip()) or value == [] or value == {}
+
+
+def _evidence_missing(value: Any) -> bool:
+    """Pending/not-applicable markers do not prove delivery or production."""
+    return _missing(value) or (isinstance(value, str) and value.strip().lower() in {_NOT_APPLICABLE, _PENDING})
+
+
+def _load_baseline(ref: str, inventory_path: Path) -> dict[str, Any]:
+    """Read a committed inventory; an invalid baseline never falls back."""
+    try:
+        relative = inventory_path.resolve().relative_to(REPO_ROOT).as_posix()
+        git_executable = shutil.which("git")
+        if git_executable is None:
+            raise ValueError("git executable unavailable")
+        # Git receives argv with an end-of-options marker; no shell interprets the reference.
+        commit = subprocess.run(  # noqa: S603
+            [git_executable, "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        # Only the verified commit and a repository-relative path reach this read operation.
+        result = subprocess.run(  # noqa: S603
+            [git_executable, "show", f"{commit}:{relative}"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        data = yaml.safe_load(result.stdout)
+        if not isinstance(data, dict) or data.get("schema") not in {1, 2} or not isinstance(data.get("features"), list):
+            raise ValueError("baseline inventory has invalid schema or features")
+        rows = data["features"]
+        if any(not isinstance(row, dict) or not isinstance(row.get("id"), str) for row in rows):
+            raise ValueError("baseline entries require string IDs")
+        if len({row["id"] for row in rows}) != len(rows):
+            raise ValueError("baseline contains duplicate IDs")
+        return data
+    except (OSError, ValueError, yaml.YAMLError, subprocess.CalledProcessError) as exc:
+        raise ValueError(f"cannot read inventory baseline {ref!r}: {exc}") from exc
+
+
+def check_inventory(
+    inventory: dict[str, Any],
+    catalog_entries: list[dict[str, Any]],
+    strict: bool,
+    baseline: dict[str, Any] | None = None,
+) -> int:
     entries = inventory.get("features", [])
     errors: list[str] = []
     warnings: list[str] = []
+    previous = {entry["id"]: entry for entry in baseline["features"]} if baseline is not None else {}
+    changed = (
+        {entry["id"] for entry in entries if previous.get(entry["id"]) != entry} if baseline is not None else set()
+    )
 
     schema = inventory.get("schema")
     if schema != _INVENTORY_SCHEMA_VERSION:
@@ -594,6 +853,9 @@ def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, A
         errors.append(f"duplicate ids in inventory: {duplicates}")
 
     known = set(ids)
+    removed = sorted(previous.keys() - known)
+    if removed:
+        errors.append(f"baseline IDs removed from inventory: {removed}; retain records with an explicit disposition")
     catalog_delivered_by_id = {e["id"]: e["status"] == "delivered" for e in catalog_entries}
     catalog_ids = set(catalog_delivered_by_id)
     deps_by_id = {e["id"]: list(e.get("dependencies") or []) for e in entries}
@@ -606,7 +868,7 @@ def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, A
         errors.append(f"dependency cycle: {' -> '.join(cycle)}")
 
     for entry in entries:
-        if entry.get("maturity") == "production" and not entry.get("evidence"):
+        if entry.get("maturity") == "production" and _evidence_missing(entry.get("evidence")):
             errors.append(
                 f"{entry['id']}: maturity=production requires evidence (an interface existing is not production)"
             )
@@ -616,6 +878,7 @@ def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, A
         for field, allowed in (
             ("responsibility", _RESPONSIBILITY_VALUES),
             ("implementation_mode", _IMPLEMENTATION_MODE_VALUES),
+            ("disposition", tuple(sorted(_DISPOSITION_VALUES))),
         ):
             value = entry.get(field)
             if value is not None and value not in (*allowed, _NOT_APPLICABLE):
@@ -626,21 +889,42 @@ def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, A
     for entry in entries:
         if entry.get("status") in _RESEARCH_STATUSES:
             continue
-        missing = [field for field in _REQUIRED_GOVERNANCE_FIELDS if entry.get(field) is None]
+        missing = [field for field in _REQUIRED_GOVERNANCE_FIELDS if _missing(entry.get(field))]
         if missing:
             warnings.append(f"{entry['id']}: missing governance fields (explicit debt): {', '.join(missing)}")
 
-    # Research lifecycle: fields may be explicitly "pending", but the whole
-    # block must not be silently absent. Promotion to delivered without a
-    # catalog ✅ is already blocked by the delivery-contradiction rule below.
+    # Research lifecycle fields may be explicitly pending, but missing
+    # individual decisions remain debt. Promotion uses baseline/history,
+    # independently of the catalog delivery mark.
     for entry in entries:
         if entry.get("status") not in _RESEARCH_STATUSES:
             continue
-        if all(entry.get(field) is None for field in _RESEARCH_LIFECYCLE_FIELDS):
+        missing = [field for field in _RESEARCH_LIFECYCLE_FIELDS if _missing(entry.get(field))]
+        if missing:
             warnings.append(
-                f"{entry['id']}: research entry missing all lifecycle governance fields"
-                f" ({', '.join(_RESEARCH_LIFECYCLE_FIELDS)}); use explicit values or {_PENDING!r}"
+                f"{entry['id']}: research entry missing lifecycle governance fields: {', '.join(missing)}"
+                f"; use explicit values or {_PENDING!r}"
             )
+
+    for entry in entries:
+        entry_id = entry["id"]
+        was_research = previous.get(entry_id, {}).get("status") in _RESEARCH_STATUSES
+        has_research_history = any(field in entry for field in _RESEARCH_LIFECYCLE_FIELDS)
+        if entry.get("status") == "delivered" and (was_research or has_research_history):
+            missing = [field for field in ("evidence", "acceptance") if _evidence_missing(entry.get(field))]
+            if missing:
+                errors.append(
+                    f"{entry_id}: research promotion requires evidence and acceptance; missing {', '.join(missing)}"
+                )
+        if entry_id in changed:
+            required = (
+                _RESEARCH_LIFECYCLE_FIELDS if entry.get("status") in _RESEARCH_STATUSES else _REQUIRED_GOVERNANCE_FIELDS
+            )
+            missing = [field for field in required if _missing(entry.get(field))]
+            if entry.get("status") not in _RESEARCH_STATUSES:
+                missing += [field for field in ("evidence", "acceptance") if _evidence_missing(entry.get(field))]
+            if missing:
+                errors.append(f"{entry_id}: incremental admission missing fields: {', '.join(missing)}")
 
     for entry in entries:
         catalog_delivered = catalog_delivered_by_id.get(entry["id"])
@@ -660,9 +944,11 @@ def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, A
     if drift_extra:
         errors.append(f"ids in inventory but not in catalog: {drift_extra}")
 
-    missing_evidence = [e["id"] for e in entries if e.get("status") != "research-candidate" and not e.get("evidence")]
+    missing_evidence = [
+        e["id"] for e in entries if e.get("status") != "research-candidate" and _evidence_missing(e.get("evidence"))
+    ]
     missing_acceptance = [
-        e["id"] for e in entries if e.get("status") != "research-candidate" and not e.get("acceptance")
+        e["id"] for e in entries if e.get("status") != "research-candidate" and _evidence_missing(e.get("acceptance"))
     ]
     if missing_evidence:
         warnings.append(
@@ -680,9 +966,11 @@ def check_inventory(inventory: dict[str, Any], catalog_entries: list[dict[str, A
 
     if errors:
         return 1
-    if strict and warnings:
+    if strict and baseline is None and warnings:
         print("ERROR: --strict is set and warnings are present", file=sys.stderr)
         return 1
+    if baseline is not None:
+        print(f"incremental admission: {len(changed)} new/changed entries; unchanged historical debt remains visible")
     print(f"check ok: {len(entries)} entries, {len(errors)} errors, {len(warnings)} warnings")
     return 0
 
@@ -761,7 +1049,20 @@ def cmd_check(
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 1
-    result = check_inventory(inventory, entries, strict=args.strict)
+    baseline = None
+    if getattr(args, "base_ref", None):
+        try:
+            baseline = _load_baseline(args.base_ref, inventory_path)
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    result = check_inventory(inventory, entries, strict=args.strict, baseline=baseline)
+    if inventory_path.resolve() == INVENTORY_PATH.resolve():
+        mapping_errors = _check_plan_mappings(inventory)
+        for message in mapping_errors:
+            print(f"ERROR: {message}", file=sys.stderr)
+        if mapping_errors:
+            result = 1
     if result != 0:
         return result
     # Governed-document drift: strict regions fail check, loose ones only
@@ -776,7 +1077,34 @@ _GOVERNED_DOC_PATHS = (
 
 
 def _governed_documents() -> dict[Path, str]:
-    return {path: path.read_text(encoding="utf-8") for path in _GOVERNED_DOC_PATHS if path.exists()}
+    required = {
+        "feature-catalog.md": {
+            "catalog:dispositions",
+            "catalog:contract-registry",
+            "catalog:capability-domains",
+            "catalog:plan-mappings",
+        },
+        "roadmap.md": {"roadmap:iterations", "roadmap:milestones", "roadmap:capability-domains"},
+    }
+    documents: dict[Path, str] = {}
+    for path in _GOVERNED_DOC_PATHS:
+        if not path.exists():
+            raise SystemExit(f"ERROR: governed document missing: {path}")
+        body = path.read_text(encoding="utf-8")
+        regions = _iter_managed_regions(body, path)
+        found = {name for name, *_ in regions}
+        if path.name not in required:
+            documents[path] = body
+            continue
+        if found != required[path.name]:
+            raise SystemExit(
+                f"ERROR: {path.name} managed region set differs: "
+                f"expected={sorted(required[path.name])}, found={sorted(found)}"
+            )
+        if any(not strict for _, strict, *_ in regions):
+            raise SystemExit(f"ERROR: {path.name} completed managed regions must retain strict=true")
+        documents[path] = body
+    return documents
 
 
 def cmd_sync(
@@ -784,6 +1112,12 @@ def cmd_sync(
     inventory_path: Path = INVENTORY_PATH,
 ) -> int:
     inventory = yaml.safe_load(inventory_path.read_text(encoding="utf-8"))
+    if inventory_path.resolve() == INVENTORY_PATH.resolve():
+        mapping_errors = _check_plan_mappings(inventory)
+        for message in mapping_errors:
+            print(f"ERROR: {message}", file=sys.stderr)
+        if mapping_errors:
+            return 1
     documents = _governed_documents()
     if args.check:
         return sync_managed_regions(inventory, documents, write=False)
@@ -798,6 +1132,7 @@ def main(argv: list[str] | None = None) -> int:
     extract_parser.set_defaults(func=cmd_extract)
     check_parser = sub.add_parser("check", help="validate the inventory against the catalog")
     check_parser.add_argument("--strict", action="store_true", help="treat warnings as errors")
+    check_parser.add_argument("--base-ref", help="Git baseline for strict admission of new/changed entries")
     check_parser.set_defaults(func=cmd_check)
     sync_parser = sub.add_parser("sync", help="regenerate managed regions in governed documents from the inventory")
     sync_parser.add_argument("--check", action="store_true", help="report drift without writing (strict regions fail)")
