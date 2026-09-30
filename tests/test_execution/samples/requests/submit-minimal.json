@@ -1,0 +1,10 @@
+{
+  "contract_version": "0.1",
+  "task_ref": {"kind": "task", "issuer_domain": "platform", "id": "t-123"},
+  "run_ref": {"kind": "run", "issuer_domain": "platform", "id": "r-456"},
+  "deployment_ref": {"kind": "deployment", "issuer_domain": "platform", "id": "dep-1"},
+  "authorization_ref": {"kind": "authorization", "issuer_domain": "platform", "id": "authz-7"},
+  "input": {"objective": "Summarize the attached material"},
+  "idempotency_key": "idem-001",
+  "trace_correlation": {"trace_id": "tr-777", "parent_span_id": "span-1"}
+}

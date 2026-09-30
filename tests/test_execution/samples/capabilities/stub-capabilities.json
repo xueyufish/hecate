@@ -1,0 +1,16 @@
+{
+  "contract_version": "0.1",
+  "backend_type": "stub",
+  "ownership": {"harness": "hecate", "environment": "hecate", "tool_execution": "hecate_gateway"},
+  "capabilities": {
+    "provide_input": "cooperative",
+    "resolve_approval": "cooperative",
+    "pause": "unsupported",
+    "resume": "unsupported",
+    "export_context": "unsupported"
+  },
+  "verification": {
+    "provide_input": {"source": "stub contract tests", "checked_at": "2026-09-30T00:00:00Z"},
+    "resolve_approval": {"source": "stub contract tests", "checked_at": "2026-09-30T00:00:00Z"}
+  }
+}

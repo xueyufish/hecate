@@ -1,0 +1,5 @@
+{
+  "code": "budget_exhausted",
+  "request_ref": {"kind": "run", "issuer_domain": "platform", "id": "r-456"},
+  "message": "budget.max_tokens exceeded before completion"
+}

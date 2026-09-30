@@ -1,0 +1,15 @@
+{
+  "contract_version": "0.1",
+  "kind": "event",
+  "event_id": "evt-1",
+  "task_ref": {"kind": "task", "issuer_domain": "platform", "id": "t-123"},
+  "run_ref": {"kind": "run", "issuer_domain": "stub", "id": "r-456"},
+  "source_sequence": 3,
+  "occurred_at": "2026-09-30T10:00:00Z",
+  "received_at": "2026-09-30T10:00:01Z",
+  "payload_schema_ref": "https://hecate.dev/contracts/execution/0.1/event-payloads/tool-result.json",
+  "payload": {"tool": "create_test_ticket", "status": "ok"},
+  "correlation_id": "corr-9",
+  "causation_id": "evt-0",
+  "evidence_ref": {"kind": "artifact", "issuer_domain": "platform", "id": "art-9"}
+}

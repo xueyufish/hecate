@@ -1,0 +1,5 @@
+{
+  "code": "authorization_denied",
+  "request_ref": {"kind": "run", "issuer_domain": "platform", "id": "r-456"},
+  "message": "authorization reference rejected by the backend issuer"
+}

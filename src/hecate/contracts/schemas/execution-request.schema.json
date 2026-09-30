@@ -1,0 +1,47 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/execution-request.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ExecutionRequest",
+  "description": "Platform-to-backend execution request. Encoding: unknown top-level fields MUST be tolerated by receivers (forward compatibility); timestamps are RFC3339 UTC ('Z'); identifiers are logical references resolved from the request and trusted local registration. backend_config_ns is a backend-specific namespace: the core validates nothing inside it and it never grants platform permissions. contract_version is the execution-contract version the sender speaks; receivers return version_conflict when it falls outside their support window.",
+  "type": "object",
+  "required": ["contract_version", "task_ref", "run_ref", "deployment_ref", "authorization_ref", "input", "idempotency_key", "trace_correlation"],
+  "additionalProperties": true,
+  "properties": {
+    "contract_version": { "type": "string", "minLength": 1 },
+    "task_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/taskRef" },
+    "run_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/runRef" },
+    "deployment_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/deploymentRef" },
+    "authorization_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/authorizationRef" },
+    "input": {
+      "type": "object",
+      "description": "Caller input payload; its structure is agreed per deployment, not by this contract."
+    },
+    "input_artifact_refs": {
+      "type": "array",
+      "items": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/artifactRef" }
+    },
+    "idempotency_key": { "type": "string", "minLength": 1 },
+    "trace_correlation": {
+      "type": "object",
+      "required": ["trace_id"],
+      "additionalProperties": false,
+      "properties": {
+        "trace_id": { "type": "string", "minLength": 1 },
+        "parent_span_id": { "type": "string" }
+      }
+    },
+    "deadline_at": { "type": "string", "description": "RFC3339 UTC wall-clock deadline. Exceeding it yields outcome_unknown, never an automatic failure." },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "max_cost_units": { "type": "number", "exclusiveMinimum": 0 }
+      }
+    },
+    "backend_config_ns": {
+      "type": "object",
+      "description": "Vendor/backend namespace. Schema validation inside the namespace is the owning adapter's responsibility."
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "manifest_version": "1",
+  "contract_version": "0.1",
+  "backend_type": "pregel",
+  "backend_compat_version": "1.3.1",
+  "entry": "agents/reviewer/main.json",
+  "files": [
+    {"path": "agents/reviewer/main.json", "sha256": "b6dc388deb2c36e9854304eae10fe65dd746d5587372efe4f016c6e59d49d7fb", "size": 32},
+    {"path": "agents/reviewer/graph.json", "sha256": "01ed2d30257dba1292b5eb340a7b62c805737fcb4d7043ad7b59a50fb76027a3", "size": 62}
+  ],
+  "required_capabilities": ["tool_execution"],
+  "tools": [
+    {"name": "create_test_ticket", "schema_ref": "tools/create_test_ticket.schema.json", "permission": "approval_required"}
+  ],
+  "artifact_schema_ref": "schemas/review-output.schema.json",
+  "evidence_refs": ["evidence/eval-2026-09.json"],
+  "backend_ns": {"pregel": {"graph": {"nodes": ["draft", "review"]}}}
+}

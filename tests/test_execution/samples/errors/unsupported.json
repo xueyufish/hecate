@@ -1,0 +1,6 @@
+{
+  "code": "unsupported",
+  "request_ref": {"kind": "run", "issuer_domain": "platform", "id": "r-456"},
+  "message": "pause is not supported by this backend",
+  "detail_ns": {"capability": "pause"}
+}

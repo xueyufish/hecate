@@ -1,0 +1,6 @@
+{
+  "code": "outcome_unknown",
+  "request_ref": {"kind": "run", "issuer_domain": "platform", "id": "r-456"},
+  "message": "connection lost after submit; execution state unknown",
+  "reconciliation": {"strategy": "query_by_idempotency_key", "key": "idem-001"}
+}

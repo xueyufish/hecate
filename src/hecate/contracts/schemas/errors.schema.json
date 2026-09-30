@@ -1,0 +1,30 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/errors.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BackendError",
+  "description": "Machine-readable error with a closed code set: unsupported, authorization_denied, budget_exhausted, version_conflict, unreachable, outcome_unknown. Timeouts and connection loss map to outcome_unknown (reconcile later) - never to an automatic task failure. version_conflict covers both contract-version mismatch outside the support window and idempotency-key reuse with different request content (mark detail_ns.reason=idempotency_key_content_mismatch and point at the original request). Every error carries a request reference and a machine-readable code; free text alone is never sufficient.",
+  "type": "object",
+  "required": ["code", "request_ref", "message"],
+  "additionalProperties": true,
+  "properties": {
+    "code": {
+      "enum": ["unsupported", "authorization_denied", "budget_exhausted", "version_conflict", "unreachable", "outcome_unknown"]
+    },
+    "request_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/ref" },
+    "message": { "type": "string", "minLength": 1 },
+    "detail_ns": {
+      "type": "object",
+      "description": "Backend-specific detail namespace (e.g. capability name, idempotency conflict reason)."
+    },
+    "reconciliation": {
+      "type": "object",
+      "description": "Present for outcome_unknown: how to reconcile without blind retry.",
+      "required": ["strategy", "key"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy": { "enum": ["query_by_idempotency_key", "query_by_run_ref"] },
+        "key": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
