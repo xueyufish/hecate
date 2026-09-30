@@ -1,0 +1,15 @@
+{
+  "contract_version": "0.1",
+  "task_ref": {"kind": "task", "issuer_domain": "platform", "id": "t-123"},
+  "run_ref": {"kind": "run", "issuer_domain": "platform", "id": "r-457"},
+  "deployment_ref": {"kind": "deployment", "issuer_domain": "platform", "id": "dep-1"},
+  "authorization_ref": {"kind": "authorization", "issuer_domain": "platform", "id": "authz-7"},
+  "input": {"objective": "Draft review notes"},
+  "input_artifact_refs": [{"kind": "artifact", "issuer_domain": "platform", "id": "art-9"}],
+  "idempotency_key": "idem-002",
+  "trace_correlation": {"trace_id": "tr-778"},
+  "deadline_at": "2026-09-30T12:00:00Z",
+  "budget": {"max_tokens": 8000},
+  "backend_config_ns": {"vendor:openai": {"mode": "fast"}},
+  "x_vendor_hint": true
+}

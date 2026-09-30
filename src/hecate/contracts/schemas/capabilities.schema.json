@@ -1,0 +1,56 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/capabilities.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BackendCapabilities",
+  "description": "Capability declaration with three-level semantics: unsupported (requesting it yields a structured UNSUPPORTED error), cooperative (backend participates when asked), enforced (platform-verified control). Ownership is declared on three independent axes - harness owner, environment owner, tool/data-access execution point - never collapsed into a single hosting label. Every non-unsupported capability MUST carry a verification entry (source, checked_at, and expiry conditions); absent or blank verification counts as missing.",
+  "type": "object",
+  "required": ["contract_version", "backend_type", "ownership", "capabilities"],
+  "additionalProperties": true,
+  "properties": {
+    "contract_version": { "type": "string", "minLength": 1 },
+    "backend_type": { "type": "string", "minLength": 1 },
+    "ownership": {
+      "type": "object",
+      "required": ["harness", "environment", "tool_execution"],
+      "additionalProperties": false,
+      "properties": {
+        "harness": { "enum": ["hecate", "enterprise", "vendor"] },
+        "environment": { "enum": ["hecate", "enterprise", "vendor", "none"] },
+        "tool_execution": { "enum": ["hecate_gateway", "backend", "vendor_internal", "mixed"] }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["provide_input", "resolve_approval", "pause", "resume", "export_context"],
+      "additionalProperties": false,
+      "properties": {
+        "provide_input": { "$ref": "#/$defs/level" },
+        "resolve_approval": { "$ref": "#/$defs/level" },
+        "pause": { "$ref": "#/$defs/level" },
+        "resume": { "$ref": "#/$defs/level" },
+        "export_context": { "$ref": "#/$defs/level" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "description": "Keyed by capability name; required for every capability whose level is not unsupported.",
+      "patternProperties": {
+        "^[a-z_]+$": {
+          "type": "object",
+          "required": ["source", "checked_at"],
+          "additionalProperties": false,
+          "properties": {
+            "source": { "type": "string", "minLength": 1 },
+            "checked_at": { "type": "string", "minLength": 1 },
+            "contract_version": { "type": "string" },
+            "valid_until": { "type": "string" }
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "level": { "enum": ["unsupported", "cooperative", "enforced"] }
+  }
+}

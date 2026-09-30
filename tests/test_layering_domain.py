@@ -63,6 +63,13 @@ ESTABLISHED_DOMAINS: dict[str, Path] = {
     "channel": SRC_ROOT / "channel",
     "studio": SRC_ROOT / "studio",
     "ops": SRC_ROOT / "ops",
+    # Platform-to-backend extension point (execution-backend-contract):
+    # consumed only via core/composition and tests; the established domains
+    # must not reach into it directly. ``contracts`` is deliberately NOT
+    # registered - it is the shared vocabulary every domain may consume
+    # (like ``models/``); its own cleanliness is guarded by
+    # ``tests/test_execution/test_contract_purity.py``.
+    "execution": SRC_ROOT / "execution",
 }
 
 # Note: cross-domain matching is keyed on ``ESTABLISHED_DOMAINS`` with the

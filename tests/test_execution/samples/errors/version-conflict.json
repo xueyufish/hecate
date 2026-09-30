@@ -1,0 +1,6 @@
+{
+  "code": "version_conflict",
+  "request_ref": {"kind": "run", "issuer_domain": "platform", "id": "r-456"},
+  "message": "idempotency key bound to a different request content",
+  "detail_ns": {"reason": "idempotency_key_content_mismatch", "idempotency_key": "idem-001"}
+}
