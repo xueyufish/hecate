@@ -24,7 +24,7 @@ Three naming/boundary questions must be fixed before any directory moves or whee
 
 ### Dependency direction (fixed)
 
-`contracts` → domain services → adapters → backends. Domain services and adapters each depend on neutral contracts; adapters may depend on vendor SDKs; domain services never import concrete adapters; `core/composition/` assembles. Platform adapters may call the host or the shared execution assembly to avoid duplicating execution flow — the platform never re-implements a second execution loop. The runtime never imports the host or the control plane.
+Source dependencies: domain services → neutral contracts; adapters → neutral contracts and vendor SDKs; composition → application interfaces and concrete implementations. Runtime call flow: entry → application service → injected adapter → backend. Domain services and adapters each depend on neutral contracts; adapters may depend on vendor SDKs; domain services never import concrete adapters; `core/composition/` assembles. Platform adapters may call the host or the shared execution assembly to avoid duplicating execution flow — the platform never re-implements a second execution loop. The runtime never imports the host or the control plane.
 
 ### Compatibility and migration rules
 

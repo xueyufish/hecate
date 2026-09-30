@@ -6,7 +6,7 @@ Accepted (2026-09-29; consolidates the governance decisions of the enterprise ag
 
 ## Context
 
-Hecate's strategic target is an enterprise Agent governance and integration platform whose execution components can also be consumed without deploying the management plane (see [positioning](../positioning.md) and the evolution plan). This raises six architectural questions that earlier ADRs answered only implicitly or not at all:
+Hecate's strategic target is an enterprise Agent governance and collaboration platform whose execution components can also be consumed without deploying the management plane (see [positioning](../positioning.md) and the evolution plan). This raises six architectural questions that earlier ADRs answered only implicitly or not at all:
 
 1. Which results must Hecate guarantee versus which implementations may be replaced — and can "replaceable" erode governance?
 2. What is the standing of the built-in Pregel runtime once external execution backends exist?
@@ -41,7 +41,7 @@ The minimum cross-backend contract stays small and stable; advanced abilities (p
 
 ### 6. No lossless running-state migration is promised
 
-Backend or version changes route **new tasks**; running tasks stay pinned to their original binding and version. Context export followed by re-execution is recorded as a new run, not a continuation. Emergency revocation and hard denials override pinned authorization snapshots — version pinning must never block revocation. Capability or topology changes require re-certification of the affected deployment combinations.
+Backend or version changes route **new tasks**; running tasks stay pinned to their original binding and version. Context export followed by re-execution is recorded as a new run, not a continuation. Emergency revocation and hard denials known to the enforcement point override pinned authorization snapshots; version pinning must never block revocation. A disconnected managed host cannot promise instant delivery of central revocations: scoped leases, expiry, trustworthy time and a declared maximum stale window bound this limitation; actions needing instant revocation require online decisions. Reconnection never grants standalone self-authorization or migrates active runs. Capability or topology changes require re-certification of the affected deployment combinations.
 
 ## Consequences
 

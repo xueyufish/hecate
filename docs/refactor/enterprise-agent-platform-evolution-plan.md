@@ -388,6 +388,8 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 ### step2 — 更新定位、决策记录与功能归属
 
+**复核修正：**原 step2 由 #195 合入并归档；后续复核见 [step2 复核记录](step2-review-report.md) 与 step2-review-hardening。补齐增量严格准入、研究晋级证据门禁、逐字段漂移及区域完整性、§六逐行处置/独立缺口、契约 owner/发布窗口和候选迁移记录；完成仅表示规划与工具交付，目标执行能力仍须所属 step 的运行证据。
+
 **目标：**正式停止“每个竞品功能都在核心实现”的规划方式。
 
 **操作：**
@@ -398,22 +400,22 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 - [x] 在定位与架构中将供应商托管 Agent 服务列为正式执行后端。（positioning.md hosted-backend 段(双轴登记+自托管≠数据驻留);ADR-034 §3;架构文档信任边界节）
 - [x] 更新 `docs/design/architecture.md`。（architecture.md 新增「Control Plane, Execution Access, and Trust Boundaries」与能力域/子包/例外登记章节;模块化单体保留）
 - [x] 新增 ADR，记录核心职责。（ADR-034(治理语义六决策)+ADR-035(包迁移方向);编号按 INDEX 实时取号）
-- [x] 按第六节映射调整 `feature-catalog.md`。（catalog 新增「Platform Governance Dispositions」受管区(55 条处置行);9 个新 ID(1.3.11b/c、2.10c—e、8.13、9.18—9.20);保留转后端/移出核心以 disposition+milestone 表达）
-- [x] 为上述 P01—P08 映射中的新增平台责任核对 Feature ID。（8.13(实验快照/逐样本)、9.18(知识接入生命周期)、9.19(组件化检索替换)、9.20(检索快照/阶段诊断);Memory/Knowledge 绑定复用 9.x 既有条目补验收）
+- [x] 按第六节映射调整 feature-catalog.md。（§六逐行处置映射进入 plan YAML 与受管表；当前实现、目标边界、处置类别、提供方及退出条件分列；保留既有 ID 和交付历史，见复核报告）
+- [x] 为上述 P01—P08 映射中的新增平台责任核对 Feature ID。（保留 8.13、9.18—9.20，并以 9.21/9.22 分开登记 Memory 与整体 Knowledge 接入；执行契约、实体责任、本地可靠执行和制品生命周期缺口追加未用后缀）
 - [x] 将 `roadmap.md` 的未完成部分改为第七节里程碑。（roadmap 新增「Delivery Iterations」(I-A…I-H)与「Stage Milestones」(M-S…M-R)受管区;Next Phase/Sprint 章节标注 Historical）
 - [x] 沿用现有 `feature-inventory.yaml`，先关闭 G5。（G5 已由 #194 关闭;本次 schema 1→2 全量迁移零字段丢失;extract/check 幂等;YAML 头注释覆盖 v2 字段所有权）
-- [x] 在字段稳定后增加确定性的受管表格生成。（受管标记+sync 子命令+逐字段漂移检测(strict 属性);CI 接入非严格 check;6 个受管区已翻转为 strict=true 且篡改测试通过）
+- [x] 在字段稳定后增加确定性的受管表格生成。（sync 结构校验、全部 ID/字段漂移诊断、必需区域与 strict=true 完整性门禁；CI 使用 Git 基线，对新增/变更条目严格准入并保留历史欠账，见复核报告）
 - [x] 为 research/Labs 条目指定 owner。（8 个 research-candidate 条目(6.15/6.20/6.22/2.12/6.38/6.39/6.42/6.43)生命周期五字段已填(owner=pending 显式待定)）
 - [x] 对身份、策略、调度、审批、发布、证据和资产目录等能力，逐项标明。（七类能力约 25 个 ID 已填五元组(responsibility/implementation_mode/enforcement_point/state_owner/milestone),见 catalog 受管处置表）
 - [x] 在目录和 roadmap 中按“基础能力域与未来组件边界”标注 Agent Engineering、AgentOps、Agent Control Plane、Agent Governance、安全、评测、MCP/A2A 企业接入层的覆盖和缺口；能力域标签不等于现在的部署单元。（catalog/roadmap 各含「Capability Domains Coverage」受管表:七域现位置/目标子包/职责/缺口;与 architecture.md 能力域归属一致）
 - [x] 在架构文档中固定上表的子包 owner。（architecture.md 依赖方向+公开接口规则+分层检查规划+例外登记表(4 项历史例外带迁移步骤/退出条件;owner 按 2026-09-28 决定于 change 启动时指派)）
-- [x] 为 Runtime、Memory/Knowledge、Evaluation、Observability 和 Gateway 分别登记契约 owner。（catalog「Capability Contract Registry」受管表(五能力×契约/发布单元/状态 owner/版本窗口)）
-- [x] 对下方已实现能力逐项给出 `core-contract / builtin-reference / optional-component / integration / retire-candidate` 处置；保留现有 Feature ID、已交付事实和迁移记录，不把“移出核心”改写成“从未实现”。（§六十行全部映射至 inventory v2 治理字段并以 catalog 受管处置表呈现;无 ID 删除;实施中发现解析器盲区——✅ 写在 ID 格的 46 行此前被静默跳过,已修复并补入清单）
+- [x] 为 Runtime、Memory/Knowledge、Evaluation、Observability 和 Gateway 分别登记契约 owner。（受管 Registry 区分契约 owner、公开契约、独立发行单元、状态 owner 与当前版本/支持窗口；未发布或未验证窗口显式标注）
+- [x] 对下方已实现能力逐项给出处置；保留现有 Feature ID、已交付事实和迁移记录，不把移出核心改写成从未实现。（复核报告登记十类候选的代码/数据责任域、安装/挂载证据、使用量待验证状态、替代接口、兼容迁移及回退退出条件；没有候选被判为 retire-candidate）
 - [x] 在 `feature-catalog.md` 中为托管执行准入、供应商会话对账、托管工具强制入口和数据驻留门禁设独立验收条目。（2.10c/2.10d/2.10e 新条目(准入+驻留门禁/会话对账/强制入口回执);roadmap M-A 行明示 hosted verification 属里程碑本身,不写为单一供应商专属）
 
 **清单字段迁移：**保留现有 `id/title/phase/category/status/maturity/dependencies/evidence/acceptance` 名称，不新建同义的 feature_id/depends_on/acceptance_evidence。增量增加 `responsibility`、`implementation_mode`、`provider_or_adapter`、`enforcement_point`、`state_owner`、`milestone`、`superseded_by`，并升级 schema/校验器；未适用字段允许显式不适用。`responsibility` 使用 `platform-guarantee / shared-contract / provider-guarantee / optional-ecosystem`；`implementation_mode` 表示 builtin/in-process-plugin/out-of-process/external-service/asset 等实现方式，延期和退役归 status，不混入实现方式。maturity 独立表示验证程度，不由 delivered 自动推导 production。
 
-**验收：**每个未实现条目都有归属和明确处置；每个候选子包有公开接口、数据 owner、依赖规则和历史例外清单；“权限依赖 Ontology”“跨 Runtime 依赖 Pregel DSL”等不合理依赖被移除；公开市场不再排在内部目录之前。
+**验收：**§六本轮映射的每个未实现条目都有归属和明确处置；未纳入本轮的历史条目继续作为显式治理欠账，由所属实施 step 补齐而非自动填充结论；每个候选子包有公开接口、数据 owner、依赖规则和历史例外清单；“权限依赖 Ontology”“跨 Runtime 依赖 Pregel DSL”等不合理依赖被移除；公开市场不再排在内部目录之前。
 
 **迁移/回退：**仅修改文档和规划数据，不抹掉已交付功能及历史链接。研究建议与已接受 ADR 分开标注。
 

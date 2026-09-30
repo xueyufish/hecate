@@ -466,3 +466,243 @@ def test_extract_parses_checkmark_in_id_cell(tmp_path: Path) -> None:
     assert by_id["6.27"]["status"] == "delivered"
     assert by_id["6.27"]["title"] == "Browser Tool"  # ✅ not part of the title
     assert by_id["1.1"]["status"] == "delivered"
+
+
+def _complete_entry(entry_id: str) -> dict[str, Any]:
+    return {
+        **_hand_filled_entry(entry_id),
+        **{field: "n/a" for field in fi._REQUIRED_GOVERNANCE_FIELDS},
+        "maturity": "unverified",
+        "responsibility": "shared-contract",
+        "implementation_mode": "builtin",
+        "dependencies": [],
+    }
+
+
+def test_incremental_admission_does_not_require_unchanged_history(capsys) -> None:
+    old = {"id": "1.0", "status": "planned"}
+    changed = _complete_entry("1.1")
+    baseline = {"schema": 2, "features": [old, {**changed, "title": "Before"}]}
+    inventory = {"schema": 2, "features": [old, changed]}
+    catalog = [{"id": "1.0", "status": "planned"}, {"id": "1.1", "status": "delivered"}]
+    assert fi.check_inventory(inventory, catalog, strict=True, baseline=baseline) == 0
+    output = capsys.readouterr()
+    assert "1.0: missing governance" in output.out
+    assert "1 new/changed" in output.out
+
+
+@pytest.mark.parametrize("new", [True, False])
+def test_incremental_admission_rejects_new_or_changed_debt(new, capsys) -> None:
+    entry = {**_complete_entry("1.1"), "acceptance": "  "}
+    previous = [] if new else [{**entry, "title": "Before"}]
+    inventory = {"schema": 2, "features": [entry]}
+    assert (
+        fi.check_inventory(
+            inventory,
+            [{"id": "1.1", "status": "delivered"}],
+            False,
+            baseline={"schema": 2, "features": previous},
+        )
+        == 1
+    )
+    assert "1.1: incremental admission missing fields: acceptance" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("value", [None, "", " ", [], {}, "pending", "n/a"])
+def test_production_placeholder_does_not_count_as_evidence(value) -> None:
+    entry = {**_complete_entry("1.1"), "maturity": "production", "evidence": value}
+    assert fi.check_inventory({"schema": 2, "features": [entry]}, [{"id": "1.1", "status": "delivered"}], False) == 1
+
+
+@pytest.mark.parametrize("remove_lifecycle", [True, False])
+def test_research_promotion_requires_results_even_with_catalog_mark(remove_lifecycle, capsys) -> None:
+    old = {**_complete_entry("6.15"), "status": "research-candidate", "research_owner": "pending"}
+    promoted = {**old, "status": "delivered", "evidence": None}
+    if remove_lifecycle:
+        del promoted["research_owner"]
+    assert (
+        fi.check_inventory(
+            {"schema": 2, "features": [promoted]},
+            [{"id": "6.15", "status": "delivered"}],
+            False,
+            baseline={"schema": 2, "features": [old]},
+        )
+        == 1
+    )
+    assert "research promotion requires evidence" in capsys.readouterr().err
+
+
+def test_research_history_blocks_promotion_without_baseline(capsys) -> None:
+    promoted = {**_complete_entry("6.15"), "research_owner": "pending", "acceptance": None}
+    assert (
+        fi.check_inventory({"schema": 2, "features": [promoted]}, [{"id": "6.15", "status": "delivered"}], False) == 1
+    )
+    assert "research promotion" in capsys.readouterr().err
+
+
+def test_partial_research_lifecycle_is_debt(capsys) -> None:
+    entry = {"id": "6.15", "status": "research-candidate", "research_owner": "pending"}
+    assert fi.check_inventory({"schema": 2, "features": [entry]}, [{"id": "6.15", "status": "planned"}], True) == 1
+    assert "hypothesis" in capsys.readouterr().out
+
+
+def test_invalid_baseline_is_not_silently_ignored() -> None:
+    with pytest.raises(ValueError, match="cannot read inventory baseline"):
+        fi._load_baseline("missing-step2-review-ref", fi.INVENTORY_PATH)
+
+
+def test_git_baseline_reads_committed_inventory() -> None:
+    data = fi._load_baseline("HEAD", fi.INVENTORY_PATH)
+    assert data["schema"] == 2
+    assert len(data["features"]) > 0
+
+
+def test_field_drift_reports_every_changed_field_and_added_removed_row() -> None:
+    expected = "| ID | owner | milestone |\n|---|---|---|\n| 1 | A | M-S |\n| 2 | B | M-A |\n"
+    current = "| ID | owner | milestone |\n|---|---|---|\n| 1 | wrong | wrong |\n| 3 | C | M-B |\n"
+    messages = fi._field_drift(current, expected)
+    assert any("1: owner drifted" in message for message in messages)
+    assert any("1: milestone drifted" in message for message in messages)
+    assert "2: row missing" in messages
+    assert "3: unexpected row" in messages
+
+
+def test_generated_table_validation_precedes_any_write(tmp_path: Path) -> None:
+    first = _doc(tmp_path / "a", strict=True, region_body="old\n")
+    second = tmp_path / "b.md"
+    second.write_text(
+        '<!-- feature-inventory:managed:bad-table strict="true" begin -->\nx\n'
+        "<!-- feature-inventory:managed:bad-table end -->\n",
+        encoding="utf-8",
+    )
+    original = first.read_bytes()
+    fi.register_managed_region("bad-table", lambda _: "| ID |\n|---|\n| 1 | extra |\n")
+    try:
+        with pytest.raises(SystemExit, match="invalid generated table"):
+            fi.sync_managed_regions(
+                _inventory_for(["1.1"]), {first: first.read_text(), second: second.read_text()}, write=True
+            )
+    finally:
+        fi._MANAGED_RENDERERS.pop("bad-table")
+    assert first.read_bytes() == original
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_required_region_cannot_be_deleted_or_downgraded(tmp_path: Path, monkeypatch, strict) -> None:
+    path = tmp_path / "feature-catalog.md"
+    if strict:
+        body = "# Missing required regions\n"
+    else:
+        body = "".join(
+            f'<!-- feature-inventory:managed:{name} strict="false" begin -->\nx\n'
+            f"<!-- feature-inventory:managed:{name} end -->\n"
+            for name in ("catalog:dispositions", "catalog:contract-registry", "catalog:capability-domains")
+        )
+    path.write_text(body, encoding="utf-8")
+    monkeypatch.setattr(fi, "_GOVERNED_DOC_PATHS", (path,))
+    with pytest.raises(SystemExit, match="managed region set differs|strict=true"):
+        fi._governed_documents()
+
+
+def test_duplicate_region_is_rejected_even_after_first_region_closes(tmp_path: Path) -> None:
+    text = f"{_BEGIN_STRICT}\nx\n{_END}\n" * 2
+    with pytest.raises(SystemExit, match="nested/duplicate"):
+        fi._iter_managed_regions(text, tmp_path / "doc.md")
+
+
+def test_registered_tables_have_consistent_column_counts() -> None:
+    for name in ("catalog:contract-registry", "roadmap:milestones", "roadmap:iterations", "catalog:capability-domains"):
+        header, rows = fi._table_rows(fi._render_managed_region(name, {"features": []}))
+        assert rows and all(len(row) == len(header) for row in rows.values())
+
+
+@pytest.mark.parametrize("missing_field", ["disposition", "responsibility", "target_mode", "state_owner"])
+def test_plan_mapping_rejects_blank_decision_fields(tmp_path: Path, monkeypatch, missing_field) -> None:
+    row = {**fi._load_plan_mappings()[0], missing_field: " "}
+    path = tmp_path / "plan.yaml"
+    path.write_text(yaml.safe_dump({"mappings": [row]}), encoding="utf-8")
+    monkeypatch.setattr(fi, "_PLAN_PATH", path)
+    with pytest.raises(ValueError, match="missing required decision fields"):
+        fi._load_plan_mappings()
+
+
+@pytest.mark.parametrize("ids", [[], ["1.1", "1.1"], [" "]])
+def test_plan_mapping_rejects_empty_or_duplicate_ids(tmp_path: Path, monkeypatch, ids) -> None:
+    row = {**fi._load_plan_mappings()[0], "ids": ids}
+    path = tmp_path / "plan.yaml"
+    path.write_text(yaml.safe_dump({"mappings": [row]}), encoding="utf-8")
+    monkeypatch.setattr(fi, "_PLAN_PATH", path)
+    with pytest.raises(ValueError, match="ids must be nonempty unique strings"):
+        fi._load_plan_mappings()
+
+
+def test_plan_mapping_requires_known_id_and_inventory_decision(monkeypatch) -> None:
+    monkeypatch.setattr(fi, "_load_plan_mappings", lambda: [{"key": "core-01", "ids": ["1.1", "1.2"]}])
+    errors = fi._check_plan_mappings({"features": [{"id": "1.1", "disposition": None}]})
+    assert "1.1: missing disposition or plan mapping core-01" in errors
+    assert "core-01: unknown feature 1.2" in errors
+
+
+def test_registration_requires_contract_owner(tmp_path: Path, monkeypatch) -> None:
+    data = yaml.safe_load(fi._TABLES_PATH.read_text(encoding="utf-8"))
+    data["contract_registry"][0][1] = " "
+    path = tmp_path / "tables.yaml"
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    monkeypatch.setattr(fi, "_TABLES_PATH", path)
+    with pytest.raises(ValueError, match="contract_registry row 1"):
+        fi._load_tables()
+
+
+def test_markdown_data_pipe_does_not_change_table_width() -> None:
+    body = "| ID | owner |\n|---|---|\n" + fi._markdown_row(["1", "IAM | local\npolicy"]) + "\n"
+    header, rows = fi._table_rows(body)
+    assert header == ["ID", "owner"]
+    assert rows["1"] == ["1", r"IAM \| local<br>policy"]
+
+
+def test_research_promotion_with_results_passes() -> None:
+    old = {**_complete_entry("6.15"), "status": "research-candidate"}
+    promoted = {**old, "status": "delivered"}
+    assert (
+        fi.check_inventory(
+            {"schema": 2, "features": [promoted]},
+            [{"id": "6.15", "status": "delivered"}],
+            False,
+            baseline={"schema": 2, "features": [old]},
+        )
+        == 0
+    )
+
+
+def test_simultaneous_catalog_and_inventory_deletion_does_not_erase_history(capsys) -> None:
+    assert (
+        fi.check_inventory(
+            {"schema": 2, "features": []},
+            [],
+            False,
+            baseline={"schema": 2, "features": [{"id": "1.1", "status": "delivered"}]},
+        )
+        == 1
+    )
+    assert "baseline IDs removed from inventory" in capsys.readouterr().err
+
+
+def test_plan_mapping_cannot_silently_drop_a_source_decision(tmp_path: Path, monkeypatch) -> None:
+    rows = fi._load_plan_mappings()
+    path = tmp_path / "plan.yaml"
+    path.write_text(yaml.safe_dump({"mappings": rows[1:]}), encoding="utf-8")
+    monkeypatch.setattr(fi, "_PLAN_PATH", path)
+    with pytest.raises(ValueError, match="review: expected 10 plan decisions, got 9"):
+        fi._load_plan_mappings()
+
+
+def test_sync_rejects_inconsistent_plan_mapping_before_writing(tmp_path: Path, monkeypatch, capsys) -> None:
+    inventory_path = _write_inventory(tmp_path, [_complete_entry("1.1")])
+    doc = _doc(tmp_path / "docs", strict=True, region_body="old\n")
+    original = doc.read_bytes()
+    monkeypatch.setattr(fi, "INVENTORY_PATH", inventory_path)
+    monkeypatch.setattr(fi, "_GOVERNED_DOC_PATHS", (doc,))
+    monkeypatch.setattr(fi, "_check_plan_mappings", lambda _: ["core-01: unknown feature"])
+    assert fi.cmd_sync(argparse.Namespace(check=False), inventory_path=inventory_path) == 1
+    assert doc.read_bytes() == original
+    assert "core-01: unknown feature" in capsys.readouterr().err

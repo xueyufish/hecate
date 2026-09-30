@@ -2,21 +2,21 @@
 
 This document explains **where Hecate sits in the agent platform landscape**, what differentiates it from neighboring tools, and when to choose it (or not). It is meant for engineering evaluators, enterprise architects, and contributors who need to explain Hecate's strategic position.
 
-Hecate is currently in **alpha**. The positioning is provisional — it will sharpen as the project matures toward 1.0.
+Hecate is currently in **alpha**. The governance direction is accepted in ADR-034/035; implementation maturity and supported deployment profiles remain subject to evidence.
 
-The strategic target is being revised toward an **enterprise Agent governance and integration platform** whose execution components can also be consumed by products without deploying the management plane. This target describes the direction under review; it does not mean independent Runtime distribution or production governance profiles are already shipped. The [platform evolution plan](../refactor/enterprise-agent-platform-evolution-plan.md) tracks that work and its acceptance gates. This page's detailed feature and competitor claims remain subject to a step2 evidence and catalogue review.
+The accepted strategic target is an **enterprise Agent governance and collaboration platform** whose execution components can also be consumed by products without deploying the management plane. This target records the accepted direction; it does not mean independent Runtime distribution or production governance profiles are already shipped. The [platform evolution plan](../refactor/enterprise-agent-platform-evolution-plan.md) tracks that work and its acceptance gates. The [step2 review](../refactor/step2-review-report.md) records planning corrections. Competitor comparisons below are historical context; provider selection requires a separate review of current official evidence.
 
 ---
 
-## 30-second summary
+## Strategic summary
 
-> Hecate's target is an **open-source enterprise Agent governance and integration platform**: organizations can register and govern Agents built with different runtimes, models, and languages, while products can consume a separately deployable execution component when they need one. The current implementation is Python-based and includes a Pregel Runtime, APIs, MCP/A2A integrations, and enterprise capabilities at varying maturity. Hecate remains in alpha; independent Runtime distribution, cross-runtime governance, and production support profiles require the implementation and evidence in the evolution plan. Python, Pregel, and any one provider are reference choices, not requirements imposed on every connected Agent.
+> Hecate's target is an **open-source enterprise Agent governance and collaboration platform**: organizations can register and govern Agents built with different runtimes, models, and languages, while products can consume a separately deployable execution component when they need one. The current implementation is Python-based and includes a Pregel Runtime, APIs, MCP/A2A integrations, and enterprise capabilities at varying maturity. Hecate remains in alpha; independent Runtime distribution, cross-runtime governance, and production support profiles require the implementation and evidence in the evolution plan. Python, Pregel, and any one provider are reference choices, not requirements imposed on every connected Agent.
 
 ---
 
 ## Delivery boundaries and deployment modes
 
-Hecate separates what it must guarantee (governance semantics, trust boundaries, enforcement points, verifiable evidence) from what it ships as replaceable implementations. Three delivery boundaries follow; none of them requires a separate repository or an immediate microservice split, and no single algorithm, database, or vendor SDK may become a mandatory dependency across all boundaries.
+Hecate separates what it must guarantee (governance semantics, trust boundaries, enforcement points, verifiable evidence) from what it ships as replaceable implementations. The following delivery boundaries apply; none of them requires a separate repository or an immediate microservice split, and no single algorithm, database, or vendor SDK may become a mandatory dependency across all boundaries.
 
 | Delivery boundary | Minimum responsibility and callers | Optional parts and exclusions |
 |---|---|---|
@@ -24,7 +24,7 @@ Hecate separates what it must guarantee (governance semantics, trust boundaries,
 | Standalone execution component | Built-in Runtime plus an execution host that loads definitions, assembles selected adapters, verifies caller identity and permissions, manages execution state and local evidence, and serves a business-app entry point | Model implementations, Memory/RAG, sandbox, persistence, and security services are configurable; the standalone host needs neither Studio, an org directory, nor the management platform to start |
 | Enterprise management platform | Registration/deployment, centralized admission, release, teams, human intervention, evaluation management, and evidence queries | Manages built-in and external runtimes; customers never need the management platform just to use the reference execution component |
 
-Three deployment modes are accepted separately — passing one never counts as passing another:
+Deployment modes are accepted separately — passing one never counts as passing another:
 
 | Deployment mode | Must deploy | Source of definitions, authorization, and state | First delivery gate |
 |---|---|---|---|
@@ -35,6 +35,11 @@ Three deployment modes are accepted separately — passing one never counts as p
 **Consumer contract for business-App standalone delivery** (example scenario: a structured inventory-type business app). The business API keeps final authority over inventory reads/writes and the business state machine; the standalone host never depends on the example business's data model, and Hecate implements no inventory, pricing, or customer management. Delivery gates are tiered: a read-only technical preview (no production writes), scoped standalone production (local identity/approval, durable tasks, evidence retention), and managed production (control-plane enrollment with bounded authorization leases). The first standalone service entry point is HTTP/JSON; in-process Python embedding is certified separately against its own lifecycle and isolation constraints; no up-front promise is made about SDKs in other languages.
 
 **Hosted Agent services are a first-class execution backend.** Vendor-hosted Agent services (which hold the reasoning loop and session) register on two axes — harness/session owner and sandbox/file-and-command owner — plus the tool-and-data enforcement point, instead of a single hosted/self-hosted tag. Self-hosting Hecate does not make every bound backend satisfy private-deployment or local data-residency requirements; vendor conditions (residency, retention, deletion, revocation effectiveness) are admission inputs verified per service version at binding time.
+
+
+Network modes are registered independently of deployment modes: permitted external services, enterprise-network-only, or fully disconnected networks. Fully disconnected operation requires local models, dependencies, artifacts and valid trust materials and receives support only after its own conformance tests. A managed host keeps scoped authorization leases and a declared maximum stale window; expiry or untrustworthy time rejects new protected actions. Instant central revocation requires an online enforcement decision, and reconnect never grants local self-authorization or re-executes existing runs.
+
+Local evidence retention and central upload are separate responsibilities. Business content is not uploaded to a control plane by default; external model/tool data flows are declared separately. A profile names its installed adapters, storage, trust material, backup and measured resource needs. Read-only preview, standalone production and managed production each need their own evidence; network isolation, optional Memory/RAG or a local database does not independently prove all data stays local.
 
 ---
 
@@ -80,7 +85,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 |---|---|---|---|---|---|---|---|
 | **Deployment** | Self-hosted OSS (MIT) | Cloud + self-host | OSS library | Cloud + enterprise | Cloud SaaS | Cloud (AWS) | Cloud + self-host (Fair-code) |
 | **Primary UX** | Code (Python) + Visual | Visual-first | Code (Python) | Code + Visual | Visual + code | Code (any framework) | Visual + code |
-| **Engine** | Built-in Pregel/BSP Runtime (the reference implementation) + event-sourced execution state (Log-as-Truth); external execution backends plug in through versioned contracts | DAG-based | Pregel (Google) inspired | Custom | Atlas Reasoning Engine | Wraps frameworks | DAG-based |
+| **Engine** | Built-in Pregel/BSP Runtime (the reference implementation) + event-sourced execution state (Log-as-Truth); external execution-backend contracts are planned and require per-backend certification | DAG-based | Pregel (Google) inspired | Custom | Atlas Reasoning Engine | Wraps frameworks | DAG-based |
 | **MCP server + client** | ✅ Bidirectional (latest spec) | ✅ Client only | Partial | ✅ | ✅ | ✅ | ✅ |
 | **A2A protocol** | ✅ (server + client) | ❌ | ❌ | Partial | ✅ | ✅ | ❌ |
 | **OpenAI-compatible API** | ✅ Wire-compatible | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
@@ -92,9 +97,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 | **Target user** | Engineers building internal agent platforms | Business / non-developers | Engineers prototyping | Mixed business + engineers | Enterprise admins | AWS-native engineers | Ops + IT |
 | **Pricing** | Free (self-host) | Free tier + cloud | Free (OSS) + paid platform | Enterprise | Per-conversation | Pay-per-use AWS | Free self-host + cloud |
 | **License** | MIT | Apache-2.0 + cloud | MIT (LangGraph) + proprietary (LangSmith) | Proprietary | Proprietary | Proprietary | Sustainable Use License |
-| **GitHub stars** (Aug 2026) | small (alpha) | ~110k | ~18k (langgraph) | ~30k | n/a (closed) | n/a (closed) | ~200k |
 
-> Stars shown for context only — Hecate is alpha and doesn't compete on popularity.
 
 ---
 
@@ -111,7 +114,7 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 
 **Hecate's advantage**: Full source code, **many engine extension interfaces (multiple Core + multiple SPI)** per [ADR-016](adr/016-platform-spi-architecture.md) at the engine layer. Dify's extension model is via Marketplace plugins, not engine-level SPI.
 
-**Dify's advantage**: Faster time-to-first-chatbot for non-developers. Larger community (~110k stars vs Hecate's alpha-stage visibility).
+**Dify's advantage**: Faster time-to-first-chatbot for non-developers. Its community and adoption need current evidence at selection time.
 
 ---
 
@@ -193,7 +196,6 @@ Hecate is **not** a coding assistant — it is a platform for building productio
 | **Primary use** | "Move data between SaaS apps" + now "build AI agents" | "Build agents that interact with LLM tools and data" |
 | **Visual model** | Workflow nodes (each does one thing) | Agent graph DSL (nodes are reasoning steps, not data transforms) |
 | **License** | Sustainable Use License (not OSI-approved) | MIT |
-| **GitHub stars** | ~200k | small (alpha) |
 | **When to choose n8n** | You need general workflow automation and AI agents are a feature among many | |
 | **When to choose Hecate** | | You are building an **agent-first** product where workflows serve the agent (not the other way around) |
 

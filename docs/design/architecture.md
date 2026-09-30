@@ -6,7 +6,7 @@ This document describes the system's architecture, design principles, and compon
 
 ## Overview
 
-Hecate enables enterprises to build, orchestrate, and run AI Agent applications on their own infrastructure. The system comprises ten modules organized in a layered dependency hierarchy, with Security and Ecosystem as cross-cutting concerns that span all modules.
+Hecate enables enterprises to build, orchestrate, and run AI Agent applications on their own infrastructure. The existing implementation groups product modules in a layered dependency hierarchy, with Security and Ecosystem as cross-cutting concerns that span all modules.
 
 ![Hecate L1 Architecture](images/hecate_architecture_l1.png)
 
@@ -14,13 +14,13 @@ Hecate enables enterprises to build, orchestrate, and run AI Agent applications 
 >
 > Security Shield (left sidebar) and Ecosystem (right sidebar) are cross-cutting concerns that span all platform modules. Each module in the L1 diagram has a corresponding L2 breakdown — see [Module Architecture](#module-architecture) below.
 
-The execution engine is Hecate's heart — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** with checkpoints as materialized caches, supports **Execution Replay** for time-travel debugging, and dispatches node execution to a Worker Pool. The built-in Runtime is the reference implementation; external execution backends are first-class and plug in through the boundaries described in [Control Plane, Execution Access, and Trust Boundaries](#control-plane-execution-access-and-trust-boundaries) below.
+The built-in execution engine is a reference capability — a self-built Pregel runtime with zero external framework dependencies. It receives compiled Graphs, executes them following the Bulk Synchronous Parallel (BSP) model, manages state through a Channel system, persists execution as an **event-sourced log** with checkpoints as materialized caches, supports **Execution Replay** for time-travel debugging, and dispatches node execution to a Worker Pool. The built-in Runtime is the reference implementation; external execution backends are first-class and plug in through the boundaries described in [Control Plane, Execution Access, and Trust Boundaries](#control-plane-execution-access-and-trust-boundaries) below.
 
 **Engine Extension Interfaces** — engine-level extensibility:
 
 | Extension Point | Purpose |
 |-----|---------|
-| `EnginePort` | Service-to-engine adapter (LLM, tools, knowledge, checkpoint) |
+| `RuntimePort` | Runtime-to-service boundary (LLM, tools, knowledge, checkpoint) |
 | `Worker` / `WorkerPool` | Node execution dispatch |
 | `CheckpointStore` | Materialized cache of execution state (log-replay fold); discardable |
 | `EventStore` | Append-only execution event log — the source of truth, with replay |
@@ -64,15 +64,15 @@ Each module below corresponds to a block in the [L1 architecture diagram](images
 
 ### Access Channel
 
-The entry point for all external requests, exposes four API surfaces: 
-  - OpenAI-compatible interface at `/v1/` , for seamless integration with existing tools. 
-  - Management API at `/api/`,  for Agent/Workflow/Session/Knowledge Base CRUD.     
-  - MCP Server endpoint at `/mcp`, for Streamable HTTP transport per the **latest MCP specification** (stateless core; shipped recently in change `mcp-streamable-http`). 
+The entry point for all external requests, exposes four API surfaces:
+  - OpenAI-compatible interface at `/v1/` , for seamless integration with existing tools.
+  - Management API at `/api/`,  for Agent/Workflow/Session/Knowledge Base CRUD.
+  - MCP Server endpoint at `/mcp`, for Streamable HTTP transport per the **latest MCP specification** (stateless core; shipped recently in change `mcp-streamable-http`).
   - A2A endpoint at `/.well-known/agent.json`, for Agent Card discovery + task lifecycle for cross-framework agent communication.
 
 Beyond the HTTP APIs, external entry points include the embeddable web widget at `/embed/chat`, IM inbound webhooks (Feishu, Slack), and the `hecate` CLI. All entry points handle authentication (API Key + JWT with Argon2), rate limiting, quota enforcement, multi-channel adaptation, and inbound IM routing.
 
-All requests are uniformly wrapped as `ExecutionRequest` objects containing the agent ID, messages, execution configuration, and request context (user info, session ID, permissions). This object flows down to the Agent Engine.
+Current entries reach execution through different application services; their actual paths are inventoried in the platform baseline. step3 defines a language-neutral execution request/receipt contract and step5 migrates entry groups to it. A shared Task/Run lifecycle or uniform request contract is a target until each entry has passed its compatibility tests.
 
 > See [Access Channel Design](access-channel-design.md) for L2 architecture, API surfaces, and implementation details.
 
@@ -86,11 +86,11 @@ Human-in-the-Loop is handled via `interrupt()` (pause execution, return control 
 
 ### Agent Engine
 
-The core differentiator — a self-built Pregel runtime with zero external framework dependencies. Compiles Graph DSL definitions into `CompiledGraph` objects, manages state through a four-type Channel system, persists execution as an **event-sourced log** with checkpoints demoted to materialized caches, and dispatches node execution to a pluggable Worker Pool. 
+The built-in reference backend — a self-built Pregel runtime with zero external framework dependencies. Compiles Graph DSL definitions into `CompiledGraph` objects, manages state through a Channel system, persists execution as an **event-sourced log** with checkpoints demoted to materialized caches, and dispatches node execution to a pluggable Worker Pool.
 
-**Execution Replay** — A first-class debugging primitive built on top of Log-as-Truth. The append-only event log lets any past session be reconstructed for inspection: trace-partitioned timelines, DAG step-through, and fold-to-version time-travel state inspection (`GET /sessions/{id}/replay` and `GET /sessions/{id}/replay/state`). 
+**Execution Replay** — A first-class debugging primitive built on top of Log-as-Truth. The append-only event log lets any past session be reconstructed for inspection: trace-partitioned timelines, DAG step-through, and fold-to-version time-travel state inspection (`GET /sessions/{id}/replay` and `GET /sessions/{id}/replay/state`).
 
-The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → append events to the log with `STEP_END` commit → evaluate conditional edges → repeat until no nodes remain. Workers receive read-only Channel snapshots and return results — they never directly modify Channels. 
+The engine runs compiled Graphs following the Pregel/BSP model: read Channel values → dispatch ready nodes to Worker Pool → await results → write new Channel values → append events to the log with `STEP_END` commit → evaluate conditional edges → repeat until no nodes remain. Workers receive read-only Channel snapshots and return results — they never directly modify Channels.
 
 > See [Engine Design](engine-design.md) for a deep dive.
 
@@ -102,7 +102,7 @@ Unified administrative control plane consolidating observability, alerting, eval
 
 ### Model Hub
 
-LLM integration layer powered by LiteLLM, supporting 100+ providers. Provides intelligent routing (4 strategies), circuit breaker pattern for fault tolerance, A/B testing and gray release for model comparison, unified tool calling across providers, and provider configuration management.
+LLM integration layer powered by LiteLLM, supporting multiple providers. Provides intelligent routing (4 strategies), circuit breaker pattern for fault tolerance, A/B testing and gray release for model comparison, unified tool calling across providers, and provider configuration management.
 
 > See [Model Hub Design](model-hub-design.md) for L2 architecture, model catalog, lifecycle management, and governance.
 
@@ -140,13 +140,18 @@ Integration and extensibility layer. Native MCP support (Client + Server with St
 
 ## Control Plane, Execution Access, and Trust Boundaries
 
-Hecate's management and governance layers remain a **modular monolith**: capability domains live as sub-packages inside the same process and codebase, and no present requirement justifies splitting the control plane into microservices. External runtimes and process-isolated components (gateways, non-Python backends) join as separate processes, containers, or remote services through versioned contracts — not by being absorbed into the monolith.
+These accepted target boundaries are implemented incrementally. The existing module sections describe reference capabilities; they do not certify a complete control plane or independently installable execution host. See ADR-034/035 and the [step2 review](../refactor/step2-review-report.md) for decisions and remaining gaps.
+
+Hecate's management and governance layers remain a **modular monolith**: capability domains are progressively assigned sub-packages inside the same process and codebase, and no present requirement justifies splitting the control plane into microservices. External runtimes and process-isolated components (gateways, non-Python backends) join as separate processes, containers, or remote services through versioned contracts — not by being absorbed into the monolith.
 
 **Runtime call chains vs source dependency directions.** At runtime, a request flows protocol/UI entry → domain application service → injected adapter → backend; neutral contracts are types, not a forwarding service. In source, domain services and adapters each depend on neutral contracts, adapters may depend on vendor SDKs, and domain services must never import concrete adapters — `core/composition/` assembles implementations. Contracts depend on no domain, ORM, web framework, or vendor SDK. Same-process callers invoke public interfaces only; reaching around them through a shared database is prohibited. Interface naming follows the repo rules (`XxxPort` is reserved for runtime↔domain hexagonal seams).
 
 **Trust boundaries and enforcement points.** Every protected side-effect path names an enforcement point and an authoritative state writer. External identity/policy services may make decisions, but actions execute only through Hecate's tool gateway or a verified execution gateway, which link the policy decision and the execution receipt. Each piece of state has a single authoritative writer: the control plane owns platform task responsibility/acceptance and desired configuration, while executors own actual run state, checkpoints, and internal loops — the platform stores projections with source and sequence, never dual-writes executor state. Hosted vendor harnesses register on two axes (harness/session owner × sandbox/file-and-command owner) plus the tool-and-data enforcement point; the platform only claims control it actually exercises, and unverifiable controls are reported as `unsupported`/`cooperative` rather than `enforced`.
 
-**Capability domains.** The platform's responsibilities group into seven capability domains — Agent Engineering, AgentOps, Agent Control Plane, Agent Governance, Security, Evaluation, and the MCP/A2A enterprise access layer. They are organizational boundaries for ownership and future extraction, not today's deployment units: the domains must not each build a second Agent identity, task state, or approval source of truth.
+**Capability domains.** The platform's responsibilities group into capability domains — Agent Engineering, AgentOps, Agent Control Plane, Agent Governance, Security, Evaluation, and the MCP/A2A enterprise access layer. They are organizational boundaries for ownership and future extraction, not today's deployment units: the domains must not each build a second Agent identity, task state, or approval source of truth.
+
+
+**Standalone host and managed connectivity.** The standalone host owns local Task/Run/Action records and starts without platform management tables; management and execution stores keep distinct owners even if they share a database server. Network modes are registered separately from deployment modes. Managed disconnection preserves only the granted scope and expiry/max-staleness window; it never changes the trust root or switches to standalone authorization. Instant central revocation requires an online decision. Reconnection re-verifies identity, grants and ownership before new work; historical events are imported with their actual source, no retroactive approvals, and active Runs retain their original mode and binding. Local evidence failure blocks protected actions; central upload may buffer within the declared policy but does not replay business actions.
 
 ## Capability Domains and Target Sub-Packages
 
@@ -162,16 +167,16 @@ Each separable candidate unit designates an internal package, a public applicati
 | Evaluation | `ops/evaluation/` | existing package, external evaluators in adapter sub-package | Evaluation tasks and results | Release approval (consumed by Governance as evidence references) |
 | MCP/A2A access | `tools/mcp/`, `channel/a2a/` | existing packages + gateway adapters | Protocol sessions and mappings | Task/Run, identity authorization, and Action state (owned by platform packages) |
 
-**Boundary rules in effect now.** The ORM may stay in shared `models/`, but each table has exactly one domain responsible for its reads/writes; other domains query through the owning domain's service and must not import its repository or write its tables. `core/composition/` only assembles implementations and gains no new business logic. New cross-package dependencies are blocked by the domain layering tests; the planned package-internal boundary checks extend `tests/test_layering_domain.py` with per-subpackage rules (no cross-subpackage implementation imports, no direct writes to another domain's tables) so that new code cannot reintroduce them.
+**Boundary rules for new code and incremental migration.** The ORM may stay in shared `models/`, but each table has exactly one domain responsible for its reads/writes; other domains query through the owning domain's service and must not import its repository or write its tables. `core/composition/` only assembles implementations and gains no new business logic. Existing domain layering tests protect top-level dependency directions; the planned package-internal boundary checks extend `tests/test_layering_domain.py` with per-subpackage rules (no cross-subpackage implementation imports, no direct writes to another domain's tables) so that new code cannot reintroduce them.
 
 **Registered exceptions** (each carries an owner, migration step, and exit condition; owners are assigned when the owning change starts, per the repo's assignment policy):
 
-| Exception | Location | Migration step | Exit condition |
-|---|---|---|---|
-| MCP handlers write `AgentModel` rows directly | `tools/mcp/server.py` (agent create/update) | Action-enforcement work moves CRUD behind the owning service | MCP handlers no longer write agent tables |
-| MCP handlers write `KnowledgeBase` rows directly | `tools/mcp/server.py` (knowledge create) | Knowledge ownership lands with the knowledge domain service | MCP handlers no longer write knowledge tables |
-| Prompt-optimization writes `PromptVersionModel` directly | `ops/prompt_optimization/review.py` | Candidate/review flow moves behind the prompt-owning service | ops stops writing prompt version tables |
-| Function-level lazy imports crossing domains | `src/hecate/runtime/` (inventory in `src/hecate/runtime/AGENTS.md`, each row with its own exit condition) | Tracked per row in that inventory; standalone-profile cleanup lands with the shared-assembly work | Each row's recorded exit condition |
+| Exception | Location | Responsible domain / assignment | Migration step | Exit condition |
+|---|---|---|---|---|
+| MCP handlers write `AgentModel` rows directly | `tools/mcp/server.py` (agent create/update) | tools/mcp + studio/engineering; implementation/acceptance owners assigned at change start | Action-enforcement work moves CRUD behind the owning service | MCP handlers no longer write agent tables |
+| MCP handlers write `KnowledgeBase` rows directly | `tools/mcp/server.py` (knowledge create) | tools/mcp + Knowledge provider owner; people assigned at change start | Knowledge ownership lands with the knowledge domain service | MCP handlers no longer write knowledge tables |
+| Prompt-optimization writes `PromptVersionModel` directly | `ops/prompt_optimization/review.py` | ops/prompt_optimization + prompt-owning studio service; people assigned at change start | Candidate/review flow moves behind the prompt-owning service | ops stops writing prompt version tables |
+| Function-level lazy imports crossing domains | `src/hecate/runtime/` (inventory in `src/hecate/runtime/AGENTS.md`, each row with its own exit condition) | runtime + each referenced capability owner; people assigned at change start | Tracked per row in that inventory; standalone-profile cleanup lands with the shared-assembly work | Each row's recorded exit condition |
 
 ---
 
@@ -179,11 +184,11 @@ Each separable candidate unit designates an internal package, a public applicati
 
 ### Open Over Closed
 
-Hecate supports 100+ LLM providers via LiteLLM, adopts MCP  and A2A as first-class integration protocols, and maintains API compatibility with OpenAI's format. No vendor lock-in is the core brand promise.
+Hecate integrates model providers via LiteLLM, adopts MCP  and A2A as first-class integration protocols, and maintains API compatibility with OpenAI's format. No vendor lock-in is the core brand promise.
 
 ### Composable Over Monolithic
 
-All external capabilities are integrated via MCP, not hardcoded. The execution engine, memory service, RAG pipeline, and tool system are independently replaceable. The three-layer Agent (Guard→Plan→Sub-Agent) is a preset template, not a constraint — users can customize any orchestration topology.
+MCP and A2A provide protocol access alongside HTTP/JSON and backend-specific adapters. Execution, Memory/Knowledge, evaluation, observability and gateway capabilities use independent public contracts and support windows. Current same-process extension seams do not establish independent deployment: real replacement, clean installation and single-capability upgrades are validated by the owning steps. The three-layer Agent (Guard→Plan→Sub-Agent) is a preset template, not a constraint — users can customize any orchestration topology.
 
 ### Observable Over Black Box
 
@@ -206,7 +211,7 @@ Each level is backward compatible.
 
 ### Developer Experience First
 
-Canvas and SDK are two interfaces to the same system, not separate products. Agent configurations and workflow modifications take effect in real-time. The underlying execution engine is identical regardless of interface.
+Canvas and SDK are two interfaces to the same system, not separate products. Agent configurations and workflow modifications take effect in real-time. Builtin callers progressively share one execution assembly; external agents use their own qualified runtime through the execution contract.
 
 ---
 
@@ -232,7 +237,7 @@ integration dependencies.
 
 ### Request Lifecycle
 
-A typical chat request flows through all layers:
+The diagram describes the builtin Pregel chat path conceptually. Current entry points have different request schemas; steps 3 and 5 introduce the neutral execution contract and converge entry handling. External backends implement their own certified execution loop.
 
 ```
 User sends message
@@ -241,7 +246,7 @@ User sends message
 ┌─ Access Channel ─────────────────────────────────────────┐
 │  1. Authenticate (API Key / JWT)                         │
 │  2. Rate limit check                                     │
-│  3. Parse request → ExecutionRequest                     │
+│  3. Parse chat request                                    │
 └──────────────────────────┬───────────────────────────────┘
                            │
     ▼
@@ -258,7 +263,7 @@ User sends message
 │  8. Pregel superstep loop:                               │
 │     a. Read Channel values for ready nodes               │
 │     b. Dispatch to Worker Pool                           │
-│     c. Workers call Capability Services via EnginePort:  │
+│     c. Workers call Capability Services via RuntimePort: │
 │        - LLM invoke (with guardrail hooks)               │
 │        - Tool execute (with permission check)            │
 │        - Knowledge query (RAG retrieval)                 │
@@ -304,7 +309,7 @@ Ordered to match the [Module Architecture](#module-architecture) walkthrough abo
 - [Agent Studio Design](agent-studio-design.md) — Visual canvas, agent configurator, workflow builder, multi-agent collaboration patterns, human-in-the-loop
 - [Engine Design](engine-design.md) — Pregel runtime, compiler pipeline, channel system, event-sourced execution state + checkpoint caches, Execution Replay
 - [Ops Center Design](ops-center-design.md) — Unified ops console, observability, evaluation engine, budget governance, audit logging
-- [Model Hub Design](model-hub-design.md) — LLM integration via LiteLLM (100+ providers), intelligent routing, circuit breaker, A/B testing, gray release
+- [Model Hub Design](model-hub-design.md) — LLM integration via LiteLLM (multiple providers), intelligent routing, circuit breaker, A/B testing, gray release
 - [Tool Platform Design](tool-platform-design.md) — MCP Client + Server, plugin ecosystem, sandboxed execution, browser automation, tool security policies
 - [Knowledge & Memory Design](knowledge-memory-design.md) — RAG pipeline, hybrid search, knowledge graph, four-level memory system
 - [Enterprise Foundation Design](enterprise-foundation-design.md) — Multi-tenancy, database access and migrations, configuration, secret management, rate limiting, task scheduling
