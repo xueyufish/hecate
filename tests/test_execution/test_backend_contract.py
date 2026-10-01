@@ -37,7 +37,6 @@ from hecate.execution.backend import (
 )
 from hecate.execution.stub import StubExecutionBackend
 from tests.test_execution.conftest import SAMPLES_DIR, load_sample
-from tests.test_execution.live_http import LiveHttpBackend
 
 SAMPLE_REQUEST = SAMPLES_DIR / "requests" / "submit-minimal.json"
 
@@ -54,16 +53,17 @@ def make_request(tmp_path: Path, key: str = "idem-001") -> ExecutionRequest:
 
 
 @pytest.fixture(params=["stub", "live"])
-def backend(request, live_backend: LiveHttpBackend) -> tuple[AgentExecutionBackend, str]:
+def backend(request) -> tuple[AgentExecutionBackend, str]:
     """Run shared contract assertions against the stub AND the live pilot.
 
     The second element is the issuer domain the backend signs its receipts
     with, so assertions can require backend-issued identity without
-    hardcoding one implementation.
+    hardcoding one implementation. The live fixture is resolved lazily so
+    stub runs never touch the pilot environment.
     """
     if request.param == "stub":
         return StubExecutionBackend(), "stub"
-    return live_backend, "pilot-ts"
+    return request.getfixturevalue("live_backend"), "pilot-ts"
 
 
 def test_standing_unsupported_negative_case_is_declared(backend) -> None:
