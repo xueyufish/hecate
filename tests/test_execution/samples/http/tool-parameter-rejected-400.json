@@ -1,0 +1,66 @@
+{
+  "scenario": "tool-parameter-rejected-400",
+  "negative": false,
+  "request": {
+    "method": "POST",
+    "path": "/runs",
+    "headers": {
+      "Idempotency-Key": "idem-003"
+    },
+    "body": {
+      "contract_version": "0.1",
+      "task_ref": {
+        "kind": "task",
+        "issuer_domain": "platform",
+        "id": "t-123"
+      },
+      "run_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "deployment_ref": {
+        "kind": "deployment",
+        "issuer_domain": "platform",
+        "id": "dep-1"
+      },
+      "authorization_ref": {
+        "kind": "authorization",
+        "issuer_domain": "platform",
+        "id": "authz-7"
+      },
+      "input": {
+        "objective": "Summarize the attached material"
+      },
+      "idempotency_key": "idem-003",
+      "trace_correlation": {
+        "trace_id": "tr-777"
+      },
+      "backend_config_ns": {
+        "tool": "create_ticket",
+        "parameters": {
+          "priority": 3
+        }
+      }
+    }
+  },
+  "response": {
+    "status": 400,
+    "headers": {
+      "X-Contract-Version": "0.1"
+    },
+    "body": {
+      "type": "https://hecate.dev/contracts/binding/parameter_schema_mismatch",
+      "title": "Parameter validation failed",
+      "status": 400,
+      "detail": "tool parameter does not match the declared input schema",
+      "errors": [
+        {
+          "tool": "create_ticket",
+          "field": "priority",
+          "reason": "expected integer"
+        }
+      ]
+    }
+  }
+}

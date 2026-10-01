@@ -1,0 +1,13 @@
+{
+  "code": "outcome_unknown",
+  "request_ref": {
+    "kind": "session",
+    "issuer_domain": "vendor-openai",
+    "id": "sess-abc"
+  },
+  "message": "submit response lost; reconcile by vendor session if supported",
+  "reconciliation": {
+    "strategy": "query_by_vendor_session",
+    "key": "sess-abc"
+  }
+}

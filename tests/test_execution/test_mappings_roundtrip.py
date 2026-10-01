@@ -26,6 +26,8 @@ from hecate.contracts.execution.sandbox import (
     CreateEnvironmentRequest,
     SandboxInfo,
 )
+from hecate.contracts.execution.security import SecurityClaims
+from hecate.contracts.execution.tools import ToolDeclaration
 from tests.test_execution.conftest import (
     SAMPLES_DIR,
     load_sample,
@@ -56,6 +58,10 @@ def _mapping_for(path: Path) -> Callable[[dict[str, Any]], Any] | None:
         if "sandbox-info" in name:
             return SandboxInfo.from_dict
         return CommandRecord.from_dict
+    if theme == "security-claims":
+        return SecurityClaims.from_dict
+    if theme == "tools":
+        return ToolDeclaration.from_dict
     return None
 
 
@@ -63,9 +69,18 @@ def _roundtrip(mapping: Mapping, sample: dict[str, Any]) -> dict[str, Any]:
     return mapping(sample).to_dict()
 
 
+def _mappable_samples() -> list[Path]:
+    """Samples with a registered mapping: excludes HTTP pairs (binding tests)
+    and ``negative-*`` samples (asserted to be rejected, not parsed)."""
+
+    return sorted(
+        p for p in SAMPLES_DIR.rglob("*.json") if p.parent.name != "http" and not p.name.startswith("negative-")
+    )
+
+
 @pytest.mark.parametrize(
     "path",
-    sorted(p for p in SAMPLES_DIR.rglob("*.json")),
+    _mappable_samples(),
     ids=lambda p: f"{p.parent.name}/{p.name}",
 )
 def test_mapping_parses_sample_and_roundtrips(path) -> None:
@@ -77,7 +92,7 @@ def test_mapping_parses_sample_and_roundtrips(path) -> None:
 
 @pytest.mark.parametrize(
     "path",
-    sorted(p for p in SAMPLES_DIR.rglob("*.json")),
+    _mappable_samples(),
     ids=lambda p: f"{p.parent.name}/{p.name}",
 )
 def test_removing_required_field_breaks_mapping_and_schema(path) -> None:
@@ -111,6 +126,10 @@ def _required_field_for(path: Path) -> str:
         return "ownership"
     if theme == "manifest":
         return "entry"
+    if theme == "security-claims":
+        return "aud"
+    if theme == "tools":
+        return "side_effect_class"
     if "create-environment" in name:
         return "idempotency_id"
     if "sandbox-info" in name:

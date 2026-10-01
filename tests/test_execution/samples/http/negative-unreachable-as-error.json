@@ -1,0 +1,28 @@
+{
+  "scenario": "negative-unreachable-as-error",
+  "negative": true,
+  "request": {
+    "method": "GET",
+    "path": "/runs/backend-a%2Fbr-9001",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 502,
+    "headers": {
+      "X-Contract-Version": "0.1"
+    },
+    "body": {
+      "type": "https://hecate.dev/contracts/errors/unreachable",
+      "title": "Unreachable",
+      "status": 502,
+      "code": "unreachable",
+      "request_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "message": "backend reports unreachable"
+    }
+  }
+}

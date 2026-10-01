@@ -1,0 +1,36 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/tool.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ToolDeclaration",
+  "description": "Cross-backend tool declaration. The side_effect_class vocabulary is adopted verbatim from the internal SideEffectClass enum (runtime/tool_side_effects.py): what a RETRY of this tool would do to external state. Failure layering: parameter-validation failures are rejected before dispatch (schema mismatch never reaches the business target); business rejection is a tool RESULT (a negative payload carried by a tool-result event - the run continues); system failure is a tool-level error event; remote outcome unknown reuses the outcome_unknown semantics and reconciles by idempotent id without blind retry.",
+  "type": "object",
+  "required": ["tool_name", "version", "input_schema_ref", "output_schema_ref", "side_effect_class"],
+  "additionalProperties": true,
+  "properties": {
+    "tool_name": { "type": "string", "minLength": 1 },
+    "version": { "type": "string", "minLength": 1 },
+    "input_schema_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "URI of the tool's input JSON Schema; mismatches are rejected before dispatch."
+    },
+    "output_schema_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "URI of the tool's output JSON Schema; tool-result event payloads declare this reference."
+    },
+    "side_effect_class": {
+      "enum": ["readonly", "idempotent_write", "non_idempotent_write", "external_side_effect", "unknown"],
+      "description": "Retry semantics, adopted verbatim from the internal SideEffectClass enum."
+    },
+    "description": { "type": "string" },
+    "deprecation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "deprecated_since": { "type": "string", "minLength": 1 },
+        "successor_tool": { "type": "string" }
+      }
+    }
+  }
+}

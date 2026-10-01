@@ -1,0 +1,62 @@
+{
+  "scenario": "idempotency-conflict-409",
+  "negative": false,
+  "request": {
+    "method": "POST",
+    "path": "/runs",
+    "headers": {
+      "Idempotency-Key": "idem-001"
+    },
+    "body": {
+      "contract_version": "0.1",
+      "task_ref": {
+        "kind": "task",
+        "issuer_domain": "platform",
+        "id": "t-123"
+      },
+      "run_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "deployment_ref": {
+        "kind": "deployment",
+        "issuer_domain": "platform",
+        "id": "dep-1"
+      },
+      "authorization_ref": {
+        "kind": "authorization",
+        "issuer_domain": "platform",
+        "id": "authz-7"
+      },
+      "input": {
+        "objective": "Summarize the attached material"
+      },
+      "idempotency_key": "idem-001",
+      "trace_correlation": {
+        "trace_id": "tr-777"
+      }
+    }
+  },
+  "response": {
+    "status": 409,
+    "headers": {
+      "X-Contract-Version": "0.1"
+    },
+    "body": {
+      "type": "https://hecate.dev/contracts/errors/version_conflict",
+      "title": "Idempotency key reuse",
+      "status": 409,
+      "code": "version_conflict",
+      "request_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "message": "same key replayed with different request content",
+      "detail_ns": {
+        "reason": "idempotency_key_content_mismatch"
+      }
+    }
+  }
+}

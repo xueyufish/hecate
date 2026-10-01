@@ -1,0 +1,60 @@
+{
+  "scenario": "budget-exhausted-429",
+  "negative": false,
+  "request": {
+    "method": "POST",
+    "path": "/runs",
+    "headers": {
+      "Idempotency-Key": "idem-002"
+    },
+    "body": {
+      "contract_version": "0.1",
+      "task_ref": {
+        "kind": "task",
+        "issuer_domain": "platform",
+        "id": "t-123"
+      },
+      "run_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "deployment_ref": {
+        "kind": "deployment",
+        "issuer_domain": "platform",
+        "id": "dep-1"
+      },
+      "authorization_ref": {
+        "kind": "authorization",
+        "issuer_domain": "platform",
+        "id": "authz-7"
+      },
+      "input": {
+        "objective": "Summarize the attached material"
+      },
+      "idempotency_key": "idem-002",
+      "trace_correlation": {
+        "trace_id": "tr-777"
+      }
+    }
+  },
+  "response": {
+    "status": 429,
+    "headers": {
+      "X-Contract-Version": "0.1",
+      "Retry-After": "3600"
+    },
+    "body": {
+      "type": "https://hecate.dev/contracts/errors/budget_exhausted",
+      "title": "Budget exhausted",
+      "status": 429,
+      "code": "budget_exhausted",
+      "request_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "message": "token budget for this deployment is exhausted"
+    }
+  }
+}

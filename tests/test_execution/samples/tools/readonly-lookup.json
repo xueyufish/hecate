@@ -1,0 +1,8 @@
+{
+  "tool_name": "inventory_lookup",
+  "version": "1.2.0",
+  "input_schema_ref": "https://example.com/schemas/inventory-lookup.input.schema.json",
+  "output_schema_ref": "https://example.com/schemas/inventory-lookup.output.schema.json",
+  "side_effect_class": "readonly",
+  "description": "Structured stock lookup against the business API; no external state changes."
+}

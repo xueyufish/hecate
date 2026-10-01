@@ -1,0 +1,67 @@
+{
+  "scenario": "events-page-200",
+  "negative": false,
+  "request": {
+    "method": "GET",
+    "path": "/runs/backend-a%2Fbr-9001/events?cursor=cur-0",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "headers": {
+      "X-Contract-Version": "0.1"
+    },
+    "body": {
+      "events": [
+        {
+          "contract_version": "0.1",
+          "kind": "gap",
+          "event_id": "gap-1",
+          "task_ref": {
+            "kind": "task",
+            "issuer_domain": "platform",
+            "id": "t-123"
+          },
+          "run_ref": {
+            "kind": "run",
+            "issuer_domain": "backend-a",
+            "id": "br-9001"
+          },
+          "source_sequence": 7,
+          "occurred_at": "2026-10-01T08:00:02Z",
+          "received_at": "2026-10-01T08:00:02Z",
+          "gap": {
+            "from_sequence": 5,
+            "to_sequence": 6
+          }
+        },
+        {
+          "contract_version": "0.1",
+          "kind": "event",
+          "event_id": "e-1",
+          "task_ref": {
+            "kind": "task",
+            "issuer_domain": "platform",
+            "id": "t-123"
+          },
+          "run_ref": {
+            "kind": "run",
+            "issuer_domain": "backend-a",
+            "id": "br-9001"
+          },
+          "source_sequence": 8,
+          "occurred_at": "2026-10-01T08:00:03Z",
+          "received_at": "2026-10-01T08:00:03Z",
+          "payload_schema_ref": "https://example.com/schemas/tool-result.schema.json",
+          "payload": {
+            "outcome": "business_rejected",
+            "reason": "insufficient stock"
+          }
+        }
+      ],
+      "next_cursor": "cur-8",
+      "has_more": false
+    }
+  }
+}

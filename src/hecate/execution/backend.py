@@ -58,6 +58,20 @@ class SubmitReceipt:
     def __post_init__(self) -> None:
         require_kind(self.run_ref, RefKind.RUN)
 
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"run_ref": self.run_ref.to_dict(), "received_at": self.received_at}
+        if self.detail_ns:
+            out["detail_ns"] = self.detail_ns
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubmitReceipt:
+        return cls(
+            run_ref=BackendRef.from_dict(data["run_ref"]),
+            received_at=data["received_at"],
+            detail_ns=data.get("detail_ns", {}),
+        )
+
 
 @dataclass(frozen=True)
 class RunStatus:
@@ -70,6 +84,20 @@ class RunStatus:
     def __post_init__(self) -> None:
         require_kind(self.run_ref, RefKind.RUN)
 
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"run_ref": self.run_ref.to_dict(), "state": self.state.value}
+        if self.detail_ns:
+            out["detail_ns"] = self.detail_ns
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RunStatus:
+        return cls(
+            run_ref=BackendRef.from_dict(data["run_ref"]),
+            state=RunState(data["state"]),
+            detail_ns=data.get("detail_ns", {}),
+        )
+
 
 @dataclass(frozen=True)
 class EventPage:
@@ -78,6 +106,20 @@ class EventPage:
     events: tuple[EventEnvelope, ...]
     next_cursor: str | None = None
     has_more: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"events": [env.to_dict() for env in self.events], "has_more": self.has_more}
+        if self.next_cursor is not None:
+            out["next_cursor"] = self.next_cursor
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EventPage:
+        return cls(
+            events=tuple(EventEnvelope.from_dict(env) for env in data["events"]),
+            next_cursor=data.get("next_cursor"),
+            has_more=data["has_more"],
+        )
 
 
 @dataclass(frozen=True)
@@ -90,6 +132,20 @@ class CancelReceipt:
 
     def __post_init__(self) -> None:
         require_kind(self.run_ref, RefKind.RUN)
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"run_ref": self.run_ref.to_dict(), "state": self.state.value}
+        if self.detail_ns:
+            out["detail_ns"] = self.detail_ns
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CancelReceipt:
+        return cls(
+            run_ref=BackendRef.from_dict(data["run_ref"]),
+            state=CancelRequestState(data["state"]),
+            detail_ns=data.get("detail_ns", {}),
+        )
 
 
 class ExecutionBackendError(Exception):

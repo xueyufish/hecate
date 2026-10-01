@@ -1,0 +1,8 @@
+{
+  "tool_name": "create_ticket",
+  "version": "2.0.1",
+  "input_schema_ref": "https://example.com/schemas/create-ticket.input.schema.json",
+  "output_schema_ref": "https://example.com/schemas/create-ticket.output.schema.json",
+  "side_effect_class": "non_idempotent_write",
+  "description": "Creates a support ticket; a retry would create a second ticket."
+}

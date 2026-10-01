@@ -1,0 +1,31 @@
+{
+  "scenario": "capability-unsupported-501",
+  "negative": false,
+  "request": {
+    "method": "POST",
+    "path": "/runs/backend-a%2Fbr-9001/cancel",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 501,
+    "headers": {
+      "X-Contract-Version": "0.1"
+    },
+    "body": {
+      "type": "https://hecate.dev/contracts/errors/unsupported",
+      "title": "Capability unsupported",
+      "status": 501,
+      "code": "unsupported",
+      "request_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "message": "cancellation is unsupported by this backend",
+      "detail_ns": {
+        "capability": "cancel"
+      }
+    }
+  }
+}
