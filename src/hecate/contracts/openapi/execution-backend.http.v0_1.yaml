@@ -1,0 +1,350 @@
+# Hecate execution backend - HTTP/JSON binding (0.x draft, unfrozen).
+#
+# Transport-neutral statement: this file is the FIRST out-of-process binding,
+# not the only permitted transport. Other transports (gRPC, queues, ...) are
+# mapped by their adapters onto the same semantics - the authoritative field
+# definitions live in src/hecate/contracts/schemas/*.schema.json and are
+# referenced here, never copied. Every response carries X-Contract-Version.
+#
+# Error mapping (RFC 9457 problem+json, `type` = contract error URI):
+#   unsupported          -> 501
+#   authorization_denied -> 403
+#   budget_exhausted     -> 429 (Retry-After optional)
+#   version_conflict     -> 409
+# Caller-synthesized states - NEVER backend HTTP error responses:
+#   unreachable     - recorded by the caller on transport failure
+#   outcome_unknown - a STATUS value in the run-status payload; after a lost
+#                     submit response, reconcile by Idempotency-Key (or the
+#                     backend-advertised reconciliation strategy)
+openapi: 3.1.0
+info:
+  title: Hecate execution backend - HTTP/JSON binding
+  version: 0.1.0
+  description: >-
+    First out-of-process transport binding for the Hecate execution-backend
+    contract. The binding is transport-neutral: other transports map the same
+    semantics through their adapters. Streaming is an optional VIEW over the
+    same event sequence - after a disconnect, clients resume with the last
+    opaque cursor through the ordinary read endpoint. Identity comes only from
+    the verified transport-layer claim set (see securitySchemes and the
+    security-claims schema); self-asserted identity or role fields in a request
+    body are ignored by receivers.
+
+    Callback authentication (backend -> platform, e.g. hosted approval
+    decisions or async completion notices): the callback MUST carry its own
+    credential bound to the PLATFORM CALLBACK audience - reusing the inbound
+    caller's token is forbidden, because inbound tokens bind the caller to the
+    backend audience, not the backend to the platform. Callback receivers
+    verify the claim set against the platform's callback verification rules
+    (plan step7); this binding fixes only the audience-binding requirement.
+security:
+  - bearerHttp: []
+paths:
+  /capabilities:
+    get:
+      operationId: describeCapabilities
+      summary: Capability discovery (ownership axes, per-capability levels, verification).
+      responses:
+        "200":
+          description: Backend capability declaration.
+          headers:
+            X-Contract-Version:
+              $ref: "#/components/headers/XContractVersion"
+          content:
+            application/json:
+              schema:
+                $ref: https://hecate.dev/contracts/execution/0.2/capabilities.schema.json
+  /runs:
+    post:
+      operationId: submitRun
+      summary: Submit one execution; idempotent on the Idempotency-Key header.
+      description: >-
+        Replaying the same key with identical content returns the original
+        receipt; replaying it with different content is 409 version_conflict
+        (detail_ns.reason=idempotency_key_content_mismatch). A lost response is
+        reconciled by resubmitting the same key (or the backend-advertised
+        reconciliation strategy) - it never starts a semantically new execution.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKeyHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: https://hecate.dev/contracts/execution/0.1/execution-request.schema.json
+      responses:
+        "202":
+          description: Submission accepted (or reconciled); run_ref is backend-issued.
+          headers:
+            X-Contract-Version:
+              $ref: "#/components/headers/XContractVersion"
+          content:
+            application/json:
+              schema:
+                $ref: https://hecate.dev/contracts/execution/0.1/submit-receipt.schema.json
+        "400":
+          $ref: "#/components/responses/ParameterValidationProblem"
+        "403":
+          $ref: "#/components/responses/AuthorizationDeniedProblem"
+        "409":
+          $ref: "#/components/responses/VersionConflictProblem"
+        "429":
+          $ref: "#/components/responses/BudgetExhaustedProblem"
+        "501":
+          $ref: "#/components/responses/UnsupportedProblem"
+  /runs/{run_ref}:
+    get:
+      operationId: getRun
+      summary: Backend-observed run status.
+      description: >-
+        state=unknown is the outcome_unknown STATUS VALUE - it appears here as
+        a normal 200 payload, never as an HTTP error.
+      parameters:
+        - $ref: "#/components/parameters/RunRefPath"
+      responses:
+        "200":
+          description: Current backend-observed status.
+          headers:
+            X-Contract-Version:
+              $ref: "#/components/headers/XContractVersion"
+          content:
+            application/json:
+              schema:
+                $ref: https://hecate.dev/contracts/execution/0.1/run-status.schema.json
+        "403":
+          $ref: "#/components/responses/AuthorizationDeniedProblem"
+  /runs/{run_ref}/events:
+    get:
+      operationId: readEvents
+      summary: Read normalized events from an opaque cursor; gaps are explicit.
+      parameters:
+        - $ref: "#/components/parameters/RunRefPath"
+        - $ref: "#/components/parameters/CursorQuery"
+        - $ref: "#/components/parameters/LimitQuery"
+      responses:
+        "200":
+          description: One page of events (gap markers included as kind=gap envelopes).
+          headers:
+            X-Contract-Version:
+              $ref: "#/components/headers/XContractVersion"
+          content:
+            application/json:
+              schema:
+                $ref: https://hecate.dev/contracts/execution/0.1/event-page.schema.json
+        "403":
+          $ref: "#/components/responses/AuthorizationDeniedProblem"
+  /runs/{run_ref}/events:stream:
+    get:
+      operationId: streamEvents
+      summary: Optional SSE view over the same event sequence.
+      description: >-
+        Optional capability (x-optional-capability: events_stream). The stream
+        carries the same envelopes as the read endpoint in the same order.
+        This view is never the only way to read events: after a disconnect,
+        resume with the last cursor through GET /runs/{run_ref}/events.
+      x-optional-capability: events_stream
+      parameters:
+        - $ref: "#/components/parameters/RunRefPath"
+        - $ref: "#/components/parameters/CursorQuery"
+      responses:
+        "200":
+          description: text/event-stream; each data frame is one EventEnvelope JSON document.
+          headers:
+            X-Contract-Version:
+              $ref: "#/components/headers/XContractVersion"
+          content:
+            text/event-stream:
+              schema:
+                $ref: https://hecate.dev/contracts/execution/0.1/event-envelope.schema.json
+        "501":
+          $ref: "#/components/responses/UnsupportedProblem"
+  /runs/{run_ref}/cancel:
+    post:
+      operationId: requestCancel
+      summary: Request cancellation - REQUESTED is never reported as APPLIED.
+      description: >-
+        A 202 response means the request was accepted; it must never be
+        presented as a confirmed cancel of the remote execution.
+      parameters:
+        - $ref: "#/components/parameters/RunRefPath"
+      responses:
+        "202":
+          description: Cancel request receipt with its true state.
+          headers:
+            X-Contract-Version:
+              $ref: "#/components/headers/XContractVersion"
+          content:
+            application/json:
+              schema:
+                $ref: https://hecate.dev/contracts/execution/0.1/cancel-receipt.schema.json
+        "403":
+          $ref: "#/components/responses/AuthorizationDeniedProblem"
+        "501":
+          $ref: "#/components/responses/UnsupportedProblem"
+  /runs/{run_ref}/artifacts:
+    get:
+      operationId: listArtifacts
+      summary: List artifact references produced by the run.
+      parameters:
+        - $ref: "#/components/parameters/RunRefPath"
+      responses:
+        "200":
+          description: Artifact references (kind=artifact, backend-issued).
+          headers:
+            X-Contract-Version:
+              $ref: "#/components/headers/XContractVersion"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: ["artifacts"]
+                additionalProperties: true
+                properties:
+                  artifacts:
+                    type: array
+                    items:
+                      $ref: https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/artifactRef
+        "403":
+          $ref: "#/components/responses/AuthorizationDeniedProblem"
+components:
+  securitySchemes:
+    bearerHttp:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Transport-layer claim set per security-claims.schema.json. The claims
+        bind one caller workload (sub) to one target backend service (aud);
+        verification is the receiving adapter's responsibility. Identity never
+        comes from the request body.
+    mutualTLS:
+      type: mutualTLS
+      description: Deployment-level alternative to bearer authentication.
+  headers:
+    XContractVersion:
+      description: Execution-contract version this response speaks (contract_version negotiation).
+      schema:
+        type: string
+        minLength: 1
+  parameters:
+    RunRefPath:
+      name: run_ref
+      in: path
+      required: true
+      description: Backend-issued run reference in its opaque wire form.
+      schema:
+        type: string
+        minLength: 1
+    CursorQuery:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque cursor from a previous page (or stream position); absent for the first page.
+      schema:
+        type: string
+        minLength: 1
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      description: Maximum events per page; the backend may clamp.
+      schema:
+        type: integer
+        minimum: 1
+    IdempotencyKeyHeader:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Caller-scoped idempotency key; identical key + identical content returns the original receipt.
+      schema:
+        type: string
+        minLength: 1
+  responses:
+    UnsupportedProblem:
+      description: Capability not supported by this backend.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemBody"
+    AuthorizationDeniedProblem:
+      description: Caller not authorized for this resource.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemBody"
+    BudgetExhaustedProblem:
+      description: Budget exhausted; Retry-After optional.
+      headers:
+        Retry-After:
+          description: Seconds until the budget window resets (optional).
+          schema:
+            type: integer
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemBody"
+    VersionConflictProblem:
+      description: Contract version outside the support window, or idempotency-key reuse with different content.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ProblemBody"
+    ParameterValidationProblem:
+      description: >-
+        Request body failed schema validation BEFORE dispatch (e.g. tool
+        parameter mismatch). Binding-level problem: the contract error codes
+        do not apply because the request never reached the contract layer -
+        `type` uses the binding URI space (https://hecate.dev/contracts/binding/...).
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/BindingProblemBody"
+  schemas:
+    BindingProblemBody:
+      description: >-
+        Plain RFC 9457 problem for binding-level rejections that occur before
+        the contract layer (schema mismatch of the request itself). Carries no
+        contract error code; `type` uses the binding URI space
+        (https://hecate.dev/contracts/binding/...), never /errors/{code}.
+      type: object
+      required: ["type", "title", "status"]
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          minLength: 1
+        status:
+          type: integer
+        detail:
+          type: string
+        errors:
+          type: array
+          description: Field-level validation detail (e.g. mismatched tool parameter).
+          items:
+            type: object
+    ProblemBody:
+      description: >-
+        RFC 9457 problem+json profile for the four returnable error codes.
+        `type` is the stable contract error URI
+        "https://hecate.dev/contracts/errors/{code}" (derived from the mapped
+        code; e.g. .../errors/authorization_denied). The contract error fields
+        (code, request_ref, message, detail_ns, reconciliation) come from
+        errors.schema.json by reference - unreachable and outcome_unknown
+        never appear here.
+      allOf:
+        - type: object
+          required: ["type", "title", "status"]
+          properties:
+            type:
+              type: string
+              format: uri-reference
+              description: Contract error URI for the mapped code.
+            title:
+              type: string
+              minLength: 1
+            status:
+              type: integer
+              description: The mapped HTTP status (501/403/429/409).
+        - $ref: https://hecate.dev/contracts/execution/0.2/errors.schema.json

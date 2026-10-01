@@ -1,0 +1,34 @@
+{
+  "contract_version": "0.1",
+  "kind": "event",
+  "event_id": "evt-tool-selection-1",
+  "task_ref": {
+    "kind": "task",
+    "issuer_domain": "platform",
+    "id": "t-123"
+  },
+  "run_ref": {
+    "kind": "run",
+    "issuer_domain": "backend-a",
+    "id": "br-9001"
+  },
+  "source_sequence": 11,
+  "occurred_at": "2026-10-01T08:00:01Z",
+  "received_at": "2026-10-01T08:00:01Z",
+  "payload_schema_ref": "https://example.com/schemas/tool-selection.schema.json",
+  "payload": {
+    "candidates": [
+      "inventory_lookup",
+      "search_docs"
+    ],
+    "selected": "inventory_lookup"
+  },
+  "correlation_id": "call-0",
+  "tool_selection": {
+    "candidates": [
+      "inventory_lookup",
+      "search_docs"
+    ],
+    "selected": "inventory_lookup"
+  }
+}

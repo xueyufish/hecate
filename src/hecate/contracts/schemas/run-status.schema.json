@@ -1,0 +1,17 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/run-status.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RunStatus",
+  "description": "Backend-observed state of one run. state=unknown is where outcome_unknown lives as a status value - it is never an HTTP error response. Plan-level Task states belong to step6 and are out of scope here.",
+  "type": "object",
+  "required": ["run_ref", "state"],
+  "additionalProperties": true,
+  "properties": {
+    "run_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/runRef" },
+    "state": { "enum": ["pending", "running", "succeeded", "failed", "cancelled", "unknown"] },
+    "detail_ns": {
+      "type": "object",
+      "description": "Backend-specific detail namespace (e.g. reconciliation hints when state=unknown)."
+    }
+  }
+}

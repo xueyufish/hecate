@@ -8,6 +8,7 @@ test fails.
 
 from __future__ import annotations
 
+import jsonschema
 import pytest
 
 from tests.test_execution.conftest import (
@@ -20,5 +21,14 @@ from tests.test_execution.conftest import (
 
 @pytest.mark.parametrize("path", all_samples(), ids=lambda p: p.name)
 def test_sample_validates_against_authoritative_schema(path) -> None:
-    schema_name, fragment = sample_schema_ref(path)
-    validate_against_schema(load_sample(path), schema_name, fragment)
+    ref = sample_schema_ref(path)
+    if ref is None:
+        pytest.skip("not governed by a single schema file (validated by dedicated binding tests)")
+    schema_name, fragment = ref
+    instance = load_sample(path)
+    if path.name.startswith("negative-"):
+        # Schema-level negatives (e.g. security-claims missing aud) MUST fail.
+        with pytest.raises(jsonschema.ValidationError):
+            validate_against_schema(instance, schema_name, fragment)
+        return
+    validate_against_schema(instance, schema_name, fragment)

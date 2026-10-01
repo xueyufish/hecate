@@ -1,0 +1,17 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/submit-receipt.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SubmitReceipt",
+  "description": "Receipt for one accepted (or reconciled) submission. The run reference is issued by the backend's own domain and is never interchangeable with a platform run reference. A lost response is reconciled with the same idempotency key - it never starts a semantically new execution.",
+  "type": "object",
+  "required": ["run_ref", "received_at"],
+  "additionalProperties": true,
+  "properties": {
+    "run_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/runRef" },
+    "received_at": { "type": "string", "minLength": 1 },
+    "detail_ns": {
+      "type": "object",
+      "description": "Backend-specific detail namespace (e.g. reconciliation hints)."
+    }
+  }
+}

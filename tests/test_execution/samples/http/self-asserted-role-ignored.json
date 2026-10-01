@@ -1,0 +1,57 @@
+{
+  "scenario": "self-asserted-role-ignored",
+  "negative": false,
+  "request": {
+    "method": "POST",
+    "path": "/runs",
+    "headers": {
+      "Idempotency-Key": "idem-004"
+    },
+    "body": {
+      "contract_version": "0.1",
+      "task_ref": {
+        "kind": "task",
+        "issuer_domain": "platform",
+        "id": "t-123"
+      },
+      "run_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "deployment_ref": {
+        "kind": "deployment",
+        "issuer_domain": "platform",
+        "id": "dep-1"
+      },
+      "authorization_ref": {
+        "kind": "authorization",
+        "issuer_domain": "platform",
+        "id": "authz-7"
+      },
+      "input": {
+        "objective": "Summarize the attached material"
+      },
+      "idempotency_key": "idem-004",
+      "trace_correlation": {
+        "trace_id": "tr-777"
+      },
+      "role": "admin",
+      "is_platform_admin": true
+    }
+  },
+  "response": {
+    "status": 202,
+    "headers": {
+      "X-Contract-Version": "0.1"
+    },
+    "body": {
+      "run_ref": {
+        "kind": "run",
+        "issuer_domain": "backend-a",
+        "id": "br-9002"
+      },
+      "received_at": "2026-10-01T08:01:00Z"
+    }
+  }
+}

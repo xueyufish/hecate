@@ -1,0 +1,28 @@
+{
+  "scenario": "authorization-denied-403",
+  "negative": false,
+  "request": {
+    "method": "GET",
+    "path": "/runs/backend-a%2Fbr-9001",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 403,
+    "headers": {
+      "X-Contract-Version": "0.1"
+    },
+    "body": {
+      "type": "https://hecate.dev/contracts/errors/authorization_denied",
+      "title": "Forbidden",
+      "status": 403,
+      "code": "authorization_denied",
+      "request_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "message": "caller workload is not authorized for this run"
+    }
+  }
+}

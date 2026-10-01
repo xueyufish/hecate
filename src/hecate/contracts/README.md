@@ -1,12 +1,33 @@
 # hecate.contracts — language-neutral execution contract
 
 Authoritative JSON Schema files live in `schemas/` (each carries an `$id` and a
-0.x draft version). The `execution/` subpackage is a stdlib-only Python mapping
-(dataclasses, no pydantic) — one binding among many, never the source of truth.
-Standard samples live in `tests/test_execution/samples/`.
+0.x draft version; `errors` and `capabilities` are at 0.2). The `execution/`
+subpackage is a stdlib-only Python mapping (dataclasses, no pydantic) — one
+binding among many, never the source of truth. Standard samples live in
+`tests/test_execution/samples/`.
 
 Three-way consistency (samples pass schema validation; the mapping parses every
 sample; round-trips preserve fields) is enforced by `tests/test_execution/`.
+
+## HTTP/JSON binding and hosted mapping
+
+- `openapi/execution-backend.http.v0_1.yaml` is the first out-of-process
+  transport binding (OpenAPI 3.1). It references the authoritative schemas by
+  `$id` — field definitions are never copied into the binding. Error
+  responses use RFC 9457 problem+json: `unsupported`→501,
+  `authorization_denied`→403, `budget_exhausted`→429, `version_conflict`→409;
+  `unreachable` and `outcome_unknown` are caller-synthesized states, never
+  backend HTTP error responses (`outcome_unknown` is a run-status value).
+  SSE streaming is an optional view; the cursor read endpoint is always
+  sufficient. Structure is validated by `openapi-spec-validator` (dev extra);
+  HTTP sample pairs live in `tests/test_execution/samples/http/`.
+- `hosted-mapping.md` fixes the platform task/run ↔ vendor session/turn
+  mapping semantics, subagent-event namespacing, and the
+  `query_by_vendor_session` reconciliation flow.
+- Identity travels as the claim set in `security-claims.schema.json` (issuer,
+  audience, workload subject, tenant, expiry) — claim possession is not
+  authentication; verification belongs to the receiving adapter. Identity
+  never comes from the request body.
 
 ## Encoding rules
 

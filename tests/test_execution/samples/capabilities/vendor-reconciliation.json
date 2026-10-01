@@ -1,0 +1,19 @@
+{
+  "contract_version": "0.2",
+  "backend_type": "vendor:example-agents-api",
+  "ownership": {
+    "harness": "vendor",
+    "environment": "vendor",
+    "tool_execution": "mixed"
+  },
+  "capabilities": {
+    "provide_input": "unsupported",
+    "resolve_approval": "unsupported",
+    "pause": "unsupported",
+    "resume": "unsupported",
+    "export_context": "unsupported"
+  },
+  "reconciliation_support": {
+    "query_by_vendor_session": true
+  }
+}

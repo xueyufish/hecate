@@ -38,10 +38,15 @@ def schema_ids() -> set[str]:
 
 
 def schema_uri(name: str) -> str:
-    """Full ``$id`` for one schema file stem (e.g. ``execution-request``)."""
+    """Full ``$id`` for one schema file stem (e.g. ``execution-request``).
+
+    v0.2 files (errors, capabilities) carry their own version after the
+    execution-backend-bindings change bumped them independently.
+    """
 
     theme = "sandbox" if name == "sandbox" else "execution"
-    return f"https://hecate.dev/contracts/{theme}/0.1/{name}.schema.json"
+    version = "0.2" if name in {"errors", "capabilities"} else "0.1"
+    return f"https://hecate.dev/contracts/{theme}/{version}/{name}.schema.json"
 
 
 def validate_against_schema(instance: Any, schema_name: str, fragment: str = "") -> None:
@@ -57,11 +62,17 @@ def validate_against_schema(instance: Any, schema_name: str, fragment: str = "")
     validator.validate(instance)
 
 
-def sample_schema_ref(path: Path) -> tuple[str, str]:
-    """Map one standard sample to its governing schema name and fragment."""
+def sample_schema_ref(path: Path) -> tuple[str, str] | None:
+    """Map one standard sample to its governing schema name and fragment.
+
+    ``None`` means the sample is not governed by a single schema file
+    (currently: HTTP request/response pairs, validated by the binding tests).
+    """
 
     theme = path.parent.name
     name = path.name
+    if theme == "http":
+        return None
     if theme == "references":
         return "references", "#/$defs/ref"
     if theme == "requests":
@@ -74,6 +85,10 @@ def sample_schema_ref(path: Path) -> tuple[str, str]:
         return "capabilities", ""
     if theme == "manifest":
         return "artifact-manifest", ""
+    if theme == "security-claims":
+        return "security-claims", ""
+    if theme == "tools":
+        return "tool", ""
     if theme == "sandbox":
         if "create-environment" in name:
             return "sandbox", "#/$defs/createEnvironmentRequest"

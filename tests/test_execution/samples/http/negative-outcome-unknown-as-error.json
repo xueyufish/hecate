@@ -1,0 +1,28 @@
+{
+  "scenario": "negative-outcome-unknown-as-error",
+  "negative": true,
+  "request": {
+    "method": "GET",
+    "path": "/runs/backend-a%2Fbr-9001",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 500,
+    "headers": {
+      "X-Contract-Version": "0.1"
+    },
+    "body": {
+      "type": "https://hecate.dev/contracts/errors/outcome_unknown",
+      "title": "Outcome unknown",
+      "status": 500,
+      "code": "outcome_unknown",
+      "request_ref": {
+        "kind": "run",
+        "issuer_domain": "platform",
+        "id": "r-456"
+      },
+      "message": "backend reports outcome unknown"
+    }
+  }
+}

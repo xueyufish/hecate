@@ -1,0 +1,12 @@
+{
+  "iss": "https://id.enterprise.example",
+  "aud": "hecate-execution-backend-a",
+  "sub": "workload:inventory-app:deploy-42",
+  "tenant": "tenant-enterprise-1",
+  "exp": "2026-10-01T09:00:00Z",
+  "delegation_ref": {
+    "kind": "authorization",
+    "issuer_domain": "platform",
+    "id": "authz-7"
+  }
+}
