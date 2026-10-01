@@ -67,7 +67,7 @@
       "additionalProperties": false,
       "properties": {
         "sandbox_id": { "type": "string", "minLength": 1 },
-        "path": { "type": "string", "minLength": 1, "description": "Sandbox-relative path; never a host path." }
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?!.*[\\\\:\\u0000])(?!.*(^|/)\\.{1,2}($|/))[^/]+(/[^/]+)*$", "description": "Portable sandbox-relative path; never a host path." }
       }
     },
     "capabilities": {

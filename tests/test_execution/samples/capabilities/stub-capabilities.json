@@ -1,16 +1,32 @@
 {
   "contract_version": "0.1",
   "backend_type": "stub",
-  "ownership": {"harness": "hecate", "environment": "hecate", "tool_execution": "hecate_gateway"},
+  "ownership": {
+    "harness": "hecate",
+    "environment": "hecate",
+    "tool_execution": "hecate_gateway"
+  },
   "capabilities": {
-    "provide_input": "cooperative",
-    "resolve_approval": "cooperative",
+    "provide_input": "unsupported",
+    "resolve_approval": "unsupported",
     "pause": "unsupported",
     "resume": "unsupported",
-    "export_context": "unsupported"
+    "export_context": "unsupported",
+    "cancel": "cooperative",
+    "events_resume": "cooperative"
   },
   "verification": {
-    "provide_input": {"source": "stub contract tests", "checked_at": "2026-09-30T00:00:00Z"},
-    "resolve_approval": {"source": "stub contract tests", "checked_at": "2026-09-30T00:00:00Z"}
+    "cancel": {
+      "source": "stub contract tests",
+      "checked_at": "2026-10-01T00:00:00Z",
+      "deployment_shape": "in_memory_test",
+      "observation_source": "backend_reported"
+    },
+    "events_resume": {
+      "source": "stub contract tests",
+      "checked_at": "2026-10-01T00:00:00Z",
+      "deployment_shape": "in_memory_test",
+      "observation_source": "backend_reported"
+    }
   }
 }

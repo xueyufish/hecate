@@ -25,9 +25,15 @@ _FORBIDDEN_KEY_PATTERN = re.compile(
 
 
 def _escapes_archive(path: str) -> bool:
-    """True for absolute paths, ``..`` segments, or empty paths."""
+    """Reject paths that do not have one portable, archive-relative spelling."""
 
-    return not path or path.startswith("/") or any(segment == ".." for segment in path.split("/"))
+    return (
+        not path
+        or "\\" in path
+        or ":" in path
+        or "\x00" in path
+        or any(segment in {"", ".", ".."} for segment in path.split("/"))
+    )
 
 
 class ManifestError(ValueError):
@@ -74,6 +80,9 @@ class ArtifactManifest:
     artifact_schema_ref: str | None = None
     evidence_refs: tuple[str, ...] = ()
     backend_ns: dict[str, Any] = field(default_factory=dict)
+    publisher_ref: str | None = None
+    license_expression: str | None = None
+    signature_ref: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -98,6 +107,9 @@ class ArtifactManifest:
             out["evidence_refs"] = list(self.evidence_refs)
         if self.backend_ns:
             out["backend_ns"] = self.backend_ns
+        for name in ("publisher_ref", "license_expression", "signature_ref"):
+            if getattr(self, name) is not None:
+                out[name] = getattr(self, name)
         return out
 
     @classmethod
@@ -118,6 +130,9 @@ class ArtifactManifest:
             artifact_schema_ref=data.get("artifact_schema_ref"),
             evidence_refs=tuple(data.get("evidence_refs", ())),
             backend_ns=data.get("backend_ns", {}),
+            publisher_ref=data.get("publisher_ref"),
+            license_expression=data.get("license_expression"),
+            signature_ref=data.get("signature_ref"),
         )
 
 
@@ -142,6 +157,29 @@ def validate_manifest_dict(data: dict[str, Any]) -> ArtifactManifest:
     """
 
     errors: list[str] = []
+
+    if not isinstance(data, dict):
+        raise ManifestError("manifest must be an object")
+    allowed = {
+        "manifest_version",
+        "contract_version",
+        "backend_type",
+        "backend_compat_version",
+        "entry",
+        "files",
+        "required_capabilities",
+        "tools",
+        "model_config_ref",
+        "component_config_refs",
+        "artifact_schema_ref",
+        "evidence_refs",
+        "backend_ns",
+        "publisher_ref",
+        "license_expression",
+        "signature_ref",
+    }
+    for key in data.keys() - allowed:
+        errors.append(f"unknown manifest field: {key}")
 
     required = ["contract_version", "backend_type", "backend_compat_version", "entry", "files"]
     for key in required:
@@ -168,6 +206,8 @@ def validate_manifest_dict(data: dict[str, Any]) -> ArtifactManifest:
             if not isinstance(item, dict):
                 errors.append(f"files[{index}] must be an object")
                 continue
+            if item.keys() - {"path", "sha256", "size"}:
+                errors.append(f"files[{index}] has unknown fields")
             path_value = item.get("path")
             if not isinstance(path_value, str) or not path_value:
                 errors.append(f"files[{index}].path must be a non-empty string")
@@ -184,9 +224,38 @@ def validate_manifest_dict(data: dict[str, Any]) -> ArtifactManifest:
             if not isinstance(size, int) or isinstance(size, bool) or size < 0:
                 errors.append(f"files[{index}].size must be a non-negative integer")
 
-    for tool in data.get("tools", []) or []:
-        if isinstance(tool, dict) and tool.get("permission") not in {"read", "write", "approval_required"}:
-            errors.append(f"tool {tool.get('name')!r} permission must be read/write/approval_required")
+        if isinstance(data.get("entry"), str) and data["entry"] not in seen_paths:
+            errors.append("entry must name a listed file")
+
+    tools = data.get("tools", [])
+    if not isinstance(tools, list):
+        errors.append("tools must be an array")
+    else:
+        for index, tool in enumerate(tools):
+            if not isinstance(tool, dict):
+                errors.append(f"tools[{index}] must be an object")
+                continue
+            if tool.keys() - {"name", "schema_ref", "permission"}:
+                errors.append(f"tools[{index}] has unknown fields")
+            for key in ("name", "schema_ref"):
+                if not isinstance(tool.get(key), str) or not tool[key]:
+                    errors.append(f"tools[{index}].{key} must be a non-empty string")
+            if not isinstance(tool.get("permission"), str) or tool["permission"] not in {
+                "read",
+                "write",
+                "approval_required",
+            }:
+                errors.append(f"tool {tool.get('name')!r} permission must be read/write/approval_required")
+
+    for key in ("required_capabilities", "component_config_refs", "evidence_refs"):
+        values = data.get(key, [])
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            errors.append(f"{key} must be an array of strings")
+    for key in ("model_config_ref", "artifact_schema_ref", "publisher_ref", "license_expression", "signature_ref"):
+        if key in data and not isinstance(data[key], str):
+            errors.append(f"{key} must be a string")
+    if not isinstance(data.get("backend_ns", {}), dict):
+        errors.append("backend_ns must be an object")
 
     _reject_forbidden_keys(data, "manifest", errors)
 
@@ -207,10 +276,22 @@ def verify_archive(data: dict[str, Any], archive: bytes) -> ArtifactManifest:
 
     try:
         with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-            member_names = {m.name for m in tar.getmembers() if m.isfile()}
+            member_names: set[str] = set()
+            for member in tar.getmembers():
+                # Validate every member, not just regular files: links, devices
+                # and duplicate names must not bypass the manifest allowlist.
+                if _escapes_archive(member.name):
+                    raise ManifestError(f"archive member escapes the archive: {member.name!r}")
+                if not member.isfile():
+                    raise ManifestError(f"non-regular archive member: {member.name!r}")
+                if member.name in member_names:
+                    raise ManifestError(f"duplicate archive member: {member.name!r}")
+                member_names.add(member.name)
             for entry in manifest.files:
                 if entry.path not in member_names:
                     raise ManifestError(f"missing archive member: {entry.path!r}")
+                if tar.getmember(entry.path).size != entry.size:
+                    raise ManifestError(f"size mismatch for {entry.path!r}")
                 extracted = tar.extractfile(entry.path)
                 if extracted is None:
                     raise ManifestError(f"missing archive member: {entry.path!r}")
@@ -222,9 +303,9 @@ def verify_archive(data: dict[str, Any], archive: bytes) -> ArtifactManifest:
                     raise ManifestError(
                         f"size mismatch for {entry.path!r}: manifest {entry.size}, archive {len(content)}"
                     )
-            for member in member_names:
-                if member not in listed_paths:
-                    raise ManifestError(f"unlisted archive member: {member!r}")
+            for member_name in member_names:
+                if member_name not in listed_paths:
+                    raise ManifestError(f"unlisted archive member: {member_name!r}")
     except tarfile.TarError as exc:
         raise ManifestError(f"unreadable archive: {exc}") from exc
 

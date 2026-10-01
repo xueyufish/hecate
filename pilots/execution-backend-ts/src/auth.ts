@@ -27,7 +27,7 @@ function base64UrlDecode(segment: string): Buffer {
   return Buffer.from(segment, "base64url");
 }
 
-export function verifyClaims(authorizationHeader: string | undefined): ClaimsResult {
+export function verifyClaims(authorizationHeader: string | undefined, audience = EXPECTED_AUDIENCE): ClaimsResult {
   if (!authorizationHeader || !authorizationHeader.startsWith("Bearer ")) {
     return { ok: false, reason: "missing bearer token" };
   }
@@ -52,7 +52,7 @@ export function verifyClaims(authorizationHeader: string | undefined): ClaimsRes
       return { ok: false, reason: `missing or blank claim: ${field}` };
     }
   }
-  if (claims.aud !== EXPECTED_AUDIENCE) {
+  if (claims.aud !== audience) {
     return { ok: false, reason: "audience mismatch" };
   }
   const expSeconds = Date.parse(claims["exp"] as string);

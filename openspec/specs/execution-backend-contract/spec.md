@@ -62,10 +62,10 @@
 
 能力模型 MUST 按 harness 所有方 × 环境所有方 × 工具与数据访问执行点三轴登记,不得以单一托管标签推断整体数据边界。供应商 session/turn 引用与平台 Task/Run 引用 MUST 在契约类型上分离,MUST NOT 相互混用或以一方冒充另一方。执行请求中的标识 MUST 为带签发域的逻辑引用,接收方 MUST NOT 被要求查询平台 ORM 解析;独立宿主从可信本地登记分配标识,受管 adapter 负责两侧映射。供应商专属配置 MUST 放命名空间字段,核心只验证通用字段,MUST NOT 从命名空间读取平台管理员权限。
 
-#### Scenario: 托管后端声明 session 引用而非 Task/Run
+#### Scenario: 托管后端保持平台、后端与供应商引用分离
 
 - **WHEN** 托管后端返回运行标识
-- **THEN** 返回的是带签发域的 session/turn 引用,平台 Task/Run 引用与之后端会话引用类型分离、不可互换
+- **THEN** SubmitReceipt 返回后端签发的 run 引用；adapter 分别保存请求中的平台 run 引用、后端 run 引用及可选供应商 session/turn 引用，不以 session 冒充回执 run，也不以相同 kind 推断跨签发域引用等价
 
 #### Scenario: 无 ORM 解析的请求处理
 
@@ -213,3 +213,26 @@
 
 - **WHEN** 托管后端上报其内部 subagent 的执行事件
 - **THEN** 事件以命名空间化细节事件归属对应 Run,不生成任何平台侧 Team 成员记录或委派授权
+
+### Requirement: 独立控制证据与实时续读
+
+能力 MUST 分别声明 cancel、events_resume、tool_proxy、sandbox、callback、internal_tools_visibility、subtask_tracking，未声明时按 unsupported 处理，不新增最低抽象方法。Schema 与映射 MUST 同时要求非 unsupported 的验证条目。enforced 声明 MUST 包含部署形态、后端/契约版本、失效时间、证据引用与独立观察来源，MUST NOT 仅依赖 backend_reported。实际来源真实性、适用范围与有效期由准入层验证，不因声明存在就授予控制权。
+
+#### Scenario: 自报治理能力不被升级为强制保证
+
+- **WHEN** 后端声明 enforced 但仅提供自报来源或缺少部署/版本/证据作用域
+- **THEN** Schema 与 Python 映射均拒绝该声明；受管准入仍须进一步验证证据真实性和有效期
+
+#### Scenario: 实时事件读至当前尾部
+
+- **WHEN** 当前事件已全部读取，或本次读取为空页，运行随后又产生事件
+- **THEN** 返回的 next_cursor 可续读新增事件；has_more=false 不表示运行终止；gap 标记自身序号在缺口之后
+
+### Requirement: 制品运行时校验与信任边界
+
+运行时 MUST 与 schema 一致拒绝未知 manifest 字段和畸形结构；入口 MUST 对应清单内已验证文件。首版归档 MUST 仅包含所列的普通文件，MUST 拒绝重复名称、链接、特殊成员及非便携相对路径。发布者/许可/签名引用可以由独立宿主解析，缺失或未验证时 MUST NOT 自动判为可信；摘要校验不等于发布者认证、无秘密或无业务数据保证。真实信任策略由 step5 加载器执行。
+
+#### Scenario: 归档特殊成员或未列入口
+
+- **WHEN** 归档含链接/重复成员，或 manifest 入口未出现在完整性清单
+- **THEN** 校验拒绝制品，不进入加载或解包

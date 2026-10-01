@@ -9,6 +9,8 @@
  * (sample: hole 5..6, marker at 7, following event at 8).
  */
 import { contentFingerprint } from "./canonical.js";
+import { callbackToken } from "./tool-gateway.js";
+import { validateEchoOutput } from "./validation.js";
 
 export interface Ref {
   kind: string;
@@ -33,6 +35,7 @@ export interface Envelope {
 export type RunStateValue = "pending" | "running" | "succeeded" | "failed" | "cancelled" | "unknown";
 
 export interface RunRecord {
+  callerScope: string;
   runRef: Ref;
   taskRef: Ref;
   state: RunStateValue;
@@ -62,6 +65,7 @@ export class UnknownRunError extends Error {
 }
 
 export interface SubmitOutcome {
+  created: boolean;
   receipt: { run_ref: Ref; received_at: string };
   record: RunRecord;
 }
@@ -71,9 +75,10 @@ export class RunStore {
   private readonly idempotency = new Map<string, { fingerprint: string; runKey: string }>();
   private counter = 9000;
 
-  submit(request: Record<string, unknown>, idempotencyKey: string): SubmitOutcome {
+  submit(request: Record<string, unknown>, idempotencyKey: string, callerScope: string): SubmitOutcome {
     const fingerprint = contentFingerprint(request);
-    const existing = this.idempotency.get(idempotencyKey);
+    const scopedKey = JSON.stringify([callerScope, idempotencyKey]);
+    const existing = this.idempotency.get(scopedKey);
     if (existing) {
       if (existing.fingerprint !== fingerprint) {
         const prior = this.runs.get(existing.runKey);
@@ -86,7 +91,7 @@ export class RunStore {
       if (!record) {
         throw new UnknownRunError();
       }
-      return { receipt: { run_ref: record.runRef, received_at: record.receivedAt }, record };
+      return { created: false, receipt: { run_ref: record.runRef, received_at: record.receivedAt }, record };
     }
 
     this.counter += 1;
@@ -94,6 +99,7 @@ export class RunStore {
     const taskRef = request.task_ref as Ref;
     const now = new Date().toISOString();
     const record: RunRecord = {
+      callerScope,
       runRef,
       taskRef,
       state: "running",
@@ -104,9 +110,8 @@ export class RunStore {
       receivedAt: now,
     };
     this.runs.set(`${runRef.issuer_domain}/${runRef.id}`, record);
-    this.idempotency.set(idempotencyKey, { fingerprint, runKey: `${runRef.issuer_domain}/${runRef.id}` });
-    this.seedEvents(record, request);
-    return { receipt: { run_ref: runRef, received_at: now }, record };
+    this.idempotency.set(scopedKey, { fingerprint, runKey: `${runRef.issuer_domain}/${runRef.id}` });
+    return { created: true, receipt: { run_ref: runRef, received_at: now }, record };
   }
 
   private emit(record: RunRecord, envelope: Omit<Envelope, "contract_version" | "task_ref" | "run_ref" | "source_sequence" | "occurred_at" | "received_at">): void {
@@ -123,7 +128,7 @@ export class RunStore {
     record.nextSequence += 1;
   }
 
-  private seedEvents(record: RunRecord, request: Record<string, unknown>): void {
+  async executeTool(record: RunRecord, request: Record<string, unknown>, callbackUrl: string, tenant: string): Promise<void> {
     const config = (request.backend_config_ns ?? {}) as Record<string, unknown>;
     const pilot = (config.pilot ?? {}) as Record<string, unknown>;
     const tool = (config.tool ?? "echo") as string;
@@ -143,6 +148,33 @@ export class RunStore {
       payload: { tool, input: parameters },
     });
 
+    let result: Record<string, unknown>;
+    try {
+      const response = await fetch(callbackUrl, {
+        method: "POST",
+        redirect: "error",
+        signal: AbortSignal.timeout(5000),
+        headers: { "content-type": "application/json", authorization: `Bearer ${callbackToken(tenant)}` },
+        body: JSON.stringify({
+          tool, input: parameters, task_ref: request.task_ref,
+          platform_run_ref: request.run_ref, backend_run_ref: record.runRef,
+          trace_correlation: request.trace_correlation,
+        }),
+      });
+      if (!response.ok) throw new Error("tool receiver rejected callback");
+      result = await response.json() as Record<string, unknown>;
+      if (!validateEchoOutput(result)) {
+        throw new Error("tool receiver returned an invalid result");
+      }
+    } catch {
+      // No hidden retry; even this readonly callback can have an unknown outcome.
+      result = {
+        status: "outcome_unknown", reason: "callback outcome unavailable",
+        reconciliation: { strategy: "manual_readonly_check", backend_run_ref: record.runRef },
+      };
+      record.state = "unknown";
+    }
+
     if (pilot["simulate_gap"] === true) {
       // The tool_result event (the next sequence) is lost; the gap marker
       // occupies the slot after the hole and declares the missing range.
@@ -153,25 +185,12 @@ export class RunStore {
         event_id: "gap-1",
         gap: { from_sequence: lostFrom, to_sequence: lostFrom },
       });
-    } else if (tool !== "echo") {
-      // Registered-tool check happens pre-dispatch in the server; reaching
-      // here with another tool is a programming error - fail the run.
-      this.emit(record, {
-        kind: "event",
-        event_id: "evt-tool-result",
-        payload_schema_ref: `${PAYLOAD_BASE}/tool-result.json`,
-        payload: { tool, status: "system_failure", reason: "unregistered tool" },
-      });
     } else {
-      const text = typeof parameters["text"] === "string" ? (parameters["text"] as string) : "";
-      const businessRejected = text.length === 0;
       this.emit(record, {
         kind: "event",
         event_id: "evt-tool-result",
         payload_schema_ref: `${PAYLOAD_BASE}/tool-result.json`,
-        payload: businessRejected
-          ? { tool, status: "business_rejected", reason: "empty echo text" }
-          : { tool, status: "ok", output: text },
+        payload: { tool, ...result },
       });
     }
   }

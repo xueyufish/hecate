@@ -10,6 +10,7 @@ module only fixes the seam.
 
 from __future__ import annotations
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -36,6 +37,12 @@ class UnsupportedCapabilityError(Exception):
         self.ability = ability
         self.sandbox_id = sandbox_id
         self.code = "unsupported"
+
+
+class SandboxIdempotencyConflictError(ValueError):
+    """The same resource/command key cannot name different request content."""
+
+    code = "version_conflict"
 
 
 @dataclass
@@ -117,6 +124,8 @@ class InMemorySandboxProvider(SandboxProvider):
         self._files: dict[tuple[str, str], bytes] = {}
         self._leases: dict[str, SandboxLease] = {}
         self._counter = 0
+        self._creation_contents: dict[str, str] = {}
+        self._command_contents: dict[str, str] = {}
 
     def describe_capabilities(self) -> SandboxCapabilities:
         return SandboxCapabilities(
@@ -129,8 +138,11 @@ class InMemorySandboxProvider(SandboxProvider):
         )
 
     def create_environment(self, request: CreateEnvironmentRequest) -> SandboxInfo:
+        fingerprint = json.dumps(request.to_dict(), sort_keys=True)
         existing = self._idempotency.get(request.idempotency_id)
         if existing is not None:
+            if self._creation_contents[request.idempotency_id] != fingerprint:
+                raise SandboxIdempotencyConflictError("environment idempotency ID reused with different content")
             return self._environments[existing]
 
         self._counter += 1
@@ -138,6 +150,7 @@ class InMemorySandboxProvider(SandboxProvider):
         info = SandboxInfo(sandbox_id=sandbox_id, run_ref=request.run_ref, state=SandboxState.READY)
         self._environments[sandbox_id] = info
         self._idempotency[request.idempotency_id] = sandbox_id
+        self._creation_contents[request.idempotency_id] = fingerprint
         self._leases[sandbox_id] = SandboxLease()
         return info
 
@@ -145,9 +158,15 @@ class InMemorySandboxProvider(SandboxProvider):
         return self._environments[sandbox_id]
 
     def submit_command(self, request: CommandRequest) -> CommandRecord:
+        fingerprint = json.dumps(request.to_dict(), sort_keys=True)
         existing = self._commands.get(request.command_id)
         if existing is not None:
+            if self._command_contents[request.command_id] != fingerprint:
+                raise SandboxIdempotencyConflictError("command ID reused with different content")
             return existing
+
+        if self.get_environment(request.sandbox_id).state is not SandboxState.READY:
+            raise ValueError("commands require a ready environment")
 
         self._command_runs[request.command_id] = self._command_runs.get(request.command_id, 0) + 1
         if self.command_mode == "timeout":
@@ -167,6 +186,7 @@ class InMemorySandboxProvider(SandboxProvider):
                 submitted_at="2026-09-30T10:05:00Z",
             )
         self._commands[request.command_id] = record
+        self._command_contents[request.command_id] = fingerprint
         return record
 
     def get_command(self, command_id: str) -> CommandRecord:
@@ -180,6 +200,8 @@ class InMemorySandboxProvider(SandboxProvider):
 
     def terminate(self, sandbox_id: str) -> SandboxInfo:
         prior = self._environments[sandbox_id]
+        if prior.state in {SandboxState.TERMINATING, SandboxState.TERMINATED}:
+            return prior
         terminating = SandboxInfo(
             sandbox_id=prior.sandbox_id,
             run_ref=prior.run_ref,
@@ -190,6 +212,10 @@ class InMemorySandboxProvider(SandboxProvider):
         return terminating
 
     def renew_lease(self, sandbox_id: str, seconds: int) -> SandboxInfo:
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds <= 0:
+            raise ValueError("lease extension must be positive seconds")
+        if self.get_environment(sandbox_id).state is not SandboxState.READY:
+            raise ValueError("lease renewal requires a ready environment")
         lease = self._leases[sandbox_id]
         lease.leases_until = _advance_lease(lease.leases_until, seconds)
         prior = self._environments[sandbox_id]

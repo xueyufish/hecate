@@ -423,28 +423,30 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **目标：**建立“平台调用 Runtime”的接口，与现有 RuntimePort 的方向区分。
 
+**复核结论：**GLM 合入的三次变更保留了正确边界，但原完成证据不能直接作为验收。复核补齐了真实只读 HTTP 工具回调、入站 Schema 校验、幂等作用域、实时游标续读、能力证据约束、归档与 Sandbox 负例及 CI 门禁。详细缺口、修正落点与复现命令见 [Step3 复核报告](step3-review-report.md)。本步完成的是语言中立契约草案与隔离互操作；不等于已切换平台 Runtime、已验证生产身份/可信制品加载或已认证供应商。
+
 **操作：**
 
-- [x] 将 JSON Schema/OpenAPI 及事件 schema 作为进程外契约的发布源；`contracts/` 中的 Python 类型是对该契约的内置映射，不让第三方依赖 Python 对象、ORM 或平台进程。（`src/hecate/contracts/schemas/` 七个权威 schema 文件 + 纯 dataclass 映射 + 标准样本三方互检；OpenAPI/HTTP 绑定文档随非 Python 试点 change 交付）
+- [x] 将 JSON Schema/OpenAPI 及事件 schema 作为进程外契约的发布源；`contracts/` 中的 Python 类型是对该契约的内置映射，不让第三方依赖 Python 对象、ORM 或平台进程。（`src/hecate/contracts/schemas/` 执行、工具、身份、制品与 Sandbox 权威 schema 集 + 纯 dataclass 映射 + 标准样本三方互检；OpenAPI/HTTP 绑定文档随非 Python 试点 change 交付）
 - [x] 为首个进程外接入规定 HTTP/JSON 绑定：能力发现、提交、状态与事件游标、控制命令、错误响应和 artifact 引用；流式订阅是可选视图，断线后仍能用游标恢复。其他传输由 adapter 映射同一语义，不要求所有服务都暴露 HTTP。（`contracts/openapi/execution-backend.http.v0_1.yaml` $ref 权威 schema 不复制；problem+json 四可返回码映射 501/403/429/409，`unreachable`/`outcome_unknown` 为调用方合成态非后端错误；SSE 标 optional capability；`openapi-spec-validator` 结构校验 + HTTP 样本互检）
 - [x] 定义 `AgentExecutionBackend` 的最小方法：`describe_capabilities`、`submit`、`get_run`、`read_events`、`list_artifacts`、`request_cancel`。（`src/hecate/execution/backend.py` + Stub 第二实现 + 参数化契约测试 `tests/test_execution/`）
-- [x] 将 `provide_input`、`resolve_approval`、`pause`、`resume`、`export_context` 定义为显式可选能力；分别声明 `unsupported / cooperative / enforced` 等可验证控制语义，不能只有含糊布尔值。（三级枚举 + 非 unsupported 能力强制验证条目；Stub 永久 pause=unsupported 为常驻负例）
+- [x] 将 `provide_input`、`resolve_approval`、`pause`、`resume`、`export_context` 定义为显式可选能力；分别声明 `unsupported / cooperative / enforced` 等可验证控制语义，不能只有含糊布尔值。（三级枚举 + Schema 与映射同时强制非 unsupported 能力的验证条目；未实现的输入/审批不再虚报 cooperative；pause 经实际 HTTP 返回 501，Stub 保留常驻负例）
 - [x] 定义 `ExecutionRequest`：任务和运行 ID、部署与版本引用、授权上下文引用、输入及 artifact 引用、预算/截止时间、幂等键、trace 关联、后端专属配置引用。（schema + 映射 + 样本；未知字段容忍且往返保留）
 - [x] 将执行请求中的标识定义为带签发域的逻辑引用，不能要求接收方查询平台 ORM。独立宿主从可信本地登记分配 Task/Run/Deployment 标识；受管 adapter 映射平台与后端标识。客户端提供的 ID/授权引用不能替代服务端身份校验或资源查找。（引用类型 kind 分离：平台侧与供应商 session/turn 不可互换，负例测试钉住）
-- [x] 定义最小执行制品 manifest：schema/后端类型与兼容版本、定义入口、内容摘要、所需能力、工具 schema 与权限声明、模型/可选组件配置引用、产物 schema 及批准/评测证据引用。后端专属图或脚本放命名空间内，其他 Runtime 无须实现 Pregel DSL；不包含明文凭据、业务数据或在线平台 ID 查找前提。（tar.gz + 逐文件 sha256；摘要篡改/路径穿越/凭据键/未列成员负例测试通过）
-- [x] 定义本地安装与加载契约：静态文件/标准归档或 OCI 制品按摘要固定，可信发布者和许可策略可验证；首版不自创专用包格式，也不自动执行清单中的安装脚本。草案格式先由 step5 的本地加载器消费，step11 沿用其发布语义，避免先建完整目录服务才可启动。（首版标准归档（tar.gz），OCI 留待 step11 按需；无安装脚本字段且结构校验拒绝未知可执行声明）
+- [x] 定义最小执行制品 manifest：schema/后端类型与兼容版本、定义入口、内容摘要、所需能力、工具 schema 与权限声明、模型/可选组件配置引用、产物 schema 及批准/评测证据引用。后端专属图或脚本放命名空间内，其他 Runtime 无须实现 Pregel DSL；不包含明文凭据、业务数据或在线平台 ID 查找前提。（tar.gz + 逐文件 sha256；拒绝跨平台路径穿越、重复成员、链接/特殊成员、未列入口、未知字段与畸形结构；publisher/license/signature 引用声明可验证条件，真实信任验证由 step5 加载器实施）
+- [x] 定义本地安装与加载契约：静态文件/标准归档或 OCI 制品按摘要固定，可信发布者和许可策略可验证；首版不自创专用包格式，也不自动执行清单中的安装脚本。草案格式先由 step5 的本地加载器消费，step11 沿用其发布语义，避免先建完整目录服务才可启动。（首版标准归档（tar.gz），OCI 留待 step11 按需；无安装脚本字段且运行时/Schema 均拒绝未知声明；本地发布者信任根、签名与许可策略、未验证制品处置规则见 contracts/README.md，后续加载器不得以摘要成功代替身份验证）
 - [x] 为托管后端定义平台 `Task/Run` 到供应商 session/turn、事件游标、subagent 事件和 artifact 的映射；供应商持有其会话状态，平台只保存必要引用、接收状态与证据。提交响应丢失时先按供应商 ID/幂等能力对账，不盲目重建会话；无法对账时标记未知。（`contracts/hosted-mapping.md` 映射语义 + errors schema `query_by_vendor_session` 策略 + capabilities `reconciliation_support` 声明；subagent 事件命名空间化、绝不自动成为 Team 成员；真实验证属 step8）
 - [x] 定义错误语义：不支持能力、授权拒绝、预算不足、版本冲突、后端不可达、结果未知。超时不自动等同于任务失败。（六类封闭集 + 对账指引；version_conflict 覆盖契约版本窗口与幂等键内容复用两种情形）
 - [x] 为工具契约固定输入/输出 schema、版本与副作用类别；将参数验证失败、业务拒绝、系统故障、远端结果未知分别表达，并允许工具选择/参数生成与实际执行结果关联到同一 Run。第三方业务工具仍由其所有者实现和维护。（`tool.schema.json` 副作用五值原样采纳内部 `SideEffectClass` 并由测试钉死一致；四态分层——参数拒绝在分发前 400、业务拒绝=工具结果事件 Run 继续、系统故障=工具级错误事件、结果未知=`outcome_unknown`+对账；`tool_selection` 可观察事实关联同一 Run，不暴露隐藏推理）
-- [x] 固定跨语言编码规则：ID/时间/枚举/可空字段的表示、未知字段的兼容处理、版本协商、幂等键和 trace 关联；提供请求、事件、错误和回执的标准样本，避免不同语言各自解释状态。（`src/hecate/contracts/README.md` + 17 个标准样本；schema 与映射的 required 集合由测试互检钉住）
+- [x] 固定跨语言编码规则：ID/时间/枚举/可空字段的表示、未知字段的兼容处理、版本协商、幂等键和 trace 关联；提供请求、事件、错误和回执的标准样本，避免不同语言各自解释状态。（`src/hecate/contracts/README.md` + 标准样本集；请求、事件、错误与 HTTP 回执的扩展字段保留；同一幂等键的请求体/header 一致，作用域来自传输身份；事件尾部/空页继续返回游标）
 - [x] 将执行契约与 Memory、Evaluation 等契约分别版本化；定义字段扩展与破坏性语义变更规则、并存窗口、弃用通知和支持终止条件。不得以一个 `hecate-contracts` 包版本要求所有后端同步升级。（执行契约与 Sandbox 契约独立 `$id` 版本空间已建立；0.x 草案不冻结，冻结以 step8 真实验证为前置；Memory/Evaluation 契约在各自 step 建立时沿用同一机制）
 - [x] 定义进程外服务身份与授权上下文传递：调用方认证、目标受众、租户作用域、短期凭据引用和回调认证；adapter 不接受客户端自报的管理员身份。（`security-claims.schema.json` 声明集（iss/aud/sub/tenant/delegation_ref/exp），样本带声明集合不带真实 JWT；bearer+mutualTLS 双 profile；回调独立受众凭据禁复用入站令牌；自报 role 落 `extra` 不进鉴权结构——映射行为负例钉住；验证语义归 step7）
-- [x] 能力声明附验证来源、适用部署形态、测试时间/版本及失效条件；`pause`、`cancel`、工具代理、沙箱、事件完整性分别认证，不以一项“支持治理”布尔值覆盖全部能力。远程自报事件与平台直接观察的动作使用不同来源等级。（verification 结构含 source/checked_at/version/valid_until；部署形态维度随 step4 Deployment 模型补齐）
-- [x] 能力模型把 harness 所有方、环境所有方和工具执行点分开；针对供应商管理的会话逐项声明输入补充、取消、事件续读、回调、内部工具可见性和子任务追踪能力。平台不能控制的操作返回 `unsupported` 或 `cooperative`，不因 API 接受请求而标记 `enforced`。（OwnershipAxes 三轴枚举；供应商会话逐项能力声明的完整样本随试点/step8 补充）
+- [x] 能力声明附验证来源、适用部署形态、测试时间/版本及失效条件；`pause`、`cancel`、工具代理、沙箱、事件完整性分别认证，不以一项“支持治理”布尔值覆盖全部能力。远程自报事件与平台直接观察的动作使用不同来源等级。（verification 结构含来源等级、测试时间、契约/后端版本、部署形态、证据引用与失效时间；enforced 声明要求独立观察且具备作用域证据；实际来源认证、部署匹配与过期降级由 step4/7/8 实施，声明本身不能授予权限）
+- [x] 能力模型把 harness 所有方、环境所有方和工具执行点分开；针对供应商管理的会话逐项声明输入补充、取消、事件续读、回调、内部工具可见性和子任务追踪能力。平台不能控制的操作返回 `unsupported` 或 `cooperative`，不因 API 接受请求而标记 `enforced`。（OwnershipAxes 三轴枚举；除五种交互外增加 cancel/events_resume/tool_proxy/sandbox/callback/internal_tools_visibility/subtask_tracking，缺省 unsupported；完整 hosted 样本明确各项未知能力不默认支持；供应商实际认证仍由 step8 实施）
 - [x] 定义供应商配置命名空间；核心只验证通用字段，专属配置由 adapter schema 验证，不能从中读取平台管理员权限。（backend_config_ns 自由对象，核心零校验、零权限）
 - [x] 建立 `StubExecutionBackend` 和契约测试；草案接口标记未稳定，允许在 step8 根据真实适配修订。（Stub 即第二实现，满足 runtime-pluggability 两选一；具名消费者为非 Python 试点与 step5a 包装）
-- [x] 同时做一个真实非 Python 后端的窄范围 adapter 验证：仅限能力发现、提交、事件/结果、取消语义和一个无副作用工具回调；验证者不依赖 Hecate Python 包。此时保持隔离测试，不接生产凭据或受保护写入，用实际差异修订契约；不能仅用 Stub 冻结接口。（试点 `pilots/execution-backend-ts/` + A 侧 vitest/ajv 自证 31 项 + B 侧 pytest live 参数与 Stub 共享断言；隔离边界 loopback/无凭据/无副作用工具；发现 F1—F3 登记于 `docs/refactor/execution-backend-pilot-report.md`，绑定层缺口留 step8 冻结时增补；契约保持 0.x 未冻结）
-- [x] 单独定义 SandboxProvider 最小契约：能力发现、创建/查询环境、提交/查询命令、文件传输、终止及续租；Sandbox 与命令分别使用幂等 ID，超时结果为 unknown/待对账。定义创建中、就绪、终止中、已终止、失败与状态未知的映射；暂停/恢复等可选状态按能力协商，不强迫所有后端提供快照。（`src/hecate/execution/sandbox.py` + `sandbox-provider-contract` 独立 capability spec；InMemory 测试替身 + 幂等/未知/终止分离负例测试）
+- [x] 同时做一个真实非 Python 后端的窄范围 adapter 验证：仅限能力发现、提交、事件/结果、取消语义和一个无副作用工具回调；验证者不依赖 Hecate Python 包。此时保持隔离测试，不接生产凭据或受保护写入，用实际差异修订契约；不能仅用 Stub 冻结接口。（试点 `pilots/execution-backend-ts/` + A 侧 vitest/Ajv 自证 + B 侧 pytest live 参数与 Stub 共享断言；只读工具真正通过 HTTP 回调独立 Python 接收端，入站/回调使用不同受众的合成凭据；原 F1/F2 403/404 绑定缺口已补齐，不继续延期；CI 强制执行异构验证且构建失败不得跳过；契约保持 0.x 未冻结，详见试点及复核报告）
+- [x] 单独定义 SandboxProvider 最小契约：能力发现、创建/查询环境、提交/查询命令、文件传输、终止及续租；Sandbox 与命令分别使用幂等 ID，超时结果为 unknown/待对账。定义创建中、就绪、终止中、已终止、失败与状态未知的映射；暂停/恢复等可选状态按能力协商，不强迫所有后端提供快照。（`src/hecate/execution/sandbox.py` + `sandbox-provider-contract` 独立 capability spec；InMemory 测试替身 + 同键异内容冲突、未知结果对账、终止状态不回退、环境存在/就绪检查及跨平台文件路径负例；真实 Docker/云提供方仍在 step7 适配）
 
 **接口边界：**Graph、Channel、WorkerResult、checkpoint 和模型内部消息格式不进入最低契约；外部 agent 自带工具时，也必须申明其可治理范围。
 

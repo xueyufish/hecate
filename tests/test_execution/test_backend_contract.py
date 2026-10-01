@@ -89,8 +89,8 @@ def test_pause_on_unsupported_backend_is_structured_error(backend, tmp_path) -> 
 
 def test_capabilities_without_verification_are_invalid() -> None:
     data = load_sample(SAMPLES_DIR / "capabilities" / "stub-capabilities.json")
-    data["capabilities"]["provide_input"] = "enforced"
-    del data["verification"]["provide_input"]
+    data["capabilities"]["cancel"] = "enforced"
+    del data["verification"]["cancel"]
     with pytest.raises(ValueError, match="verification entry"):
         BackendCapabilities.from_dict(data)
 

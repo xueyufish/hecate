@@ -9,12 +9,19 @@
 **运行:**
 
 ```bash
-npm install
+npm ci
 npm run build
 node dist/server.js --port 0        # 随机 loopback 端口;--port N 固定
+node dist/server.js --port 0 --tool-callback-url http://127.0.0.1:PORT/echo
 npm test                            # 构建 + A 侧自证(样本×schema 校验 + wire 硬语义断言)
 ```
 
 **复现(A 侧证据):** 见 `docs/refactor/execution-backend-pilot-report.md`(B 侧 Python live 参数证据同文件分栏)。
 
 **契约引用:** schema 与标准样本按相对路径直接引用仓库源文件(`src/hecate/contracts/schemas/`、`tests/test_execution/samples/`),不复制——契约修订必须落在源头。
+
+未配置回调 URL 时启动独立 loopback 工具 HTTP 接收端；URL 只能由可信启动参数指定，不能由请求体覆盖。B 侧使用独立 Python 接收端，验证实际回调、结果映射及幂等重放不会重复调用。`contracts/echo.*` 发布工具版本、副作用类别和输入/输出 schema。回调使用独立 `pilot-tool-callback` 受众的合成凭据，禁止转发入站令牌。
+
+身份声明检查仅用于隔离试点；当前 token 不验签，不能视为生产身份认证。租户/工作负载隔离测试证明传输身份的作用域语义，不能证明身份可信。能力证据仅适用于 loopback 测试拓扑。
+
+CI 安装锁文件依赖并执行 A/B 两侧；`HECATE_REQUIRE_LIVE_PILOT=1` 时依赖缺失必须失败。已安装依赖时每次重编译，编译失败不能跳过或复用旧 `dist`。

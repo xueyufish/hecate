@@ -17,6 +17,7 @@ there - it is the shared vocabulary every domain may consume (like
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -77,17 +78,18 @@ def find_violations(root: Path, package_name: str) -> list[str]:
     violations: list[str] = []
     for path in _iter_py(root):
         for lineno, module in _import_modules(path, package_root=root):
-            top = module.removeprefix("hecate.")
-            if top.startswith(package_name):
-                continue  # self-imports are fine
-            for prefix in FORBIDDEN_PREFIXES:
-                if module == prefix or module.startswith(prefix + "."):
-                    try:
-                        rel = path.relative_to(REPO_ROOT)
-                    except ValueError:  # probe invoked on a directory outside the repo
-                        rel = path
-                    violations.append(f"{rel}:line {lineno}: imports {module}")
-                    break
+            if module.split(".", 1)[0] in sys.stdlib_module_names:
+                continue
+            allowed = ("hecate.contracts", "contracts")
+            if package_name == "execution":
+                allowed += ("hecate.execution", "execution")
+            if any(module == prefix or module.startswith(prefix + ".") for prefix in allowed):
+                continue
+            try:
+                rel = path.relative_to(REPO_ROOT)
+            except ValueError:
+                rel = path
+            violations.append(f"{rel}:line {lineno}: imports {module}")
     return violations
 
 
@@ -125,3 +127,13 @@ def test_probe_catches_try_block_import_escape(tmp_path) -> None:
 
     violations = find_violations(package, "contracts")
     assert any("guarded.py" in v and "sqlalchemy" in v for v in violations)
+
+
+def test_probe_rejects_unlisted_vendor_sdk_and_reverse_dependency(tmp_path) -> None:
+    package = tmp_path / "contracts"
+    package.mkdir()
+    (package / "vendor.py").write_text(
+        "import anthropic\nfrom hecate.execution.backend import RunState\n", encoding="utf-8"
+    )
+    violations = find_violations(package, "contracts")
+    assert len(violations) == 2

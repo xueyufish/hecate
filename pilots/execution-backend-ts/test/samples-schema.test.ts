@@ -9,7 +9,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020";
 import { describe, expect, it } from "vitest";
-import { SAMPLES_DIR, SCHEMAS_DIR } from "./helpers.js";
+import { PILOT_ROOT, SAMPLES_DIR, SCHEMAS_DIR } from "./helpers.js";
 
 const ajv = new Ajv2020({ strict: false, allErrors: true });
 
@@ -77,6 +77,15 @@ const eventPageValidate = schemaValidator("event-page");
 const runStatusValidate = schemaValidator("run-status");
 
 describe("standard samples validate against published schemas", () => {
+  it("publishes a readonly tool declaration and its input/output schemas", () => {
+    const declaration = JSON.parse(readFileSync(resolve(PILOT_ROOT, "contracts/echo.tool.json"), "utf8"));
+    expect(schemaValidator("tool")(declaration)).toBe(true);
+    expect(declaration.side_effect_class).toBe("readonly");
+    for (const [name, ref] of [["input", declaration.input_schema_ref], ["output", declaration.output_schema_ref]]) {
+      const schema = JSON.parse(readFileSync(resolve(PILOT_ROOT, `contracts/echo.${name}.schema.json`), "utf8"));
+      expect(schema.$id).toBe(ref);
+    }
+  });
   for (const [dir, schemaName] of SINGLE_SCHEMA_MAP) {
     it(`validates ${dir}/* against ${schemaName}.schema.json`, () => {
       const validate = schemaValidator(schemaName);

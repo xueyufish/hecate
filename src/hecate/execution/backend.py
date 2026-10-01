@@ -54,6 +54,7 @@ class SubmitReceipt:
     run_ref: BackendRef
     received_at: str
     detail_ns: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         require_kind(self.run_ref, RefKind.RUN)
@@ -62,6 +63,7 @@ class SubmitReceipt:
         out: dict[str, Any] = {"run_ref": self.run_ref.to_dict(), "received_at": self.received_at}
         if self.detail_ns:
             out["detail_ns"] = self.detail_ns
+        out.update(self.extra)
         return out
 
     @classmethod
@@ -70,6 +72,7 @@ class SubmitReceipt:
             run_ref=BackendRef.from_dict(data["run_ref"]),
             received_at=data["received_at"],
             detail_ns=data.get("detail_ns", {}),
+            extra={k: v for k, v in data.items() if k not in {"run_ref", "received_at", "detail_ns"}},
         )
 
 
@@ -80,6 +83,7 @@ class RunStatus:
     run_ref: BackendRef
     state: RunState
     detail_ns: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         require_kind(self.run_ref, RefKind.RUN)
@@ -88,6 +92,7 @@ class RunStatus:
         out: dict[str, Any] = {"run_ref": self.run_ref.to_dict(), "state": self.state.value}
         if self.detail_ns:
             out["detail_ns"] = self.detail_ns
+        out.update(self.extra)
         return out
 
     @classmethod
@@ -96,6 +101,7 @@ class RunStatus:
             run_ref=BackendRef.from_dict(data["run_ref"]),
             state=RunState(data["state"]),
             detail_ns=data.get("detail_ns", {}),
+            extra={k: v for k, v in data.items() if k not in {"run_ref", "state", "detail_ns"}},
         )
 
 
@@ -106,11 +112,13 @@ class EventPage:
     events: tuple[EventEnvelope, ...]
     next_cursor: str | None = None
     has_more: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"events": [env.to_dict() for env in self.events], "has_more": self.has_more}
         if self.next_cursor is not None:
             out["next_cursor"] = self.next_cursor
+        out.update(self.extra)
         return out
 
     @classmethod
@@ -119,6 +127,7 @@ class EventPage:
             events=tuple(EventEnvelope.from_dict(env) for env in data["events"]),
             next_cursor=data.get("next_cursor"),
             has_more=data["has_more"],
+            extra={k: v for k, v in data.items() if k not in {"events", "next_cursor", "has_more"}},
         )
 
 
@@ -129,6 +138,7 @@ class CancelReceipt:
     run_ref: BackendRef
     state: CancelRequestState
     detail_ns: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         require_kind(self.run_ref, RefKind.RUN)
@@ -137,6 +147,7 @@ class CancelReceipt:
         out: dict[str, Any] = {"run_ref": self.run_ref.to_dict(), "state": self.state.value}
         if self.detail_ns:
             out["detail_ns"] = self.detail_ns
+        out.update(self.extra)
         return out
 
     @classmethod
@@ -145,6 +156,7 @@ class CancelReceipt:
             run_ref=BackendRef.from_dict(data["run_ref"]),
             state=CancelRequestState(data["state"]),
             detail_ns=data.get("detail_ns", {}),
+            extra={k: v for k, v in data.items() if k not in {"run_ref", "state", "detail_ns"}},
         )
 
 

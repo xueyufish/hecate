@@ -25,15 +25,15 @@ export const HTTP_STATUS_BY_CODE: Record<ContractErrorCode, number> = {
 
 export interface ContractProblemFields {
   code: ContractErrorCode;
-  request_ref?: object;
+  request_ref: object;
   message: string;
   detail_ns?: Record<string, unknown>;
 }
 
-function send(res: ServerResponse, status: number, payload: unknown): void {
+function send(res: ServerResponse, status: number, payload: unknown, contentType = "application/json"): void {
   const body = JSON.stringify(payload);
   res.writeHead(status, {
-    "content-type": "application/json",
+    "content-type": contentType,
     "x-contract-version": "0.1",
   });
   res.end(body);
@@ -52,7 +52,7 @@ export function sendProblem(
     status,
     code,
     ...fields,
-  });
+  }, "application/problem+json");
 }
 
 export function sendBindingProblem(
@@ -67,7 +67,7 @@ export function sendBindingProblem(
     title,
     status,
     ...rest,
-  });
+  }, "application/problem+json");
 }
 
 export async function readJsonBody(req: IncomingMessage): Promise<unknown> {

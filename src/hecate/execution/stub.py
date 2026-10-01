@@ -15,6 +15,7 @@ idempotency key returns the original receipt) is exercisable.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,8 +44,6 @@ from hecate.execution.backend import (
     backend_error,
 )
 
-_STUB_CHECKED_AT = "2026-09-30T00:00:00Z"
-
 
 @dataclass
 class StubExecutionBackend(AgentExecutionBackend):
@@ -70,15 +69,21 @@ class StubExecutionBackend(AgentExecutionBackend):
                 tool_execution=ToolExecutionPoint.HECATE_GATEWAY,
             ),
             capabilities=CapabilitySet(
-                provide_input=CapabilityLevel.COOPERATIVE,
-                resolve_approval=CapabilityLevel.COOPERATIVE,
+                provide_input=CapabilityLevel.UNSUPPORTED,
+                resolve_approval=CapabilityLevel.UNSUPPORTED,
                 pause=CapabilityLevel.UNSUPPORTED,
                 resume=CapabilityLevel.UNSUPPORTED,
                 export_context=CapabilityLevel.UNSUPPORTED,
+                controls={"cancel": CapabilityLevel.COOPERATIVE, "events_resume": CapabilityLevel.COOPERATIVE},
             ),
             verification={
-                "provide_input": CapabilityVerification(source="stub contract tests", checked_at=_STUB_CHECKED_AT),
-                "resolve_approval": CapabilityVerification(source="stub contract tests", checked_at=_STUB_CHECKED_AT),
+                name: CapabilityVerification(
+                    source="stub contract tests",
+                    checked_at="2026-10-01T00:00:00Z",
+                    deployment_shape="in_memory_test",
+                    observation_source="backend_reported",
+                )
+                for name in ("cancel", "events_resume")
             },
         )
 
@@ -110,14 +115,15 @@ class StubExecutionBackend(AgentExecutionBackend):
                 )
             return receipt
 
-        run_id = request.run_ref.id
+        # The backend owns its IDs; two callers may use the same local run ID.
+        run_id = f"br-{len(self._receipts) + 1}"
         receipt = SubmitReceipt(
             run_ref=BackendRef(RefKind.RUN, self.issuer_domain, run_id),
             received_at="2026-09-30T10:00:00Z",
         )
         # Record before any fault injection: a lost response still left the
         # run behind, so same-key resubmission reconciles instead of doubling.
-        self._receipts[request.idempotency_key] = (request, receipt)
+        self._receipts[request.idempotency_key] = (deepcopy(request), receipt)
         self._runs[run_id] = RunStatus(run_ref=receipt.run_ref, state=RunState.RUNNING)
         self._events[run_id] = []
         self._artifacts[run_id] = list(request.input_artifact_refs)
@@ -133,23 +139,25 @@ class StubExecutionBackend(AgentExecutionBackend):
         return receipt
 
     def get_run(self, run_ref: BackendRef) -> RunStatus:
-        require_run(run_ref)
+        require_run(run_ref, self.issuer_domain)
         return self._runs[run_ref.id]
 
     def read_events(self, run_ref: BackendRef, cursor: str | None = None) -> EventPage:
-        require_run(run_ref)
+        require_run(run_ref, self.issuer_domain)
         events = self._events[run_ref.id]
         start = int(cursor) if cursor else 0
         window = tuple(events[start:])
         has_more = False
-        return EventPage(events=window, next_cursor=None, has_more=has_more)
+        return EventPage(events=window, next_cursor=str(start + len(window)), has_more=has_more)
 
     def list_artifacts(self, run_ref: BackendRef) -> tuple[BackendRef, ...]:
-        require_run(run_ref)
+        require_run(run_ref, self.issuer_domain)
         return tuple(self._artifacts[run_ref.id])
 
     def request_cancel(self, run_ref: BackendRef) -> CancelReceipt:
-        require_run(run_ref)
+        require_run(run_ref, self.issuer_domain)
+        if self.get_run(run_ref).state is RunState.CANCELLED:
+            return self._cancels[run_ref.id]
         receipt = CancelReceipt(run_ref=run_ref, state=CancelRequestState.REQUESTED)
         self._cancels[run_ref.id] = receipt
         return receipt
@@ -174,14 +182,14 @@ class StubExecutionBackend(AgentExecutionBackend):
         return event
 
     def inject_gap(self, run_id: str, from_sequence: int, to_sequence: int) -> EventEnvelope:
-        self._sequence[run_id] = to_sequence
+        self._sequence[run_id] = to_sequence + 1
         gap_event = EventEnvelope(
             contract_version="0.1",
             kind=EventKind.GAP,
             event_id=f"gap-{from_sequence}-{to_sequence}",
             task_ref=BackendRef(RefKind.TASK, "platform", "t-stub"),
             run_ref=BackendRef(RefKind.RUN, self.issuer_domain, run_id),
-            source_sequence=to_sequence,
+            source_sequence=to_sequence + 1,
             occurred_at="2026-09-30T10:00:01Z",
             received_at="2026-09-30T10:00:01Z",
             gap=GapRange(from_sequence=from_sequence, to_sequence=to_sequence),
@@ -199,6 +207,8 @@ class StubExecutionBackend(AgentExecutionBackend):
         return applied
 
 
-def require_run(run_ref: BackendRef) -> None:
+def require_run(run_ref: BackendRef, issuer_domain: str) -> None:
     if run_ref.kind is not RefKind.RUN:
         raise ValueError(f"reference kind mismatch: expected run, got {run_ref.kind.value}")
+    if run_ref.issuer_domain != issuer_domain:
+        raise ValueError("backend run reference issuer mismatch")

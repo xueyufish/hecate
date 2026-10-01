@@ -21,7 +21,7 @@ import urllib.request
 from typing import Any
 
 from hecate.contracts.execution.capabilities import BackendCapabilities
-from hecate.contracts.execution.errors import BackendErrorCode
+from hecate.contracts.execution.errors import BackendErrorCode, Reconciliation
 from hecate.contracts.execution.references import BackendRef
 from hecate.contracts.execution.request import ExecutionRequest
 from hecate.execution.backend import (
@@ -30,6 +30,7 @@ from hecate.execution.backend import (
     EventPage,
     RunStatus,
     SubmitReceipt,
+    UnsupportedCapabilityError,
     backend_error,
 )
 
@@ -66,6 +67,7 @@ class LiveHttpBackend(AgentExecutionBackend):
     def __init__(self, base_url: str) -> None:
         self._base = base_url.rstrip("/")
         self._token = _token()
+        self.callback_calls: list[dict[str, Any]] = []
 
     # -- transport ---------------------------------------------------------
 
@@ -111,12 +113,18 @@ class LiveHttpBackend(AgentExecutionBackend):
                 raise LiveTransportError(
                     f"contract problem without request_ref from {method} {path}: {parsed}"
                 ) from None
+            if code == "unsupported":
+                raise UnsupportedCapabilityError(
+                    parsed["detail_ns"]["capability"], BackendRef.from_dict(parsed["request_ref"])
+                ) from None
             raise backend_error(
                 BackendErrorCode(code),
                 BackendRef.from_dict(parsed["request_ref"]),
                 parsed["message"],
                 detail_ns=parsed.get("detail_ns") or {},
-                reconciliation=parsed.get("reconciliation"),
+                reconciliation=(
+                    Reconciliation.from_dict(parsed["reconciliation"]) if "reconciliation" in parsed else None
+                ),
             ) from None
 
     # -- AgentExecutionBackend surface -------------------------------------
@@ -148,6 +156,10 @@ class LiveHttpBackend(AgentExecutionBackend):
     def request_cancel(self, run_ref: BackendRef) -> CancelReceipt:
         receipt = self._request("POST", f"/runs/{self._wire(run_ref)}/cancel")
         return CancelReceipt.from_dict(receipt)
+
+    def pause(self, run_ref: BackendRef) -> None:
+        """Exercise the actual wire refusal, rather than inherited local refusal."""
+        self._request("POST", f"/runs/{self._wire(run_ref)}/pause")
 
     # -- pilot-only vendor extension ---------------------------------------
 

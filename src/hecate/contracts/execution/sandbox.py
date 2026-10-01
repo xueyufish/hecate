@@ -290,7 +290,12 @@ class SandboxFileRef:
     def __post_init__(self) -> None:
         if not self.sandbox_id or not self.path:
             raise ValueError("sandbox_id and path must be non-empty strings")
-        if self.path.startswith("/") or ".." in self.path.split("/"):
+        if (
+            "\\" in self.path
+            or ":" in self.path
+            or "\x00" in self.path
+            or any(segment in {"", ".", ".."} for segment in self.path.split("/"))
+        ):
             raise ValueError("path must be sandbox-relative without traversal segments")
 
     def to_dict(self) -> dict[str, str]:

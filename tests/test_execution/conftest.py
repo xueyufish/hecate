@@ -108,13 +108,17 @@ def load_sample(path: Path) -> dict[str, Any]:
 
 # --- live pilot interop (change execution-backend-nonpython-pilot) -----------
 
+import os  # noqa: E402
+import queue  # noqa: E402
 import shutil  # noqa: E402
 import subprocess  # noqa: E402
+import threading  # noqa: E402
 import time  # noqa: E402
 
 import pytest  # noqa: E402
 
 from tests.test_execution.live_http import LiveHttpBackend  # noqa: E402
+from tests.test_execution.tool_callback import ToolCallbackServer  # noqa: E402
 
 _PILOT_DIR = SCHEMA_DIR.parents[3] / "pilots" / "execution-backend-ts"
 
@@ -130,16 +134,16 @@ def live_backend() -> LiveHttpBackend:
     """
     node = shutil.which("node")
     if node is None:
+        if os.environ.get("HECATE_REQUIRE_LIVE_PILOT") == "1":
+            pytest.fail("live pilot is required but node is unavailable")
         pytest.skip("node runtime not available; live pilot interop requires node")
     dist_server = _PILOT_DIR / "dist" / "server.js"
     tsc = _PILOT_DIR / "node_modules" / "typescript" / "bin" / "tsc"
-    if not dist_server.exists():
-        if not tsc.exists():
-            # CI provisions no npm dependencies for the pilot by design
-            # (no node CI job); the A-side vitest suite is the standing proof.
-            pytest.skip(
-                "pilot JS dependencies not installed; run npm install in pilots/execution-backend-ts for live interop"
-            )
+    if not tsc.exists():
+        if os.environ.get("HECATE_REQUIRE_LIVE_PILOT") == "1":
+            pytest.fail("live pilot is required but npm dependencies are unavailable")
+        pytest.skip("pilot JS dependencies not installed; run npm ci in pilots/execution-backend-ts")
+    else:
         try:
             subprocess.run(  # noqa: S603 - node and args resolved from repo layout
                 [
@@ -152,32 +156,51 @@ def live_backend() -> LiveHttpBackend:
                 cwd=_PILOT_DIR,
             )
         except (subprocess.CalledProcessError, OSError) as error:
-            pytest.skip(f"pilot build failed; live interop skipped ({error})")
+            pytest.fail(f"pilot build failed: {error}")
+    callback = ToolCallbackServer()
     proc = subprocess.Popen(  # noqa: S603 - node and args resolved from repo layout
-        [node, str(dist_server), "--port", "0"],
+        [node, str(dist_server), "--port", "0", "--tool-callback-url", callback.url],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
     )
     try:
         port = None
-        deadline = time.monotonic() + 20
         assert proc.stdout is not None
+        lines: queue.Queue[str] = queue.Queue()
+
+        def collect_lines() -> None:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                lines.put(line)
+            lines.put("")
+
+        threading.Thread(target=collect_lines, daemon=True).start()
+        deadline = time.monotonic() + 20
         while port is None:
-            if time.monotonic() > deadline:
-                proc.kill()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 pytest.fail("pilot server did not report readiness in time")
-            line = proc.stdout.readline()
+            try:
+                line = lines.get(timeout=remaining)
+            except queue.Empty:
+                pytest.fail("pilot server did not report readiness in time")
             if not line:
                 if port is None:
                     pytest.fail("pilot server exited before reporting readiness")
                 break
             if "PILOT_LISTENING" in line:
                 port = int(line.strip().rsplit("=", 1)[1])
-        yield LiveHttpBackend(f"http://127.0.0.1:{port}")
+        backend = LiveHttpBackend(f"http://127.0.0.1:{port}")
+        backend.callback_calls = callback.calls
+        yield backend
     finally:
         proc.terminate()
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+            proc.wait(timeout=10)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        callback.close()
