@@ -41,6 +41,15 @@ FORBIDDEN_PREFIXES: tuple[str, ...] = (
 
 _SELF_PACKAGES = ("hecate.contracts", "hecate.execution")
 
+# The language-neutral seam inside ``execution/``: the ABC mapping files a
+# third-party backend implementer faces (plan step3). Registry service
+# modules (``*_registry.py``) are Control Plane services on the platform
+# side of that seam — they legitimately consume the ORM to own the
+# registration tables (plan step4/§三) and are never imported by external
+# implementers — so they are exempt here, while the single-writer rule
+# (tests/test_layering_domain.py) keeps the tables execution-owned.
+_SEAM_MODULES = {"__init__.py", "backend.py", "sandbox.py", "stub.py"}
+
 
 def _iter_py(root: Path) -> list[Path]:
     return sorted(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
@@ -77,6 +86,8 @@ def find_violations(root: Path, package_name: str) -> list[str]:
 
     violations: list[str] = []
     for path in _iter_py(root):
+        if package_name == "execution" and path.name not in _SEAM_MODULES:
+            continue
         for lineno, module in _import_modules(path, package_root=root):
             if module.split(".", 1)[0] in sys.stdlib_module_names:
                 continue

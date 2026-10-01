@@ -428,3 +428,50 @@ class TestSiblingPackagesAndOtherDomainsNeverImportOps:
             "its budget service consumes cost + quota from core. "
             "Found:\n" + "\n".join(bad)
         )
+
+
+class TestDeploymentRegistryTablesAreExecutionOwned:
+    """The step4 registration tables have a single writer: the execution domain.
+
+    ``hecate.models.agent_deployment`` and ``hecate.models.agent_principal``
+    are written only by ``hecate.execution`` registry services (plan step4:
+    "Deployment 与 principal 的登记经过唯一应用服务写入;其他域不得直接写这两
+    张表或并行维护同义映射"). The AST import-face scan mirrors the W1—W3
+    sampling method from the platform baseline: any module-level import of
+    the two model modules from outside ``hecate/execution/`` (besides the
+    ``models`` package itself) is a violation — reads also go through the
+    registry so workspace isolation and audit stay in one place. Alembic
+    revisions and tests are exempt (they legitimately touch the schema).
+    """
+
+    _REGISTRY_MODEL_MODULES = ("hecate.models.agent_deployment", "hecate.models.agent_principal")
+
+    def test_only_execution_domain_imports_registry_models(self) -> None:
+        bad: list[str] = []
+        for path in _iter_py(SRC_ROOT):
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            # models/ owns the class definitions; execution/ owns the reads
+            # and writes. Everything else in src/hecate must stay out.
+            if rel.startswith("src/hecate/models/") or rel.startswith("src/hecate/execution/"):
+                continue
+            for lineno, module in _module_level_imports(path):
+                if module in self._REGISTRY_MODEL_MODULES:
+                    bad.append(f"{rel}:line {lineno}: from {module} import ...")
+        assert not bad, (
+            "agent_deployments / agent_principals are single-writer tables owned "
+            "by the execution registry — import them only from hecate.execution "
+            "(models package exempt). Found:\n" + "\n".join(bad)
+        )
+
+    def test_no_workspace_wheel_imports_registry_models(self) -> None:
+        bad: list[str] = []
+        for path in _iter_py(PACKAGES_ROOT):
+            for lineno, module in _module_level_imports(path):
+                if module in self._REGISTRY_MODEL_MODULES:
+                    rel = path.relative_to(REPO_ROOT)
+                    bad.append(f"{rel}:line {lineno}: from {module} import ...")
+        assert not bad, (
+            "workspace wheels must not import the deployment-registry model "
+            "modules; registration flows through hecate.execution services. "
+            "Found:\n" + "\n".join(bad)
+        )
