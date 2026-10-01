@@ -462,11 +462,11 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **操作：**
 
-- [ ] 保留 `AgentModel` 与现有版本表，把它们视为定义和版本；避免新建同义的 AgentDefinitionVersion。
-- [ ] 增加 Agent principal 及与现有 Agent 的关联：组织、负责人、生命周期、身份提供方映射。负责人是人类或明确的企业责任主体，不是 persona 字符串。
-- [ ] 区分人类发起者、Agent principal、执行工作负载身份与 on-behalf-of 委派。Run 固定所用身份链和目标受众；工作负载证明其部署实例，不直接继承人类或平台管理员权限。
-- [ ] 增加 `AgentDeploymentModel`：AgentVersion、backend 类型和版本、进程内/本地进程/远程服务接入方式、传输契约版本、endpoint/配置引用、环境、能力快照、接入等级、健康状态、凭据引用。实现语言仅为登记元数据，不决定权限或能力等级。
-- [ ] 为 Deployment 的托管后端配置记录 harness 与环境提供方、服务地区、数据驻留和保留/删除条件、供应商内部工具范围及企业网关路径；Run 固定实际绑定的供应商 session/turn 引用。缺少可核实条件时不得默认判为私有部署或强制治理。
+- [x] 保留 `AgentModel` 与现有版本表，把它们视为定义和版本；避免新建同义的 AgentDefinitionVersion。（Deployment 外键引用 `agent_versions` 既有表（models/agent_deployment.py），未新建同义版本体系）
+- [x] 增加 Agent principal 及与现有 Agent 的关联：组织、负责人、生命周期、身份提供方映射。负责人是人类或明确的企业责任主体，不是 persona 字符串。（`AgentPrincipalModel` + `execution/principal_registry.py`：负责人解析到组织+活跃用户，persona 不产生 principal（测试钉住）；不可映射者按 pending 审计登记）
+- [x] 区分人类发起者、Agent principal、执行工作负载身份与 on-behalf-of 委派。Run 固定所用身份链和目标受众；工作负载证明其部署实例，不直接继承人类或平台管理员权限。（`contracts/execution/identity.py` 四槽 `IdentityChain`/`WorkloadIdentity`，与 `SecurityClaims.sub`/`delegation_ref` 对齐；Run 侧固化由 step4 第二支 task-run-model 消费）
+- [x] 增加 `AgentDeploymentModel`：AgentVersion、backend 类型和版本、进程内/本地进程/远程服务接入方式、传输契约版本、endpoint/配置引用、环境、能力快照、接入等级、健康状态、凭据引用。实现语言仅为登记元数据，不决定权限或能力等级。（models/agent_deployment.py + `deployment_registry.py`：快照经 `BackendCapabilities` 往返校验、语言元数据无授权语义（测试钉住）、builtin 回填幂等（部分唯一索引））
+- [x] 为 Deployment 的托管后端配置记录 harness 与环境提供方、服务地区、数据驻留和保留/删除条件、供应商内部工具范围及企业网关路径；Run 固定实际绑定的供应商 session/turn 引用。缺少可核实条件时不得默认判为私有部署或强制治理。（`hosted_config` JSON + 未核验哨兵（缺省强制 `verification: unverified`）；Run↔session/turn 引用归 step4 第二支）
 - [ ] 增加 `TaskModel` 和 `RunModel`：Task 保存业务目标、发起者、验收和责任；Run 保存一次后端执行、尝试号、固定配置及后端运行 ID。
 - [ ] 区分平台记录与独立宿主记录：平台 Task 的验收/责任、Run 的后端投影与宿主真实执行状态分别指定字段 owner。新增本地部署来源/本地 ID 映射、事件序号与控制 ownership；独立运行不读平台表，观察接入不能自动取得投递或审批权。
 - [ ] 定义独立部署注册流程：校验宿主身份与信任根、登记已安装版本/能力、显式选择受管的新 Run；历史 Run 仅按来源导入观察，活跃 Run 默认保持原模式。模式转换有操作者、准入与审计，不因网络重连自动改变调度权。
