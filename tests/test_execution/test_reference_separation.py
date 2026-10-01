@@ -51,3 +51,21 @@ def test_request_rejects_session_kind_in_run_slot() -> None:
 def test_base_ref_still_requires_known_kind() -> None:
     with pytest.raises(ValueError):
         BackendRef(kind="galaxy", issuer_domain="platform", id="x-1")  # type: ignore[arg-type]
+
+
+def test_platform_task_and_run_refs_pin_their_kinds() -> None:
+    """Platform-side constructors (task-run-model) mint correctly-kinded refs."""
+
+    from hecate.contracts.execution.references import (
+        platform_run_ref,
+        platform_task_ref,
+        require_kind,
+    )
+
+    task = platform_task_ref("hecate", "task-1")
+    run = platform_run_ref("hecate", "run-1")
+    require_kind(task, RefKind.TASK)
+    require_kind(run, RefKind.RUN)
+    # Round-trip through the shared reference contract.
+    assert BackendRef.from_dict(task.to_dict()) == task
+    assert BackendRef.from_dict(run.to_dict()) == run

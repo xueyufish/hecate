@@ -38,6 +38,7 @@ from hecate.models import (  # noqa: F401
     backup,
     budget,
     conversation,
+    conversation_link,
     document,
     evaluation,
     evidence,
@@ -51,8 +52,11 @@ from hecate.models import (  # noqa: F401
     organization,
     plugin,
     quota,
+    run,
     skill,
     skill_version,
+    standalone_enrollment,
+    task,
     tool,
     tool_policy,
     trace,
@@ -60,6 +64,9 @@ from hecate.models import (  # noqa: F401
     workflow,
     workspace,
     workspace_member,
+)
+from hecate.models import (
+    session as models_session,  # noqa: F401  (aliased: fixtures use a local `session`)
 )
 from hecate.models.api_key import ApiKeyModel, ApiKeyScope
 from hecate.models.organization import OrganizationModel
