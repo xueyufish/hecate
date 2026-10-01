@@ -433,18 +433,29 @@ class TestSiblingPackagesAndOtherDomainsNeverImportOps:
 class TestDeploymentRegistryTablesAreExecutionOwned:
     """The step4 registration tables have a single writer: the execution domain.
 
-    ``hecate.models.agent_deployment`` and ``hecate.models.agent_principal``
-    are written only by ``hecate.execution`` registry services (plan step4:
-    "Deployment 与 principal 的登记经过唯一应用服务写入;其他域不得直接写这两
-    张表或并行维护同义映射"). The AST import-face scan mirrors the W1—W3
-    sampling method from the platform baseline: any module-level import of
-    the two model modules from outside ``hecate/execution/`` (besides the
-    ``models`` package itself) is a violation — reads also go through the
-    registry so workspace isolation and audit stay in one place. Alembic
-    revisions and tests are exempt (they legitimately touch the schema).
+    ``hecate.models.agent_deployment``, ``hecate.models.agent_principal``,
+    ``hecate.models.task``, ``hecate.models.run``,
+    ``hecate.models.standalone_enrollment`` and
+    ``hecate.models.conversation_link`` are written only by
+    ``hecate.execution`` registry services (plan step4: "Deployment 与
+    principal 的登记经过唯一应用服务写入;其他域不得直接写这两张表或并行
+    维护同义映射"; the task-run tables follow the same rule). The AST
+    import-face scan mirrors the W1—W3 sampling method from the platform
+    baseline: any module-level import of the model modules from outside
+    ``hecate/execution/`` (besides the ``models`` package itself) is a
+    violation — reads also go through the registry so workspace isolation
+    and audit stay in one place. Alembic revisions and tests are exempt
+    (they legitimately touch the schema).
     """
 
-    _REGISTRY_MODEL_MODULES = ("hecate.models.agent_deployment", "hecate.models.agent_principal")
+    _REGISTRY_MODEL_MODULES = (
+        "hecate.models.agent_deployment",
+        "hecate.models.agent_principal",
+        "hecate.models.task",
+        "hecate.models.run",
+        "hecate.models.standalone_enrollment",
+        "hecate.models.conversation_link",
+    )
 
     def test_only_execution_domain_imports_registry_models(self) -> None:
         bad: list[str] = []
@@ -458,7 +469,7 @@ class TestDeploymentRegistryTablesAreExecutionOwned:
                 if module in self._REGISTRY_MODEL_MODULES:
                     bad.append(f"{rel}:line {lineno}: from {module} import ...")
         assert not bad, (
-            "agent_deployments / agent_principals are single-writer tables owned "
+            "task/run/enrollment/link tables are single-writer tables owned "
             "by the execution registry — import them only from hecate.execution "
             "(models package exempt). Found:\n" + "\n".join(bad)
         )
@@ -471,7 +482,7 @@ class TestDeploymentRegistryTablesAreExecutionOwned:
                     rel = path.relative_to(REPO_ROOT)
                     bad.append(f"{rel}:line {lineno}: from {module} import ...")
         assert not bad, (
-            "workspace wheels must not import the deployment-registry model "
+            "workspace wheels must not import the registry model "
             "modules; registration flows through hecate.execution services. "
             "Found:\n" + "\n".join(bad)
         )

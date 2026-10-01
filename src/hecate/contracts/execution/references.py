@@ -73,6 +73,23 @@ def run_ref(issuer_domain: str, id: str) -> BackendRef:
     return BackendRef(RefKind.RUN, issuer_domain, id)
 
 
+def platform_task_ref(issuer_domain: str, id: str) -> BackendRef:
+    """Task reference issued by the platform's own control-plane domain.
+
+    Mirrors :func:`run_ref` for platform-side task ids minted by the
+    task-run registry; kept separate so call sites state which side
+    minted the identifier.
+    """
+
+    return task_ref(issuer_domain, id)
+
+
+def platform_run_ref(issuer_domain: str, id: str) -> BackendRef:
+    """Run reference issued by the platform's own control-plane domain."""
+
+    return run_ref(issuer_domain, id)
+
+
 def deployment_ref(issuer_domain: str, id: str) -> BackendRef:
     return BackendRef(RefKind.DEPLOYMENT, issuer_domain, id)
 
