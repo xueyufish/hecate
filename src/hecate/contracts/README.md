@@ -58,6 +58,9 @@ sample; round-trips preserve fields) is enforced by `tests/test_execution/`.
   with identical content returns the original result, and replaying it with
   different content is a `version_conflict` whose `detail_ns.reason` is
   `idempotency_key_content_mismatch`.
+  For HTTP, the scope is the authenticated issuer/tenant/workload, and the
+  `Idempotency-Key` header MUST equal the body's `idempotency_key`. Body refs
+  cannot establish that scope or grant access to another caller's run.
 - **Trace correlation** travels as `trace_id` (+ optional `parent_span_id`);
   event envelopes add `correlation_id` / `causation_id`.
 
@@ -69,5 +72,52 @@ sample; round-trips preserve fields) is enforced by `tests/test_execution/`.
 - `hecate.contracts` is shared vocabulary: any domain may consume it.
   `hecate.execution` is an extension-point package: consumed via
   `core/composition` and tests only (registered in the layering guard).
-- Runtime validation of inbound payloads uses `jsonschema` against these same
-  schema files — a single validation authority.
+- Inbound wire validation uses these same schema files (`jsonschema` in Python,
+  Ajv in the TypeScript pilot). Contract DTOs and archive checks remain stdlib
+  only. `contracts` cannot import `execution`; `execution` may consume the
+  shared contracts. The import guard allows only stdlib and this direction.
+
+## Capability scope and evidence
+
+The five original interaction names remain required. The optional control
+names `cancel`, `events_resume`, `tool_proxy`, `sandbox`, `callback`,
+`internal_tools_visibility`, and `subtask_tracking` default to `unsupported`
+when absent. Each non-unsupported name requires a verification entry in both
+the schema and Python mapping. An `enforced` declaration additionally requires
+backend/contract versions, deployment shape, expiry, an evidence reference,
+and `observation_source=platform_observed|independent_test`. A backend report
+alone cannot claim enforced control. These fields describe evidence; admission
+must still authenticate its provenance, match the actual deployment/version,
+and reject expired evidence (steps4/7/8). A string reference is not proof.
+
+Optional interaction refusal is available over HTTP; successful interaction
+payloads/receipts need an explicit adapter profile and verification. The pilot
+declares all five interactions unsupported and demonstrates a real wire pause
+refusal. The six-method minimum remains unchanged.
+
+## Cursor semantics
+
+Return `next_cursor` even at the current live tail, including empty pages.
+`has_more=false` means no more events are available **now**, not that the run
+has ended. Keep the cursor so newly emitted events can be read without replay.
+Gap markers have a sequence after the declared missing range.
+
+## Local artifact installation profile (draft)
+
+The first distribution is a tar.gz with exactly the listed regular files.
+Use portable relative paths; reject absolute/drive/backslash/traversal paths,
+duplicate archive names, links, devices, unlisted members and unlisted entry
+points. Unknown manifest declarations, including installation hooks, are
+rejected by the runtime guard as well as the schema. Verification reads bytes
+and never extracts files or executes an installer.
+
+`publisher_ref`, `license_expression`, and `signature_ref` carry local trust
+metadata. Missing metadata means unverified, not implicitly trusted. The step5
+loader must resolve the publisher against host-configured trust roots, verify
+a detached signature/attestation binding the exact manifest and file digests,
+and apply the host's license/size/resource policies before loading. Caller
+content cannot change those policies. Preview acceptance of unsigned artifacts
+must be explicit; managed admission requires verified evidence. Digest
+validation proves integrity, not publisher identity, secret absence or business
+data classification. Credential-shaped key rejection is only a coarse guard.
+OCI support and catalog publication remain later-step work.

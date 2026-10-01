@@ -7,6 +7,13 @@
     "resolve_approval": "unsupported",
     "pause": "unsupported",
     "resume": "unsupported",
-    "export_context": "unsupported"
+    "export_context": "unsupported",
+    "cancel": "unsupported",
+    "events_resume": "unsupported",
+    "tool_proxy": "unsupported",
+    "sandbox": "unsupported",
+    "callback": "unsupported",
+    "internal_tools_visibility": "unsupported",
+    "subtask_tracking": "unsupported"
   }
 }

@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hecate.dev/pilots/echo/0.1/input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": { "text": { "type": "string" } }
+}

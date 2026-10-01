@@ -71,3 +71,19 @@ Python 契约测试 MUST 提供测试专用的 HTTP transport,把对试点后端
 
 - **WHEN** 查看运行证据报告
 - **THEN** A 侧与 B 侧的运行输出、环境(node/Python 版本)与复现命令分别可查,报告不宣称超出窄范围验证的任何认证
+
+### Requirement: 真正的工具回调与持续验证
+
+只读工具 MUST 有符合工具契约的版本、副作用类别及输入/输出 schema，MUST 经独立 HTTP 接收端实际执行并映射结果，MUST NOT 仅在后端内部拼接事件作为回调证据。回调 MUST 使用独立受众的试点凭据，MUST NOT 复用入站令牌。入站请求 MUST 经权威 schema 校验；幂等 header 与 body MUST 一致，作用域来自传输身份，其他租户/工作负载 MUST NOT 访问 Run。试点凭据不验签，隔离语义测试 MUST NOT 被描述为生产身份可信认证。
+
+CI MUST 安装锁文件 Node 依赖并执行 A/B 两侧。HECATE_REQUIRE_LIVE_PILOT=1 时无 Node/依赖 MUST 失败；本地允许带理由跳过缺失依赖，但已有依赖的构建失败 MUST 失败且不得复用旧 dist。就绪读取 MUST 有可生效的超时，测试进程 MUST 被清理。
+
+#### Scenario: 回调结果跨语言验证
+
+- **WHEN** TypeScript 后端调用独立 Python 只读工具接收端，并用同一幂等键重放提交
+- **THEN** 工具只调用一次，回调受众与入站受众不同，结果和平台/后端 Run、trace 引用均可关联
+
+#### Scenario: CI 不允许隐藏异构失败
+
+- **WHEN** CI 缺少依赖或 TypeScript 编译失败
+- **THEN** 验证失败，不能以 skip 或旧构建产物记为通过

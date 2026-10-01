@@ -31,7 +31,7 @@ async function submit(body: Record<string, unknown>, key: string): Promise<{
 }> {
   const res = await call(pilot.baseUrl, "POST", "/runs", {
     token,
-    body,
+    body: { ...body, idempotency_key: key },
     headers: { "Idempotency-Key": key },
   });
   return { status: res.status, body: res.body as Record<string, unknown> };
@@ -291,5 +291,61 @@ describe("unknown run reference", () => {
     expect(body["type"]).toBe("https://hecate.dev/contracts/binding/run_not_found");
     // It is NOT a contract error code - the binding defines none for this.
     expect(body["code"]).toBeUndefined();
+  });
+});
+
+describe("Step3 review regressions", () => {
+  it("refuses pause over HTTP without fabricating success", async () => {
+    const submitted = await submit(makeSubmitBody(), "a-wire-pause");
+    const ref = submitted.body.run_ref as { issuer_domain: string; id: string };
+    const res = await call(pilot.baseUrl, "POST", `/runs/${runRefWire(ref)}/pause`, { token });
+    expect(res.status).toBe(501);
+    expect((res.body as Record<string, unknown>).code).toBe("unsupported");
+    expect(res.headers["content-type"]).toBe("application/problem+json");
+  });
+  for (const overrides of [
+    { run_ref: { kind: "session", issuer_domain: "vendor", id: "s" } },
+    { input: null }, { budget: { max_tokens: -1 } }, { trace_correlation: {} },
+    { backend_config_ns: { tool: "echo", parameters: { text: 42 } } },
+  ]) {
+    it(`rejects malformed wire content ${JSON.stringify(overrides)}`, async () => {
+      const res = await submit(makeSubmitBody(overrides), `invalid-${JSON.stringify(overrides)}`);
+      expect(res.status).toBe(400);
+    });
+  }
+
+  it("rejects header/body idempotency disagreement", async () => {
+    const res = await call(pilot.baseUrl, "POST", "/runs", {
+      token, body: makeSubmitBody(), headers: { "Idempotency-Key": "different-key" },
+    });
+    expect(res.status).toBe(400);
+    expect(res.headers["content-type"]).toBe("application/problem+json");
+  });
+
+  it("scopes idempotency and run access to transport identity", async () => {
+    const body = makeSubmitBody({ idempotency_key: "shared-across-tenants" });
+    const first = await submit(body, "shared-across-tenants");
+    const second = await call(pilot.baseUrl, "POST", "/runs", {
+      token: makeToken({ tenant: "tenant-2" }), body,
+      headers: { "Idempotency-Key": "shared-across-tenants" },
+    });
+    expect(second.status).toBe(202);
+    expect((second.body as Record<string, unknown>).run_ref).not.toEqual(first.body.run_ref);
+    const ref = first.body.run_ref as { issuer_domain: string; id: string };
+    for (const [method, suffix] of [["GET", ""], ["GET", "/events"], ["GET", "/artifacts"], ["POST", "/cancel"]]) {
+      const res = await call(pilot.baseUrl, method!, `/runs/${runRefWire(ref)}${suffix}`, {
+        token: makeToken({ tenant: "tenant-2" }),
+      });
+      expect(res.status).toBe(403);
+    }
+  });
+
+  it("the readonly tool result is obtained across a callback endpoint", async () => {
+    const submitted = await submit(makeSubmitBody({ backend_config_ns: { parameters: { text: "hello" } } }), "a-callback");
+    const ref = submitted.body.run_ref as { issuer_domain: string; id: string };
+    const res = await call(pilot.baseUrl, "GET", `/runs/${runRefWire(ref)}/events`, { token });
+    const events = (res.body as { events: Array<{ payload: Record<string, unknown> }> }).events;
+    expect(events.at(-1)!.payload.output).toBe("hello");
+    expect(events.at(-1)!.payload.served_by).toBe("loopback-tool-gateway");
   });
 });

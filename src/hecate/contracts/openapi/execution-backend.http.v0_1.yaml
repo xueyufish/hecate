@@ -54,13 +54,18 @@ paths:
             application/json:
               schema:
                 $ref: https://hecate.dev/contracts/execution/0.2/capabilities.schema.json
+        "403":
+          $ref: "#/components/responses/AuthorizationFailureProblem"
+
   /runs:
     post:
       operationId: submitRun
       summary: Submit one execution; idempotent on the Idempotency-Key header.
       description: >-
         Replaying the same key with identical content returns the original
-        receipt; replaying it with different content is 409 version_conflict
+        receipt; the header must equal body idempotency_key and the key is scoped
+        to the authenticated issuer/tenant/workload, never caller body fields.
+        Replaying it with different content is 409 version_conflict
         (detail_ns.reason=idempotency_key_content_mismatch). A lost response is
         reconciled by resubmitting the same key (or the backend-advertised
         reconciliation strategy) - it never starts a semantically new execution.
@@ -85,13 +90,14 @@ paths:
         "400":
           $ref: "#/components/responses/ParameterValidationProblem"
         "403":
-          $ref: "#/components/responses/AuthorizationDeniedProblem"
+          $ref: "#/components/responses/AuthorizationFailureProblem"
         "409":
           $ref: "#/components/responses/VersionConflictProblem"
         "429":
           $ref: "#/components/responses/BudgetExhaustedProblem"
         "501":
           $ref: "#/components/responses/UnsupportedProblem"
+
   /runs/{run_ref}:
     get:
       operationId: getRun
@@ -112,7 +118,12 @@ paths:
               schema:
                 $ref: https://hecate.dev/contracts/execution/0.1/run-status.schema.json
         "403":
-          $ref: "#/components/responses/AuthorizationDeniedProblem"
+          $ref: "#/components/responses/AuthorizationFailureProblem"
+        "404":
+          $ref: "#/components/responses/RunNotFoundProblem"
+        "400":
+          $ref: "#/components/responses/ParameterValidationProblem"
+
   /runs/{run_ref}/events:
     get:
       operationId: readEvents
@@ -132,7 +143,12 @@ paths:
               schema:
                 $ref: https://hecate.dev/contracts/execution/0.1/event-page.schema.json
         "403":
-          $ref: "#/components/responses/AuthorizationDeniedProblem"
+          $ref: "#/components/responses/AuthorizationFailureProblem"
+        "404":
+          $ref: "#/components/responses/RunNotFoundProblem"
+        "400":
+          $ref: "#/components/responses/ParameterValidationProblem"
+
   /runs/{run_ref}/events:stream:
     get:
       operationId: streamEvents
@@ -158,6 +174,13 @@ paths:
                 $ref: https://hecate.dev/contracts/execution/0.1/event-envelope.schema.json
         "501":
           $ref: "#/components/responses/UnsupportedProblem"
+        "403":
+          $ref: "#/components/responses/AuthorizationFailureProblem"
+        "404":
+          $ref: "#/components/responses/RunNotFoundProblem"
+        "400":
+          $ref: "#/components/responses/ParameterValidationProblem"
+
   /runs/{run_ref}/cancel:
     post:
       operationId: requestCancel
@@ -178,9 +201,14 @@ paths:
               schema:
                 $ref: https://hecate.dev/contracts/execution/0.1/cancel-receipt.schema.json
         "403":
-          $ref: "#/components/responses/AuthorizationDeniedProblem"
+          $ref: "#/components/responses/AuthorizationFailureProblem"
         "501":
           $ref: "#/components/responses/UnsupportedProblem"
+        "404":
+          $ref: "#/components/responses/RunNotFoundProblem"
+        "400":
+          $ref: "#/components/responses/ParameterValidationProblem"
+
   /runs/{run_ref}/artifacts:
     get:
       operationId: listArtifacts
@@ -205,7 +233,34 @@ paths:
                     items:
                       $ref: https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/artifactRef
         "403":
-          $ref: "#/components/responses/AuthorizationDeniedProblem"
+          $ref: "#/components/responses/AuthorizationFailureProblem"
+        "404":
+          $ref: "#/components/responses/RunNotFoundProblem"
+        "400":
+          $ref: "#/components/responses/ParameterValidationProblem"
+  /runs/{run_ref}/{interaction}:
+    post:
+      operationId: optionalInteraction
+      summary: Explicit refusal of unsupported optional interactions.
+      description: >-
+        This draft defines the unsupported profile for optional interactions.
+        A backend declaring a cooperative/enforced interaction must publish
+        its request/receipt schema and verified binding before admitting it;
+        this profile alone does not certify a successful interaction.
+      parameters:
+        - $ref: "#/components/parameters/RunRefPath"
+        - name: interaction
+          in: path
+          required: true
+          schema:
+            enum: [pause, resume, provide_input, resolve_approval, export_context]
+      responses:
+        "501":
+          $ref: "#/components/responses/UnsupportedProblem"
+        "403":
+          $ref: "#/components/responses/AuthorizationFailureProblem"
+        "404":
+          $ref: "#/components/responses/RunNotFoundProblem"
 components:
   securitySchemes:
     bearerHttp:
@@ -231,7 +286,10 @@ components:
       name: run_ref
       in: path
       required: true
-      description: Backend-issued run reference in its opaque wire form.
+      description: >-
+        Backend-issued run reference; percent-encode issuer_domain + / + id as
+        one path segment. Split the decoded value at the first slash; this
+        profile requires issuer_domain to contain no slash.
       schema:
         type: string
         minLength: 1
@@ -239,7 +297,7 @@ components:
       name: cursor
       in: query
       required: false
-      description: Opaque cursor from a previous page (or stream position); absent for the first page.
+      description: Opaque per-run cursor; absent on the first read. Return a continuation even at the current live tail; has_more=false does not mean execution has ended.
       schema:
         type: string
         minLength: 1
@@ -260,6 +318,20 @@ components:
         type: string
         minLength: 1
   responses:
+    AuthorizationFailureProblem:
+      description: Contextless authentication failures use a binding problem; run-scoped failures may use authorization_denied with request_ref.
+      content:
+        application/problem+json:
+          schema:
+            oneOf:
+              - $ref: "#/components/schemas/ProblemBody"
+              - $ref: "#/components/schemas/BindingProblemBody"
+    RunNotFoundProblem:
+      description: Backend-issued run reference is unknown; binding problem with no contract error code.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/BindingProblemBody"
     UnsupportedProblem:
       description: Capability not supported by this backend.
       content:
@@ -307,6 +379,8 @@ components:
         contract error code; `type` uses the binding URI space
         (https://hecate.dev/contracts/binding/...), never /errors/{code}.
       type: object
+      not:
+        required: ["code"]
       required: ["type", "title", "status"]
       properties:
         type:
@@ -348,3 +422,6 @@ components:
               type: integer
               description: The mapped HTTP status (501/403/429/409).
         - $ref: https://hecate.dev/contracts/execution/0.2/errors.schema.json
+        - properties:
+            code:
+              enum: [unsupported, authorization_denied, budget_exhausted, version_conflict]

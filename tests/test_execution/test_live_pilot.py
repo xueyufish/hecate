@@ -130,3 +130,38 @@ def _wire(run_ref: BackendRef) -> str:
     import urllib.parse
 
     return urllib.parse.quote(f"{run_ref.issuer_domain}/{run_ref.id}", safe="")
+
+
+def test_live_tail_cursor_observes_later_events_without_replaying(live_backend: LiveHttpBackend) -> None:
+    receipt = live_backend.submit(make_request(key="live-tail-follow"))
+    before = live_backend.read_events(receipt.run_ref)
+    assert before.next_cursor is not None
+    empty = live_backend.read_events(receipt.run_ref, before.next_cursor)
+    assert empty.events == ()
+    assert empty.next_cursor == before.next_cursor
+    live_backend.advance(receipt.run_ref)
+    later = live_backend.read_events(receipt.run_ref, empty.next_cursor)
+    assert len(later.events) == 1
+    assert later.events[0].payload["outcome"] == "succeeded"
+    assert not {e.event_id for e in before.events} & {e.event_id for e in later.events}
+
+
+def test_readonly_callback_crosses_into_python_receiver_once(live_backend: LiveHttpBackend) -> None:
+    request = make_request(
+        {"backend_config_ns": {"tool": "echo", "parameters": {"text": "callback result"}}}, key="callback-once"
+    )
+    count = len(live_backend.callback_calls)
+    receipt = live_backend.submit(request)
+    replay = live_backend.submit(request)
+    assert replay == receipt
+    assert len(live_backend.callback_calls) == count + 1
+    call = live_backend.callback_calls[-1]
+    assert call["body"]["platform_run_ref"] == request.run_ref.to_dict()
+    assert call["body"]["backend_run_ref"] == receipt.run_ref.to_dict()
+    assert call["body"]["trace_correlation"] == request.trace_correlation.to_dict()
+    assert call["claims"]["aud"] == "pilot-tool-callback"
+    assert call["claims"]["tenant"] == "tenant-1"
+    assert call["token"] != live_backend._token  # noqa: SLF001 - regression for credential reuse
+    result = live_backend.read_events(receipt.run_ref).events[-1].payload
+    assert result["output"] == "callback result"
+    assert result["served_by"] == "python-tool-receiver"

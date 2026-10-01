@@ -184,3 +184,12 @@ def test_problem_bodies_use_problem_json_media_type() -> None:
     for name, body in binding["components"]["responses"].items():
         if "Problem" in name:
             assert "application/problem+json" in body["content"], name
+
+
+def test_binding_defines_auth_and_unknown_run_responses() -> None:
+    binding = load_binding()
+    for path, operations in binding["paths"].items():
+        for operation in operations.values():
+            assert "403" in operation["responses"], path
+            if "{run_ref}" in path:
+                assert "404" in operation["responses"], path

@@ -2,7 +2,7 @@
   "$id": "https://hecate.dev/contracts/execution/0.1/event-page.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "EventPage",
-  "description": "One page of the normalized event stream. next_cursor is opaque and resumable; absent when the page is the last one. gap events are explicit markers for missing sequence ranges - never silently skipped. The SSE stream view carries the same envelopes; after a disconnect, clients resume with the last cursor through the ordinary read endpoint.",
+  "description": "One page of the normalized event stream. next_cursor is opaque and resumable and is returned even at the current tail of a live run (including empty pages), so subsequent events can be polled without replaying earlier events. has_more only describes events already available. gap events are explicit markers for missing sequence ranges. The SSE view uses the same envelopes and cursors.",
   "type": "object",
   "required": ["events", "has_more"],
   "additionalProperties": true,

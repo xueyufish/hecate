@@ -10,7 +10,8 @@ the MAPPING semantics; real hosted-service verification belongs to plan step8.
 | Platform side | Vendor side | Rule |
 |---|---|---|
 | `task` ref (platform-issued) | one or more `session` refs (vendor-issued) | One platform task may span several vendor sessions (retries create new runs, and a session may outlive a run attempt). The task reference never becomes a session reference. |
-| `run` ref (backend-issued) | one `session` ref + a turn cursor | A run maps to exactly one vendor session; the platform stores the session ref and its own cursor. `run` and `session` are distinct kinds - never interchangeable (references.schema.json). |
+| `run` ref in ExecutionRequest (platform-issued) | backend-issued `run` ref in SubmitReceipt | Keep both references in the adapter mapping. Events and status queried from the backend use its reference; the platform preserves its own Run ID. Matching `kind=run` does not make references from different issuing domains interchangeable. |
+| backend-issued `run` ref | primary vendor `session` ref + turn position, when the vendor has sessions | The adapter owns this mapping and any additional child-session references in its namespace. A backend need not expose a session at all. `run`, `session` and `turn` remain distinct kinds. |
 | `deployment` ref | vendor harness + environment registration | Harness owner and environment owner are declared on separate capability axes; a self-hosted sandbox does not make the session self-hosted. |
 | event cursor | vendor session/turn position | Cursors are opaque and per-run; the platform never reconstructs a global order from vendor sequences. |
 

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hecate.dev/pilots/echo/0.1/output.schema.json",
+  "type": "object",
+  "required": ["status"],
+  "properties": {
+    "status": { "enum": ["ok", "business_rejected"] },
+    "output": { "type": "string" },
+    "reason": { "type": "string" },
+    "served_by": { "type": "string" }
+  },
+  "allOf": [
+    { "if": { "properties": { "status": { "const": "ok" } } }, "then": { "required": ["output"] } },
+    { "if": { "properties": { "status": { "const": "business_rejected" } } }, "then": { "required": ["reason"] } }
+  ],
+  "additionalProperties": false
+}

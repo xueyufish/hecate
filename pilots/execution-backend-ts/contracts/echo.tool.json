@@ -1,0 +1,7 @@
+{
+  "tool_name": "echo",
+  "version": "0.1",
+  "input_schema_ref": "https://hecate.dev/pilots/echo/0.1/input.schema.json",
+  "output_schema_ref": "https://hecate.dev/pilots/echo/0.1/output.schema.json",
+  "side_effect_class": "readonly"
+}

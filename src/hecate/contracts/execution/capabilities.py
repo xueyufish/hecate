@@ -14,6 +14,17 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
+OPTIONAL_CONTROL_NAMES = (
+    "cancel",
+    "events_resume",
+    "tool_proxy",
+    "sandbox",
+    "callback",
+    "internal_tools_visibility",
+    "subtask_tracking",
+)
+CAPABILITY_NAMES = ("provide_input", "resolve_approval", "pause", "resume", "export_context", *OPTIONAL_CONTROL_NAMES)
+
 
 class CapabilityLevel(StrEnum):
     """Verifiable control level for one optional capability."""
@@ -81,6 +92,10 @@ class CapabilityVerification:
     checked_at: str
     contract_version: str | None = None
     valid_until: str | None = None
+    deployment_shape: str | None = None
+    backend_version: str | None = None
+    observation_source: str | None = None
+    evidence_ref: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"source": self.source, "checked_at": self.checked_at}
@@ -88,6 +103,9 @@ class CapabilityVerification:
             out["contract_version"] = self.contract_version
         if self.valid_until is not None:
             out["valid_until"] = self.valid_until
+        for name in ("deployment_shape", "backend_version", "observation_source", "evidence_ref"):
+            if getattr(self, name) is not None:
+                out[name] = getattr(self, name)
         return out
 
     @classmethod
@@ -97,6 +115,10 @@ class CapabilityVerification:
             checked_at=data["checked_at"],
             contract_version=data.get("contract_version"),
             valid_until=data.get("valid_until"),
+            deployment_shape=data.get("deployment_shape"),
+            backend_version=data.get("backend_version"),
+            observation_source=data.get("observation_source"),
+            evidence_ref=data.get("evidence_ref"),
         )
 
 
@@ -109,8 +131,11 @@ class CapabilitySet:
     pause: CapabilityLevel
     resume: CapabilityLevel
     export_context: CapabilityLevel
+    controls: dict[str, CapabilityLevel] = field(default_factory=dict)
 
     def level_of(self, name: str) -> CapabilityLevel:
+        if name in OPTIONAL_CONTROL_NAMES:
+            return self.controls.get(name, CapabilityLevel.UNSUPPORTED)
         return getattr(self, name)
 
     def to_dict(self) -> dict[str, str]:
@@ -120,6 +145,7 @@ class CapabilitySet:
             "pause": self.pause.value,
             "resume": self.resume.value,
             "export_context": self.export_context.value,
+            **{name: level.value for name, level in self.controls.items()},
         }
 
     @classmethod
@@ -130,6 +156,7 @@ class CapabilitySet:
             pause=CapabilityLevel(data["pause"]),
             resume=CapabilityLevel(data["resume"]),
             export_context=CapabilityLevel(data["export_context"]),
+            controls={name: CapabilityLevel(data[name]) for name in OPTIONAL_CONTROL_NAMES if name in data},
         )
 
 
@@ -147,7 +174,7 @@ class BackendCapabilities:
     def __post_init__(self) -> None:
         if not self.contract_version or not self.backend_type:
             raise ValueError("contract_version and backend_type must be non-empty")
-        for name in ("provide_input", "resolve_approval", "pause", "resume", "export_context"):
+        for name in CAPABILITY_NAMES:
             if self.capabilities.level_of(name) is not CapabilityLevel.UNSUPPORTED:
                 entry = self.verification.get(name)
                 if entry is None or not entry.source or not entry.checked_at:
@@ -155,6 +182,19 @@ class BackendCapabilities:
                         f"capability {name!r} is {self.capabilities.level_of(name).value} "
                         "but has no verification entry (source/checked_at are required)"
                     )
+                if self.capabilities.level_of(name) is CapabilityLevel.ENFORCED and (
+                    entry.observation_source not in {"platform_observed", "independent_test"}
+                    or not all(
+                        (
+                            entry.contract_version,
+                            entry.backend_version,
+                            entry.deployment_shape,
+                            entry.valid_until,
+                            entry.evidence_ref,
+                        )
+                    )
+                ):
+                    raise ValueError(f"enforced capability {name!r} requires scoped, independently observed evidence")
 
     def level_of(self, name: str) -> CapabilityLevel:
         return self.capabilities.level_of(name)

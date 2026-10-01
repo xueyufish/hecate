@@ -8,7 +8,9 @@
  * and grants no platform permissions.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { EXPECTED_AUDIENCE, verifyClaims } from "./auth.js";
+import { verifyClaims, type Claims } from "./auth.js";
+import { validateRequest, validateEchoParameters } from "./validation.js";
+import { startToolGateway, trustedCallbackUrl } from "./tool-gateway.js";
 import {
   readJsonBody,
   sendBindingProblem,
@@ -35,10 +37,10 @@ function runRefFromWire(wire: string): Ref {
   return { kind: "run", issuer_domain: decoded.slice(0, slash), id: decoded.slice(slash + 1) };
 }
 
-function authorize(req: IncomingMessage, url: URL): { ok: true } | { ok: false; reason: string; runRef?: Ref } {
+function authorize(req: IncomingMessage, url: URL): { ok: true; claims: Claims } | { ok: false; reason: string; runRef?: Ref } {
   const result = verifyClaims(req.headers.authorization);
   if (result.ok) {
-    return { ok: true };
+    return { ok: true, claims: result.claims };
   }
   // Run-scoped routes can reference the target run even when the caller is
   // unauthorized (finding F2: the binding leaves auth-error shapes undefined
@@ -96,7 +98,7 @@ function requireContractVersion(request: Record<string, unknown>, res: ServerRes
   return true;
 }
 
-async function handleSubmit(req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleSubmit(req: IncomingMessage, res: ServerResponse, claims: Claims, callbackUrl: string): Promise<void> {
   let body: unknown;
   try {
     body = await readJsonBody(req);
@@ -113,17 +115,15 @@ async function handleSubmit(req: IncomingMessage, res: ServerResponse): Promise<
     return;
   }
   const request = body as Record<string, unknown>;
-  if (!requireContractVersion(request, res)) {
+  if (!validateRequest(request)) {
+    sendBindingProblem(res, "request_schema_mismatch", 400, {
+      title: "Request body failed authoritative schema validation",
+      errors: validateRequest.errors,
+    });
     return;
   }
-  for (const field of ["task_ref", "run_ref", "deployment_ref", "authorization_ref", "input", "trace_correlation"]) {
-    if (!(field in request)) {
-      sendBindingProblem(res, "request_schema_mismatch", 400, {
-        title: "Request body failed schema validation",
-        detail: `missing required field: ${field}`,
-      });
-      return;
-    }
+  if (!requireContractVersion(request, res)) {
+    return;
   }
 
   // Pre-dispatch tool declaration check (binding-level 400 before the
@@ -138,6 +138,12 @@ async function handleSubmit(req: IncomingMessage, res: ServerResponse): Promise<
     });
     return;
   }
+  if (!validateEchoParameters(config.parameters ?? {})) {
+    sendBindingProblem(res, "parameter_schema_mismatch", 400, {
+      title: "Tool parameters failed schema validation", errors: validateEchoParameters.errors,
+    });
+    return;
+  }
 
   const idempotencyKey = req.headers["idempotency-key"];
   if (typeof idempotencyKey !== "string" || idempotencyKey.length === 0) {
@@ -146,8 +152,18 @@ async function handleSubmit(req: IncomingMessage, res: ServerResponse): Promise<
     });
     return;
   }
+  if (idempotencyKey !== request.idempotency_key) {
+    sendBindingProblem(res, "request_schema_mismatch", 400, {
+      title: "Idempotency-Key header must match body idempotency_key",
+    });
+    return;
+  }
   try {
-    const { receipt } = store.submit(request, idempotencyKey);
+    const outcome = store.submit(request, idempotencyKey, callerScope(claims));
+    if (outcome.created) {
+      await store.executeTool(outcome.record, request, callbackUrl, claims.tenant);
+    }
+    const { receipt } = outcome;
     send(res, 202, receipt);
   } catch (error) {
     handleUnknownRun(res, error);
@@ -164,7 +180,8 @@ function handleEvents(url: URL, res: ServerResponse, runRef: Ref): void {
       if (!decoded.startsWith("seq:")) {
         throw new Error("bad cursor");
       }
-      startSequence = Number.parseInt(decoded.slice(4), 10);
+      if (!/^seq:\d+$/.test(decoded)) throw new Error("bad cursor");
+      startSequence = Number(decoded.slice(4));
       if (!Number.isInteger(startSequence) || startSequence < 0) {
         throw new Error("bad cursor");
       }
@@ -180,12 +197,16 @@ function handleEvents(url: URL, res: ServerResponse, runRef: Ref): void {
   const hasMore = record.events.some((e) => e.source_sequence > last);
   send(res, 200, {
     events: page,
-    next_cursor: hasMore ? Buffer.from(`seq:${last + 1}`).toString("base64url") : null,
+    next_cursor: Buffer.from(`seq:${last + 1}`).toString("base64url"),
     has_more: hasMore,
   });
 }
 
-export function createServerInstance(): Server {
+function callerScope(claims: Claims): string {
+  return JSON.stringify([claims.iss, claims.tenant, claims.sub]);
+}
+
+export function createServerInstance(callbackUrl: string): Server {
   return createServer((req, res) => {
     void (async () => {
       const url = new URL(req.url ?? "/", "http://loopback");
@@ -214,13 +235,25 @@ export function createServerInstance(): Server {
           return;
         }
         if (req.method === "POST" && path === "/runs") {
-          await handleSubmit(req, res);
+          await handleSubmit(req, res, auth.claims, callbackUrl);
           return;
         }
-        const runMatch = /^\/runs\/([^/]+)(?:\/(events|events:stream|cancel|artifacts))?$/.exec(path);
+        const runMatch = /^\/runs\/([^/]+)(?:\/(events|events:stream|cancel|artifacts|pause|resume|provide_input|resolve_approval|export_context))?$/.exec(path);
         if (runMatch) {
           const runRef = runRefFromWire(runMatch[1]!);
+          const target = store.require(`${runRef.issuer_domain}/${runRef.id}`);
+          if (target.callerScope !== callerScope(auth.claims)) {
+            sendProblem(res, "authorization_denied", { message: "run belongs to another caller scope", request_ref: runRef });
+            return;
+          }
           const sub = runMatch[2];
+          if (sub && ["pause", "resume", "provide_input", "resolve_approval", "export_context"].includes(sub) && req.method === "POST") {
+            sendProblem(res, "unsupported", {
+              message: `${sub} is not supported by this backend`,
+              request_ref: runRef, detail_ns: { capability: sub },
+            });
+            return;
+          }
           if (!sub && req.method === "GET") {
             const record = store.require(`${runRef.issuer_domain}/${runRef.id}`);
             send(res, 200, { run_ref: record.runRef, state: record.state, detail_ns: {} });
@@ -253,6 +286,10 @@ export function createServerInstance(): Server {
         if (req.method === "POST" && path.startsWith("/pilot-ns/runs/") && path.endsWith("/advance")) {
           const wire = path.slice("/pilot-ns/runs/".length, -"/advance".length);
           const runRef = runRefFromWire(wire);
+          if (store.require(`${runRef.issuer_domain}/${runRef.id}`).callerScope !== callerScope(auth.claims)) {
+            sendProblem(res, "authorization_denied", { message: "run belongs to another caller scope", request_ref: runRef });
+            return;
+          }
           const record = store.advance(`${runRef.issuer_domain}/${runRef.id}`);
           send(res, 200, { run_ref: record.runRef, state: record.state, detail_ns: {} });
           return;
@@ -261,7 +298,7 @@ export function createServerInstance(): Server {
       } catch (error) {
         handleUnknownRun(res, error);
       }
-    })();
+    })().catch((error: unknown) => handleUnknownRun(res, error));
   });
 }
 
@@ -276,14 +313,34 @@ function capabilitiesDocument(): Record<string, unknown> {
       pause: "unsupported",
       resume: "unsupported",
       export_context: "unsupported",
+      cancel: "cooperative",
+      events_resume: "cooperative",
+      callback: "cooperative",
+      tool_proxy: "unsupported",
+      sandbox: "unsupported",
+      internal_tools_visibility: "cooperative",
+      subtask_tracking: "unsupported",
     },
+    verification: Object.fromEntries(["cancel", "events_resume", "callback", "internal_tools_visibility"].map((name) => [name, {
+      source: "loopback pilot contract tests",
+      checked_at: "2026-10-01T00:00:00Z",
+      contract_version: CONTRACT_VERSION,
+      backend_version: "0.1.0",
+      deployment_shape: "isolated_loopback",
+      observation_source: "independent_test",
+      evidence_ref: "docs/refactor/execution-backend-pilot-report.md",
+      valid_until: "2026-10-02T00:00:00Z",
+    }])),
     reconciliation_support: { query_by_vendor_session: false },
   };
 }
 
 const argvPort = process.argv.indexOf("--port");
 const port = argvPort >= 0 ? Number.parseInt(process.argv[argvPort + 1] ?? "0", 10) : 0;
-const server = createServerInstance();
+const argvCallback = process.argv.indexOf("--tool-callback-url");
+const localGateway = argvCallback < 0 ? await startToolGateway() : null;
+const callbackUrl = trustedCallbackUrl(localGateway?.url ?? process.argv[argvCallback + 1]!);
+const server = createServerInstance(callbackUrl);
 server.listen(port, "127.0.0.1", () => {
   const address = server.address();
   const actual = typeof address === "object" && address !== null ? address.port : port;

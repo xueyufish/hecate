@@ -27,6 +27,7 @@ jobs:
             code:
               - 'src/**'
               - 'packages/**'
+              - 'pilots/execution-backend-ts/**'
               - 'tests/**'
               - 'alembic/**'
               - 'docker/**'
@@ -103,10 +104,19 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pilots/execution-backend-ts/package-lock.json
       - name: Install dependencies
         run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
       - name: Run tests
+        env:
+          HECATE_REQUIRE_LIVE_PILOT: "1"
         run: |
+          npm ci --prefix pilots/execution-backend-ts
+          npm test --prefix pilots/execution-backend-ts
           uv pip install pytest-timeout
           uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
 
