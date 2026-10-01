@@ -46,3 +46,7 @@ docs/research/
 
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# Pilot build artifacts (verification assets, not product packages)
+pilots/*/dist/
+pilots/*/node_modules/
