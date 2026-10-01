@@ -29,6 +29,7 @@ from hecate.contracts.execution.events import EventKind
 from hecate.contracts.execution.references import RefKind
 from hecate.contracts.execution.request import ExecutionRequest
 from hecate.execution.backend import (
+    AgentExecutionBackend,
     CancelRequestState,
     ExecutionBackendError,
     RunState,
@@ -39,6 +40,11 @@ from tests.test_execution.conftest import SAMPLES_DIR, load_sample
 
 SAMPLE_REQUEST = SAMPLES_DIR / "requests" / "submit-minimal.json"
 
+# Stub-only injection points (append_event / inject_gap / settle_cancel /
+# unreachable_submit / detail_ns shapes) below this line are intentionally
+# NOT parametrized: they exercise stub-internal mechanics whose live
+# equivalents are covered by test_live_pilot.py through the binding.
+
 
 def make_request(tmp_path: Path, key: str = "idem-001") -> ExecutionRequest:
     data = load_sample(SAMPLE_REQUEST)
@@ -46,20 +52,35 @@ def make_request(tmp_path: Path, key: str = "idem-001") -> ExecutionRequest:
     return ExecutionRequest.from_dict(data)
 
 
-def test_stub_is_the_standing_unsupported_negative_case() -> None:
-    caps = StubExecutionBackend().describe_capabilities()
+@pytest.fixture(params=["stub", "live"])
+def backend(request) -> tuple[AgentExecutionBackend, str]:
+    """Run shared contract assertions against the stub AND the live pilot.
+
+    The second element is the issuer domain the backend signs its receipts
+    with, so assertions can require backend-issued identity without
+    hardcoding one implementation. The live fixture is resolved lazily so
+    stub runs never touch the pilot environment.
+    """
+    if request.param == "stub":
+        return StubExecutionBackend(), "stub"
+    return request.getfixturevalue("live_backend"), "pilot-ts"
+
+
+def test_standing_unsupported_negative_case_is_declared(backend) -> None:
+    candidate, _ = backend
+    caps = candidate.describe_capabilities()
     assert caps.level_of("pause") is CapabilityLevel.UNSUPPORTED
     assert caps.level_of("resume") is CapabilityLevel.UNSUPPORTED
     assert caps.level_of("export_context") is CapabilityLevel.UNSUPPORTED
 
 
-def test_pause_on_unsupported_backend_is_structured_error(tmp_path) -> None:
-    backend = StubExecutionBackend()
+def test_pause_on_unsupported_backend_is_structured_error(backend, tmp_path) -> None:
+    backend_obj, _ = backend
     request = make_request(tmp_path)
-    receipt = backend.submit(request)
+    receipt = backend_obj.submit(request)
 
     with pytest.raises(UnsupportedCapabilityError) as excinfo:
-        backend.pause(receipt.run_ref)
+        backend_obj.pause(receipt.run_ref)
 
     assert excinfo.value.error.code is BackendErrorCode.UNSUPPORTED
     assert excinfo.value.error.detail_ns == {"capability": "pause"}
@@ -74,24 +95,24 @@ def test_capabilities_without_verification_are_invalid() -> None:
         BackendCapabilities.from_dict(data)
 
 
-def test_submit_is_idempotent_on_key(tmp_path) -> None:
-    backend = StubExecutionBackend()
-    first = backend.submit(make_request(tmp_path))
-    second = backend.submit(make_request(tmp_path))
+def test_submit_is_idempotent_on_key(backend, tmp_path) -> None:
+    backend_obj, expected_issuer = backend
+    first = backend_obj.submit(make_request(tmp_path))
+    second = backend_obj.submit(make_request(tmp_path))
     assert first.run_ref == second.run_ref
     assert first.received_at == second.received_at
     assert first.run_ref.kind is RefKind.RUN
-    assert first.run_ref.issuer_domain == "stub"
+    assert first.run_ref.issuer_domain == expected_issuer
 
 
-def test_same_key_different_content_is_version_conflict(tmp_path) -> None:
-    backend = StubExecutionBackend()
-    backend.submit(make_request(tmp_path))
+def test_same_key_different_content_is_version_conflict(backend, tmp_path) -> None:
+    backend_obj, _ = backend
+    backend_obj.submit(make_request(tmp_path))
 
     conflicting = make_request(tmp_path)
     object.__setattr__(conflicting, "input", {"objective": "Different objective"})
     with pytest.raises(ExecutionBackendError) as excinfo:
-        backend.submit(conflicting)
+        backend_obj.submit(conflicting)
 
     error = excinfo.value.error
     assert error.code is BackendErrorCode.VERSION_CONFLICT

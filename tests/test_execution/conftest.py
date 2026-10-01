@@ -104,3 +104,80 @@ def all_samples() -> list[Path]:
 
 def load_sample(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+# --- live pilot interop (change execution-backend-nonpython-pilot) -----------
+
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+
+import pytest  # noqa: E402
+
+from tests.test_execution.live_http import LiveHttpBackend  # noqa: E402
+
+_PILOT_DIR = SCHEMA_DIR.parents[3] / "pilots" / "execution-backend-ts"
+
+
+@pytest.fixture(scope="session")
+def live_backend() -> LiveHttpBackend:
+    """Run the TypeScript pilot on an ephemeral loopback port.
+
+    Skips with a stated reason when node is unavailable - the A-side vitest
+    suite is the standing proof; this fixture adds cross-language interop
+    whenever a node runtime exists. It is a conditional skip, not a
+    permanent one.
+    """
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node runtime not available; live pilot interop requires node")
+    dist_server = _PILOT_DIR / "dist" / "server.js"
+    tsc = _PILOT_DIR / "node_modules" / "typescript" / "bin" / "tsc"
+    if not dist_server.exists():
+        if not tsc.exists():
+            # CI provisions no npm dependencies for the pilot by design
+            # (no node CI job); the A-side vitest suite is the standing proof.
+            pytest.skip(
+                "pilot JS dependencies not installed; run npm install in pilots/execution-backend-ts for live interop"
+            )
+        try:
+            subprocess.run(  # noqa: S603 - node and args resolved from repo layout
+                [
+                    node,
+                    str(tsc),
+                    "-p",
+                    str(_PILOT_DIR / "tsconfig.json"),
+                ],
+                check=True,
+                cwd=_PILOT_DIR,
+            )
+        except (subprocess.CalledProcessError, OSError) as error:
+            pytest.skip(f"pilot build failed; live interop skipped ({error})")
+    proc = subprocess.Popen(  # noqa: S603 - node and args resolved from repo layout
+        [node, str(dist_server), "--port", "0"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    try:
+        port = None
+        deadline = time.monotonic() + 20
+        assert proc.stdout is not None
+        while port is None:
+            if time.monotonic() > deadline:
+                proc.kill()
+                pytest.fail("pilot server did not report readiness in time")
+            line = proc.stdout.readline()
+            if not line:
+                if port is None:
+                    pytest.fail("pilot server exited before reporting readiness")
+                break
+            if "PILOT_LISTENING" in line:
+                port = int(line.strip().rsplit("=", 1)[1])
+        yield LiveHttpBackend(f"http://127.0.0.1:{port}")
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()

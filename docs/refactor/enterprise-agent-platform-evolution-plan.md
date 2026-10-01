@@ -443,7 +443,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 - [x] 能力模型把 harness 所有方、环境所有方和工具执行点分开；针对供应商管理的会话逐项声明输入补充、取消、事件续读、回调、内部工具可见性和子任务追踪能力。平台不能控制的操作返回 `unsupported` 或 `cooperative`，不因 API 接受请求而标记 `enforced`。（OwnershipAxes 三轴枚举；供应商会话逐项能力声明的完整样本随试点/step8 补充）
 - [x] 定义供应商配置命名空间；核心只验证通用字段，专属配置由 adapter schema 验证，不能从中读取平台管理员权限。（backend_config_ns 自由对象，核心零校验、零权限）
 - [x] 建立 `StubExecutionBackend` 和契约测试；草案接口标记未稳定，允许在 step8 根据真实适配修订。（Stub 即第二实现，满足 runtime-pluggability 两选一；具名消费者为非 Python 试点与 step5a 包装）
-- [ ] 同时做一个真实非 Python 后端的窄范围 adapter 验证：仅限能力发现、提交、事件/结果、取消语义和一个无副作用工具回调；验证者不依赖 Hecate Python 包。此时保持隔离测试，不接生产凭据或受保护写入，用实际差异修订契约；不能仅用 Stub 冻结接口。
+- [x] 同时做一个真实非 Python 后端的窄范围 adapter 验证：仅限能力发现、提交、事件/结果、取消语义和一个无副作用工具回调；验证者不依赖 Hecate Python 包。此时保持隔离测试，不接生产凭据或受保护写入，用实际差异修订契约；不能仅用 Stub 冻结接口。（试点 `pilots/execution-backend-ts/` + A 侧 vitest/ajv 自证 31 项 + B 侧 pytest live 参数与 Stub 共享断言；隔离边界 loopback/无凭据/无副作用工具；发现 F1—F3 登记于 `docs/refactor/execution-backend-pilot-report.md`，绑定层缺口留 step8 冻结时增补；契约保持 0.x 未冻结）
 - [x] 单独定义 SandboxProvider 最小契约：能力发现、创建/查询环境、提交/查询命令、文件传输、终止及续租；Sandbox 与命令分别使用幂等 ID，超时结果为 unknown/待对账。定义创建中、就绪、终止中、已终止、失败与状态未知的映射；暂停/恢复等可选状态按能力协商，不强迫所有后端提供快照。（`src/hecate/execution/sandbox.py` + `sandbox-provider-contract` 独立 capability spec；InMemory 测试替身 + 幂等/未知/终止分离负例测试）
 
 **接口边界：**Graph、Channel、WorkerResult、checkpoint 和模型内部消息格式不进入最低契约；外部 agent 自带工具时，也必须申明其可治理范围。
