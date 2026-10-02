@@ -353,7 +353,7 @@ async def _process_chat(
     # workspace's policy rule rows.
     bundle = None
     if agent_tools:
-        from hecate.runtime.security.guardrail_assembly import assemble_guardrails
+        from hecate.core.composition.guardrail_platform import assemble_guardrails
 
         bundle = await assemble_guardrails(
             db,

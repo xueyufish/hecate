@@ -539,10 +539,10 @@ class MemoryPressureNudgeProcessor(ContextProcessor):
         self.threshold = threshold
 
     async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
-        from hecate.core.config import settings
+        from hecate_runtime.config import kernel_config
 
         meta: dict[str, Any] = {"nudged": False}
-        if not settings.MEMORY_PRESSURE_NUDGE_ENABLED:
+        if not kernel_config().memory_pressure_nudge_enabled:
             meta["reason"] = "disabled"
             return units, ProcessorResult(processor=self.name, metadata=meta)
 
@@ -611,7 +611,7 @@ class ReflectionRecordProcessor(ContextProcessor):
     Discipline:
 
     - **Capability-gated**: short-circuits to a pass-through if
-      ``settings.REFLECTION_ENABLED`` is off OR the builtin provider does
+      ``kernel_config().reflection_enabled`` is off OR the builtin provider does
       not declare ``CAP_TASK_MEMORY``. Same byte-identical guarantee as
       the other memory processors: when off, the projection is
       unmodified and no DB call is made.
@@ -632,10 +632,10 @@ class ReflectionRecordProcessor(ContextProcessor):
     run_mode = "always"
 
     async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
-        from hecate.core.config import settings
+        from hecate_runtime.config import kernel_config
 
         meta: dict[str, Any] = {"recorded": 0, "skipped": 0, "disabled": False}
-        if not settings.REFLECTION_ENABLED:
+        if not kernel_config().reflection_enabled:
             meta["disabled"] = True
             return units, ProcessorResult(processor=self.name, metadata=meta)
 
@@ -654,7 +654,7 @@ class ReflectionRecordProcessor(ContextProcessor):
             return units, ProcessorResult(processor=self.name, metadata=meta)
 
         # Capability check — only dispatch when the provider declares it.
-        from hecate.core.composition.memory_provider import (
+        from hecate_runtime.memory import (
             CAP_TASK_MEMORY,
             provider_supports,
             resolve_memory_provider,
@@ -1126,10 +1126,10 @@ class MemoryPrefetchProcessor(ContextProcessor):
         self._timeout_seconds = timeout_seconds
 
     async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
-        from hecate.core.config import settings
+        from hecate_runtime.config import kernel_config
 
         meta: dict[str, Any] = {"injected": False}
-        if not settings.MEMORY_PREFETCH_ENABLED:
+        if not kernel_config().memory_prefetch_enabled:
             meta["reason"] = "disabled"
             return units, ProcessorResult(processor=self.name, metadata=meta)
 
@@ -1158,7 +1158,7 @@ class MemoryPrefetchProcessor(ContextProcessor):
             meta["pin"] = "replay"
             return _render_pinned(units, ctx, pinned[1])
 
-        from hecate.core.composition.memory_provider import (
+        from hecate_runtime.memory import (
             CAP_PREFETCH,
             provider_supports,
             resolve_memory_provider,
@@ -1175,8 +1175,8 @@ class MemoryPrefetchProcessor(ContextProcessor):
                     query_text=query_text,
                     workspace_id=uuid.UUID(str(raw_ws)),
                     agent_id=uuid.UUID(str(raw_agent)),
-                    max_entries=int(settings.MEMORY_PREFETCH_MAX_ENTRIES),
-                    max_tokens=int(settings.MEMORY_PREFETCH_MAX_TOKENS),
+                    max_entries=int(kernel_config().memory_prefetch_max_entries),
+                    max_tokens=int(kernel_config().memory_prefetch_max_tokens),
                 ),
                 timeout=self._timeout_seconds,
             )
@@ -1669,15 +1669,15 @@ class ReflectionInjectionProcessor(ContextProcessor):
     run_mode = "always"
 
     async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
-        from hecate.core.composition.memory_provider import (
+        from hecate_runtime.config import kernel_config
+        from hecate_runtime.memory import (
             CAP_TASK_MEMORY,
             provider_supports,
             resolve_memory_provider,
         )
-        from hecate.core.config import settings
 
         meta: dict[str, Any] = {"injected": False}
-        if not settings.REFLECTION_ENABLED:
+        if not kernel_config().reflection_enabled:
             meta["reason"] = "disabled"
             return units, ProcessorResult(processor=self.name, metadata=meta)
 
@@ -1743,15 +1743,15 @@ class EscalationOnFailureProcessor(ContextProcessor):
     run_mode = "always"
 
     async def process(self, units: list[ContextUnit], ctx: ChainContext) -> tuple[list[ContextUnit], ProcessorResult]:
-        from hecate.core.composition.memory_provider import (
+        from hecate_runtime.config import kernel_config
+        from hecate_runtime.memory import (
             CAP_ESCALATE_FAILURE,
             provider_supports,
             resolve_memory_provider,
         )
-        from hecate.core.config import settings
 
         meta: dict[str, Any] = {"recalled": False}
-        if not settings.REFLECTION_ENABLED:
+        if not kernel_config().reflection_enabled:
             meta["reason"] = "disabled"
             return units, ProcessorResult(processor=self.name, metadata=meta)
 

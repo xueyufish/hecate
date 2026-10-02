@@ -52,14 +52,14 @@ async def on_task_complete(
     Returns the ``EpisodeWriteResult`` from the provider, or ``None``
     when the feature flag is off / the provider lacks the capability.
     """
-    from hecate.core.composition.memory_provider import (
+    from hecate_runtime.config import kernel_config
+    from hecate_runtime.memory import (
         CAP_END_EPISODE,
         provider_supports,
         resolve_memory_provider,
     )
-    from hecate.core.config import settings
 
-    if not settings.REFLECTION_ENABLED:
+    if not kernel_config().reflection_enabled:
         return None
     provider = resolve_memory_provider()
     if provider is None or not provider_supports(provider, CAP_END_EPISODE):
@@ -125,14 +125,14 @@ async def on_task_failure(
         task_type=task_type,
         episode_id=episode_id,
     )
-    from hecate.core.composition.memory_provider import (
+    from hecate_runtime.config import kernel_config
+    from hecate_runtime.memory import (
         CAP_ESCALATE_FAILURE,
         provider_supports,
         resolve_memory_provider,
     )
-    from hecate.core.config import settings
 
-    if not settings.REFLECTION_ENABLED:
+    if not kernel_config().reflection_enabled:
         return close_result
     provider = resolve_memory_provider()
     if provider is None or not provider_supports(provider, CAP_ESCALATE_FAILURE):
@@ -163,26 +163,10 @@ async def _lookup_active_episode(
     agent_id: uuid.UUID,
     session_id: uuid.UUID,
 ) -> uuid.UUID | None:
-    from sqlalchemy import select
-
-    from hecate.core.database import async_session_factory
-    from hecate.models.task_memory import EpisodeModel
+    from hecate_runtime.memory import find_open_episode
 
     try:
-        async with async_session_factory() as db:
-            stmt = (
-                select(EpisodeModel.id)
-                .where(
-                    EpisodeModel.workspace_id == workspace_id,
-                    EpisodeModel.agent_id == agent_id,
-                    EpisodeModel.session_id == session_id,
-                    EpisodeModel.closed_at.is_(None),
-                    ~EpisodeModel.deleted,
-                )
-                .order_by(EpisodeModel.created_at.desc())
-                .limit(1)
-            )
-            return (await db.execute(stmt)).scalar_one_or_none()
+        return await find_open_episode(workspace_id, agent_id, session_id)
     except Exception as e:  # pragma: no cover
         logger.warning(
             "_lookup_active_episode failed (workspace=%s agent=%s session=%s): %s",

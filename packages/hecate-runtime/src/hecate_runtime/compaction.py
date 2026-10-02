@@ -49,7 +49,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from hecate.core.config import settings
+from hecate_runtime.config import kernel_config
 from hecate_runtime.eventstore import EventType
 
 if TYPE_CHECKING:
@@ -404,15 +404,12 @@ async def _register_flush_window(execution_context: dict[str, Any], session_id: 
     raw_agent = execution_context.get("agent_id")
     if not raw_ws or not raw_agent:
         return
-    from hecate.core.composition.memory_policy import resolve_policy
-    from hecate.core.database import async_session_factory
+    from hecate_runtime.memory import memory_flush_policy_enabled
 
     workspace_id = uuid.UUID(str(raw_ws))
     agent_id = uuid.UUID(str(raw_agent))
-    async with async_session_factory() as db:
-        policy = await resolve_policy(db, workspace_id, agent_id)
-        if not policy.flush_enabled:
-            return
+    if not await memory_flush_policy_enabled(workspace_id, agent_id):
+        return
 
     raw_user = execution_context.get("user_id")
     user_id = uuid.UUID(str(raw_user)) if raw_user else None
@@ -744,7 +741,7 @@ async def run_surface_replacement(
     # Best-effort by contract — a failure here only logs; compaction has
     # already committed and the raw event log keeps the content (the
     # watermark sweep covers the window on a later trigger).
-    if settings.MEMORY_FLUSH_ENABLED:
+    if kernel_config().memory_flush_enabled:
         try:
             await _register_flush_window(execution_context, session_id)
         except Exception:  # noqa: BLE001 — never fails the compaction path

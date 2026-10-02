@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from hecate.core.config import settings
+from hecate_runtime.config import kernel_config
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class LLMGuardScanner:
     """
 
     def __init__(self, enabled: bool = True):
-        self.enabled = enabled and settings.LLM_GUARD_ENABLED
+        self.enabled = enabled and kernel_config().llm_guard_enabled
         self._prompt_scanners = None
         self._output_scanners = None
 

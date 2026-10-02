@@ -1,11 +1,15 @@
-"""Guardrail assembly facade — the single wire-up point for production paths.
+"""Guardrail assembly facade — the kernel-pure wire-up point.
 
 The security components (``create_security_hooks`` factory, ``ToolAccessPolicy``
 evaluation, ``ApprovalCallback`` contract) are assembled here into the
 per-Phase middleware chains that the workflow service and chat path consume.
-The facade reads per-agent ``guardrail_config`` and the workspace's
-``ToolPolicyModel`` / ``ToolPolicyRuleModel`` rows and returns a fully wired
-``GuardrailBundle`` — chains + policy + approval callback + denial tracker.
+
+Since step5b the kernel consumes **already-loaded** ``ToolRule`` rows; the
+DB-backed policy loading, org derivation, and finding-writer construction
+live in the platform bridge
+(``hecate.core.composition.guardrail_platform``), which adapts this facade
+for the chat path. A standalone host loads rules from its own local policy
+source and calls this facade directly.
 """
 
 from __future__ import annotations
@@ -14,10 +18,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from hecate.models.tool_policy import ToolPolicyModel, ToolPolicyRuleModel
 from hecate_runtime.monotonic_denials import MonotonicDenialTracker
 from hecate_runtime.security.hooks import create_security_hooks
 from hecate_runtime.tool_access import (
@@ -52,11 +52,11 @@ class GuardrailBundle:
     denial_tracker: Any | None = None
 
 
-def _policy_rule_to_tool_rule(row: ToolPolicyModel | ToolPolicyRuleModel) -> ToolRule | None:
+def tool_rule_from_policy_row(row: Any) -> ToolRule | None:
     action = _RULE_ACTION_BY_VALUE.get(getattr(row, "rule_action", None) or getattr(row, "action", None) or "")
     if action is None:
         return None
-    pattern = row.tool_pattern
+    pattern = getattr(row, "tool_pattern", None)
     arg_conditions = getattr(row, "arg_conditions", None)
     return ToolRule(
         action=action,
@@ -67,37 +67,22 @@ def _policy_rule_to_tool_rule(row: ToolPolicyModel | ToolPolicyRuleModel) -> Too
 
 
 async def assemble_guardrails(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-    agent_id: uuid.UUID | None,
+    rules: list[ToolRule],
     guardrail_config: dict | None,
     event_store: Any | None = None,
     session_id: uuid.UUID | None = None,
     dlp_scanner: Any = None,
-    org_id: uuid.UUID | None = None,
-    user_id: uuid.UUID | None = None,
+    finding_writer: Any | None = None,
+    workspace_id: uuid.UUID | None = None,
+    agent_id: uuid.UUID | None = None,
 ) -> GuardrailBundle:
-    """Construct the full guardrail bundle for one agent execution.
-
-    Reads workspace-level (``agent_id IS NULL``) and per-agent rules from
-    ``ToolPolicyRuleModel`` plus workspace-level baseline rules from
-    ``ToolPolicyModel``. Returns a ``GuardrailBundle`` with the security
-    hooks (existing factory), the assembled ``ToolAccessPolicy`` with all
-    rules materialized, and a ``FailingClosedApprovalCallback`` when an
-    event store and session id are supplied (T2.6 wires this in production;
-    falls back to ``NoAnswerApprovalCallback`` otherwise).
-
-    The bundle also carries a ``middleware_chains`` dict keyed by
-    ``Phase``, populated by ``build_middleware_chains``. Stages that are
-    disabled in ``guardrail_config`` are filtered at assembly time — they
-    never enter the chain.
+    """Construct the guardrail bundle from already-loaded policy rules.
 
     Args:
-        db: Async DB session for the policy lookup.
-        workspace_id: Workspace owning the agent; bounds the policy scope.
-        agent_id: Agent whose rules augment workspace rules; ``None`` skips
-            agent-specific rule loading (e.g. for plain API calls without an
-            agent).
+        rules: Materialized ``ToolRule`` list — loaded by the caller from its
+            policy source (platform DB adapter or a standalone host's local
+            policy). Use ``tool_rule_from_policy_row`` to convert raw policy
+            rows.
         guardrail_config: ``AgentModel.guardrail_config`` dict consumed by
             ``create_security_hooks``.
         event_store: Optional event store; when provided together with
@@ -105,67 +90,17 @@ async def assemble_guardrails(
             emits the durable ``APPROVAL_ASKED`` / ``APPROVAL_DECIDED``
             event pair (T2.6).
         session_id: Session id used to anchor approval event emission.
-        org_id: Organization id; auto-derived from ``WorkspaceModel`` when
-            not supplied. Required for ``SecurityFindingModel`` persistence.
-        user_id: Optional user id; propagated to finding rows when present.
+        dlp_scanner: Optional DLP scanner injected into the output hooks.
+        finding_writer: Optional platform finding writer (ops adapter);
+            the kernel never constructs it itself.
+        workspace_id: Workspace owning the agent; anchors the approval
+            callback.
+        agent_id: Agent whose execution this bundle guards.
 
     Returns:
         ``GuardrailBundle`` ready to inject into ``ToolWorker``,
         ``LLMWorker``, and the chat path-A tool loop.
     """
-    rules: list[ToolRule] = []
-
-    # Workspace-level policy baseline (deny-by-default security baseline).
-    ws_policy_q = select(ToolPolicyModel).where(
-        ToolPolicyModel.workspace_id == workspace_id,
-        ToolPolicyModel.deleted_at.is_(None),
-    )
-    for row in (await db.execute(ws_policy_q)).scalars():
-        rule = _policy_rule_to_tool_rule(row)
-        if rule is not None:
-            rules.append(rule)
-
-    # Workspace-level + per-agent ToolPolicyRuleModel rows.
-    if agent_id is not None:
-        rules_q = select(ToolPolicyRuleModel).where(
-            ToolPolicyRuleModel.workspace_id == workspace_id,
-            ToolPolicyRuleModel.deleted_at.is_(None),
-            (ToolPolicyRuleModel.agent_id.is_(None)) | (ToolPolicyRuleModel.agent_id == agent_id),
-        )
-    else:
-        rules_q = select(ToolPolicyRuleModel).where(
-            ToolPolicyRuleModel.workspace_id == workspace_id,
-            ToolPolicyRuleModel.deleted_at.is_(None),
-            ToolPolicyRuleModel.agent_id.is_(None),
-        )
-    for row in (await db.execute(rules_q)).scalars():
-        rule = _policy_rule_to_tool_rule(row)
-        if rule is not None:
-            rules.append(rule)
-
-    # Construct the output-side finding writer when context is sufficient.
-    # This closes the historical gap where DLP / injection / prompt-leakage
-    # findings on the LLM output side never reached SecurityFindingModel.
-    finding_writer: Any = None
-    if event_store is not None and session_id is not None:
-        from hecate.models.workspace import WorkspaceModel
-        from hecate.ops.security.findings_writer import SecurityFindingWriter
-
-        if org_id is None:
-            ws_row = (
-                await db.execute(select(WorkspaceModel).where(WorkspaceModel.id == workspace_id))
-            ).scalar_one_or_none()
-            org_id = ws_row.org_id if ws_row is not None else None
-
-        finding_writer = SecurityFindingWriter(
-            db=db,
-            org_id=org_id,
-            workspace_id=workspace_id,
-            session_id=session_id,
-            user_id=user_id,
-            event_store=event_store,
-        )
-
     hooks = create_security_hooks(guardrail_config, dlp_scanner=dlp_scanner, finding_writer=finding_writer)
 
     # T2.6: when the wiring is present, the assembly produces the durable

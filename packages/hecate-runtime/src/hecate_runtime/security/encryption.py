@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from hecate.core.config import settings
+from hecate_runtime.config import kernel_config
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ def _get_fernet():
     except ImportError as e:
         raise ConfigurationError("cryptography package not installed") from e
 
-    key = settings.FERNET_KEY
+    key = kernel_config().fernet_key
     if not key:
         raise ConfigurationError("FERNET_KEY not configured; required for mask_and_encrypt mode")
 

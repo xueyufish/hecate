@@ -413,6 +413,9 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
     await seed_builtin_tools()
     register_secret_providers()
     attach_state_stores(app)
+    from hecate.core.composition.runtime_memory_bridge import install_runtime_kernel_services
+
+    install_runtime_kernel_services()
     attach_dlp_scanner(app)
     await discover_plugins()
     await replay_agent_plugin_mcp()
