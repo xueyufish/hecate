@@ -108,7 +108,7 @@
 
 | 责任 step | 差距项(当前 → 目标) | 实现 owner | 验收 owner | 指派时点 |
 |---|---|---|---|---|
-| step5a | `WorkflowExecutionService` 平台职责 → 共享执行装配函数与执行应用服务(§2 ②⑥) | 待指派 | 待指派 | change 启动时 |
+| step5a | `WorkflowExecutionService` 平台职责 → 共享执行装配函数与执行应用服务(§2 ②⑥)（已交付:`runtime-shared-assembly` — `runtime/execution_assembly.py` + `execution/builtin.py`） | 已指派（本 change 实现） | 已指派（同左） | change 启动时 |
 | step5b | 主应用内 runtime → `hecate-runtime` wheel + extras;懒加载清单按 §2.2 归类解除;干净安装测试 | 待指派 | 待指派 | change 启动时 |
 | step5c | 独立宿主(`hecate-runner`):本地 manifest 加载、身份/策略 adapter、最小执行/状态/证据接口;只读 SC01/SC02 技术预览 | 待指派 | 待指派 | change 启动时 |
 | step6 | 本地持久任务/Action 意图/领取/结果引用/事件游标;重启恢复与对账(SC03/SC06) | 待指派 | 待指派 | change 启动时 |

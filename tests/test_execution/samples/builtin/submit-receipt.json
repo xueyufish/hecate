@@ -1,0 +1,5 @@
+{
+  "run_ref": {"kind": "run", "issuer_domain": "hecate-builtin", "id": "5f0c9a2e-8b1d-4c3a-9e2f-7a6b5c4d3e2f"},
+  "received_at": "2026-09-30T12:00:00+00:00",
+  "detail_ns": {"idempotency_key": "idem-001"}
+}

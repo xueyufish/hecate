@@ -520,3 +520,54 @@ class TestDeploymentRegistryTablesAreExecutionOwned:
             "modules; registration flows through hecate.execution services. "
             "Found:\n" + "\n".join(bad)
         )
+
+
+class TestSharedExecutionAssemblyBoundary:
+    """The shared execution assembly (step5a) must stay platform-agnostic.
+
+    ``runtime/execution_assembly.py`` is the extraction target for the
+    standalone ``hecate-runtime`` wheel (plan step5b), so unlike the
+    domain-level rules above — which only police module-level imports —
+    this boundary scans EVERY import site in the file, including
+    function-local lazy imports. Studio, the ORM models, and SQLAlchemy
+    must never appear in its import closure; platform definition
+    resolution belongs to the platform adapter.
+    """
+
+    ASSEMBLY_MODULE = SRC_ROOT / "runtime" / "execution_assembly.py"
+    FORBIDDEN_PREFIXES = ("hecate.studio", "hecate.models", "sqlalchemy")
+
+    def _all_import_modules(self, path: Path) -> list[tuple[int, str]]:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        hits: list[tuple[int, str]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                hits.append((node.lineno, node.module or ""))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    hits.append((node.lineno, alias.name))
+        return hits
+
+    def test_assembly_imports_no_platform_modules(self) -> None:
+        bad: list[str] = []
+        for lineno, module in self._all_import_modules(self.ASSEMBLY_MODULE):
+            if any(module == p or module.startswith(p + ".") for p in self.FORBIDDEN_PREFIXES):
+                bad.append(f"line {lineno}: {module}")
+        assert not bad, (
+            "runtime/execution_assembly.py must not import studio, ORM models, "
+            "or sqlalchemy at ANY import site (plan step5a: platform queries "
+            "stay in the platform adapter); found:\n" + "\n".join(bad)
+        )
+
+    def test_assembly_signatures_carry_no_session(self) -> None:
+        """Mechanical criterion: no assembly callable takes a DB session."""
+        tree = ast.parse(self.ASSEMBLY_MODULE.read_text(encoding="utf-8"))
+        offenders: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef):
+                continue
+            for arg in [*node.args.args, *node.args.kwonlyargs]:
+                ann = ast.unparse(arg.annotation) if arg.annotation else ""
+                if "AsyncSession" in ann or ann.split("[")[0].split(".")[-1] == "Session":
+                    offenders.append(f"{node.name}:{arg.arg}")
+        assert not offenders, f"assembly callables must not take DB sessions: {offenders}"

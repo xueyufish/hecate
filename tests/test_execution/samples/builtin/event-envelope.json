@@ -1,0 +1,12 @@
+{
+  "contract_version": "0.1",
+  "kind": "event",
+  "event_id": "5f0c9a2e-8b1d-4c3a-9e2f-7a6b5c4d3e2f:0",
+  "task_ref": {"kind": "task", "issuer_domain": "platform", "id": "t-001"},
+  "run_ref": {"kind": "run", "issuer_domain": "hecate-builtin", "id": "5f0c9a2e-8b1d-4c3a-9e2f-7a6b5c4d3e2f"},
+  "source_sequence": 0,
+  "occurred_at": "2026-09-30T12:00:00+00:00",
+  "received_at": "2026-09-30T12:00:00+00:00",
+  "payload_schema_ref": "hecate.builtin.engine_event/0",
+  "payload": {"type": "values", "state": {"messages": []}}
+}
