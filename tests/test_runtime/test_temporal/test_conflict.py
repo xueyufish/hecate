@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from hecate_runtime.conflict import ConflictResolver, ConflictStrategy
+
 from hecate.runtime.channel import (
     AccumulatorBehavior,
     LastValueBehavior,
     TopicBehavior,
 )
-from hecate.runtime.temporal.conflict import ConflictResolver, ConflictStrategy
 
 
 class TestConflictResolver:

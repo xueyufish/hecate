@@ -5,12 +5,13 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock
 
-from hecate.runtime.channel import LastValueBehavior
-from hecate.runtime.temporal.conflict import (
+from hecate_runtime.conflict import (
     ConflictResolver,
     ConflictStrategy,
 )
-from hecate.runtime.temporal.workflow import DistributedPregelWorkflow
+
+from hecate.execution.temporal.workflow import DistributedPregelWorkflow
+from hecate.runtime.channel import LastValueBehavior
 
 
 class TestDistributedPregelWorkflow:

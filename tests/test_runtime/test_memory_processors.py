@@ -9,13 +9,13 @@ default-chain composition.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import pytest
+from hecate_runtime import memory as mem_mod
+from hecate_runtime.config import kernel_config
 
-from hecate.core.composition import memory_provider as mp_mod
-from hecate.core.config import settings
 from hecate.runtime import context_processors as cp_mod
 from hecate.runtime.context_processors import (
     _ESCALATION_LAST_HINT,
@@ -90,7 +90,7 @@ def _reset_cooldown() -> Any:
 
 class TestMemoryPrefetch:
     async def test_disabled_is_noop(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings, "MEMORY_PREFETCH_ENABLED", False)
+        monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_prefetch_enabled=False))
         units = _units()
         out, result = await MemoryPrefetchProcessor().process(units, _ctx())
         assert out == units
@@ -98,30 +98,30 @@ class TestMemoryPrefetch:
         assert result.metadata["reason"] == "disabled"
 
     async def test_over_budget_skips(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings, "MEMORY_PREFETCH_ENABLED", True)
+        monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_prefetch_enabled=True))
         units = _units()
         out, result = await MemoryPrefetchProcessor().process(units, _ctx(budget=1))
         assert out == units
         assert result.metadata["reason"] == "over_budget"
 
     async def test_missing_scope_skips(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings, "MEMORY_PREFETCH_ENABLED", True)
+        monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_prefetch_enabled=True))
         units = _units()
         out, result = await MemoryPrefetchProcessor().process(units, _ctx(execution_context={"session_id": "s1"}))
         assert result.metadata["reason"] == "no_scope"
 
     async def test_provider_error_degrades(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings, "MEMORY_PREFETCH_ENABLED", True)
-        monkeypatch.setattr(mp_mod, "resolve_memory_provider", lambda: _StubProvider(fail=True))
+        monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_prefetch_enabled=True))
+        monkeypatch.setattr(mem_mod, "_provider_source", lambda: _StubProvider(fail=True))
         units = _units()
         out, result = await MemoryPrefetchProcessor().process(units, _ctx())
         assert out == units
         assert result.metadata["reason"] == "provider_error"
 
     async def test_injects_at_tail_with_entries(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings, "MEMORY_PREFETCH_ENABLED", True)
+        monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_prefetch_enabled=True))
         stub = _StubProvider([_Entry("Deployment target is staging"), _Entry("User prefers tags")])
-        monkeypatch.setattr(mp_mod, "resolve_memory_provider", lambda: stub)
+        monkeypatch.setattr(mem_mod, "_provider_source", lambda: stub)
         processor = MemoryPrefetchProcessor()
         units = _units()
         out, result = await processor.process(units, _ctx())
@@ -138,8 +138,8 @@ class TestMemoryPrefetch:
         assert stub.calls and "deployment target" in stub.calls[0]["query_text"].lower()
 
     async def test_empty_entries_skips_injection(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(settings, "MEMORY_PREFETCH_ENABLED", True)
-        monkeypatch.setattr(mp_mod, "resolve_memory_provider", lambda: _StubProvider([]))
+        monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_prefetch_enabled=True))
+        monkeypatch.setattr(mem_mod, "_provider_source", lambda: _StubProvider([]))
         baseline = _units()
         out, result = await MemoryPrefetchProcessor().process(baseline, _ctx())
         assert flatten_units(out) == flatten_units(baseline)
@@ -201,7 +201,7 @@ class TestDefaultChain:
         """With flags off the chain output equals the legacy six-step chain."""
         from hecate.runtime.context_processors import ContextProcessorChain
 
-        monkeypatch.setattr(settings, "MEMORY_PREFETCH_ENABLED", False)
+        monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_prefetch_enabled=False))
         legacy = ContextProcessorChain(
             [
                 p

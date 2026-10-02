@@ -57,6 +57,7 @@ from hecate.ops.api.evaluation_annotations import router as evaluation_annotatio
 from hecate.ops.api.evaluation_backflow import router as evaluation_backflow_router
 from hecate.ops.api.evaluation_reports import router as evaluation_reports_router
 from hecate.ops.api.evaluation_tasks import router as evaluation_tasks_router
+from hecate.ops.api.hooks import router as hooks_router
 from hecate.ops.api.model_pricing import router as model_pricing_router
 from hecate.ops.api.ops_center_overview import router as ops_center_overview_router
 from hecate.ops.api.preflight import router as preflight_router
@@ -68,7 +69,6 @@ from hecate.ops.api.synthesis import router as synthesis_router
 from hecate.ops.api.tool_analytics import router as tool_analytics_router
 from hecate.ops.api.tool_decisions import router as tool_decisions_router
 from hecate.ops.api.traces import router as traces_router
-from hecate.runtime.api.hooks import router as hooks_router
 from hecate.studio.api.agent_templates import router as agent_templates_router
 from hecate.studio.api.agent_versions import router as agent_versions_router
 from hecate.studio.api.agents import router as agents_router

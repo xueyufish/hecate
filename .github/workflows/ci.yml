@@ -153,6 +153,45 @@ jobs:
 
   # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
   # requires Docker-in-Docker and is covered by integration tests locally.
+  runtime-wheel-clean-install:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        run: pip install uv
+      - name: Build hecate-runtime wheel (non-editable artifact)
+        run: uv build --package hecate-runtime
+      - name: Install wheel into a clean venv (no repo source path)
+        run: |
+          python -m venv "$RUNNER_TEMP/clean_venv"
+          "$RUNNER_TEMP/clean_venv/bin/python" -m pip install dist/hecate_runtime-*.whl
+      - name: Assert no full-hecate dependency leaked in
+        run: |
+          installed=$("$RUNNER_TEMP/clean_venv/bin/python" -m pip list --format freeze | grep -ixE 'hecate==.*' || true)
+          if [ -n "$installed" ]; then
+            echo "::error::clean venv contains the full hecate application: $installed"
+            exit 1
+          fi
+      - name: Run kernel smoke (from outside the repo)
+        working-directory: /tmp
+        run: |
+          "$RUNNER_TEMP/clean_venv/bin/python" "$GITHUB_WORKSPACE/packages/hecate-runtime/smoke/smoke_run.py"
+      - name: Assert optional extras are declared unsupported, not crashing
+        working-directory: /tmp
+        run: |
+          "$RUNNER_TEMP/clean_venv/bin/python" - <<'PY'
+          from hecate_runtime.capabilities_status import capability_status
+          caps = capability_status()
+          for key in ("memory_consolidation", "sandbox_offload", "memory_provider", "a2a_handoff"):
+              assert caps[key] == "unsupported", f"{key} should be unsupported without extras, got {caps[key]}"
+          print("capability status:", caps)
+          PY
+
   docker-sandbox-smoke:
     needs: changes
     if: needs.changes.outputs.code == 'true'

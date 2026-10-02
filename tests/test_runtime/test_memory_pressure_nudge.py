@@ -9,10 +9,11 @@ cross-validation).
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 import pytest
+from hecate_runtime.config import kernel_config
 
-from hecate.core.config import settings
 from hecate.runtime.context_policy import PROCESSOR_REGISTRY, validate_policy_spec
 from hecate.runtime.context_processors import (
     ChainContext,
@@ -49,7 +50,7 @@ def _processor_with_marker(marker, threshold: float = 0.9) -> MemoryPressureNudg
 
 
 async def _run(monkeypatch: pytest.MonkeyPatch, processor, units, ctx):
-    monkeypatch.setattr(settings, "MEMORY_PRESSURE_NUDGE_ENABLED", True)
+    monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_pressure_nudge_enabled=True))
     ContextProcessorChain([processor], session_state=ctx.state)
     return await processor.process(units, ctx)
 
@@ -138,7 +139,7 @@ async def test_marker_failure_degrades_to_hint_only(monkeypatch: pytest.MonkeyPa
 
 
 async def test_disabled_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(settings, "MEMORY_PRESSURE_NUDGE_ENABLED", False)
+    monkeypatch.setattr("hecate_runtime.config._current", replace(kernel_config(), memory_pressure_nudge_enabled=False))
     processor = MemoryPressureNudgeProcessor()
     out, result = await processor.process(unitize([_user("x" * 4000)]), _ctx())
     assert result.metadata["reason"] == "disabled"

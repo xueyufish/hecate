@@ -43,8 +43,26 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # domains / packages. Listed in roughly dependency order; conftest and
 # other side-effecting modules are intentionally excluded (they require
 # pytest fixtures).
+# Probe the kernel directly (the distribution root) AND the shim path the
+# platform still imports. Kernel entries are prefixed with hecate_runtime.;
+# shim entries keep hecate.runtime. and verify forwarding works under the
+# same blocked-prefix gate.
 CORE_RUNTIME_MODULES: tuple[str, ...] = (
+    "hecate_runtime.types",
+    "hecate_runtime.ports",
+    "hecate_runtime.eventstore",
+    "hecate_runtime.context",
+    "hecate_runtime.pregel",
+    "hecate_runtime.compiler",
+    "hecate_runtime.execution_assembly",
+    "hecate_runtime.memory",
+    "hecate_runtime.config",
+    "hecate_runtime.capabilities_status",
     "hecate.runtime.types",
+    "hecate.runtime.ports",
+    "hecate.runtime.eventstore",
+    "hecate.runtime.context",
+    "hecate.runtime.dynamic_types",
     "hecate.runtime.ports",
     "hecate.runtime.eventstore",
     "hecate.runtime.context",
@@ -113,16 +131,17 @@ ALL_BLOCKED_PREFIXES: tuple[str, ...] = BLOCKED_IN_MAIN_DOMAINS + BLOCKED_WHEELS
 # new sanctioned lazy import lands, add the row to BOTH the AGENTS.md
 # inventory (with an exit condition) and this map.
 ALLOWED_LAZY_IMPORTS: dict[str, tuple[str, ...]] = {
+    # step5b post-clearance inventory. Cleared rows (tool_access shell
+    # analysis -> hecate_runtime.shell_analysis; coordinator templates ->
+    # hecate_runtime.dynamic_orchestration; tool_worker builtin name set ->
+    # hecate_runtime.tool_names; task_memory_hook platform resolver ->
+    # hecate_runtime.memory) are gone. Remaining rows are optional
+    # capabilities, each with an exit condition in the package AGENTS.md.
     "agent_tool.py": ("hecate.channel.a2a",),
     "compaction.py": ("hecate_memory",),
     "context_processors.py": ("hecate_memory",),
     "offloader.py": ("hecate_sandbox",),
-    "task_memory_hook.py": ("hecate_memory",),
-    "tool_access.py": ("hecate.tools",),
-    "workers/coordinator_worker.py": ("hecate.studio",),
-    "workers/tool_worker.py": ("hecate.tools",),
     "security/egress.py": ("hecate.ops",),
-    "security/guardrail_assembly.py": ("hecate.ops",),
     "security/hooks/output_security.py": ("hecate.ops",),
 }
 
@@ -223,7 +242,7 @@ def test_runtime_has_no_undocumented_business_imports() -> None:
     fail with file and line so they can be inventoried or removed."""
     import ast
 
-    runtime_root = REPO_ROOT / "src" / "hecate" / "runtime"
+    runtime_root = REPO_ROOT / "packages" / "hecate-runtime" / "src" / "hecate_runtime"
     violations: list[str] = []
     for path in sorted(runtime_root.rglob("*.py")):
         rel = path.relative_to(runtime_root).as_posix()

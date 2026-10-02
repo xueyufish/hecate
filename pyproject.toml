@@ -46,6 +46,7 @@ dependencies = [
     "rich>=13.0.0",
     "litellm>=1.50.0",
     "redis>=5.0.0",
+    "hecate-runtime",
     "hecate-ops",
     "hecate-llm",
     "hecate-sandbox",
@@ -77,6 +78,7 @@ exclude = ["packages/channels"]
 
 [tool.uv.sources]
 hecate = { workspace = true }
+hecate-runtime = { workspace = true }
 hecate-ops = { workspace = true }
 hecate-llm = { workspace = true }
 hecate-sandbox = { workspace = true }

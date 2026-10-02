@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import pytest
-
-from hecate.runtime.temporal.conflict import ConflictResolver, ConflictStrategy
+from hecate_runtime.conflict import ConflictResolver, ConflictStrategy
 
 
 @pytest.fixture

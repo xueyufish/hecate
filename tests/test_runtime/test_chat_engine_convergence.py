@@ -241,7 +241,7 @@ async def test_http_fork_routes_by_flag(monkeypatch: pytest.MonkeyPatch) -> None
         patch("hecate.channel.api.v1.chat._build_tool_registry", return_value=MagicMock()),
         patch("hecate.channel.api.v1.chat._get_provider_config", new=AsyncMock(return_value={})),
         patch(
-            "hecate.runtime.security.guardrail_assembly.assemble_guardrails",
+            "hecate.core.composition.guardrail_platform.assemble_guardrails",
             new=AsyncMock(side_effect=lambda *a, **kw: _bundle()),
         ),
     ):

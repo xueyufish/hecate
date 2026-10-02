@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import uuid
 
+from hecate.core.composition.guardrail_platform import assemble_guardrails
 from hecate.models.tool_policy import ToolPolicyModel, ToolPolicyRuleModel
 from hecate.runtime.security.guardrail_assembly import (
     GuardrailBundle,
     NoAnswerApprovalCallback,
-    assemble_guardrails,
 )
 from hecate.runtime.tool_access import ApprovalDecision, RuleAction
 
