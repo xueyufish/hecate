@@ -336,7 +336,7 @@ async def enrich_traces(
     for row in rows.scalars():
         md = row.metadata_ or {}
         otel_trace_id = md.get("otel.trace_id")
-        if otel_trace_id in trace_ids:
+        if isinstance(otel_trace_id, str) and otel_trace_id in trace_ids:
             total_latency_ms = None
             output_data = row.output_data or {}
             if isinstance(output_data, dict):

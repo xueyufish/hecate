@@ -57,8 +57,8 @@ _LOCK_RETRY_MAX_S = 0.150
 
 # step5a: the composite worker and port summarizer moved to the shared
 # runtime assembly (hecate.runtime.execution_assembly); keep the legacy
-# private name as an alias so existing references keep working.
-_CompositeWorker = CompositeWorker
+# private name as a type alias so existing references keep working.
+type _CompositeWorker = CompositeWorker
 
 
 class TurnInFlightError(Exception):
