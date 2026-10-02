@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import Boolean, DateTime, Enum
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import JSON
 
@@ -36,10 +36,11 @@ class StandaloneEnrollmentModel(BaseModel):
     Fields:
 
     - **host_identity_ref** — JSON reference to the presenting host identity
-      (issuer domain + identity id); the registry validates resolvability.
+      (issuer domain + identity id); registration validates syntax only,
+      admission requires trusted resolution.
     - **trust_root_ref** — JSON reference to the trust root the host
-      validates against; enrollment without a resolvable trust root is
-      rejected, never defaulted.
+      validates against; missing references are rejected and named claims
+      remain pending until trusted resolution succeeds.
     - **installed_versions** — JSON list of the deployment/contract versions
       the host reports installed, with capability summaries; recorded as
       reported-at-enrollment data, not a live capability probe.
@@ -53,6 +54,9 @@ class StandaloneEnrollmentModel(BaseModel):
     """
 
     __tablename__ = "standalone_enrollments"
+    __table_args__ = (
+        CheckConstraint("NOT managed_new_runs OR admission = 'ADMITTED'", name="ck_enrollment_managed_admitted"),
+    )
 
     host_identity_ref: Mapped[dict] = mapped_column(JSON, nullable=False)
     trust_root_ref: Mapped[dict] = mapped_column(JSON, nullable=False)

@@ -68,7 +68,7 @@ class AgentDeploymentModel(BaseModel):
       mutated, deployments reference them.
     - **issuer_domain** — issuing domain for this registration; together
       with the row id it forms the contract ``deployment`` BackendRef.
-      Unique per (domain, backend_type, agent_version) so a backfill replay
+      Builtin rows are unique per (agent, version) so a backfill replay
       cannot produce a second builtin deployment.
     - **access_mode / transport_contract_version** — how the platform talks
       to the backend and which wire contract it speaks.
@@ -86,8 +86,7 @@ class AgentDeploymentModel(BaseModel):
       source + verification time. Missing verifiable values stay
       ``{"verification": "unverified"}``.
     - **is_default** — at most one default deployment per agent (unique
-      partial-style index enforced via the registry + unique constraint on
-      the backfill-relevant subset).
+      partial unique index on live default rows, in addition to registry locking).
     - **endpoint** / **config_ref** / **credential_ref** — where to reach
       the backend and indirection handles for configuration and secrets;
       never inline secrets.
@@ -95,6 +94,13 @@ class AgentDeploymentModel(BaseModel):
 
     __tablename__ = "agent_deployments"
     __table_args__ = (
+        Index(
+            "uq_agent_deployments_default",
+            "agent_id",
+            unique=True,
+            sqlite_where=text("is_default AND NOT deleted"),
+            postgresql_where=text("is_default AND NOT deleted"),
+        ),
         # One builtin deployment per (agent, version): makes the step4
         # backfill idempotent. Self-hosted/hosted rows of the same version
         # are legitimately distinct (different endpoints/regions), so their

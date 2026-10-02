@@ -36,13 +36,14 @@ class RunModel(BaseModel):
     Fields:
 
     - **task_id / deployment_id** — the owning task and the deployment the
-      attempt ran against (fixed configuration and capability snapshot live
-      on the deployment row; the run references, never copies them).
+      attempt ran against; ``execution_snapshot`` freezes the selected
+      version/configuration/capabilities for newly registered platform runs.
     - **attempt_no** — 1-based attempt counter per task; unique together
       with ``task_id`` so retries are new rows and concurrent retries
       cannot silently share a counter.
     - **identity_chain** — frozen ``IdentityChain`` serialization fixed at
       creation; later identity or delegation changes never rewrite it.
+      Imported chains are historical claims, never an authorization proof.
     - **backend_ref** — JSON execution-contract ``run`` BackendRef
       (issuer domain + backend-assigned id) identifying the actual backend
       execution.
@@ -57,7 +58,8 @@ class RunModel(BaseModel):
     - **origin** — ``platform`` for runs the platform dispatched,
       ``imported_observation`` for runs imported from a local host's
       records; imported rows gain no dispatch or approval rights by
-      construction (the registry offers no queueing API at all).
+      their origin and control owner; actual dispatch/approval paths must
+      enforce these fields when those paths are introduced.
     - **local_source** — for imported runs: JSON with the source
       deployment's issuing domain and the host-local run identifier, so
       re-imports dedupe and provenance stays queryable.
@@ -68,17 +70,28 @@ class RunModel(BaseModel):
         Index("uq_runs_task_attempt", "task_id", "attempt_no", unique=True),
         Index(
             "uq_runs_backend_session",
-            "backend_session",
+            "backend_session_issuer",
+            "backend_session_id",
             unique=True,
-            sqlite_where=text("backend_session IS NOT NULL"),
-            postgresql_where=text("backend_session IS NOT NULL"),
+            sqlite_where=text("backend_session_id IS NOT NULL"),
+            postgresql_where=text("backend_session_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_runs_local_source",
+            "workspace_id",
+            "deployment_id",
+            "local_source_issuer",
+            "local_run_id",
+            unique=True,
+            sqlite_where=text("local_run_id IS NOT NULL"),
+            postgresql_where=text("local_run_id IS NOT NULL"),
         ),
         Index("ix_runs_task_id", "task_id"),
         Index("ix_runs_workspace_id", "workspace_id"),
     )
 
     task_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("tasks.id", ondelete="CASCADE"),
+        ForeignKey("tasks.id", ondelete="RESTRICT"),
         nullable=False,
     )
     deployment_id: Mapped[uuid.UUID] = mapped_column(
@@ -91,6 +104,12 @@ class RunModel(BaseModel):
     identity_chain: Mapped[dict] = mapped_column(JSON, nullable=False)
     backend_ref: Mapped[dict] = mapped_column(JSON, nullable=False)
     backend_session: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    backend_session_issuer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    backend_session_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    execution_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    control_owner: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    local_source_issuer: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    local_run_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     event_cursor: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     projection: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     origin: Mapped[RunOrigin] = mapped_column(

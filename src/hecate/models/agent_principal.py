@@ -32,8 +32,8 @@ class AgentPrincipalModel(BaseModel):
 
     Fields:
 
-    - **agent_id** — the registered agent; unique among live principals so
-      an agent has at most one principal at a time.
+    - **agent_id** — the registered agent; unique per agent. Replacing a
+      revoked principal requires a future explicit history-preserving flow.
     - **workspace_id** — copied from the agent at registration; queries go
       through the registry service, never raw table access.
     - **organization_id** / **owner_user_id** — the resolvable responsibility

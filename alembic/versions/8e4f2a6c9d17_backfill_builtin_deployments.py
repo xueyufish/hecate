@@ -17,8 +17,8 @@ Migrate/contract half of the step4 deployment-registry migration:
 - contract tightening: nothing to alter — the expand revision created the
   fresh tables with full constraints.
 
-Rollback keeps the new tables (plan step4: "回滚应用时保留新表"): the
-downgrade removes only the backfilled rows/audit entries.
+Rollback keeps the new tables and all backfilled rows/audit entries. Schema
+downgrade is refused; application rollback is the supported recovery path.
 """
 
 from __future__ import annotations
@@ -59,13 +59,13 @@ def upgrade() -> None:
                 'BUILTIN',
                 'IN_PROCESS',
                 'hecate',
-                '{"contract_version": "0.1", "backend_type": "builtin", "ownership": {"harness": "hecate", "environment": "none", "tool_execution": "hecate_gateway"}}',
+                '{"contract_version": "0.1", "backend_type": "builtin", "ownership": {"harness": "hecate", "environment": "none", "tool_execution": "hecate_gateway"}, "capabilities": {"provide_input": "unsupported", "resolve_approval": "unsupported", "pause": "unsupported", "resume": "unsupported", "export_context": "unsupported"}}',
                 :harness,
                 :environment,
                 :tool_execution,
                 'UNVERIFIED',
                 'UNKNOWN',
-                TRUE,
+                NOT EXISTS (SELECT 1 FROM agent_deployments existing WHERE existing.agent_id = a.id AND existing.is_default AND NOT existing.deleted),
                 CURRENT_TIMESTAMP,
                 CURRENT_TIMESTAMP,
                 FALSE
@@ -73,9 +73,10 @@ def upgrade() -> None:
             JOIN agent_versions v
               ON v.agent_id = a.id
              AND v.version = COALESCE(
-                     a.published_version,
-                     (SELECT MAX(v2.version) FROM agent_versions v2 WHERE v2.agent_id = a.id)
+                     (SELECT v1.version FROM agent_versions v1 WHERE v1.agent_id = a.id AND v1.version = a.published_version AND NOT v1.deleted),
+                     (SELECT MAX(v2.version) FROM agent_versions v2 WHERE v2.agent_id = a.id AND NOT v2.deleted)
                  )
+             AND NOT v.deleted
             WHERE a.deleted IS FALSE
               AND NOT EXISTS (
                   SELECT 1 FROM agent_deployments d
@@ -95,21 +96,24 @@ def upgrade() -> None:
             """
             INSERT INTO audit_logs (
                 id, org_id, workspace_id, user_id, action,
-                resource_type, success, metadata, created_at
+                resource_type, resource_id, success, metadata, created_at, updated_at, deleted
             )
             SELECT
                 gen_random_uuid(),
-                a.workspace_id,
+                w.org_id,
                 a.workspace_id,
                 '00000000-0000-0000-0000-000000000000',
                 'AGENT_DEPLOYMENT_BACKFILL_PENDING',
                 'agent',
+                a.id,
                 TRUE,
-                '{"reason": "agent has no version snapshot; builtin deployment not created"}',
-                CURRENT_TIMESTAMP
+                '{"reason": "agent lacks a governed principal or a live version snapshot"}',
+                CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, FALSE
             FROM agents a
+            JOIN workspaces w ON w.id = a.workspace_id
             WHERE a.deleted IS FALSE
-              AND NOT EXISTS (SELECT 1 FROM agent_versions v WHERE v.agent_id = a.id)
+              AND (NOT EXISTS (SELECT 1 FROM agent_versions v WHERE v.agent_id = a.id AND NOT v.deleted)
+                   OR NOT EXISTS (SELECT 1 FROM agent_principals p WHERE p.agent_id = a.id AND NOT p.deleted))
               AND NOT EXISTS (
                   SELECT 1 FROM audit_logs al
                   WHERE al.action = 'AGENT_DEPLOYMENT_BACKFILL_PENDING'
@@ -122,7 +126,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-    # Keep the tables (plan step4 rollback rule); remove only backfill data.
-    bind.execute(sa.text("DELETE FROM agent_deployments WHERE backend_type = 'BUILTIN'"))
-    bind.execute(sa.text("DELETE FROM audit_logs WHERE action = 'AGENT_DEPLOYMENT_BACKFILL_PENDING'"))
+    raise RuntimeError("Step4 records must be retained; roll back the application without downgrading schema")

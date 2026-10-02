@@ -41,6 +41,12 @@ from hecate.models.agent_version import AgentVersionModel
 from hecate.models.audit import AuditLogModel
 from hecate.models.organization import OrganizationModel
 from hecate.models.user import UserModel
+from hecate.models.workspace import WorkspaceModel
+
+
+@pytest.fixture(autouse=True)
+def _tenant_context(default_workspace):
+    """Provide the real tenant required by registration and audit."""
 
 
 def hash_password(raw: str) -> str:
@@ -89,6 +95,10 @@ async def _org_and_user(db_session) -> tuple[OrganizationModel, UserModel]:
     await db_session.flush()
     user = UserModel(email=f"owner-{uuid.uuid4().hex[:8]}@example.com", hashed_password=hash_password("securepass123"))
     db_session.add(user)
+    await db_session.flush()
+    org.owner_id = user.id
+    workspace = await db_session.get(WorkspaceModel, ZERO_WS)
+    workspace.org_id = org.id
     await db_session.flush()
     return org, user
 
@@ -141,14 +151,16 @@ async def test_lifecycle_transitions_and_terminal_revocation(db_session) -> None
     registry = PrincipalRegistry(db_session)
     principal = await registry.register(agent.id, org.id, user.id)
 
-    suspended = await registry.transition(principal.id, PrincipalLifecycle.SUSPENDED, actor_id=user.id)
+    suspended = await registry.transition(
+        principal.id, PrincipalLifecycle.SUSPENDED, actor_id=user.id, workspace_id=ZERO_WS
+    )
     assert suspended.lifecycle is PrincipalLifecycle.SUSPENDED
-    reactivated = await registry.transition(principal.id, PrincipalLifecycle.ACTIVE)
+    reactivated = await registry.transition(principal.id, PrincipalLifecycle.ACTIVE, workspace_id=ZERO_WS)
     assert reactivated.lifecycle is PrincipalLifecycle.ACTIVE
-    revoked = await registry.transition(principal.id, PrincipalLifecycle.REVOKED)
+    revoked = await registry.transition(principal.id, PrincipalLifecycle.REVOKED, workspace_id=ZERO_WS)
 
     with pytest.raises(PrincipalTransitionError, match="not allowed"):
-        await registry.transition(principal.id, PrincipalLifecycle.ACTIVE)
+        await registry.transition(principal.id, PrincipalLifecycle.ACTIVE, workspace_id=ZERO_WS)
     assert revoked.lifecycle is PrincipalLifecycle.REVOKED
 
 
@@ -174,7 +186,7 @@ async def test_same_version_two_backends_and_backend_ref(db_session) -> None:
     registry = DeploymentRegistry(db_session)
 
     builtin = await registry.register(
-        agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, is_default=True
+        agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, is_default=True, workspace_id=ZERO_WS
     )
     hosted = await registry.register(
         agent.id,
@@ -184,6 +196,7 @@ async def test_same_version_two_backends_and_backend_ref(db_session) -> None:
         agent_version_id=version.id,
         issuer_domain="vendor-x",
         implementation_language="typescript",
+        workspace_id=ZERO_WS,
     )
 
     assert builtin.agent_version_id == version.id  # published_version=None -> latest
@@ -209,6 +222,7 @@ async def test_language_metadata_does_not_change_standing(db_session) -> None:
         BUILTIN_AXES,
         issuer_domain="site-a",
         implementation_language="python",
+        workspace_id=ZERO_WS,
     )
     rs_deploy = await registry.register(
         agent.id,
@@ -217,6 +231,7 @@ async def test_language_metadata_does_not_change_standing(db_session) -> None:
         BUILTIN_AXES,
         issuer_domain="site-b",
         implementation_language="rust",
+        workspace_id=ZERO_WS,
     )
 
     assert py_deploy.access_level is AccessLevel.UNVERIFIED
@@ -230,7 +245,12 @@ async def test_hosted_config_unverified_sentinel_and_validation(db_session) -> N
     registry = DeploymentRegistry(db_session)
 
     none_config = await registry.register(
-        agent.id, BackendType.HOSTED, AccessMode.REMOTE_SERVICE, HOSTED_AXES, issuer_domain="vendor-a"
+        agent.id,
+        BackendType.HOSTED,
+        AccessMode.REMOTE_SERVICE,
+        HOSTED_AXES,
+        issuer_domain="vendor-a",
+        workspace_id=ZERO_WS,
     )
     assert none_config.hosted_config == {"verification": "unverified"}
 
@@ -241,6 +261,7 @@ async def test_hosted_config_unverified_sentinel_and_validation(db_session) -> N
         HOSTED_AXES,
         issuer_domain="vendor-b",
         hosted_config={"region": "us"},
+        workspace_id=ZERO_WS,
     )
     assert silent_config.hosted_config["verification"] == "unverified"
 
@@ -251,8 +272,9 @@ async def test_hosted_config_unverified_sentinel_and_validation(db_session) -> N
         HOSTED_AXES,
         issuer_domain="vendor-c",
         hosted_config={"region": "us", "verification": "vendor-dpa-2026-09", "residency": "us"},
+        workspace_id=ZERO_WS,
     )
-    assert verified_config.hosted_config["verification"] == "vendor-dpa-2026-09"
+    assert verified_config.hosted_config["verification"] == "unverified"
 
     with pytest.raises(DeploymentValidationError, match="JSON object"):
         await registry.register(
@@ -261,11 +283,17 @@ async def test_hosted_config_unverified_sentinel_and_validation(db_session) -> N
             AccessMode.REMOTE_SERVICE,
             HOSTED_AXES,
             issuer_domain="vendor-d",
-            hosted_config="us-only",  # type: ignore[arg-type]
+            hosted_config="us-only",
+            workspace_id=ZERO_WS,
         )
     with pytest.raises(DeploymentValidationError, match="only valid for hosted"):
         await registry.register(
-            agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, hosted_config={"region": "us"}
+            agent.id,
+            BackendType.BUILTIN,
+            AccessMode.IN_PROCESS,
+            BUILTIN_AXES,
+            hosted_config={"region": "us"},
+            workspace_id=ZERO_WS,
         )
 
 
@@ -281,6 +309,7 @@ async def test_snapshot_validation_rejects_bad_shape_and_axis_mismatch(db_sessio
             AccessMode.IN_PROCESS,
             BUILTIN_AXES,
             capability_snapshot={"contract_version": "0.1", "ownership": {"harness": "bogus"}},
+            workspace_id=ZERO_WS,
         )
 
     conflicting = {
@@ -293,7 +322,12 @@ async def test_snapshot_validation_rejects_bad_shape_and_axis_mismatch(db_sessio
     }
     with pytest.raises(DeploymentValidationError, match="disagrees"):
         await registry.register(
-            agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, capability_snapshot=conflicting
+            agent.id,
+            BackendType.BUILTIN,
+            AccessMode.IN_PROCESS,
+            BUILTIN_AXES,
+            capability_snapshot=conflicting,
+            workspace_id=ZERO_WS,
         )
 
 
@@ -301,10 +335,14 @@ async def test_default_flag_is_unique_per_agent_and_audited(db_session) -> None:
     agent = await _agent(db_session)
     await _version(db_session, agent)
     registry = DeploymentRegistry(db_session)
-    first = await registry.register(agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, is_default=True)
-    second = await registry.register(agent.id, BackendType.SELF_HOSTED, AccessMode.LOCAL_PROCESS, BUILTIN_AXES)
+    first = await registry.register(
+        agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, is_default=True, workspace_id=ZERO_WS
+    )
+    second = await registry.register(
+        agent.id, BackendType.SELF_HOSTED, AccessMode.LOCAL_PROCESS, BUILTIN_AXES, workspace_id=ZERO_WS
+    )
 
-    await registry.set_default(agent.id, second.id)
+    await registry.set_default(agent.id, second.id, workspace_id=ZERO_WS)
 
     rows = {row.id: row for row in await registry.list_for_agent(agent.id, ZERO_WS)}
     assert rows[first.id].is_default is False
@@ -324,18 +362,22 @@ async def test_revoked_principal_blocks_new_deployments(db_session) -> None:
     org, user = await _org_and_user(db_session)
     principals = PrincipalRegistry(db_session)
     principal = await principals.register(agent.id, org.id, user.id)
-    await principals.transition(principal.id, PrincipalLifecycle.REVOKED)
+    await principals.transition(principal.id, PrincipalLifecycle.REVOKED, workspace_id=ZERO_WS)
 
     registry = DeploymentRegistry(db_session)
     with pytest.raises(DeploymentRegistryError, match="revoked"):
-        await registry.register(agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES)
+        await registry.register(
+            agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, workspace_id=ZERO_WS
+        )
 
 
 async def test_workspace_isolation_is_indistinguishable(db_session) -> None:
     agent = await _agent(db_session)
     await _version(db_session, agent)
     registry = DeploymentRegistry(db_session)
-    deployment = await registry.register(agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES)
+    deployment = await registry.register(
+        agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, workspace_id=ZERO_WS
+    )
 
     foreign = await registry.get_for_workspace(deployment.id, ZERO_WS)
     assert foreign.id == deployment.id
@@ -350,4 +392,6 @@ async def test_agent_without_versions_cannot_register(db_session) -> None:
     agent = await _agent(db_session)
     registry = DeploymentRegistry(db_session)
     with pytest.raises(DeploymentValidationError, match="no versions"):
-        await registry.register(agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES)
+        await registry.register(
+            agent.id, BackendType.BUILTIN, AccessMode.IN_PROCESS, BUILTIN_AXES, workspace_id=ZERO_WS
+        )

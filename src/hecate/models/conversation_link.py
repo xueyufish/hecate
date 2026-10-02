@@ -49,7 +49,7 @@ class ConversationTaskLinkModel(BaseModel):
     )
 
     conversation_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("sessions.id", ondelete="CASCADE"),
+        ForeignKey("conversations.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
     )

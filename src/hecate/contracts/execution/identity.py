@@ -32,7 +32,7 @@ class WorkloadIdentity:
 
     def __post_init__(self) -> None:
         require_kind(self.deployment, RefKind.DEPLOYMENT)
-        if not self.workload_id or not isinstance(self.workload_id, str):
+        if not isinstance(self.workload_id, str) or not self.workload_id.strip():
             raise ValueError("workload_id must be a non-empty string")
 
     def to_dict(self) -> dict[str, Any]:
@@ -52,20 +52,29 @@ class IdentityChain:
     ``principal_id`` is the agent principal (an enterprise responsibility
     subject, never a persona string). ``on_behalf_of`` carries the delegation
     reference when the workload acts on behalf of another principal.
+    ``audience`` fixes the intended target; legacy chains may omit it, but
+    new platform runs require it. The chain never authenticates its claims.
     """
 
     initiator: str | None
     principal_id: str
     workload: WorkloadIdentity
     on_behalf_of: BackendRef | None = None
+    audience: str | None = None
 
     def __post_init__(self) -> None:
-        if self.initiator is not None and (not self.initiator or not isinstance(self.initiator, str)):
+        if self.initiator is not None and (not isinstance(self.initiator, str) or not self.initiator.strip()):
             raise ValueError("initiator must be a non-empty string or None (system-initiated)")
-        if not self.principal_id or not isinstance(self.principal_id, str):
+        if not isinstance(self.principal_id, str) or not self.principal_id.strip():
             raise ValueError("principal_id must be a non-empty string")
         if self.on_behalf_of is not None and not isinstance(self.on_behalf_of, BackendRef):
             raise ValueError("on_behalf_of must be a BackendRef when present")
+        if not isinstance(self.workload, WorkloadIdentity):
+            raise ValueError("workload must be a WorkloadIdentity")
+        if self.on_behalf_of is not None:
+            require_kind(self.on_behalf_of, RefKind.AUTHORIZATION)
+        if self.audience is not None and (not isinstance(self.audience, str) or not self.audience.strip()):
+            raise ValueError("audience must be a non-empty string when present")
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -75,6 +84,8 @@ class IdentityChain:
         }
         if self.on_behalf_of is not None:
             out["on_behalf_of"] = self.on_behalf_of.to_dict()
+        if self.audience is not None:
+            out["audience"] = self.audience
         return out
 
     @classmethod
@@ -84,4 +95,5 @@ class IdentityChain:
             principal_id=data["principal_id"],
             workload=WorkloadIdentity.from_dict(data["workload"]),
             on_behalf_of=(BackendRef.from_dict(data["on_behalf_of"]) if "on_behalf_of" in data else None),
+            audience=data.get("audience"),
         )
