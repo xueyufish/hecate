@@ -561,7 +561,9 @@ def get_browser_tool_names() -> frozenset[str]:
 
 def get_memory_tool_names() -> frozenset[str]:
     """Return the set of tool names handled by the memory backend."""
-    return _MEMORY_TOOLS
+    from hecate_runtime.tool_names import MEMORY_TOOL_NAMES
+
+    return MEMORY_TOOL_NAMES
 
 
 def get_risk_level(tool_name: str) -> str:

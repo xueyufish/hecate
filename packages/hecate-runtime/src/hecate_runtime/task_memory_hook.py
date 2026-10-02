@@ -76,14 +76,14 @@ async def on_task_complete(
                 agent_id=agent_id,
                 episode_id=episode_id,
             )
-        # No specific episode id — let the service layer look up the
-        # active one by session.
-        from hecate_memory.memory.task_memory import TaskMemoryService
-
+        # No specific episode id — resolve the open episode through the
+        # injected gateway, then close via the provider's identical
+        # idempotent ``close_episode`` (same semantics as the platform
+        # TaskMemoryService, without importing the memory wheel here).
         ep = await _lookup_active_episode(workspace_id, agent_id, session_id)
         if ep is None:
             return None
-        return await TaskMemoryService.close_episode(
+        return await provider.close_episode(
             workspace_id=workspace_id,
             agent_id=agent_id,
             episode_id=ep,

@@ -405,7 +405,7 @@ class ToolAccessPolicy:
             if fnmatch.fnmatch(str(arg_value), pattern.arg_pattern):
                 return True
             # Content-aware check (T3.2): only for shell-class tools.
-            from hecate.tools.tool.shell_analysis import analyze_command
+            from hecate_runtime.shell_analysis import analyze_command
             from hecate_runtime.workers.sandbox_router import is_shell_tool
 
             if is_shell_tool(tool_name) and isinstance(arg_value, str):

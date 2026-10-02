@@ -916,13 +916,10 @@ class ToolWorker(Worker):
         # processor consumes this marker at the next context assembly
         # (agent-memory-tools, retrieval escalation gating).
         if isinstance(result, dict) and result.get("low_signal"):
-            try:
-                from hecate.tools.tool.builtin import get_memory_tool_names
+            from hecate_runtime.tool_names import MEMORY_TOOL_NAMES
 
-                if name in get_memory_tool_names() and execution_context is not None:
-                    execution_context["memory_retrieval_low_signal"] = True
-            except ImportError:
-                pass
+            if name in MEMORY_TOOL_NAMES and execution_context is not None:
+                execution_context["memory_retrieval_low_signal"] = True
         if self._event_store and execution_context:
             import hashlib as _hashlib
 

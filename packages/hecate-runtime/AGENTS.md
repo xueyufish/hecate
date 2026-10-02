@@ -30,44 +30,55 @@ import probe — blocks transitive/lazy imports an AST scan cannot see) and
   `hecate_enterprise`, `hecate_llm`, `hecate_channel_slack`,
   `hecate_channel_feishu`
 
-Function-level lazy imports are the only sanctioned way to cross the domain
-boundary (module-level imports are rejected by the AST scan; the runtime
-self-sufficiency probe AST-scans ALL import sites against the inventory
-below — an undocumented lazy import fails CI. Each row carries an exit
-condition; new rows must include one):
+Function-level lazy imports are the only sanctioned way to cross the
+kernel boundary (module-level imports are rejected by
+``tests/test_runtime/test_kernel_purity.py``; the self-sufficiency probe
+AST-scans ALL import sites against the inventory below — an undocumented
+lazy import fails CI. Each row carries an exit condition; new rows must
+include one). State after step5b
+(``runtime-standalone-distribution``):
 
-- `runtime/tool_access.py` → `hecate.tools.tool.shell_analysis`
-  (content-aware shell gating). *Exit*: a second shell-analysis
-  implementation appears or an engine hook replaces content gating —
-  promote to an injected interface.
-- `runtime/workers/coordinator_worker.py` →
-  `hecate.studio.workflows.templates` (dynamic orchestration executor).
-  *Exit*: template construction becomes parameter-injected / DSL-driven.
-- `runtime/agent_tool.py` → `hecate.channel.a2a.client` + `types`
+**Cleared in step5b** (no longer sanctioned, enforced absent):
+
+- ~~`tool_access.py` → `hecate.tools.tool.shell_analysis`~~ — the
+  analyzer moved INTO the kernel (`hecate_runtime.shell_analysis`);
+  the platform module is a forwarding shim.
+- ~~`workers/coordinator_worker.py` → `hecate.studio.workflows.templates`~~
+  — `build_dynamic_orchestration_executor` + roster helper moved into
+  `hecate_runtime.dynamic_orchestration`; studio forwards to the kernel.
+- ~~`workers/tool_worker.py` → `hecate.tools.tool.builtin`~~ — the
+  memory-tool name set is kernel-owned (`hecate_runtime.tool_names`);
+  the platform builtin module groups from it.
+- ~~`task_memory_hook.py` → `hecate_memory` + `EpisodeModel`~~ — writes
+  go through `hecate_runtime.memory` (injected provider source +
+  episode lookup); zero wheel/ORM imports.
+- ~~`security/guardrail_assembly.py` → `hecate.ops.*` + `hecate.models`~~
+  — the facade is kernel-pure (pre-loaded `ToolRule` rows);
+  DB loading and finding-writer construction live in the platform
+  bridge (`core/composition/guardrail_platform`).
+
+**Remaining sanctioned rows** (optional capabilities):
+
+- `agent_tool.py` → `hecate.channel.a2a.client` + `types`
   (A2A handoff transport). *Exit*: A2A client injected via a port
-  (fold into the A2A server-auth initiative).
-- `runtime/compaction.py`, `runtime/context_processors.py` →
-  `hecate_memory.memory.consolidation` (consolidation backend).
-  *Exit*: consolidation extracted behind a runtime-owned Protocol.
-- `runtime/offloader.py` → `hecate_sandbox.environment` (offload
-  execution env). *Exit*: sandbox environment exposed as a runtime port.
-- `runtime/task_memory_hook.py` → `hecate_memory.memory.task_memory` +
-  `EpisodeModel` (task-memory writes). *Exit*: writes injected via the
-  memory provider Protocol (dropping the ORM import).
-- `runtime/workers/tool_worker.py` → `hecate.tools.tool.builtin`
-  (memory-tool name set for retrieval escalation). *Exit*: the name set
-  moves to a shared constants module or is injected.
-- `runtime/security/egress.py` → `hecate.ops.dlp.*` (scanner via DI +
+  (fold into the A2A server-auth initiative). Standalone profile
+  declares the capability `unsupported` (see
+  `hecate_runtime.capabilities_status`).
+- `compaction.py`, `context_processors.py` →
+  `hecate_memory.memory.consolidation` (consolidation backend;
+  extra `memory`). *Exit*: consolidation extracted behind a
+  runtime-owned Protocol.
+- `offloader.py` → `hecate_sandbox.environment` (offload execution
+  env; extra `sandbox`). *Exit*: sandbox environment exposed as a
+  runtime port.
+- `security/egress.py` → `hecate.ops.dlp.*` (scanner via DI +
   TYPE_CHECKING annotations; action enum at its runtime use site).
   *Exit*: full DI when the DLP action enum moves out of ops.
-- `runtime/security/hooks/output_security.py` → `hecate.ops.dlp.*`,
+- `security/hooks/output_security.py` → `hecate.ops.dlp.*`,
   `hecate.ops.output_security.*`, `hecate.ops.security.findings_writer`
-  (scan/redact/record dispatch). *Exit*: scan, redact, and finding-write
+  (scan/redact/record dispatch; degraded pass-through under the
+  `security` extra contract). *Exit*: scan, redact, and finding-write
   injected via the security hook port.
-- `runtime/security/guardrail_assembly.py` →
-  `hecate.ops.security.findings_writer` (finding-write wiring into the
-  guardrail bundle). *Exit*: finding writes injected via the security
-  hook port (same initiative as the output_security row).
 
 (`runtime/agent_execution_port.py` rows removed — the adapter moved to
 `core/composition/agent_execution_port.py` in
