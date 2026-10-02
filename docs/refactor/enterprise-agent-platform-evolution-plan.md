@@ -463,20 +463,22 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 **操作：**
 
 - [x] 保留 `AgentModel` 与现有版本表，把它们视为定义和版本；避免新建同义的 AgentDefinitionVersion。（Deployment 外键引用 `agent_versions` 既有表（models/agent_deployment.py），未新建同义版本体系）
-- [x] 增加 Agent principal 及与现有 Agent 的关联：组织、负责人、生命周期、身份提供方映射。负责人是人类或明确的企业责任主体，不是 persona 字符串。（`AgentPrincipalModel` + `execution/principal_registry.py`：负责人解析到组织+活跃用户，persona 不产生 principal（测试钉住）；不可映射者按 pending 审计登记）
-- [x] 区分人类发起者、Agent principal、执行工作负载身份与 on-behalf-of 委派。Run 固定所用身份链和目标受众；工作负载证明其部署实例，不直接继承人类或平台管理员权限。（`contracts/execution/identity.py` 四槽 `IdentityChain`/`WorkloadIdentity`，与 `SecurityClaims.sub`/`delegation_ref` 对齐；Run 侧固化由 step4 第二支 task-run-model 消费）
-- [x] 增加 `AgentDeploymentModel`：AgentVersion、backend 类型和版本、进程内/本地进程/远程服务接入方式、传输契约版本、endpoint/配置引用、环境、能力快照、接入等级、健康状态、凭据引用。实现语言仅为登记元数据，不决定权限或能力等级。（models/agent_deployment.py + `deployment_registry.py`：快照经 `BackendCapabilities` 往返校验、语言元数据无授权语义（测试钉住）、builtin 回填幂等（部分唯一索引））
-- [x] 为 Deployment 的托管后端配置记录 harness 与环境提供方、服务地区、数据驻留和保留/删除条件、供应商内部工具范围及企业网关路径；Run 固定实际绑定的供应商 session/turn 引用。缺少可核实条件时不得默认判为私有部署或强制治理。（`hosted_config` JSON + 未核验哨兵（缺省强制 `verification: unverified`）；Run↔session/turn 引用归 step4 第二支）
-- [x] 增加 `TaskModel` 和 `RunModel`：Task 保存业务目标、发起者、验收和责任；Run 保存一次后端执行、尝试号、固定配置及后端运行 ID。（`models/task.py` 无状态列、`models/run.py` 尝试号+冻结身份链+backend ref；固定配置/能力快照经 deployment 引用不复制；Task 状态机属 step6，spec 显式禁止预先引入）
-- [x] 区分平台记录与独立宿主记录：平台 Task 的验收/责任、Run 的后端投影与宿主真实执行状态分别指定字段 owner。新增本地部署来源/本地 ID 映射、事件序号与控制 ownership；独立运行不读平台表，观察接入不能自动取得投递或审批权。（Run 的 projection/event_cursor 归平台、origin=imported_observation + local_source 登记来源；registry 无投递 API——结构性证明观察无投递权；分层测试钉住六表 execution 单写入方）
-- [x] 定义独立部署注册流程：校验宿主身份与信任根、登记已安装版本/能力、显式选择受管的新 Run；历史 Run 仅按来源导入观察，活跃 Run 默认保持原模式。模式转换有操作者、准入与审计，不因网络重连自动改变调度权。（`standalone_enrollments` 表 + registry：信任根不可解析即拒绝、managed_new_runs 默认 false、仅操作者经 set_managed_opt_in 翻转并留审计；真实注册/断连/重连验证归 `managed-runner-enrollment` step6/7）
-- [x] 定义 `conversation_id / task_id / run_id / backend_session_id` 的映射；一个会话可以产生不同任务，一个任务重试产生新 Run，不能复用旧 run_id 冒充恢复。（`execution/task_run_registry.py` 单写入方：会话→多任务、(task,attempt_no) 唯一索引、backend session 部分唯一索引拒绝二次绑定、无 run_id 复活路径）
-- [x] 对旧 Agent 回填 builtin deployment，对已有 session 建立兼容映射；缺少负责人或组织数据的记录标记待治理，不自动赋平台身份。（builtin 回填见 Change 1 #202；session 兼容映射经 `link_conversation` 惰性创建，治理数据不解析时 governance_status=pending，不自动赋身份）
-- [x] 设计增量迁移：先新增可空列/新表，再回填和校验，最后收紧约束。（迁移 `c1d2e3f4a5b6` 全为新表、约束即建即紧、回填为空集+惰性映射；PG 16 完整 up→down→up 双循环验证，修复 JSON 列 btree 索引与 ENUM 类型残留两个 PG 特有问题）
+- [x] 增加 Agent principal 及与现有 Agent 的关联：组织、负责人、生命周期、身份提供方映射。负责人是人类或明确的企业责任主体，不是 persona 字符串。（`principal_registry.py` 校验真实 workspace/组织、活跃负责人及其归属；生命周期转换带 workspace；IdP 成对登记。当前支持人类负责人，其他企业责任主体以可解析身份适配接入，不接受自由文本）
+- [x] 区分人类发起者、Agent principal、执行工作负载身份与 on-behalf-of 委派。Run 固定所用身份链和目标受众；工作负载证明其部署实例，不直接继承人类或平台管理员权限。（`IdentityChain` 保留独立身份槽及 `audience`；新建平台 Run 校验 workload 的部署引用和活跃 principal 归属，要求非空受众；委派使用 authorization 引用。这里只登记身份绑定，真实凭据/委派/受众鉴权属 step7）
+- [x] 增加 `AgentDeploymentModel`：AgentVersion、backend 类型和版本、进程内/本地进程/远程服务接入方式、传输契约版本、endpoint/配置引用、环境、能力快照、接入等级、健康状态、凭据引用。实现语言仅为登记元数据，不决定权限或能力等级。（`deployment_registry.py` 校验版本归属、完整能力快照与 backend/ownership 一致；缺省能力为 unsupported；登记 API 拒绝自行提升 enforced。默认部署使用行锁及部分唯一索引；真实认证提升由 step7/8 接入）
+- [x] 为 Deployment 的托管后端配置记录 harness 与环境提供方、服务地区、数据驻留和保留/删除条件、供应商内部工具范围及企业网关路径；Run 固定实际绑定的供应商 session/turn 引用。缺少可核实条件时不得默认判为私有部署或强制治理。（`hosted_config` 校验来源/核验时间及完整条件；完整供应商声明也仅标记 declared，缺失为 unverified。Run 的后端会话不可覆盖，绑定以签发域/ID 规范化约束；认证与驻留策略决策由 step7/8 实施）
+- [x] 增加 `TaskModel` 和 `RunModel`：Task 保存业务目标、发起者、验收和责任；Run 保存一次后端执行、尝试号、固定配置及后端运行 ID。（Task 不引入 step6 状态机；新平台 Run 的 `execution_snapshot` 复制版本配置及部署能力/配置/凭据引用，后续部署变更不改历史。秘密值不复制；历史 Run/观察导入未能证明的快照保持缺失，不以当前配置补造）
+- [x] 区分平台记录与独立宿主记录：平台 Task 的验收/责任、Run 的后端投影与宿主真实执行状态分别指定字段 owner。新增本地部署来源/本地 ID 映射、事件序号与控制 ownership；独立运行不读平台表，观察接入不能自动取得投递或审批权。（Run 使用 `origin`、`control_owner`、规范化来源键；projection/event_cursor 归平台且先验证再写。历史身份只是来源声明；step6/7 必须在真实投递和审批入口检查 origin/owner，不能把“登记服务没有投递 API”作为权限隔离证明）
+- [x] 定义独立部署注册流程：校验宿主身份与信任根、登记已安装版本/能力、显式选择受管的新 Run；历史 Run 仅按来源导入观察，活跃 Run 默认保持原模式。模式转换有操作者、准入与审计，不因网络重连自动改变调度权。（named refs 只登记 pending；准入需要活跃 workspace 管理员、版本/能力和可信解析器的肯定结果；解析器缺失/失败时拒绝。数据库禁止 rejected/pending 同时开启 managed。真实解析器装配、注册/断连/重连和授权租约由 step6/7 交付；本步不声称已有受管执行）
+- [x] 定义 `conversation_id / task_id / run_id / backend_session_id` 的映射；一个会话可以产生不同任务，一个任务重试产生新 Run，不能复用旧 run_id 冒充恢复。（`task_run_registry.py` 单写入方：Task 行锁串行分配尝试号；backend 会话以签发域/ID 永久保留，软删除不释放；本地导入按 workspace/部署/来源/本地 ID 幂等，不扫描整表）
+- [x] 对旧 Agent 回填 builtin deployment，对已有 session 建立兼容映射；缺少负责人或组织数据的记录标记待治理，不自动赋平台身份。（回填优先有效已发布版本、否则最新有效版本；无版本或未有 principal 者按真实组织与 Agent ID 记录幂等待治理审计。`link_session` 经真实 `Session.conversation_id` 建立映射；conversation 外键指向 conversations，双方必须同 workspace；治理未解析默认 pending，旧执行入口暂不切换）
+- [x] 设计增量迁移：先新增可空列/新表，再回填和校验，最后收紧约束。（修复迁移 `e9a4b72c6d10` 新增可空快照/标识字段、校正已存在的 session 映射和组织审计、补约束；重复或不可解析数据明确阻止升级供人工修复，不静默删除。Step4 与修复迁移 downgrade 均明确拒绝；应用回退保留新表及运行/审计记录，不能以删除表的 up→down→up 测试证明安全回退）
 
 **验收：**旧 Agent 在默认 builtin deployment 上仍可执行；同一版本能登记不同后端部署；跨 workspace 不可读取或指定其他部署；重试可追溯到原 Task。
 
 **迁移/回退：**保持旧字段可读，兼容期通过唯一服务层维护映射；不允许业务方独立双写导致两套配置失配。回滚应用时保留新表，禁止自动丢弃运行记录。
+
+**审查证据与后续边界：**见 [Step4 审查报告](step4-review-report.md)。注册值及引用不等价于认证/授权证明；托管条件尚需可信认证，独立宿主解析器尚需真实装配。拒绝审计随登记调用方事务保存，接入 API 必须明确拒绝事务的提交策略，不能无条件 rollback 后声称拒绝已持久审计。step5 才迁移旧执行入口，step6/7 才验证真实调度、权限和断连；Step4 模型完成不能替代这些步骤的验收。
 
 ### step5 — 交付独立执行组件，逐条迁移平台入口
 

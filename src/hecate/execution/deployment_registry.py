@@ -7,8 +7,8 @@ Registration validates the capability snapshot against the execution
 contract (``BackendCapabilities``), keeps the denormalized axes columns
 consistent with it, records hosted-backend dual-axis configuration with an
 explicit ``unverified`` sentinel, and enforces at most one default
-deployment per agent. Workspace isolation is enforced on every read by
-joining the owning agent - a missing and a foreign deployment are
+deployment per agent. Workspace isolation is enforced on every read using
+the registered workspace boundary - a missing and a foreign deployment are
 indistinguishable. Implementation-language metadata is recorded but never
 consulted for authorization or capability decisions.
 """
@@ -16,13 +16,16 @@ consulted for authorization or capability decisions.
 from __future__ import annotations
 
 import uuid
+from copy import deepcopy
+from datetime import datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hecate.contracts.execution.capabilities import BackendCapabilities, OwnershipAxes
+from hecate.contracts.execution.capabilities import CAPABILITY_NAMES, BackendCapabilities, OwnershipAxes
 from hecate.contracts.execution.references import BackendRef, RefKind
 from hecate.execution.principal_registry import PrincipalRegistry
+from hecate.execution.registry_support import registry_audit, require_workspace
 from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import (
     AccessLevel,
@@ -33,7 +36,6 @@ from hecate.models.agent_deployment import (
 )
 from hecate.models.agent_principal import PrincipalLifecycle
 from hecate.models.agent_version import AgentVersionModel
-from hecate.models.audit import AuditLogModel
 
 UNVERIFIED_HOSTED_CONFIG: dict[str, str] = {"verification": "unverified"}
 
@@ -64,6 +66,7 @@ class DeploymentRegistry:
         access_mode: AccessMode,
         axes: OwnershipAxes,
         *,
+        workspace_id: uuid.UUID,
         agent_version_id: uuid.UUID | None = None,
         issuer_domain: str = "hecate",
         capability_snapshot: dict | None = None,
@@ -88,14 +91,33 @@ class DeploymentRegistry:
         sentinel and never inherit private-deployment or enforced semantics.
         """
         agent = await self._session.get(AgentModel, agent_id)
-        if agent is None or agent.deleted:
-            raise DeploymentNotFoundError(f"agent {agent_id} not found")
+        if agent is None or agent.deleted or agent.workspace_id != workspace_id:
+            raise DeploymentNotFoundError(f"agent {agent_id} not found in workspace")
+        try:
+            await require_workspace(self._session, workspace_id)
+        except ValueError as exc:
+            raise DeploymentNotFoundError("workspace not found") from exc
+        if not issuer_domain.strip():
+            raise DeploymentValidationError("issuer_domain must be non-empty")
+        if access_level is not AccessLevel.UNVERIFIED:
+            raise DeploymentValidationError(f"{access_level.value} access requires a trusted certification workflow")
 
         principal = await self._principals.get_active_for_agent(agent_id)
         if principal is not None and principal.lifecycle is PrincipalLifecycle.REVOKED:
+            await self._audit(
+                workspace_id=workspace_id,
+                actor=registered_by,
+                action="AGENT_DEPLOYMENT_REJECTED",
+                resource_id=agent_id,
+                detail={"reason": "principal is revoked"},
+                success=False,
+            )
             raise DeploymentRegistryError(f"agent {agent_id} principal is revoked; new deployments are refused")
 
         version_id = agent_version_id or await self._resolve_version(agent)
+        version = await self._session.get(AgentVersionModel, version_id)
+        if version is None or version.deleted or version.agent_id != agent.id:
+            raise DeploymentValidationError("version does not belong to this agent")
         snapshot = await self._validated_snapshot(capability_snapshot, axes, backend_type)
 
         if backend_type is BackendType.HOSTED:
@@ -131,8 +153,8 @@ class DeploymentRegistry:
         self._session.add(deployment)
         await self._session.flush()
         if is_default:
-            await self.set_default(agent_id, deployment.id, actor_id=registered_by)
-        self._audit(
+            await self.set_default(agent_id, deployment.id, workspace_id=workspace_id, actor_id=registered_by)
+        await self._audit(
             workspace_id=agent.workspace_id,
             actor=registered_by,
             action="AGENT_DEPLOYMENT_REGISTERED",
@@ -151,10 +173,24 @@ class DeploymentRegistry:
         agent_id: uuid.UUID,
         deployment_id: uuid.UUID,
         *,
+        workspace_id: uuid.UUID,
         actor_id: uuid.UUID | None = None,
     ) -> None:
         """Make ``deployment_id`` the agent's only default deployment."""
-        deployment = await self.get_for_workspace(deployment_id, await self._agent_workspace(agent_id))
+        agent = (
+            await self._session.execute(
+                select(AgentModel)
+                .where(
+                    AgentModel.id == agent_id,
+                    AgentModel.workspace_id == workspace_id,
+                    AgentModel.deleted.is_(False),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent is None:
+            raise DeploymentNotFoundError("agent not found in workspace")
+        deployment = await self.get_for_workspace(deployment_id, workspace_id)
         if deployment.agent_id != agent_id:
             raise DeploymentValidationError(f"deployment {deployment_id} does not belong to agent {agent_id}")
         await self._session.execute(
@@ -164,7 +200,7 @@ class DeploymentRegistry:
         )
         deployment.is_default = True
         await self._session.flush()
-        self._audit(
+        await self._audit(
             workspace_id=deployment.workspace_id,
             actor=actor_id,
             action="AGENT_DEPLOYMENT_DEFAULT_SET",
@@ -217,6 +253,7 @@ class DeploymentRegistry:
                     select(AgentVersionModel).where(
                         AgentVersionModel.agent_id == agent.id,
                         AgentVersionModel.version == agent.published_version,
+                        AgentVersionModel.deleted.is_(False),
                     )
                 )
             ).scalar_one_or_none()
@@ -225,7 +262,7 @@ class DeploymentRegistry:
         row = (
             await self._session.execute(
                 select(AgentVersionModel)
-                .where(AgentVersionModel.agent_id == agent.id)
+                .where(AgentVersionModel.agent_id == agent.id, AgentVersionModel.deleted.is_(False))
                 .order_by(AgentVersionModel.version.desc())
                 .limit(1)
             )
@@ -239,10 +276,11 @@ class DeploymentRegistry:
         capability_snapshot: dict | None, axes: OwnershipAxes, backend_type: BackendType
     ) -> dict:
         if capability_snapshot is None:
-            return {
+            capability_snapshot = {
                 "contract_version": "0.1",
                 "backend_type": backend_type.value,
                 "ownership": axes.to_dict(),
+                "capabilities": {name: "unsupported" for name in CAPABILITY_NAMES},
             }
         try:
             parsed = BackendCapabilities.from_dict(capability_snapshot)
@@ -250,7 +288,11 @@ class DeploymentRegistry:
             raise DeploymentValidationError(f"capability snapshot does not round-trip: {exc}") from exc
         if parsed.ownership != axes:
             raise DeploymentValidationError("capability snapshot ownership disagrees with the axes columns")
-        return capability_snapshot
+        if parsed.backend_type != backend_type.value:
+            raise DeploymentValidationError("capability snapshot backend_type disagrees with deployment")
+        if any(parsed.level_of(name).value == "enforced" for name in CAPABILITY_NAMES):
+            raise DeploymentValidationError("enforced capabilities require a trusted certification workflow")
+        return deepcopy(parsed.to_dict())
 
     @staticmethod
     def _validated_hosted_config(hosted_config: dict | None) -> dict:
@@ -258,20 +300,35 @@ class DeploymentRegistry:
             return dict(UNVERIFIED_HOSTED_CONFIG)
         if not isinstance(hosted_config, dict):
             raise DeploymentValidationError("hosted_config must be a JSON object")
-        verification = hosted_config.get("verification")
-        if not isinstance(verification, str) or not verification:
-            # No verifiable statement: keep the explicit sentinel rather
-            # than an implicit default that reads as private/enforced.
-            return {**hosted_config, **UNVERIFIED_HOSTED_CONFIG}
-        return hosted_config
+        stored = deepcopy(hosted_config)
+        required = (
+            "harness_provider",
+            "environment_provider",
+            "region",
+            "residency",
+            "retention",
+            "deletion",
+            "internal_tools",
+            "gateway_path",
+            "source",
+            "checked_at",
+        )
+        complete = all(name in stored and stored[name] is not None for name in required)
+        complete = complete and all(
+            isinstance(stored.get(name), str) and bool(stored[name].strip())
+            for name in ("harness_provider", "environment_provider", "region", "source", "checked_at")
+        )
+        if complete:
+            try:
+                checked = datetime.fromisoformat(stored["checked_at"])
+                complete = checked.tzinfo is not None
+            except ValueError:
+                complete = False
+        # Vendor facts remain claims until a trusted certification flow verifies them.
+        stored["verification"] = "declared" if complete else "unverified"
+        return stored
 
-    async def _agent_workspace(self, agent_id: uuid.UUID) -> uuid.UUID:
-        agent = await self._session.get(AgentModel, agent_id)
-        if agent is None or agent.deleted:
-            raise DeploymentNotFoundError(f"agent {agent_id} not found")
-        return agent.workspace_id
-
-    def _audit(
+    async def _audit(
         self,
         *,
         workspace_id: uuid.UUID,
@@ -279,16 +336,15 @@ class DeploymentRegistry:
         action: str,
         resource_id: uuid.UUID,
         detail: dict[str, str],
+        success: bool = True,
     ) -> None:
-        self._session.add(
-            AuditLogModel(
-                org_id=workspace_id,
-                workspace_id=workspace_id,
-                user_id=actor or uuid.UUID(int=0),
-                action=action,
-                resource_type="agent_deployment",
-                resource_id=resource_id,
-                success=True,
-                metadata_=detail,
-            )
+        await registry_audit(
+            self._session,
+            workspace_id=workspace_id,
+            actor=actor,
+            action=action,
+            resource_type="agent_deployment",
+            resource_id=resource_id,
+            detail=detail,
+            success=success,
         )

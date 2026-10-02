@@ -24,12 +24,22 @@ from hecate.execution.task_run_registry import (
 )
 from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
+from hecate.models.agent_principal import AgentPrincipalModel
 from hecate.models.agent_version import AgentVersionModel
 from hecate.models.audit import AuditLogModel
+from hecate.models.conversation import ConversationModel
 from hecate.models.conversation_link import ConversationTaskLinkModel, GovernanceStatus
 from hecate.models.run import RunOrigin
 from hecate.models.standalone_enrollment import AdmissionResult, StandaloneEnrollmentModel
 from hecate.models.task import TaskModel
+from hecate.models.user import UserModel
+from hecate.models.workspace_member import WorkspaceMemberModel, WorkspaceRole
+
+
+@pytest.fixture(autouse=True)
+def _tenant_context(default_workspace):
+    """Use real tenant records for registration and audit."""
+
 
 ZERO_WS = uuid.UUID("00000000-0000-0000-0000-000000000000")
 OTHER_WS = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -44,14 +54,20 @@ _INITIATOR = {
 }
 
 
-def _chain(principal: str = "principal-1"):
+def _chain(deployment: AgentDeploymentModel | None = None, principal: str | None = None):
     from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
     from hecate.contracts.execution.references import deployment_ref
 
     return IdentityChain(
         initiator="user-1",
-        principal_id=principal,
-        workload=WorkloadIdentity(deployment=deployment_ref("hecate", "d-1"), workload_id="w-1"),
+        principal_id=principal or (str(deployment.agent_id) if deployment else "principal-1"),
+        workload=WorkloadIdentity(
+            deployment=deployment_ref(
+                deployment.issuer_domain if deployment else "hecate", str(deployment.id) if deployment else "d-1"
+            ),
+            workload_id="w-1",
+        ),
+        audience="enterprise-tools",
     )
 
 
@@ -68,6 +84,19 @@ async def _deployment(db_session) -> AgentDeploymentModel:
     )
     db_session.add(version)
     await db_session.flush()
+    user = UserModel(email=f"owner-{agent.id}@example.com", hashed_password=uuid.uuid4().hex)
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(
+        AgentPrincipalModel(
+            id=agent.id,
+            agent_id=agent.id,
+            workspace_id=ZERO_WS,
+            organization_id=ZERO_WS,
+            owner_user_id=user.id,
+        )
+    )
+    await db_session.flush()
     deployment = AgentDeploymentModel(
         agent_id=agent.id,
         agent_version_id=version.id,
@@ -76,9 +105,9 @@ async def _deployment(db_session) -> AgentDeploymentModel:
         access_mode=AccessMode.IN_PROCESS,
         issuer_domain="hecate",
         capability_snapshot={},
-        axes_harness="HECATE",
-        axes_environment="NONE",
-        axes_tool_execution="HECATE_GATEWAY",
+        axes_harness="hecate",
+        axes_environment="none",
+        axes_tool_execution="hecate_gateway",
     )
     db_session.add(deployment)
     await db_session.flush()
@@ -135,14 +164,14 @@ async def test_retry_creates_new_run_with_incremented_attempt(db_session) -> Non
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("backend", "br-1"),
     )
     second = await registry.create_run(
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("backend", "br-2"),
     )
 
@@ -163,17 +192,17 @@ async def test_run_pins_the_identity_chain_snapshot(db_session) -> None:
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain("principal-A"),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("backend", "br-1"),
     )
     stored = dict(run.identity_chain)
     # Later delegation change in the caller's world: the frozen row keeps A.
-    fresh = _chain("principal-B")
-    assert stored["principal_id"] == "principal-A"
+    fresh = _chain(deployment, "principal-B")
+    assert stored["principal_id"] == str(deployment.agent_id)
     assert fresh.principal_id == "principal-B"
     from hecate.contracts.execution.identity import IdentityChain
 
-    assert IdentityChain.from_dict(stored).principal_id == "principal-A"
+    assert IdentityChain.from_dict(stored).principal_id == str(deployment.agent_id)
 
 
 async def test_run_rejects_wrong_reference_kind(db_session) -> None:
@@ -185,7 +214,7 @@ async def test_run_rejects_wrong_reference_kind(db_session) -> None:
             task_id=task.id,
             workspace_id=ZERO_WS,
             deployment_id=deployment.id,
-            identity_chain=_chain(),
+            identity_chain=_chain(deployment),
             backend_run_ref=session_ref("backend", "s-1"),
         )
 
@@ -214,18 +243,18 @@ async def test_backend_session_binding_is_unique_across_runs(db_session) -> None
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("backend", "br-1"),
     )
     second = await registry.create_run(
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("backend", "br-2"),
     )
 
-    await registry.bind_backend_session(first.id, ZERO_WS, session_ref="s".__class__ and turn_ref("vendor", "turn-9"))
+    await registry.bind_backend_session(first.id, ZERO_WS, session_ref=turn_ref("vendor", "turn-9"))
     with pytest.raises(BackendSessionConflictError, match="already bound"):
         await registry.bind_backend_session(second.id, ZERO_WS, session_ref=turn_ref("vendor", "turn-9"))
     # The existing binding is untouched.
@@ -241,7 +270,7 @@ async def test_backend_session_rejects_non_session_kinds(db_session) -> None:
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("backend", "br-1"),
     )
     with pytest.raises(TaskRunValidationError, match="session/turn"):
@@ -259,7 +288,7 @@ async def test_projection_update_touches_only_projection_fields(db_session) -> N
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("backend", "br-1"),
     )
     frozen_identity = dict(run.identity_chain)
@@ -282,7 +311,7 @@ async def test_projection_cursor_never_moves_backwards(db_session) -> None:
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("backend", "br-1"),
     )
     await registry.update_projection(run.id, ZERO_WS, projection={}, event_cursor=5)
@@ -304,7 +333,7 @@ async def test_imported_observation_creates_only_its_row(db_session) -> None:
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("local-host", "lr-1"),
         local_source={"issuer_domain": "local-host", "local_run_id": "lr-1"},
     )
@@ -326,7 +355,7 @@ async def test_imported_observation_requires_local_run_id(db_session) -> None:
             task_id=task.id,
             workspace_id=ZERO_WS,
             deployment_id=deployment.id,
-            identity_chain=_chain(),
+            identity_chain=_chain(deployment),
             backend_run_ref=run_ref("local-host", "lr-1"),
             local_source={"issuer_domain": "local-host"},
         )
@@ -340,13 +369,23 @@ async def test_local_source_dedupe_probe_finds_imported_run(db_session) -> None:
         task_id=task.id,
         workspace_id=ZERO_WS,
         deployment_id=deployment.id,
-        identity_chain=_chain(),
+        identity_chain=_chain(deployment),
         backend_run_ref=run_ref("local-host", "lr-1"),
         local_source={"issuer_domain": "local-host", "local_run_id": "lr-1"},
     )
-    found = await registry.find_local_source_run("lr-1", ZERO_WS)
+    found = await registry.find_local_source_run(
+        "lr-1", ZERO_WS, issuer_domain="local-host", deployment_id=deployment.id
+    )
     assert found is not None
-    assert await registry.find_local_source_run("lr-missing", ZERO_WS) is None
+    assert (
+        await registry.find_local_source_run(
+            "lr-missing",
+            ZERO_WS,
+            issuer_domain="local-host",
+            deployment_id=deployment.id,
+        )
+        is None
+    )
 
 
 # --- standalone enrollment ------------------------------------------------
@@ -381,13 +420,22 @@ async def test_enrollment_defaults_to_no_managed_runs_and_audits(db_session) -> 
 
 
 async def test_managed_opt_in_requires_operator_and_leaves_audit(db_session) -> None:
-    registry = TaskRunRegistry(db_session)
+    async def resolve(workspace_id, host, root, versions):
+        return workspace_id == ZERO_WS and host["id"] == "host-1" and root["id"] == "root-1"
+
+    registry = TaskRunRegistry(db_session, enrollment_resolver=resolve)
     enrollment = await registry.register_standalone_enrollment(
         workspace_id=ZERO_WS,
         host_identity_ref={"issuer_domain": "corp", "id": "host-1"},
         trust_root_ref={"issuer_domain": "corp", "id": "root-1"},
+        installed_versions={"contracts": ["0.1"], "capabilities": {"cancel": "unsupported"}},
     )
-    operator = uuid.uuid4()
+    user = UserModel(email="admin@example.com", hashed_password=uuid.uuid4().hex)
+    db_session.add(user)
+    await db_session.flush()
+    operator = user.id
+    db_session.add(WorkspaceMemberModel(user_id=operator, workspace_id=ZERO_WS, role=WorkspaceRole.ADMIN))
+    await db_session.flush()
     await registry.set_managed_opt_in(
         enrollment.id, ZERO_WS, managed_new_runs=True, operator_id=operator, admitted=True
     )
@@ -408,7 +456,10 @@ async def test_conversation_link_is_lazy_idempotent_and_multi_task(db_session) -
     registry = TaskRunRegistry(db_session)
     task_a = await _task(db_session, registry)
     task_b = await _task(db_session, registry)
-    conversation = uuid.uuid4()
+    conversation_row = ConversationModel(agent_id=uuid.uuid4(), workspace_id=ZERO_WS)
+    db_session.add(conversation_row)
+    await db_session.flush()
+    conversation = conversation_row.id
 
     first = await registry.link_conversation(conversation_id=conversation, task_id=task_a.id, workspace_id=ZERO_WS)
     again = await registry.link_conversation(conversation_id=conversation, task_id=task_a.id, workspace_id=ZERO_WS)
@@ -422,8 +473,11 @@ async def test_conversation_link_is_lazy_idempotent_and_multi_task(db_session) -
 async def test_unresolvable_governance_stays_pending(db_session) -> None:
     registry = TaskRunRegistry(db_session)
     task = await _task(db_session, registry)
+    conversation = ConversationModel(agent_id=uuid.uuid4(), workspace_id=ZERO_WS)
+    db_session.add(conversation)
+    await db_session.flush()
     link = await registry.link_conversation(
-        conversation_id=uuid.uuid4(), task_id=task.id, workspace_id=ZERO_WS, initiator_resolves=False
+        conversation_id=conversation.id, task_id=task.id, workspace_id=ZERO_WS, initiator_resolves=False
     )
     assert link.governance_status is GovernanceStatus.PENDING
     # Pending is stored but no platform identity is fabricated: the link has

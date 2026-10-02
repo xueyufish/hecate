@@ -441,7 +441,7 @@ class TestDeploymentRegistryTablesAreExecutionOwned:
     principal 的登记经过唯一应用服务写入;其他域不得直接写这两张表或并行
     维护同义映射"; the task-run tables follow the same rule). The AST
     import-face scan mirrors the W1—W3 sampling method from the platform
-    baseline: any module-level import of the model modules from outside
+    baseline: any import of model modules or aggregate model names from outside
     ``hecate/execution/`` (besides the ``models`` package itself) is a
     violation — reads also go through the registry so workspace isolation
     and audit stay in one place. Alembic revisions and tests are exempt
@@ -457,6 +457,42 @@ class TestDeploymentRegistryTablesAreExecutionOwned:
         "hecate.models.conversation_link",
     )
 
+    @classmethod
+    def _registry_imports(cls, source: str) -> list[tuple[int, str]]:
+        names = {
+            "AgentPrincipalModel",
+            "AgentDeploymentModel",
+            "TaskModel",
+            "RunModel",
+            "StandaloneEnrollmentModel",
+            "ConversationTaskLinkModel",
+            "agent_principal",
+            "agent_deployment",
+            "task",
+            "run",
+            "standalone_enrollment",
+            "conversation_link",
+        }
+        found = []
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in cls._REGISTRY_MODEL_MODULES:
+                        found.append((node.lineno, alias.name))
+            elif isinstance(node, ast.ImportFrom) and (
+                node.module in cls._REGISTRY_MODEL_MODULES
+                or (
+                    node.module == "hecate.models"
+                    and any(alias.name in names or alias.name == "*" for alias in node.names)
+                )
+            ):
+                found.append((node.lineno, node.module or ""))
+        return found
+
+    def test_guard_catches_lazy_and_reexported_models(self) -> None:
+        source = "def register():\n    from hecate.models import RunModel\n    import hecate.models.task\n"
+        assert len(self._registry_imports(source)) == 2
+
     def test_only_execution_domain_imports_registry_models(self) -> None:
         bad: list[str] = []
         for path in _iter_py(SRC_ROOT):
@@ -465,9 +501,8 @@ class TestDeploymentRegistryTablesAreExecutionOwned:
             # and writes. Everything else in src/hecate must stay out.
             if rel.startswith("src/hecate/models/") or rel.startswith("src/hecate/execution/"):
                 continue
-            for lineno, module in _module_level_imports(path):
-                if module in self._REGISTRY_MODEL_MODULES:
-                    bad.append(f"{rel}:line {lineno}: from {module} import ...")
+            for lineno, module in self._registry_imports(path.read_text(encoding="utf-8")):
+                bad.append(f"{rel}:line {lineno}: from {module} import ...")
         assert not bad, (
             "task/run/enrollment/link tables are single-writer tables owned "
             "by the execution registry — import them only from hecate.execution "
@@ -477,10 +512,9 @@ class TestDeploymentRegistryTablesAreExecutionOwned:
     def test_no_workspace_wheel_imports_registry_models(self) -> None:
         bad: list[str] = []
         for path in _iter_py(PACKAGES_ROOT):
-            for lineno, module in _module_level_imports(path):
-                if module in self._REGISTRY_MODEL_MODULES:
-                    rel = path.relative_to(REPO_ROOT)
-                    bad.append(f"{rel}:line {lineno}: from {module} import ...")
+            for lineno, module in self._registry_imports(path.read_text(encoding="utf-8")):
+                rel = path.relative_to(REPO_ROOT)
+                bad.append(f"{rel}:line {lineno}: from {module} import ...")
         assert not bad, (
             "workspace wheels must not import the registry model "
             "modules; registration flows through hecate.execution services. "

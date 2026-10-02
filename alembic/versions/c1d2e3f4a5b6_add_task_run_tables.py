@@ -11,9 +11,9 @@ alters of populated tables, not fresh ones). No existing table or hot path
 is touched; legacy chat sessions get conversation links lazily via the
 registry service, so no data backfill revision is needed.
 
-Rollback drops the four tables: they hold no data on a system that never
-ran the step5d/step6 flows, and the plan's keep-new-tables-on-rollback rule
-(§step4 迁移/回退) protects rows that exist - here none can.
+Application rollback retains these tables and their records. Schema downgrade
+is refused even before the later execution flows are deployed: registration
+services can already create governance and observation records.
 """
 
 from __future__ import annotations
@@ -153,10 +153,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("conversation_task_links")
-    op.drop_table("standalone_enrollments")
-    op.drop_table("runs")
-    op.drop_table("tasks")
-    # PostgreSQL enum types outlive their tables; drop ours explicitly so a
-    # downgrade -> upgrade cycle does not hit DuplicateObject.
-    sa.Enum(name="enrollment_admission_result").drop(op.get_bind(), checkfirst=True)
+    raise RuntimeError("Step4 records must be retained; roll back the application without downgrading schema")

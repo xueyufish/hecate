@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
-from hecate.contracts.execution.references import RefKind, deployment_ref, run_ref
+from hecate.contracts.execution.references import RefKind, authorization_ref, deployment_ref, run_ref
 
 
 def _workload() -> WorkloadIdentity:
@@ -17,7 +17,8 @@ def test_chain_round_trips_through_dict() -> None:
         initiator="user-42",
         principal_id="principal-9",
         workload=_workload(),
-        on_behalf_of=run_ref("hecate", "run-3"),
+        on_behalf_of=authorization_ref("hecate", "delegation-3"),
+        audience="enterprise-tools",
     )
     restored = IdentityChain.from_dict(chain.to_dict())
     assert restored == chain

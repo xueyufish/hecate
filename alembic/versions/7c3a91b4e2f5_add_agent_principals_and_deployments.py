@@ -125,13 +125,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("agent_deployments")
-    op.drop_table("agent_principals")
-    for enum_name in (
-        "deployment_health_state",
-        "deployment_access_level",
-        "deployment_access_mode",
-        "deployment_backend_type",
-        "principal_lifecycle",
-    ):
-        op.execute(f"DROP TYPE IF EXISTS {enum_name}")
+    raise RuntimeError("Step4 records must be retained; roll back the application without downgrading schema")
