@@ -46,6 +46,16 @@ def _mapping_for(path: Path) -> Callable[[dict[str, Any]], Any] | None:
         return ExecutionRequest.from_dict
     if theme == "events":
         return EventEnvelope.from_dict
+    if theme == "builtin":
+        from hecate.execution.backend import CancelReceipt, RunStatus, SubmitReceipt
+
+        if "submit-receipt" in name:
+            return SubmitReceipt.from_dict
+        if "run-status" in name:
+            return RunStatus.from_dict
+        if "cancel-receipt" in name:
+            return CancelReceipt.from_dict
+        return EventEnvelope.from_dict
     if theme == "errors":
         return BackendError.from_dict
     if theme == "capabilities":
@@ -120,6 +130,12 @@ def _required_field_for(path: Path) -> str:
         return "idempotency_key"
     if theme == "events":
         return "event_id"
+    if theme == "builtin":
+        if "submit-receipt" in name:
+            return "run_ref"
+        if "event-envelope" in name:
+            return "event_id"
+        return "state"
     if theme == "errors":
         return "code"
     if theme == "capabilities":

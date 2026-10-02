@@ -11,7 +11,6 @@ ConversationService orchestration.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import random
 import uuid
@@ -23,11 +22,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.workflow import WorkflowModel, WorkflowVersionModel
 from hecate.runtime.checkpoint import InMemoryCheckpointStore
-from hecate.runtime.compaction import CompactionSummarizer
 from hecate.runtime.compiler import GraphCompiler
 from hecate.runtime.context import PriorityContextEngine
 from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventStore, EventType
 from hecate.runtime.evidence import EvidenceTracker
+from hecate.runtime.execution_assembly import (
+    AssembledExecution,
+    CompositeWorker,
+    PortCompactionSummarizer,
+    WorkerDependencies,
+    assemble_execution,
+    create_composite_worker,
+)
 from hecate.runtime.guardrail import (
     PostLLMHook,
     PostToolHook,
@@ -37,13 +43,6 @@ from hecate.runtime.guardrail import (
 from hecate.runtime.pregel import PregelRuntime
 from hecate.runtime.session_state import SessionState, SessionStateConflictError, SessionStateStore
 from hecate.runtime.types import StreamMode
-from hecate.runtime.workers.agent_worker import AgentWorker
-from hecate.runtime.workers.condition_worker import ConditionWorker
-from hecate.runtime.workers.knowledge_worker import KnowledgeWorker
-from hecate.runtime.workers.llm_worker import LLMWorker
-from hecate.runtime.workers.suggestion_worker import SuggestionWorker
-from hecate.runtime.workers.tool_worker import ToolWorker
-from hecate.runtime.workers.variable_set_worker import VariableSetWorker
 from hecate.studio.state.state import AgentState
 from hecate.studio.workflows.graph_dsl import parse_graph
 
@@ -55,6 +54,11 @@ logger = logging.getLogger(__name__)
 _LOCK_MAX_RETRIES = 3
 _LOCK_RETRY_MIN_S = 0.02
 _LOCK_RETRY_MAX_S = 0.150
+
+# step5a: the composite worker and port summarizer moved to the shared
+# runtime assembly (hecate.runtime.execution_assembly); keep the legacy
+# private name as an alias so existing references keep working.
+_CompositeWorker = CompositeWorker
 
 
 class TurnInFlightError(Exception):
@@ -82,116 +86,6 @@ async def _sync_event_position(
         return state
     position = await event_store.get_version(session_id)
     return state.model_copy(update={"event_position": position})
-
-
-class PortCompactionSummarizer(CompactionSummarizer):
-    """Composition adapter: produces the structured summary via the runtime port.
-
-    The summarizer prompt is isolated from the tenant conversation namespace
-    and rides the routing configuration of the underlying port; route pinning
-    and cache-namespace isolation never leak into the runtime domain (which
-    only sees the :class:`CompactionSummarizer` ABC).
-    """
-
-    _PROMPT = (
-        "You are a conversation compaction engine. Summarize the conversation segment below so an "
-        "agent can continue the work with no other history. Respond with ONLY a JSON object "
-        "(no markdown fences) with exactly these keys:\n"
-        '- "objective": what the user is trying to accomplish (string)\n'
-        '- "key_decisions": important decisions, constraints and fixed choices so far (string[])\n'
-        '- "current_state": what has been done and what is in progress (string)\n'
-        '- "next_steps": concrete pending actions (string[])\n'
-        '- "critical_context": data, identifiers, file paths, errors and gotchas that must survive '
-        "verbatim (string)"
-    )
-
-    def __init__(self, port: Any) -> None:
-        self._port = port
-
-    async def summarize(self, messages: list[dict]) -> dict[str, Any]:
-        request = [
-            {"role": "system", "content": self._PROMPT},
-            {"role": "user", "content": json.dumps(messages, ensure_ascii=False, default=str)},
-        ]
-        text = ""
-        async for token in self._port.llm_invoke(messages=request, config={}):
-            text += token
-        return self._parse_summary(text)
-
-    def _parse_summary(self, text: str) -> dict[str, Any]:
-        """Parse the model response into the structured node; raise on any defect."""
-        stripped = text.strip()
-        if stripped.startswith("```"):
-            stripped = stripped.strip("`").lstrip()
-            if stripped.lower().startswith("json"):
-                stripped = stripped[4:]
-        start, end = stripped.find("{"), stripped.rfind("}")
-        if start < 0 or end <= start:
-            raise ValueError("summarizer response contains no JSON object")
-        parsed = json.loads(stripped[start : end + 1])
-        if not isinstance(parsed, dict):
-            raise ValueError("summarizer response is not a JSON object")
-        return parsed
-
-
-class _CompositeWorker:
-    """Routes node execution to the appropriate Worker based on NodeType.
-
-    This composite pattern allows PregelRuntime to use a single Worker
-    instance that internally delegates to the correct specialized Worker.
-    """
-
-    def __init__(
-        self,
-        llm_worker: LLMWorker,
-        tool_worker: ToolWorker,
-        condition_worker: ConditionWorker,
-        agent_worker: AgentWorker,
-        knowledge_worker: KnowledgeWorker,
-        suggestion_worker: SuggestionWorker,
-        variable_worker: VariableSetWorker,
-        controller_worker: Any | None = None,
-    ) -> None:
-        self._llm = llm_worker
-        self._tool = tool_worker
-        self._condition = condition_worker
-        self._agent = agent_worker
-        self._knowledge = knowledge_worker
-        self._suggestion = suggestion_worker
-        self._variable = variable_worker
-        self._controller = controller_worker
-        self._workers_by_type: dict[str, Any] = {
-            "conversation": self._llm,
-            "tool-call": self._tool,
-            "condition": self._condition,
-            "agent": self._agent,
-            "knowledge-retrieval": self._knowledge,
-            "suggestion": self._suggestion,
-            "variable-set": self._variable,
-            "controller": self._controller,
-        }
-
-    def _get_worker(self, node_type_value: str) -> Any:
-        return self._workers_by_type.get(node_type_value, self._llm)
-
-    async def execute(
-        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
-    ) -> Any:
-        """Delegate to the appropriate worker based on node_type in config."""
-        node_type = node_config.get("_node_type", "conversation")
-        worker = self._get_worker(node_type)
-        return await worker.execute(node_id, node_config, channel_snapshot, execution_context=execution_context)
-
-    async def execute_stream(
-        self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
-    ) -> AsyncGenerator:
-        """Delegate streaming execution to the appropriate worker."""
-        node_type = node_config.get("_node_type", "conversation")
-        worker = self._get_worker(node_type)
-        async for item in worker.execute_stream(
-            node_id, node_config, channel_snapshot, execution_context=execution_context
-        ):
-            yield item
 
 
 class WorkflowExecutionService:
@@ -473,86 +367,60 @@ class WorkflowExecutionService:
             msg = f"Unknown agent mode: {agent_mode}"
             raise ValueError(msg)
 
-        # Compile graph
-        compiler = GraphCompiler()
-        compiled = compiler.compile(graph_config, execution_mode=execution_mode)
+        # step5a: compile, worker bundle, checkpoint/offloader wiring, and
+        # PregelRuntime construction live in the shared runtime assembly; the
+        # platform adapter only resolves definitions and reads settings.
+        from hecate.core.composition.intent_evidence import create_intent_evidence_port
 
-        # Inject node type info into configs for composite worker routing
-        for _nid, ncfg in compiled.nodes.items():
-            ncfg.config["_node_type"] = ncfg.type.value
-
-        # Create Workers
-        composite = self._create_composite_worker(tools, kb_ids, agent_persona)
-
-        # Build initial input
-        initial_input = {
-            "messages": messages,
-            "_session_id": str(session_id),
-            "_agent_id": str(agent_id) if agent_id else "",
-            "_user_id": str(user_id) if user_id else "",
-            "_turn_index": 0,
-            "_agent_state": agent_state,
-        }
-        if environment_root:
-            initial_input["_environment_root"] = environment_root
-        if kb_ids:
-            initial_input["_kb_ids"] = kb_ids
-        if tools:
-            initial_input["_tools"] = tools
-
-        initial_input["sys.execution_mode"] = execution_mode
-        if execution_mode == "conversational":
-            initial_input["sys.conversation_id"] = str(session_id)
-            initial_input["sys.dialogue_count"] = 0
-
-        # Execute
-        checkpoint_store = InMemoryCheckpointStore()
-        if self._checkpoint_store is not None:
-            from hecate.runtime.session_state_materializer import (
-                SessionStateMaterializer,
-            )
-
-            tenant_uuid = uuid.UUID(str(user_id)) if user_id is not None else None
-            captured_user_id = tenant_uuid
-
-            def _tenant_provider() -> tuple[uuid.UUID, uuid.UUID] | None:
-                if captured_user_id is None:
-                    return None
-                return captured_user_id, captured_user_id
-
-            checkpoint_store = SessionStateMaterializer(
-                session_state_store=self._checkpoint_store,
-                tenant_context_provider=_tenant_provider,
-                event_store=self._event_store,
-            )
-
-        context_offloader: ContextOffloader | None = None
+        context_offload_enabled = False
+        context_offload_threshold_tokens: int | None = None
         if agent_env is not None and self._environment_manager:
             from hecate.core.config import settings
 
-            if settings.CONTEXT_OFFLOAD_ENABLED:
-                from hecate.runtime.offloader import ContextOffloader
+            context_offload_enabled = bool(settings.CONTEXT_OFFLOAD_ENABLED)
+            context_offload_threshold_tokens = settings.CONTEXT_OFFLOAD_THRESHOLD_TOKENS
 
-                context_offloader = ContextOffloader(
-                    environment=agent_env,
-                    threshold_tokens=settings.CONTEXT_OFFLOAD_THRESHOLD_TOKENS,
-                )
-
-        evidence_tracker = EvidenceTracker(session_id=session_id)
-
-        runtime = PregelRuntime(
-            graph=compiled,
-            worker=composite,
-            checkpoint_store=checkpoint_store,
-            max_supersteps=max_iterations * 3 + 5,
-            context_engine=PriorityContextEngine(),
-            context_chain=self._context_chain_factory,
+        assembled: AssembledExecution = assemble_execution(
+            graph_config=graph_config,
+            execution_mode=execution_mode,
+            messages=messages,
+            session_id=session_id,
+            agent_id=agent_id,
+            user_id=user_id,
+            agent_state=agent_state,
+            tools=tools,
+            kb_ids=kb_ids,
+            agent_persona=agent_persona,
+            environment_root=environment_root,
+            environment=agent_env,
+            max_iterations=max_iterations,
+            deps=WorkerDependencies(
+                port=self._port,
+                pre_llm_hook=self._pre_llm_hook,
+                post_llm_hook=self._post_llm_hook,
+                pre_tool_hook=self._pre_tool_hook,
+                post_tool_hook=self._post_tool_hook,
+                middleware_chains=self._middleware_chains,
+                access_policy=self._access_policy,
+                approval_callback=self._approval_callback,
+                tool_policy_rules=self._tool_policy_rules,
+                event_store=self._event_store,
+                denial_tracker=self._denial_tracker,
+                suggestion_service=self._suggestion_service,
+                # 2.6a controller — evidence provider built per execution by
+                # the composition root, mirroring the pre-extraction behavior.
+                controller_evidence_port=create_intent_evidence_port(),
+            ),
+            context_chain_factory=self._context_chain_factory,
             citation_provenance=self._citation_provenance,
             grounding_scoring=self._grounding_scoring,
-            context_offloader=context_offloader,
-            environment=agent_env,
-            evidence_tracker=evidence_tracker,
+            session_state_store=self._checkpoint_store,
+            context_offload_enabled=context_offload_enabled,
+            context_offload_threshold_tokens=context_offload_threshold_tokens,
         )
+        runtime = assembled.runtime
+        initial_input = assembled.initial_input
+        evidence_tracker = assembled.evidence_tracker
 
         stream_mode = StreamMode.MESSAGES if stream else StreamMode.VALUES
 
@@ -827,6 +695,11 @@ class WorkflowExecutionService:
     ) -> _CompositeWorker:
         """Create a composite worker with all production Workers.
 
+        Thin platform-adapter delegate: the construction itself lives in the
+        shared runtime assembly (``runtime.execution_assembly``); this method
+        only gathers the composition-injected dependencies. Kept as a method
+        so existing monkeypatching call sites keep working.
+
         Args:
             tools: Available tools for ToolWorker.
             kb_ids: Knowledge base IDs for KnowledgeWorker.
@@ -835,50 +708,26 @@ class WorkflowExecutionService:
         Returns:
             CompositeWorker that routes to specialized Workers.
         """
-        llm_worker = LLMWorker(
+        from hecate.core.composition.intent_evidence import create_intent_evidence_port
+
+        deps = WorkerDependencies(
             port=self._port,
             pre_llm_hook=self._pre_llm_hook,
             post_llm_hook=self._post_llm_hook,
-            middleware_chains=self._middleware_chains,
-        )
-        tool_worker = ToolWorker(
-            port=self._port,
             pre_tool_hook=self._pre_tool_hook,
             post_tool_hook=self._post_tool_hook,
+            middleware_chains=self._middleware_chains,
             access_policy=self._access_policy,
             approval_callback=self._approval_callback,
-            tool_rules=self._tool_policy_rules,
+            tool_policy_rules=self._tool_policy_rules,
             event_store=self._event_store,
-            middleware_chains=self._middleware_chains,
             denial_tracker=self._denial_tracker,
-        )
-        agent_worker = AgentWorker(port=self._port)
-        knowledge_worker = KnowledgeWorker(port=self._port)
-        suggestion_worker = SuggestionWorker(
             suggestion_service=self._suggestion_service,
+            # 2.6a controller — evidence provider wired from the composition
+            # root; the runtime worker itself stays studio-free.
+            controller_evidence_port=create_intent_evidence_port(),
         )
-        condition_worker = ConditionWorker()
-        variable_worker = VariableSetWorker()
-        # 2.6a controller — evidence provider wired from the composition
-        # root; the runtime worker itself stays studio-free.
-        from hecate.core.composition.intent_evidence import create_intent_evidence_port
-        from hecate.runtime.workers.controller_worker import ControllerWorker
-
-        controller_worker = ControllerWorker(
-            port=self._port,
-            evidence_port=create_intent_evidence_port(),
-        )
-
-        return _CompositeWorker(
-            llm_worker=llm_worker,
-            tool_worker=tool_worker,
-            condition_worker=condition_worker,
-            agent_worker=agent_worker,
-            knowledge_worker=knowledge_worker,
-            suggestion_worker=suggestion_worker,
-            variable_worker=variable_worker,
-            controller_worker=controller_worker,
-        )
+        return create_composite_worker(deps, tools, kb_ids, agent_persona)
 
     async def _load_workflow_mode(self, workflow_id: uuid.UUID) -> str:
         """Load execution_mode from the WorkflowModel."""

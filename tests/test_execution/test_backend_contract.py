@@ -52,31 +52,67 @@ def make_request(tmp_path: Path, key: str = "idem-001") -> ExecutionRequest:
     return ExecutionRequest.from_dict(data)
 
 
-@pytest.fixture(params=["stub", "live"])
-def backend(request) -> tuple[AgentExecutionBackend, str]:
-    """Run shared contract assertions against the stub AND the live pilot.
+def _builtin_request_factory() -> tuple[AgentExecutionBackend, object]:
+    """Builtin backend + request factory pre-loaded with a resolvable config.
+
+    The builtin backend rejects requests without ``backend_config_ns["builtin"]``
+    (definitions are the platform adapter's job), so its factory injects a
+    chat-graph config and session id the shared assembly can execute against
+    the stub port.
+    """
+    import uuid as uuid_mod
+
+    from hecate.execution.builtin import HecateExecutionBackend
+    from hecate.studio.workflows.templates import build_chat_graph
+    from tests.test_execution.test_builtin_backend import _make_port
+
+    backend = HecateExecutionBackend(port=_make_port())
+
+    def make_builtin_request(tmp_path: Path, key: str = "idem-001") -> ExecutionRequest:
+        data = load_sample(SAMPLE_REQUEST)
+        data["idempotency_key"] = key
+        data["input"] = {"messages": [{"role": "user", "content": "Hi"}]}
+        data["backend_config_ns"] = {
+            "builtin": {
+                "graph_config": build_chat_graph(model="gpt-4o"),
+                "session_id": str(uuid_mod.uuid4()),
+            }
+        }
+        return ExecutionRequest.from_dict(data)
+
+    return backend, make_builtin_request
+
+
+@pytest.fixture(params=["stub", "live", "builtin"])
+def backend(request) -> tuple[AgentExecutionBackend, str, object]:
+    """Run shared contract assertions against stub, live pilot, AND builtin.
 
     The second element is the issuer domain the backend signs its receipts
-    with, so assertions can require backend-issued identity without
-    hardcoding one implementation. The live fixture is resolved lazily so
-    stub runs never touch the pilot environment.
+    with; the third is the request factory each backend needs (builtin
+    requires a pre-resolved config namespace, the others take the plain
+    sample). The live fixture is resolved lazily so local runs never touch
+    the pilot environment. Builtin-specific semantics (cancel receipts,
+    unknown runs, paging) live in test_builtin_backend.py.
     """
     if request.param == "stub":
-        return StubExecutionBackend(), "stub"
-    return request.getfixturevalue("live_backend"), "pilot-ts"
+        return StubExecutionBackend(), "stub", make_request
+    if request.param == "live":
+        return request.getfixturevalue("live_backend"), "pilot-ts", make_request
+    backend_obj, factory = _builtin_request_factory()
+    return backend_obj, "hecate-builtin", factory
 
 
 def test_standing_unsupported_negative_case_is_declared(backend) -> None:
-    candidate, _ = backend
+    candidate, _, _ = backend
     caps = candidate.describe_capabilities()
     assert caps.level_of("pause") is CapabilityLevel.UNSUPPORTED
     assert caps.level_of("resume") is CapabilityLevel.UNSUPPORTED
     assert caps.level_of("export_context") is CapabilityLevel.UNSUPPORTED
 
 
-def test_pause_on_unsupported_backend_is_structured_error(backend, tmp_path) -> None:
-    backend_obj, _ = backend
-    request = make_request(tmp_path)
+async def test_pause_on_unsupported_backend_is_structured_error(backend, tmp_path) -> None:
+    backend_obj, _, make_req = backend
+    request = make_req(tmp_path)
     receipt = backend_obj.submit(request)
 
     with pytest.raises(UnsupportedCapabilityError) as excinfo:
@@ -95,21 +131,22 @@ def test_capabilities_without_verification_are_invalid() -> None:
         BackendCapabilities.from_dict(data)
 
 
-def test_submit_is_idempotent_on_key(backend, tmp_path) -> None:
-    backend_obj, expected_issuer = backend
-    first = backend_obj.submit(make_request(tmp_path))
-    second = backend_obj.submit(make_request(tmp_path))
+async def test_submit_is_idempotent_on_key(backend, tmp_path) -> None:
+    backend_obj, expected_issuer, make_req = backend
+    first = backend_obj.submit(make_req(tmp_path))
+    second = backend_obj.submit(make_req(tmp_path, key="idem-001"))
     assert first.run_ref == second.run_ref
     assert first.received_at == second.received_at
     assert first.run_ref.kind is RefKind.RUN
     assert first.run_ref.issuer_domain == expected_issuer
 
 
-def test_same_key_different_content_is_version_conflict(backend, tmp_path) -> None:
-    backend_obj, _ = backend
-    backend_obj.submit(make_request(tmp_path))
+async def test_same_key_different_content_is_version_conflict(backend, tmp_path) -> None:
+    backend_obj, _, make_req = backend
+    first_request = make_req(tmp_path)
+    backend_obj.submit(first_request)
 
-    conflicting = make_request(tmp_path)
+    conflicting = make_req(tmp_path)
     object.__setattr__(conflicting, "input", {"objective": "Different objective"})
     with pytest.raises(ExecutionBackendError) as excinfo:
         backend_obj.submit(conflicting)

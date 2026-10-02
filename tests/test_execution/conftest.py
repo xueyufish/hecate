@@ -73,6 +73,16 @@ def sample_schema_ref(path: Path) -> tuple[str, str] | None:
     name = path.name
     if theme == "http":
         return None
+    if theme == "builtin":
+        builtin_map = {
+            "submit-receipt.json": ("submit-receipt", ""),
+            "run-status.json": ("run-status", ""),
+            "cancel-receipt.json": ("cancel-receipt", ""),
+            "event-envelope.json": ("event-envelope", ""),
+        }
+        if name in builtin_map:
+            return builtin_map[name]
+        raise AssertionError(f"unknown builtin sample: {name}; extend the mapping")
     if theme == "references":
         return "references", "#/$defs/ref"
     if theme == "requests":
