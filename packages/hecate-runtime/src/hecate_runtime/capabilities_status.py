@@ -24,6 +24,7 @@ try:  # pragma: no cover - importlib.metadata is always present on 3.12+
         except (ImportError, ValueError, ModuleNotFoundError):
             return False
 except ImportError:  # pragma: no cover
+
     def _dist_available(import_root: str) -> bool:
         return False
 

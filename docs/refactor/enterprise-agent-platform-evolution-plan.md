@@ -487,7 +487,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 **操作：**
 
 - [x] step5a：先实现 `HecateExecutionBackend` 包装当前 `WorkflowExecutionService`，固定兼容样本；再抽出图编译/Worker/上下文/guardrail 的共享装配函数和执行应用服务。平台 ORM 查询、定义解析、平台授权映射留在平台 adapter，转换为执行输入后调用共享装配；只包装旧服务不能作为独立消费的完成证据。（`runtime-shared-assembly` 已交付：装配落 `src/hecate/runtime/execution_assembly.py`（studio/ORM 零 import，分层守卫扫描全部 import 位点），`HecateExecutionBackend` 在 `src/hecate/execution/builtin.py` 经共享装配执行，契约测试参数化 Stub/live/builtin 三实现，builtin 兼容样本钉住漂移；既有执行服务测试零断言修改全绿）
-- [ ] step5b：按 step1 依赖闭包抽取 `hecate-runtime` 与最小类型/契约依赖；构建非 editable wheel，并提供声明式 extras/adapter 依赖。清除首个独立 profile 路径上的延迟跨域 import，包括编译输入、工具安全、上下文和证据写入；可选功能未安装时启动声明 `unsupported`，不能等运行中 ImportError。平台兼容导入只转发到新包，禁止新包反向依赖完整 `hecate`。
+- [x] step5b：按 step1 依赖闭包抽取 `hecate-runtime` 与最小类型/契约依赖；构建非 editable wheel，并提供声明式 extras/adapter 依赖。清除首个独立 profile 路径上的延迟跨域 import，包括编译输入、工具安全、上下文和证据写入；可选功能未安装时启动声明 `unsupported`，不能等运行中 ImportError。平台兼容导入只转发到新包，禁止新包反向依赖完整 `hecate`。（`packages/hecate-runtime` 落地：内核 88 模块、无 `hecate` 反向依赖、settings/数据库耦合清零（RuntimeConfig+memory 接缝注入）、五行"待解除耦合"清除、wheel 干净安装冒烟 + CI `runtime-wheel-clean-install` job、capability_status 启动期声明；独立基线 §8 证据登记；SC01/SC02 留 step5c 不翻转）
 - [ ] step5c：实现独立执行宿主（建议 `hecate-runner`），提供本地 manifest 加载、可信配置/secret 引用解析、业务身份和策略 adapter、模型/工具装配、最小执行/状态/事件接口、健康与关闭处理。与平台 adapter 共享执行应用服务；HTTP 身份校验不能以客户端自报角色替代。独立包安装样例只配置模型、模拟业务 API 和本地证据存储，不启动管理服务。
 - [ ] step5c：先提供本地只读技术预览：允许列表工具、参数校验、可信身份、隔离数据域和持久的基础审计必须生效；写工具、后台自动重试、长任务恢复等未验证能力拒绝启用。提供 Stub 模型的确定性 CI 样例和可配置模型 endpoint 的集成入口；真实模型调用证据单独记录，不用 Stub 宣称供应商已认证。
 - [ ] step5d：迁移平台调用方，使其选用同一共享装配或独立宿主 adapter；内置执行包与宿主可以单独升级，支持窗口由契约/依赖矩阵界定。Python 嵌入入口复用共享装配但首版不自动授予生产支持；非 Python App 通过公开 HTTP/JSON 样例接入，不必等待 SDK 生成器。

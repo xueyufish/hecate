@@ -124,3 +124,13 @@
 - **托管执行组合数据流详查**(harness 会话、Sandbox、远程 MCP、供应商内部工具的数据流与驻留/保留限制):登记格式与已核验示例见原基线 §5;实际组合数据流随 step4 `AgentDeploymentModel` 落地时补齐,缺少登记对象(表/字段)时详查无落点。
 - **真实成本基线**:受 G4 门槛(reported/estimated/reconciled 用量记账)约束,目标 step7/step10;采集口径已固定于原基线 §9 的 Tier-2 `cost_baseline` 块,当前采集状态为 `not-collected`,是事实登记而非缺陷。
 - **多 Agent 成本/结果比较**:随团队协作模型(step12/13)启用;单 Agent 基线口径已固定,比较在模型落地前无从执行。
+
+
+## 8. step5b 交付增量(runtime-standalone-distribution)
+
+基线提交之后的交付记录(2026-10-03,change `runtime-standalone-distribution`);本节为快照内增量,不回改 §2/§3 的历史结论:
+
+- **发行包已交付**:`packages/hecate-runtime`(import root `hecate_runtime`,88 模块),无 `hecate` 反向依赖(纯净测试 `tests/test_runtime/test_kernel_purity.py` + 探针双模式钉住);`src/hecate/runtime/` 为纯转发 shim,退出条件 step19。§3 的"发行包不存在"结论就此关闭。
+- **依赖闭包已解除**:§2.①的 settings/数据库耦合经 `hecate_runtime.config.RuntimeConfig` + `hecate_runtime.memory` 注入接缝清零(grep 归零);§2.2 五行"待解除耦合"全部清除(shell_analysis/dynamic_orchestration/tool_names 收入内核,task_memory 经 gateway,guardrail 拆为纯装配+平台桥接);§3 的三个硬依赖未进内核依赖(pyproject 仅 httpx/pydantic/sqlalchemy/cryptography),主应用侧收敛仍归 step19。
+- **安装性验证已建立**:非 editable wheel 在干净 venv 安装 + 无源码路径冒烟(`packages/hecate-runtime/smoke/smoke_run.py`,断言事件序列、checkpoint 持久、无 `hecate.*` 模块载入)本地通过;CI `runtime-wheel-clean-install` job 固化(构建→干净安装→无全量 hecate 断言→冒烟→extras 缺失时 capability 全部 unsupported)。§3"import 探针通过 ≠ 可独立安装"的缺口就此关闭。
+- **仍未支持**:SC01/SC02(无控制面冷启动、只读执行)需 step5c 宿主;manifest 不翻转。本节证据不授予独立运行的生产认证。
