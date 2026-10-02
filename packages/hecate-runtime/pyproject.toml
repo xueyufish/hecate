@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hecate-runtime"
+version = "0.1.0"
+description = "Hecate runtime kernel — Pregel execution engine, workers, and shared assembly"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Hecate Team" },
+]
+dependencies = [
+    "httpx>=0.28.0",
+    "pydantic>=2.10.0",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+memory = [
+    "hecate-memory",
+]
+sandbox = [
+    "hecate-sandbox",
+]
+security = [
+    "llm-guard>=0.3",
+]
+otel = [
+    "opentelemetry-api>=1.20.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate_runtime"]
+
+[tool.uv.sources]
+hecate-memory = { workspace = true }
+hecate-sandbox = { workspace = true }

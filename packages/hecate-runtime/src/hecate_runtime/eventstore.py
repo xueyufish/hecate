@@ -1,0 +1,348 @@
+"""Append-only event persistence for graph execution state.
+
+Provides the abstract contract (EventStore) and a test implementation:
+- ``InMemoryEventStore`` — for testing and single-process use
+
+EventStore records granular execution events (node start/end, tool calls,
+channel writes, interrupts) as an append-only log. This complements
+CheckpointStore's snapshot model with fine-grained audit trails and
+incremental replay capability.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import uuid
+from abc import ABC, abstractmethod
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
+
+
+class EventType(StrEnum):
+    """Standard event categories for execution tracking."""
+
+    NODE_START = "NODE_START"
+    NODE_END = "NODE_END"
+    TOOL_CALL = "TOOL_CALL"
+    TOOL_RESULT = "TOOL_RESULT"
+    CHANNEL_WRITE = "CHANNEL_WRITE"
+    CHANNEL_WRITE_REJECTED = "CHANNEL_WRITE_REJECTED"
+    LLM_REQUEST = "LLM_REQUEST"
+    LLM_RESPONSE = "LLM_RESPONSE"
+    INTERRUPT = "INTERRUPT"
+    RESUME = "RESUME"
+    ERROR = "ERROR"
+    PII_DETECTED = "PII_DETECTED"
+    CUSTOM = "CUSTOM"
+    STEP_END = "STEP_END"
+    EVICTION = "EVICTION"
+    SUBGRAPH_START = "SUBGRAPH_START"
+    SUBGRAPH_END = "SUBGRAPH_END"
+    # 1.3.18 dynamic orchestration — emitted by CoordinatorWorker at the
+    # outer-loop boundaries. Additive, LogPolicy does NOT exclude
+    # these (see ADR-030 §1 for the additive EventType contract).
+    ORCHESTRATOR_DECISION = "ORCHESTRATOR_DECISION"
+    ORCHESTRATOR_EVALUATION = "ORCHESTRATOR_EVALUATION"
+    # 1.3.4 fail-closed approval — emitted by the approval callback wrapper
+    # (services/security/approval.py). The pair MUST be enclosed by a
+    # TURN_START / TURN_END window (see ADR-030 seam registry, 1.3.4 row).
+    APPROVAL_ASKED = "APPROVAL_ASKED"
+    APPROVAL_DECIDED = "APPROVAL_DECIDED"
+    # Turn boundaries — PregelRuntime emits TURN_START at the first execute()
+    # of a session resumption chain and TURN_END on completion. Path-A
+    # (direct tool loop) emits the same pair via the assembly facade.
+    TURN_START = "TURN_START"
+    TURN_END = "TURN_END"
+    # Output-side typed findings (9.1a injection detection, 9.2 prompt
+    # leakage protection) — emitted by OutputSecurityHook after the
+    # SecurityFindingWriter persists a row. Additive, LogPolicy does NOT
+    # exclude these (see ADR-030 §1 for the additive EventType contract).
+    INJECTION_DETECTED = "INJECTION_DETECTED"
+    PROMPT_LEAKAGE_DETECTED = "PROMPT_LEAKAGE_DETECTED"
+    # 1.3.21② time-travel — bootstrap event of a forked child session's log.
+    # Carries the folded parent state snapshot (channel_state), lineage
+    # (parent_session_id, parent_log_version), and the derived continuation
+    # (next_nodes). A commit point; fold hydrates from its payload.
+    FORK = "FORK"
+    # 6.23 intent recognition — INTENT_RECOGNIZED is appended once per
+    # recognition (layered result, decision source, cache-hit flag, evidence
+    # version reference); CONTROLLER_ROUTED once per controller routing
+    # decision. Additive; LogPolicy does NOT exclude these (ADR-030 §1).
+    INTENT_RECOGNIZED = "INTENT_RECOGNIZED"
+    CONTROLLER_ROUTED = "CONTROLLER_ROUTED"
+    # ADR-033 durable compaction — the bracket event sequence recorded by
+    # the compression processor's surface_replacement backend. All four are
+    # bookkeeping events: the fold skips them (channel state is untouched —
+    # the messages channel keeps every original), and they carry no
+    # log_schema_version marker. START without a matching COMPLETED is an
+    # in-progress lock, never a fabricated summary.
+    COMPACTION_STARTED = "COMPACTION_STARTED"
+    COMPACTION_SUMMARY = "COMPACTION_SUMMARY"
+    CONTEXT_SURFACE_REPLACED = "CONTEXT_SURFACE_REPLACED"
+    COMPACTION_COMPLETED = "COMPACTION_COMPLETED"
+
+
+CURRENT_LOG_SCHEMA_VERSION: int = 2  # events without this marker are non-replayable (values never recorded)
+
+
+@dataclass(frozen=True)
+class Event:
+    """Immutable record of a single execution event.
+
+    Each event captures a granular state change during graph execution.
+    Events are append-only and versioned per session for incremental replay.
+
+    Attributes:
+        id: Unique identifier for this event (auto-generated).
+        session_id: The execution session this event belongs to.
+        superstep: The superstep counter at the time of the event.
+        event_type: The category of event.
+        node_id: The node that produced the event (None for session-level events).
+        timestamp: When the event occurred (auto-generated UTC).
+        payload: Arbitrary event-specific data.
+        trace_id: Correlation ID linking this event to an application-level trace.
+        version: Monotonically increasing version number within the session.
+    """
+
+    session_id: uuid.UUID
+    superstep: int
+    event_type: EventType
+    node_id: str | None = None
+    id: uuid.UUID = field(default_factory=uuid.uuid4)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    payload: dict[str, Any] = field(default_factory=dict)
+    trace_id: str | None = None
+    version: int = 0
+
+
+class EventVersionConflictError(Exception):
+    """Raised when concurrent ``append`` calls collide on the same ``(session_id, version)``.
+
+    The message SHALL include the offending ``session_id`` for diagnostics.
+    """
+
+    def __init__(self, session_id: uuid.UUID, version: int) -> None:
+        self.session_id = session_id
+        self.version = version
+        super().__init__(f"Event version conflict for session_id={session_id} at version={version}")
+
+
+class EventStore(ABC):
+    """Abstract interface for append-only event persistence.
+
+    An EventStore records granular execution events as an append-only log,
+    complementing CheckpointStore's snapshot model. Events are versioned
+    per session for incremental replay and audit trails.
+    """
+
+    @abstractmethod
+    async def append(self, event: Event) -> uuid.UUID:
+        """Persist an event and return its ID.
+
+        Args:
+            event: The event to persist.
+
+        Returns:
+            The UUID of the persisted event.
+        """
+        ...
+
+    async def append_batch(self, events: list[Event]) -> list[uuid.UUID]:
+        """Persist multiple events atomically with batch-internal order preserved.
+
+        Default implementation appends each event sequentially via ``append``;
+        production implementations SHOULD override with a single-transaction
+        multi-row INSERT for write-amplification savings. Per-call batch order
+        is preserved in assigned versions. If any event fails to persist the
+        entire batch fails (best-effort: implementations MAY roll back already
+        committed rows in this case).
+
+        Args:
+            events: Ordered list of events to persist.
+
+        Returns:
+            The UUIDs of the persisted events in input order.
+
+        Raises:
+            EventVersionConflictError: If a version collision occurs.
+        """
+        return [await self.append(event) for event in events]
+
+    @abstractmethod
+    async def get_events(
+        self,
+        session_id: uuid.UUID,
+        from_version: int = 0,
+    ) -> list[Event]:
+        """Retrieve events for a session, optionally from a given version.
+
+        Args:
+            session_id: The session to query events for.
+            from_version: Minimum version to include (inclusive).
+
+        Returns:
+            A list of events in version-ascending order.
+        """
+        ...
+
+    @abstractmethod
+    def replay(
+        self,
+        session_id: uuid.UUID,
+        from_version: int = 0,
+    ) -> AsyncGenerator[Event, None]:
+        """Yield events for a session as an async stream.
+
+        Args:
+            session_id: The session to replay events for.
+            from_version: Minimum version to include (inclusive).
+
+        Yields:
+            Events in version-ascending order.
+        """
+        ...
+
+    @abstractmethod
+    async def get_version(self, session_id: uuid.UUID) -> int:
+        """Return the current version (highest) for a session.
+
+        Args:
+            session_id: The session to query.
+
+        Returns:
+            The highest version number, or 0 if no events exist.
+        """
+        ...
+
+    @asynccontextmanager
+    async def acquire_event_lock(
+        self,
+        session_id: uuid.UUID,
+        *,
+        timeout_ms: int = 30000,
+    ) -> AsyncGenerator[None, None]:
+        """Acquire an exclusive lock for event writes on ``session_id``.
+
+        Default implementation is a no-op (yields immediately). Single-process
+        implementations (e.g. ``InMemoryEventStore``) and implementations whose
+        ``append`` already serializes via storage-level locks (e.g.
+        ``PostgresEventStore`` which uses ``SELECT ... FOR UPDATE``) do not
+        need to override this.
+
+        Distributed implementations (e.g. a future Redis-backed event store)
+        SHOULD override this with ``SET NX PX`` semantics, raising
+        ``EventVersionConflictError`` if acquisition fails after retries.
+
+        Args:
+            session_id: The session whose event log is being mutated.
+            timeout_ms: Advisory lock TTL in milliseconds.
+
+        Yields:
+            None — callers enter the critical section after ``yield``.
+        """
+        yield
+
+
+class InMemoryEventStore(EventStore):
+    """In-memory event store intended for testing and single-process use.
+
+    Stores events in a dict mapping session_id to a list of Event records.
+    Version numbers are assigned sequentially per session starting from 1.
+    """
+
+    def __init__(self) -> None:
+        self._store: dict[uuid.UUID, list[Event]] = {}
+        # One process-wide lock: the base no-op only serializes individual
+        # appends, but check-then-act sequences (e.g. the tool recovery
+        # claim: resolve state, then append TOOL_CALL) need a mutual-exclusion
+        # region spanning several awaits.
+        self._event_lock = asyncio.Lock()
+
+    @asynccontextmanager
+    async def acquire_event_lock(
+        self,
+        session_id: uuid.UUID,
+        *,
+        timeout_ms: int = 30000,
+    ) -> AsyncGenerator[None, None]:
+        """Exclusive region for event read-modify-write sequences."""
+        await self._event_lock.acquire()
+        try:
+            yield
+        finally:
+            self._event_lock.release()
+
+    async def append(self, event: Event) -> uuid.UUID:
+        """Append an event with an auto-assigned version number.
+
+        Args:
+            event: The event to persist.
+
+        Returns:
+            The UUID of the persisted event.
+        """
+        session_events = self._store.setdefault(event.session_id, [])
+        next_version = len(session_events) + 1
+        versioned = Event(
+            session_id=event.session_id,
+            superstep=event.superstep,
+            event_type=event.event_type,
+            node_id=event.node_id,
+            id=event.id,
+            timestamp=event.timestamp,
+            payload=event.payload,
+            trace_id=event.trace_id,
+            version=next_version,
+        )
+        session_events.append(versioned)
+        return versioned.id
+
+    async def get_events(
+        self,
+        session_id: uuid.UUID,
+        from_version: int = 0,
+    ) -> list[Event]:
+        """Retrieve events for a session from a given version.
+
+        Args:
+            session_id: The session to query.
+            from_version: Minimum version to include (inclusive).
+
+        Returns:
+            A list of events in version-ascending order.
+        """
+        session_events = self._store.get(session_id, [])
+        return [e for e in session_events if e.version >= from_version]
+
+    async def replay(
+        self,
+        session_id: uuid.UUID,
+        from_version: int = 0,
+    ) -> AsyncGenerator[Event, None]:
+        """Yield events for a session as an async stream.
+
+        Args:
+            session_id: The session to replay.
+            from_version: Minimum version to include (inclusive).
+
+        Yields:
+            Events in version-ascending order.
+        """
+        for event in await self.get_events(session_id, from_version):
+            yield event
+
+    async def get_version(self, session_id: uuid.UUID) -> int:
+        """Return the current version for a session.
+
+        Args:
+            session_id: The session to query.
+
+        Returns:
+            The highest version number, or 0 if no events exist.
+        """
+        session_events = self._store.get(session_id, [])
+        return session_events[-1].version if session_events else 0

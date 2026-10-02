@@ -1,12 +1,15 @@
-"""Re-export convenience for the Command type.
+"""Compatibility shim: implementation moved to ``hecate_runtime`` (step5b).
 
-This module re-exports ``Command`` from ``hecate.runtime.types`` so that
-consumers can import it as ``from hecate.runtime.command import Command`` for
-readability, without needing to know the internal types module layout.
+Forwarding only — slated for removal in step19
+(``runtime-standalone-distribution`` -> ``legacy-platform-consolidation``).
 """
 
-from __future__ import annotations
+import sys
+from typing import TYPE_CHECKING
 
-from hecate.runtime.types import Command
+import hecate_runtime.command as _mod
 
-__all__ = ["Command"]
+if TYPE_CHECKING:
+    from hecate_runtime.command import *  # noqa: F401,F403
+
+sys.modules[__name__] = _mod

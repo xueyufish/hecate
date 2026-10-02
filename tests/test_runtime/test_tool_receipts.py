@@ -14,9 +14,9 @@ import uuid
 
 import pytest
 
+from hecate.execution.temporal.run_worker import main as run_worker_main
+from hecate.execution.temporal.worker_pool import TemporalWorkerPool
 from hecate.runtime.eventstore import EventType, InMemoryEventStore
-from hecate.runtime.temporal.run_worker import main as run_worker_main
-from hecate.runtime.temporal.worker_pool import TemporalWorkerPool
 from hecate.runtime.tool_side_effects import (
     RECEIPT_FAILED,
     RECEIPT_SUCCEEDED,

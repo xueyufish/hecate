@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from hecate.runtime.temporal.worker_pool import TemporalWorkerPool
+from hecate.execution.temporal.worker_pool import TemporalWorkerPool
 from hecate.runtime.worker import Worker, WorkerResult
 
 

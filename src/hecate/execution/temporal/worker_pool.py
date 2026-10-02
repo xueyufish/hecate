@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from hecate.runtime.worker import Worker, WorkerPool, WorkerResult
+from hecate_runtime.worker import Worker, WorkerPool, WorkerResult
 
 logger = logging.getLogger(__name__)
 

@@ -39,11 +39,11 @@ logger = logging.getLogger(__name__)
 def _load_schema() -> dict:
     """Load the Graph DSL JSON Schema from the package (cached after first call).
 
-    The schema is bundled inside the engine package as ``graph-dsl.schema.json``,
+    The schema is bundled inside the runtime kernel package as ``graph-dsl.schema.json``,
     loaded via ``importlib.resources`` so it works both in development and after
     ``pip install``.
     """
-    schema_path = files("hecate.runtime").joinpath("graph-dsl.schema.json")
+    schema_path = files("hecate_runtime").joinpath("graph-dsl.schema.json")
     return json.loads(schema_path.read_text(encoding="utf-8"))
 
 

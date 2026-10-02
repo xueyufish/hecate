@@ -223,7 +223,7 @@ def test_runtime_has_no_undocumented_business_imports() -> None:
     fail with file and line so they can be inventoried or removed."""
     import ast
 
-    runtime_root = REPO_ROOT / "src" / "hecate" / "runtime"
+    runtime_root = REPO_ROOT / "packages" / "hecate-runtime" / "src" / "hecate_runtime"
     violations: list[str] = []
     for path in sorted(runtime_root.rglob("*.py")):
         rel = path.relative_to(runtime_root).as_posix()
