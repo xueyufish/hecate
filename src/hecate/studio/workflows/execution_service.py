@@ -427,7 +427,20 @@ class WorkflowExecutionService:
         if stream:
             return self._persist_evidence(
                 evidence_tracker,
-                self._stream_execute(runtime, session_id, initial_input, stream_mode, execution_mode, agent_state),
+                self._stream_execute(
+                    runtime,
+                    session_id,
+                    initial_input,
+                    stream_mode,
+                    execution_mode,
+                    agent_state,
+                    # Tenant scope for the session-state persistence below.
+                    # Mirrors the non-streaming save: the chat path threads
+                    # user_id as the tenant key (no separate org_id).
+                    org_id=user_id,
+                    user_id=user_id,
+                    agent_id=agent_id,
+                ),
             )
 
         response = await self._non_stream_execute(runtime, session_id, initial_input, execution_mode)

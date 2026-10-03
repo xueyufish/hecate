@@ -34,6 +34,20 @@ TAIL_EXECUTOR_MODULES = (
 )
 DIRECT_LLM_CALLS = ("llm_service.chat(", "llm_service.chat_stream(")
 
+# step5 hardening: entry-side shared assembly must come from the single
+# composition-layer source. Entry modules must not define their own
+# process-wide store singletons (the default in-memory backends make each
+# module-level instance a private, mutually invisible store) and must not
+# import other entries' private assembly helpers.
+ASSEMBLY_SCAN_TREES = ENTRY_TREES + (SRC_ROOT / "ops" / "scheduling",)
+STORE_SINGLETON_NAMES = ("_shared_event_store", "_shared_session_state_store", "_shared_stores")
+FORBIDDEN_PRIVATE_ASSEMBLY_IMPORTS = (
+    "_build_tool_registry",
+    "_load_agent_tools",
+    "_get_shared_event_store",
+    "_get_shared_session_state_store",
+)
+
 
 def _module_level_imports(path: Path) -> list[tuple[int, str, str | None]]:
     """Collect (line, module, imported_name) for all import statements.
@@ -136,3 +150,80 @@ def test_tail_executors_have_no_direct_llm_calls() -> None:
         source = module.read_text(encoding="utf-8")
         for call in DIRECT_LLM_CALLS:
             assert call not in source, f"{module.name} must not call {call} directly (go through the entry service)"
+
+
+def _label(path: Path) -> str:
+    """Repo-relative display path; plain name for files outside the tree."""
+    if path.is_relative_to(SRC_ROOT):
+        return str(path.relative_to(SRC_ROOT))
+    return path.name
+
+
+def _store_singleton_definitions(path: Path) -> list[str]:
+    """Module-level assignments that create a private per-module store singleton."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found: list[str] = []
+    for node in tree.body:
+        targets: list[ast.AST] = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            if isinstance(target, ast.Name) and target.id in STORE_SINGLETON_NAMES:
+                found.append(f"{_label(path)}:{node.lineno} defines module-level {target.id}")
+    return found
+
+
+def _private_assembly_imports(path: Path) -> list[str]:
+    """Imports of other entries' private assembly helpers from entry modules."""
+    found: list[str] = []
+    for line, module, name in _module_level_imports(path):
+        if name in FORBIDDEN_PRIVATE_ASSEMBLY_IMPORTS:
+            found.append(f"{_label(path)}:{line} imports {name} from {module}")
+    return found
+
+
+def test_entry_layer_has_no_private_store_singletons() -> None:
+    found: list[str] = []
+    for tree_root in ASSEMBLY_SCAN_TREES:
+        for path in sorted(tree_root.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            found.extend(_store_singleton_definitions(path))
+    assert not found, (
+        "entry modules must resolve stores through core.composition.entry_assembly, "
+        f"not define per-module singletons (in-memory backends make each a private store): {found}"
+    )
+
+
+def test_entry_layer_has_no_cross_entry_private_assembly_imports() -> None:
+    found: list[str] = []
+    for tree_root in ASSEMBLY_SCAN_TREES:
+        for path in sorted(tree_root.rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            found.extend(_private_assembly_imports(path))
+    assert not found, (
+        "entry modules must use the public assembly source "
+        f"(core.composition.entry_assembly), not each other's private helpers: {found}"
+    )
+
+
+def test_layering_guard_rejects_injected_store_singleton(tmp_path: Path) -> None:
+    """The singleton scanner itself works: a planted definition is reported."""
+    module = tmp_path / "violating_entry.py"
+    module.write_text("_shared_event_store = None\n", encoding="utf-8")
+    hits = _store_singleton_definitions(module)
+    assert hits and "_shared_event_store" in hits[0]
+
+
+def test_layering_guard_rejects_injected_private_import(tmp_path: Path) -> None:
+    """The private-import scanner itself works: a planted import is reported."""
+    module = tmp_path / "violating_entry.py"
+    module.write_text(
+        "from hecate.channel.api.v1.chat import _build_tool_registry\n",
+        encoding="utf-8",
+    )
+    hits = _private_assembly_imports(module)
+    assert hits and "_build_tool_registry" in hits[0]

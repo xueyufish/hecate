@@ -10,6 +10,7 @@ execution service itself is never patched.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from types import SimpleNamespace
@@ -278,7 +279,92 @@ async def test_real_http_streaming_multi_round_silent_intermediates(client, db_s
     assert "TOOL_CALL" in kinds and "TOOL_RESULT" in kinds
 
 
-# --- G3 6.2: approval denial through the real entry --------------------------
+# --- G3 6.4: disconnect mid-stream, resume the same session ------------------
+
+
+async def test_stream_disconnect_persists_state_and_resume_is_clean(client, db_session, llm, tool_executor):
+    """Disconnect mid-answer, then resume the session over the real entry.
+
+    Phase 1 aborts the SSE stream right after the first answer delta — the
+    in-flight tool round has completed server-side, and the streaming
+    path's disconnect handler persists the session snapshot. Phase 2
+    resumes the same session over the real HTTP entry: its own tool
+    dispatch runs exactly once (no replay of the disconnected turn) and
+    tool call/result pairing over the whole store stays intact.
+    """
+    agent = await _agent_with_tool(db_session, uuid.UUID(int=0))
+    session_id = str(uuid.uuid4())
+
+    # Phase 1: disconnect right after the first answer delta.
+    async with client.stream(
+        "POST",
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "turn one"}],
+            "stream": True,
+            "session_id": session_id,
+        },
+    ) as response:
+        assert response.status_code == 200
+        got_answer_delta = False
+        async for line in response.aiter_lines():
+            if not line.startswith("data: ") or line == "data: [DONE]":
+                continue
+            chunk = json.loads(line.removeprefix("data: "))
+            choices = chunk.get("choices") or [{}]
+            delta = choices[0].get("delta") or {}
+            if delta.get("content"):
+                got_answer_delta = True
+                break
+        assert got_answer_delta, "phase 1 reached the answer stream before the disconnect"
+
+    # The in-flight round completed server-side despite the disconnect.
+    assert tool_executor.calls == [(TOOL_NAME, {"a": 2, "b": 3})]
+
+    # The disconnect handler persisted the session snapshot. The engine
+    # generator is finalized asynchronously after the client aborts, so
+    # yield to the loop until the best-effort save lands.
+    state_store = app.state.session_state_store
+    saved_sessions: list[uuid.UUID] = []
+    for _ in range(50):
+        await asyncio.sleep(0)
+        saved_sessions = [
+            sess for users in state_store._storage.values() for sessions in users.values() for sess in sessions
+        ]
+        if uuid.UUID(session_id) in saved_sessions:
+            break
+    assert uuid.UUID(session_id) in saved_sessions, "disconnect persisted the session snapshot"
+
+    # Phase 2: resume the same session over the real HTTP entry.
+    second = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "turn two"}],
+            "session_id": session_id,
+        },
+    )
+    assert second.status_code == 200
+    data = second.json()
+    assert data["choices"][0]["message"]["content"] == f"The answer is {TOOL_RESULT}"
+
+    # Resume restored the disconnected turn's state: the tool dispatched
+    # exactly once across BOTH phases (phase 1's completed round is not
+    # re-executed; phase 2 answers from the restored tool result).
+    assert len(tool_executor.calls) == 1
+    final_messages = llm.chat_calls[-1] if llm.chat_calls else llm.stream_calls[-1]
+    assert any(isinstance(m, dict) and m.get("role") == "tool" for m in final_messages), (
+        "phase 2 saw the restored tool result from the disconnected turn"
+    )
+
+    # Pairing over the whole store stays intact across disconnect+resume.
+    from hecate.execution.entry_events import validate_tool_pairing
+
+    all_events = [e for events in app.state.event_store._store.values() for e in events]
+    report = validate_tool_pairing(all_events)
+    assert report.ok, f"unpaired tool events after disconnect+resume: {report}"
+
+
+# --- G3 6.5: approval denial through the real entry --------------------------
 
 
 async def test_real_http_approval_denial_surfaces(client, db_session, llm, tool_executor):

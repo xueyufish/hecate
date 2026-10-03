@@ -79,33 +79,18 @@ def _reject_tool_execution(ctx: AuthContext, tool_name: str, reason: str) -> str
     return json.dumps({"error": reason})
 
 
-_shared_stores: dict[str, Any] = {}
-
-
 def _get_shared_event_store() -> Any:
-    """Process-wide EventStore for MCP executions (singleton semantics).
+    """Process-wide EventStore shared with every entry (see entry_assembly)."""
+    from hecate.core.composition.entry_assembly import get_shared_event_store
 
-    The HTTP path reads the lifespan-built singleton from ``app.state``;
-    MCP tool bodies run outside request context, so they resolve through
-    the same factory and cache the instance — one store per process,
-    identical backend selection from settings.
-    """
-    if "event_store" not in _shared_stores:
-        from hecate.core.config import settings
-        from hecate.studio.event_state import create_event_store
-
-        _shared_stores["event_store"] = create_event_store(settings)
-    return _shared_stores["event_store"]
+    return get_shared_event_store()
 
 
 def _get_shared_session_state_store() -> Any:
-    """Process-wide SessionStateStore for MCP executions (see event store note)."""
-    if "session_state_store" not in _shared_stores:
-        from hecate.core.config import settings
-        from hecate.studio.session_state import create_session_state_store
+    """Process-wide SessionStateStore shared with every entry (see entry_assembly)."""
+    from hecate.core.composition.entry_assembly import get_shared_session_state_store
 
-        _shared_stores["session_state_store"] = create_session_state_store(settings)
-    return _shared_stores["session_state_store"]
+    return get_shared_session_state_store()
 
 
 async def _chat_via_entry(
@@ -127,6 +112,7 @@ async def _chat_via_entry(
     """
     from hecate_llm.service import llm_service
 
+    from hecate.core.composition.entry_assembly import build_tool_registry, load_agent_tools
     from hecate.core.composition.guardrail_platform import assemble_guardrails
     from hecate.core.composition.runtime_port_adapter import create_runtime_port
     from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
@@ -138,10 +124,8 @@ async def _chat_via_entry(
     effective_tools: list[dict[str, Any]] = []
     bundle = None
     if agent.tools:
-        from hecate.channel.api.v1.chat import _build_tool_registry, _load_agent_tools
-
-        tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
-        effective_tools = await _load_agent_tools(db, agent.tools or [])
+        tool_registry = build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
+        effective_tools = await load_agent_tools(db, agent.tools or [])
         if effective_tools:
             bundle = await assemble_guardrails(
                 db,

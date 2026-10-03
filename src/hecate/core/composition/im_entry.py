@@ -16,19 +16,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_shared_event_store: Any = None
-
-
-def _get_shared_event_store() -> Any:
-    """Process-wide EventStore for IM executions (same factory as the app singleton)."""
-    global _shared_event_store
-    if _shared_event_store is None:
-        from hecate.core.config import settings
-        from hecate.studio.event_state import create_event_store
-
-        _shared_event_store = create_event_store(settings)
-    return _shared_event_store
-
 
 class IMEntryExecutionAdapter:
     """Workflow-service seam for the IM message bus over the entry service."""
@@ -40,6 +27,11 @@ class IMEntryExecutionAdapter:
         from hecate_llm.service import llm_service
         from sqlalchemy import select
 
+        from hecate.core.composition.entry_assembly import (
+            build_tool_registry,
+            get_shared_event_store,
+            load_agent_tools,
+        )
         from hecate.core.composition.guardrail_platform import assemble_guardrails
         from hecate.core.composition.runtime_port_adapter import create_runtime_port
         from hecate.core.database import async_session_factory
@@ -64,13 +56,11 @@ class IMEntryExecutionAdapter:
             bundle = None
             event_store = None
             if agent is not None and agent.tools:
-                from hecate.channel.api.v1.chat import _build_tool_registry, _load_agent_tools
-
-                event_store = _get_shared_event_store()
-                tool_registry = _build_tool_registry(
+                event_store = get_shared_event_store()
+                tool_registry = build_tool_registry(
                     db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None)
                 )
-                effective_tools = await _load_agent_tools(db, agent.tools or [])
+                effective_tools = await load_agent_tools(db, agent.tools or [])
                 if effective_tools:
                     bundle = await assemble_guardrails(
                         db,

@@ -49,6 +49,13 @@ A2A_AGENT_NAME=Hecate Agent
 
 # Authentication mode: "api_key" (default), "bearer", or "none"
 A2A_AUTH_MODE=api_key
+
+# Workspace the A2A server executes agents from. The executor refuses to
+# run unless this workspace contains exactly one non-deleted agent — it
+# never falls back to a global first-agent pick (that would let an A2A
+# caller cross workspace/tenant boundaries). Required: A2A tasks fail
+# with "No agent configured for A2A execution" until this is set.
+A2A_AGENT_WORKSPACE_ID=00000000-0000-0000-0000-000000000000
 ```
 
 > **`A2A_SERVER_URL` is the external URL** — what other agents see. Set this to your reverse proxy's public address (e.g. `https://hecate.example.com`), **not** the internal Docker hostname. This value goes into the `url` field of the AgentCard.

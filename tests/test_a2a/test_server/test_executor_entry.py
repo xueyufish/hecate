@@ -17,8 +17,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-import hecate.channel.api.v1.chat as chat_module
-import hecate.core.composition.im_entry as im_entry_module
+import hecate.core.composition.entry_assembly as entry_assembly
 from hecate.channel.a2a.server.handler import A2ARequestHandler
 from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
@@ -130,18 +129,25 @@ def tool_executor(monkeypatch: pytest.MonkeyPatch) -> StubToolExecutor:
         registry._builtin_names = {TOOL_NAME}
         return registry
 
-    monkeypatch.setattr(chat_module, "_build_tool_registry", _build)
+    monkeypatch.setattr(entry_assembly, "build_tool_registry", _build)
     return executor
 
 
 @pytest.fixture
 def shared_event_store(monkeypatch: pytest.MonkeyPatch):
-    """Pin the process-level event store singleton the executor reuses."""
+    """Pin the shared process-level event store the entry assembly resolves."""
     from hecate.runtime.eventstore import InMemoryEventStore
 
     store = InMemoryEventStore()
-    monkeypatch.setattr(im_entry_module, "_shared_event_store", store)
+    monkeypatch.setattr(entry_assembly, "_shared_event_store", store)
     return store
+
+
+@pytest.fixture
+def a2a_scope(monkeypatch: pytest.MonkeyPatch, default_workspace):
+    """Point the A2A agent scope at the default workspace."""
+    monkeypatch.setattr("hecate.core.config.settings.A2A_AGENT_WORKSPACE_ID", str(default_workspace.id))
+    return default_workspace
 
 
 async def _agent_with_tool(
@@ -225,6 +231,7 @@ async def _send_message(db_session: AsyncSession, text: str) -> dict:
 async def test_send_message_runs_through_entry_service_with_tools(
     db_session: AsyncSession,
     default_workspace,
+    a2a_scope,
     llm: StubLLMService,
     tool_executor: StubToolExecutor,
     shared_event_store,
@@ -260,7 +267,7 @@ async def test_send_message_runs_through_entry_service_with_tools(
 
 
 async def test_send_message_protocol_shape_is_pinned(
-    db_session: AsyncSession, default_workspace, llm: StubLLMService
+    db_session: AsyncSession, default_workspace, a2a_scope, llm: StubLLMService
 ) -> None:
     """The A2A protocol response keeps its pre-migration field set."""
     await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
@@ -273,7 +280,7 @@ async def test_send_message_protocol_shape_is_pinned(
 
 
 async def test_send_message_registers_task_without_deployment(
-    db_session: AsyncSession, default_workspace, llm: StubLLMService
+    db_session: AsyncSession, default_workspace, a2a_scope, llm: StubLLMService
 ) -> None:
     """No default deployment: the Task still registers; the run gap is explicit."""
     await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
@@ -298,24 +305,67 @@ async def test_send_message_registers_task_without_deployment(
 async def test_no_agent_configured_fails_without_execution(
     db_session: AsyncSession, default_workspace, llm: StubLLMService
 ) -> None:
+    """Unconfigured scope: in-protocol refusal, no agent picked, no execution."""
+    await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
+
     result = await _send_message(db_session, "hello")
 
     assert result["task"]["status"]["state"] == "failed"
-    assert result["task"]["status"]["message"]["parts"][0]["text"] == "No agent configured in Hecate"
+    assert result["task"]["status"]["message"]["parts"][0]["text"] == "No agent configured for A2A execution"
     assert llm.chat_calls == []
 
 
-async def test_provider_failure_maps_to_failed_task(
-    db_session: AsyncSession, default_workspace, monkeypatch: pytest.MonkeyPatch
+async def test_out_of_scope_agent_is_never_selected(
+    db_session: AsyncSession, default_workspace, default_org, llm: StubLLMService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An agent outside the configured scope must not be picked as a global fallback."""
+    from hecate.models.workspace import WorkspaceModel
+
+    await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
+    other_ws = WorkspaceModel(org_id=default_org.id, name="A2A other ws", slug=f"a2a-other-{uuid.uuid4().hex[:8]}")
+    db_session.add(other_ws)
+    await db_session.flush()
+    monkeypatch.setattr("hecate.core.config.settings.A2A_AGENT_WORKSPACE_ID", str(other_ws.id))
+
+    result = await _send_message(db_session, "hello")
+
+    assert result["task"]["status"]["state"] == "failed"
+    assert result["task"]["status"]["message"]["parts"][0]["text"] == (
+        "No agent available in the configured A2A workspace"
+    )
+    assert llm.chat_calls == []
+
+
+async def test_ambiguous_scope_fails_without_execution(
+    db_session: AsyncSession,
+    default_workspace,
+    a2a_scope,
+    llm: StubLLMService,
+) -> None:
+    """A scope resolving to multiple agents refuses instead of picking one."""
+    await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
+    await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
+
+    result = await _send_message(db_session, "hello")
+
+    assert result["task"]["status"]["state"] == "failed"
+    assert result["task"]["status"]["message"]["parts"][0]["text"] == (
+        "The configured A2A workspace does not resolve to a single agent"
+    )
+    assert llm.chat_calls == []
+
+
+async def test_provider_failure_maps_to_failed_task_without_internals(
+    db_session: AsyncSession, default_workspace, a2a_scope, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import hecate_llm.service
 
     class _Broken:
         async def chat(self, **_kwargs: Any):
-            raise RuntimeError("llm down")
+            raise RuntimeError("llm down with secrets /path/to/db")
 
         async def chat_stream(self, **_kwargs: Any):
-            raise RuntimeError("llm down")
+            raise RuntimeError("llm down with secrets /path/to/db")
             yield  # pragma: no cover
 
     monkeypatch.setattr(hecate_llm.service, "llm_service", _Broken())
@@ -324,4 +374,7 @@ async def test_provider_failure_maps_to_failed_task(
     result = await _send_message(db_session, "hello")
 
     assert result["task"]["status"]["state"] == "failed"
-    assert "Execution failed" in result["task"]["status"]["message"]["parts"][0]["text"]
+    text = result["task"]["status"]["message"]["parts"][0]["text"]
+    assert text == "Execution failed"
+    assert "llm down" not in text
+    assert "/path/to/db" not in text

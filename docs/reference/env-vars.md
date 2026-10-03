@@ -95,6 +95,7 @@ The DLP engine scans content at every trust boundary for sensitive data and appl
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `A2A_SERVER_ENABLED` | `false` | Enable A2A protocol server. |
+| `A2A_AGENT_WORKSPACE_ID` | `""` | Workspace the A2A server executes agents from. A2A tasks refuse to run until it names a workspace with exactly one non-deleted agent; there is no global first-agent fallback (cross-workspace execution risk). |
 
 ## Observability
 

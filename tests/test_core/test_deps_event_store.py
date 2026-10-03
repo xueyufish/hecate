@@ -27,16 +27,17 @@ def test_get_event_store_reads_app_state_singleton():
     assert store is sentinel
 
 
-def test_get_event_store_falls_back_to_factory_when_unset():
-    """When app.state.event_store is unset, the dependency SHALL call create_event_store(settings)."""
+def test_get_event_store_falls_back_to_shared_instance_when_unset():
+    """When app.state.event_store is unset, the dependency SHALL resolve the
+    process-wide shared store from entry_assembly — never a fresh per-call
+    store (in-memory backends make store identity the consistency boundary)."""
     app = FastAPI()
 
-    fallback_store = InMemoryEventStore()
-    with patch("hecate.core.deps_event_store.create_event_store", return_value=fallback_store) as factory:
+    shared = InMemoryEventStore()
+    with patch("hecate.core.composition.entry_assembly._shared_event_store", shared):
         request = _make_request(app)
         store = get_event_store(request)
-    assert store is fallback_store
-    factory.assert_called_once()
+    assert store is shared
 
 
 def test_get_event_store_returns_eventstore_instance():

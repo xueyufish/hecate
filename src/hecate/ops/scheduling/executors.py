@@ -126,8 +126,12 @@ class AgentExecutor(TaskExecutor):
         """Run one execution through the platform entry service."""
         from hecate_llm.service import llm_service
 
+        from hecate.core.composition.entry_assembly import (
+            build_tool_registry,
+            get_shared_event_store,
+            load_agent_tools,
+        )
         from hecate.core.composition.guardrail_platform import assemble_guardrails
-        from hecate.core.composition.im_entry import _get_shared_event_store
         from hecate.core.composition.runtime_port_adapter import create_runtime_port
         from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
 
@@ -138,11 +142,9 @@ class AgentExecutor(TaskExecutor):
         bundle = None
         event_store = None
         if agent.tools:
-            from hecate.channel.api.v1.chat import _build_tool_registry, _load_agent_tools
-
-            event_store = _get_shared_event_store()
-            tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
-            effective_tools = await _load_agent_tools(db, agent.tools or [])
+            event_store = get_shared_event_store()
+            tool_registry = build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
+            effective_tools = await load_agent_tools(db, agent.tools or [])
             if effective_tools:
                 bundle = await assemble_guardrails(
                     db,
