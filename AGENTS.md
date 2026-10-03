@@ -41,11 +41,11 @@ uvicorn hecate.main:app --reload
 
 ## Architecture
 
-Modular monolith after Phase R: six domain directories (`runtime/`, `tools/`, `enterprise/`, `channel/`, `studio/`, `ops/`), two cross-cutting layers (`core/` infrastructure + composition root, `models/` data contracts), and a uv workspace of extracted packages under `packages/`.
+Modular monolith after Phase R: domain directories (`runtime/`, `tools/`, `enterprise/`, `channel/`, `studio/`, `ops/`) plus the `execution/` control-plane boundary and language-neutral `contracts/` schemas, two cross-cutting layers (`core/` infrastructure + composition root, `models/` data contracts), and a uv workspace of extracted packages under `packages/`. The Pregel runtime kernel lives in `packages/hecate-runtime`; `src/hecate/runtime/` is a compatibility-forwarding shim layer.
 
-- Runtime domain deep dive, self-sufficiency invariant, and extension-point inventory: [`src/hecate/runtime/AGENTS.md`](src/hecate/runtime/AGENTS.md)
+- Runtime domain deep dive, self-sufficiency invariant, and extension-point inventory: [`packages/hecate-runtime/AGENTS.md`](packages/hecate-runtime/AGENTS.md)
 - Docs map (per-section READMEs): [`docs/design/README.md`](docs/design/README.md) — architecture, engine design, concepts, ADR index
-- Engine boundary start: `src/hecate/runtime/ports.py` (RuntimePort)
+- Engine boundary start: `packages/hecate-runtime/src/hecate_runtime/ports.py` (RuntimePort)
 - Engine/model gotchas (ORM aliases, ChannelManager semantics, StreamMode, PERSISTENT_TOPIC migration): [`docs/gotchas.md`](docs/gotchas.md)
 
 ## Gotchas and non-obvious facts
