@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.composition.memory_policy import narrowed_tool_names
-from hecate.core.config import settings
 from hecate.core.database import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_state_store import get_session_state_store
@@ -367,10 +366,25 @@ async def _process_chat(
             dlp_scanner=dlp_scanner,
         )
 
-    # B1b convergence: with CHAT_TOOL_LOOP_ENGINE_ENABLED the tool loop runs
-    # inside the Pregel engine (unified events, receipts, checkpoints); the
-    # direct loop below stays as the rollback path while the flag is false.
-    use_engine_loop = bool(agent_tools) and settings.CHAT_TOOL_LOOP_ENGINE_ENABLED
+    # B1b convergence (step5d routing): the effective path resolves per
+    # request — workspace override (feature-flag tenant allowlist) beats
+    # the global flag; a session with a recorded path keeps it. The direct
+    # loop below stays as the rollback path.
+    from hecate.execution.entry_routing import (
+        PATH_ENGINE,
+        read_session_path,
+        record_session_path,
+        resolve_chat_engine_path,
+    )
+
+    effective_workspace = workspace_id if workspace_id is not None else (agent.workspace_id if agent else None)
+    session_path = await read_session_path(db, request.session_id)
+    resolved_path = await resolve_chat_engine_path(db, effective_workspace, session_path=session_path)
+    use_engine_loop = bool(agent_tools) and resolved_path == PATH_ENGINE
+    if agent_tools:
+        # Record affinity on the session row (best-effort) so continuations
+        # never switch path mid-conversation.
+        await record_session_path(db, request.session_id, resolved_path)
     if agent_tools and not use_engine_loop:
         # Agent-configured tools: drive the tool-calling loop directly —
         # the LLM proposes tool calls, the registry executes them, and results
@@ -449,14 +463,18 @@ async def _process_chat(
 
     if use_enhanced:
         from hecate.core.composition.runtime_port_adapter import create_runtime_port
-        from hecate.studio.workflows.execution_service import WorkflowExecutionService
+        from hecate.execution.entry_events import RunEventMapper
+        from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
 
         tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
 
         port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
 
-        exec_service = WorkflowExecutionService(
+        # step5d: the entry service owns assembly + Task/Run correlation;
+        # this module keeps protocol adaptation only.
+        entry = EntryExecutionService(
             port=port,
+            entry_name="http-chat",
             db=db,
             event_store=event_store,
             checkpoint_store=session_state_store,
@@ -466,11 +484,22 @@ async def _process_chat(
             middleware_chains=bundle.middleware_chains if bundle else None,
             denial_tracker=bundle.denial_tracker if bundle else None,
         )
+        goal = next(
+            (m.get("content", "")[:200] for m in msg_dicts if m.get("role") == "user" and m.get("content")),
+            None,
+        )
+        correlation_input = CorrelationInput(
+            workspace_id=effective_workspace,
+            agent_id=agent.id if agent is not None else None,
+            user_id=user_id,
+            session_id=uuid.UUID(request.session_id) if request.session_id else None,
+            goal=goal,
+        )
 
         if request.stream:
 
             async def _stream_with_workflow():
-                result_gen = await exec_service.execute(
+                outcome = await entry.execute(
                     agent_mode="chat",
                     messages=msg_dicts,
                     model=effective_model,
@@ -482,34 +511,78 @@ async def _process_chat(
                     generate_opening=request.generate_opening,
                     enable_suggestions=request.generate_suggestions,
                     skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
+                    correlation=correlation_input,
                 )
+                result_gen = outcome.result
 
                 if isinstance(result_gen, dict):
                     yield _format_done_chunk(effective_model)
                     return
 
-                async for event in result_gen:
-                    if event.get("type") == "message":
-                        delta_content = event.get("content", "")
-                        if not delta_content:
-                            # Empty deltas (tool-call-only iterations) are not
-                            # content — suppress rather than emit no-op chunks.
-                            continue
-                        chunk = ChatCompletionChunk(
-                            model=effective_model,
-                            choices=[
-                                ChatCompletionChunkChoice(
-                                    delta=ChatCompletionChunkDelta(content=delta_content),
-                                    finish_reason=None,
+                # step5d event mapping: when the execution is correlated to a
+                # run the adapter renders from platform envelopes (client-safe
+                # payloads only); otherwise it falls back to the raw engine
+                # stream — never silently claiming registration.
+                correlation = outcome.correlation
+                use_mapped = (
+                    correlation.status == "registered"
+                    and correlation.task_ref is not None
+                    and correlation.run_ref is not None
+                )
+                if use_mapped:
+                    mapper = RunEventMapper(correlation.task_ref, correlation.run_ref)
+                    async for envelope in _map_stream(result_gen, mapper):
+                        payload = envelope.payload
+                        if payload.get("type") == "message":
+                            delta_content = payload.get("content", "")
+                            if not delta_content:
+                                # Empty deltas (tool-call-only iterations) are
+                                # not content — suppress rather than emit
+                                # no-op chunks.
+                                continue
+                            chunk = ChatCompletionChunk(
+                                model=effective_model,
+                                choices=[
+                                    ChatCompletionChunkChoice(
+                                        delta=ChatCompletionChunkDelta(content=delta_content),
+                                        finish_reason=None,
+                                    )
+                                ],
+                            )
+                            yield f"data: {json.dumps(chunk.model_dump())}\n\n"
+                        elif payload.get("type") == "values":
+                            suggested_questions = payload.get("suggested_questions")
+                            if suggested_questions:
+                                yield (
+                                    f"data: {json.dumps({'type': 'suggestions', 'questions': suggested_questions})}\n\n"
                                 )
-                            ],
-                        )
-                        yield f"data: {json.dumps(chunk.model_dump())}\n\n"
-                    elif event.get("type") == "values":
-                        state = event.get("state", {})
-                        suggested_questions = state.get("suggested_questions")
-                        if suggested_questions:
-                            yield f"data: {json.dumps({'type': 'suggestions', 'questions': suggested_questions})}\n\n"
+                else:
+                    logger.warning(
+                        "Chat execution correlation missing (%s); rendering from raw engine stream",
+                        correlation.reason,
+                    )
+                    async for event in result_gen:
+                        if event.get("type") == "message":
+                            delta_content = event.get("content", "")
+                            if not delta_content:
+                                continue
+                            chunk = ChatCompletionChunk(
+                                model=effective_model,
+                                choices=[
+                                    ChatCompletionChunkChoice(
+                                        delta=ChatCompletionChunkDelta(content=delta_content),
+                                        finish_reason=None,
+                                    )
+                                ],
+                            )
+                            yield f"data: {json.dumps(chunk.model_dump())}\n\n"
+                        elif event.get("type") == "values":
+                            state = event.get("state", {})
+                            suggested_questions = state.get("suggested_questions")
+                            if suggested_questions:
+                                yield (
+                                    f"data: {json.dumps({'type': 'suggestions', 'questions': suggested_questions})}\n\n"
+                                )
 
                 yield _format_done_chunk(effective_model)
 
@@ -519,7 +592,7 @@ async def _process_chat(
             )
 
         # Non-streaming with enhanced features
-        result = await exec_service.execute(
+        outcome = await entry.execute(
             agent_mode="chat",
             messages=msg_dicts,
             model=effective_model,
@@ -531,7 +604,9 @@ async def _process_chat(
             generate_opening=request.generate_opening,
             enable_suggestions=request.generate_suggestions,
             skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
+            correlation=correlation_input,
         )
+        result = outcome.result
 
         if not isinstance(result, dict):
             msg = f"Expected dict result for non-streaming chat, got {type(result)}"
@@ -539,7 +614,7 @@ async def _process_chat(
 
         suggested_questions = result.get("suggested_questions")
 
-        return ChatCompletionResponse(
+        response_payload = ChatCompletionResponse(
             model=result.get("model", effective_model),
             choices=[
                 ChatCompletionChoice(
@@ -557,6 +632,12 @@ async def _process_chat(
                 total_tokens=result.get("usage", {}).get("total_tokens", 0),
             ),
         ).model_dump()
+        # Correlation visibility: a missing registration is explicit in the
+        # response instead of the platform claiming a record it does not
+        # have. Registered executions stay OpenAI-clean (logged server-side).
+        if outcome.correlation.status != "registered":
+            response_payload["hecate_correlation"] = outcome.correlation.to_dict()
+        return response_payload
 
     # Simple passthrough: no KB, no suggestions — use LLM directly for lowest latency
     provider_cfg = await _get_provider_config(db, effective_model)
@@ -603,6 +684,12 @@ async def _process_chat(
             total_tokens=response.usage.get("total_tokens", 0),
         ),
     ).model_dump()
+
+
+async def _map_stream(result_gen, mapper):
+    """Map raw engine stream events to contract envelopes (step5d)."""
+    async for event in result_gen:
+        yield mapper.map_stream_event(event)
 
 
 def _format_done_chunk(model: str) -> str:

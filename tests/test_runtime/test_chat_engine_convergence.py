@@ -226,6 +226,10 @@ async def test_http_fork_routes_by_flag(monkeypatch: pytest.MonkeyPatch) -> None
     )
 
     db = MagicMock()
+    # step5d routing reads the workspace flag row and the session path:
+    # minimal async semantics — no flag row, no session record.
+    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    db.get = AsyncMock(return_value=None)
 
     def _bundle(**kwargs):
         b = MagicMock()

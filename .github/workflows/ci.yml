@@ -166,6 +166,8 @@ jobs:
           python-version: "3.12"
       - name: Install uv
         run: pip install uv
+      - name: Check execution stack compatibility matrix
+        run: python scripts/check_execution_stack_matrix.py
       - name: Build hecate-runtime wheel (non-editable artifact)
         run: uv build --package hecate-runtime
       - name: Build hecate-runner wheel (non-editable artifact)

@@ -39,6 +39,7 @@ Each use case combines multiple subsystems below into a working end-to-end recip
 ## Core Subsystems
 
 - **[Engine Design](engine-design.md)** — the Pregel runtime, compiler, channel system, and event-sourced execution state (Log-as-Truth).
+- **[Execution Stack Compatibility Matrix](execution-stack-compatibility-matrix.md)** — supported combinations of the platform, `hecate-runtime` kernel, and `hecate-runner` host with support windows and exit conditions; CI-checked against the workspace versions.
 - **[Access Channel Design](access-channel-design.md)** — API surfaces, authentication, gateway control plane, multi-channel adaptation, and zero-trust identity.
 - **[Agent Studio Design](agent-studio-design.md)** — visual development environment: canvas, agent configurator, multi-agent orchestration, NL2X workflow generation, and testing tools.
 - **[Visual Canvas Architecture](visual-canvas-architecture.md)** — the React Flow + Next.js frontend (`web/`): bidirectional DSL sync, custom node types, multi-agent pattern templates, and canvas-to-backend protocol.

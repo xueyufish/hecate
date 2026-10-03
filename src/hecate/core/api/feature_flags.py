@@ -6,8 +6,12 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from hecate.core.auth_context import AuthContext
+from hecate.core.deps import get_db
 from hecate.core.deps_feature_flags import get_feature_flag_service
+from hecate.core.deps_workspace import get_auth_context
 from hecate.core.feature_flags import FeatureFlagService
 
 router = APIRouter(prefix="/api/feature-flags", tags=["feature-flags"])
@@ -106,7 +110,17 @@ async def update_flag(
     key: str,
     body: FeatureFlagUpdate,
     service: Annotated[FeatureFlagService, Depends(get_feature_flag_service)],
+    ctx: Annotated[AuthContext, Depends(get_auth_context)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> FeatureFlagResponse:
+    from hecate.execution.entry_routing import (
+        CHAT_ENGINE_FLAG_KEY,
+        record_rollout_change,
+    )
+
+    existing = await service.get(key)
+    old_rules = dict(existing.targeting_rules) if existing is not None and existing.targeting_rules else None
+    old_enabled = existing.enabled if existing is not None else None
     try:
         flag = await service.update(
             key,
@@ -117,6 +131,24 @@ async def update_flag(
         )
     except KeyError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    if (
+        key == CHAT_ENGINE_FLAG_KEY
+        and (body.targeting_rules is not None or body.enabled is not None)
+        and ctx.workspace_id is not None
+    ):
+        # step5d rollout record: every engine-path override change is
+        # auditable (workspace, actor, old→new). The effective workspace is
+        # the caller's; targeting is workspace-scoped by contract.
+        await record_rollout_change(
+            db,
+            workspace_id=ctx.workspace_id,
+            actor_id=ctx.user_id,
+            old_value={"enabled": old_enabled, "targeting_rules": old_rules},
+            new_value={
+                "enabled": body.enabled if body.enabled is not None else old_enabled,
+                "targeting_rules": body.targeting_rules if body.targeting_rules is not None else old_rules,
+            },
+        )
     return FeatureFlagResponse(
         key=flag.key,
         status=flag.status,
