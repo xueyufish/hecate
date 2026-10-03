@@ -84,7 +84,6 @@ async def _make_agent_with_deployment(
         await db_session.flush()
         db_session.add(
             AgentPrincipalModel(
-                id=agent.id,
                 agent_id=agent.id,
                 workspace_id=workspace_id,
                 organization_id=workspace_id,
@@ -182,6 +181,11 @@ async def test_per_request_correlation_creates_task_and_run(db_session, workspac
 
     run = await TaskRunRegistry(db_session).get_run(uuid.UUID(outcome.correlation.run_ref.id), workspace_id)
     assert run.backend_ref["id"] == str(session_id)
+    from sqlalchemy import select
+
+    principal = await db_session.scalar(select(AgentPrincipalModel).where(AgentPrincipalModel.agent_id == agent.id))
+    assert principal.id != agent.id
+    assert run.identity_chain["principal_id"] == str(principal.id)
 
 
 async def test_per_request_correlation_without_deployment_still_records_task(db_session, workspace_id) -> None:
@@ -311,3 +315,104 @@ def test_entry_module_has_no_engine_specific_imports() -> None:
     assert "graph_compiler" not in joined.lower()
     assert "GraphCompiler" not in source
     assert "PregelRuntime" not in source
+
+
+async def test_registry_flush_failure_rolls_back_only_correlation(db_session, workspace_id, monkeypatch):
+    from sqlalchemy import func, select
+
+    from hecate.execution.task_run_registry import TaskRunRegistry
+    from hecate.models.task import TaskModel
+
+    agent = await _make_agent_with_deployment(db_session, workspace_id)
+    service = _service(workspace_id, db_session)
+
+    async def failing_run(registry, **kwargs):
+        registry._session.add(
+            TaskModel(goal=None, initiator_ref={}, workspace_id=workspace_id, issuer_domain="private")
+        )
+        await registry._session.flush()
+
+    monkeypatch.setattr(TaskRunRegistry, "create_run", failing_run)
+    outcome = await service.execute(
+        messages=[{"role": "user", "content": "hello"}],
+        correlation=CorrelationInput(workspace_id=workspace_id, agent_id=agent.id),
+    )
+    assert outcome.result["content"] == "hi"
+    assert outcome.correlation.status == CORRELATION_MISSING
+    assert outcome.correlation.reason == "correlation registration failed"
+    assert db_session.is_active
+    assert await db_session.scalar(select(func.count()).select_from(TaskModel)) == 0
+    assert await db_session.get(AgentModel, agent.id) is agent
+
+
+async def test_mismatched_sessions_are_rejected_before_execution(db_session, workspace_id):
+    service = _service(workspace_id, db_session)
+    with pytest.raises(ValueError, match="session identifiers must match"):
+        await service.execute(session_id=uuid.uuid4(), correlation=CorrelationInput(session_id=uuid.uuid4()))
+    assert service._service.calls == []
+
+
+async def test_default_entry_stores_are_shared_even_without_tools(db_session, workspace_id):
+    from hecate.core.composition.entry_assembly import get_shared_event_store, get_shared_session_state_store
+
+    service = _service(workspace_id, db_session)
+    assert service._service.kwargs["event_store"] is get_shared_event_store()
+    assert service._service.kwargs["checkpoint_store"] is get_shared_session_state_store()
+
+
+async def test_evaluation_threads_scope_version_and_shared_task(db_session, workspace_id):
+    from hecate.execution.task_run_registry import TaskRunRegistry
+    from hecate.models.workflow import WorkflowModel
+    from hecate.ops.evaluation.engine import EvaluationEngine
+
+    workflow = WorkflowModel(name="evaluation", workspace_id=workspace_id)
+    db_session.add(workflow)
+    await db_session.flush()
+    task = await TaskRunRegistry(db_session).create_task(
+        goal="evaluate",
+        workspace_id=workspace_id,
+        initiator_ref={
+            "initiator": None,
+            "principal_id": "eval",
+            "audience": "evaluation",
+            "workload": {
+                "deployment": {"kind": "deployment", "issuer_domain": "hecate", "id": "eval"},
+                "workload_id": "eval",
+            },
+        },
+    )
+    result, trajectory = await EvaluationEngine(db_session)._generate_answer_via_workflow(
+        query="hello",
+        workflow_id=workflow.id,
+        workflow_version=2,
+        item_id=uuid.uuid4(),
+        repetitions=2,
+        correlation_task_id=task.id,
+    )
+    assert result == "hi" and len(trajectory) == 2
+    assert all(row["correlation"]["task_ref"]["id"] == str(task.id) for row in trajectory)
+    calls = StubExecService.instances[-1].calls
+    assert len(calls) == 2
+    assert all(call["workflow_version"] == 2 and call["workspace_id"] == workspace_id for call in calls)
+    assert "correlation" not in calls[0]
+
+
+async def test_evaluation_rejects_cross_workspace_anchor(db_session, workspace_id):
+    from hecate.models.task import TaskModel
+    from hecate.models.workflow import WorkflowModel
+    from hecate.ops.evaluation.engine import EvaluationEngine
+
+    workflow = WorkflowModel(name="evaluation", workspace_id=workspace_id)
+    task = TaskModel(goal="foreign", workspace_id=uuid.uuid4(), initiator_ref={}, issuer_domain="hecate")
+    db_session.add_all([workflow, task])
+    await db_session.flush()
+    with pytest.raises(ValueError, match="same workspace"):
+        await EvaluationEngine(db_session)._generate_answer_via_workflow(
+            query="hello",
+            workflow_id=workflow.id,
+            workflow_version=1,
+            item_id=uuid.uuid4(),
+            repetitions=1,
+            correlation_task_id=task.id,
+        )
+    assert StubExecService.instances == []

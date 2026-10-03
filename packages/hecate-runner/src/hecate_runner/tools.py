@@ -27,7 +27,7 @@ class BusinessApiToolDispatcher:
         payload = {
             "principal": principal,
             "domains": domains,
-            "arguments": arguments,
+            "arguments": {key: arguments[key] for key in ("domain", "sku") if key in arguments},
         }
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:

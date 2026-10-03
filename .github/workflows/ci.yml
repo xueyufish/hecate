@@ -121,6 +121,7 @@ jobs:
           npm test --prefix pilots/execution-backend-ts
           uv pip install pytest-timeout
           uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
+          uv run pytest packages/hecate-runner/tests/ -q --timeout=120 -p no:cacheprovider
 
   migrations:
     needs: changes

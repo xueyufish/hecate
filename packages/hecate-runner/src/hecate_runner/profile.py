@@ -25,11 +25,21 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from hecate_runtime.manifest import ArtifactManifest, ManifestError, sha256_hex, validate_manifest_dict
+from jsonschema import Draft202012Validator
+from jsonschema.exceptions import SchemaError
 
 PREVIEW_ROLE = "read_only"
 _PREVIEW_FORBIDDEN_PERMISSIONS = {"write", "approval_required"}
+BUILTIN_TOOL_SCHEMAS = {
+    "query_inventory": {
+        "type": "object",
+        "required": ["domain", "sku"],
+        "properties": {"domain": {"type": "string", "minLength": 1}, "sku": {"type": "string", "minLength": 1}},
+    }
+}
 
 
 class ProfileError(Exception):
@@ -75,7 +85,10 @@ def _resolve_secret_ref(ref: str, profile_dir: Path) -> str:
         path = profile_dir / ref[5:]
         if not path.is_file():
             raise ProfileError(f"secret reference file:{ref[5:]} does not exist")
-        return path.read_text(encoding="utf-8").strip()
+        value = path.read_text(encoding="utf-8").strip()
+        if not value:
+            raise ProfileError(f"secret reference file:{ref[5:]} is empty")
+        return value
     raise ProfileError(f"secret reference must start with 'env:' or 'file:': {ref!r}")
 
 
@@ -91,6 +104,18 @@ def _load_json(path: Path, label: str) -> dict:
     return data
 
 
+def _check_local_schema_refs(value: object) -> None:
+    if isinstance(value, dict):
+        ref = value.get("$ref")
+        if ref is not None and (not isinstance(ref, str) or not ref.startswith("#")):
+            raise ProfileError("preview tool schemas support internal references only")
+        for item in value.values():
+            _check_local_schema_refs(item)
+    elif isinstance(value, list):
+        for item in value:
+            _check_local_schema_refs(item)
+
+
 def _load_manifest(profile_dir: Path) -> ArtifactManifest:
     raw = _load_json(profile_dir / "agent-manifest.json", "agent manifest")
     try:
@@ -100,6 +125,8 @@ def _load_manifest(profile_dir: Path) -> ArtifactManifest:
 
     for entry in manifest.files:
         content_path = profile_dir / "files" / entry.path
+        if not content_path.resolve().is_relative_to((profile_dir / "files").resolve()):
+            raise ProfileError(f"manifest file escapes files directory: {entry.path!r}")
         if content_path.is_file():
             content = content_path.read_bytes()
             if sha256_hex(content) != entry.sha256:
@@ -116,6 +143,8 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
     errors: list[str] = []
 
     host = data.get("host", "127.0.0.1")
+    if host not in ("127.0.0.1", "localhost"):
+        errors.append("host must be a loopback address in the preview profile")
     port = data.get("port")
     if not isinstance(port, int) or isinstance(port, bool) or not (0 <= port < 65536):
         errors.append("port must be an integer in [0, 65536) (0 = OS-assigned)")
@@ -129,16 +158,25 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
         errors.append("model must be an object")
         model = {}
     model_backend = model.get("backend", "stub")
-    if model_backend not in {"stub", "endpoint"}:
+    if not isinstance(model_backend, str) or model_backend not in {"stub", "endpoint"}:
         errors.append("model.backend must be 'stub' or 'endpoint'")
     model_endpoint = model.get("endpoint")
     model_auth_env = model.get("auth_env")
     if model_backend == "endpoint" and (not isinstance(model_endpoint, str) or not model_endpoint):
         errors.append("model.endpoint is required when backend is 'endpoint'")
+    elif model_backend == "endpoint":
+        try:
+            endpoint_url = urlsplit(model_endpoint if isinstance(model_endpoint, str) else "")
+            if endpoint_url.scheme not in ("http", "https") or not endpoint_url.hostname:
+                errors.append("model.endpoint must be an HTTP(S) URL")
+        except ValueError:
+            errors.append("model.endpoint must be an HTTP(S) URL")
 
     allowlist = data.get("tool_allowlist", [])
     if not isinstance(allowlist, list) or any(not isinstance(name, str) or not name for name in allowlist):
         errors.append("tool_allowlist must be an array of non-empty strings")
+    elif len(allowlist) != len(set(allowlist)):
+        errors.append("tool_allowlist must not contain duplicate tools")
 
     shutdown_ref = data.get("shutdown_token_ref")
     if not isinstance(shutdown_ref, str) or not shutdown_ref:
@@ -149,7 +187,7 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
         errors.append("max_request_bytes must be a positive integer")
 
     max_concurrency = data.get("max_concurrency", 1)
-    if max_concurrency != 1:
+    if not isinstance(max_concurrency, int) or isinstance(max_concurrency, bool) or max_concurrency != 1:
         errors.append("max_concurrency must be 1 in the preview profile")
 
     if errors:
@@ -236,6 +274,7 @@ class Profile:
     identities: tuple[TrustedIdentity, ...]
     shutdown_token: str
     entry_content: bytes
+    tool_schemas: dict[str, dict]
 
     def capabilities_summary(self) -> dict:
         return {
@@ -259,6 +298,13 @@ def load_profile(profile_dir: Path) -> Profile:
         raise ProfileError(f"profile directory does not exist: {profile_dir}")
 
     manifest = _load_manifest(profile_dir)
+    if manifest.backend_type != "pregel" or manifest.backend_compat_version != "0.1":
+        raise ProfileError("preview supports only backend_type='pregel' with backend_compat_version='0.1'")
+    if manifest.contract_version != "0.1":
+        raise ProfileError("preview supports only contract_version='0.1'")
+    supported = {"submit", "read_events_cursor", "cancel", "local_evidence"}
+    if set(manifest.required_capabilities) - supported:
+        raise ProfileError("manifest requires unsupported capabilities")
     config = _load_config(profile_dir)
     identities = _load_identities(profile_dir)
 
@@ -277,11 +323,34 @@ def load_profile(profile_dir: Path) -> Profile:
     unknown = [name for name in config.tool_allowlist if name not in builtin_read and name not in manifest_read_names]
     if unknown:
         raise ProfileError(f"tool_allowlist entries not declared as read tools in the manifest: {unknown}")
+    unmapped = set(config.tool_allowlist) - set(BUILTIN_TOOL_SCHEMAS)
+    if unmapped:
+        raise ProfileError(f"preview has no tool adapter for: {sorted(unmapped)}")
+
+    schemas = {name: BUILTIN_TOOL_SCHEMAS[name] for name in config.tool_allowlist}
+    verified_files = {entry.path for entry in manifest.files}
+    for tool in manifest.tools:
+        if tool.name not in config.tool_allowlist:
+            continue
+        if tool.schema_ref not in verified_files:
+            raise ProfileError(f"tool schema must be a digest-verified manifest file: {tool.schema_ref!r}")
+        schema = _load_json(profile_dir / "files" / tool.schema_ref, f"tool schema {tool.name}")
+        _check_local_schema_refs(schema)
+        try:
+            Draft202012Validator.check_schema(schema)
+        except SchemaError as exc:
+            raise ProfileError(f"invalid tool schema for {tool.name}") from exc
+        schemas[tool.name] = schema
 
     entry_path = profile_dir / "files" / manifest.entry
     entry_content = entry_path.read_bytes()
+    entry = _load_json(entry_path, "preview entry")
+    if entry.get("kind") != "entry" or entry.get("tools") != list(config.tool_allowlist):
+        raise ProfileError("preview entry must declare kind='entry' and the configured tools in order")
 
     shutdown_token = _resolve_secret_ref(config.shutdown_token_ref, profile_dir)
+    if config.model_auth_env and not os.environ.get(config.model_auth_env):
+        raise ProfileError(f"model auth reference env:{config.model_auth_env} is not set")
 
     return Profile(
         directory=profile_dir,
@@ -290,4 +359,5 @@ def load_profile(profile_dir: Path) -> Profile:
         identities=identities,
         shutdown_token=shutdown_token,
         entry_content=entry_content,
+        tool_schemas=schemas,
     )

@@ -1,10 +1,12 @@
 # step5 复核与修正记录
 
+> 本文件保留上一轮基线与证据。最新 main 的补充复核见 [Step5 执行链复核与修正](step5-execution-review-report.md)：修复独立宿主与平台入口遗漏，并更正 5c 的完成边界；本文件中的旧测试结果和“复核属实”不替代新报告结论。
+
 ## 复核范围与证据
 
-本次复核 step5 全部五个交付：`runtime-shared-assembly`（PR #206）、`runtime-standalone-distribution`（#207）、`hecate-runner-preview`（#208）、`platform-entry-migration`（#209）、`entry-tail-migration`（#210），基线为 `9f9d367`。依据为[演进方案](enterprise-agent-platform-evolution-plan.md) step5 与 G1—G5 门禁、[platform-entry-execution 规格](../specs/platform-entry-execution/spec.md)、[unified-chat-execution 规格](../specs/unified-chat-execution/spec.md)、五个 change 的归档工件与实际代码。
+本次复核 step5 全部五个交付：`runtime-shared-assembly`（PR #206）、`runtime-standalone-distribution`（#207）、`hecate-runner-preview`（#208）、`platform-entry-migration`（#209）、`entry-tail-migration`（#210），基线为 `9f9d367`。依据为[演进方案](enterprise-agent-platform-evolution-plan.md) step5 与 G1—G5 门禁、[platform-entry-execution 规格](../../openspec/specs/platform-entry-execution/spec.md)、[unified-chat-execution 规格](../../openspec/specs/unified-chat-execution/spec.md)、五个 change 的归档工件与实际代码。
 
-证据类型是静态代码走查、规格逐条对照与真实入口回归。修正由 [step5-review-hardening](../changes/step5-review-hardening/proposal.md) 承接。既有交付事实（5a/5b/5c 勾选、SC01/SC02 翻转、双 wheel CI）经复核属实，本次修正不改变其结论。
+证据类型是静态代码走查、规格逐条对照与真实入口回归。修正由 [step5-review-hardening](../../openspec/changes/archive/2026-10-03-step5-review-hardening/proposal.md) 承接。既有交付事实（5a/5b/5c 勾选、SC01/SC02 翻转、双 wheel CI）经复核属实，本次修正不改变其结论。
 
 ## 发现与处置
 

@@ -158,3 +158,82 @@ def test_resolve_identity_constant_time_lookup(tmp_path: Path, _shutdown_env: No
     assert resolve_identity(profile.identities, "reader-secret-token") is not None
     assert resolve_identity(profile.identities, "wrong-token") is None
     assert resolve_identity(profile.identities, "") is None
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("backend_type", "foreign-runtime"),
+        ("backend_compat_version", "99"),
+        ("contract_version", "99"),
+        ("required_capabilities", ["long_task_recovery"]),
+    ],
+)
+def test_unsupported_manifest_fails_at_startup(tmp_path, _shutdown_env, field, value):
+    profile_dir = _write_profile(tmp_path)
+    path = profile_dir / "agent-manifest.json"
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    manifest[field] = value
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ProfileError):
+        load_profile(profile_dir)
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [("host", "0.0.0.0"), ("max_concurrency", True), ("tool_allowlist", ["query_inventory", "query_inventory"])],  # noqa: S104
+)
+def test_invalid_preview_configuration_fails_at_startup(tmp_path, _shutdown_env, field, value):
+    profile_dir = _write_profile(tmp_path)
+    path = profile_dir / "runner.json"
+    config = json.loads(path.read_text(encoding="utf-8"))
+    config[field] = value
+    path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ProfileError):
+        load_profile(profile_dir)
+
+
+def test_empty_secret_fails_at_startup(tmp_path, _shutdown_env):
+    profile_dir = _write_profile(tmp_path)
+    (profile_dir / "secrets/app-reader-token").write_text("  ", encoding="utf-8")
+    with pytest.raises(ProfileError, match="empty"):
+        load_profile(profile_dir)
+
+
+def test_declared_tool_requires_verified_schema(tmp_path, _shutdown_env):
+    profile_dir = _write_profile(
+        tmp_path,
+        tools=[
+            {
+                "name": "query_inventory",
+                "permission": "read",
+                "schema_ref": "schemas/inventory.json",
+            }
+        ],
+    )
+    with pytest.raises(ProfileError, match="digest-verified"):
+        load_profile(profile_dir)
+
+
+def test_external_schema_refs_fail_startup_without_network(tmp_path, _shutdown_env):
+    schema_name = "schemas/inventory.json"
+    profile_dir = _write_profile(
+        tmp_path,
+        tools=[
+            {
+                "name": "query_inventory",
+                "permission": "read",
+                "schema_ref": schema_name,
+            }
+        ],
+    )
+    schema_content = b'{"$ref": "https://unexpected.example/schema"}'
+    schema_path = profile_dir / "files" / schema_name
+    schema_path.parent.mkdir()
+    schema_path.write_bytes(schema_content)
+    manifest_path = profile_dir / "agent-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["files"].append({"path": schema_name, "sha256": sha256_hex(schema_content), "size": len(schema_content)})
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ProfileError, match="internal references only"):
+        load_profile(profile_dir)

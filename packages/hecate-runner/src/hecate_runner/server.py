@@ -25,15 +25,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import parse_qs
 
 from .engine import ExecutionEngine
 from .evidence import OUTCOME_DENIED, EvidenceStore
 from .profile import Profile, resolve_identity
 
 _MAX_BODY_FALLBACK = 1 << 20
+logger = logging.getLogger(__name__)
 
 
 class _ProblemError(Exception):
@@ -74,6 +77,7 @@ class RunnerServer:
         # Event.set() is not a coroutine; schedule a trivial coroutine that
         # sets it on the runner loop (run_coroutine_threadsafe requires one).
         async def _set() -> None:
+            self._engine.begin_shutdown()
             self._shutdown_event.set()
 
         asyncio.run_coroutine_threadsafe(_set(), self._loop)
@@ -86,14 +90,23 @@ class RunnerServer:
         if self._http is not None:
             await asyncio.get_running_loop().run_in_executor(None, self._http.shutdown)
 
-    def wait_shutdown_sync(self, timeout: float = 30.0) -> None:
+    def wait_shutdown_sync(self, timeout: float | None = None) -> None:
         """Blocking variant for the calling thread (main/tests)."""
 
         future = asyncio.run_coroutine_threadsafe(self.wait_shutdown(), self._loop)
         future.result(timeout=timeout)
 
     def close(self) -> None:
+        """Close execution, listener and loop without leaving orphaned tasks."""
+        if self._loop.is_closed():
+            return
+        self._run_coro(self._engine.close())
+        if self._http is not None:
+            self._http.shutdown()
+            self._http.server_close()
         self._loop.call_soon_threadsafe(self._loop.stop)
+        self._loop_thread.join(timeout=5)
+        self._loop.close()
 
     # -- helpers -----------------------------------------------------------
 
@@ -107,21 +120,29 @@ class RunnerServer:
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
 
+            def setup(self) -> None:
+                super().setup()
+                self.connection.settimeout(10.0)
+
             def log_message(self, fmt: str, *args) -> None:  # silence default stderr noise
                 pass
 
-            def _send_json(self, status: int, payload: dict) -> None:
+            def _send_json(self, status: int, payload: dict, content_type: str = "application/json") -> None:
                 body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 self.send_response(status)
-                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
 
             def _send_problem(self, status: int, type_: str, title: str, detail: str) -> None:
+                # Error paths may reject before reading a request body. Closing
+                # prevents its bytes being parsed as a subsequent HTTP request.
+                self.close_connection = True
                 self._send_json(
                     status,
                     {"type": f"urn:hecate:problem:{type_}", "title": title, "detail": detail, "status": status},
+                    "application/problem+json",
                 )
 
             def _identity(self) -> dict | None:
@@ -134,11 +155,29 @@ class RunnerServer:
                 return {"principal": identity.principal, "role": identity.role, "domains": identity.domains}
 
             def _read_body(self) -> bytes:
-                length = int(self.headers.get("Content-Length") or 0)
+                if self.headers.get("Transfer-Encoding"):
+                    raise _ProblemError(400, "invalid-request", "Invalid framing", "chunked bodies are unsupported")
+                try:
+                    length = int(self.headers.get("Content-Length") or 0)
+                except ValueError:
+                    raise _ProblemError(400, "invalid-request", "Invalid framing", "invalid Content-Length") from None
+                if length < 0:
+                    raise _ProblemError(400, "invalid-request", "Invalid framing", "negative Content-Length")
                 cap = server._profile.config.max_request_bytes or _MAX_BODY_FALLBACK
                 if length > cap:
                     raise _ProblemError(413, "payload-too-large", "Payload too large", f"body exceeds {cap} bytes")
                 return self.rfile.read(length) if length else b""
+
+            def _authorized_run(self, run_id: str, identity: dict):
+                state = server._engine.get_state(run_id)
+                if state is None:
+                    raise _ProblemError(404, "run-not-found", "Run not found", "run does not resolve")
+                if state.principal != identity["principal"] or not set(state.domains).issubset(identity["domains"]):
+                    server._evidence.append(
+                        "denial", identity["principal"], run_id, OUTCOME_DENIED, {"reason": "forbidden"}
+                    )
+                    raise _ProblemError(403, "forbidden", "Request denied", "run is outside the trusted identity scope")
+                return state
 
             def _deny(self, type_: str, detail: str, status: int, principal: str = "anonymous") -> None:
                 server._evidence.append("denial", principal, self.path, OUTCOME_DENIED, {"reason": type_})
@@ -148,23 +187,32 @@ class RunnerServer:
                 try:
                     path = self.path.split("?", 1)[0]
                     if path == "/healthz":
-                        self._send_json(200, {"ready": True, **server._profile.capabilities_summary()})
+                        self._send_json(
+                            200, {"ready": not server._engine.closing, **server._profile.capabilities_summary()}
+                        )
                         return
                     if path == "/capabilities":
                         self._send_json(200, server._engine.capabilities())
                         return
-                    if path.startswith("/v1/evidence"):
-                        if self._identity() is None:
-                            self._deny("unauthenticated", "missing or unknown credential", 401)
-                            return
-                        from urllib.parse import parse_qs
-
+                    identity = self._identity()
+                    if identity is None:
+                        self._deny("unauthenticated", "missing or unknown credential", 401)
+                        return
+                    if path == "/v1/evidence":
                         params = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
                         outcome_values = params.get("outcome") or []
                         principal_values = params.get("principal") or []
+                        if principal_values and principal_values[0] != identity["principal"]:
+                            self._deny(
+                                "forbidden",
+                                "evidence is outside the trusted identity scope",
+                                403,
+                                identity["principal"],
+                            )
+                            return
                         records = server._evidence.query(
                             outcome=outcome_values[0] if outcome_values else None,
-                            principal=principal_values[0] if principal_values else None,
+                            principal=identity["principal"],
                         )
                         self._send_json(
                             200,
@@ -185,12 +233,9 @@ class RunnerServer:
                         return
 
                     parts = [p for p in path.split("/") if p]
-                    if len(parts) >= 2 and parts[0] == "runs":
+                    if len(parts) in (2, 3) and parts[0] == "runs":
                         run_id = parts[1]
-                        state = server._engine.get_state(run_id)
-                        if state is None:
-                            self._send_problem(404, "run-not-found", "Run not found", f"no run {run_id!r}")
-                            return
+                        state = self._authorized_run(run_id, identity)
                         if len(parts) == 2:
                             self._send_json(
                                 200,
@@ -203,9 +248,15 @@ class RunnerServer:
                             )
                             return
                         if parts[2] == "events":
-                            cursor = int(
-                                (self.path.split("cursor=")[-1].split("&")[0] or 0) if "cursor=" in self.path else 0
-                            )
+                            params = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                            try:
+                                cursor = int((params.get("cursor") or ["0"])[0])
+                                if cursor < 0 or cursor > len(state.events):
+                                    raise ValueError
+                            except ValueError:
+                                raise _ProblemError(
+                                    400, "invalid-cursor", "Invalid cursor", "cursor is outside the event range"
+                                ) from None
                             events = state.events[cursor:]
                             self._send_json(
                                 200,
@@ -223,7 +274,10 @@ class RunnerServer:
                 except _ProblemError as problem:
                     self._send_problem(problem.status, problem.type, problem.title, problem.detail)
                 except Exception as exc:  # noqa: BLE001 - map to internal-error problem
-                    self._send_problem(500, "internal-error", "Internal error", str(exc))
+                    logger.warning("Runner GET failed", exc_info=exc)
+                    self._send_problem(
+                        500, "internal-error", "Internal error", "request failed; inspect local service logs"
+                    )
 
             def do_POST(self) -> None:  # noqa: N802 - http.server API
                 try:
@@ -232,7 +286,12 @@ class RunnerServer:
 
                     if parts == ["admin", "shutdown"]:
                         body = self._read_body()
-                        token = json.loads(body or b"{}").get("token", "")
+                        request = json.loads(body or b"{}")
+                        if not isinstance(request, dict) or not isinstance(request.get("token", ""), str):
+                            raise _ProblemError(
+                                400, "invalid-request", "Invalid request", "shutdown token must be a string"
+                            )
+                        token = request.get("token", "")
                         import hmac as hmac_mod
 
                         if not hmac_mod.compare_digest(token, server._profile.shutdown_token):
@@ -248,15 +307,17 @@ class RunnerServer:
                         return
 
                     if parts == ["runs"]:
+                        if server._engine.closing:
+                            self._send_problem(503, "shutting-down", "Runner closing", "new runs are not accepted")
+                            return
                         body = self._read_body()
                         request = json.loads(body or b"{}")
                         # Self-reported role/domain claims are ignored by design:
                         # only the server-side identity mapping grants scope.
-                        tool_arguments = request.get("tool_arguments") or {}
-                        if not isinstance(tool_arguments, dict):
-                            self._deny(
-                                "invalid-request", "tool_arguments must be an object", 422, identity["principal"]
-                            )
+                        try:
+                            server._engine.validate_run_input(request)
+                        except ValueError as exc:
+                            self._deny("invalid-request", str(exc), 422, identity["principal"])
                             return
                         run_id, state = server._run_coro(
                             server._engine.submit(identity["principal"], request, tuple(identity["domains"]))
@@ -269,13 +330,19 @@ class RunnerServer:
 
                     if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":
                         run_id = parts[1]
-                        state = server._engine.get_state(run_id)
-                        if state is None:
-                            self._send_problem(404, "run-not-found", "Run not found", f"no run {run_id!r}")
-                            return
-                        if state.status == "running":
+                        state = self._authorized_run(run_id, identity)
+
+                        async def cancel() -> bool:
+                            return server._engine.request_cancel(run_id)
+
+                        if server._run_coro(cancel()):
                             self._send_json(
-                                202, {"run_ref": f"runs/{run_id}", "cancel": "requested", "note": "cooperative"}
+                                202,
+                                {
+                                    "run_ref": f"runs/{run_id}",
+                                    "cancel": "requested",
+                                    "note": "cooperative at tool boundaries",
+                                },
                             )
                         else:
                             self._send_json(
@@ -289,6 +356,9 @@ class RunnerServer:
                 except json.JSONDecodeError as exc:
                     self._send_problem(400, "invalid-json", "Invalid JSON", str(exc))
                 except Exception as exc:  # noqa: BLE001
-                    self._send_problem(500, "internal-error", "Internal error", str(exc))
+                    logger.warning("Runner POST failed", exc_info=exc)
+                    self._send_problem(
+                        500, "internal-error", "Internal error", "request failed; inspect local service logs"
+                    )
 
         return Handler

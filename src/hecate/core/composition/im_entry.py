@@ -58,9 +58,11 @@ class IMEntryExecutionAdapter:
             if agent is not None and agent.tools:
                 event_store = get_shared_event_store()
                 tool_registry = build_tool_registry(
-                    db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None)
+                    db,
+                    skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
+                    workspace_id=agent.workspace_id,
                 )
-                effective_tools = await load_agent_tools(db, agent.tools or [])
+                effective_tools = await load_agent_tools(db, agent.tools or [], workspace_id=agent.workspace_id)
                 if effective_tools:
                     bundle = await assemble_guardrails(
                         db,

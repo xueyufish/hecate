@@ -111,8 +111,8 @@ async def mcp_env(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, aut
 
     from hecate.tools.tool.registry import ToolRegistry
 
-    def _build(db, skill_ref_manifest=None):
-        registry = ToolRegistry(db=db, builtin_executor=stub_executor)
+    def _build(db, skill_ref_manifest=None, *, workspace_id=None):
+        registry = ToolRegistry(db=db, builtin_executor=stub_executor, workspace_id=workspace_id)
         registry._builtin_names = {TOOL_NAME}
         return registry
 
@@ -176,10 +176,10 @@ async def mcp_env(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, aut
     )
     db_session.add(SessionModel(id=uuid.uuid4(), agent_id=agent.id, status="active", workspace_id=ZERO_WS))
     # The bundled zero workspace row backs registry workspace checks.
-    if db_session.get(OrganizationModel, ZERO_WS) is None:
+    if await db_session.get(OrganizationModel, ZERO_WS) is None:
         db_session.add(OrganizationModel(id=ZERO_WS, name="zero-org"))
     await db_session.flush()
-    if db_session.get(WorkspaceModel, ZERO_WS) is None:
+    if await db_session.get(WorkspaceModel, ZERO_WS) is None:
         db_session.add(WorkspaceModel(id=ZERO_WS, org_id=ZERO_WS, name="bundled", slug="bundled"))
         await db_session.flush()
 

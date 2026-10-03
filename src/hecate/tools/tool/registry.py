@@ -8,6 +8,7 @@ non-builtin tools query the ``ToolModel`` database table.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
@@ -51,12 +52,14 @@ class ToolRegistry:
         mcp_manager: MCPClientManager | None = None,
         cache: ToolCache | None = None,
         rest_executor: RestToolExecutor | None = None,
+        workspace_id: uuid.UUID | None = None,
     ) -> None:
         self._db = db
         self._builtin = builtin_executor
         self._mcp_manager = mcp_manager
         self._cache = cache
         self._rest_executor = rest_executor
+        self._workspace_id = workspace_id
         self._builtin_names: set[str] = set(BUILTIN_TOOL_DEFINITIONS.keys())
 
     async def execute(
@@ -86,12 +89,10 @@ class ToolRegistry:
             )
 
         # DB lookup for non-builtin tools
-        result = await self._db.execute(
-            select(ToolModel).where(
-                ToolModel.name == name,
-                ~ToolModel.deleted,
-            )
-        )
+        query = select(ToolModel).where(ToolModel.name == name, ~ToolModel.deleted)
+        if self._workspace_id is not None:
+            query = query.where(ToolModel.workspace_id == self._workspace_id)
+        result = await self._db.execute(query)
         tool = result.scalar_one_or_none()
         if tool is None:
             raise ValueError(f"Tool '{name}' not found")

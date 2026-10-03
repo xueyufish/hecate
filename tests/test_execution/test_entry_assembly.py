@@ -32,6 +32,34 @@ def test_registered_store_is_the_accessor_result(clean_slots) -> None:
     assert entry_assembly.get_shared_event_store() is store
 
 
+async def test_tool_definitions_and_dispatch_are_workspace_scoped(db_session):
+    import uuid
+
+    from hecate.models.tool import ToolModel
+    from hecate.tools.tool.registry import ToolRegistry
+
+    first, second = uuid.uuid4(), uuid.uuid4()
+    db_session.add_all(
+        [
+            ToolModel(
+                workspace_id=first, name="shared_name", description="first workspace", source="custom", parameters={}
+            ),
+            ToolModel(
+                workspace_id=second, name="shared_name", description="second workspace", source="custom", parameters={}
+            ),
+            ToolModel(workspace_id=second, name="foreign_only", description="private", source="custom", parameters={}),
+        ]
+    )
+    await db_session.flush()
+    tools = await entry_assembly.load_agent_tools(db_session, ["shared_name", "foreign_only"], workspace_id=first)
+    assert len(tools) == 1 and tools[0]["function"]["description"] == "first workspace"
+    registry = ToolRegistry(db_session, builtin_executor=None, workspace_id=first)
+    with pytest.raises(ValueError, match="not found"):
+        await registry.execute("foreign_only", {})
+    with pytest.raises(NotImplementedError, match="Custom tool"):
+        await registry.execute("shared_name", {})
+
+
 def test_latest_registration_wins(clean_slots) -> None:
     first, second = InMemoryEventStore(), InMemoryEventStore()
     entry_assembly.register_shared_event_store(first)

@@ -173,9 +173,11 @@ class HecateAgentExecutor:
         if agent.tools:
             event_store = get_shared_event_store()
             tool_registry = build_tool_registry(
-                self._db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None)
+                self._db,
+                skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
+                workspace_id=agent.workspace_id,
             )
-            effective_tools = await load_agent_tools(self._db, agent.tools or [])
+            effective_tools = await load_agent_tools(self._db, agent.tools or [], workspace_id=agent.workspace_id)
             if effective_tools:
                 bundle = await assemble_guardrails(
                     self._db,

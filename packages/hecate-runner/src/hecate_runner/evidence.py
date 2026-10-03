@@ -13,6 +13,8 @@ later step, step10).
 from __future__ import annotations
 
 import json
+import os
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -38,6 +40,7 @@ class EvidenceStore:
     def __init__(self, evidence_dir: Path) -> None:
         self._dir = evidence_dir
         self._dir.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.Lock()
 
     def append(self, kind: str, principal: str, ref: str, outcome: str, detail: dict | None = None) -> None:
         record = {
@@ -49,8 +52,10 @@ class EvidenceStore:
             "detail": detail or {},
         }
         path = self._day_file(record["ts"])
-        with path.open("a", encoding="utf-8") as handle:
+        with self._lock, path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
 
     def query(
         self,
@@ -63,7 +68,9 @@ class EvidenceStore:
 
         matches: list[EvidenceRecord] = []
         for path in sorted(self._dir.glob("evidence-*.jsonl"), reverse=True):
-            for line in path.read_text(encoding="utf-8").splitlines():
+            with self._lock:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            for line in reversed(lines):
                 if not line.strip():
                     continue
                 record = json.loads(line)

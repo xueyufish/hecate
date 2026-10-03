@@ -124,8 +124,8 @@ def tool_executor(monkeypatch: pytest.MonkeyPatch) -> StubToolExecutor:
 
     executor = StubToolExecutor()
 
-    def _build(db: Any, skill_ref_manifest: Any = None) -> ToolRegistry:
-        registry = ToolRegistry(db=db, builtin_executor=executor)
+    def _build(db: Any, skill_ref_manifest: Any = None, *, workspace_id: uuid.UUID | None = None) -> ToolRegistry:
+        registry = ToolRegistry(db=db, builtin_executor=executor, workspace_id=workspace_id)
         registry._builtin_names = {TOOL_NAME}
         return registry
 

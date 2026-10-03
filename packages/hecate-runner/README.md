@@ -3,8 +3,13 @@
 Standalone execution host for the [`hecate-runtime`](../hecate-runtime) kernel —
 the step5c technical preview. It cold-starts from a profile directory with no
 management platform, no platform management tables, and no repository source
-path, and serves the step3 execution-backend HTTP binding in a strictly
+path, and serves a host-specific preview HTTP API in a strictly
 **read-only** posture.
+
+This API is not yet the complete step3 execution-backend binding: the preview
+uses its own run request, string references and event shape. The contract adapter
+and shared execution application service remain step5c work; do not register it
+as a certified interchangeable backend based on endpoint names alone.
 
 ## Status: technical preview
 
@@ -51,6 +56,14 @@ Secrets are referenced, never inlined: `env:NAME` or `file:relative/path`.
 `model.endpoint` and records that source in the run's evidence — no vendor
 certification is implied).
 
+The endpoint adapter sends `{"prompt": "...", "tools": ["query_inventory"]}`
+and expects `{"content": "..."}`; optional `model.auth_env` references a bearer
+token. Endpoint errors fail the run. This profile uses a fixed tool plan and
+does not implement model-driven tool selection. Only `query_inventory` is mapped
+by the preview business adapter; other mappings fail startup. Its arguments
+require non-empty string `domain` and `sku`; declared tool schemas must be listed
+and digest-verified in the manifest.
+
 ## Run
 
 ```bash
@@ -59,7 +72,7 @@ hecate-runner --profile ./my-profile [--business-api http://127.0.0.1:8601]
 
 ## HTTP surface
 
-Step3 binding: `GET /capabilities`, `POST /runs`, `GET /runs/{id}`,
+Preview host API: `GET /capabilities`, `POST /runs`, `GET /runs/{id}`,
 `GET /runs/{id}/events?cursor=`, `POST /runs/{id}/cancel`,
 `GET /runs/{id}/artifacts`. Host extensions: `GET /healthz`,
 `GET /v1/evidence?outcome=&principal=`, `POST /admin/shutdown`
@@ -69,6 +82,15 @@ Authenticate with `Authorization: Bearer <credential>` where the credential
 hashes to an entry in `identity.json`. Principal, role, and data domains are
 resolved server-side; role/domain fields in the request body are ignored by
 design.
+
+Health and capability probes are public. Run state/events/artifacts and cancel
+require the original principal with the original domains still in scope.
+Evidence queries return only the caller's principal; deployment operators read
+anonymous-denial records from local JSONL files. A run is admitted only after
+its local evidence is flushed; an unwritable store refuses execution. Cancellation
+stops later tool calls cooperatively and cannot revoke an external call already
+in progress. Shutdown stops admission and closes in-process tasks; unresolved
+work is recorded as `unknown`, without recovery guarantees.
 
 ## Scenario coverage
 

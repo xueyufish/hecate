@@ -355,9 +355,11 @@ class EvaluationEngine:
             Exception: Any invocation failure propagates so the caller can
                 record per-item error scores.
         """
-        from hecate.core.composition.runtime_port_adapter import make_runtime_port
+        from hecate_llm.service import llm_service
 
-        port = make_runtime_port()
+        from hecate.core.composition.runtime_port_adapter import create_runtime_port
+
+        port = create_runtime_port(self.db, llm_service)
         response = await port.agent_execute(
             agent_id=agent_id,
             messages=[{"role": "user", "content": query}],
@@ -839,13 +841,54 @@ class EvaluationEngine:
             Exception: Any invocation failure propagates so the caller can
                 record per-item error scores.
         """
-        from hecate.core.composition.runtime_port_adapter import make_runtime_port
-        from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
+        from hecate_llm.service import llm_service
 
-        port = make_runtime_port()
-        entry = EntryExecutionService(port=port, entry_name="evaluation", db=self.db)
+        from hecate.core.composition.entry_assembly import (
+            build_tool_registry,
+            get_shared_event_store,
+            get_shared_session_state_store,
+        )
+        from hecate.core.composition.guardrail_platform import assemble_guardrails
+        from hecate.core.composition.runtime_port_adapter import create_runtime_port
+        from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
+        from hecate.execution.task_run_registry import TaskRunRegistry, TaskRunRegistryError
+        from hecate.models.workflow import WorkflowModel
+
+        workflow = await self.db.get(WorkflowModel, workflow_id)
+        if workflow is None or workflow.deleted:
+            raise ValueError("evaluation workflow does not resolve")
+        workspace_id = workflow.workspace_id
+        if correlation_task_id is not None:
+            try:
+                await TaskRunRegistry(self.db).get_task(correlation_task_id, workspace_id)
+            except TaskRunRegistryError as exc:
+                raise ValueError("evaluation task and workflow must belong to the same workspace") from exc
+        event_store = get_shared_event_store()
+        tool_registry = build_tool_registry(self.db, workspace_id=workspace_id)
+        port = create_runtime_port(self.db, llm_service, tool_registry=tool_registry)
+        bundle = await assemble_guardrails(
+            self.db,
+            workspace_id=workspace_id,
+            agent_id=None,
+            guardrail_config=None,
+            event_store=event_store,
+        )
+        entry = EntryExecutionService(
+            port=port,
+            entry_name="evaluation",
+            db=self.db,
+            event_store=event_store,
+            checkpoint_store=get_shared_session_state_store(),
+            access_policy=bundle.access_policy,
+            approval_callback=bundle.approval_callback,
+            tool_policy_rules=bundle.rules,
+            middleware_chains=bundle.middleware_chains,
+            denial_tracker=bundle.denial_tracker,
+        )
         correlation = (
-            CorrelationInput(existing_task_id=correlation_task_id) if correlation_task_id is not None else None
+            CorrelationInput(workspace_id=workspace_id, existing_task_id=correlation_task_id)
+            if correlation_task_id is not None
+            else None
         )
 
         last_content = ""
@@ -856,6 +899,8 @@ class EvaluationEngine:
             outcome = await entry.execute(
                 agent_mode="workflow",
                 workflow_id=workflow_id,
+                workflow_version=workflow_version,
+                workspace_id=workspace_id,
                 session_id=session_id,
                 messages=[{"role": "user", "content": query}],
                 stream=False,
@@ -868,7 +913,6 @@ class EvaluationEngine:
                     item_id,
                     rep,
                 )
-                correlation = None
             result = outcome.result
             content = str((result or {}).get("content") or "").strip()
             last_content = content
@@ -881,6 +925,7 @@ class EvaluationEngine:
                     "workflow_version": workflow_version,
                     "content_length": len(content),
                     "purpose": "workflow_evaluation",
+                    "correlation": outcome.correlation.to_dict(),
                 }
             )
 

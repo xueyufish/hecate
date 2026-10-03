@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from sqlalchemy import select
@@ -116,6 +116,7 @@ class EntryExecutionService:
     ) -> None:
         # Lazy sibling-domain import: the execution domain must not import
         # studio at module level (tests/test_layering_domain.py).
+        from hecate.core.composition.entry_assembly import get_shared_event_store, get_shared_session_state_store
         from hecate.studio.workflows.execution_service import WorkflowExecutionService
 
         self._db = db
@@ -123,8 +124,8 @@ class EntryExecutionService:
         self._service = WorkflowExecutionService(
             port=port,
             db=db,
-            event_store=event_store,
-            checkpoint_store=checkpoint_store,
+            event_store=event_store if event_store is not None else get_shared_event_store(),
+            checkpoint_store=checkpoint_store if checkpoint_store is not None else get_shared_session_state_store(),
             access_policy=access_policy,
             approval_callback=approval_callback,
             tool_policy_rules=tool_policy_rules,
@@ -151,6 +152,10 @@ class EntryExecutionService:
             execute_kwargs["session_id"] = session_id
         elif isinstance(session_id, str):
             session_id = uuid.UUID(session_id)
+        if correlation.session_id is not None and correlation.session_id != session_id:
+            raise ValueError("execution and correlation session identifiers must match")
+        execute_kwargs["session_id"] = session_id
+        correlation = replace(correlation, session_id=session_id)
 
         result = await self._service.execute(**execute_kwargs)
         correlation_result = await self._correlate(correlation, session_id=session_id)
@@ -166,19 +171,22 @@ class EntryExecutionService:
 
         registry = TaskRunRegistry(self._db)
         try:
-            if correlation.existing_task_id is not None:
-                return await self._correlate_shared_task(registry, correlation)
-            return await self._correlate_per_request(registry, correlation, session_id=session_id)
+            # Registry flush failures must not poison the caller's transaction
+            # or leave a partial Task reported as a completed registration.
+            async with self._db.begin_nested():
+                if correlation.existing_task_id is not None:
+                    return await self._correlate_shared_task(registry, correlation)
+                return await self._correlate_per_request(registry, correlation, session_id=session_id)
         except TaskRunRegistryError as exc:
             logger.warning(
                 "Entry %s correlation failed: %s",
                 self._entry_name,
                 exc,
             )
-            return CorrelationResult(status=CORRELATION_MISSING, reason=str(exc))
+            return CorrelationResult(status=CORRELATION_MISSING, reason="correlation registry rejected registration")
         except Exception as exc:  # noqa: BLE001 — correlation must never break execution
             logger.warning("Entry %s correlation failed unexpectedly: %s", self._entry_name, exc)
-            return CorrelationResult(status=CORRELATION_MISSING, reason=str(exc))
+            return CorrelationResult(status=CORRELATION_MISSING, reason="correlation registration failed")
 
     async def _correlate_shared_task(self, registry: Any, correlation: CorrelationInput) -> CorrelationResult:
         from hecate.execution.task_run_registry import TaskNotFoundError
@@ -232,7 +240,22 @@ class EntryExecutionService:
         the chain still round-trips (task creation validates the shape
         only) and no run is opened.
         """
-        principal_id = str(correlation.agent_id) if correlation.agent_id is not None else "platform-system"
+        from hecate.execution.task_run_registry import TaskRunValidationError
+        from hecate.models.agent_principal import AgentPrincipalModel
+
+        principal_id = "platform-system"
+        if correlation.agent_id is not None:
+            row = await self._db.execute(
+                select(AgentPrincipalModel).where(
+                    AgentPrincipalModel.agent_id == correlation.agent_id,
+                    AgentPrincipalModel.workspace_id == correlation.workspace_id,
+                    ~AgentPrincipalModel.deleted,
+                )
+            )
+            principal = row.scalar_one_or_none()
+            if principal is None and deployment is not None:
+                raise TaskRunValidationError("agent has no registered principal")
+            principal_id = str(principal.id) if principal is not None else str(correlation.agent_id)
         if deployment is not None:
             workload = WorkloadIdentity(
                 deployment=deployment_ref(deployment.issuer_domain, str(deployment.id)),
@@ -268,10 +291,11 @@ class EntryExecutionService:
         if correlation.session_id is None:
             return
         try:
-            await registry.link_session(
-                session_id=correlation.session_id,
-                task_id=task_id,
-                workspace_id=correlation.workspace_id,
-            )
+            async with self._db.begin_nested():
+                await registry.link_session(
+                    session_id=correlation.session_id,
+                    task_id=task_id,
+                    workspace_id=correlation.workspace_id,
+                )
         except Exception as exc:  # noqa: BLE001 — linking is additive provenance
             logger.info("Entry %s conversation link skipped: %s", self._entry_name, exc)

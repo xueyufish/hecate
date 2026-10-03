@@ -75,7 +75,9 @@ def _builtin_request_factory() -> tuple[AgentExecutionBackend, object]:
         data["backend_config_ns"] = {
             "builtin": {
                 "graph_config": build_chat_graph(model="gpt-4o"),
-                "session_id": str(uuid_mod.uuid4()),
+                # Retries retain their resolved definition; a fresh session
+                # would be a different execution request.
+                "session_id": str(uuid_mod.uuid5(uuid_mod.NAMESPACE_URL, f"builtin-contract:{key}")),
             }
         }
         return ExecutionRequest.from_dict(data)
