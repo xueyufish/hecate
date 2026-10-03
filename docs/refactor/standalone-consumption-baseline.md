@@ -89,10 +89,12 @@
 
 场景明细的唯一事实源是 `tests/scenarios/manifest.yaml` 的 `sc_scenarios` 组(SC01—SC10,title 逐字对齐方案 §八);本表登记当前能力状态,两处由 `test_manifest_consistency.py` 钉住一致性。当前状态枚举:**未支持**(能力未实现,责任 step 未交付)/ **未验证**(代码路径可能存在但无独立安装/运行证据)/ **未支持/未验证**。本 change 阶段所有 SC 场景均为 `planned`,对应状态不得登记为已支持/已通过。
 
+> 更新(2026-10-02,change `hecate-runner-preview`):SC01/SC02 随 step5c 只读技术预览交付翻转为"技术预览已交付"(`implemented`,证据 `tests/scenarios/test_sc01_cold_start.py`/`test_sc02_inventory_read.py`:干净 venv 双 wheel 安装、无控制面冷启动、只读库存读取与越权拒绝、本地证据)。技术预览不构成生产支持;完整认证仍归 step16。原快照结论保留如下,不覆盖。
+
 | SC ID | 能力 | 当前状态 | 责任 step |
 |---|---|---|---|
-| SC01 | 干净安装与无控制面冷启动 | 未支持 | 5b/5c(step16 认证) |
-| SC02 | 结构化库存读取与越权调用 | 未支持 | 5c(生产权限 step7) |
+| SC01 | 干净安装与无控制面冷启动 | 技术预览已交付(5c);生产认证 step16 | 5b/5c(step16 认证) |
+| SC02 | 结构化库存读取与越权调用 | 技术预览已交付(5c);生产权限 step7 | 5c(生产权限 step7) |
 | SC03 | 本地批准写入与重启 | 未支持 | 6/7 |
 | SC04 | 受管断连与授权过期 | 未支持 | 7 |
 | SC05 | 重连与重复控制命令 | 未支持 | 4/6/7 |

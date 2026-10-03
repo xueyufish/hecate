@@ -216,10 +216,9 @@ sc_scenarios:
   - id: SC01
     title: 干净安装与无控制面冷启动
     run_mode: standalone
-    status: planned
+    status: implemented
     tier: 1
-    responsible_step: 5b/5c（认证 step16）
-    blocked_by: runtime-standalone-distribution
+    responsible_step: 5b/5c（认证 step16；5c 已交付，见 test_sc01_cold_start.py）
     assertions: >-
       No full-Hecate install, no repo mount, no platform management tables;
       only the profile's required adapters are configured and the host starts;
@@ -228,10 +227,9 @@ sc_scenarios:
   - id: SC02
     title: 结构化库存读取与越权调用
     run_mode: standalone
-    status: planned
+    status: implemented
     tier: 1
-    responsible_step: 5c（生产权限 step7）
-    blocked_by: runtime-standalone-distribution
+    responsible_step: 5c（预览已交付，见 test_sc02_inventory_read.py；生产权限仍归 step7）
     assertions: >-
       Authorized data domain is read through the structured business-API
       fixture; cross-domain and forged-role requests are rejected; generated

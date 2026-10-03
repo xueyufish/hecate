@@ -1,0 +1,271 @@
+"""Clean-install harness for the SC01/SC02 standalone-consumption scenarios.
+
+Builds the ``hecate-runtime`` and ``hecate-runner`` wheels, installs them
+into a fresh uv venv (no repo source path, no editable install), writes a
+profile, starts a stub business API plus the runner as a subprocess from a
+temporary working directory, and yields an HTTP client. Everything
+environment-specific (path normalization, startup polling, timeouts) is
+centralized here so the scenario tests stay declarative.
+
+The harness requires ``uv`` on PATH; without it, tests skip with an
+explicit reason. CI guarantees uv and runs these files, so CI is the
+authority — a local skip is never a completion claim.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+READER_TOKEN = "reader-secret-token"
+STARTUP_TIMEOUT_SECONDS = 60.0
+
+
+def uv_available() -> bool:
+    return shutil.which("uv") is not None
+
+
+def _build_wheels(dist_dir: Path) -> tuple[Path, Path]:
+    for package in ("hecate-runtime", "hecate-runner"):
+        subprocess.run(
+            ["uv", "build", "--package", package, "--out-dir", str(dist_dir)],
+            check=True,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            timeout=300,
+        )
+    runtime_wheel = next(dist_dir.glob("hecate_runtime-*.whl"))
+    runner_wheel = next(dist_dir.glob("hecate_runner-*.whl"))
+    return runtime_wheel, runner_wheel
+
+
+def _write_profile(profile_dir: Path, *, business_api_port: int, manifest_tools: list[dict] | None = None) -> None:
+    """Materialize a preview profile with absolute local paths."""
+
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    entry_name = "agents/summary/main.json"
+    entry_content = b'{"kind": "entry", "tools": ["query_inventory"]}'
+    (profile_dir / "files" / "agents/summary").mkdir(parents=True, exist_ok=True)
+    (profile_dir / "files" / entry_name).write_bytes(entry_content)
+
+    manifest: dict = {
+        "manifest_version": "1",
+        "contract_version": "0.1",
+        "backend_type": "pregel",
+        "backend_compat_version": "0.1",
+        "entry": entry_name,
+        "files": [
+            {"path": entry_name, "sha256": hashlib.sha256(entry_content).hexdigest(), "size": len(entry_content)}
+        ],
+    }
+    if manifest_tools is not None:
+        manifest["tools"] = manifest_tools
+    (profile_dir / "agent-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    (profile_dir / "runner.json").write_text(
+        json.dumps(
+            {
+                "host": "127.0.0.1",
+                "port": 0,
+                "evidence_dir": "evidence",
+                "business_api_base": f"http://127.0.0.1:{business_api_port}",
+                "model": {"backend": "stub"},
+                "tool_allowlist": ["query_inventory"],
+                "shutdown_token_ref": "env:RUNNER_SHUTDOWN_TOKEN",
+            }
+        ),
+        encoding="utf-8",
+    )
+    (profile_dir / "identity.json").write_text(
+        json.dumps(
+            {
+                "identities": [
+                    {
+                        "principal": "app-reader",
+                        "role": "read_only",
+                        "domains": ["domain_a"],
+                        "credential": "file:secrets/app-reader-token",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (profile_dir / "secrets").mkdir(exist_ok=True)
+    (profile_dir / "secrets/app-reader-token").write_text(READER_TOKEN, encoding="utf-8")
+
+
+def _start_business_api() -> tuple[ThreadingHTTPServer, list[dict]]:
+    """Stub of the business App's inventory API; owns its own rules."""
+
+    calls: list[dict] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt: str, *args) -> None:
+            pass
+
+        def _send(self, status: int, payload: dict) -> None:
+            body = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:  # noqa: N802
+            length = int(self.headers.get("Content-Length") or 0)
+            request = json.loads(self.rfile.read(length) or b"{}")
+            calls.append(request)
+            domain = (request.get("arguments") or {}).get("domain")
+            if domain not in (request.get("domains") or []):
+                self._send(403, {"detail": "cross-domain read denied by business API"})
+                return
+            if domain == "domain_fail":
+                self._send(422, {"detail": "business rule rejected"})
+                return
+            inventory = {
+                "domain_a": {"SKU-A1": {"name": "示例商品A1", "quantity": 100}},
+                "domain_b": {"SKU-B1": {"name": "示例商品B1", "quantity": 7}},
+            }
+            record = inventory.get(domain, {}).get((request.get("arguments") or {}).get("sku", ""))
+            if record is None:
+                self._send(422, {"detail": "unknown sku"})
+                return
+            self._send(200, {"result": record, "outcome": "ok"})
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, calls
+
+
+class RunnerInstance:
+    """A runner subprocess with its profile and an HTTP client."""
+
+    def __init__(
+        self, workdir: Path, profile_dir: Path, python_exe: Path, process: subprocess.Popen, port: int
+    ) -> None:
+        self.workdir = workdir
+        self.profile_dir = profile_dir
+        self.python_exe = python_exe
+        self.process = process
+        self.port = port
+
+    def request(
+        self, method: str, path: str, body: dict | None = None, token: str | None = READER_TOKEN
+    ) -> tuple[int, dict]:
+        data = json.dumps(body).encode() if body is not None else None
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=data, method=method)
+        if token is not None:
+            req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Content-Type", "application/json")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                return response.status, json.loads(response.read())
+        except urllib.error.HTTPError as error:
+            return error.code, json.loads(error.read())
+
+    def wait_run(self, run_id: str, timeout: float = 30.0) -> tuple[int, dict]:
+        """Poll until the run leaves 'running' (or the timeout expires)."""
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status, run = self.request("GET", f"/runs/{run_id}")
+            if status != 200:
+                return status, run
+            if run.get("status") != "running":
+                return status, run
+            time.sleep(0.2)
+        return self.request("GET", f"/runs/{run_id}")
+
+    def stop(self) -> None:
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+
+
+def start_runner(
+    tmp_root: Path, *, manifest_tools: list[dict] | None = None
+) -> tuple[RunnerInstance, ThreadingHTTPServer, list[dict]]:
+    """Build, install, profile, launch.
+
+    Returns (runner, business_api_server, business_api_calls); the caller
+    stops the runner via ``RunnerInstance.stop()`` and shuts the business
+    API down via ``stop_business_api`` (or rely on daemon threads in tests).
+    """
+
+    if not uv_available():
+        raise RuntimeError("uv is required for the clean-install harness")
+
+    workdir = Path(tempfile.mkdtemp(prefix="sc-runner-", dir=tmp_root))
+    dist_dir = workdir / "dist"
+    venv_dir = workdir / "venv"
+    runtime_wheel, runner_wheel = _build_wheels(dist_dir)
+
+    subprocess.run(["uv", "venv", str(venv_dir), "--seed"], check=True, capture_output=True, timeout=120)
+    python_exe = venv_dir / "Scripts" / "python.exe" if os.name == "nt" else venv_dir / "bin" / "python"
+    subprocess.run(
+        ["uv", "pip", "install", "--python", str(python_exe), str(runtime_wheel), str(runner_wheel)],
+        check=True,
+        capture_output=True,
+        timeout=300,
+    )
+
+    business_server, business_calls = _start_business_api()
+    profile_dir = workdir / "profile"
+    _write_profile(profile_dir, business_api_port=business_server.server_address[1], manifest_tools=manifest_tools)
+
+    port_file = workdir / "port.txt"
+    log_file = workdir / "runner.log"
+    env = {
+        **os.environ,
+        "RUNNER_SHUTDOWN_TOKEN": "sc-shutdown-token",
+        "RUNNER_PORT_FILE": str(port_file),
+    }
+    log_handle = log_file.open("w", encoding="utf-8")
+    process = subprocess.Popen(
+        [str(python_exe), "-m", "hecate_runner", "--profile", str(profile_dir)],
+        cwd=str(workdir),  # no repo source path
+        env=env,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+    )
+
+    deadline = time.monotonic() + STARTUP_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            log_handle.close()
+            output = log_file.read_text(encoding="utf-8", errors="replace")
+            raise RuntimeError(f"runner exited during startup (code {process.returncode}): {output[-2000:]}")
+        if port_file.is_file():
+            port = int(port_file.read_text(encoding="utf-8").strip())
+            instance = RunnerInstance(workdir, profile_dir, python_exe, process, port)
+            status, body = instance.request("GET", "/healthz", token=None)
+            if status == 200 and body.get("ready"):
+                log_handle.close()
+                return instance, business_server, business_calls
+        time.sleep(0.3)
+    log_handle.close()
+    process.kill()
+    raise RuntimeError(f"runner did not become healthy in {STARTUP_TIMEOUT_SECONDS}s")
+
+
+def stop_business_api(server: ThreadingHTTPServer) -> None:
+    server.shutdown()
+    server.server_close()
