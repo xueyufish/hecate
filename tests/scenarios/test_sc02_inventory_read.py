@@ -3,12 +3,14 @@
 The business-API fixture enforces its own rules (domain isolation,
 server-side roles); the runner must not grant anything beyond the
 server-verified identity: forged role claims are ignored, cross-domain
-reads are refused by the business API, unknown credentials are denied
+reads are refused before dispatch, unknown credentials are denied
 with queryable evidence, invalid arguments fail before any dispatch,
 and a manifest declaring a write tool fails startup.
 """
 
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -50,14 +52,14 @@ def test_sc02_authorized_domain_read_succeeds(runner_stack) -> None:
     assert tool_results[-1]["outcome"]["result"]["quantity"] == 100
 
 
-def test_sc02_cross_domain_read_denied_by_business_api(runner_stack) -> None:
+def test_sc02_cross_domain_read_denied_before_dispatch(runner_stack) -> None:
     runner, calls = runner_stack
     before = len(calls)
     status, run, (run_id, events) = _submit(runner, {"domain": "domain_b", "sku": "SKU-B1"})
     assert status == 202 and run["status"] == "succeeded"
     tool_results = [e for e in events["events"] if e.get("type") == "tool_result"]
     assert tool_results[-1]["outcome"]["status"] == "authorization"
-    assert len(calls) == before + 1, "the request must reach the business API, which denies it"
+    assert len(calls) == before, "the runner must not dispatch outside the trusted identity scope"
 
 
 def test_sc02_forged_role_claim_is_ignored(runner_stack) -> None:
@@ -77,8 +79,14 @@ def test_sc02_unknown_credential_denied_with_evidence(runner_stack) -> None:
     status, body = runner.request("POST", "/runs", {"input": {}}, token="not-a-real-token")
     assert status == 401
     assert body["type"].endswith("unauthenticated")
-    _, evidence = runner.request("GET", "/v1/evidence?outcome=denied")
-    assert any(record["detail"]["reason"] == "unauthenticated" for record in evidence["records"])
+    # Unknown callers have no authenticated owner. The deployment operator
+    # reads their denial evidence locally; a reader cannot query other owners.
+    records = [
+        json.loads(line)
+        for path in (runner.profile_dir / "evidence").glob("evidence-*.jsonl")
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(record["detail"].get("reason") == "unauthenticated" for record in records)
 
 
 def test_sc02_invalid_arguments_fail_before_dispatch(runner_stack) -> None:

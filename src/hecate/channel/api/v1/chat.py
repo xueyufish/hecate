@@ -312,7 +312,7 @@ async def _process_chat(
     # client-supplied tools; client tools take precedence on name conflict.
     agent_tools: list[dict[str, Any]] = []
     if agent is not None:
-        agent_tools = await _load_agent_tools(db, agent.tools or [])
+        agent_tools = await _load_agent_tools(db, agent.tools or [], workspace_id=agent.workspace_id)
     effective_tools: list[dict[str, Any]] = list(agent_tools)
     if request.tools:
         client_names = {
@@ -394,7 +394,11 @@ async def _process_chat(
         # Agent-configured tools: drive the tool-calling loop directly —
         # the LLM proposes tool calls, the registry executes them, and results
         # feed back into the conversation (mirrors ConversationService).
-        tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
+        tool_registry = _build_tool_registry(
+            db,
+            skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
+            workspace_id=agent.workspace_id if agent is not None else workspace_id or uuid.UUID(int=0),
+        )
         provider_cfg = await _get_provider_config(db, effective_model)
         if request.stream:
             return StreamingResponse(
@@ -471,7 +475,11 @@ async def _process_chat(
         from hecate.execution.entry_events import RunEventMapper
         from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
 
-        tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
+        tool_registry = _build_tool_registry(
+            db,
+            skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
+            workspace_id=agent.workspace_id if agent is not None else workspace_id or uuid.UUID(int=0),
+        )
 
         port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
 

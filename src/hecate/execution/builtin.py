@@ -31,7 +31,8 @@ import asyncio
 import json
 import logging
 import uuid
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -197,17 +198,13 @@ class HecateExecutionBackend(AgentExecutionBackend):
         )
 
     def _digest(self, request: ExecutionRequest) -> str:
-        """Content digest over the platform-visible request surface.
+        """Compare request content including its resolved execution definition.
 
-        ``backend_config_ns`` is excluded: it carries live in-process objects
-        (the resolved graph config) that the assembly legitimately mutates
-        during compilation (node-type injection), so value-digesting them is
-        unstable across a run. Idempotency therefore keys on the platform
-        request surface in this draft; a durable, manifest-based digest is
-        step6 scope.
+        Compiler-owned copies prevent graph mutation from changing this
+        digest. Opaque in-process handles retain repr-based identity; durable
+        manifest-based hashing remains step6 scope.
         """
         data = request.to_dict()
-        data.pop("backend_config_ns", None)
         return json.dumps(data, sort_keys=True, default=repr)
 
     # --- the six methods ----------------------------------------------------------
@@ -234,6 +231,17 @@ class HecateExecutionBackend(AgentExecutionBackend):
                 detail_ns={"reason": "idempotency_key_content_mismatch"},
             )
         cfg = self._require_builtin_config(request)
+        # Freeze JSON execution inputs before the scheduled task can observe
+        # later caller edits. Environment/state handles stay explicitly local.
+        cfg = dict(cfg)
+        for key in ("graph_config", "tools", "kb_ids"):
+            if key in cfg:
+                cfg[key] = deepcopy(cfg[key])
+        request = replace(
+            request,
+            input=deepcopy(request.input),
+            backend_config_ns={**request.backend_config_ns, "builtin": cfg},
+        )
 
         run_ref = BackendRef(kind=RefKind.RUN, issuer_domain=self._issuer_domain, id=str(uuid.uuid4()))
         receipt = SubmitReceipt(
@@ -302,6 +310,12 @@ class HecateExecutionBackend(AgentExecutionBackend):
     # --- execution ----------------------------------------------------------------
 
     def _require_builtin_config(self, request: ExecutionRequest) -> dict[str, Any]:
+        if request.budget is not None or request.deadline_at is not None:
+            raise backend_error(
+                BackendErrorCode.UNSUPPORTED,
+                request.run_ref,
+                "builtin preview does not enforce resource budgets or deadlines; these require step6 admission",
+            )
         cfg = request.backend_config_ns.get("builtin")
         if not isinstance(cfg, dict) or "graph_config" not in cfg or "session_id" not in cfg:
             raise backend_error(
@@ -356,6 +370,10 @@ class HecateExecutionBackend(AgentExecutionBackend):
             ):
                 record.events.append(self._envelope(request, run_ref, seq, event))
                 seq += 1
+                if isinstance(event, dict) and event.get("type") == "interrupt":
+                    record.state = RunState.UNKNOWN
+                    record.detail = {"reason": "execution interrupted; continuation controls are unsupported"}
+                    return
             record.state = RunState.SUCCEEDED
         except asyncio.CancelledError:
             record.state = RunState.UNKNOWN
@@ -383,11 +401,11 @@ class HecateExecutionBackend(AgentExecutionBackend):
         )
 
     def _find(self, run_ref: BackendRef) -> _RunRecord:
-        if run_ref.issuer_domain != self._issuer_domain:
+        if run_ref.kind is not RefKind.RUN or run_ref.issuer_domain != self._issuer_domain:
             raise backend_error(
                 BackendErrorCode.UNSUPPORTED,
                 run_ref,
-                f"run reference issuer {run_ref.issuer_domain!r} is not {self._issuer_domain!r}",
+                "reference must be a run issued by this backend",
             )
         for record in self._records.values():
             if record.run_ref.id == run_ref.id:

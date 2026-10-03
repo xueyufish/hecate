@@ -15,9 +15,12 @@ the capabilities endpoint and lands in step6.
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 
+import httpx
 from hecate_runtime.checkpoint import InMemoryCheckpointStore
 from hecate_runtime.pregel import PregelRuntime
 from hecate_runtime.types import (
@@ -32,9 +35,12 @@ from hecate_runtime.types import (
     CompiledGraph as CompiledGraphT,
 )
 from hecate_runtime.worker import Worker
+from jsonschema import Draft202012Validator
 
 from .evidence import OUTCOME_FAILED, EvidenceStore
-from .profile import Profile
+from .profile import BUILTIN_TOOL_SCHEMAS, Profile
+
+logger = logging.getLogger(__name__)
 
 # Capabilities the preview profile does not provide; surfaced verbatim on
 # /capabilities so absence is explicit, not a silent default.
@@ -54,26 +60,45 @@ class ModelNodeWorker(Worker):
 
     Stub backend: deterministic selection of every allowlisted tool in
     manifest order, consuming the run input verbatim. Endpoint backend:
-    same payload shape; the configured endpoint is called by the server
-    layer (keeps this worker sync-free) and its text is recorded in the
-    run's evidence.
+    calls the configured JSON endpoint and retains its text in graph events.
+    Both modes execute a fixed tool plan; model-driven tool selection is
+    outside this preview.
     """
 
-    def __init__(self, tool_names: list[str]) -> None:
+    def __init__(self, profile: Profile) -> None:
         super().__init__()
-        self._tool_names = tool_names
+        self._profile = profile
 
     async def execute(
         self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
     ) -> WorkerResult:
-        prompt = (channel_snapshot.get("input") or {}).get("prompt", "")
+        run_input = channel_snapshot.get("input") or {}
+        prompt = run_input.get("prompt", (run_input.get("input") or {}).get("prompt", ""))
+        config = self._profile.config
+        content = ""
+        if config.model_backend == "endpoint":
+            headers = {}
+            if config.model_auth_env:
+                headers["Authorization"] = f"Bearer {os.environ[config.model_auth_env]}"
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    config.model_endpoint,
+                    json={"prompt": prompt, "tools": list(config.tool_allowlist)},
+                    headers=headers,
+                )
+                response.raise_for_status()
+                payload = response.json()
+                if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
+                    raise ValueError("model endpoint must return an object with string content")
+                content = payload["content"]
         return WorkerResult(
             node_id=node_id,
             channel_updates={
                 "plan": {
-                    "tools": list(self._tool_names),
+                    "tools": list(config.tool_allowlist),
                     "prompt": prompt,
                     "model_source": node_config.get("model_source", "stub"),
+                    "content": content,
                 },
             },
         )
@@ -108,6 +133,7 @@ class RunState:
     events: list[dict] = field(default_factory=list)
     result_ref: str | None = None
     error: str | None = None
+    cancel_requested: bool = False
 
 
 class ExecutionEngine:
@@ -123,6 +149,8 @@ class ExecutionEngine:
         self._runs: dict[str, RunState] = {}
         self._graph = self._compile_graph()
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._tasks: set[asyncio.Task] = set()
+        self._closing = False
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Record the loop runs are scheduled on (set by the server layer)."""
@@ -132,7 +160,18 @@ class ExecutionEngine:
     async def _dispatch_tool(self, state: RunState, tool_name: str, arguments: dict) -> dict:
         """Run one tool with the run's server-verified identity scope."""
 
-        outcome = await self._tool_dispatch(tool_name, arguments, state.principal, list(state.domains))
+        if state.cancel_requested:
+            raise _CooperativeCancelError
+        self._evidence.append("tool_dispatch", state.principal, state.run_id, "started", {"tool": tool_name})
+        if arguments.get("domain") not in state.domains:
+            outcome = {"status": "authorization", "detail": "requested domain is outside the trusted identity scope"}
+        else:
+            outcome = await self._tool_dispatch(tool_name, arguments, state.principal, list(state.domains))
+        status = outcome.get("status")
+        evidence_outcome = "ok" if status == "ok" else "denied" if status == "authorization" else "failed"
+        self._evidence.append(
+            "tool_result", state.principal, state.run_id, evidence_outcome, {"tool": tool_name, "status": status}
+        )
         self.record_tool_result(state, tool_name, outcome)
         return outcome
 
@@ -170,6 +209,26 @@ class ExecutionEngine:
     def busy(self) -> bool:
         return self._lock.locked()
 
+    @property
+    def closing(self) -> bool:
+        """Whether shutdown has begun and new work must be refused."""
+        return self._closing
+
+    def validate_run_input(self, run_input: dict) -> None:
+        """Validate every scheduled tool before accepting any execution."""
+        if not isinstance(run_input, dict):
+            raise ValueError("run request must be an object")
+        if "input" in run_input and not isinstance(run_input["input"], dict):
+            raise ValueError("input must be an object")
+        raw = run_input.get("tool_arguments", {})
+        if not isinstance(raw, dict):
+            raise ValueError("tool_arguments must be an object")
+        for name in self._profile.config.tool_allowlist:
+            arguments = raw.get(name) if isinstance(raw.get(name), dict) else raw
+            for schema in (BUILTIN_TOOL_SCHEMAS[name], self._profile.tool_schemas[name]):
+                if next(Draft202012Validator(schema).iter_errors(arguments), None) is not None:
+                    raise ValueError(f"invalid arguments for tool {name}")
+
     def capabilities(self) -> dict:
         supported = {
             "submit": "enforced",
@@ -189,13 +248,65 @@ class ExecutionEngine:
         this scope, never any request-body self-reported claims.
         """
 
-        if self._lock.locked():
+        if self._closing or self._lock.locked():
             return "", None
+        self.validate_run_input(run_input)
+        # Reserve admission before yielding to the execution task. Checking
+        # the lock only in _execute silently queued concurrent submissions.
+        await self._lock.acquire()
         run_id = uuid.uuid4().hex
         state = RunState(run_id=run_id, status="running", principal=principal, domains=tuple(domains))
-        self._runs[run_id] = state
-        asyncio.create_task(self._execute(run_id, state, run_input))
+        try:
+            self._evidence.append(
+                "submission", principal, run_id, "accepted", {"model_source": self._profile.config.model_backend}
+            )
+            self._runs[run_id] = state
+            task = asyncio.create_task(self._execute(run_id, state, run_input))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        except BaseException:
+            self._lock.release()
+            raise
         return run_id, state
+
+    def request_cancel(self, run_id: str) -> bool:
+        """Request cancellation at the next tool boundary; never revoke a completed call."""
+        state = self._runs[run_id]
+        if state.status != "running":
+            return False
+        self._evidence.append("cancel", state.principal, run_id, "requested")
+        state.cancel_requested = True
+        return True
+
+    def begin_shutdown(self) -> None:
+        """Stop admission immediately without promising durable recovery."""
+        self._closing = True
+
+    async def close(self) -> None:
+        """Stop in-process tasks and retain an honest unknown-outcome record."""
+        self.begin_shutdown()
+        for task in self._tasks:
+            task.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        for state in self._runs.values():
+            if state.status == "running":
+                try:
+                    self._evidence.append(
+                        "execution",
+                        state.principal,
+                        state.run_id,
+                        OUTCOME_FAILED,
+                        {
+                            "status": "unknown",
+                            "reason": "shutdown before execution task started",
+                        },
+                    )
+                except OSError:
+                    logger.exception("Could not record shutdown of run %s", state.run_id)
+                state.status = "unknown"
+                state.error = "runner shut down; outcome is not established"
+        if self._lock.locked():
+            self._lock.release()
 
     async def wait_for(self, run_id: str, timeout: float = 60.0) -> RunState:
         for _ in range(int(timeout / 0.05)):
@@ -223,27 +334,45 @@ class ExecutionEngine:
         state.events.append(event)
 
     async def _execute(self, run_id: str, state: RunState, run_input: dict) -> None:
-        async with self._lock:
+        try:
             runtime = PregelRuntime(self._graph, _FanOutWorker(self, state), self._checkpoint_store)
             try:
                 async for event in runtime.execute(uuid.uuid4(), initial_input={"input": run_input}):
                     self._append_event(state, event)
-                state.status = "succeeded"
-                state.result_ref = f"runs/{run_id}/artifacts"
-                self._evidence.append(
-                    "execution",
-                    state.principal,
-                    run_id,
-                    OUTCOME_FAILED if state.error else "ok",
-                    {
-                        "status": state.status,
-                        "model_source": self._profile.config.model_backend,
-                    },
-                )
+                final_status = "cancelled" if state.cancel_requested else "succeeded"
+            except _CooperativeCancelError:
+                final_status = "cancelled"
+            except asyncio.CancelledError:
+                final_status = "unknown"
+                state.error = "runner shut down; outcome is not established"
             except Exception as exc:  # noqa: BLE001 - the run fails; the server stays up
-                state.status = "failed"
-                state.error = str(exc)
-                self._evidence.append("execution", state.principal, run_id, OUTCOME_FAILED, {"error": str(exc)})
+                if state.cancel_requested:
+                    final_status = "cancelled"
+                else:
+                    final_status = "failed"
+                    state.error = "execution failed; inspect local service logs"
+                    logger.warning("Runner execution %s failed", run_id, exc_info=exc)
+            result_ref = f"runs/{run_id}/artifacts" if final_status == "succeeded" else None
+            self._evidence.append(
+                "execution",
+                state.principal,
+                run_id,
+                "ok" if final_status == "succeeded" else OUTCOME_FAILED,
+                {
+                    "status": final_status,
+                    "model_source": self._profile.config.model_backend,
+                    "result_ref": result_ref,
+                },
+            )
+            state.result_ref = result_ref
+            state.status = final_status
+        except Exception:
+            logger.exception("Runner execution %s could not retain evidence", run_id)
+            state.status = "unknown"
+            state.result_ref = None
+            state.error = "local evidence write failed; outcome requires inspection"
+        finally:
+            self._lock.release()
 
     def record_tool_result(self, state: RunState, tool_name: str, outcome: dict) -> None:
         self._append_event(state, {"type": "tool_result", "tool": tool_name, "outcome": outcome})
@@ -260,8 +389,10 @@ class _FanOutWorker(Worker):
     async def execute(
         self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
     ) -> WorkerResult:
+        if self._state.cancel_requested:
+            raise _CooperativeCancelError
         if node_id == "model":
-            worker: Worker = ModelNodeWorker(list(self._engine._profile.config.tool_allowlist))
+            worker: Worker = ModelNodeWorker(self._engine._profile)
         else:
             worker = ReadToolNodeWorker(
                 lambda arguments, _tool=node_config["tool_name"], _state=self._state: self._engine._dispatch_tool(
@@ -269,3 +400,7 @@ class _FanOutWorker(Worker):
                 )
             )
         return await worker.execute(node_id, node_config, channel_snapshot, execution_context)
+
+
+class _CooperativeCancelError(Exception):
+    """No further tools may start after an accepted cancellation request."""

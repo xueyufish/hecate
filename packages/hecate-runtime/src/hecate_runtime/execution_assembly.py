@@ -346,6 +346,7 @@ def assemble_execution(
         graph=compiled,
         worker=composite,
         checkpoint_store=checkpoint_store,
+        event_store=deps.event_store,
         max_supersteps=max_iterations * 3 + 5,
         context_engine=PriorityContextEngine(),
         context_chain=context_chain_factory,

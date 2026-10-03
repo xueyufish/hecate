@@ -234,13 +234,13 @@ def start_runner(
     port_file = workdir / "port.txt"
     log_file = workdir / "runner.log"
     env = {
-        **os.environ,
+        **{key: value for key, value in os.environ.items() if key not in {"PYTHONPATH", "PYTHONHOME"}},
         "RUNNER_SHUTDOWN_TOKEN": "sc-shutdown-token",
         "RUNNER_PORT_FILE": str(port_file),
     }
     log_handle = log_file.open("w", encoding="utf-8")
     process = subprocess.Popen(
-        [str(python_exe), "-m", "hecate_runner", "--profile", str(profile_dir)],
+        [str(python_exe), "-I", "-m", "hecate_runner", "--profile", str(profile_dir)],
         cwd=str(workdir),  # no repo source path
         env=env,
         stdout=log_handle,

@@ -56,6 +56,96 @@ def _make_backend(**kwargs: object) -> HecateExecutionBackend:
     return HecateExecutionBackend(port=_make_port(), **kwargs)
 
 
+async def test_idempotency_covers_resolved_graph_and_keeps_caller_input_unchanged():
+    from copy import deepcopy
+    from dataclasses import replace
+
+    backend = _make_backend()
+    request = _make_request()
+    original = deepcopy(request.backend_config_ns)
+    receipt = backend.submit(request)
+    await _wait_for_terminal(backend, receipt.run_ref)
+    assert request.backend_config_ns == original
+    assert backend.submit(request) == receipt
+    changed = deepcopy(original)
+    changed["builtin"]["graph_config"] = build_chat_graph(model="a-different-model")
+    with pytest.raises(ExecutionBackendError) as error:
+        backend.submit(replace(request, backend_config_ns=changed))
+    assert error.value.error.code is BackendErrorCode.VERSION_CONFLICT
+
+
+async def test_backend_rejects_wrong_reference_kind():
+    backend = _make_backend()
+    receipt = backend.submit(_make_request())
+    foreign_kind = BackendRef(RefKind.TASK, receipt.run_ref.issuer_domain, receipt.run_ref.id)
+    with pytest.raises(ExecutionBackendError) as error:
+        backend.get_run(foreign_kind)
+    assert error.value.error.code is BackendErrorCode.UNSUPPORTED
+    await _wait_for_terminal(backend, receipt.run_ref)
+
+
+async def test_shared_assembly_wires_engine_commit_events():
+    from hecate.runtime.eventstore import EventType, InMemoryEventStore
+
+    store = InMemoryEventStore()
+    backend = _make_backend(event_store=store)
+    request = _make_request()
+    session_id = uuid.UUID(request.backend_config_ns["builtin"]["session_id"])
+    receipt = backend.submit(request)
+    await _wait_for_terminal(backend, receipt.run_ref)
+    events = await store.get_events(session_id)
+    kinds = {event.event_type for event in events}
+    assert {EventType.TURN_START, EventType.TURN_END, EventType.CHANNEL_WRITE, EventType.STEP_END} <= kinds
+    assert all(event.session_id == session_id for event in events)
+
+
+@pytest.mark.parametrize("limit", ["budget", "deadline"])
+async def test_unimplemented_resource_bounds_are_not_silently_ignored(limit):
+    from dataclasses import replace
+
+    from hecate.contracts.execution.request import Budget
+
+    backend = _make_backend()
+    request = _make_request()
+    request = (
+        replace(request, budget=Budget(max_tokens=1))
+        if limit == "budget"
+        else replace(
+            request,
+            deadline_at="2000-01-01T00:00:00+00:00",
+        )
+    )
+    with pytest.raises(ExecutionBackendError) as error:
+        backend.submit(request)
+    assert error.value.error.code is BackendErrorCode.UNSUPPORTED
+    assert backend._records == {}
+
+
+async def test_interrupted_execution_is_not_reported_as_success(monkeypatch):
+    from types import SimpleNamespace
+
+    import hecate.execution.builtin as builtin_module
+
+    class InterruptedRuntime:
+        async def execute(self, **kwargs):
+            yield {"type": "interrupt", "value": "approval required"}
+
+    monkeypatch.setattr(
+        builtin_module,
+        "assemble_execution",
+        lambda **kwargs: SimpleNamespace(
+            runtime=InterruptedRuntime(),
+            initial_input={},
+            execution_mode="conversational",
+        ),
+    )
+    backend = _make_backend()
+    receipt = backend.submit(_make_request())
+    await _wait_for_terminal(backend, receipt.run_ref)
+    assert backend.get_run(receipt.run_ref).state is RunState.UNKNOWN
+    assert "interrupted" in backend.get_run(receipt.run_ref).detail_ns["reason"]
+
+
 def _make_request(key: str = "idem-001", backend: HecateExecutionBackend | None = None) -> object:
     """Sample request enriched with the pre-resolved builtin config namespace."""
     data = load_sample(SAMPLE_REQUEST)

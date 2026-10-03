@@ -17,6 +17,7 @@ helpers — that rule is enforced by ``tests/test_layering_entry_imports.py``.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from sqlalchemy import select
@@ -25,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.models.tool import ToolModel
 
 logger = logging.getLogger(__name__)
+_DEFAULT_WORKSPACE = uuid.UUID(int=0)
 
 _shared_event_store: Any = None
 _shared_session_state_store: Any = None
@@ -78,7 +80,9 @@ def get_shared_session_state_store() -> Any:
     return _shared_session_state_store
 
 
-async def load_agent_tools(db: AsyncSession, tool_names: list[str]) -> list[dict[str, Any]]:
+async def load_agent_tools(
+    db: AsyncSession, tool_names: list[str], *, workspace_id: uuid.UUID = _DEFAULT_WORKSPACE
+) -> list[dict[str, Any]]:
     """Resolve an agent's configured tools into OpenAI-format definitions.
 
     Builtin tool names resolve from the in-memory ``BUILTIN_TOOL_DEFINITIONS``;
@@ -103,7 +107,11 @@ async def load_agent_tools(db: AsyncSession, tool_names: list[str]) -> list[dict
         else:
             db_names.append(name)
     if db_names:
-        result = await db.execute(select(ToolModel).where(ToolModel.name.in_(db_names), ~ToolModel.deleted))
+        result = await db.execute(
+            select(ToolModel).where(
+                ToolModel.name.in_(db_names), ToolModel.workspace_id == workspace_id, ~ToolModel.deleted
+            )
+        )
         for tool in result.scalars().all():
             definitions.append(
                 {
@@ -117,7 +125,12 @@ async def load_agent_tools(db: AsyncSession, tool_names: list[str]) -> list[dict
     return format_tools_for_llm(definitions)
 
 
-def build_tool_registry(db: AsyncSession, skill_ref_manifest: list[dict[str, Any]] | None = None) -> Any:
+def build_tool_registry(
+    db: AsyncSession,
+    skill_ref_manifest: list[dict[str, Any]] | None = None,
+    *,
+    workspace_id: uuid.UUID = _DEFAULT_WORKSPACE,
+) -> Any:
     """Construct a ToolRegistry wired to builtin + DB tools using app settings.
 
     Args:
@@ -157,4 +170,4 @@ def build_tool_registry(db: AsyncSession, skill_ref_manifest: list[dict[str, Any
         skill_loader=SkillLoader(db, ref_manifest=skill_ref_manifest),
         memory_backend=memory_backend,
     )
-    return ToolRegistry(db=db, builtin_executor=builtin_executor)
+    return ToolRegistry(db=db, builtin_executor=builtin_executor, workspace_id=workspace_id)

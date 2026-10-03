@@ -124,8 +124,10 @@ async def _chat_via_entry(
     effective_tools: list[dict[str, Any]] = []
     bundle = None
     if agent.tools:
-        tool_registry = build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
-        effective_tools = await load_agent_tools(db, agent.tools or [])
+        tool_registry = build_tool_registry(
+            db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None), workspace_id=agent.workspace_id
+        )
+        effective_tools = await load_agent_tools(db, agent.tools or [], workspace_id=agent.workspace_id)
         if effective_tools:
             bundle = await assemble_guardrails(
                 db,

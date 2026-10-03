@@ -91,6 +91,8 @@
 
 > 更新(2026-10-02,change `hecate-runner-preview`):SC01/SC02 随 step5c 只读技术预览交付翻转为"技术预览已交付"(`implemented`,证据 `tests/scenarios/test_sc01_cold_start.py`/`test_sc02_inventory_read.py`:干净 venv 双 wheel 安装、无控制面冷启动、只读库存读取与越权拒绝、本地证据)。技术预览不构成生产支持;完整认证仍归 step16。原快照结论保留如下,不覆盖。
 
+> 补充复核（基线 `5619cce`）：SC01/SC02 保持只读预览 `implemented`；这一状态不代表 5c 完整架构交付。宿主共享执行应用服务与正式 HTTP 后端绑定尚未完成，演进方案中 5c 总项恢复未勾选。身份查询隔离、参数校验、endpoint、审计准入与生命周期遗漏已修复；详见 [Step5 执行链复核与修正](step5-execution-review-report.md)。SC06/SC08/SC10 不随这些修补自动授予认证。
+
 | SC ID | 能力 | 当前状态 | 责任 step |
 |---|---|---|---|
 | SC01 | 干净安装与无控制面冷启动 | 技术预览已交付(5c);生产认证 step16 | 5b/5c(step16 认证) |
