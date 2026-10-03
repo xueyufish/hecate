@@ -606,10 +606,16 @@ class Settings(BaseSettings):
     A2A_TRUSTED_JWKS_PATH: str = ""
 
     # Chat engine convergence (B1b): when true, chat requests for agents
-    # with configured tools execute through WorkflowExecutionService /
-    # Pregel (unified events, receipts, checkpoints) instead of the direct
-    # tool loop. Default false keeps the legacy direct loop — flip after
-    # the consistency regression suite passes in a staging environment.
+    # with configured tools execute through the shared assembly (Pregel:
+    # unified events, receipts, checkpoints) instead of the direct tool
+    # loop. Default false keeps the legacy direct loop. This is the
+    # GLOBAL fallback only — per-workspace rollout goes through the
+    # ``chat_tool_loop_engine_enabled`` feature flag (tenant allowlist),
+    # resolved by ``hecate.execution.entry_routing``; every override
+    # change writes a CHAT_ENGINE_ROLLOUT_CHANGED audit record, and an
+    # existing session keeps its recorded path (session affinity).
+    # Flipping the global default requires G3 evidence for every entry
+    # and the consistency regression suite passing in staging.
     CHAT_TOOL_LOOP_ENGINE_ENABLED: bool = False
 
     COST_ANOMALY_THRESHOLD: float = 2.5

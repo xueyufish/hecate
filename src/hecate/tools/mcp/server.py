@@ -79,6 +79,126 @@ def _reject_tool_execution(ctx: AuthContext, tool_name: str, reason: str) -> str
     return json.dumps({"error": reason})
 
 
+_shared_stores: dict[str, Any] = {}
+
+
+def _get_shared_event_store() -> Any:
+    """Process-wide EventStore for MCP executions (singleton semantics).
+
+    The HTTP path reads the lifespan-built singleton from ``app.state``;
+    MCP tool bodies run outside request context, so they resolve through
+    the same factory and cache the instance — one store per process,
+    identical backend selection from settings.
+    """
+    if "event_store" not in _shared_stores:
+        from hecate.core.config import settings
+        from hecate.studio.event_state import create_event_store
+
+        _shared_stores["event_store"] = create_event_store(settings)
+    return _shared_stores["event_store"]
+
+
+def _get_shared_session_state_store() -> Any:
+    """Process-wide SessionStateStore for MCP executions (see event store note)."""
+    if "session_state_store" not in _shared_stores:
+        from hecate.core.config import settings
+        from hecate.studio.session_state import create_session_state_store
+
+        _shared_stores["session_state_store"] = create_session_state_store(settings)
+    return _shared_stores["session_state_store"]
+
+
+async def _chat_via_entry(
+    db: AsyncSession,
+    *,
+    session_id: str,
+    message: str,
+    agent: AgentModel,
+    ctx: AuthContext,
+) -> str:
+    """Run one chat turn through the platform entry service (step5d).
+
+    Assembly parity with the HTTP chat entry: agent-configured tools are
+    loaded the same way, the guardrail bundle is assembled from the same
+    composition helper, and the event store / checkpoint store are the
+    process-wide singletons instead of the previous bare port+db wiring
+    (which produced no events and no commit points). Correlation
+    (Task/Run) is fail-open and never blocks the response.
+    """
+    from hecate_llm.service import llm_service
+
+    from hecate.core.composition.guardrail_platform import assemble_guardrails
+    from hecate.core.composition.runtime_port_adapter import create_runtime_port
+    from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
+
+    event_store = _get_shared_event_store()
+    checkpoint_store = _get_shared_session_state_store()
+
+    tool_registry = None
+    effective_tools: list[dict[str, Any]] = []
+    bundle = None
+    if agent.tools:
+        from hecate.channel.api.v1.chat import _build_tool_registry, _load_agent_tools
+
+        tool_registry = _build_tool_registry(db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None))
+        effective_tools = await _load_agent_tools(db, agent.tools or [])
+        if effective_tools:
+            bundle = await assemble_guardrails(
+                db,
+                workspace_id=agent.workspace_id,
+                agent_id=agent.id,
+                guardrail_config=getattr(agent, "guardrail_config", None),
+                event_store=event_store,
+                session_id=uuid.UUID(session_id) if session_id else None,
+                dlp_scanner=None,
+            )
+
+    port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
+    entry = EntryExecutionService(
+        port=port,
+        entry_name="mcp-chat",
+        db=db,
+        event_store=event_store,
+        checkpoint_store=checkpoint_store,
+        access_policy=bundle.access_policy if bundle else None,
+        approval_callback=bundle.approval_callback if bundle else None,
+        tool_policy_rules=bundle.rules if bundle else None,
+        middleware_chains=bundle.middleware_chains if bundle else None,
+        denial_tracker=bundle.denial_tracker if bundle else None,
+    )
+    agent_cfg = getattr(agent, "model_config_db", None) or {}
+    resolved_model = agent_cfg.get("model") if isinstance(agent_cfg, dict) else None
+    execute_kwargs: dict[str, Any] = dict(
+        agent_mode="chat",
+        messages=[{"role": "user", "content": message}],
+        tools=effective_tools,
+        stream=False,
+        session_id=session_id,
+        agent_id=str(agent.id),
+        user_id=str(ctx.user_id) if ctx.user_id else None,
+        workspace_id=agent.workspace_id,
+    )
+    if resolved_model:
+        execute_kwargs["model"] = resolved_model
+    outcome = await entry.execute(
+        correlation=CorrelationInput(
+            workspace_id=agent.workspace_id,
+            agent_id=agent.id,
+            user_id=ctx.user_id,
+            session_id=uuid.UUID(session_id) if session_id else None,
+            goal=message[:200] or None,
+        ),
+        **execute_kwargs,
+    )
+    result = outcome.result
+    if not isinstance(result, dict):
+        return json.dumps({"error": "unexpected execution result shape"})
+    if outcome.correlation.status != "registered":
+        logger.warning("MCP chat correlation missing (%s)", outcome.correlation.reason)
+    content = result.get("content", "")
+    return json.dumps({"response": content, "session_id": session_id})
+
+
 async def _knowledge_ids_visible(db: AsyncSession, ids: list[Any], ctx: AuthContext) -> bool:
     """Check that every referenced knowledge base belongs to the caller."""
     try:
@@ -201,24 +321,7 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
                 if agent is None or not _workspace_ok(agent.workspace_id, ctx):
                     return json.dumps({"error": "Session not found"})
 
-                from hecate_llm.service import llm_service
-
-                from hecate.core.composition.runtime_port_adapter import create_runtime_port
-                from hecate.studio.workflows.execution_service import WorkflowExecutionService
-
-                port = create_runtime_port(db, llm_service)
-                exec_service = WorkflowExecutionService(port=port, db=db)
-
-                result = await exec_service.execute(
-                    agent_mode="chat",
-                    messages=[{"role": "user", "content": message}],
-                    stream=False,
-                    session_id=session_id,
-                    agent_id=str(session.agent_id),
-                )
-
-                content = result.get("content", "") if isinstance(result, dict) else str(result)
-                return json.dumps({"response": content, "session_id": session_id})
+                return await _chat_via_entry(db, session_id=session_id, message=message, agent=agent, ctx=ctx)
             except Exception as e:
                 logger.error("agent_chat failed: %s", e, exc_info=True)
                 return json.dumps({"error": str(e)})
@@ -272,24 +375,10 @@ def create_mcp_server(gateway_enabled: bool | None = None) -> FastMCP:
                 if agent is None or not _workspace_ok(agent.workspace_id, ctx):
                     return json.dumps({"error": "Session not found"})
 
-                from hecate_llm.service import llm_service
-
-                from hecate.core.composition.runtime_port_adapter import create_runtime_port
-                from hecate.studio.workflows.execution_service import WorkflowExecutionService
-
-                port = create_runtime_port(db, llm_service)
-                exec_service = WorkflowExecutionService(port=port, db=db)
-
-                result = await exec_service.execute(
-                    agent_mode="chat",
-                    messages=[{"role": "user", "content": message}],
-                    stream=False,
-                    session_id=session_id,
-                    agent_id=str(session.agent_id),
-                )
-
-                content = result.get("content", "") if isinstance(result, dict) else str(result)
-                return json.dumps({"response": content, "session_id": session_id})
+                # Session affinity: a resume keeps the session's recorded
+                # execution path; the shared entry helper re-resolves only
+                # when no path was recorded.
+                return await _chat_via_entry(db, session_id=session_id, message=message, agent=agent, ctx=ctx)
             except Exception as e:
                 logger.error("session_resume failed: %s", e, exc_info=True)
                 return json.dumps({"error": str(e)})

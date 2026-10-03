@@ -233,6 +233,12 @@ async def register_im_channels(app: FastAPI) -> None:
         app.state.plugin_registry = plugin_registry
 
         im_bus = IMMessageBus()
+        # step5d: IM executions run through the platform entry service so
+        # the bus shares one assembly + Task/Run correlation with the
+        # HTTP/MCP chat entries.
+        from hecate.core.composition.im_entry import IMEntryExecutionAdapter
+
+        im_bus.attach_workflow_service(IMEntryExecutionAdapter())
         await im_bus.start()
         app.state.im_message_bus = im_bus
         logger.info("IM channels initialized: %d IM adapter(s) registered", registered_im)

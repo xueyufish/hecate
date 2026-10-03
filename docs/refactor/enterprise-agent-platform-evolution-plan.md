@@ -488,15 +488,15 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 - [x] step5a：先实现 `HecateExecutionBackend` 包装当前 `WorkflowExecutionService`，固定兼容样本；再抽出图编译/Worker/上下文/guardrail 的共享装配函数和执行应用服务。平台 ORM 查询、定义解析、平台授权映射留在平台 adapter，转换为执行输入后调用共享装配；只包装旧服务不能作为独立消费的完成证据。（`runtime-shared-assembly` 已交付：装配落 `src/hecate/runtime/execution_assembly.py`（studio/ORM 零 import，分层守卫扫描全部 import 位点），`HecateExecutionBackend` 在 `src/hecate/execution/builtin.py` 经共享装配执行，契约测试参数化 Stub/live/builtin 三实现，builtin 兼容样本钉住漂移；既有执行服务测试零断言修改全绿）
 - [x] step5b：按 step1 依赖闭包抽取 `hecate-runtime` 与最小类型/契约依赖；构建非 editable wheel，并提供声明式 extras/adapter 依赖。清除首个独立 profile 路径上的延迟跨域 import，包括编译输入、工具安全、上下文和证据写入；可选功能未安装时启动声明 `unsupported`，不能等运行中 ImportError。平台兼容导入只转发到新包，禁止新包反向依赖完整 `hecate`。（`packages/hecate-runtime` 落地：内核 88 模块、无 `hecate` 反向依赖、settings/数据库耦合清零（RuntimeConfig+memory 接缝注入）、五行"待解除耦合"清除、wheel 干净安装冒烟 + CI `runtime-wheel-clean-install` job、capability_status 启动期声明；独立基线 §8 证据登记；SC01/SC02 留 step5c 不翻转）
-- [ ] step5c：实现独立执行宿主（建议 `hecate-runner`），提供本地 manifest 加载、可信配置/secret 引用解析、业务身份和策略 adapter、模型/工具装配、最小执行/状态/事件接口、健康与关闭处理。与平台 adapter 共享执行应用服务；HTTP 身份校验不能以客户端自报角色替代。独立包安装样例只配置模型、模拟业务 API 和本地证据存储，不启动管理服务。
-- [ ] step5c：先提供本地只读技术预览：允许列表工具、参数校验、可信身份、隔离数据域和持久的基础审计必须生效；写工具、后台自动重试、长任务恢复等未验证能力拒绝启用。提供 Stub 模型的确定性 CI 样例和可配置模型 endpoint 的集成入口；真实模型调用证据单独记录，不用 Stub 宣称供应商已认证。
-- [ ] step5d：迁移平台调用方，使其选用同一共享装配或独立宿主 adapter；内置执行包与宿主可以单独升级，支持窗口由契约/依赖矩阵界定。Python 嵌入入口复用共享装配但首版不自动授予生产支持；非 Python App 通过公开 HTTP/JSON 样例接入，不必等待 SDK 生成器。
-- [ ] 将 Pregel stream、状态、错误和产物映射到平台契约；原始事件作为后端详情保留。
-- [ ] 按入口清单迁移：先内部 Agent/Workflow 调用，再评估/定时任务，再 REST/MCP/A2A/IM；每次仅切换一组调用链。
-- [ ] 复用 #178 已有的引擎聊天子图和 `CHAT_TOOL_LOOP_ENGINE_ENABLED`，补 G3 的实际入口测试，再加入 workspace 路由和放量记录；不重复实现子图。兼容期明确旧循环不具备的恢复/回放保证，G2 未关闭时也不对新路径授予可靠副作用恢复保证。
-- [ ] 同步和流式 API 成为 Task/Run 上的等待或订阅视图；不要保留独立执行生命周期。
-- [ ] 兼容现有 OpenAI 风格响应和 SSE 格式，在适配层转换平台事件，不把 backend 专属字段强塞给旧客户端。
-- [ ] 在分层测试中限制入口层新增 `PregelRuntime`、`GraphCompiler` 具体导入。
+- [x] step5c：实现独立执行宿主（建议 `hecate-runner`），提供本地 manifest 加载、可信配置/secret 引用解析、业务身份和策略 adapter、模型/工具装配、最小执行/状态/事件接口、健康与关闭处理。与平台 adapter 共享执行应用服务；HTTP 身份校验不能以客户端自报角色替代。独立包安装样例只配置模型、模拟业务 API 和本地证据存储，不启动管理服务。（`packages/hecate-runner` 已交付（PR #208，change `hecate-runner-preview`）：本地 manifest 加载、启动期拒绝 write/approval 工具的只读 profile、业务身份/策略 adapter 接缝、最小执行/证据接口、健康与诚实关闭；CI 双 wheel 干净安装 + CLI 冒烟）
+- [x] step5c：先提供本地只读技术预览：允许列表工具、参数校验、可信身份、隔离数据域和持久的基础审计必须生效；写工具、后台自动重试、长任务恢复等未验证能力拒绝启用。提供 Stub 模型的确定性 CI 样例和可配置模型 endpoint 的集成入口；真实模型调用证据单独记录，不用 Stub 宣称供应商已认证。（SC01/SC02 随该切片翻转为 `implemented`：`tests/scenarios/test_sc01_cold_start.py`/`test_sc02_inventory_read.py` + `tests/scenarios/tools/`（库存 fixture 与 runner harness）；基线 §5 登记更新，生产认证仍归 step16/step7）
+- [ ] step5d：迁移平台调用方，使其选用同一共享装配或独立宿主 adapter；内置执行包与宿主可以单独升级，支持窗口由契约/依赖矩阵界定。Python 嵌入入口复用共享装配但首版不自动授予生产支持；非 Python App 通过公开 HTTP/JSON 样例接入，不必等待 SDK 生成器。（第一切片进行中（change `platform-entry-migration`）：HTTP/MCP/IM/评估四链改经 `EntryExecutionService` 并登记 Task/Run；A2A executor 与定时任务 executor 仍直连 `llm_service.chat`，登记为未迁移绕过路径，后续切片迁移）
+- [ ] 将 Pregel stream、状态、错误和产物映射到平台契约；原始事件作为后端详情保留。（事件映射层已落 `src/hecate/execution/entry_events.py`：RunEventMapper 客户端安全投影 + 后端详情保留 + tool 配对校验；HTTP 流式已切换消费，错误/产物映射待续）
+- [ ] 按入口清单迁移：先内部 Agent/Workflow 调用，再评估/定时任务，再 REST/MCP/A2A/IM；每次仅切换一组调用链。（已完成：HTTP chat/agents、MCP agent_chat/session_resume（补齐 event_store/checkpoint 装配与 agent 工具面）、IM 注入适配器、评估 workflow 执行（单一内部 Task 关联）；未迁移：A2A executor、定时任务 executor）
+- [ ] 复用 #178 已有的引擎聊天子图和 `CHAT_TOOL_LOOP_ENGINE_ENABLED`，补 G3 的实际入口测试，再加入 workspace 路由和放量记录；不重复实现子图。兼容期明确旧循环不具备的恢复/回放保证，G2 未关闭时也不对新路径授予可靠副作用恢复保证。（已交付：workspace 覆盖（feature flag tenant allowlist）+ 放量审计记录 + 会话路径亲缘；真实入口测试 `tests/test_channel/test_chat_engine_g3_entry.py`（真实 HTTP 执行服务/图/工具 worker，仅 provider 边界 stub）：流式/非流式多轮、审批拒绝（durable APPROVAL 对）、亲缘；取消语义经 backend 契约 REQUESTED，HTTP 取消端点随 step6）
+- [ ] 同步和流式 API 成为 Task/Run 上的等待或订阅视图；不要保留独立执行生命周期。（入口服务同步/流式为同一委托执行的两个视图；事件按 run 引用+游标读取待 step6 持久化后收口）
+- [ ] 兼容现有 OpenAI 风格响应和 SSE 格式，在适配层转换平台事件，不把 backend 专属字段强塞给旧客户端。（SSE 从映射后 envelope 渲染，payload 仅客户端安全字段；未关联执行回退原始流并告警，不虚报已登记）
+- [x] 在分层测试中限制入口层新增 `PregelRuntime`、`GraphCompiler` 具体导入。（`tests/test_layering_entry_imports.py`：channel/api、channel/im、tools/mcp 扫描 + 注入负例）
 
 **验证落点：**复用 `tests/test_services/test_workflow/test_execution_service*.py`，增加各入口对同一契约的测试。
 

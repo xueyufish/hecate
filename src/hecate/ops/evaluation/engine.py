@@ -172,6 +172,7 @@ class EvaluationEngine:
             self.db.add(run)
             await self.db.flush()
 
+        workflow_correlation_task_id: uuid.UUID | None = None
         if answer_source == AnswerSource.WORKFLOW:
             # Pin workflow_version once on the run row so downstream consumers
             # (diff, summary, publish report) see the same value the
@@ -182,6 +183,10 @@ class EvaluationEngine:
                 run.workflow_version = await self._resolve_latest_workflow_version(workflow_id)
             run.repetitions = repetitions
             await self.db.flush()
+            # step5d correlation anchor: one internal task for the whole
+            # evaluation run — item executions attach runs/associations to
+            # it instead of minting a task per item. Best-effort (fail-open).
+            workflow_correlation_task_id = await self._ensure_workflow_task(dataset_id, workflow_id)
 
         run.started_at = datetime.now(UTC)
         await self.db.flush()
@@ -238,6 +243,7 @@ class EvaluationEngine:
                             intent_package=intent_package,
                             agent_definition=agent_definition,
                             rollout_capture=rollout_capture,
+                            correlation_task_id=workflow_correlation_task_id,
                         )
                         item_scores[str(item.id)] = scores
                         if traj:
@@ -261,6 +267,7 @@ class EvaluationEngine:
                                 intent_package=intent_package,
                                 agent_definition=agent_definition,
                                 rollout_capture=rollout_capture,
+                                correlation_task_id=workflow_correlation_task_id,
                             )
                         )
                         for item in items
@@ -418,6 +425,7 @@ class EvaluationEngine:
         intent_package: dict | None = None,
         agent_definition: Any | None = None,
         rollout_capture: list[dict] | None = None,
+        correlation_task_id: uuid.UUID | None = None,
     ) -> tuple[list[Score], list[dict]]:
         """Process a single dataset item: generate the answer and score it.
 
@@ -463,6 +471,7 @@ class EvaluationEngine:
                     workflow_version=workflow_version,
                     item_id=item.id,
                     repetitions=repetitions,
+                    correlation_task_id=correlation_task_id,
                 )
                 trajectory_rows.extend(traj)
                 return content
@@ -750,6 +759,43 @@ class EvaluationEngine:
             logger.warning("Pipeline answer generation failed: %s", e)
             return ""
 
+    async def _ensure_workflow_task(self, dataset_id: uuid.UUID, workflow_id: uuid.UUID) -> uuid.UUID | None:
+        """Create the evaluation run's single internal correlation task.
+
+        Best-effort by contract (step5d): a registry failure leaves the
+        evaluation uncorrelated (logged) instead of failing the run.
+        """
+        from hecate.models.dataset import DatasetModel
+
+        try:
+            from hecate.execution.task_run_registry import TaskRunRegistry
+
+            row = await self.db.execute(
+                select(DatasetModel.workspace_id).where(DatasetModel.id == dataset_id, ~DatasetModel.deleted)
+            )
+            workspace_id = row.scalar_one_or_none()
+            if workspace_id is None:
+                return None
+            registry = TaskRunRegistry(self.db)
+            initiator_ref = {
+                "initiator": None,
+                "principal_id": f"evaluation-{workflow_id}",
+                "workload": {
+                    "deployment": {"kind": "deployment", "issuer_domain": "hecate", "id": str(workflow_id)},
+                    "workload_id": "hecate:evaluation",
+                },
+                "audience": "hecate:evaluation",
+            }
+            task = await registry.create_task(
+                goal=f"Evaluation of workflow {workflow_id} (dataset {dataset_id})",
+                initiator_ref=initiator_ref,
+                workspace_id=workspace_id,
+            )
+            return task.id
+        except Exception:  # noqa: BLE001 — correlation must not fail the evaluation
+            logger.warning("Evaluation workflow task correlation skipped", exc_info=True)
+            return None
+
     async def _generate_answer_via_workflow(
         self,
         query: str,
@@ -757,18 +803,20 @@ class EvaluationEngine:
         workflow_version: int | None,
         item_id: uuid.UUID,
         repetitions: int,
+        correlation_task_id: uuid.UUID | None = None,
     ) -> tuple[str, list[dict]]:
         """Generate an answer by executing the workflow under test.
 
-        One non-streaming ``WorkflowExecutionService.execute`` invocation
-        per repetition; the final repetition's ``content`` is the item's
+        One non-streaming entry-service execution per repetition; the
+        final repetition's ``content`` is the item's
         ``generated_answer``. Per-node execution data (node id, type,
         status, duration, error) is collected into ``trajectory`` rows
         indexed by ``(item_id, repetition_index)`` so downstream diff /
-        trajectory views can correlate.
+        trajectory views can correlate. Executions attach to the run's
+        single internal task when its correlation anchor resolved.
 
-        The studio service is imported lazily inside the function so the
-        ops domain stays runtime-clean (per
+        The execution domain and studio services are imported lazily
+        inside the function so the ops domain stays runtime-clean (per
         ``tests/test_layering_domain.py``); the runtime request path is
         never touched.
 
@@ -781,6 +829,8 @@ class EvaluationEngine:
             item_id: Dataset item UUID (used to tag trajectory rows).
             repetitions: How many times to execute the workflow for this
                 item. ``>=1``.
+            correlation_task_id: The run's internal task anchor (step5d);
+                ``None`` keeps the execution uncorrelated.
 
         Returns:
             Tuple of (generated_answer, trajectory_rows).
@@ -790,23 +840,36 @@ class EvaluationEngine:
                 record per-item error scores.
         """
         from hecate.core.composition.runtime_port_adapter import make_runtime_port
-        from hecate.studio.workflows.execution_service import WorkflowExecutionService
+        from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
 
         port = make_runtime_port()
-        service = WorkflowExecutionService(port=port, db=self.db)
+        entry = EntryExecutionService(port=port, entry_name="evaluation", db=self.db)
+        correlation = (
+            CorrelationInput(existing_task_id=correlation_task_id) if correlation_task_id is not None else None
+        )
 
         last_content = ""
         trajectory_rows: list[dict] = []
 
         for rep in range(1, repetitions + 1):
             session_id = uuid.uuid4()
-            result = await service.execute(
+            outcome = await entry.execute(
                 agent_mode="workflow",
                 workflow_id=workflow_id,
                 session_id=session_id,
                 messages=[{"role": "user", "content": query}],
                 stream=False,
+                correlation=correlation,
             )
+            if correlation is not None and not outcome.correlated:
+                logger.warning(
+                    "Evaluation execution correlation missing (%s); item %s repetition %s",
+                    outcome.correlation.reason,
+                    item_id,
+                    rep,
+                )
+                correlation = None
+            result = outcome.result
             content = str((result or {}).get("content") or "").strip()
             last_content = content
             trajectory_rows.append(
