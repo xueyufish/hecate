@@ -595,6 +595,12 @@ class Settings(BaseSettings):
     A2A_SERVER_ENABLED: bool = False
     A2A_SERVER_URL: str = "http://localhost:8000"
     A2A_AGENT_NAME: str = "Hecate Agent"
+    # Workspace scope the A2A server executes agents from. The executor
+    # refuses to run unless this resolves to exactly one non-deleted agent
+    # in that workspace — it never falls back to a global first-agent pick
+    # (cross-tenant execution risk). Per-caller agent identity is a
+    # registered follow-up (step5 review).
+    A2A_AGENT_WORKSPACE_ID: str = ""
     A2A_AUTH_MODE: str = "api_key"
     A2A_SIGNING_ENABLED: bool = False
     A2A_SIGNING_KEY_PATH: str = ""

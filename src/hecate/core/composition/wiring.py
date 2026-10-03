@@ -77,6 +77,10 @@ def register_secret_providers() -> None:
 
 def attach_state_stores(app: FastAPI) -> None:
     """Construct process-wide EventStore and SessionStateStore singletons."""
+    from hecate.core.composition.entry_assembly import (
+        register_shared_event_store,
+        register_shared_session_state_store,
+    )
     from hecate.core.config import settings
     from hecate.core.feature_flags.redis_cache import FeatureFlagCache
     from hecate.studio.event_state import create_event_store
@@ -84,6 +88,11 @@ def attach_state_stores(app: FastAPI) -> None:
 
     app.state.event_store = create_event_store(settings)
     app.state.session_state_store = create_session_state_store(settings)
+    # Entry executions outside request context (MCP, IM, A2A, schedulers)
+    # resolve their stores through entry_assembly; register the lifespan
+    # instances so every entry shares exactly one store per process.
+    register_shared_event_store(app.state.event_store)
+    register_shared_session_state_store(app.state.session_state_store)
     redis_client = None
     if settings.SESSION_STATE_STORE_BACKEND == "redis" and settings.SESSION_STATE_REDIS_URL:
         from redis.asyncio import Redis

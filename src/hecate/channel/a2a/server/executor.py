@@ -38,9 +38,10 @@ class HecateAgentExecutor:
 
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
+        self._resolution_failure = "No agent configured for A2A execution"
 
     async def execute(self, message: Message, task_id: str, context_id: str) -> Task:
-        """Execute an A2A task by running the default agent.
+        """Execute an A2A task by running the scoped agent.
 
         Args:
             message: The incoming A2A message.
@@ -51,13 +52,11 @@ class HecateAgentExecutor:
             Task with execution results.
         """
 
-        # Find the default agent (first agent in workspace). Selection
-        # semantics are unchanged; per-caller agent identity is a
-        # registered A2A protocol gap, not something this migration alters.
-        result = await self._db.execute(select(AgentModel).where(AgentModel.deleted.is_(False)).limit(1))
-        agent = result.scalar_one_or_none()
-
+        agent = await self._resolve_agent()
         if agent is None:
+            # Scope unconfigured or not resolvable to exactly one agent —
+            # refuse in-protocol instead of picking a global agent (which
+            # could cross workspaces/tenants).
             return Task(
                 id=task_id,
                 context_id=context_id,
@@ -65,7 +64,7 @@ class HecateAgentExecutor:
                     state=TaskState.FAILED,
                     message=Message(
                         role="agent",
-                        parts=[{"text": "No agent configured in Hecate"}],
+                        parts=[{"text": self._resolution_failure}],
                     ),
                 ),
             )
@@ -99,7 +98,8 @@ class HecateAgentExecutor:
                 artifacts=artifacts,
             )
 
-        except Exception as e:
+        except Exception:
+            # Stable client-facing text only; internals stay in server logs.
             logger.exception("A2A task execution failed")
             return Task(
                 id=task_id,
@@ -108,17 +108,61 @@ class HecateAgentExecutor:
                     state=TaskState.FAILED,
                     message=Message(
                         role="agent",
-                        parts=[{"text": f"Execution failed: {e!s}"}],
+                        parts=[{"text": "Execution failed"}],
                     ),
                 ),
             )
+
+    async def _resolve_agent(self) -> AgentModel | None:
+        """Resolve the single agent inside the configured workspace scope.
+
+        ``A2A_AGENT_WORKSPACE_ID`` must name a workspace holding exactly
+        one non-deleted agent; empty, invalid, zero-hit, or ambiguous
+        scopes all refuse (``None``) with the reason recorded in
+        ``self._resolution_failure`` for the protocol response.
+        """
+        import uuid as uuid_mod
+
+        from hecate.core.config import settings
+
+        self._resolution_failure = "No agent configured for A2A execution"
+        raw = (settings.A2A_AGENT_WORKSPACE_ID or "").strip()
+        if not raw:
+            logger.error("A2A agent workspace scope is not configured; refusing execution")
+            return None
+        try:
+            workspace_uuid = uuid_mod.UUID(raw)
+        except ValueError:
+            logger.error("A2A agent workspace scope is not a valid workspace id; refusing execution")
+            return None
+        result = await self._db.execute(
+            select(AgentModel).where(AgentModel.workspace_id == workspace_uuid, AgentModel.deleted.is_(False))
+        )
+        agents = result.scalars().all()
+        if not agents:
+            logger.error("A2A agent workspace scope %s has no agents; refusing execution", raw)
+            self._resolution_failure = "No agent available in the configured A2A workspace"
+            return None
+        if len(agents) > 1:
+            logger.error(
+                "A2A agent workspace scope %s resolves to %d agents; refusing execution",
+                raw,
+                len(agents),
+            )
+            self._resolution_failure = "The configured A2A workspace does not resolve to a single agent"
+            return None
+        return agents[0]
 
     async def _execute_via_entry_service(self, agent: AgentModel, user_message: str) -> str:
         """Run one execution through the platform entry service."""
         from hecate_llm.service import llm_service
 
+        from hecate.core.composition.entry_assembly import (
+            build_tool_registry,
+            get_shared_event_store,
+            load_agent_tools,
+        )
         from hecate.core.composition.guardrail_platform import assemble_guardrails
-        from hecate.core.composition.im_entry import _get_shared_event_store
         from hecate.core.composition.runtime_port_adapter import create_runtime_port
         from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
 
@@ -127,13 +171,11 @@ class HecateAgentExecutor:
         bundle = None
         event_store = None
         if agent.tools:
-            from hecate.channel.api.v1.chat import _build_tool_registry, _load_agent_tools
-
-            event_store = _get_shared_event_store()
-            tool_registry = _build_tool_registry(
+            event_store = get_shared_event_store()
+            tool_registry = build_tool_registry(
                 self._db, skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None)
             )
-            effective_tools = await _load_agent_tools(self._db, agent.tools or [])
+            effective_tools = await load_agent_tools(self._db, agent.tools or [])
             if effective_tools:
                 bundle = await assemble_guardrails(
                     self._db,

@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from hecate_llm.service import LLMResponse, llm_service
-from hecate_llm.tool_calling import format_tools_for_llm, inject_tool_results, parse_tool_calls
+from hecate_llm.tool_calling import inject_tool_results, parse_tool_calls
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,12 @@ if TYPE_CHECKING:
     from hecate.tools.tool.registry import ToolRegistry
 
 from hecate.core.auth_context import AuthContext
+from hecate.core.composition.entry_assembly import (
+    build_tool_registry as _build_tool_registry,
+)
+from hecate.core.composition.entry_assembly import (
+    load_agent_tools as _load_agent_tools,
+)
 from hecate.core.composition.memory_policy import narrowed_tool_names
 from hecate.core.database import get_db
 from hecate.core.deps_event_store import get_event_store
@@ -32,7 +38,6 @@ from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
 from hecate.models.agent import AgentModel
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
-from hecate.models.tool import ToolModel
 from hecate.runtime.eventstore import EventStore
 from hecate.runtime.guardrail import GuardrailAction
 from hecate.runtime.middleware import Phase
@@ -507,6 +512,9 @@ async def _process_chat(
                     stream=True,
                     session_id=request.session_id,
                     agent_id=parsed_agent_id,
+                    # Tenant scope for the engine's session-state persistence
+                    # (checkpoint save on completion and on disconnect).
+                    user_id=user_id,
                     kb_ids=parsed_kb_ids,
                     generate_opening=request.generate_opening,
                     enable_suggestions=request.generate_suggestions,
@@ -600,6 +608,8 @@ async def _process_chat(
             stream=False,
             session_id=request.session_id,
             agent_id=parsed_agent_id,
+            # Tenant scope for the engine's session-state persistence.
+            user_id=user_id,
             kb_ids=parsed_kb_ids,
             generate_opening=request.generate_opening,
             enable_suggestions=request.generate_suggestions,
@@ -797,85 +807,6 @@ async def _stream_chat(
     )
     yield f"data: {json.dumps(final_chunk.model_dump())}\n\n"
     yield "data: [DONE]\n\n"
-
-
-async def _load_agent_tools(db: AsyncSession, tool_names: list[str]) -> list[dict[str, Any]]:
-    """Resolve an agent's configured tools into OpenAI-format definitions.
-
-    Builtin tool names resolve from the in-memory ``BUILTIN_TOOL_DEFINITIONS``;
-    any other names are looked up in the ``ToolModel`` table.
-
-    Args:
-        db: The async database session.
-        tool_names: Tool names configured on the agent.
-
-    Returns:
-        Tool definitions formatted for LLM function calling.
-    """
-    if not tool_names:
-        return []
-    from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
-
-    definitions: list[dict[str, Any]] = []
-    db_names: list[str] = []
-    for name in tool_names:
-        if name in BUILTIN_TOOL_DEFINITIONS:
-            definitions.append({"name": name, **BUILTIN_TOOL_DEFINITIONS[name]})
-        else:
-            db_names.append(name)
-    if db_names:
-        result = await db.execute(select(ToolModel).where(ToolModel.name.in_(db_names), ~ToolModel.deleted))
-        for tool in result.scalars().all():
-            definitions.append(
-                {
-                    "name": tool.name,
-                    "description": tool.description or "",
-                    "parameters": tool.parameters or {"type": "object", "properties": {}},
-                }
-            )
-    return format_tools_for_llm(definitions)
-
-
-def _build_tool_registry(db: AsyncSession, skill_ref_manifest: list[dict[str, Any]] | None = None) -> ToolRegistry:
-    """Construct a ToolRegistry wired to builtin + DB tools using app settings.
-
-    Args:
-        db: The async database session.
-
-    Returns:
-        A configured ToolRegistry.
-    """
-    from hecate.core.config import settings
-    from hecate.tools.skill.loader import SkillLoader
-    from hecate.tools.tool.builtin import BuiltInToolExecutor
-    from hecate.tools.tool.registry import ToolRegistry
-    from hecate.tools.tool.search.factory import create_search_provider
-
-    search_provider = create_search_provider(
-        provider=settings.SEARCH_PROVIDER,
-        api_key=settings.SEARCH_API_KEY,
-    )
-    memory_backend = None
-    if settings.MEMORY_TOOLS_ENABLED:
-        try:
-            from hecate_memory.memory.tools_backend import MemoryToolBackend
-
-            memory_backend = MemoryToolBackend(db)
-        except ImportError:
-            memory_backend = None
-    # 4.21 reflection_tools seeding — when MEMORY_TOOLS_ENABLED is on
-    # but REFLECTION_ENABLED is off, the seeding layer excludes
-    # ``reflection_search`` and ``work_context_query`` so the agent
-    # never sees tools whose backend would refuse the call. Tool
-    # definitions live in tools/tool/builtin.py and are also gated by
-    # the same visibility check below at the registry layer.
-    builtin_executor = BuiltInToolExecutor(
-        search_provider=search_provider,
-        workspace_root=settings.WORKSPACE_ROOT,
-        skill_loader=SkillLoader(db, ref_manifest=skill_ref_manifest),
-        memory_backend=memory_backend,
-    )
-    return ToolRegistry(db=db, builtin_executor=builtin_executor)
 
 
 async def _execute_tool_calls(

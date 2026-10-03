@@ -98,6 +98,7 @@ async def mcp_env(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, aut
     monkeypatch.setattr(settings, "CHAT_TOOL_LOOP_ENGINE_ENABLED", True)
     monkeypatch.setattr(settings, "MCP_AUTH_TYPE", "none")
 
+    import hecate.core.composition.entry_assembly as entry_assembly
     import hecate.tools.mcp.server as mcp_server
 
     stub_llm = _StubLLM()
@@ -105,7 +106,8 @@ async def mcp_env(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, aut
 
     event_store = InMemoryEventStore()
     state_store = InMemorySessionStateStore()
-    monkeypatch.setattr(mcp_server, "_shared_stores", {"event_store": event_store, "session_state_store": state_store})
+    monkeypatch.setattr(entry_assembly, "_shared_event_store", event_store)
+    monkeypatch.setattr(entry_assembly, "_shared_session_state_store", state_store)
 
     from hecate.tools.tool.registry import ToolRegistry
 
@@ -182,7 +184,7 @@ async def mcp_env(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, aut
         await db_session.flush()
 
     monkeypatch.setattr(mcp_server, "_auth", _fake_auth)
-    monkeypatch.setattr("hecate.channel.api.v1.chat._build_tool_registry", _build)
+    monkeypatch.setattr(entry_assembly, "build_tool_registry", _build)
     return SimpleNamespace(
         llm=stub_llm,
         executor=stub_executor,
