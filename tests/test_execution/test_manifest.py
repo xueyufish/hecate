@@ -12,14 +12,14 @@ import json
 import tarfile
 
 import pytest
-
-from hecate.contracts.execution.manifest import (
+from hecate_runtime.manifest import (
     ArtifactManifest,
     ManifestError,
     sha256_hex,
     validate_manifest_dict,
     verify_archive,
 )
+
 from tests.test_execution.conftest import SAMPLES_DIR, load_sample
 
 ARCHIVE_CONTENTS: dict[str, bytes] = {

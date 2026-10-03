@@ -111,6 +111,8 @@ jobs:
           cache-dependency-path: pilots/execution-backend-ts/package-lock.json
       - name: Install dependencies
         run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
+      - name: Install hecate-runner into the dev environment (package tests)
+        run: uv pip install --no-deps -e packages/hecate-runner
       - name: Run tests
         env:
           HECATE_REQUIRE_LIVE_PILOT: "1"
@@ -166,10 +168,12 @@ jobs:
         run: pip install uv
       - name: Build hecate-runtime wheel (non-editable artifact)
         run: uv build --package hecate-runtime
-      - name: Install wheel into a clean venv (no repo source path)
+      - name: Build hecate-runner wheel (non-editable artifact)
+        run: uv build --package hecate-runner
+      - name: Install wheels into a clean venv (no repo source path)
         run: |
           python -m venv "$RUNNER_TEMP/clean_venv"
-          "$RUNNER_TEMP/clean_venv/bin/python" -m pip install dist/hecate_runtime-*.whl
+          "$RUNNER_TEMP/clean_venv/bin/python" -m pip install dist/hecate_runtime-*.whl dist/hecate_runner-*.whl
       - name: Assert no full-hecate dependency leaked in
         run: |
           installed=$("$RUNNER_TEMP/clean_venv/bin/python" -m pip list --format freeze | grep -ixE 'hecate==.*' || true)
@@ -191,6 +195,11 @@ jobs:
               assert caps[key] == "unsupported", f"{key} should be unsupported without extras, got {caps[key]}"
           print("capability status:", caps)
           PY
+      - name: Assert the runner CLI exists in the clean venv
+        working-directory: /tmp
+        run: |
+          "$RUNNER_TEMP/clean_venv/bin/hecate-runner" --help > /dev/null
+          echo "runner console script OK"
 
   docker-sandbox-smoke:
     needs: changes

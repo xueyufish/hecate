@@ -20,6 +20,7 @@ members = [
     "hecate-llm",
     "hecate-memory",
     "hecate-ops",
+    "hecate-runner",
     "hecate-runtime",
     "hecate-sandbox",
 ]
@@ -2581,6 +2582,17 @@ requires-dist = [
 provides-extras = ["otel"]
 
 [[package]]
+name = "hecate-runner"
+version = "0.1.0"
+source = { editable = "packages/hecate-runner" }
+dependencies = [
+    { name = "hecate-runtime" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "hecate-runtime", editable = "packages/hecate-runtime" }]
+
+[[package]]
 name = "hecate-runtime"
 version = "0.1.0"
 source = { editable = "packages/hecate-runtime" }
@@ -2610,7 +2622,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "hecate-memory", marker = "extra == 'memory'", editable = "packages/hecate-memory" },
     { name = "hecate-sandbox", marker = "extra == 'sandbox'", editable = "packages/hecate-sandbox" },
-    { name = "httpx", specifier = ">=0.28.0" },
+    { name = "httpx", specifier = ">=0.28.0,<1.0" },
     { name = "llm-guard", marker = "extra == 'security'", specifier = ">=0.3" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20.0" },
     { name = "pydantic", specifier = ">=2.10.0" },

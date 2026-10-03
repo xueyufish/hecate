@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "hecate-runner"
+version = "0.1.0"
+description = "Standalone execution host for the Hecate runtime kernel (technical preview)"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    { name = "Hecate Team" },
+]
+dependencies = [
+    "hecate-runtime",
+]
+
+[project.scripts]
+hecate-runner = "hecate_runner.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate_runner"]
+
+[tool.uv.sources]
+hecate-runtime = { workspace = true }

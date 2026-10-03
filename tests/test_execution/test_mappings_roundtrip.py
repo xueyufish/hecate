@@ -14,11 +14,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hecate_runtime.manifest import ArtifactManifest
 
 from hecate.contracts.execution.capabilities import BackendCapabilities
 from hecate.contracts.execution.errors import BackendError
 from hecate.contracts.execution.events import EventEnvelope
-from hecate.contracts.execution.manifest import ArtifactManifest
 from hecate.contracts.execution.references import BackendRef
 from hecate.contracts.execution.request import ExecutionRequest
 from hecate.contracts.execution.sandbox import (
