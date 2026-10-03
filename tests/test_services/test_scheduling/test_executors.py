@@ -8,9 +8,11 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.models.agent import AgentModel
+from hecate.models.task import TaskModel
 from hecate.ops.scheduling.executors import (
     AgentExecutor,
     ExecutorRegistry,
@@ -32,6 +34,30 @@ def _session_factory(session: AsyncSession):
         yield session
 
     return _factory
+
+
+class _StubLLMService:
+    """Deterministic provider double at the llm_service seam."""
+
+    def __init__(self, content: str = "scheduled reply") -> None:
+        self.content = content
+        self.chat_calls: list[dict] = []
+        self.stream_calls: list[dict] = []
+
+    async def chat(self, *, messages, model=None, tools=None, **_kwargs):
+        self.chat_calls.append({"messages": list(messages), "model": model, "tools": tools})
+        return SimpleNamespace(
+            content=self.content,
+            model=model or "stub-model",
+            tool_calls=None,
+            finish_reason="stop",
+            usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        )
+
+    async def chat_stream(self, *, messages, model=None, tools=None, **_kwargs):
+        self.stream_calls.append({"messages": list(messages), "model": model, "tools": tools})
+        yield {"content": self.content, "tool_calls": None}
+        yield {"content": "", "finish_reason": "stop", "tool_calls": None}
 
 
 class TestExecutorRegistry:
@@ -64,37 +90,63 @@ class TestAgentExecutor:
         assert result["status"] == "failed"
         assert "agent_id" in result["error"]
 
-    async def test_runs_agent_via_llm_service(self, db_session: AsyncSession) -> None:
-        """Regression: pre-Phase-R AgentService is gone — the executor must
-        load the agent row and call llm_service with persona + model."""
-        from hecate_llm.service import llm_service
+    async def test_runs_agent_via_entry_service(self, db_session: AsyncSession, default_workspace) -> None:
+        """The executor delegates to the platform entry service: the run
+        flows through the provider seam (no direct llm_service.chat call)
+        and the execution is correlated to a registered Task."""
+        import hecate_llm.service
 
+        stub = _StubLLMService()
         agent = AgentModel(
             name="Sched Agent",
             persona="You are the scheduled agent.",
+            workspace_id=uuid.uuid4(),  # differs from the task row: row context must win
             model_config_db={"model": "test-model"},
         )
+        db_session.add(agent)
+        await db_session.flush()
+        row_workspace = default_workspace.id
+
+        with (
+            patch("hecate.core.database.async_session_factory", _session_factory(db_session)),
+            patch.object(hecate_llm.service, "llm_service", stub),
+        ):
+            result = await AgentExecutor().execute(
+                uuid.uuid4(),
+                {"message": "hello"},
+                workspace_id=row_workspace,
+                agent_id=agent.id,
+            )
+
+        assert result["status"] == "success"
+        assert result["result"] == "scheduled reply"
+        # Execution went through the provider seam exactly once.
+        invocations = stub.chat_calls + stub.stream_calls
+        assert len(invocations) == 1
+        assert invocations[0]["model"] == "test-model"
+        # Task registered under the task-row workspace (authoritative source).
+        tasks = (
+            (await db_session.execute(select(TaskModel).where(TaskModel.workspace_id == row_workspace))).scalars().all()
+        )
+        assert len(tasks) == 1
+
+    async def test_task_config_agent_id_fallback(self, db_session: AsyncSession) -> None:
+        """Compat: without row-context args the task_config binding still runs."""
+        import hecate_llm.service
+
+        stub = _StubLLMService()
+        agent = AgentModel(name="Fallback Agent", model_config_db={"model": "test-model"})
         db_session.add(agent)
         await db_session.flush()
 
         with (
             patch("hecate.core.database.async_session_factory", _session_factory(db_session)),
-            patch.object(
-                llm_service,
-                "chat",
-                AsyncMock(return_value=SimpleNamespace(content="scheduled reply")),
-            ) as mock_chat,
+            patch.object(hecate_llm.service, "llm_service", stub),
         ):
-            result = await AgentExecutor().execute(uuid.uuid4(), {"agent_id": str(agent.id), "message": "hello"})
+            result = await AgentExecutor().execute(uuid.uuid4(), {"agent_id": str(agent.id), "message": "hi"})
 
         assert result["status"] == "success"
         assert result["result"] == "scheduled reply"
-        mock_chat.assert_awaited_once()
-        kwargs = mock_chat.call_args
-        sent_messages = kwargs.args[0] if kwargs.args else kwargs.kwargs.get("messages")
-        assert sent_messages[0] == {"role": "system", "content": "You are the scheduled agent."}
-        assert sent_messages[1] == {"role": "user", "content": "hello"}
-        assert kwargs.kwargs.get("model") == "test-model"
 
     async def test_unknown_agent_fails(self, db_session: AsyncSession) -> None:
         with patch("hecate.core.database.async_session_factory", _session_factory(db_session)):
@@ -103,7 +155,15 @@ class TestAgentExecutor:
         assert "not found" in result["error"]
 
     async def test_llm_failure_is_reported(self, db_session: AsyncSession) -> None:
-        from hecate_llm.service import llm_service
+        import hecate_llm.service
+
+        class _Broken:
+            async def chat(self, **_kwargs):
+                raise RuntimeError("llm down")
+
+            async def chat_stream(self, **_kwargs):
+                raise RuntimeError("llm down")
+                yield  # pragma: no cover
 
         agent = AgentModel(name="Broken Agent", model_config_db={"model": "test-model"})
         db_session.add(agent)
@@ -111,7 +171,7 @@ class TestAgentExecutor:
 
         with (
             patch("hecate.core.database.async_session_factory", _session_factory(db_session)),
-            patch.object(llm_service, "chat", AsyncMock(side_effect=RuntimeError("llm down"))),
+            patch.object(hecate_llm.service, "llm_service", _Broken()),
         ):
             result = await AgentExecutor().execute(uuid.uuid4(), {"agent_id": str(agent.id), "message": "hello"})
         assert result["status"] == "failed"

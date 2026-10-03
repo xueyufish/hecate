@@ -1,10 +1,6 @@
-# platform-entry-execution Specification
+# platform-entry-execution Delta
 
-## Purpose
-
-平台入口执行应用服务:被迁移的入口调用链(HTTP chat、MCP `agent_chat`/`session_resume`、IM 注入、评估 workflow 执行)经同一个平台入口执行服务发起执行;入口模块只保留协议适配(身份校验、请求/响应格式、流式协议),执行装配(含事件存储与 checkpoint)发生在入口服务内,平台 adapter 与独立宿主共享同一装配。同步与流式接口是同一次执行上的等待/订阅视图,不引入独立执行生命周期。
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: 平台入口统一消费一个执行应用服务
 
@@ -54,25 +50,6 @@
 - **WHEN** Task/Run 登记未能完成而执行继续
 - **THEN** 执行结果或日志显式标记关联缺失,不以已登记状态上报
 
-### Requirement: 引擎事件映射到平台契约
-
-入口服务 SHALL 将引擎原始流事件映射为 `contracts/execution` 的 `EventEnvelope`(task_ref/run_ref、source_sequence、payload schema 引用),并支持按 run 引用与游标的分页读取;原始引擎事件 MUST 作为后端详情保留,不因映射而丢弃。tool call/result 的配对在映射层校验,未配对事件 MUST 显式暴露(校验失败或告警),不得静默吞掉。客户端可见的 OpenAI 风格响应与 SSE chunk 由适配层转换产生,MUST NOT 携带 backend 专属字段(引擎内部路由/状态通道名等)。
-
-#### Scenario: 事件可按 run 与游标读取
-
-- **WHEN** 一次执行完成后按 run 引用读取事件页并携带上次游标
-- **THEN** 返回的 envelope 序列连续、可翻页,且包含 tool 事件的配对语义
-
-#### Scenario: 原始事件作为后端详情保留
-
-- **WHEN** 读取映射后的事件
-- **THEN** 每个可映射事件的后端详情中可取得原始引擎事件
-
-#### Scenario: 客户端 chunk 不含 backend 专属字段
-
-- **WHEN** 检查流式响应的 SSE chunk 字段集合
-- **THEN** 字段限于 OpenAI chunk 语义,引擎内部状态字段不出现在客户端可见输出中
-
 ### Requirement: 入口层禁止新增引擎具体导入
 
 被迁移的入口层模块(channel/api、tools/mcp、channel/im、channel/a2a/server)MUST NOT 直接 import 引擎具体实现类(`PregelRuntime`、`GraphCompiler`);执行装配只发生在入口服务与共享装配内。该约束 SHALL 由分层测试自动化执行,违规时测试失败并指出模块与符号。
@@ -81,20 +58,6 @@
 
 - **WHEN** 入口层模块(含 channel/a2a/server)新增对 `PregelRuntime` 或 `GraphCompiler` 的 import
 - **THEN** 分层测试失败并指出违规模块与符号
-
-### Requirement: 执行包与宿主的升级支持窗口显式
-
-hecate-runtime(内置执行包)、hecate-runner(宿主)与平台主体的组合升级支持窗口 SHALL 以显式契约/依赖矩阵成文(兼容组合、边界版本、退出条件),并被 CI 断言与 lock/workspace 实际版本一致;矩阵外组合 MUST NOT 被静默当作受支持组合。
-
-#### Scenario: 矩阵与实际版本一致
-
-- **WHEN** CI 校验契约/依赖矩阵
-- **THEN** 矩阵声明的组合与 workspace/lock 中的实际版本边界一致
-
-#### Scenario: 矩阵外组合不被宣称支持
-
-- **WHEN** 组合落在矩阵声明的边界之外
-- **THEN** 文档与矩阵不将其列为受支持组合,文档中的支持窗口与矩阵一一对应
 
 ### Requirement: 每次入口迁移附真实入口回归
 

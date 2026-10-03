@@ -1,7 +1,7 @@
 """Layering guard: entry-layer modules must not import engine concretes.
 
 step5d introduced the platform entry execution service so entry chains
-(HTTP chat, MCP, IM) stop assembling execution themselves. This test
+(HTTP chat, MCP, IM, A2A) stop assembling execution themselves. This test
 pins the boundary: entry-layer modules must not import ``PregelRuntime``
 or ``GraphCompiler`` — execution assembly happens only inside the entry
 service and the shared runtime assembly. A violation fails naming the
@@ -18,11 +18,21 @@ SRC_ROOT = Path(__file__).resolve().parents[1] / "src" / "hecate"
 # Entry-layer trees whose jobs are protocol adaptation, not assembly.
 ENTRY_TREES = (
     SRC_ROOT / "channel" / "api",
+    SRC_ROOT / "channel" / "a2a" / "server",
     SRC_ROOT / "channel" / "im",
     SRC_ROOT / "tools" / "mcp",
 )
 
 FORBIDDEN_SYMBOLS = ("PregelRuntime", "GraphCompiler")
+
+# Migrated tail executors: llm_service may be imported as the provider
+# seam handed to the runtime port, but invoking it directly bypasses the
+# entry execution service.
+TAIL_EXECUTOR_MODULES = (
+    SRC_ROOT / "channel" / "a2a" / "server" / "executor.py",
+    SRC_ROOT / "ops" / "scheduling" / "executors.py",
+)
+DIRECT_LLM_CALLS = ("llm_service.chat(", "llm_service.chat_stream(")
 
 
 def _module_level_imports(path: Path) -> list[tuple[int, str, str | None]]:
@@ -113,3 +123,16 @@ def test_layering_guard_rejects_injected_violation(tmp_path: Path) -> None:
     assert hits, "scanner must flag a planted engine concrete import"
     assert any("PregelRuntime" in (name or mod) for _, mod, name in hits)
     del tree
+
+
+def test_tail_executors_have_no_direct_llm_calls() -> None:
+    """Migrated tail executors must not invoke llm_service directly.
+
+    Importing llm_service to hand it to the runtime port is the provider
+    seam; calling ``llm_service.chat(...)`` in executor code bypasses the
+    entry execution service (the pre-migration bypass this change closed).
+    """
+    for module in TAIL_EXECUTOR_MODULES:
+        source = module.read_text(encoding="utf-8")
+        for call in DIRECT_LLM_CALLS:
+            assert call not in source, f"{module.name} must not call {call} directly (go through the entry service)"
