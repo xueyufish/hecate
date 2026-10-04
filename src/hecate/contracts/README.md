@@ -40,7 +40,18 @@ live in `hecate.execution.durable` with an InMemory second implementation in
 `hecate.execution.stub_durable`. Every production implementation must pass the
 parameterized suite in `tests/test_execution/test_durable_contract.py` before
 wiring — register the factory in `DURABLE_IMPLEMENTATIONS`
-(`tests/test_execution/conftest.py`) to inherit the suite unchanged.
+(`tests/test_execution/conftest.py`) to inherit the suite unchanged. The SQL
+reference implementation (`hecate-durable`, worktree A of step6) is registered
+there as `sql-sqlite`; its fault-injection suite runs against PostgreSQL via
+`DURABLE_TEST_POSTGRES_URL`.
+
+Since step6's `durable-execution-core`, the durable contract cluster
+(`references` / `events` / `tools` / `durable`) and the seams actually live in
+the independently installable `hecate-durable` package
+(`hecate_durable.contracts` / `hecate_durable.seams` / `hecate_durable.stub`);
+the paths under `hecate.contracts.execution` / `hecate.execution` forward there
+so the standalone-host wheel closure never pulls the full application. The
+authoritative schemas stay in `src/hecate/contracts/schemas/`.
 
 ## HTTP/JSON binding and hosted mapping
 

@@ -21,6 +21,9 @@ import uuid
 from dataclasses import dataclass, field
 
 import httpx
+from hecate_durable.contracts.references import BackendRef
+from hecate_durable.contracts.tools import ToolSideEffectClass
+from hecate_runtime.action_ledger import ActionLedgerHook
 from hecate_runtime.checkpoint import InMemoryCheckpointStore
 from hecate_runtime.pregel import PregelRuntime
 from hecate_runtime.types import (
@@ -37,8 +40,15 @@ from hecate_runtime.types import (
 from hecate_runtime.worker import Worker
 from jsonschema import Draft202012Validator
 
+from .durable import DurableRuntime, gate_dispatch_async, record_outcome_async
 from .evidence import OUTCOME_FAILED, EvidenceStore
 from .profile import BUILTIN_TOOL_SCHEMAS, Profile
+
+DURABLE_CAPABILITIES: dict[str, str] = {
+    "durable_tasks": "supported: persistent task/action ledger (hecate-durable)",
+    "long_task_recovery": "supported: replay-based restart recovery, ledger-gated",
+    "write_tools": "supported: manifest-declared write tools through the action ledger",
+}
 
 logger = logging.getLogger(__name__)
 
@@ -127,23 +137,50 @@ class ReadToolNodeWorker(Worker):
 @dataclass
 class RunState:
     run_id: str
-    status: str  # "running" | "succeeded" | "failed" | "cancelled"
+    status: str  # "running" | "succeeded" | "failed" | "cancelled" | "unknown" | task lifecycle
     principal: str
     domains: tuple[str, ...]
     events: list[dict] = field(default_factory=list)
     result_ref: str | None = None
     error: str | None = None
     cancel_requested: bool = False
+    # Durable profile correlation (None in the preview).
+    task_ref: BackendRef | None = None
+    run_ref: BackendRef | None = None
+    action_hook: ActionLedgerHook | None = None
+    needs_reconciliation: bool = False
+    replayed: bool = False
+    cancel_command_id: str | None = None
+
+
+class EvidenceUnavailableError(Exception):
+    """The local evidence store cannot accept writes (SC06 gate)."""
 
 
 class ExecutionEngine:
     """Serial, in-process execution of the compiled preview graph."""
 
-    def __init__(self, profile: Profile, evidence: EvidenceStore, tool_dispatch) -> None:
+    def __init__(
+        self,
+        profile: Profile,
+        evidence: EvidenceStore,
+        tool_dispatch,
+        durable: DurableRuntime | None = None,
+    ) -> None:
         # ``tool_dispatch`` signature: (tool_name, arguments, principal, domains).
         self._profile = profile
         self._evidence = evidence
         self._tool_dispatch = tool_dispatch
+        self._durable = durable
+        # Side-effect class per allowlisted tool from the manifest's declared
+        # permission: read → readonly, write → conservative non-idempotent.
+        self._side_effects: dict[str, ToolSideEffectClass] = {
+            tool.name: (
+                ToolSideEffectClass.READONLY if tool.permission == "read" else ToolSideEffectClass.NON_IDEMPOTENT_WRITE
+            )
+            for tool in profile.manifest.tools
+            if tool.name in profile.config.tool_allowlist
+        }
         self._checkpoint_store = InMemoryCheckpointStore()
         self._lock = asyncio.Lock()
         self._runs: dict[str, RunState] = {}
@@ -158,10 +195,40 @@ class ExecutionEngine:
         self._loop = loop
 
     async def _dispatch_tool(self, state: RunState, tool_name: str, arguments: dict) -> dict:
-        """Run one tool with the run's server-verified identity scope."""
+        """Run one tool with the run's server-verified identity scope.
+
+        In the durable profile every dispatch first passes the persistent
+        ledger gate (recovery verdict + atomic claim) and, for protected
+        tools, the evidence-writability gate; the real outcome is mirrored
+        back to the ledger after the business call.
+        """
 
         if state.cancel_requested:
             raise _CooperativeCancelError
+        effect = self._side_effects.get(tool_name, ToolSideEffectClass.UNKNOWN)
+        if state.action_hook is not None:
+            withheld, claim_blocked = await gate_dispatch_async(
+                state.action_hook,
+                run_id=state.run_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                side_effect_class=effect,
+            )
+            blocked = withheld if withheld is not None else claim_blocked
+            if blocked is not None:
+                self._mark_reconciliation(state, blocked)
+                self.record_tool_result(state, tool_name, blocked)
+                return blocked
+            if effect is not ToolSideEffectClass.READONLY:
+                # SC06 local half: stop new protected actions when the local
+                # evidence store cannot accept writes.
+                try:
+                    self._evidence.probe()
+                except OSError as exc:
+                    blocked = {"status": "store_unavailable", "detail": f"local evidence unwritable: {exc}"}
+                    self._mark_reconciliation(state, blocked)
+                    self.record_tool_result(state, tool_name, blocked)
+                    return blocked
         self._evidence.append("tool_dispatch", state.principal, state.run_id, "started", {"tool": tool_name})
         if arguments.get("domain") not in state.domains:
             outcome = {"status": "authorization", "detail": "requested domain is outside the trusted identity scope"}
@@ -172,8 +239,22 @@ class ExecutionEngine:
         self._evidence.append(
             "tool_result", state.principal, state.run_id, evidence_outcome, {"tool": tool_name, "status": status}
         )
+        if state.action_hook is not None:
+            await record_outcome_async(
+                state.action_hook,
+                run_id=state.run_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                outcome=outcome,
+            )
         self.record_tool_result(state, tool_name, outcome)
         return outcome
+
+    def _mark_reconciliation(self, state: RunState, outcome: dict) -> None:
+        """A withheld/blocked durable action keeps the task pending reconciliation."""
+
+        if outcome.get("status") in {"needs_review", "reconciliation_required", "conflict", "store_unavailable"}:
+            state.needs_reconciliation = True
 
     def _compile_graph(self) -> CompiledGraphT:
         allowlist = list(self._profile.config.tool_allowlist)
@@ -236,46 +317,145 @@ class ExecutionEngine:
             "cancel": "cooperative",
             "local_evidence": "enforced",
         }
+        if self._durable is not None:
+            return {**supported, **DURABLE_CAPABILITIES, **UNSUPPORTED_CAPABILITIES}
         return {**supported, **UNSUPPORTED_CAPABILITIES}
 
     async def submit(
-        self, principal: str, run_input: dict, domains: tuple[str, ...] = ()
+        self,
+        principal: str,
+        run_input: dict,
+        domains: tuple[str, ...] = (),
+        *,
+        idempotency_key: str | None = None,
     ) -> tuple[str, RunState | None]:
         """Start a run; returns (run_id, None-in-flight-refusal) — serial queue.
 
         ``principal``/``domains`` come from the server-verified identity at
         the HTTP entry and travel with the run: tool dispatches carry exactly
-        this scope, never any request-body self-reported claims.
+        this scope, never any request-body self-reported claims. In the
+        durable profile the submission registers under an idempotency key
+        bound to that verified identity and the canonical request body:
+        replays return the original run; a key rebound to a different body
+        raises :class:`IdempotencyConflictError`.
         """
 
         if self._closing or self._lock.locked():
             return "", None
         self.validate_run_input(run_input)
+        if self._durable is not None:
+            self._admit_protected(run_input)
+            submission = self._durable.submit(principal=principal, run_input=run_input, idempotency_key=idempotency_key)
+            run_ref = submission.association.run_ref
+            task_ref = submission.association.task_ref
+            if submission.replayed:
+                # Same key + same body: never a second execution. Report the
+                # task's durable state (post-restart runs resolve via the
+                # same path because startup reconcile already re-drove them).
+                state = self._runs.get(run_ref.id)
+                if state is None:
+                    state = self._durable_task_state(task_ref, principal, domains, run_ref)
+                state.replayed = True
+                return run_ref.id, state
         # Reserve admission before yielding to the execution task. Checking
         # the lock only in _execute silently queued concurrent submissions.
         await self._lock.acquire()
-        run_id = uuid.uuid4().hex
-        state = RunState(run_id=run_id, status="running", principal=principal, domains=tuple(domains))
+        if self._durable is not None:
+            state = RunState(
+                run_id=run_ref.id,
+                status="running",
+                principal=principal,
+                domains=tuple(domains),
+                task_ref=task_ref,
+                run_ref=run_ref,
+            )
+            state.action_hook = self._durable.hook_for(task_ref, run_ref)
+        else:
+            run_id = uuid.uuid4().hex
+            state = RunState(run_id=run_id, status="running", principal=principal, domains=tuple(domains))
         try:
             self._evidence.append(
-                "submission", principal, run_id, "accepted", {"model_source": self._profile.config.model_backend}
+                "submission", principal, state.run_id, "accepted", {"model_source": self._profile.config.model_backend}
             )
-            self._runs[run_id] = state
-            task = asyncio.create_task(self._execute(run_id, state, run_input))
+            self._runs[state.run_id] = state
+            task = asyncio.create_task(self._execute(state.run_id, state, run_input))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
         except BaseException:
             self._lock.release()
             raise
-        return run_id, state
+        return state.run_id, state
 
-    def request_cancel(self, run_id: str) -> bool:
+    def _admit_protected(self, run_input: dict) -> None:
+        """SC06 admission gate: refuse protected runs while evidence is unwritable."""
+
+        if any(effect is not ToolSideEffectClass.READONLY for effect in self._side_effects.values()):
+            try:
+                self._evidence.probe()
+            except OSError as exc:
+                raise EvidenceUnavailableError(f"local evidence store unwritable: {exc}") from exc
+
+    def _durable_task_state(
+        self, task_ref: BackendRef, principal: str, domains: tuple[str, ...], run_ref: BackendRef
+    ) -> RunState:
+        record = self._durable.store.get_task_state(task_ref) if self._durable else None
+        status = record.lifecycle_state.value if record is not None else "unknown"
+        return RunState(
+            run_id=run_ref.id,
+            status=status,
+            principal=principal,
+            domains=tuple(domains),
+            task_ref=task_ref,
+            run_ref=run_ref,
+            replayed=True,
+        )
+
+    def resume(self, task_ref: BackendRef, run_ref: BackendRef, run_input: dict) -> str | None:
+        """Re-drive a non-terminal durable task after a restart (replay path).
+
+        Returns the run id when dispatched, or ``None`` when the serial slot
+        is busy (the caller retries on the next tick) — recovery decisions
+        per action come from the ledger inside the normal dispatch gate.
+        """
+
+        if self._durable is None or self._closing or self._lock.locked():
+            return None
+        state = RunState(
+            run_id=run_ref.id,
+            status="running",
+            principal="host-recovery",
+            domains=(),
+            task_ref=task_ref,
+            run_ref=run_ref,
+        )
+        state.action_hook = self._durable.hook_for(task_ref, run_ref)
+
+        async def _runner() -> None:
+            # The slot was free when resume checked (same loop turn, no await
+            # between), so this acquire completes immediately; a same-turn
+            # contender merely serializes behind the run in flight.
+            # _execute's finally releases the slot, exactly like the submit
+            # path — no double release here.
+            await self._lock.acquire()
+            self._runs[state.run_id] = state
+            await self._execute(state.run_id, state, run_input, resume=True)
+
+        try:
+            task = asyncio.create_task(_runner())
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+        except BaseException:
+            raise
+        return state.run_id
+
+    def request_cancel(self, run_id: str, *, command_id: str | None = None) -> bool:
         """Request cancellation at the next tool boundary; never revoke a completed call."""
         state = self._runs[run_id]
         if state.status != "running":
             return False
         self._evidence.append("cancel", state.principal, run_id, "requested")
         state.cancel_requested = True
+        state.cancel_command_id = command_id
         return True
 
     def begin_shutdown(self) -> None:
@@ -333,11 +513,19 @@ class ExecutionEngine:
     def _append_event(self, state: RunState, event: dict) -> None:
         state.events.append(event)
 
-    async def _execute(self, run_id: str, state: RunState, run_input: dict) -> None:
+    async def _execute(self, run_id: str, state: RunState, run_input: dict, *, resume: bool = False) -> None:
         try:
+            if self._durable is not None and state.task_ref is not None:
+                # RUNNING→RUNNING on resume is an absorbing no-op; a fresh
+                # submission moves QUEUED→RUNNING here, never inside submit.
+                self._durable.begin_run(state.task_ref)
+            # Stable session id per run so replay-based recovery (restarts,
+            # retries) derives identical action keys for the same logical
+            # execution instead of fresh random identities.
+            session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"runner-run:{run_id}")
             runtime = PregelRuntime(self._graph, _FanOutWorker(self, state), self._checkpoint_store)
             try:
-                async for event in runtime.execute(uuid.uuid4(), initial_input={"input": run_input}):
+                async for event in runtime.execute(session_id, initial_input={"input": run_input}):
                     self._append_event(state, event)
                 final_status = "cancelled" if state.cancel_requested else "succeeded"
             except _CooperativeCancelError:
@@ -372,6 +560,29 @@ class ExecutionEngine:
             state.result_ref = None
             state.error = "local evidence write failed; outcome requires inspection"
         finally:
+            if self._durable is not None and state.task_ref is not None:
+                hook_failed = getattr(state.action_hook, "has_failed_outcomes", False)
+                try:
+                    record = self._durable.finish_run(
+                        state.task_ref,
+                        state.status,
+                        needs_reconciliation=state.needs_reconciliation or bool(hook_failed),
+                    )
+                    state.status = record.lifecycle_state.value
+                except Exception:
+                    logger.exception("Could not persist final task state for %s", run_id)
+                    state.status = "unknown"
+                if state.cancel_command_id is not None:
+                    # Cancel receipts converge only on actual effect: applied
+                    # when the cooperative boundary took hold, rejected when
+                    # the run had already finished another way.
+                    try:
+                        if state.status == "cancelled":
+                            self._durable.cancel_applied(state.cancel_command_id)
+                        else:
+                            self._durable.cancel_rejected(state.cancel_command_id)
+                    except Exception:
+                        logger.exception("Could not converge cancel command %s", state.cancel_command_id)
             self._lock.release()
 
     def record_tool_result(self, state: RunState, tool_name: str, outcome: dict) -> None:

@@ -1,0 +1,19 @@
+[project]
+name = "hecate-durable"
+version = "0.1.0"
+description = "Durable execution core: contracts cluster, seams, and SQL reference storage (step6 worktree A)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy>=2.0.36",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hecate_durable"]

@@ -47,6 +47,7 @@ dependencies = [
     "litellm>=1.50.0",
     "redis>=5.0.0",
     "hecate-runtime",
+    "hecate-durable",
     "hecate-ops",
     "hecate-llm",
     "hecate-sandbox",
@@ -79,6 +80,7 @@ exclude = ["packages/channels"]
 [tool.uv.sources]
 hecate = { workspace = true }
 hecate-runtime = { workspace = true }
+hecate-durable = { workspace = true }
 hecate-ops = { workspace = true }
 hecate-llm = { workspace = true }
 hecate-sandbox = { workspace = true }
@@ -188,6 +190,7 @@ known-third-party = ["alembic", "pytest", "sqlalchemy"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S603", "S607", "S105", "S106", "S310"]
+"packages/hecate-durable/tests/**" = ["S101", "S105", "S106", "S310"]
 "packages/hecate-runner/tests/**" = ["S101", "S603", "S607", "S105", "S107", "S310"]
 "packages/hecate-runner/smoke/**" = ["S101"]
 "scripts/**" = ["S101"]
@@ -219,7 +222,7 @@ update_changelog_on_bump = true
 
 [tool.mypy]
 python_version = "3.12"
-mypy_path = "src:packages/hecate-enterprise/src:packages/hecate-memory/src:packages/hecate-ops/src:packages/hecate-llm/src:packages/hecate-sandbox/src:packages/channels/hecate-channel-slack/src:packages/channels/hecate-channel-feishu/src"
+mypy_path = "src:packages/hecate-durable/src:packages/hecate-enterprise/src:packages/hecate-memory/src:packages/hecate-ops/src:packages/hecate-llm/src:packages/hecate-sandbox/src:packages/channels/hecate-channel-slack/src:packages/channels/hecate-channel-feishu/src"
 explicit_package_bases = true
 strict = true
 warn_return_any = true

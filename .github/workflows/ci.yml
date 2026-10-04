@@ -121,6 +121,7 @@ jobs:
           npm test --prefix pilots/execution-backend-ts
           uv pip install pytest-timeout
           uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
+          uv run pytest packages/hecate-durable/tests/ -q --timeout=120 -p no:cacheprovider
           uv run pytest packages/hecate-runner/tests/ -q --timeout=120 -p no:cacheprovider
 
   migrations:
@@ -149,6 +150,12 @@ jobs:
       - uses: astral-sh/setup-uv@v3
       - name: Install dependencies
         run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
+      - name: Durable-core fault suite against real PostgreSQL
+        env:
+          DURABLE_TEST_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+        run: |
+          uv pip install pytest-timeout "psycopg[binary]>=3.2"
+          uv run pytest packages/hecate-durable/tests/ -q --timeout=120 -p no:cacheprovider
       - name: Fresh-database migration drift gate
         env:
           DRIFT_ADMIN_URL: postgresql://hecate:hecate@localhost:5432/postgres
@@ -171,12 +178,14 @@ jobs:
         run: python scripts/check_execution_stack_matrix.py
       - name: Build hecate-runtime wheel (non-editable artifact)
         run: uv build --package hecate-runtime
+      - name: Build hecate-durable wheel (non-editable artifact)
+        run: uv build --package hecate-durable
       - name: Build hecate-runner wheel (non-editable artifact)
         run: uv build --package hecate-runner
       - name: Install wheels into a clean venv (no repo source path)
         run: |
           python -m venv "$RUNNER_TEMP/clean_venv"
-          "$RUNNER_TEMP/clean_venv/bin/python" -m pip install dist/hecate_runtime-*.whl dist/hecate_runner-*.whl
+          "$RUNNER_TEMP/clean_venv/bin/python" -m pip install dist/hecate_runtime-*.whl dist/hecate_durable-*.whl dist/hecate_runner-*.whl
       - name: Assert no full-hecate dependency leaked in
         run: |
           installed=$("$RUNNER_TEMP/clean_venv/bin/python" -m pip list --format freeze | grep -ixE 'hecate==.*' || true)
@@ -184,6 +193,15 @@ jobs:
             echo "::error::clean venv contains the full hecate application: $installed"
             exit 1
           fi
+      - name: Assert the durable core is importable standalone
+        working-directory: /tmp
+        run: |
+          "$RUNNER_TEMP/clean_venv/bin/python" - <<'PY'
+          from hecate_durable.storage import SqlDurableStore
+          store = SqlDurableStore("sqlite://")
+          store.create_schema()
+          print("hecate-durable standalone OK")
+          PY
       - name: Run kernel smoke (from outside the repo)
         working-directory: /tmp
         run: |

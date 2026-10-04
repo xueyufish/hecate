@@ -1,37 +1,42 @@
-"""Business-API tool adapter: the ``query_inventory`` read tool.
+"""Business-API tool adapters: ``query_inventory`` read and
+``submit_inventory_update`` write (durable profile).
 
-Dispatches an allowlisted read tool to the business App's HTTP API using
-the server-verified principal and domain scope — the request body's
-self-reported claims never reach this layer. The business API owns its
-rules (domain isolation, roles, approval); the runner only classifies
-the response into contract error semantics
+Dispatches allowlisted tools to the business App's HTTP API using the
+server-verified principal and domain scope — the request body's self-reported
+claims never reach this layer. The business API owns its rules (domain
+isolation, roles, one-shot parameter-bound approvals); the runner only
+classifies the response into contract error semantics
 (``unsupported``/``authorization``/``business``/``transient``/``unknown``).
+The write tool is admitted only by the durable profile, where every dispatch
+flows through the persistent action ledger first.
 """
 
 from __future__ import annotations
 
 
 class BusinessApiToolDispatcher:
-    """Calls the business API for allowlisted read tools over httpx."""
+    """Calls the business API for allowlisted tools over httpx."""
 
     def __init__(self, base_url: str, timeout: float = 10.0) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
 
     async def __call__(self, tool_name: str, arguments: dict, principal: str, domains: list[str]) -> dict:
-        if tool_name != "query_inventory":
-            return {"status": "unsupported", "detail": f"tool {tool_name!r} has no business-API mapping"}
+        if tool_name == "query_inventory":
+            payload_args = {key: arguments[key] for key in ("domain", "sku") if key in arguments}
+            return await self._post("/inventory/query", payload_args, principal, domains)
+        if tool_name == "submit_inventory_update":
+            payload_args = {key: arguments[key] for key in ("domain", "sku", "quantity") if key in arguments}
+            return await self._post("/inventory/write", payload_args, principal, domains)
+        return {"status": "unsupported", "detail": f"tool {tool_name!r} has no business-API mapping"}
 
+    async def _post(self, path: str, arguments: dict, principal: str, domains: list[str]) -> dict:
         import httpx
 
-        payload = {
-            "principal": principal,
-            "domains": domains,
-            "arguments": {key: arguments[key] for key in ("domain", "sku") if key in arguments},
-        }
+        payload = {"principal": principal, "domains": domains, "arguments": arguments}
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(f"{self._base_url}/inventory/query", json=payload)
+                response = await client.post(f"{self._base_url}{path}", json=payload)
         except httpx.TimeoutException:
             return {"status": "unknown", "detail": "business API timeout; outcome not established"}
         except httpx.HTTPError as exc:

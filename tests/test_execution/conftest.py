@@ -262,17 +262,36 @@ from hecate.execution.stub_durable import (  # noqa: E402
 DurableSuite = tuple[DurableTaskStore, ControlCommandRecorder, ActionLedger]
 DurableImplementationFactory = Callable[[], DurableSuite]
 
+
 # Registration point for durable-seam implementations. The contract suite in
 # test_durable_contract.py runs against every entry unchanged; production
 # implementations register here when their changes land:
-#   - durable-execution-core: the PostgreSQL store/worker core (worktree A)
+#   - durable-execution-core: the SQL store core (worktree A) — registered
+#     below over a per-test SQLite file (the portable dialect; the same
+#     implementation runs its fault-injection suite against PostgreSQL via
+#     DURABLE_TEST_POSTGRES_URL in packages/hecate-durable/tests/)
 #   - platform-task-control-api: the platform adapter over this seam (worktree B)
+def _sql_sqlite_suite() -> DurableSuite:
+    import os
+    import tempfile
+
+    from hecate_durable.storage import SqlDurableStore
+
+    handle, path = tempfile.mkstemp(suffix=".durable-suite.db")
+    os.close(handle)
+    os.unlink(path)
+    store = SqlDurableStore(f"sqlite:///{path}")
+    store.create_schema()
+    return (store, store, store)
+
+
 DURABLE_IMPLEMENTATIONS: dict[str, DurableImplementationFactory] = {
     "inmemory-stub": lambda: (
         InMemoryDurableTaskStore(),
         InMemoryControlCommandRecorder(),
         InMemoryActionLedger(),
     ),
+    "sql-sqlite": _sql_sqlite_suite,
 }
 
 __all__ = [

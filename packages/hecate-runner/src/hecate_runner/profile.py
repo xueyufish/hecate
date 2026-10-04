@@ -32,14 +32,56 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
 PREVIEW_ROLE = "read_only"
+# Without the durable profile only read tools may execute; the durable
+# profile additionally admits manifest-declared ``write`` tools (the
+# business API is the authorization/approval authority in standalone mode —
+# SC03's "no platform approval service"). Approval-bound tools stay
+# refused until step7 ships runner-side approval binding.
 _PREVIEW_FORBIDDEN_PERMISSIONS = {"write", "approval_required"}
+_DURABLE_ALLOWED_PERMISSIONS = {"read", "write"}
 BUILTIN_TOOL_SCHEMAS = {
     "query_inventory": {
         "type": "object",
         "required": ["domain", "sku"],
         "properties": {"domain": {"type": "string", "minLength": 1}, "sku": {"type": "string", "minLength": 1}},
-    }
+    },
+    "submit_inventory_update": {
+        "type": "object",
+        "required": ["domain", "sku", "quantity"],
+        "properties": {
+            "domain": {"type": "string", "minLength": 1},
+            "sku": {"type": "string", "minLength": 1},
+            "quantity": {"type": "integer", "minimum": 1},
+        },
+    },
 }
+
+
+@dataclass(frozen=True)
+class DurableConfig:
+    """Durable profile settings (persistent task/action ledger storage)."""
+
+    database_url: str
+    workspace: str
+
+
+def _load_durable(data: dict) -> DurableConfig | None:
+    """Parse and validate the optional ``durable`` block of ``runner.json``."""
+
+    raw = data.get("durable")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ProfileError("invalid runner config: durable must be an object")
+    url = raw.get("database_url")
+    if not isinstance(url, str) or not url:
+        raise ProfileError("invalid runner config: durable.database_url must be a non-empty string")
+    if not (url.startswith("sqlite:///") or url.startswith("postgresql+psycopg://")):
+        raise ProfileError("durable.database_url must be sqlite:/// (development) or postgresql+psycopg:// (reference)")
+    workspace = raw.get("workspace", "standalone")
+    if not isinstance(workspace, str) or not workspace:
+        raise ProfileError("durable.workspace must be a non-empty string")
+    return DurableConfig(database_url=url, workspace=workspace)
 
 
 class ProfileError(Exception):
@@ -60,6 +102,7 @@ class RunnerConfig:
     shutdown_token_ref: str  # env var name or "file:<path>"
     max_request_bytes: int
     max_concurrency: int
+    durable: DurableConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -198,6 +241,7 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
     evidence_dir_str = evidence_dir if isinstance(evidence_dir, str) else ""
 
     return RunnerConfig(
+        durable=_load_durable(data),
         host=host if isinstance(host, str) else "127.0.0.1",
         port=port,
         evidence_dir=profile_dir / evidence_dir_str,
@@ -277,12 +321,16 @@ class Profile:
     tool_schemas: dict[str, dict]
 
     def capabilities_summary(self) -> dict:
-        return {
+        summary = {
             "backend_type": self.manifest.backend_type,
             "backend_compat_version": self.manifest.backend_compat_version,
             "model_source": self.config.model_backend,
             "read_tools": sorted(self.config.tool_allowlist),
         }
+        if self.config.durable is not None:
+            summary["durable"] = True
+            summary["durable_workspace"] = self.config.durable.workspace
+        return summary
 
 
 def load_profile(profile_dir: Path) -> Profile:
@@ -308,21 +356,31 @@ def load_profile(profile_dir: Path) -> Profile:
     config = _load_config(profile_dir)
     identities = _load_identities(profile_dir)
 
+    allowed_permissions = _DURABLE_ALLOWED_PERMISSIONS if config.durable is not None else {"read"}
     for tool in manifest.tools:
-        if tool.permission in _PREVIEW_FORBIDDEN_PERMISSIONS:
+        if tool.permission == "approval_required":
             raise ProfileError(
-                f"preview profile forbids tool {tool.name!r} with permission {tool.permission!r}; "
-                "only 'read' tools are allowed (write/approval land in a later step)"
+                f"profile forbids tool {tool.name!r} with permission 'approval_required'; "
+                "approval binding lands in step7"
             )
+        if tool.permission not in allowed_permissions:
+            qualifier = (
+                "only 'read' tools are allowed"
+                if config.durable is None
+                else ("only 'read' and durable-profile 'write' tools are allowed")
+            )
+            raise ProfileError(f"profile forbids tool {tool.name!r} with permission {tool.permission!r}; {qualifier}")
 
-    manifest_read_names = {tool.name for tool in manifest.tools if tool.permission == "read"}
-    # The preview host provides a fixed builtin read tool; a manifest that
-    # declares the same name must mark it read. Anything else in the
-    # allowlist must be an explicitly declared read tool.
-    builtin_read = {"query_inventory"}
-    unknown = [name for name in config.tool_allowlist if name not in builtin_read and name not in manifest_read_names]
+    manifest_admitted = {tool.name for tool in manifest.tools if tool.permission in allowed_permissions}
+    # The preview host provides fixed builtin tools; a manifest that declares
+    # the same name must carry an admitted permission. Anything else in the
+    # allowlist must be an explicitly declared tool.
+    builtin_admitted = set(BUILTIN_TOOL_SCHEMAS)
+    unknown = [name for name in config.tool_allowlist if name not in builtin_admitted and name not in manifest_admitted]
     if unknown:
-        raise ProfileError(f"tool_allowlist entries not declared as read tools in the manifest: {unknown}")
+        raise ProfileError(
+            f"tool_allowlist entries not declared with an admitted permission in the manifest: {unknown}"
+        )
     unmapped = set(config.tool_allowlist) - set(BUILTIN_TOOL_SCHEMAS)
     if unmapped:
         raise ProfileError(f"preview has no tool adapter for: {sorted(unmapped)}")

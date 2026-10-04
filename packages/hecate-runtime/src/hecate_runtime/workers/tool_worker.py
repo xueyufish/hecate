@@ -15,14 +15,9 @@ per call in the same order as the LLM emitted them.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import time
-import uuid
-from contextlib import suppress
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
 
 from hecate_runtime.citation_provenance import (
@@ -54,7 +49,6 @@ from hecate_runtime.tool_side_effects import (
     RECEIPT_UNKNOWN,
     SideEffectClass,
     classify,
-    should_auto_retry,
 )
 from hecate_runtime.types import WorkerResult
 from hecate_runtime.worker import Worker
@@ -85,98 +79,30 @@ def _is_indeterminate_error(exc: Exception) -> bool:
     )
 
 
-class ToolExecutionState(StrEnum):
-    """Recovery state of a dispatched tool execution (plan G2).
+# Recovery vocabulary and the shared decision table live in action_ledger
+# (re-exported here for compatibility with existing importers).
+from hecate_runtime.action_ledger import (  # noqa: E402
+    ActionClaimVerdict,
+    ActionLedgerHook,
+    ToolExecutionResolution,
+    ToolExecutionState,
+    recovery_decision,
+    resolve_tool_execution_state,
+    stable_execution_id,
+    tool_arguments_digest,
+)
 
-    ``claimed`` is the crash window — TOOL_CALL persisted, outcome missing —
-    and is deliberately distinct from ``never_started``; ``store_unavailable``
-    is a failed lookup, which must never degrade to "no record".
-    """
-
-    NEVER_STARTED = "never_started"
-    CLAIMED = "claimed"
-    OUTCOME_UNKNOWN = "outcome_unknown"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    STORE_UNAVAILABLE = "store_unavailable"
-
-
-@dataclass(frozen=True)
-class ToolExecutionResolution:
-    """Outcome of a recovery lookup for one ``execution_id``."""
-
-    state: ToolExecutionState
-    arguments_digest: str | None = None
-    result_digest: str | None = None
-    tool_name: str | None = None
-
-
-def tool_arguments_digest(arguments: Any) -> str:
-    """Stable digest of tool arguments for action-key conflict detection.
-
-    Canonical JSON (sorted keys, compact separators) so equivalent payloads
-    hash identically regardless of key order. Invalid JSON values raise
-    rather than colliding with an empty argument object.
-    """
-    canonical = json.dumps(arguments, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-async def resolve_tool_execution_state(event_store: Any, session_id: Any, execution_id: str) -> ToolExecutionResolution:
-    """Resolve the recovery state of a tool execution from the event log.
-
-    Consumes both ``TOOL_CALL`` (the claim) and ``TOOL_RESULT`` (the
-    receipt) so recovery decisions rest on recorded state instead of the
-    absence of records. Each new claim supersedes the preceding attempt's
-    receipt. Legacy claim arguments can still establish execution identity.
-    """
-    if event_store is None:
-        return ToolExecutionResolution(state=ToolExecutionState.NEVER_STARTED)
-    try:
-        events = await event_store.get_events(session_id)
-    except Exception:
-        logger.warning("Tool recovery lookup failed; state is store_unavailable", exc_info=True)
-        return ToolExecutionResolution(state=ToolExecutionState.STORE_UNAVAILABLE)
-    claim: dict[str, Any] | None = None
-    receipt: dict[str, Any] | None = None
-    for event in events:
-        payload = event.payload
-        if payload.get("execution_id") != execution_id:
-            continue
-        if event.event_type is EventType.TOOL_CALL:
-            claim = payload
-            receipt = None
-        elif event.event_type is EventType.TOOL_RESULT:
-            receipt = payload
-    identity = receipt or claim or {}
-    arguments_digest = identity.get("arguments_digest") or (claim or {}).get("arguments_digest")
-    if arguments_digest is None and claim is not None and isinstance(claim.get("arguments"), dict):
-        with suppress(TypeError, ValueError):
-            arguments_digest = tool_arguments_digest(claim["arguments"])
-    recorded_name = identity.get("tool_name") or (claim or {}).get("tool_name")
-    if receipt is not None:
-        status = receipt.get("status")
-        if status == RECEIPT_SUCCEEDED:
-            state = ToolExecutionState.SUCCEEDED
-        elif status == RECEIPT_UNKNOWN:
-            state = ToolExecutionState.OUTCOME_UNKNOWN
-        elif status == RECEIPT_FAILED:
-            state = ToolExecutionState.FAILED
-        else:
-            state = ToolExecutionState.OUTCOME_UNKNOWN
-        return ToolExecutionResolution(
-            state=state,
-            arguments_digest=arguments_digest,
-            result_digest=receipt.get("result_digest"),
-            tool_name=recorded_name,
-        )
-    if claim is not None:
-        return ToolExecutionResolution(
-            state=ToolExecutionState.CLAIMED,
-            arguments_digest=arguments_digest,
-            tool_name=recorded_name,
-        )
-    return ToolExecutionResolution(state=ToolExecutionState.NEVER_STARTED)
+__all__ = [
+    "ActionClaimVerdict",
+    "ActionLedgerHook",
+    "ToolExecutionResolution",
+    "ToolExecutionState",
+    "get_tool_receipt",
+    "recovery_decision",
+    "resolve_tool_execution_state",
+    "stable_execution_id",
+    "tool_arguments_digest",
+]
 
 
 async def get_tool_receipt(event_store: Any, session_id: Any, execution_id: str) -> dict[str, Any] | None:
@@ -205,6 +131,36 @@ async def get_tool_receipt(event_store: Any, session_id: Any, execution_id: str)
     return receipt
 
 
+# Severity used to merge the two recovery authorities (event log vs ledger):
+# the least-executable verdict wins so a conservative source is never
+# overridden. SUCCEEDED ranks highest for backfill (no re-execution either
+# way); unknown/unavailable outrank claimed; never_started loses to all.
+_SEVERITY = {
+    ToolExecutionState.SUCCEEDED: 5,
+    ToolExecutionState.OUTCOME_UNKNOWN: 4,
+    ToolExecutionState.STORE_UNAVAILABLE: 4,
+    ToolExecutionState.CLAIMED: 3,
+    ToolExecutionState.FAILED: 2,
+    ToolExecutionState.NEVER_STARTED: 0,
+}
+
+
+def _merge_resolutions(
+    event: ToolExecutionResolution | None, ledger: ToolExecutionResolution | None
+) -> ToolExecutionResolution | None:
+    if event is None:
+        return ledger
+    if ledger is None:
+        return event
+    if event.state is ledger.state:
+        if event.result_content is not None:
+            return event
+        if ledger.result_content is not None:
+            return ledger
+        return event if event.result_digest is not None else ledger
+    return event if _SEVERITY[event.state] >= _SEVERITY[ledger.state] else ledger
+
+
 class ToolWorker(Worker):
     """Worker that executes tool calls from the messages channel.
 
@@ -228,6 +184,7 @@ class ToolWorker(Worker):
         tool_rules: list[ToolRule] | None = None,
         middleware_chains: dict | None = None,
         denial_tracker: Any | None = None,
+        action_hook: ActionLedgerHook | None = None,
     ) -> None:
         super().__init__(event_store=event_store)
         self._port = port
@@ -247,6 +204,11 @@ class ToolWorker(Worker):
         # been denied, the same tool_call_id is refused without re-running
         # the policy pipeline.
         self._denial_tracker = denial_tracker
+        # Step6 durable-execution-core: optional persistent action-ledger
+        # mirror. When present, intent/claim/outcome are mirrored to the
+        # ledger and its resolution participates in recovery decisions —
+        # the durable authority that survives process restarts.
+        self._action_hook = action_hook
 
     async def _emit_channel_write_rejected(
         self,
@@ -508,102 +470,149 @@ class ToolWorker(Worker):
 
         Returns a terminal tool-result message when the dispatch must not
         execute (succeeded backfill, review markers, digest conflict), or
-        None when execution may proceed. With ``claim=True`` — the call
-        inside the session event lock — a ``never_started`` resolution is
-        claimed by appending the TOOL_CALL event; with ``claim=False`` this
-        is a read-only pre-filter. Decisions by state:
-
-        - succeeded → backfill the real result from channel history; when
-          the content never reached the channel, return an explicit
-          reconciliation marker (never fabricated content, never re-run)
-        - outcome_unknown → human review
-        - claimed → readonly re-execution; every write stops for review
-        - failed → ``should_auto_retry`` (readonly/idempotent only)
-        - store_unavailable → readonly proceeds; side effects fail closed
+        None when execution may proceed. Two authorities feed one decision
+        table (``recovery_decision``): the runtime event log and, when
+        configured, the persistent action ledger — the latter survives
+        process restarts. With ``claim=True`` — the call inside the session
+        event lock — a ``never_started`` resolution is claimed by appending
+        the TOOL_CALL event; with ``claim=False`` this is a read-only
+        pre-filter.
         """
-        if self._event_store is None or not session_key:
+
+        if (self._event_store is None and self._action_hook is None) or not session_key:
             return None
-        resolution = await resolve_tool_execution_state(self._event_store, session_key, execution_id)
-        if resolution.tool_name is not None and resolution.tool_name != tool_name:
-            return self._withheld_result(
-                tc_id, "[conflict] tool differs from the recorded execution; execution withheld"
+        resolution: ToolExecutionResolution | None = None
+        if self._event_store is not None:
+            resolution = await resolve_tool_execution_state(self._event_store, session_key, execution_id)
+        hook_resolution: ToolExecutionResolution | None = None
+        if self._action_hook is not None:
+            hook_resolution = await self._hook_resolution(session_key, execution_id)
+        merged = _merge_resolutions(resolution, hook_resolution)
+        if merged is not None:
+            decision = recovery_decision(
+                merged,
+                tc_id=tc_id,
+                tool_name=tool_name,
+                arguments_digest=arguments_digest,
+                classification=classification,
+                messages=messages,
+                recorded_content=merged.result_content,
             )
-        if resolution.arguments_digest is not None and resolution.arguments_digest != arguments_digest:
-            logger.warning(
-                "Tool execution %s arguments digest mismatch — conflict, not executed",
-                execution_id,
+            if decision is not None:
+                return decision
+        if claim and execution_context is not None and arguments is not None and self._event_store is not None:
+            await self._append_tool_call(
+                execution_context=execution_context,
+                tool_name=tool_name,
+                arguments=arguments,
+                arguments_digest=arguments_digest,
+                tool_call_id=tc_id,
+                execution_id=execution_id,
+                side_effect_class=classification.value,
             )
-            return self._withheld_result(
-                tc_id,
-                "[conflict] arguments differ from the recorded execution for this call id; execution withheld",
-            )
-        state = resolution.state
-        if state not in (ToolExecutionState.NEVER_STARTED, ToolExecutionState.STORE_UNAVAILABLE) and (
-            resolution.tool_name is None or resolution.arguments_digest is None
-        ):
-            return self._withheld_result(tc_id, "[needs review] recorded execution identity incomplete; retry withheld")
-        if state is ToolExecutionState.NEVER_STARTED:
-            if claim and execution_context is not None and arguments is not None:
-                await self._append_tool_call(
-                    execution_context=execution_context,
-                    tool_name=tool_name,
-                    arguments=arguments,
-                    arguments_digest=arguments_digest,
-                    tool_call_id=tc_id,
-                    execution_id=execution_id,
-                    side_effect_class=classification.value,
-                )
+        return None
+
+    async def _hook_resolution(self, session_key: Any, execution_id: str) -> ToolExecutionResolution:
+        """Resolve from the persistent ledger; store failure is explicit."""
+
+        try:
+            return await self._action_hook.resolve(session_id=str(session_key), execution_id=execution_id)
+        except Exception:
+            logger.warning("Action ledger lookup failed — store_unavailable", exc_info=True)
+            return ToolExecutionResolution(state=ToolExecutionState.STORE_UNAVAILABLE)
+
+    async def _hook_claim(
+        self,
+        *,
+        session_key: Any,
+        execution_id: str,
+        tc_id: str,
+        tool_name: str,
+        arguments: dict,
+        arguments_digest: str,
+        side_effect_class: SideEffectClass,
+        messages: list[dict],
+    ) -> dict[str, Any] | None:
+        """Persist intent + atomically claim via the ledger hook.
+
+        Returns a withheld/blocked result when the claim must not proceed
+        (conflict, lost claim, ledger failure on a side-effecting class);
+        None when this executor may dispatch.
+        """
+
+        hook = self._action_hook
+        if hook is None:  # pragma: no cover - caller guards on hook presence
             return None
-        if state is ToolExecutionState.SUCCEEDED:
-            for msg in reversed(messages):
-                if msg.get("role") == "tool" and msg.get("tool_call_id") == tc_id:
-                    return dict(msg)
-            digest_suffix = f" (result_digest={resolution.result_digest})" if resolution.result_digest else ""
-            logger.warning(
-                "Tool execution %s recorded succeeded but result content is unavailable — reconciliation required",
-                execution_id,
+        try:
+            verdict = await hook.record_claim(
+                session_id=str(session_key),
+                execution_id=execution_id,
+                tool_call_id=tc_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                arguments_digest=arguments_digest,
+                side_effect_class=side_effect_class.value,
             )
-            return self._withheld_result(
-                tc_id,
-                "[reconciliation required] execution recorded succeeded but recorded result "
-                f"content is unavailable{digest_suffix}; not re-executed",
-            )
-        if state is ToolExecutionState.OUTCOME_UNKNOWN:
-            return self._withheld_result(
-                tc_id,
-                "[needs review] previous execution outcome indeterminate; retry withheld",
-            )
-        if state is ToolExecutionState.CLAIMED:
-            if classification is SideEffectClass.READONLY:
+        except Exception:
+            logger.warning("Action ledger claim failed — fail closed", exc_info=True)
+            if side_effect_class is SideEffectClass.READONLY:
                 return None
             return self._withheld_result(
-                tc_id,
-                "[needs review] dispatch recorded but no outcome receipt (interrupted execution); retry withheld",
+                tc_id, "[withheld] action ledger unavailable; side-effecting execution withheld"
             )
-        if state is ToolExecutionState.FAILED:
-            if should_auto_retry(classification, RECEIPT_FAILED):
-                if claim and execution_context is not None and arguments is not None:
-                    await self._append_tool_call(
-                        execution_context=execution_context,
-                        tool_name=tool_name,
-                        arguments=arguments,
-                        arguments_digest=arguments_digest,
-                        tool_call_id=tc_id,
-                        execution_id=execution_id,
-                        side_effect_class=classification.value,
-                    )
-                return None
-            return self._withheld_result(
-                tc_id,
-                "[needs review] previous execution failed; retry withheld for this side-effect class",
-            )
-        # STORE_UNAVAILABLE: fail closed for anything side-effecting.
-        if classification is SideEffectClass.READONLY:
+        if verdict.conflict is not None:
+            return self._withheld_result(tc_id, verdict.conflict)
+        if verdict.claimed:
             return None
-        return self._withheld_result(
-            tc_id,
-            "[withheld] tool receipt store unavailable; side-effecting execution withheld",
+        resolution = verdict.resolution
+        if resolution is None:  # pragma: no cover - defensive
+            return self._withheld_result(tc_id, "[needs review] ledger verdict missing; retry withheld")
+        return recovery_decision(
+            resolution,
+            tc_id=tc_id,
+            tool_name=tool_name,
+            arguments_digest=arguments_digest,
+            classification=side_effect_class,
+            messages=messages,
+            recorded_content=resolution.result_content,
         )
+
+    async def _mirror_outcome(
+        self,
+        *,
+        session_key: Any,
+        execution_id: str,
+        tc_id: str,
+        tool_name: str,
+        arguments_digest: str,
+        status: str,
+        result: Any = None,
+        error: str | None = None,
+    ) -> None:
+        """Mirror the real outcome to the ledger; never undo the effect.
+
+        A failed ledger write leaves the action claimed — recovery then
+        fails closed (pending reconciliation) instead of silently re-running
+        the side effect. The result still flows through the channel.
+        """
+
+        try:
+            await self._action_hook.record_outcome(
+                session_id=str(session_key),
+                execution_id=execution_id,
+                tool_call_id=tc_id,
+                tool_name=tool_name,
+                arguments_digest=arguments_digest,
+                status=status,
+                result=result,
+                error=error,
+            )
+        except Exception:
+            logger.warning(
+                "Action ledger outcome write failed for %s — stays claimed, pending reconciliation",
+                execution_id,
+                exc_info=True,
+            )
 
     async def _execute_single_tool(
         self,
@@ -647,10 +656,7 @@ class ToolWorker(Worker):
         # (then the id degenerates to random and receipt matching is simply
         # unavailable for that call).
         session_key = (execution_context or {}).get("session_id")
-        if session_key and tc_id:
-            execution_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"tool-exec:{session_key}:{tc_id}"))
-        else:
-            execution_id = str(uuid.uuid4())
+        execution_id = stable_execution_id(session_key, tc_id)
         side_effect_class = classify(name)
         messages = context.get("messages", []) if context else []
 
@@ -801,6 +807,26 @@ class ToolWorker(Worker):
             name=f"tool:{name}",
             attributes={"tool_name": name, "gen_ai.tool.name": name, "arguments": str(arguments)[:500]},
         )
+        # Authoritative ledger claim (step6 durable-execution-core): persist
+        # intent and claim atomically in the durable store FIRST — it is the
+        # authority that survives restarts. A lost claim or a conflict
+        # withholds here; readonly losers may proceed (replayable).
+        if self._action_hook is not None and session_key:
+            hook_decision = await self._hook_claim(
+                session_key=session_key,
+                execution_id=execution_id,
+                tc_id=tc_id,
+                tool_name=name,
+                arguments=arguments,
+                arguments_digest=arguments_digest,
+                side_effect_class=side_effect_class,
+                messages=messages,
+            )
+            if hook_decision is not None:
+                if span_ctx:
+                    await self._port.end_span(span_ctx.span_id, output_data={"withheld": "ledger"})
+                return hook_decision
+
         # Authoritative recovery + claim, inside the session event lock:
         # re-resolve against the log and claim never-started executions so
         # concurrent dispatches (duplicate workers) admit at most one first
@@ -898,6 +924,16 @@ class ToolWorker(Worker):
                         },
                     )
                 )
+            if self._action_hook is not None and session_key:
+                await self._mirror_outcome(
+                    session_key=session_key,
+                    execution_id=execution_id,
+                    tc_id=tc_id,
+                    tool_name=name,
+                    arguments_digest=arguments_digest,
+                    status=status,
+                    error=str(e)[:500],
+                )
             self._capture_evidence(
                 execution_context=execution_context,
                 node_id=node_id,
@@ -944,6 +980,16 @@ class ToolWorker(Worker):
                         "log_schema_version": CURRENT_LOG_SCHEMA_VERSION,
                     },
                 )
+            )
+        if self._action_hook is not None and session_key:
+            await self._mirror_outcome(
+                session_key=session_key,
+                execution_id=execution_id,
+                tc_id=tc_id,
+                tool_name=name,
+                arguments_digest=arguments_digest,
+                status=RECEIPT_SUCCEEDED,
+                result=result,
             )
 
         if span_ctx:
