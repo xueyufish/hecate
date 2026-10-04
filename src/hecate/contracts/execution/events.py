@@ -22,6 +22,52 @@ class EventKind(StrEnum):
     GAP = "gap"
 
 
+class ActorKind(StrEnum):
+    """Who performed the action a governance event records."""
+
+    HUMAN = "human"
+    AGENT_PRINCIPAL = "agent_principal"
+    SERVICE = "service"
+    PLATFORM = "platform"
+
+
+class EventSource(StrEnum):
+    """Authoritative writer of an event, grading observed vs reported evidence."""
+
+    PLATFORM = "platform"
+    STANDALONE_HOST = "standalone_host"
+    EXECUTION_BACKEND = "execution_backend"
+
+
+@dataclass(frozen=True)
+class ActorRef:
+    """Acting principal reference (governance-event profile requires it)."""
+
+    kind: ActorKind
+    id: str
+    on_behalf_of: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.kind, ActorKind):
+            raise ValueError(f"actor kind must be an ActorKind, got {self.kind!r}")
+        if not self.id:
+            raise ValueError("actor id must be a non-empty string")
+
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"kind": self.kind.value, "id": self.id}
+        if self.on_behalf_of is not None:
+            out["on_behalf_of"] = self.on_behalf_of
+        return out
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ActorRef:
+        return cls(
+            kind=ActorKind(data["kind"]),
+            id=data["id"],
+            on_behalf_of=data.get("on_behalf_of"),
+        )
+
+
 @dataclass(frozen=True)
 class GapRange:
     """Explicitly missing sequence range (never silently skipped)."""
@@ -54,6 +100,8 @@ class EventEnvelope:
     evidence_ref: BackendRef | None = None
     correlation_id: str | None = None
     causation_id: str | None = None
+    actor: ActorRef | None = None
+    source: EventSource | None = None
     gap: GapRange | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -96,6 +144,10 @@ class EventEnvelope:
             out["correlation_id"] = self.correlation_id
         if self.causation_id is not None:
             out["causation_id"] = self.causation_id
+        if self.actor is not None:
+            out["actor"] = self.actor.to_dict()
+        if self.source is not None:
+            out["source"] = self.source.value
         if self.gap is not None:
             out["gap"] = self.gap.to_dict()
         out.update(self.extra)
@@ -117,6 +169,8 @@ class EventEnvelope:
             "evidence_ref",
             "correlation_id",
             "causation_id",
+            "actor",
+            "source",
             "gap",
         }
         extra = {key: value for key, value in data.items() if key not in known}
@@ -134,6 +188,23 @@ class EventEnvelope:
             evidence_ref=(BackendRef.from_dict(data["evidence_ref"]) if "evidence_ref" in data else None),
             correlation_id=data.get("correlation_id"),
             causation_id=data.get("causation_id"),
+            actor=ActorRef.from_dict(data["actor"]) if "actor" in data else None,
+            source=EventSource(data["source"]) if "source" in data else None,
             gap=GapRange.from_dict(data["gap"]) if "gap" in data else None,
             extra=extra,
+        )
+
+
+def validate_governance_event(envelope: EventEnvelope) -> None:
+    """Governance-event profile: ``actor`` and ``source`` are both required.
+
+    Governance events must stay attributable to an acting principal and
+    gradable by their authoritative writer; an envelope missing either is
+    rejected rather than defaulted.
+    """
+
+    missing = [name for name, value in (("actor", envelope.actor), ("source", envelope.source)) if value is None]
+    if missing:
+        raise ValueError(
+            f"governance event {envelope.event_id!r} requires {' and '.join(missing)}; refusing to accept the event"
         )

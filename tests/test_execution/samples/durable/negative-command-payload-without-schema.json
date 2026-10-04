@@ -1,0 +1,9 @@
+{
+  "command_id": "cmd-bad01",
+  "kind": "provide_input",
+  "issuer": "user-116",
+  "task_ref": { "kind": "task", "issuer_domain": "platform.local", "id": "task-042" },
+  "issued_at": "2026-10-04T09:00:00Z",
+  "state": "requested",
+  "payload": { "answer": "missing schema ref" }
+}

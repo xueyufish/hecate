@@ -1,0 +1,13 @@
+{
+  "command_id": "cmd-7f3a",
+  "kind": "provide_input",
+  "issuer": "user-116",
+  "task_ref": { "kind": "task", "issuer_domain": "platform.local", "id": "task-042" },
+  "run_ref": { "kind": "run", "issuer_domain": "platform.local", "id": "run-9c1" },
+  "issued_at": "2026-10-04T09:00:00Z",
+  "expires_at": "2026-10-04T09:05:00Z",
+  "expected_revision": 3,
+  "state": "acknowledged",
+  "payload": { "answer": "approve batch #12" },
+  "payload_schema_ref": "https://hecate.dev/samples/provide-input/v1"
+}

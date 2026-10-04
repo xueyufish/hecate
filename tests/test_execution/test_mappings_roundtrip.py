@@ -72,6 +72,26 @@ def _mapping_for(path: Path) -> Callable[[dict[str, Any]], Any] | None:
         return SecurityClaims.from_dict
     if theme == "tools":
         return ToolDeclaration.from_dict
+    if theme == "durable":
+        from hecate.contracts.execution.durable import (
+            ActionIntent,
+            ActionRecovery,
+            ClaimReceipt,
+            ControlCommandRecord,
+            TaskStateRecord,
+        )
+
+        if "task-state" in name:
+            return TaskStateRecord.from_dict
+        if "command-record" in name:
+            return ControlCommandRecord.from_dict
+        if "action-intent" in name:
+            return ActionIntent.from_dict
+        if "action-recovery" in name:
+            return ActionRecovery.from_dict
+        if "claim-receipt" in name:
+            return ClaimReceipt.from_dict
+        return EventEnvelope.from_dict  # governance-event
     return None
 
 
@@ -146,6 +166,18 @@ def _required_field_for(path: Path) -> str:
         return "aud"
     if theme == "tools":
         return "side_effect_class"
+    if theme == "durable":
+        if "task-state" in name:
+            return "lifecycle_state"
+        if "command-record" in name:
+            return "command_id"
+        if "action-intent" in name:
+            return "arguments_digest"
+        if "action-recovery" in name:
+            return "state"
+        if "claim-receipt" in name:
+            return "claimed"
+        return "event_id"  # governance-event
     if "create-environment" in name:
         return "idempotency_id"
     if "sandbox-info" in name:

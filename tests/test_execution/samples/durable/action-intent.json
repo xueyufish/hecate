@@ -1,0 +1,6 @@
+{
+  "action_key": "tenant-a/run-9c1/ticket-write/7f21",
+  "action_name": "ticket_write",
+  "arguments_digest": "sha256:9b74c9897bac770ffc0ae1027cbde629",
+  "side_effect_class": "non_idempotent_write"
+}

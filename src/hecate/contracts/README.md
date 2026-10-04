@@ -9,6 +9,39 @@ binding among many, never the source of truth. Standard samples live in
 Three-way consistency (samples pass schema validation; the mapping parses every
 sample; round-trips preserve fields) is enforced by `tests/test_execution/`.
 
+## Durable execution contracts
+
+`durable-task-state.schema.json`, `durable-command-record.schema.json`, and
+`durable-action-ledger.schema.json` fix the shared vocabulary for step6's
+parallel deliveries — the persistence core (`durable-execution-core`) and the
+platform task API (`platform-task-control-api`) both consume these and must not
+define parallel enums or interfaces:
+
+- Task lifecycle states are a closed enum, a different dimension from the
+  backend-observed `run-status` states; terminal states absorb and
+  `reconciliation_required` converges only through an explicit reconciliation
+  action. Field ownership stays a consumer concern.
+- Control commands carry independent receipt records (`requested /
+  acknowledged / applied / rejected / expired`); a transport success is never
+  `applied`, and `expired` is terminal. `provide_input` payloads follow the
+  envelope pattern (`payload` + `payload_schema_ref`); the concrete payload
+  schema is defined by consumers, not pre-built here.
+- The action ledger mirrors the runtime `tool-recovery` four-state semantics
+  (`never_started / claimed / outcome_unknown / store_unavailable`) with
+  terminal outcomes split into `ActionOutcome`; drift tests pin the mapping,
+  the Python enums, and the schema enums together.
+- The governance-event profile reuses `event-envelope.schema.json` with
+  optional `actor`/`source` fields — both required under the profile
+  (`validate_governance_event`), so platform-observed and remotely reported
+  events stay attributable and gradeable.
+
+Minimal seams (`DurableTaskStore`, `ControlCommandRecorder`, `ActionLedger`)
+live in `hecate.execution.durable` with an InMemory second implementation in
+`hecate.execution.stub_durable`. Every production implementation must pass the
+parameterized suite in `tests/test_execution/test_durable_contract.py` before
+wiring — register the factory in `DURABLE_IMPLEMENTATIONS`
+(`tests/test_execution/conftest.py`) to inherit the suite unchanged.
+
 ## HTTP/JSON binding and hosted mapping
 
 - `openapi/execution-backend.http.v0_1.yaml` is the first out-of-process
