@@ -22,6 +22,16 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response as StarletteResponse
 
 from hecate.channel.api.a2a import router as a2a_management_router
+from hecate.channel.api.tasks import (
+    commands_router as task_commands_router,
+)
+from hecate.channel.api.tasks import (
+    reconciliation_router as task_reconciliation_router,
+)
+from hecate.channel.api.tasks import router as task_control_router
+from hecate.channel.api.tasks import (
+    runs_router as task_runs_router,
+)
 from hecate.channel.api.v1.agents import router as agent_chat_router
 from hecate.channel.api.v1.chat import router as chat_router
 from hecate.channel.api.v1.models import router as models_router
@@ -413,6 +423,10 @@ except ImportError:
     logger.debug("hecate-enterprise not installed; skipping /budgets router")
 
 app.include_router(audit_router, prefix="/api", tags=["audit"])
+app.include_router(task_control_router, prefix="/api", tags=["tasks"])
+app.include_router(task_runs_router, prefix="/api", tags=["tasks"])
+app.include_router(task_commands_router, prefix="/api", tags=["tasks"])
+app.include_router(task_reconciliation_router, prefix="/api", tags=["tasks"])
 app.include_router(tool_decisions_router, prefix="/api", tags=["security"])
 app.include_router(security_findings_router, prefix="/api", tags=["security"])
 app.include_router(schedules_router, prefix="/api", tags=["schedules"])

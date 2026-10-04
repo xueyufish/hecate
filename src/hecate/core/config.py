@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     EVENT_STORE_BACKEND: str = "memory"  # "memory" | "postgres"
     EVENT_STORE_PG_TABLE: str = "events"  # PG table name (operator-customizable)
 
+    # Durable-execution seam binding (step6 platform track). "stub" binds the
+    # Phase 0 InMemory doubles (dev/tests); "postgres" binds the platform
+    # adapters over the step6 tables (requires the psycopg driver).
+    HECATE_DURABLE_BACKEND: str = "stub"
+
     # Memory provider backend (hecate.memory_providers entry point, PR2.2).
     # Names: "builtin" (hecate-memory shipped in-process) or any third-party
     # entry registered by an installed package. Unknown / failing factory

@@ -94,12 +94,15 @@ class TaskRunRegistry:
         issuer_domain: str = "hecate",
         acceptance: dict[str, Any] | None = None,
         responsibility: str | None = None,
+        task_id: uuid.UUID | None = None,
     ) -> TaskModel:
         """Create the platform responsibility record for one business goal.
 
         ``initiator_ref`` must round-trip as an ``IdentityChain``: the task
         names who asked for the work, and a malformed chain is a caller bug,
-        not bad data to store.
+        not bad data to store. ``task_id`` presets the row's identifier so
+        the durable-submission arbitration (which registers the Task/Run
+        association before any row exists) and the row land on the same id.
         """
         if not isinstance(goal, str) or not goal.strip():
             raise TaskRunValidationError("task goal must be a non-empty string")
@@ -109,6 +112,7 @@ class TaskRunRegistry:
         except ValueError as exc:
             raise TaskNotFoundError("workspace not found") from exc
         task = TaskModel(
+            id=task_id,
             goal=goal,
             initiator_ref=deepcopy(initiator_ref),
             acceptance=deepcopy(acceptance) if acceptance is not None else {},
@@ -139,6 +143,7 @@ class TaskRunRegistry:
         deployment_id: uuid.UUID,
         identity_chain: IdentityChain,
         backend_run_ref: BackendRef,
+        run_id: uuid.UUID | None = None,
     ) -> RunModel:
         """Open one execution attempt: a new row with the next attempt number.
 
@@ -147,6 +152,8 @@ class TaskRunRegistry:
         reference must be contract-kind ``run``. A retry is this method
         called again on the same task - it lands on a new row by
         construction and never inherits the prior attempt's backend session.
+        ``run_id`` presets the row identifier for pre-registered
+        associations (see :meth:`create_task`).
         """
         task = await self._locked_task(task_id, workspace_id)
         require_kind(backend_run_ref, RefKind.RUN)
@@ -158,6 +165,7 @@ class TaskRunRegistry:
             await self._session.execute(select(func.max(RunModel.attempt_no)).where(RunModel.task_id == task.id))
         ).scalar_one()
         run = RunModel(
+            id=run_id,
             task_id=task.id,
             deployment_id=deployment_id,
             attempt_no=(current_max or 0) + 1,
