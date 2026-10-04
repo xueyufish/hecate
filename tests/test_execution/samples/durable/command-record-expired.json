@@ -1,0 +1,9 @@
+{
+  "command_id": "cmd-31d0",
+  "kind": "cancel",
+  "issuer": "user-116",
+  "task_ref": { "kind": "task", "issuer_domain": "platform.local", "id": "task-042" },
+  "issued_at": "2026-10-04T09:00:00Z",
+  "expires_at": "2026-10-04T09:00:30Z",
+  "state": "expired"
+}

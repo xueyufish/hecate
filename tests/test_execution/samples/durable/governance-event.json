@@ -1,0 +1,17 @@
+{
+  "contract_version": "0.1",
+  "kind": "event",
+  "event_id": "evt-5a2f",
+  "task_ref": { "kind": "task", "issuer_domain": "platform.local", "id": "task-042" },
+  "run_ref": { "kind": "run", "issuer_domain": "platform.local", "id": "run-9c1" },
+  "source_sequence": 12,
+  "occurred_at": "2026-10-04T09:01:00Z",
+  "received_at": "2026-10-04T09:01:00Z",
+  "payload_schema_ref": "https://hecate.dev/contracts/execution/0.1/action-authorized",
+  "payload": { "action_key": "tenant-a/run-9c1/ticket-write/7f21", "decision": "allow" },
+  "evidence_ref": { "kind": "artifact", "issuer_domain": "platform.local", "id": "art-88" },
+  "correlation_id": "corr-1",
+  "causation_id": "cause-9",
+  "actor": { "kind": "agent_principal", "id": "principal-77", "on_behalf_of": "user-116" },
+  "source": "platform"
+}

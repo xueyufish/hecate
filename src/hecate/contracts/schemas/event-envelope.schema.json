@@ -20,6 +20,8 @@
     "evidence_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/artifactRef" },
     "correlation_id": { "type": "string" },
     "causation_id": { "type": "string" },
+    "actor": { "$ref": "#/$defs/actor" },
+    "source": { "$ref": "#/$defs/eventSource" },
     "gap": {
       "type": "object",
       "required": ["from_sequence", "to_sequence"],
@@ -39,5 +41,22 @@
       "if": { "properties": { "kind": { "const": "gap" } } },
       "then": { "required": ["gap"] }
     }
-  ]
+  ],
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string", "enum": ["human", "agent_principal", "service", "platform"] },
+        "id": { "type": "string", "minLength": 1 },
+        "on_behalf_of": { "type": "string", "minLength": 1 }
+      }
+    },
+    "eventSource": {
+      "type": "string",
+      "description": "Authoritative writer of the event; distinguishes platform-directly-observed actions from host- or backend-reported ones.",
+      "enum": ["platform", "standalone_host", "execution_backend"]
+    }
+  }
 }

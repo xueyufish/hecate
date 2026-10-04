@@ -1,0 +1,31 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/durable-task-state.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DurableTaskState",
+  "description": "Task lifecycle state contract. The lifecycle state is a closed enum distinct from the backend-observed RunState dimension; one side MUST NOT overwrite the other. succeeded/failed/cancelled are terminal and MUST NOT roll back; reconciliation_required MUST NOT be silently rewritten into success or failure - it converges only through an explicit reconciliation action. Field ownership (platform projection vs host authority) is declared by consumers; this contract fixes only the state vocabulary. Unknown fields MUST be tolerated.",
+  "type": "object",
+  "required": ["task_ref", "lifecycle_state", "revision", "recorded_at"],
+  "additionalProperties": true,
+  "properties": {
+    "task_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/taskRef" },
+    "lifecycle_state": { "$ref": "#/$defs/taskLifecycleState" },
+    "revision": { "type": "integer", "minimum": 0 },
+    "recorded_at": { "type": "string", "minLength": 1 },
+    "writer_source": { "type": "string", "minLength": 1 }
+  },
+  "$defs": {
+    "taskLifecycleState": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "waiting_input",
+        "waiting_approval",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "reconciliation_required"
+      ]
+    }
+  }
+}
