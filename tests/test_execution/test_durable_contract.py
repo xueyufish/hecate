@@ -405,7 +405,17 @@ def test_auto_replay_policy_table(state: ActionLedgerState, effect_class: ToolSi
 
 def test_seam_signatures_carry_only_contract_types() -> None:
     def allowed(module: str) -> bool:
-        return module == "builtins" or module.startswith("hecate.contracts") or module == "typing"
+        # typing machinery modules differ across Python versions (e.g. an
+        # ``int | None`` hint resolves to ``typing.Union`` on 3.14 but
+        # ``types.UnionType`` on 3.12) and are never leak sources; the check
+        # exists to catch ORM/web/engine/vendor classes in seam signatures.
+        return (
+            module == "builtins"
+            or module == "typing"
+            or module == "types"
+            or module == "collections.abc"
+            or module.startswith("hecate.contracts")
+        )
 
     for abc in (DurableTaskStore, ControlCommandRecorder, ActionLedger):
         for name, method in abc.__dict__.items():
