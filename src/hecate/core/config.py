@@ -91,9 +91,16 @@ class Settings(BaseSettings):
     EVENT_STORE_PG_TABLE: str = "events"  # PG table name (operator-customizable)
 
     # Durable-execution seam binding (step6 platform track). "stub" binds the
-    # Phase 0 InMemory doubles (dev/tests); "postgres" binds the platform
-    # adapters over the step6 tables (requires the psycopg driver).
+    # Phase 0 InMemory doubles (dev/tests); "postgres" binds the durable core
+    # SQL store across all three seams (requires the psycopg driver).
     HECATE_DURABLE_BACKEND: str = "stub"
+
+    # In-process durable dispatch worker (step6 worker change). "on" starts
+    # the worker + outbox relay with the application lifespan when the
+    # backend is "postgres"; "off" disables them (e.g. a dedicated worker
+    # process runs ``python -m hecate_durable.worker`` instead). The stub
+    # binding never starts a loop — dispatch happens inline per submission.
+    HECATE_DURABLE_WORKER: str = "on"
 
     # Memory provider backend (hecate.memory_providers entry point, PR2.2).
     # Names: "builtin" (hecate-memory shipped in-process) or any third-party

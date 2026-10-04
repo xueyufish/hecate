@@ -142,6 +142,19 @@ class PlatformEventService:
         await self.append(stored, workspace_id=workspace_id)
         return stored
 
+    async def find_by_event_id(self, event_id: str) -> EventEnvelope | None:
+        """One stored envelope by its globally-unique event id (relay dedup)."""
+
+        row = (
+            await self._db.execute(
+                select(PlatformEventModel).where(
+                    PlatformEventModel.event_id == event_id,
+                    PlatformEventModel.deleted.is_(False),
+                )
+            )
+        ).scalar_one_or_none()
+        return EventEnvelope.from_dict(dict(row.envelope)) if row is not None else None
+
     async def read_run_events(
         self,
         run_ref: BackendRef,

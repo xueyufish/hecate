@@ -28,6 +28,7 @@ of in main.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -416,6 +417,71 @@ async def start_online_evaluation_worker(app: FastAPI) -> None:
 
 
 @asynccontextmanager
+async def start_durable_worker(app: FastAPI) -> None:
+    """Start the in-process durable dispatch worker + outbox relay.
+
+    Only meaningful on the postgres binding: the stub binding dispatches
+    inline per submission (no durability to reconcile). "off" keeps the
+    loop out of the app process — a dedicated worker process runs
+    ``python -m hecate_durable.worker`` against the same database instead.
+    """
+
+    from hecate.core.config import settings
+
+    if getattr(settings, "HECATE_DURABLE_WORKER", "on") != "on":
+        app.state.durable_worker = None
+        return
+    from hecate.core.composition.durable_platform import POSTGRES_BACKEND, get_durable_suite
+
+    suite = get_durable_suite()
+    if suite.backend != POSTGRES_BACKEND:
+        app.state.durable_worker = None
+        return
+    from hecate_durable.worker import DurableWorker, OutboxRelay
+
+    from hecate.core.database import async_session_factory
+    from hecate.execution.event_relay import PlatformOutboxProjector
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+    store = suite.store
+    dispatcher = PlatformTaskDispatcher(store, async_session_factory)
+    worker = DurableWorker(store, dispatcher, leases=store.leases)
+    relay = OutboxRelay(
+        store.session_factory,
+        PlatformOutboxProjector(store, async_session_factory),
+        relay_key="platform",
+    )
+    from hecate.channel.api.tasks import bind_worker_state
+
+    bind_worker_state(app.state)
+    app.state.durable_worker = worker
+    app.state.durable_outbox_relay = relay
+    app.state.durable_worker_task = asyncio.create_task(worker.run_forever())
+    app.state.durable_relay_task = asyncio.create_task(relay.run_forever())
+    logger.info("durable dispatch worker started (backend=postgres)")
+
+
+async def stop_durable_worker(app: FastAPI) -> None:
+    """Drain and stop the in-process durable worker + relay."""
+
+    worker = getattr(app.state, "durable_worker", None)
+    relay = getattr(app.state, "durable_outbox_relay", None)
+    if worker is None:
+        return
+    worker.request_drain()
+    if relay is not None:
+        relay.stop()
+    for task_attr in ("durable_worker_task", "durable_relay_task"):
+        task = getattr(app.state, task_attr, None)
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+    remaining = await worker.drain()
+    if remaining:
+        logger.warning("durable worker stopped with %d dispatch(es) in flight", remaining)
+
+
 async def compose_application(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: build the composition and tear it down on exit.
 
@@ -445,6 +511,7 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
     start_security_findings()
     await start_siem_export(app)
     await start_online_evaluation_worker(app)
+    await start_durable_worker(app)
     start_recall_indexer()
     from hecate.core.composition.consolidation import start_consolidation
 
@@ -498,6 +565,7 @@ async def compose_application(app: FastAPI) -> AsyncIterator[None]:
             await stop_recall_indexer()
         except ImportError:
             pass
+        await stop_durable_worker(app)
         online_evaluation_worker = getattr(app.state, "online_evaluation_worker", None)
         if online_evaluation_worker is not None:
             try:

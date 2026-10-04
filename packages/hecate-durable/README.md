@@ -11,6 +11,7 @@ step6's local-reliable-execution track (worktree `durable-execution-core`).
 | `hecate_durable.seams` | `DurableTaskStore` / `ControlCommandRecorder` / `ActionLedger` — the language-neutral seams from phase-0 (`durable-execution-contracts`). |
 | `hecate_durable.stub` | The InMemory doubles; test/local-preview only, no restart durability. |
 | `hecate_durable.storage` | The SQL reference storage: `SqlDurableStore` (implements all three seams), `SqlEventLog` (transactional outbox + cursor reads with gap markers), `LeaseManager` (leases + monotonic fencing tokens). |
+| `hecate_durable.worker` | `DurableWorker` — lease-claimed dispatch with startup/periodic reconciliation (queued re-claim, stale-running takeover under a fresh fencing token), bounded retry with backoff, graceful drain; `OutboxRelay` — cursor-bounded projection of the transactional outbox into an injected read-model callback with persistent failure bookkeeping; and the `python -m hecate_durable.worker` standalone process entry. The dispatcher is injected (the platform binds its task-control callback); this module never imports platform or host code. |
 
 The only runtime dependency is SQLAlchemy. PostgreSQL is the reference
 production dialect (`pip install hecate-durable[postgres]`); SQLite (file) is
@@ -56,6 +57,41 @@ store.create_schema()  # host-owned schema; no platform alembic
 The `hecate-runner` durable profile consumes this package; see
 `packages/hecate-runner/README.md`. Platform-side projection and scheduling
 (`platform-task-control-api`) consume the same seams.
+
+## Dispatch worker
+
+```python
+from hecate_durable.worker import DurableWorker, OutboxRelay
+
+async def dispatcher(task_ref, record, lease) -> None:
+    ...  # drive one task to terminal/waiting via store.apply_task_state
+
+worker = DurableWorker(store, dispatcher, leases=store.leases)
+relay = OutboxRelay(store.session_factory, project_event, relay_key="platform")
+```
+
+- **Claiming** — one lease per task (`dispatch:{issuer}:{id}`); concurrent
+  worker instances are safe. The lifecycle revision CAS additionally fences a
+  superseded executor's late terminal write.
+- **Reconciliation** — queued tasks re-enter claiming; `running` tasks whose
+  lease expired are re-queued under a fresh token and re-dispatched; live
+  leases are untouched. Outcomes arbitrate through the submission idempotency
+  key and the action ledger's four-state decisions, so a replay never
+  re-executes a finished side effect.
+- **Retry** — bounded by `max_attempts` with exponential backoff; exhausted
+  tasks park in `reconciliation_required` with the failure journaled.
+- **Outbox relay** — projects committed event rows into a read model
+  idempotently per `event_id`; the cursor row (`durable_outbox_cursor`)
+  persists across restarts and records explicitly skipped poison events —
+  the authoritative log row always remains.
+- **Standalone process** — `python -m hecate_durable.worker --dsn ... --dispatcher
+  'module:factory'` runs the same loop outside the app process; startup
+  failures exit non-zero with the cause.
+
+The `hecate-runner` serial technical preview keeps its own slot-based
+startup reconcile (its serial lock, not leases, is the concurrency control
+there); adopting `DurableWorker` for background runner dispatch follows the
+durable profile's full form.
 
 ## Tests
 

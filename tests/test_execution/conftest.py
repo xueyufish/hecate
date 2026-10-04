@@ -301,7 +301,6 @@ DurableImplementationFactory = Callable[[], DurableSuite]
 #     below over a per-test SQLite file (the portable dialect; the same
 #     implementation runs its fault-injection suite against PostgreSQL via
 #     DURABLE_TEST_POSTGRES_URL in packages/hecate-durable/tests/)
-#   - platform-task-control-api: the platform adapter over this seam (worktree B)
 def _sql_sqlite_suite() -> DurableSuite:
     import os
     import tempfile
@@ -316,26 +315,6 @@ def _sql_sqlite_suite() -> DurableSuite:
     return (store, store, store)
 
 
-def _platform_adapter_suite() -> DurableSuite:
-    """Worktree-B platform adapters over an isolated in-memory database.
-
-    The adapters are dialect-agnostic SQLAlchemy; the suite exercises them
-    on in-memory SQLite exactly like the rest of the CI matrix, while the
-    production binding maps the same code onto PostgreSQL. The ledger slot
-    stays on the InMemory stub until durable-execution-core lands its own.
-    """
-
-    from hecate.execution.platform_durable import PlatformDurableFactory
-
-    factory = PlatformDurableFactory("sqlite://")
-    factory.create_all()
-    return (
-        factory.task_store(),
-        factory.command_recorder(),
-        InMemoryActionLedger(),
-    )
-
-
 DURABLE_IMPLEMENTATIONS: dict[str, DurableImplementationFactory] = {
     "inmemory-stub": lambda: (
         InMemoryDurableTaskStore(),
@@ -343,7 +322,6 @@ DURABLE_IMPLEMENTATIONS: dict[str, DurableImplementationFactory] = {
         InMemoryActionLedger(),
     ),
     "sql-sqlite": _sql_sqlite_suite,
-    "platform-postgres": _platform_adapter_suite,
 }
 
 __all__ = [
