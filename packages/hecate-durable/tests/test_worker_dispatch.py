@@ -57,17 +57,19 @@ def suite(request: pytest.FixtureRequest, tmp_path) -> AsyncIterator[tuple[objec
         Base.metadata.create_all(store.engine)
         leases = LeaseManager(store.session_factory, clock=lambda: clock.now)
 
-    def submit(task_id: str, *, state: TaskLifecycleState | None = None, **extra) -> BackendRef:
-        ref = BackendRef(RefKind.TASK, "host", task_id)
-        store.apply_task_state(ref, TaskLifecycleState.QUEUED, input_payload={"goal": "test"}, extra_update=dict(extra))
-        if state is not None and state is not TaskLifecycleState.QUEUED:
-            store.apply_task_state(ref, state)
-        return ref
-
-    store.submit = submit  # type: ignore[attr-defined]
     yield store, leases, clock
     if request.param != "inmemory":
         store.dispose()
+
+
+def submit_task(store, task_id: str, *, state: TaskLifecycleState | None = None, **extra) -> BackendRef:
+    """Seed one queued task (optionally advanced to ``state``) for a test."""
+
+    ref = BackendRef(RefKind.TASK, "host", task_id)
+    store.apply_task_state(ref, TaskLifecycleState.QUEUED, input_payload={"goal": "test"}, extra_update=dict(extra))
+    if state is not None and state is not TaskLifecycleState.QUEUED:
+        store.apply_task_state(ref, state)
+    return ref
 
 
 def make_worker(store, leases, clock: MutableClock, dispatcher, **kwargs) -> DurableWorker:
@@ -89,7 +91,7 @@ def make_worker(store, leases, clock: MutableClock, dispatcher, **kwargs) -> Dur
 @pytest.mark.asyncio
 async def test_claim_dispatches_queued_task(suite) -> None:
     store, leases, clock = suite
-    ref = store.submit("t1")
+    ref = submit_task(store, "t1")
     dispatcher = RecordingDispatcher()
     dispatcher.bind(store)
     worker = make_worker(store, leases, clock, dispatcher)
@@ -104,7 +106,7 @@ async def test_claim_dispatches_queued_task(suite) -> None:
 @pytest.mark.asyncio
 async def test_concurrent_claim_is_exclusive(suite) -> None:
     store, leases, clock = suite
-    ref = store.submit("t1")
+    ref = submit_task(store, "t1")
     dispatcher = RecordingDispatcher()
     dispatcher.bind(store)
     worker = make_worker(store, leases, clock, dispatcher)
@@ -119,7 +121,7 @@ async def test_concurrent_claim_is_exclusive(suite) -> None:
 @pytest.mark.asyncio
 async def test_reconcile_dispatches_due_tasks(suite) -> None:
     store, leases, clock = suite
-    ref = store.submit("t1")
+    ref = submit_task(store, "t1")
     dispatcher = RecordingDispatcher()
     dispatcher.bind(store)
     worker = make_worker(store, leases, clock, dispatcher)
@@ -131,7 +133,7 @@ async def test_reconcile_dispatches_due_tasks(suite) -> None:
 @pytest.mark.asyncio
 async def test_backoff_gates_retry_until_due(suite) -> None:
     store, leases, clock = suite
-    ref = store.submit("t1")
+    ref = submit_task(store, "t1")
     dispatcher = RecordingDispatcher(fail_times=1)
     dispatcher.bind(store)
     worker = make_worker(store, leases, clock, dispatcher, max_attempts=3)
@@ -151,7 +153,7 @@ async def test_backoff_gates_retry_until_due(suite) -> None:
 @pytest.mark.asyncio
 async def test_exhausted_attempts_park_in_reconciliation(suite) -> None:
     store, leases, clock = suite
-    ref = store.submit("t1")
+    ref = submit_task(store, "t1")
     dispatcher = RecordingDispatcher(fail_times=99)
     dispatcher.bind(store)
     worker = make_worker(store, leases, clock, dispatcher, max_attempts=3)
@@ -174,7 +176,7 @@ async def test_exhausted_attempts_park_in_reconciliation(suite) -> None:
 @pytest.mark.asyncio
 async def test_stale_running_is_requeued_and_redispatched(suite) -> None:
     store, leases, clock = suite
-    ref = store.submit("t1", state=TaskLifecycleState.RUNNING)  # crashed after claim
+    ref = submit_task(store, "t1", state=TaskLifecycleState.RUNNING)  # crashed after claim
     dispatcher = RecordingDispatcher()
     dispatcher.bind(store)
     worker = make_worker(store, leases, clock, dispatcher)
@@ -186,7 +188,7 @@ async def test_stale_running_is_requeued_and_redispatched(suite) -> None:
 @pytest.mark.asyncio
 async def test_live_lease_is_not_disturbed(suite) -> None:
     store, leases, clock = suite
-    ref = store.submit("t1", state=TaskLifecycleState.RUNNING)
+    ref = submit_task(store, "t1", state=TaskLifecycleState.RUNNING)
     leases.acquire(f"dispatch:{ref.issuer_domain}:{ref.id}", "live-executor", 300.0)
     dispatcher = RecordingDispatcher()
     dispatcher.bind(store)
@@ -200,7 +202,7 @@ async def test_live_lease_is_not_disturbed(suite) -> None:
 @pytest.mark.asyncio
 async def test_drain_stops_claiming(suite) -> None:
     store, leases, clock = suite
-    ref = store.submit("t1")
+    ref = submit_task(store, "t1")
     dispatcher = RecordingDispatcher()
     dispatcher.bind(store)
     worker = make_worker(store, leases, clock, dispatcher)
