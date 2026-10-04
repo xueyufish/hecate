@@ -49,8 +49,8 @@ Beyond the seams, the storage layer adds what the plan's step6 requires:
 ```python
 from hecate_durable.storage import SqlDurableStore
 
-store = SqlDurableStore("sqlite:///runner-state.db")   # or postgresql+psycopg://...
-store.create_schema()                                  # host-owned schema; no platform alembic
+store = SqlDurableStore("sqlite:///runner-state.db")  # or postgresql+psycopg://...
+store.create_schema()  # host-owned schema; no platform alembic
 ```
 
 The `hecate-runner` durable profile consumes this package; see
