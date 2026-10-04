@@ -41,13 +41,20 @@ class RecordingDispatcher:
 
 @pytest.fixture(params=dialects() + ["inmemory"])
 def suite(request: pytest.FixtureRequest, tmp_path) -> AsyncIterator[tuple[object, object, MutableClock]]:
+    from hecate_durable.storage.models import Base
+
     clock = MutableClock()
     if request.param == "inmemory":
         store = InMemoryDurableTaskStore()
         leases = InMemoryLeaseManager(clock=lambda: clock.now)
     else:
         store = make_store(request.param, tmp_path, name=f"worker-{request.param}.db")
-        store.create_schema()
+        # The postgres URL names one physical database shared by the whole
+        # parameterized run — reset the package-owned tables before every
+        # test so leftover rows (e.g. a previous test's terminal task with
+        # the same id) cannot leak in. Same isolation rule as conftest.
+        Base.metadata.drop_all(store.engine)
+        Base.metadata.create_all(store.engine)
         leases = LeaseManager(store.session_factory, clock=lambda: clock.now)
 
     def submit(task_id: str, *, state: TaskLifecycleState | None = None, **extra) -> BackendRef:
@@ -59,6 +66,8 @@ def suite(request: pytest.FixtureRequest, tmp_path) -> AsyncIterator[tuple[objec
 
     store.submit = submit  # type: ignore[attr-defined]
     yield store, leases, clock
+    if request.param != "inmemory":
+        store.dispose()
 
 
 def make_worker(store, leases, clock: MutableClock, dispatcher, **kwargs) -> DurableWorker:
