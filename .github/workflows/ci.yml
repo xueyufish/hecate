@@ -45,21 +45,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
+      - uses: astral-sh/setup-uv@v3
+      - name: Install lint tools
         run: |
-          pip install ruff pyyaml
+          uv venv
+          uv pip install ruff pyyaml
       - name: Lint
-        run: ruff check src/hecate/ packages/ tests/ scripts/feature_inventory.py
+        run: uv run --no-sync ruff check src/hecate/ packages/ tests/ scripts/feature_inventory.py
       - name: Format check
-        run: ruff format --check src/hecate/ packages/ tests/ scripts/feature_inventory.py
+        run: uv run --no-sync ruff format --check src/hecate/ packages/ tests/ scripts/feature_inventory.py
       - name: Feature inventory admission (changed entries strict; historical debt reported)
         env:
           INVENTORY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: |
           if [ -z "$INVENTORY_BASE_SHA" ] || [ "$INVENTORY_BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            python scripts/feature_inventory.py check --strict
+            uv run --no-sync python scripts/feature_inventory.py check --strict
           else
-            python scripts/feature_inventory.py check --base-ref "$INVENTORY_BASE_SHA"
+            uv run --no-sync python scripts/feature_inventory.py check --base-ref "$INVENTORY_BASE_SHA"
           fi
 
   typecheck:
@@ -117,12 +119,32 @@ jobs:
         env:
           HECATE_REQUIRE_LIVE_PILOT: "1"
         run: |
+          # npm ci stays here (not only in pilot-ts): the live_backend fixture
+          # compiles the pilot with tsc for the B-side interop tests.
           npm ci --prefix pilots/execution-backend-ts
-          npm test --prefix pilots/execution-backend-ts
-          uv pip install pytest-timeout
           uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
           uv run pytest packages/hecate-durable/tests/ -q --timeout=120 -p no:cacheprovider
           uv run pytest packages/hecate-runner/tests/ -q --timeout=120 -p no:cacheprovider
+
+  # A-side of the execution-backend pilot spec (openspec/specs/execution-backend-pilot):
+  # the self-contained vitest suite runs in parallel with the Python `test` job,
+  # which covers the B-side via the live_backend fixture. Add `pilot-ts` to the
+  # branch-protection required checks to keep the current gating strength.
+  pilot-ts:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: pilots/execution-backend-ts/package-lock.json
+      - name: Run TypeScript pilot suite
+        run: |
+          npm ci --prefix pilots/execution-backend-ts
+          npm test --prefix pilots/execution-backend-ts
 
   migrations:
     needs: changes
