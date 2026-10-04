@@ -97,10 +97,10 @@
 |---|---|---|---|
 | SC01 | 干净安装与无控制面冷启动 | 技术预览已交付(5c);生产认证 step16 | 5b/5c(step16 认证) |
 | SC02 | 结构化库存读取与越权调用 | 技术预览已交付(5c);生产权限 step7 | 5c(生产权限 step7) |
-| SC03 | 本地批准写入与重启 | 未支持 | 6/7 |
+| SC03 | 本地批准写入与重启 | step6 半边交付:持久任务/Action 台账、幂等提交、重启回填真实结果与 claimed 写入安全停止(`durable-execution-core`,`packages/hecate-durable` + runner durable profile);审批绑定与只读身份写权限归 step7,场景整体保持 planned | 6/7 |
 | SC04 | 受管断连与授权过期 | 未支持 | 7 |
 | SC05 | 重连与重复控制命令 | 未支持 | 4/6/7 |
-| SC06 | 本地审计不可写、中心上传不可用 | 未支持 | 6/7/10 |
+| SC06 | 本地审计不可写、中心上传不可用 | step6 半边交付:本地证据不可写时新受保护动作停止、readonly 继续、执行后落盘失败保持待对账(`durable-execution-core`);中心上传缓冲与缺口报告归 step10,场景整体保持 planned | 6/7/10 |
 | SC07 | 制品篡改、不兼容与回滚 | 未支持 | 5 最小校验;11/16 完整门禁 |
 | SC08 | 默认遥测与外部模型数据流 | 未支持 | 5/7/10、16 |
 | SC09 | 完全隔离网络配置(条件性) | 未支持 | 11/16,启用时单独认证 |
@@ -116,7 +116,7 @@
 | step5b | 主应用内 runtime → `hecate-runtime` wheel + extras;懒加载清单按 §2.2 归类解除;干净安装测试 | 已指派（`runtime-standalone-distribution`，PR #207） | 已指派（同左） | change 启动时 |
 | step5c | 独立宿主(`hecate-runner`):本地 manifest 加载、身份/策略 adapter、最小执行/状态/证据接口;只读 SC01/SC02 技术预览 | 已指派（`hecate-runner-preview`，PR #208） | 已指派（同左） | change 启动时 |
 | step5d | 入口迁移:第一切片(`platform-entry-migration`,PR #209)HTTP/MCP/IM/评估四链经 `EntryExecutionService` 并登记 Task/Run;第二切片(`entry-tail-migration`,PR #210)A2A executor 与定时任务 agent executor 亦经入口服务执行,`llm_service.chat` 直连清除;复核(`step5-review-hardening`,PR #211)入口事件存储收敛为单进程共享实例,A2A 改 `A2A_AGENT_WORKSPACE_ID` 显式作用域唯一解析。剩余登记:调度器 `manager._execute_task` 接线 executor registry(归 step6)、A2A per-caller 身份(后续条目)、定时任务 WorkflowExecutor 经 studio `WorkflowTestRunner` 测试入口(显式绕过) | 已指派（`platform-entry-migration`/`entry-tail-migration`，PR #209/#210） | 已指派（同左） | change 启动时 |
-| step6 | 本地持久任务/Action 意图/领取/结果引用/事件游标;重启恢复与对账(SC03/SC06) | 待指派 | 待指派 | change 启动时 |
+| step6 | 本地持久任务/Action 意图/领取/结果引用/事件游标;重启恢复与对账(SC03/SC06) | 已指派(`durable-execution-core`,worktree A:独立包 `hecate-durable` + kernel 钩子 + runner durable profile;平台 API/投影归 worktree B `platform-task-control-api`) | 已指派(同左;参数化契约套件 + 故障注入集 + runner durable 测试) | change 启动时 |
 | step7 | 本地身份/策略/审批/凭据/预算;受管授权租约与断连边界(SC04/SC05);G4 用量记账 | 待指派 | 待指派 | change 启动时 |
 | step10 | 最小本地证据 envelope、导出与脱敏边界(SC06/SC08 扩展) | 待指派 | 待指派 | change 启动时 |
 | step11 | 制品门禁:manifest 校验、本地准入/升级/回退(SC07/SC10) | 待指派 | 待指派 | change 启动时 |

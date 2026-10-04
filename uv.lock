@@ -16,6 +16,7 @@ members = [
     "hecate",
     "hecate-channel-feishu",
     "hecate-channel-slack",
+    "hecate-durable",
     "hecate-enterprise",
     "hecate-llm",
     "hecate-memory",
@@ -2235,6 +2236,7 @@ dependencies = [
     { name = "email-validator" },
     { name = "fastapi" },
     { name = "fastmcp" },
+    { name = "hecate-durable" },
     { name = "hecate-llm" },
     { name = "hecate-ops" },
     { name = "hecate-runtime" },
@@ -2361,6 +2363,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fastmcp", specifier = ">=4.0.0b3,<5" },
     { name = "flagembedding", marker = "extra == 'rag'", specifier = ">=1.2" },
+    { name = "hecate-durable", editable = "packages/hecate-durable" },
     { name = "hecate-llm", editable = "packages/hecate-llm" },
     { name = "hecate-ops", editable = "packages/hecate-ops" },
     { name = "hecate-runtime", editable = "packages/hecate-runtime" },
@@ -2452,6 +2455,26 @@ requires-dist = [
     { name = "hecate", editable = "." },
     { name = "slack-bolt", specifier = ">=1.18.0" },
 ]
+
+[[package]]
+name = "hecate-durable"
+version = "0.1.0"
+source = { editable = "packages/hecate-durable" }
+dependencies = [
+    { name = "sqlalchemy" },
+]
+
+[package.optional-dependencies]
+postgres = [
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
+    { name = "sqlalchemy", specifier = ">=2.0.36" },
+]
+provides-extras = ["postgres"]
 
 [[package]]
 name = "hecate-enterprise"
@@ -2586,12 +2609,14 @@ name = "hecate-runner"
 version = "0.1.0"
 source = { editable = "packages/hecate-runner" }
 dependencies = [
+    { name = "hecate-durable" },
     { name = "hecate-runtime" },
     { name = "jsonschema" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "hecate-durable", editable = "packages/hecate-durable" },
     { name = "hecate-runtime", editable = "packages/hecate-runtime" },
     { name = "jsonschema", specifier = ">=4.23,<5" },
 ]

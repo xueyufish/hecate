@@ -97,3 +97,14 @@ class EvidenceStore:
     def _day_file(self, ts: float) -> Path:
         day = time.strftime("%Y%m%d", time.gmtime(ts))
         return self._dir / f"evidence-{day}.jsonl"
+
+    def probe(self) -> None:
+        """Verify the store accepts writes by appending a real probe record.
+
+        The probe itself is auditable evidence (kind ``evidence_gate``), not
+        a synthetic health flag: if the append fails the store is genuinely
+        unwritable and the caller must stop new protected actions (SC06
+        local half). Raises ``OSError`` on failure.
+        """
+
+        self.append("evidence_gate", "host", "probe", OUTCOME_OK, {"check": "writable"})

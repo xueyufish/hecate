@@ -216,7 +216,9 @@ def test_same_key_same_digest_idempotent(store: DurableTaskStore) -> None:
     digest = canonical_request_digest({"prompt": "hello", "mode": "fast"})
     first = store.record_submission(_key(digest), TASK, RUN)
     second = store.record_submission(_key(digest), TASK, RUN)
-    assert first is second or first.to_dict() == second.to_dict()
+    # The InMemory stub returns the very same stored object; SQL-backed
+    # implementations reconstruct an equal record — either is a valid replay.
+    assert first is second or first == second
 
 
 def test_same_key_different_digest_conflicts(store: DurableTaskStore) -> None:
@@ -409,12 +411,16 @@ def test_seam_signatures_carry_only_contract_types() -> None:
         # ``int | None`` hint resolves to ``typing.Union`` on 3.14 but
         # ``types.UnionType`` on 3.12) and are never leak sources; the check
         # exists to catch ORM/web/engine/vendor classes in seam signatures.
+        # ``hecate.contracts.execution.*`` now forwards to the independently
+        # installable ``hecate_durable.contracts`` (same classes, same module
+        # of record), so both prefixes are contract-type homes.
         return (
             module == "builtins"
             or module == "typing"
             or module == "types"
             or module == "collections.abc"
             or module.startswith("hecate.contracts")
+            or module.startswith("hecate_durable.contracts")
         )
 
     for abc in (DurableTaskStore, ControlCommandRecorder, ActionLedger):

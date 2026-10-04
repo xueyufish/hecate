@@ -21,11 +21,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MATRIX_PATH = REPO_ROOT / "docs" / "design" / "execution-stack-compatibility-matrix.md"
 PACKAGES = {
     "hecate-runtime": REPO_ROOT / "packages" / "hecate-runtime" / "pyproject.toml",
+    "hecate-durable": REPO_ROOT / "packages" / "hecate-durable" / "pyproject.toml",
     "hecate-runner": REPO_ROOT / "packages" / "hecate-runner" / "pyproject.toml",
 }
 
 _VERSION_LINE = re.compile(r'^version\s*=\s*"([^"]+)"', re.MULTILINE)
-_MATRIX_ROW = re.compile(r"^\|.*`(\d+\.\d+\.\d+)`（wheel）.*`(\d+\.\d+\.\d+)`（wheel）.*\|")
+_MATRIX_ROW = re.compile(r"^\|.*`(\d+\.\d+\.\d+)`（wheel）.*`(\d+\.\d+\.\d+)`（wheel）.*`(\d+\.\d+\.\d+)`（wheel）.*\|")
 
 
 def read_package_version(pyproject: Path) -> str:
@@ -37,14 +38,14 @@ def read_package_version(pyproject: Path) -> str:
     return match.group(1)
 
 
-def declared_matrix_versions(matrix_text: str) -> set[tuple[str, str]]:
-    """Versions declared for the supported wheel combos (runtime, runner)."""
-    pairs: set[tuple[str, str]] = set()
+def declared_matrix_versions(matrix_text: str) -> set[tuple[str, str, str]]:
+    """Versions declared for the supported wheel combos (runtime, durable, runner)."""
+    triples: set[tuple[str, str, str]] = set()
     for line in matrix_text.splitlines():
         match = _MATRIX_ROW.match(line)
         if match is not None:
-            pairs.add((match.group(1), match.group(2)))
-    return pairs
+            triples.add((match.group(1), match.group(2), match.group(3)))
+    return triples
 
 
 def main() -> int:
@@ -53,21 +54,20 @@ def main() -> int:
         return 1
     matrix_text = MATRIX_PATH.read_text(encoding="utf-8")
 
-    actual_runtime = read_package_version(PACKAGES["hecate-runtime"])
-    actual_runner = read_package_version(PACKAGES["hecate-runner"])
+    actual = tuple(read_package_version(path) for path in PACKAGES.values())
     declared = declared_matrix_versions(matrix_text)
 
     if not declared:
         print("FAIL: matrix declares no supported wheel version row")
         return 1
-    if (actual_runtime, actual_runner) not in declared:
+    if actual not in declared:
         print(
-            f"FAIL: matrix drift — workspace has hecate-runtime {actual_runtime} / "
-            f"hecate-runner {actual_runner}, but the matrix only declares: {sorted(declared)}. "
+            f"FAIL: matrix drift — workspace has {dict(zip(PACKAGES, actual, strict=True))}, "
+            f"but the matrix only declares: {sorted(declared)}. "
             "Update docs/design/execution-stack-compatibility-matrix.md."
         )
         return 1
-    print(f"OK: matrix matches workspace (hecate-runtime {actual_runtime}, hecate-runner {actual_runner})")
+    print(f"OK: matrix matches workspace ({dict(zip(PACKAGES, actual, strict=True))})")
     return 0
 
 

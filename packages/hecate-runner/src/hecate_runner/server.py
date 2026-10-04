@@ -31,7 +31,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs
 
-from .engine import ExecutionEngine
+from hecate_durable.contracts.durable import IdempotencyConflictError
+
+from .durable import DurableRuntime
+from .engine import EvidenceUnavailableError, ExecutionEngine
 from .evidence import OUTCOME_DENIED, EvidenceStore
 from .profile import Profile, resolve_identity
 
@@ -50,10 +53,17 @@ class _ProblemError(Exception):
 class RunnerServer:
     """Owns the engine, evidence, and the HTTP surface."""
 
-    def __init__(self, profile: Profile, engine: ExecutionEngine, evidence: EvidenceStore) -> None:
+    def __init__(
+        self,
+        profile: Profile,
+        engine: ExecutionEngine,
+        evidence: EvidenceStore,
+        durable: DurableRuntime | None = None,
+    ) -> None:
         self._profile = profile
         self._engine = engine
         self._evidence = evidence
+        self._durable = durable
         self._loop = asyncio.new_event_loop()
         engine.attach_loop(self._loop)
         self._loop_thread = threading.Thread(target=self._loop.run_forever, name="runner-asyncio", daemon=True)
@@ -233,6 +243,72 @@ class RunnerServer:
                         return
 
                     parts = [p for p in path.split("/") if p]
+                    if parts and parts[0] == "tasks":
+                        if server._durable is None:
+                            self._send_problem(404, "not-found", "Not found", "no durable profile on this host")
+                            return
+                        if len(parts) == 1 and parts[0] == "tasks":
+                            records = server._durable.store.list_tasks()
+                            items = []
+                            for r in records:
+                                run_ref = server._durable.store.run_for_task(r.task_ref)
+                                items.append(
+                                    {
+                                        "task_ref": r.task_ref.id,
+                                        "state": r.lifecycle_state.value,
+                                        "revision": r.revision,
+                                        "run_ref": f"runs/{run_ref.id}" if run_ref is not None else None,
+                                    }
+                                )
+                            self._send_json(200, {"tasks": items})
+                            return
+                        task_id = parts[1]
+                        record = server._durable.task_state(task_id)
+                        if record is None:
+                            raise _ProblemError(404, "task-not-found", "Task not found", "task does not resolve")
+                        if len(parts) == 3 and parts[2] == "actions":
+                            run_ref = server._durable.store.run_for_task(record.task_ref)
+                            actions = server._durable.run_actions(run_ref) if run_ref is not None else []
+                            self._send_json(200, {"task_ref": task_id, "actions": actions})
+                            return
+                        if len(parts) == 3 and parts[2] == "events":
+                            run_ref = server._durable.store.run_for_task(record.task_ref)
+                            if run_ref is None:
+                                self._send_json(200, {"cursor": 0, "events": [], "terminal": True})
+                                return
+                            params = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                            try:
+                                cursor = int((params.get("cursor") or ["0"])[0])
+                                if cursor < 0:
+                                    raise ValueError
+                            except ValueError:
+                                raise _ProblemError(
+                                    400, "invalid-cursor", "Invalid cursor", "cursor must be a non-negative integer"
+                                ) from None
+                            page = server._durable.read_events(run_ref, cursor=cursor)
+                            self._send_json(
+                                200,
+                                {
+                                    "cursor": page.next_cursor,
+                                    "events": [envelope.to_dict() for envelope in page.events],
+                                },
+                            )
+                            return
+                        if len(parts) == 2:
+                            run_ref = server._durable.store.run_for_task(record.task_ref)
+                            self._send_json(
+                                200,
+                                {
+                                    "task_ref": task_id,
+                                    "state": record.lifecycle_state.value,
+                                    "revision": record.revision,
+                                    "run_ref": f"runs/{run_ref.id}" if run_ref is not None else None,
+                                },
+                            )
+                            return
+                        self._send_problem(404, "not-found", "Not found", f"no route for {path}")
+                        return
+
                     if len(parts) in (2, 3) and parts[0] == "runs":
                         run_id = parts[1]
                         state = self._authorized_run(run_id, identity)
@@ -248,6 +324,31 @@ class RunnerServer:
                             )
                             return
                         if parts[2] == "events":
+                            if server._durable is not None and state.run_ref is not None:
+                                # Durable profile: events come from the
+                                # persistent log — cursors survive restarts.
+                                params = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                                try:
+                                    cursor = int((params.get("cursor") or ["0"])[0])
+                                    if cursor < 0:
+                                        raise ValueError
+                                except ValueError:
+                                    raise _ProblemError(
+                                        400,
+                                        "invalid-cursor",
+                                        "Invalid cursor",
+                                        "cursor must be a non-negative integer",
+                                    ) from None
+                                page = server._durable.read_events(state.run_ref, cursor=cursor)
+                                self._send_json(
+                                    200,
+                                    {
+                                        "cursor": page.next_cursor,
+                                        "events": [envelope.to_dict() for envelope in page.events],
+                                        "terminal": state.status != "running",
+                                    },
+                                )
+                                return
                             params = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
                             try:
                                 cursor = int((params.get("cursor") or ["0"])[0])
@@ -319,21 +420,58 @@ class RunnerServer:
                         except ValueError as exc:
                             self._deny("invalid-request", str(exc), 422, identity["principal"])
                             return
-                        run_id, state = server._run_coro(
-                            server._engine.submit(identity["principal"], request, tuple(identity["domains"]))
-                        )
+                        idempotency_key = self.headers.get("Idempotency-Key") or None
+                        try:
+                            run_id, state = server._run_coro(
+                                server._engine.submit(
+                                    identity["principal"],
+                                    request,
+                                    tuple(identity["domains"]),
+                                    idempotency_key=idempotency_key,
+                                )
+                            )
+                        except IdempotencyConflictError as exc:
+                            self._send_problem(
+                                409,
+                                "idempotency-conflict",
+                                "Idempotency conflict",
+                                f"key already registered with a different request digest ({exc.registered_digest})",
+                            )
+                            return
+                        except EvidenceUnavailableError as exc:
+                            self._send_problem(
+                                503,
+                                "evidence-unavailable",
+                                "Local evidence store unwritable",
+                                f"new protected runs are refused: {exc}",
+                            )
+                            return
                         if state is None:
                             self._send_problem(503, "busy", "Runner busy", "serial preview: another run is in flight")
                             return
-                        self._send_json(202, {"run_ref": f"runs/{run_id}", "status": "running"})
+                        response = {"run_ref": f"runs/{run_id}", "status": state.status}
+                        if state.replayed:
+                            response["replayed"] = True
+                        self._send_json(202, response)
                         return
 
                     if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":
                         run_id = parts[1]
                         state = self._authorized_run(run_id, identity)
+                        command_id = None
+                        if server._durable is not None and state.task_ref is not None and state.run_ref is not None:
+                            import uuid as uuid_mod
+
+                            command_id = f"cancel-{uuid_mod.uuid4()}"
+                            server._durable.record_cancel(
+                                command_id=command_id,
+                                issuer=identity["principal"],
+                                task_ref=state.task_ref,
+                                run_ref=state.run_ref,
+                            )
 
                         async def cancel() -> bool:
-                            return server._engine.request_cancel(run_id)
+                            return server._engine.request_cancel(run_id, command_id=command_id)
 
                         if server._run_coro(cancel()):
                             self._send_json(
@@ -341,10 +479,13 @@ class RunnerServer:
                                 {
                                     "run_ref": f"runs/{run_id}",
                                     "cancel": "requested",
-                                    "note": "cooperative at tool boundaries",
+                                    "command_id": command_id,
+                                    "note": "cooperative at tool boundaries; applied only on actual effect",
                                 },
                             )
                         else:
+                            if command_id is not None:
+                                server._durable.cancel_rejected(command_id)
                             self._send_json(
                                 200, {"run_ref": f"runs/{run_id}", "cancel": "no-op", "status": state.status}
                             )

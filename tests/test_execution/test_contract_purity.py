@@ -23,6 +23,12 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTRACTS_ROOT = REPO_ROOT / "src" / "hecate" / "contracts"
 EXECUTION_ROOT = REPO_ROOT / "src" / "hecate" / "execution"
+# The durable-execution contract cluster moved to the independently
+# installable ``hecate-durable`` package (step6 durable-execution-core); the
+# paths under ``src/hecate`` forward there. The package's own pure modules
+# are scanned with the same rule so the guarantee follows the code home.
+DURABLE_ROOT = REPO_ROOT / "packages" / "hecate-durable" / "src" / "hecate_durable"
+DURABLE_CONTRACTS_ROOT = DURABLE_ROOT / "contracts"
 
 # Forbidden import prefixes for the contract layer. ``hecate.contracts`` /
 # ``hecate.execution`` are self-imports and allowed; stdlib is allowed.
@@ -95,12 +101,24 @@ def find_violations(root: Path, package_name: str) -> list[str]:
     for path in _iter_py(root):
         if package_name == "execution" and path.name not in _SEAM_MODULES:
             continue
+        if package_name == "hecate_durable-top" and path.name not in {"__init__.py", "seams.py", "stub.py"}:
+            continue
         for lineno, module in _import_modules(path, package_root=root):
             if module.split(".", 1)[0] in sys.stdlib_module_names:
                 continue
             allowed = ("hecate.contracts", "contracts")
             if package_name == "execution":
                 allowed += ("hecate.execution", "execution")
+            if package_name in {"contracts", "execution"}:
+                # Forwarding shims reach the contract cluster's real home in
+                # the independently installable package; its pure modules are
+                # equivalent to ``hecate.contracts`` here. Storage (SQLAlchemy)
+                # is deliberately NOT allowed through this seam.
+                allowed += ("hecate_durable.contracts", "hecate_durable.seams", "hecate_durable.stub")
+            if package_name == "hecate_durable-contracts":
+                allowed += ("hecate_durable.contracts",)
+            if package_name == "hecate_durable-top":
+                allowed += ("hecate_durable", "hecate_durable.contracts", "hecate_durable.seams", "hecate_durable.stub")
             if any(module == prefix or module.startswith(prefix + ".") for prefix in allowed):
                 continue
             try:
