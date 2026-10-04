@@ -5,6 +5,10 @@ Provides cron-based scheduling with:
 - :class:`ScheduleManager` — manages APScheduler lifecycle and job CRUD
 - Advisory lock support for multi-node execution
 - Cron expression validation via croniter
+- Trigger dispatch through the executor registry (step6 wiring): a cron
+  fire resolves the scheduled task's target (agent/workflow) and runs it
+  through the registered executor — the same entry-service path as every
+  migrated entry chain. No execution happens without an executor result.
 - Graceful degradation when apscheduler is not installed
 """
 
@@ -31,6 +35,27 @@ logger = logging.getLogger(__name__)
 # Lazy import guard — apscheduler may not be installed
 _apscheduler: object | None = None
 _croniter: object | None = None
+
+# Process-level executor registry: built once, reused by every cron fire.
+_executor_registry: object | None = None
+
+
+def _get_executor_registry() -> object:
+    """Lazily create the default executor registry (agent + workflow)."""
+
+    global _executor_registry  # noqa: PLW0603
+    if _executor_registry is None:
+        from hecate.ops.scheduling.executors import create_default_registry
+
+        _executor_registry = create_default_registry()
+    return _executor_registry
+
+
+def set_executor_registry(registry: object) -> None:
+    """Override the process registry (tests inject stub executors)."""
+
+    global _executor_registry  # noqa: PLW0603
+    _executor_registry = registry
 
 
 def _get_croniter() -> object:
@@ -190,7 +215,10 @@ class ScheduleManager:
         """Execute a scheduled task (called by APScheduler).
 
         Includes advisory lock check for multi-node safety and
-        max_concurrent_runs enforcement.
+        max_concurrent_runs enforcement. The trigger dispatches through the
+        executor registry (agent/workflow target resolution); the execution
+        record reflects the executor's real result — there is no
+        record-success-without-executing path.
 
         Args:
             task_id: UUID of the task to execute.
@@ -223,10 +251,15 @@ class ScheduleManager:
                 await session.commit()
                 return
 
-            # Advisory lock for multi-node safety
-            lock_id = int(hashlib.sha256(f"{task_id}:{datetime.now(UTC).date()}".encode()).hexdigest()[:15], 16)
-            lock_result = await session.execute(text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": lock_id})
-            if not lock_result.scalar_one():
+            # Advisory lock for multi-node safety (PostgreSQL only; a
+            # single-process sqlite profile has no competing node)
+            acquired = True
+            lock_id = 0
+            if session.bind is not None and session.bind.dialect.name == "postgresql":
+                lock_id = int(hashlib.sha256(f"{task_id}:{datetime.now(UTC).date()}".encode()).hexdigest()[:15], 16)
+                lock_result = await session.execute(text("SELECT pg_try_advisory_lock(:lock_id)"), {"lock_id": lock_id})
+                acquired = bool(lock_result.scalar_one())
+            if not acquired:
                 logger.debug("Skipping task %s — another node is executing", task_id)
                 return
 
@@ -240,17 +273,57 @@ class ScheduleManager:
                 )
                 session.add(execution)
 
-                # Update task last_run_at and next_run_at
+                # Dispatch through the executor registry: the scheduled row's
+                # target binding decides which executor runs; the registry
+                # runs it through the platform entry service (real
+                # execution + Task/Run correlation), never a stub success.
+                registry = _get_executor_registry()
+                if task.agent_id is not None:
+                    executor_type = "agent"
+                elif task.workflow_id is not None:
+                    executor_type = "workflow"
+                else:
+                    raise ValueError("scheduled task has neither agent_id nor workflow_id; cannot resolve executor")
+                executor = registry.get(executor_type)
+                if executor is None:
+                    raise ValueError(f"no executor registered for task type {executor_type!r}")
+                executor_result = await executor.execute(
+                    task_id,
+                    dict(task.execution_config or {}),
+                    workspace_id=task.workspace_id,
+                    agent_id=task.agent_id,
+                    workflow_id=task.workflow_id,
+                )
+                success = isinstance(executor_result, dict) and executor_result.get("status") == "success"
+                execution.status = ExecutionStatus.SUCCESS.value if success else ExecutionStatus.FAILED.value
+                execution.result_summary = executor_result if isinstance(executor_result, dict) else None
+                if not success:
+                    error = executor_result.get("error") if isinstance(executor_result, dict) else None
+                    execution.error_message = str(error or "executor reported a non-success status")
+
+                # Update task last_run_at and next_run_at. The next-run
+                # projection needs croniter (optional extra); without it the
+                # run keeps its previous projection — the executed result
+                # must not be marked failed over a missing calendar helper.
                 task.last_run_at = started
-                task.next_run_at = self.calculate_next_run(task.cron_expression, task.timezone)
+                try:
+                    task.next_run_at = self.calculate_next_run(task.cron_expression, task.timezone)
+                except ImportError:
+                    logger.debug("croniter not installed; next_run_at left unchanged for task %s", task_id)
 
                 await session.commit()
-                logger.info("Executed scheduled task %s", task_id)
+                logger.info(
+                    "Executed scheduled task %s via %s executor: %s",
+                    task_id,
+                    executor_type,
+                    execution.status,
+                )
             except Exception as e:
                 logger.error("Scheduled task %s execution failed: %s", task_id, e)
                 execution.status = ExecutionStatus.FAILED.value
                 execution.error_message = str(e)
                 await session.commit()
             finally:
-                await session.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id})
+                if lock_id:
+                    await session.execute(text("SELECT pg_advisory_unlock(:lock_id)"), {"lock_id": lock_id})
                 await session.commit()
