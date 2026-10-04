@@ -416,7 +416,6 @@ async def start_online_evaluation_worker(app: FastAPI) -> None:
 # ---------------------------------------------------------------------------
 
 
-@asynccontextmanager
 async def start_durable_worker(app: FastAPI) -> None:
     """Start the in-process durable dispatch worker + outbox relay.
 
@@ -482,6 +481,7 @@ async def stop_durable_worker(app: FastAPI) -> None:
         logger.warning("durable worker stopped with %d dispatch(es) in flight", remaining)
 
 
+@asynccontextmanager
 async def compose_application(app: FastAPI) -> AsyncIterator[None]:
     """Application lifespan: build the composition and tear it down on exit.
 
