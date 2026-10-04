@@ -146,6 +146,46 @@ from tests.test_execution.live_http import LiveHttpBackend  # noqa: E402
 from tests.test_execution.tool_callback import ToolCallbackServer  # noqa: E402
 
 _PILOT_DIR = SCHEMA_DIR.parents[3] / "pilots" / "execution-backend-ts"
+_TSC_LOCK_DIR = _PILOT_DIR / ".tsc-build.lock"
+_TSC_LOCK_STALE_SECONDS = 300
+
+
+def _build_pilot(node: str, tsc: Path) -> None:
+    """Compile the pilot, serializing the build across pytest-xdist workers.
+
+    Every worker session rebuilds (the pilot spec forbids reusing a stale
+    dist), and all workers share the same outDir — without the lock a worker
+    can spawn dist/server.js while another worker's tsc is still rewriting it.
+    """
+    deadline = time.monotonic() + _TSC_LOCK_STALE_SECONDS
+    while True:
+        try:
+            _TSC_LOCK_DIR.mkdir()
+            break
+        except FileExistsError:
+            try:
+                stale = time.time() - _TSC_LOCK_DIR.stat().st_mtime > _TSC_LOCK_STALE_SECONDS
+            except FileNotFoundError:
+                stale = False
+            if stale:
+                shutil.rmtree(_TSC_LOCK_DIR, ignore_errors=True)
+            elif time.monotonic() > deadline:
+                pytest.fail("pilot build lock held too long")
+            else:
+                time.sleep(0.1)
+    try:
+        subprocess.run(  # noqa: S603 - node and args resolved from repo layout
+            [
+                node,
+                str(tsc),
+                "-p",
+                str(_PILOT_DIR / "tsconfig.json"),
+            ],
+            check=True,
+            cwd=_PILOT_DIR,
+        )
+    finally:
+        shutil.rmtree(_TSC_LOCK_DIR, ignore_errors=True)
 
 
 @pytest.fixture(scope="session")
@@ -170,16 +210,7 @@ def live_backend() -> LiveHttpBackend:
         pytest.skip("pilot JS dependencies not installed; run npm ci in pilots/execution-backend-ts")
     else:
         try:
-            subprocess.run(  # noqa: S603 - node and args resolved from repo layout
-                [
-                    node,
-                    str(tsc),
-                    "-p",
-                    str(_PILOT_DIR / "tsconfig.json"),
-                ],
-                check=True,
-                cwd=_PILOT_DIR,
-            )
+            _build_pilot(node, tsc)
         except (subprocess.CalledProcessError, OSError) as error:
             pytest.fail(f"pilot build failed: {error}")
     callback = ToolCallbackServer()

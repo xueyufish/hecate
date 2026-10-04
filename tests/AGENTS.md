@@ -5,9 +5,12 @@
   judge a test's target by its directory name; check the imports. Do not bulk
   rename directories.
 - Shared fixtures in `conftest.py` (repo root): `db_session` (AsyncSession +
-  auto-rollback), `setup_database` (autouse, create_all/drop_all per test),
-  `client` (httpx AsyncClient + DI overrides). Use `db_session` in all DB
-  tests — never create separate engines in test files.
+  auto-rollback), `_create_schema_once` (autouse, session-scoped: builds the
+  schema once per pytest session / xdist worker), `setup_database` (autouse,
+  clears every table's rows before each test — never drop tables in test
+  teardowns, that would destroy the session schema), `client` (httpx
+  AsyncClient + DI overrides). Use `db_session` in all DB tests — never
+  create separate engines in test files.
 - `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` needed. Database is
   in-memory SQLite (`sqlite+aiosqlite://`); never connect to real PostgreSQL
   in unit tests.
