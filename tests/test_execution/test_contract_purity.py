@@ -48,7 +48,14 @@ _SELF_PACKAGES = ("hecate.contracts", "hecate.execution")
 # registration tables (plan step4/§三) and are never imported by external
 # implementers — so they are exempt here, while the single-writer rule
 # (tests/test_layering_domain.py) keeps the tables execution-owned.
-_SEAM_MODULES = {"__init__.py", "backend.py", "sandbox.py", "stub.py"}
+_SEAM_MODULES = {
+    "__init__.py",
+    "backend.py",
+    "sandbox.py",
+    "stub.py",
+    "durable.py",
+    "stub_durable.py",
+}
 
 
 def _iter_py(root: Path) -> list[Path]:

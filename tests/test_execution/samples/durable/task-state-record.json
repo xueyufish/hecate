@@ -1,0 +1,7 @@
+{
+  "task_ref": { "kind": "task", "issuer_domain": "platform.local", "id": "task-042" },
+  "lifecycle_state": "running",
+  "revision": 3,
+  "recorded_at": "2026-10-04T08:15:00Z",
+  "writer_source": "platform"
+}

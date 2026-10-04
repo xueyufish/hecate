@@ -38,12 +38,17 @@ class RunState(StrEnum):
 
 
 class CancelRequestState(StrEnum):
-    """Control-command receipt states: a request is not an applied cancel."""
+    """Control-command receipt states: a request is not an applied cancel.
+
+    ``expired`` (durable-command-record contract) marks a command whose
+    validity window elapsed before it was applied; it is terminal.
+    """
 
     REQUESTED = "requested"
     ACKNOWLEDGED = "acknowledged"
     APPLIED = "applied"
     REJECTED = "rejected"
+    EXPIRED = "expired"
     UNKNOWN = "unknown"
 
 

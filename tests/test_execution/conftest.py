@@ -99,6 +99,21 @@ def sample_schema_ref(path: Path) -> tuple[str, str] | None:
         return "security-claims", ""
     if theme == "tools":
         return "tool", ""
+    if theme == "durable":
+        durable_map = {
+            "task-state-record.json": ("durable-task-state", ""),
+            "negative-task-state-unknown-state.json": ("durable-task-state", ""),
+            "command-record.json": ("durable-command-record", ""),
+            "command-record-expired.json": ("durable-command-record", ""),
+            "negative-command-payload-without-schema.json": ("durable-command-record", ""),
+            "action-intent.json": ("durable-action-ledger", "#/$defs/actionIntent"),
+            "action-recovery.json": ("durable-action-ledger", "#/$defs/actionRecovery"),
+            "claim-receipt.json": ("durable-action-ledger", "#/$defs/claimReceipt"),
+            "governance-event.json": ("event-envelope", ""),
+        }
+        if name in durable_map:
+            return durable_map[name]
+        raise AssertionError(f"unknown durable sample: {name}; extend the mapping")
     if theme == "sandbox":
         if "create-environment" in name:
             return "sandbox", "#/$defs/createEnvironmentRequest"
@@ -214,3 +229,72 @@ def live_backend() -> LiveHttpBackend:
         if proc.stdout is not None:
             proc.stdout.close()
         callback.close()
+
+
+# --- durable-execution seams (change durable-execution-contracts) ----------
+
+from collections.abc import Callable  # noqa: E402
+
+from hecate.contracts.execution.durable import (  # noqa: E402
+    ActionIntent,
+    ActionOutcomeRecord,
+    ActionRecovery,
+    ClaimReceipt,
+    CommandState,
+    ControlCommandRecord,
+    IdempotencyKey,
+    SubmissionAssociation,
+    TaskLifecycleState,
+    TaskStateRecord,
+)
+from hecate.contracts.execution.references import BackendRef  # noqa: E402
+from hecate.execution.durable import (  # noqa: E402
+    ActionLedger,
+    ControlCommandRecorder,
+    DurableTaskStore,
+)
+from hecate.execution.stub_durable import (  # noqa: E402
+    InMemoryActionLedger,
+    InMemoryControlCommandRecorder,
+    InMemoryDurableTaskStore,
+)
+
+DurableSuite = tuple[DurableTaskStore, ControlCommandRecorder, ActionLedger]
+DurableImplementationFactory = Callable[[], DurableSuite]
+
+# Registration point for durable-seam implementations. The contract suite in
+# test_durable_contract.py runs against every entry unchanged; production
+# implementations register here when their changes land:
+#   - durable-execution-core: the PostgreSQL store/worker core (worktree A)
+#   - platform-task-control-api: the platform adapter over this seam (worktree B)
+DURABLE_IMPLEMENTATIONS: dict[str, DurableImplementationFactory] = {
+    "inmemory-stub": lambda: (
+        InMemoryDurableTaskStore(),
+        InMemoryControlCommandRecorder(),
+        InMemoryActionLedger(),
+    ),
+}
+
+__all__ = [
+    "ActionIntent",
+    "ActionOutcomeRecord",
+    "ActionRecovery",
+    "BackendRef",
+    "ClaimReceipt",
+    "CommandState",
+    "ControlCommandRecord",
+    "DURABLE_IMPLEMENTATIONS",
+    "DurableImplementationFactory",
+    "DurableSuite",
+    "IdempotencyKey",
+    "SubmissionAssociation",
+    "TaskLifecycleState",
+    "TaskStateRecord",
+    "all_samples",
+    "load_registry",
+    "load_sample",
+    "sample_schema_ref",
+    "schema_ids",
+    "schema_uri",
+    "validate_against_schema",
+]

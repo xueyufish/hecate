@@ -1,0 +1,39 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/durable-command-record.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DurableCommandRecord",
+  "description": "Control-command receipt contract. Every command produces one independent record with a single authoritative writer. A transport-level success (e.g. HTTP 200) MUST NOT be interpreted as applied - applied is produced only by an executor's actual-effect receipt. expired is terminal: an expired command MUST NOT be applied afterwards. A command may carry the expected task/run revision to reject commands issued from a stale page. provide_input payloads follow the envelope pattern: a payload object plus its payload_schema_ref; the concrete payload schema is defined by consumers. Unknown fields MUST be tolerated.",
+  "type": "object",
+  "required": ["command_id", "kind", "issuer", "task_ref", "issued_at", "state"],
+  "additionalProperties": true,
+  "properties": {
+    "command_id": { "type": "string", "minLength": 1 },
+    "kind": { "$ref": "#/$defs/controlCommandKind" },
+    "issuer": { "type": "string", "minLength": 1 },
+    "task_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/taskRef" },
+    "run_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/runRef" },
+    "issued_at": { "type": "string", "minLength": 1 },
+    "expires_at": { "type": "string", "minLength": 1 },
+    "expected_revision": { "type": "integer", "minimum": 0 },
+    "state": { "$ref": "#/$defs/commandState" },
+    "payload": { "type": "object" },
+    "payload_schema_ref": { "type": "string", "minLength": 1 },
+    "detail_ns": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "required": ["payload"] },
+      "then": { "required": ["payload_schema_ref"] }
+    }
+  ],
+  "$defs": {
+    "controlCommandKind": {
+      "type": "string",
+      "enum": ["cancel", "pause", "resume", "provide_input"]
+    },
+    "commandState": {
+      "type": "string",
+      "enum": ["requested", "acknowledged", "applied", "rejected", "expired"]
+    }
+  }
+}
