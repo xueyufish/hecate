@@ -1,7 +1,8 @@
 """Clean-install harness for the SC01/SC02 standalone-consumption scenarios.
 
-Builds the ``hecate-runtime`` and ``hecate-runner`` wheels, installs them
-into a fresh uv venv (no repo source path, no editable install), writes a
+Builds the ``hecate-runtime``, ``hecate-durable``, and ``hecate-runner``
+wheels, installs them into a fresh uv venv (no repo source path, no
+editable install), writes a
 profile, starts a stub business API plus the runner as a subprocess from a
 temporary working directory, and yields an HTTP client. Everything
 environment-specific (path normalization, startup polling, timeouts) is
@@ -36,8 +37,8 @@ def uv_available() -> bool:
     return shutil.which("uv") is not None
 
 
-def _build_wheels(dist_dir: Path) -> tuple[Path, Path]:
-    for package in ("hecate-runtime", "hecate-runner"):
+def _build_wheels(dist_dir: Path) -> tuple[Path, Path, Path]:
+    for package in ("hecate-runtime", "hecate-durable", "hecate-runner"):
         subprocess.run(
             ["uv", "build", "--package", package, "--out-dir", str(dist_dir)],
             check=True,
@@ -46,8 +47,9 @@ def _build_wheels(dist_dir: Path) -> tuple[Path, Path]:
             timeout=300,
         )
     runtime_wheel = next(dist_dir.glob("hecate_runtime-*.whl"))
+    durable_wheel = next(dist_dir.glob("hecate_durable-*.whl"))
     runner_wheel = next(dist_dir.glob("hecate_runner-*.whl"))
-    return runtime_wheel, runner_wheel
+    return runtime_wheel, durable_wheel, runner_wheel
 
 
 def _write_profile(profile_dir: Path, *, business_api_port: int, manifest_tools: list[dict] | None = None) -> None:
@@ -216,12 +218,24 @@ def start_runner(
     workdir = Path(tempfile.mkdtemp(prefix="sc-runner-", dir=tmp_root))
     dist_dir = workdir / "dist"
     venv_dir = workdir / "venv"
-    runtime_wheel, runner_wheel = _build_wheels(dist_dir)
+    runtime_wheel, durable_wheel, runner_wheel = _build_wheels(dist_dir)
 
     subprocess.run(["uv", "venv", str(venv_dir), "--seed"], check=True, capture_output=True, timeout=120)
     python_exe = venv_dir / "Scripts" / "python.exe" if os.name == "nt" else venv_dir / "bin" / "python"
+    # The runner wheel declares hecate-durable; the local wheel satisfies it
+    # here the same way the clean-install CI job provides it (the package is
+    # not published to PyPI).
     subprocess.run(
-        ["uv", "pip", "install", "--python", str(python_exe), str(runtime_wheel), str(runner_wheel)],
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python_exe),
+            str(runtime_wheel),
+            str(durable_wheel),
+            str(runner_wheel),
+        ],
         check=True,
         capture_output=True,
         timeout=300,

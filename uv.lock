@@ -2609,12 +2609,14 @@ name = "hecate-runner"
 version = "0.1.0"
 source = { editable = "packages/hecate-runner" }
 dependencies = [
+    { name = "hecate-durable" },
     { name = "hecate-runtime" },
     { name = "jsonschema" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "hecate-durable", editable = "packages/hecate-durable" },
     { name = "hecate-runtime", editable = "packages/hecate-runtime" },
     { name = "jsonschema", specifier = ">=4.23,<5" },
 ]
