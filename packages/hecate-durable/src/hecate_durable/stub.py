@@ -9,8 +9,11 @@ durability guarantee and must never back a production profile.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
+from datetime import UTC, datetime
 
 from hecate_durable.seams import ActionLedger, ControlCommandRecorder, DurableTaskStore
+from hecate_durable.storage.lease import LeaseHandle, StaleFenceError
 
 from .contracts.durable import (
     ActionIntent,
@@ -62,6 +65,8 @@ class InMemoryDurableTaskStore(DurableTaskStore):
         expected_revision: int | None = None,
         reconciled: bool = False,
         recorded_at: str = "",
+        extra_update: dict | None = None,
+        input_payload: dict | None = None,
     ) -> TaskStateRecord:
         with self._lock:
             current = self._states.get(task_ref.id)
@@ -70,17 +75,24 @@ class InMemoryDurableTaskStore(DurableTaskStore):
                 if expected_revision is not None and expected_revision != current.revision:
                     raise ValueError(f"stale revision: expected {expected_revision}, current is {current.revision}")
                 revision = current.revision + 1
+                extra = {**current.extra, **(extra_update or {})}
+                if input_payload is not None:
+                    extra["input_payload"] = input_payload
             else:
                 if target is not TaskLifecycleState.QUEUED:
                     raise ValueError(f"first recorded state must be queued, got {target.value}")
                 if expected_revision is not None and expected_revision != 0:
                     raise ValueError(f"stale revision: expected {expected_revision}, current is 0")
                 revision = 0
+                extra = dict(extra_update or {})
+                if input_payload is not None:
+                    extra["input_payload"] = input_payload
             record = TaskStateRecord(
                 task_ref=task_ref,
                 lifecycle_state=target,
                 revision=revision,
                 recorded_at=recorded_at or "1970-01-01T00:00:00Z",
+                extra=extra,
             )
             self._states[task_ref.id] = record
             return record
@@ -88,6 +100,95 @@ class InMemoryDurableTaskStore(DurableTaskStore):
     def get_task_state(self, task_ref: BackendRef) -> TaskStateRecord | None:
         with self._lock:
             return self._states.get(task_ref.id)
+
+    def submit_task(
+        self,
+        *,
+        key: IdempotencyKey,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        input_payload: dict,
+    ) -> SubmissionAssociation:
+        """Idempotent submission creating the task row + input in one step.
+
+        Mirrors ``SqlDurableStore.submit_task`` (no run linkage/event log —
+        the stub has neither): same key + digest replays the association,
+        different digest is a conflict, and a fresh key records the task as
+        ``queued`` with the replay input.
+        """
+
+        with self._lock:
+            existing = self._submissions.get(key.key)
+            if existing is not None:
+                if existing.key.request_digest != key.request_digest:
+                    raise IdempotencyConflictError(key.key, existing.key.request_digest)
+                return existing
+            if task_ref.id not in self._states:
+                self._states[task_ref.id] = TaskStateRecord(
+                    task_ref=task_ref,
+                    lifecycle_state=TaskLifecycleState.QUEUED,
+                    revision=0,
+                    recorded_at="1970-01-01T00:00:00Z",
+                    writer_source="submit",
+                    extra={"input_payload": dict(input_payload)},
+                )
+            association = SubmissionAssociation(key=key, task_ref=task_ref, run_ref=run_ref)
+            self._submissions[key.key] = association
+            return association
+
+    def attach_workspace(self, task_ref: BackendRef, workspace_id: object) -> None:
+        """Mirror of the SQL attribution hook; the stub stores it in extra."""
+
+        with self._lock:
+            current = self._states.get(task_ref.id)
+            if current is None:
+                return
+            self._states[task_ref.id] = TaskStateRecord(
+                task_ref=current.task_ref,
+                lifecycle_state=current.lifecycle_state,
+                revision=current.revision,
+                recorded_at=current.recorded_at,
+                writer_source=current.writer_source,
+                extra={**current.extra, "workspace_id": str(workspace_id)},
+            )
+
+    def get_task_input(self, task_ref: BackendRef) -> dict | None:
+        """Replay input stored via ``apply_task_state(input_payload=...)``."""
+
+        with self._lock:
+            record = self._states.get(task_ref.id)
+            if record is None:
+                return None
+            payload = record.extra.get("input_payload")
+            return dict(payload) if isinstance(payload, dict) else None
+
+    def list_tasks(self, states: set[TaskLifecycleState] | None = None) -> list[TaskStateRecord]:
+        """All task records, optionally filtered by lifecycle state."""
+
+        with self._lock:
+            records = list(self._states.values())
+        if states is None:
+            return records
+        return [record for record in records if record.lifecycle_state in states]
+
+    def emit_event(
+        self,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        *,
+        event_type: str,
+        payload: dict,
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
+    ) -> dict:
+        """No outbox on the stub: the event is dropped with a stable return.
+
+        The stub carries no event log (dev/tests only); callers rely on the
+        platform read model for event queries, which the API tests stub
+        separately.
+        """
+
+        return {"event_type": event_type, "dropped": True}
 
 
 class InMemoryControlCommandRecorder(ControlCommandRecorder):
@@ -126,6 +227,7 @@ class InMemoryControlCommandRecorder(ControlCommandRecorder):
                 payload=current.payload,
                 payload_schema_ref=current.payload_schema_ref,
                 detail_ns=current.detail_ns,
+                extra=current.extra,
             )
             self._commands[command_id] = updated
             return updated
@@ -133,6 +235,16 @@ class InMemoryControlCommandRecorder(ControlCommandRecorder):
     def get(self, command_id: str) -> ControlCommandRecord | None:
         with self._lock:
             return self._commands.get(command_id)
+
+    def list_pending_commands(self, workspace_id: str) -> list[ControlCommandRecord]:
+        """Workspace-scoped ``requested`` receipts (lazy-expiry sweep input)."""
+
+        with self._lock:
+            return [
+                record
+                for record in self._commands.values()
+                if record.state is CommandState.REQUESTED and record.extra.get("workspace_id") == str(workspace_id)
+            ]
 
 
 class InMemoryActionLedger(ActionLedger):
@@ -214,3 +326,80 @@ class InMemoryActionLedger(ActionLedger):
             intent=intent,
             pending_reconciliation=not may_auto_replay(ActionLedgerState.CLAIMED, intent.side_effect_class),
         )
+
+
+class InMemoryLeaseManager:
+    """Process-local lease semantics mirroring :class:`LeaseManager`.
+
+    Serves the worker over the InMemory stub (dev/tests, single process);
+    carries no cross-process guarantee — that is the SQL manager's job.
+    """
+
+    def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
+        self._leases: dict[str, tuple[str, int, float]] = {}  # key -> (holder, token, expires_epoch)
+        self._lock = threading.Lock()
+        self._clock = clock or _default_clock
+
+    def acquire(self, lease_key: str, holder: str, ttl_seconds: float) -> LeaseHandle | None:
+        now = self._clock().timestamp()
+        with self._lock:
+            current = self._leases.get(lease_key)
+            if current is not None and current[0] != holder and current[2] > now:
+                return None  # another holder's lease is still valid
+            if current is None:
+                token = 1
+            elif current[0] == holder:
+                token = current[1]  # re-acquiring one's own lease does not bump
+            else:
+                token = current[1] + 1  # takeover of an expired lease bumps
+            self._leases[lease_key] = (holder, token, now + ttl_seconds)
+            return LeaseHandle(
+                lease_key=lease_key,
+                holder=holder,
+                fencing_token=token,
+                expires_at=datetime.fromtimestamp(now + ttl_seconds, tz=UTC).isoformat(),
+            )
+
+    def renew(self, lease_key: str, holder: str, ttl_seconds: float) -> LeaseHandle | None:
+        now = self._clock().timestamp()
+        with self._lock:
+            current = self._leases.get(lease_key)
+            if current is None or current[0] != holder:
+                return None
+            self._leases[lease_key] = (holder, current[1], now + ttl_seconds)
+            return LeaseHandle(
+                lease_key=lease_key,
+                holder=holder,
+                fencing_token=current[1],
+                expires_at=datetime.fromtimestamp(now + ttl_seconds, tz=UTC).isoformat(),
+            )
+
+    def release(self, lease_key: str, holder: str) -> bool:
+        with self._lock:
+            current = self._leases.get(lease_key)
+            if current is None or current[0] != holder:
+                return False
+            del self._leases[lease_key]
+            return True
+
+    def current_token(self, lease_key: str) -> int | None:
+        with self._lock:
+            current = self._leases.get(lease_key)
+            return None if current is None else current[1]
+
+    def validate_fence(self, lease_key: str, presented_token: int) -> None:
+        current = self.current_token(lease_key)
+        if current is None or current != presented_token:
+            raise StaleFenceError(lease_key, presented_token, current if current is not None else -1)
+
+
+class _LeaseHeldError(Exception):
+    """The lease is currently held by another holder (in-memory variant)."""
+
+    def __init__(self, lease_key: str) -> None:
+        super().__init__(f"lease {lease_key!r} is held by another holder")
+        self.lease_key = lease_key
+
+
+def _default_clock() -> datetime:
+    return datetime.now(UTC)

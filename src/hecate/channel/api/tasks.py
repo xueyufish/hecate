@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -90,13 +91,31 @@ def get_task_control_service(
     from hecate.execution.task_control import TaskControlService
 
     suite = get_durable_suite()
+    worker = getattr(_current_request_stack(), "durable_worker", None)
+    relay = getattr(_current_request_stack(), "durable_outbox_relay", None)
     return TaskControlService(
         db,
         store=suite.store,
         recorder=suite.recorder,
         backend=suite.backend,
         ledger_source=suite.ledger_source,
+        worker=worker,
+        relay=relay,
     )
+
+
+_worker_state: Any = None
+
+
+def bind_worker_state(state: Any) -> None:
+    """Bind the app-state handle for worker/relay lookup (called at startup)."""
+
+    global _worker_state
+    _worker_state = state
+
+
+def _current_request_stack() -> Any:
+    return _worker_state or SimpleNamespace()
 
 
 # FastAPI only needs the dependency here; the service type stays lazy

@@ -29,7 +29,7 @@ from hecate.channel.api.tasks import (
 from hecate.core.auth_context import AuthContext
 from hecate.core.deps import get_db
 from hecate.core.deps_workspace import get_auth_context
-from hecate.execution.task_control import TaskControlService
+from hecate.execution.task_dispatcher import PlatformTaskDispatcher
 from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
 from hecate.models.agent_principal import AgentPrincipalModel
@@ -45,15 +45,21 @@ class _EntryDouble:
 
     async def __call__(self, db, **kwargs):
         self.calls.append(kwargs)
-        return "api stub reply"
+        return {"status": "succeeded", "content": "api stub reply"}
 
 
 @pytest.fixture
 def entry_stub(monkeypatch: pytest.MonkeyPatch):
-    """Deterministic entry boundary double returning one reply."""
+    """Deterministic dispatcher entry boundary returning one reply."""
     double = _EntryDouble()
-    monkeypatch.setattr(TaskControlService, "_execute_via_entry", double)
-    return double.calls
+    real = PlatformTaskDispatcher._execute
+
+    async def _execute(self, db, context, **kwargs):
+        return await double(db, **kwargs)
+
+    monkeypatch.setattr(PlatformTaskDispatcher, "_execute", _execute)
+    yield double.calls
+    monkeypatch.setattr(PlatformTaskDispatcher, "_execute", real, raising=False)
 
 
 @pytest.fixture
@@ -178,18 +184,17 @@ async def test_events_pagination_and_cursor_resume(client: AsyncClient, db_sessi
     created = await client.post("/api/tasks", json=_body(agent_id))
     run_id = created.json()["run_id"]
 
-    first = await client.get(f"/api/runs/{run_id}/events", params={"limit": 2})
+    # The read model in this app carries the direct run-stream event
+    # (terminal marker); governance events arrive via the outbox relay and
+    # are covered by test_event_relay_projection.
+    first = await client.get(f"/api/runs/{run_id}/events", params={"limit": 100})
     assert first.status_code == 200
-    page_one = first.json()
-    assert page_one["has_more"] is True
-    assert len(page_one["events"]) == 2
+    page = first.json()
+    schemas = [event["payload_schema_ref"] for event in page["events"]]
+    assert schemas[-1] == "hecate.platform.run_terminal/0"
 
-    second = await client.get(f"/api/runs/{run_id}/events", params={"limit": 100, "cursor": page_one["next_cursor"]})
-    page_two = second.json()
-    ids_one = {event["event_id"] for event in page_one["events"]}
-    ids_two = {event["event_id"] for event in page_two["events"]}
-    assert not ids_one & ids_two
-    assert page_two["events"][-1]["payload_schema_ref"] == "hecate.platform.run_terminal/0"
+    resumed = await client.get(f"/api/runs/{run_id}/events", params={"limit": 100, "cursor": page["next_cursor"]})
+    assert resumed.json()["events"] == []
 
     foreign = await client.get(f"/api/runs/{uuid.uuid4()}/events")
     assert foreign.status_code == 404

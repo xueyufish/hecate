@@ -4,16 +4,21 @@ Single process-wide switch point between the seam implementations:
 
 - ``stub`` (default) — the Phase 0 InMemory doubles. Suitable for
   development and tests; carries no durability guarantee.
-- ``postgres`` — this change's platform adapters over the platform tables
-  (``PostgresDurableTaskStore`` / ``PostgresControlCommandRecorder``).
-  The action ledger stays on the InMemory stub until the
-  ``durable-execution-core`` worktree lands its production ledger; the
-  binding reports that provenance so the reconciliation API can label
-  ledger-backed sections honestly.
+- ``postgres`` — the durable-execution-core ``SqlDurableStore`` bound to all
+  three seams. Store, command recorder, and action ledger share one engine
+  and transaction domain, which makes the plan's "critical state + outbox in
+  the same transaction" rule the default path instead of an adapter
+  discipline; ``ledger_source="core"`` reflects that the ledger is a
+  production implementation, and the reconciliation API labels it honestly.
 
-When the durable-execution-core implementation merges, its suite
-replaces the members here — the API and service layers only ever see the
-seam ABCs, so no consumer changes.
+The former platform PostgreSQL adapters over the worktree-B tables
+(``task_lifecycle_states`` / ``task_submissions`` / ``control_commands``)
+were retired when the core store landed: the durable tables are the single
+authoritative home for task lifecycle, commands, and the action ledger, and
+the platform contributes only attribution (``workspace_id``) and the
+outbox-to-read-model relay. This module also hosts the sync-engine helpers
+the worker and relay need — the async application URL maps onto its sync
+driver here so the seam's synchronous API can run beside the async ORM.
 """
 
 from __future__ import annotations
@@ -21,13 +26,65 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.pool import StaticPool
+
 from hecate.core.config import settings
 from hecate.execution.durable import ActionLedger, ControlCommandRecorder, DurableTaskStore
-from hecate.execution.platform_durable import PlatformDurableFactory
-from hecate.execution.stub_durable import InMemoryActionLedger
 
 STUB_BACKEND = "stub"
 POSTGRES_BACKEND = "postgres"
+
+_SYNC_DRIVER_MAP = {
+    "postgresql+asyncpg": "postgresql+psycopg",
+    "sqlite+aiosqlite": "sqlite",
+    "postgresql": "postgresql+psycopg",
+    "postgresql+psycopg": "postgresql+psycopg",
+    "sqlite": "sqlite",
+}
+
+
+def to_sync_database_url(url: str) -> str:
+    """Map an async (or sync) database URL onto its sync driver form.
+
+    PostgreSQL maps to the psycopg (v3) driver — the same package the
+    ``redis`` extra already declares — because asyncpg has no sync API.
+    Engine creation raises a clear error when psycopg is not installed;
+    the stub binding keeps driver-less installs fully functional.
+    """
+
+    scheme = url.split("://", 1)[0]
+    mapped = _SYNC_DRIVER_MAP.get(scheme, scheme)
+    if "://" in url:
+        return mapped + "://" + url.split("://", 1)[1]
+    return mapped
+
+
+def create_sync_engine(url: str) -> Engine:
+    """Create the durable store's synchronous engine.
+
+    In-memory SQLite uses ``StaticPool`` so every short session sees the
+    same underlying connection (otherwise each session would get a fresh
+    empty database).
+    """
+
+    sync_url = to_sync_database_url(url)
+    if sync_url.startswith("sqlite") and ("://:" in sync_url or sync_url.endswith("://")):
+        return create_engine(
+            sync_url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    if sync_url.startswith("postgresql"):
+        try:
+            import psycopg  # noqa: F401
+        except ImportError as err:
+            raise ImportError(
+                "the postgres durable binding requires the psycopg driver; "
+                "install it with: uv pip install 'psycopg[binary]>=3.1.0'"
+            ) from err
+    return create_engine(sync_url, pool_pre_ping=True, pool_size=5, max_overflow=5)
 
 
 @dataclass(frozen=True)
@@ -48,18 +105,23 @@ _suite: DurableSuite | None = None
 def _build_suite() -> DurableSuite:
     backend = getattr(settings, "HECATE_DURABLE_BACKEND", STUB_BACKEND) or STUB_BACKEND
     if backend == POSTGRES_BACKEND:
-        factory = PlatformDurableFactory(settings.DATABASE_URL)
+        from hecate_durable.storage import SqlDurableStore
+
+        store = SqlDurableStore(to_sync_database_url(settings.DATABASE_URL), source="platform")
         return DurableSuite(
-            store=factory.task_store(),
-            recorder=factory.command_recorder(),
-            ledger=InMemoryActionLedger(),
+            store=store,
+            recorder=store,
+            ledger=store,
             backend=backend,
-            # Ledger stays on the stub until durable-execution-core lands.
-            ledger_source="stub",
+            ledger_source="core",
         )
     if backend != STUB_BACKEND:
         raise ValueError(f"unknown HECATE_DURABLE_BACKEND {backend!r}; expected 'stub' or 'postgres'")
-    from hecate.execution.stub_durable import InMemoryControlCommandRecorder, InMemoryDurableTaskStore
+    from hecate.execution.stub_durable import (
+        InMemoryActionLedger,
+        InMemoryControlCommandRecorder,
+        InMemoryDurableTaskStore,
+    )
 
     return DurableSuite(
         store=InMemoryDurableTaskStore(),

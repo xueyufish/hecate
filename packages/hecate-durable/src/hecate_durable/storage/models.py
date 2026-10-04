@@ -62,6 +62,10 @@ class TaskStateRow(Base):
     recorded_at: Mapped[str] = mapped_column(String(64))
     writer_source: Mapped[str | None] = mapped_column(String(64))
     extra: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    # Platform attribution (single writer: the platform's attach_workspace at
+    # submit time); the standalone host leaves it NULL — workspace is a
+    # platform concept, the deployment domain is the host's scope.
+    workspace_id: Mapped[str | None] = mapped_column(String(64))
     # Host-owned columns (single writer: the standalone host): run linkage for
     # event emission and restart replay, plus the submitted input payload.
     run_issuer: Mapped[str | None] = mapped_column(String(256))
@@ -99,6 +103,8 @@ class CommandRow(Base):
     task_id: Mapped[str] = mapped_column(String(256))
     issued_at: Mapped[str] = mapped_column(String(64))
     state: Mapped[str] = mapped_column(String(32))
+    # Platform attribution at record time (see TaskStateRow.workspace_id).
+    workspace_id: Mapped[str | None] = mapped_column(String(64))
     run_issuer: Mapped[str | None] = mapped_column(String(256))
     run_id: Mapped[str | None] = mapped_column(String(256))
     expires_at: Mapped[str | None] = mapped_column(String(64))
@@ -190,3 +196,24 @@ class LeaseRow(Base):
     expires_at: Mapped[str] = mapped_column(String(64))
     expires_at_epoch: Mapped[float] = mapped_column(Float)
     acquired_at: Mapped[str] = mapped_column(String(64))
+
+
+class OutboxCursorRow(Base):
+    """Relay cursor over the transactional outbox (worker-owned).
+
+    ``last_event_row_id`` is the highest consumed ``durable_event_log.id``;
+    ``skipped_event_ids`` records events abandoned after bounded consecutive
+    projection failures so a poison envelope cannot block the relay forever
+    while staying visible (the authoritative row remains in the log).
+    """
+
+    __tablename__ = "durable_outbox_cursor"
+
+    relay_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    last_event_row_id: Mapped[int] = mapped_column(Integer, default=0)
+    skipped_event_ids: Mapped[list[Any]] = mapped_column(JSON, default=list)
+    # Bounded-retry bookkeeping: the event currently failing projection and
+    # how many consecutive pumps have failed on it (across pump cycles).
+    failing_event_id: Mapped[str | None] = mapped_column(String(64))
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[str] = mapped_column(String(64))

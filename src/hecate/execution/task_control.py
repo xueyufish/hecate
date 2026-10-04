@@ -2,25 +2,24 @@
 
 The application service behind ``/api/tasks``: idempotent submission,
 Task lifecycle projection over the durable seam, control-command
-receipts, run projections, governance-event emission, and the
-pending-reconciliation view. State vocabulary and transition rules come
-exclusively from ``contracts/execution/durable`` — this module never
-invents states.
+receipts, run projections, and the pending-reconciliation view. State
+vocabulary and transition rules come exclusively from
+``contracts/execution/durable`` — this module never invents states.
 
-Dispatch today is **in-process** (the dev binding): ``wait`` executes
-inside the request; non-wait executions run as process-local background
-tasks that survive the HTTP disconnect but not a process restart. The
-durable worker core (worktree A) replaces dispatch behind this surface
-without API changes.
+Dispatch is **durable**: submission persists the input payload on the
+durable task row and hands the task to the durable worker (lease-claimed,
+reconciled across restarts, bounded retries). The execution callback lives
+in :mod:`hecate.execution.task_dispatcher`; this service only triggers it —
+through the worker when one is bound, or inline (same code path minus the
+lease) when no worker is wired, e.g. on the stub binding in tests.
 
-Cancellation is honest about what the platform can enforce. A queued
-task that was never dispatched is genuinely cancelled — the dispatch
-observes the request before starting, skips execution, applies the
-lifecycle transition, and marks the command ``applied``. A running
-inline execution has no cooperative abort channel, so its command stays
-``requested`` with an explicit note; commands against terminal tasks
-are ``rejected``. ``applied`` never appears without a real effect, and
-an HTTP success response never claims it.
+Cancellation is honest about what the platform can enforce. A queued or
+waiting task is genuinely cancelled — the command path CAS-advances the
+lifecycle, so a racing dispatch loses its claim and the receipt is
+``applied``. A running execution has no cooperative abort channel, so its
+command stays ``requested`` with an explicit note; commands against
+terminal tasks are ``rejected``. ``applied`` never appears without a real
+effect, and an HTTP success response never claims it.
 """
 
 from __future__ import annotations
@@ -28,12 +27,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import false, func, select, update
+from sqlalchemy import false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from hecate.contracts.execution.durable import (
@@ -48,7 +46,6 @@ from hecate.contracts.execution.durable import (
     TaskStateRecord,
     canonical_request_digest,
 )
-from hecate.contracts.execution.events import ActorKind, ActorRef
 from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
 from hecate.contracts.execution.references import (
     BackendRef,
@@ -59,15 +56,8 @@ from hecate.contracts.execution.references import (
 )
 from hecate.execution.backend import EventPage
 from hecate.execution.durable import ControlCommandRecorder, DurableTaskStore
-from hecate.execution.entry_events import RunEventMapper
-from hecate.execution.governance_events import (
-    COMMAND_RECORDED,
-    COMMAND_TRANSITIONED,
-    RUN_TERMINAL,
-    TASK_STATE_CHANGED,
-    TASK_SUBMITTED,
-    PlatformEventService,
-)
+from hecate.execution.governance_events import RUN_TERMINAL, PlatformEventService
+from hecate.execution.task_dispatcher import PlatformTaskDispatcher, run_row_ref
 from hecate.execution.task_run_registry import (
     TaskNotFoundError,
     TaskRunRegistry,
@@ -76,10 +66,8 @@ from hecate.execution.task_run_registry import (
 from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AgentDeploymentModel
 from hecate.models.agent_principal import AgentPrincipalModel
-from hecate.models.control_command import ControlCommandModel
 from hecate.models.run import RunModel
 from hecate.models.task import TaskModel
-from hecate.models.task_lifecycle import TaskLifecycleStateModel
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +75,7 @@ PLATFORM_ISSUER = "hecate"
 UNRECORDED_LIFECYCLE = "unrecorded"
 POSTGRES_BACKEND = "postgres"
 _CANCEL_RUNNING_NOTE = (
-    "running inline execution has no cooperative abort channel; "
-    "applied cancellation arrives with the durable worker core (step6 track A)"
+    "running execution has no cooperative abort channel; the command stays requested and the task runs to its outcome"
 )
 
 
@@ -124,57 +111,22 @@ def _expired(expires_at: str | None) -> bool:
     return deadline <= datetime.now(UTC)
 
 
-class _DispatchGuard:
-    """Process-local dispatch state for cancel arbitration.
-
-    Every mutation happens in a no-await critical section, so event-loop
-    atomicity holds: cancellation is either observed before the dispatch
-    starts (the dispatch applies it) or the execution has already begun
-    (the command honestly stays ``requested``).
-    """
-
-    __slots__ = ("cancel_requested", "pending_cancel_command_id", "started")
-
-    def __init__(self) -> None:
-        self.cancel_requested = False
-        self.pending_cancel_command_id: str | None = None
-        self.started = False
-
-
-_guards: dict[uuid.UUID, _DispatchGuard] = {}
-# Workspace attribution for commands under the stub binding (the stub
-# recorder has no table; postgres-mode attribution lives on the row).
-_command_workspaces: dict[str, uuid.UUID] = {}
-# Strong references for fire-and-forget background dispatches (an
-# unreferenced task can be garbage-collected mid-execution).
+# Strong references for fire-and-forget dispatch triggers (an unreferenced
+# task can be garbage-collected mid-execution).
 _background_tasks: set[asyncio.Task[None]] = set()
 
 
-def _spawn_background(coro: Coroutine[Any, Any, None]) -> None:
-    """Schedule one fire-and-forget dispatch, keeping a strong reference.
-
-    Named (and therefore patchable) so tests can hold the dispatch before
-    it starts - the queued-cancel arbitration window is otherwise too
-    narrow to exercise deterministically through the async API.
-    """
+def _spawn_background(coro) -> None:  # noqa: ANN001 — the coroutine type varies by caller
+    """Schedule one fire-and-forget dispatch, keeping a strong reference."""
 
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
 
-def _guard_for(task_id: uuid.UUID) -> _DispatchGuard:
-    return _guards.setdefault(task_id, _DispatchGuard())
-
-
 def task_ref_of(task_id: uuid.UUID | str) -> BackendRef:
     """Platform-issued task reference for one task row."""
     return task_ref(PLATFORM_ISSUER, str(task_id))
-
-
-def run_row_ref(run: RunModel) -> BackendRef:
-    """Platform run-row reference for one execution attempt."""
-    return BackendRef(RefKind.RUN, run.issuer_domain, str(run.id))
 
 
 @dataclass(frozen=True)
@@ -209,6 +161,9 @@ class TaskControlService:
         backend: str = "stub",
         ledger_source: str = "stub",
         session_factory: async_sessionmaker[AsyncSession] | None = None,
+        dispatcher: PlatformTaskDispatcher | None = None,
+        worker: Any | None = None,
+        relay: Any | None = None,
     ) -> None:
         self._db = db
         self._store = store
@@ -216,7 +171,20 @@ class TaskControlService:
         self._backend = backend
         self._ledger_source = ledger_source
         self._session_factory = session_factory
+        self._worker = worker
+        self._relay = relay
         self._registry = TaskRunRegistry(db)
+        if dispatcher is not None:
+            self._dispatcher = dispatcher
+        elif worker is None:
+            # Inline dispatch (stub binding or worker off): the callback must
+            # open its sessions from THIS service's factory — the global one
+            # may point at a different database in tests/embeddings.
+            from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+            self._dispatcher = PlatformTaskDispatcher(store, session_factory)
+        else:
+            self._dispatcher = None
 
     # ------------------------------------------------------------------
     # submission
@@ -234,7 +202,7 @@ class TaskControlService:
         wait: bool = False,
         stream: bool = False,
     ) -> SubmitResult:
-        """Idempotently submit one task; dev dispatch executes it in-process."""
+        """Idempotently submit one task; the durable worker dispatches it."""
         if not goal or not goal.strip():
             raise TaskControlValidationError("goal must be a non-empty string")
         messages = input.get("messages")
@@ -251,27 +219,38 @@ class TaskControlService:
         minted_task, minted_run, engine_session = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         t_ref = task_ref_of(minted_task)
         run_backend_ref = run_ref(deployment.issuer_domain, str(engine_session))
-
-        if idempotency_key:
-            key = IdempotencyKey(
-                key=idempotency_key,
-                subject=str(user_id) if user_id is not None else "anonymous",
-                workspace=str(workspace_id),
-                request_digest=digest,
+        # The input payload rides the durable task row: a restart re-dispatches
+        # from durable state, never from a lost in-process closure.
+        persisted_input = {
+            "goal": goal,
+            "agent_id": str(agent_id),
+            "deployment_id": str(deployment.id),
+            "workspace_id": str(workspace_id),
+            "user_id": str(user_id) if user_id else None,
+            "messages": messages,
+            "model": input.get("model"),
+            "stream": stream,
+        }
+        key = IdempotencyKey(
+            key=idempotency_key or f"auto:{minted_task}",
+            subject=str(user_id) if user_id is not None else "anonymous",
+            workspace=str(workspace_id),
+            request_digest=digest,
+        )
+        try:
+            association: SubmissionAssociation = await asyncio.to_thread(
+                self._store.submit_task,
+                key=key,
+                task_ref=t_ref,
+                run_ref=BackendRef(RefKind.RUN, PLATFORM_ISSUER, str(minted_run)),
+                input_payload=persisted_input,
             )
-            try:
-                association = await asyncio.to_thread(
-                    self._store.record_submission,
-                    key,
-                    t_ref,
-                    BackendRef(RefKind.RUN, PLATFORM_ISSUER, str(minted_run)),
-                )
-            except IdempotencyConflictError as exc:
-                raise SubmissionConflictError(
-                    f"idempotency key {idempotency_key!r} is already registered with a different request digest"
-                ) from exc
-            if association.task_ref != t_ref:
-                return await self._replay_result(workspace_id, association)
+        except IdempotencyConflictError as exc:
+            raise SubmissionConflictError(
+                f"idempotency key {idempotency_key!r} is already registered with a different request digest"
+            ) from exc
+        if association.task_ref != t_ref:
+            return await self._replay_result(workspace_id, association)
 
         chain = await self._identity_chain(workspace_id, agent_id, user_id, deployment)
         try:
@@ -297,58 +276,72 @@ class TaskControlService:
         # independent session per transaction regardless).
         await self._db.commit()
 
-        await self._apply_state(t_ref, TaskLifecycleState.QUEUED, workspace_id=workspace_id)
+        if hasattr(self._store, "attach_workspace"):
+            # Table-backed stores persist workspace attribution for scoped
+            # queries; the stub records it in extra and ignores scoping.
+            await asyncio.to_thread(self._store.attach_workspace, t_ref, workspace_id)
         r_ref = run_row_ref(run)
-        await PlatformEventService(self._db).emit(
-            task_ref=t_ref,
-            run_ref=r_ref,
-            payload_schema_ref=TASK_SUBMITTED,
-            payload={"goal": goal[:512], "agent_id": str(agent_id), "deployment_id": str(deployment.id)},
-            actor=self._actor(user_id),
-            workspace_id=workspace_id,
-        )
-        await self._db.commit()
 
         if wait:
-            outcome = await self._dispatch(
-                db=self._db,
-                task_ref=t_ref,
-                run_ref=r_ref,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                engine_session=engine_session,
-                messages=messages,
-                model=input.get("model"),
-                stream=stream,
-                goal=goal,
-                user_id=user_id,
-            )
-            return SubmitResult(
-                task_ref=t_ref,
-                run_ref=r_ref,
-                lifecycle_state=await self._lifecycle_state(t_ref),
-                replayed=False,
-                result=outcome,
-            )
-        _spawn_background(
-            self._dispatch_background(
-                task_ref=t_ref,
-                run_ref=r_ref,
-                workspace_id=workspace_id,
-                agent_id=agent_id,
-                engine_session=engine_session,
-                messages=messages,
-                model=input.get("model"),
-                stream=stream,
-                goal=goal,
-                user_id=user_id,
-            )
-        )
+            await self._dispatch_now(t_ref)
+            return await self._submit_wait_result(t_ref, r_ref, workspace_id)
+        _spawn_background(self._dispatch_task(t_ref))
         return SubmitResult(
             task_ref=t_ref,
             run_ref=r_ref,
-            lifecycle_state=TaskLifecycleState.QUEUED.value,
+            lifecycle_state=await self._lifecycle_state(t_ref),
             replayed=False,
+        )
+
+    async def _dispatch_now(self, t_ref: BackendRef) -> None:
+        """Dispatch one task synchronously (the ``wait`` submission view)."""
+
+        if self._worker is not None:
+            await self._worker.dispatch_once(t_ref)
+            return
+        record = await asyncio.to_thread(self._store.get_task_state, t_ref)
+        if record is None or record.lifecycle_state is not TaskLifecycleState.QUEUED:
+            return
+        if self._dispatcher is None:
+            raise TaskControlValidationError("no dispatcher bound; cannot execute tasks")
+        await asyncio.to_thread(self._store.apply_task_state, t_ref, TaskLifecycleState.RUNNING)
+        # Inline dispatch runs on this request's session (same DB); the
+        # worker path opens its own sessions instead.
+        await self._dispatcher(t_ref, record, None, db=self._db)
+
+    async def _dispatch_task(self, t_ref: BackendRef) -> None:
+        """Background dispatch trigger; same path as the worker's cycle."""
+
+        try:
+            if self._worker is not None:
+                await self._worker.dispatch_once(t_ref)
+                return
+            await self._dispatch_now(t_ref)
+        except Exception:  # noqa: BLE001 — a background dispatch never crashes the loop
+            logger.exception("background dispatch failed for task %s", t_ref.id)
+
+    async def _submit_wait_result(self, t_ref: BackendRef, r_ref: BackendRef, workspace_id: uuid.UUID) -> SubmitResult:
+        state = await self._lifecycle_state(t_ref)
+        result: dict[str, Any] | None = None
+        if state in (TaskLifecycleState.SUCCEEDED.value, TaskLifecycleState.FAILED.value):
+            # Terminal on return: surface the run projection as the outcome.
+            try:
+                run = await self._registry.get_run(uuid.UUID(r_ref.id), workspace_id)
+                projection = run.projection or {}
+                result = {
+                    "status": projection.get("state", state),
+                    "content": str(projection.get("result_preview") or ""),
+                    "error": projection.get("error"),
+                }
+            except (TaskRunRegistryError, TaskControlNotFoundError):
+                result = None
+        return SubmitResult(
+            task_ref=t_ref,
+            run_ref=r_ref,
+            lifecycle_state=state,
+            replayed=False,
+            result=result,
+            reason=None if result is not None else "wait view returned before a terminal outcome",
         )
 
     async def _replay_result(self, workspace_id: uuid.UUID, association: SubmissionAssociation) -> SubmitResult:
@@ -373,18 +366,24 @@ class TaskControlService:
     # ------------------------------------------------------------------
 
     async def get_task_detail(self, workspace_id: uuid.UUID, task_id: uuid.UUID) -> dict[str, Any]:
-        """Task responsibility record + lifecycle projection + runs."""
+        """Task responsibility record + lifecycle projection + runs (+ wait info)."""
         task = await self._get_task(workspace_id, task_id)
         runs = await self._registry.list_runs_for_task(task.id, workspace_id)
-        return {
+        t_ref = task_ref_of(task.id)
+        record = await asyncio.to_thread(self._store.get_task_state, t_ref)
+        detail: dict[str, Any] = {
             "task_id": str(task.id),
             "goal": task.goal,
             "issuer_domain": task.issuer_domain,
             "workspace_id": str(task.workspace_id),
-            "lifecycle_state": await self._lifecycle_state(task_ref_of(task.id)),
+            "lifecycle_state": record.lifecycle_state.value if record else UNRECORDED_LIFECYCLE,
             "created_at": task.created_at.isoformat() if task.created_at else None,
             "runs": [self._run_summary(run) for run in runs],
         }
+        wait = (record.extra or {}).get("wait") if record else None
+        if wait:
+            detail["wait"] = wait
+        return detail
 
     async def list_tasks(
         self,
@@ -397,15 +396,23 @@ class TaskControlService:
         """Workspace-scoped task list joined with lifecycle projection."""
         base = select(TaskModel).where(TaskModel.workspace_id == workspace_id, TaskModel.deleted.is_(False))
         if state is not None and state != UNRECORDED_LIFECYCLE:
-            lifecycle_rows = await self._db.execute(
-                select(TaskLifecycleStateModel.task_ref_id).where(
-                    TaskLifecycleStateModel.workspace_id == workspace_id,
-                    TaskLifecycleStateModel.lifecycle_state == state,
-                    TaskLifecycleStateModel.deleted.is_(False),
-                )
-            )
-            task_ids = [uuid.UUID(row) for row in lifecycle_rows.scalars()]
-            base = base.where(TaskModel.id.in_(task_ids) if task_ids else false())
+            # Lifecycle states live on the durable task rows; workspace
+            # attribution (set at submit) scopes them to this workspace.
+            try:
+                target = TaskLifecycleState(state)
+            except ValueError as exc:
+                raise TaskControlValidationError(f"unknown lifecycle state {state!r}") from exc
+            records = await asyncio.to_thread(self._store.list_tasks, {target})
+            task_ids = [
+                record.task_ref.id for record in records if str(record.extra.get("workspace_id")) == str(workspace_id)
+            ]
+            parsed: list[uuid.UUID] = []
+            for raw in task_ids:
+                try:
+                    parsed.append(uuid.UUID(raw))
+                except ValueError:
+                    continue
+            base = base.where(TaskModel.id.in_(parsed) if parsed else false())
         count = (await self._db.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
         tasks = (
             (
@@ -500,6 +507,7 @@ class TaskControlService:
         payload_schema_ref: str | None = None,
         expected_revision: int | None = None,
         expires_at: str | None = None,
+        detail_ns: dict[str, Any] | None = None,
     ) -> CommandIssueResult:
         """Record a command and act on what the platform can enforce."""
         task = await self._get_task(workspace_id, task_id)
@@ -518,66 +526,120 @@ class TaskControlService:
             expected_revision=expected_revision,
             payload=dict(payload) if payload else {},
             payload_schema_ref=payload_schema_ref if payload else None,
+            # Workspace attribution rides the record (persisted with the
+            # command row) so scoping works for both bindings uniformly.
+            extra={"workspace_id": str(workspace_id)},
+            detail_ns=dict(detail_ns) if detail_ns else {},
         )
         record = await asyncio.to_thread(self._recorder.record, record)
-        await self._attribute_command(record.command_id, workspace_id)
-        await self._emit_command_event(t_ref, record, workspace_id, CommandState.REQUESTED)
         # Close this session's write transaction before the recorder's own
         # transaction runs — the seam store never shares a transaction with
         # the application session (one independent session per transaction).
         await self._db.commit()
 
         if kind is ControlCommandKind.CANCEL:
-            detail = await self._request_cancel(t_ref, task_id, record, workspace_id)
+            detail = await self._request_cancel(t_ref, record, workspace_id)
+        elif kind is ControlCommandKind.PROVIDE_INPUT:
+            detail = await self._wake_waiting(
+                t_ref, record, workspace_id, expected_state=TaskLifecycleState.WAITING_INPUT, payload=payload or {}
+            )
+        elif kind is ControlCommandKind.RESUME:
+            detail = await self._wake_waiting(
+                t_ref, record, workspace_id, expected_state=TaskLifecycleState.WAITING_APPROVAL, payload=payload or {}
+            )
         else:
-            # pause/resume/provide_input: builtin deployments declare none of
-            # these capabilities — reject explicitly, never fake success.
+            # pause: builtin deployments declare no pause capability —
+            # reject explicitly, never fake success.
             await self._db.commit()
             record = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
-            await self._emit_command_event(t_ref, record, workspace_id, record.state)
-            detail = "builtin deployments declare no pause/resume/provide_input capability"
+            detail = "builtin deployments declare no pause capability"
         refreshed = await asyncio.to_thread(self._recorder.get, record.command_id)
         return CommandIssueResult(record=refreshed or record, detail=detail)
 
-    async def _request_cancel(
-        self, t_ref: BackendRef, task_id: uuid.UUID, record: ControlCommandRecord, workspace_id: uuid.UUID
+    async def _wake_waiting(
+        self,
+        t_ref: BackendRef,
+        record: ControlCommandRecord,
+        workspace_id: uuid.UUID,
+        *,
+        expected_state: TaskLifecycleState,
+        payload: dict[str, Any],
     ) -> str:
+        """Wake a durable wait with the single-use token (revision-CAS consumed)."""
+
+        state = await self._lifecycle_state(t_ref)
+        current = await asyncio.to_thread(self._store.get_task_state, t_ref)
+        wait = (current.extra or {}).get("wait") or {} if current else {}
+        if state != expected_state.value:
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return f"task is {state}, not waiting for {expected_state.value}; wake rejected"
+        # The token rides detail_ns (caller metadata, no payload schema
+        # required); any provided input payload follows the envelope rule.
+        token = str((record.detail_ns or {}).get("wait_token") or "")
+        if not token or token != str(wait.get("wait_token")):
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return "wake token missing or wrong; rejected"
+        if wait.get("consumed"):
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return "wake token already consumed; rejected"
+        if _expired(wait.get("wait_expires_at")):
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return "wake token expired; rejected"
+        wake_payload = dict(payload)
+        base_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
+        merged_input = {**base_input, "provided": wake_payload}
+        try:
+            await asyncio.to_thread(
+                self._store.apply_task_state,
+                t_ref,
+                TaskLifecycleState.QUEUED,
+                expected_revision=current.revision,
+                extra_update={"wait": {**wait, "consumed": True}},
+                input_payload=merged_input,
+            )
+        except (InvalidTaskTransitionError, ValueError):
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return "task moved on concurrently; wake rejected"
+        applied = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
+        logger.info("task %s woken from %s; requeued with provided input", t_ref.id, expected_state.value)
+        return f"wake accepted; task requeued (receipt {applied.state.value})"
+
+    async def _request_cancel(self, t_ref: BackendRef, record: ControlCommandRecord, workspace_id: uuid.UUID) -> str:
         state = await self._lifecycle_state(t_ref)
         if state in (
             TaskLifecycleState.SUCCEEDED.value,
             TaskLifecycleState.FAILED.value,
             TaskLifecycleState.CANCELLED.value,
         ):
-            rejected = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
-            await self._emit_command_event(t_ref, rejected, workspace_id, rejected.state)
+            await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return f"task already terminal ({state}); cancel rejected"
-        guard = _guard_for(task_id)
-        if state == TaskLifecycleState.QUEUED.value and not guard.started and not guard.cancel_requested:
-            # Critical section (no awaits): the dispatch either already saw
-            # started=True or will observe cancel_requested and apply it.
-            guard.cancel_requested = True
-            guard.pending_cancel_command_id = record.command_id
-            return "cancel requested before dispatch; the dispatch applies it and closes the receipt"
-        guard.cancel_requested = True
+        if state in (
+            TaskLifecycleState.QUEUED.value,
+            TaskLifecycleState.WAITING_INPUT.value,
+            TaskLifecycleState.WAITING_APPROVAL.value,
+        ):
+            # Nothing is executing (or the wait can be abandoned): the CAS
+            # on the lifecycle revision makes the cancel real. A dispatch
+            # that raced the cancel loses its claim and skips.
+            current = await asyncio.to_thread(self._store.get_task_state, t_ref)
+            try:
+                await asyncio.to_thread(
+                    self._store.apply_task_state,
+                    t_ref,
+                    TaskLifecycleState.CANCELLED,
+                    expected_revision=current.revision if current else None,
+                )
+            except (InvalidTaskTransitionError, ValueError):
+                return "dispatch raced the cancel; the command stays requested"
+            applied = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
+            return f"cancel applied before dispatch (receipt {applied.state.value})"
+        await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REQUESTED)
         return _CANCEL_RUNNING_NOTE
 
     async def get_command(self, workspace_id: uuid.UUID, command_id: str) -> ControlCommandRecord:
         """Read one command receipt with workspace scoping and lazy expiry."""
-        if self._backend == POSTGRES_BACKEND:
-            row = (
-                await self._db.execute(
-                    select(ControlCommandModel).where(
-                        ControlCommandModel.command_id == command_id,
-                        ControlCommandModel.deleted.is_(False),
-                    )
-                )
-            ).scalar_one_or_none()
-            if row is None or row.workspace_id != workspace_id:
-                raise TaskControlNotFoundError(f"command {command_id} not found in workspace")
-        elif _command_workspaces.get(command_id) != workspace_id:
-            raise TaskControlNotFoundError(f"command {command_id} not found in workspace")
         record = await asyncio.to_thread(self._recorder.get, command_id)
-        if record is None:
+        if record is None or str(record.extra.get("workspace_id")) != str(workspace_id):
             raise TaskControlNotFoundError(f"command {command_id} not found in workspace")
         if record.state is CommandState.REQUESTED and _expired(record.expires_at):
             record = await asyncio.to_thread(self._recorder.transition, command_id, CommandState.EXPIRED)
@@ -589,38 +651,22 @@ class TaskControlService:
 
     async def pending_reconciliation(self, workspace_id: uuid.UUID) -> dict[str, Any]:
         """Read-only view of unconverged facts (lazy command expiry aside)."""
-        rows = (
-            (
-                await self._db.execute(
-                    select(TaskLifecycleStateModel)
-                    .where(
-                        TaskLifecycleStateModel.workspace_id == workspace_id,
-                        TaskLifecycleStateModel.lifecycle_state == TaskLifecycleState.RECONCILIATION_REQUIRED.value,
-                        TaskLifecycleStateModel.deleted.is_(False),
-                    )
-                    .order_by(TaskLifecycleStateModel.updated_at)
-                )
-            )
-            .scalars()
-            .all()
-        )
+        records = await asyncio.to_thread(self._store.list_tasks, {TaskLifecycleState.RECONCILIATION_REQUIRED})
         tasks = [
             {
-                "task_ref": {"issuer_domain": row.issuer_domain, "id": row.task_ref_id},
-                "revision": row.revision,
-                "recorded_at": row.recorded_at,
+                "task_ref": record.task_ref.to_dict(),
+                "revision": record.revision,
+                "recorded_at": record.recorded_at,
+                "last_error": record.extra.get("last_error"),
+                "dispatch_attempts": record.extra.get("dispatch_attempts"),
             }
-            for row in rows
+            for record in records
+            if str((record.extra or {}).get("workspace_id")) == str(workspace_id)
         ]
         expired_commands: list[dict[str, Any]] = []
-        for command_id, attributed_ws in list(_command_workspaces.items()):
-            if attributed_ws != workspace_id:
-                continue
-            record = await asyncio.to_thread(self._recorder.get, command_id)
-            if record is None or record.state is not CommandState.REQUESTED:
-                continue
+        for record in await asyncio.to_thread(self._recorder.list_pending_commands, str(workspace_id)):
             if _expired(record.expires_at):
-                record = await asyncio.to_thread(self._recorder.transition, command_id, CommandState.EXPIRED)
+                record = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)
                 expired_commands.append(
                     {
                         "command_id": record.command_id,
@@ -630,260 +676,50 @@ class TaskControlService:
                         "task_ref": record.task_ref.to_dict(),
                     }
                 )
+        actions = await self._reconciliation_actions(workspace_id, tasks)
+        relay_status = None
+        if self._relay is not None:
+            try:
+                relay_status = await asyncio.to_thread(self._relay.status)
+            except Exception:  # noqa: BLE001 — a relay status read never breaks the view
+                logger.exception("relay status read failed")
         return {
             "workspace_id": str(workspace_id),
             "tasks": tasks,
             "commands": expired_commands,
-            # The action ledger has no production implementation yet (step6
-            # track A); an empty list is a labeled absence, not a scan result.
-            "actions": [],
+            "actions": actions,
             "ledger_source": self._ledger_source,
+            "event_relay": relay_status,
         }
 
-    # ------------------------------------------------------------------
-    # dispatch (dev mode: in-process)
-    # ------------------------------------------------------------------
+    async def _reconciliation_actions(
+        self, workspace_id: uuid.UUID, tasks: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Per-action verdicts for reconciliation tasks (core ledger binding).
 
-    async def _dispatch_background(
-        self,
-        *,
-        task_ref: BackendRef,
-        run_ref: BackendRef,
-        workspace_id: uuid.UUID,
-        agent_id: uuid.UUID,
-        engine_session: uuid.UUID,
-        messages: list[dict[str, Any]],
-        model: str | None,
-        stream: bool,
-        goal: str,
-        user_id: uuid.UUID | None,
-    ) -> None:
-        from hecate.core.database import async_session_factory
-
-        factory = self._session_factory or async_session_factory
-        try:
-            async with factory() as db:
-                await self._dispatch(
-                    db=db,
-                    task_ref=task_ref,
-                    run_ref=run_ref,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    engine_session=engine_session,
-                    messages=messages,
-                    model=model,
-                    stream=stream,
-                    goal=goal,
-                    user_id=user_id,
-                )
-        except Exception:  # noqa: BLE001 — a background dispatch never crashes the loop
-            logger.exception("background dispatch failed for task %s", task_ref.id)
-
-    async def _dispatch(
-        self,
-        *,
-        db: AsyncSession,
-        task_ref: BackendRef,
-        run_ref: BackendRef,
-        workspace_id: uuid.UUID,
-        agent_id: uuid.UUID,
-        engine_session: uuid.UUID,
-        messages: list[dict[str, Any]],
-        model: str | None,
-        stream: bool,
-        goal: str,
-        user_id: uuid.UUID | None,
-    ) -> dict[str, Any]:
-        task_id = uuid.UUID(task_ref.id)
-        guard = _guard_for(task_id)
-        guard.started = True
-        try:
-            if guard.cancel_requested:
-                # Cancel won the race before any execution began — a real effect.
-                await self._apply_state(task_ref, TaskLifecycleState.CANCELLED, workspace_id=workspace_id)
-                await self._emit_state_event(db, task_ref, run_ref, workspace_id, TaskLifecycleState.CANCELLED)
-                # Close this session's writes before the recorder's own
-                # transaction applies the command (no shared transactions).
-                await db.commit()
-                if guard.pending_cancel_command_id:
-                    applied = await asyncio.to_thread(
-                        self._recorder.transition, guard.pending_cancel_command_id, CommandState.APPLIED
-                    )
-                    await self._emit_command_event(task_ref, applied, workspace_id, applied.state)
-                    await db.commit()
-                return {"status": "cancelled", "content": ""}
-
-            await self._apply_state(task_ref, TaskLifecycleState.RUNNING, workspace_id=workspace_id)
-            await self._emit_state_event(db, task_ref, run_ref, workspace_id, TaskLifecycleState.RUNNING)
-            await db.commit()
-
-            outcome: dict[str, Any] = {"status": "failed", "content": "", "error": "dispatch produced no result"}
-            try:
-                content = await self._execute_via_entry(
-                    db,
-                    workspace_id=workspace_id,
-                    agent_id=agent_id,
-                    engine_session=engine_session,
-                    messages=messages,
-                    model=model,
-                    stream=stream,
-                    goal=goal,
-                    user_id=user_id,
-                    task_ref=task_ref,
-                    run_ref=run_ref,
-                )
-                outcome = {"status": "succeeded", "content": content}
-            except Exception as exc:  # noqa: BLE001 — an execution failure maps to task failure
-                logger.warning("task %s execution failed: %s", task_ref.id, exc)
-                outcome = {"status": "failed", "content": "", "error": str(exc)}
-
-            terminal = TaskLifecycleState.SUCCEEDED if outcome["status"] == "succeeded" else TaskLifecycleState.FAILED
-            # Stream-mode executions leave uncommitted event rows on this
-            # session; close them before the seam store's own transaction.
-            await db.commit()
-            await self._apply_state(task_ref, terminal, workspace_id=workspace_id)
-            await self._emit_state_event(db, task_ref, run_ref, workspace_id, terminal)
-            try:
-                run = await TaskRunRegistry(db).get_run(uuid.UUID(run_ref.id), workspace_id)
-                await TaskRunRegistry(db).update_projection(
-                    run.id,
-                    workspace_id,
-                    projection={
-                        "state": outcome["status"],
-                        "error": outcome.get("error"),
-                        "result_preview": (outcome.get("content") or "")[:2000],
-                    },
-                )
-            except TaskRunRegistryError:
-                logger.warning("task %s run projection update skipped", task_ref.id)
-            await PlatformEventService(db).emit(
-                task_ref=task_ref,
-                run_ref=run_ref,
-                payload_schema_ref=RUN_TERMINAL,
-                payload={"status": outcome["status"], "error": outcome.get("error")},
-                actor=ActorRef(kind=ActorKind.PLATFORM, id="task-control"),
-                workspace_id=workspace_id,
-            )
-            await db.commit()
-            return outcome
-        finally:
-            # Terminal guards never arbitrate again; cancel on a terminal task
-            # is rejected by state, so dropping the guard is safe.
-            if await self._lifecycle_state(task_ref) in (
-                TaskLifecycleState.SUCCEEDED.value,
-                TaskLifecycleState.FAILED.value,
-                TaskLifecycleState.CANCELLED.value,
-            ):
-                _guards.pop(task_id, None)
-
-    async def _execute_via_entry(
-        self,
-        db: AsyncSession,
-        *,
-        workspace_id: uuid.UUID,
-        agent_id: uuid.UUID,
-        engine_session: uuid.UUID,
-        messages: list[dict[str, Any]],
-        model: str | None,
-        stream: bool,
-        goal: str,
-        user_id: uuid.UUID | None,
-        task_ref: BackendRef,
-        run_ref: BackendRef,
-    ) -> str:
-        """Run one execution through the platform entry service.
-
-        Mirrors the scheduled agent executor's assembly (shared event
-        store, agent tool surface, guardrail bundle) and correlates to the
-        pre-created task via ``existing_task_id``; the pre-created run row
-        carries the engine session as its backend reference. Stream mode
-        persists the mapped envelopes so the run's event stream is durable.
+        The stub ledger carries no rows and returns an empty list — a
+        labeled absence, not a scan result.
         """
-        from hecate_llm.service import llm_service
 
-        from hecate.core.composition.entry_assembly import (
-            build_tool_registry,
-            get_shared_event_store,
-            load_agent_tools,
-        )
-        from hecate.core.composition.guardrail_platform import assemble_guardrails
-        from hecate.core.composition.runtime_port_adapter import create_runtime_port
-        from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
-
-        agent = await db.get(AgentModel, agent_id)
-        if agent is None:
-            raise TaskControlValidationError(f"agent {agent_id} no longer resolves")
-
-        event_store = None
-        tool_registry = None
-        effective_tools: list[dict[str, Any]] = []
-        bundle = None
-        if agent.tools:
-            event_store = get_shared_event_store()
-            tool_registry = build_tool_registry(db, workspace_id=workspace_id)
-            effective_tools = await load_agent_tools(db, agent.tools or [], workspace_id=workspace_id)
-            if effective_tools:
-                bundle = await assemble_guardrails(
-                    db,
-                    workspace_id=workspace_id,
-                    agent_id=agent.id,
-                    guardrail_config=getattr(agent, "guardrail_config", None),
-                    event_store=event_store,
-                    session_id=None,
-                    dlp_scanner=None,
-                )
-
-        port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
-        entry = EntryExecutionService(
-            port=port,
-            entry_name="task-control",
-            db=db,
-            event_store=event_store,
-            access_policy=bundle.access_policy if bundle else None,
-            approval_callback=bundle.approval_callback if bundle else None,
-            tool_policy_rules=bundle.rules if bundle else None,
-            middleware_chains=bundle.middleware_chains if bundle else None,
-            denial_tracker=bundle.denial_tracker if bundle else None,
-        )
-        correlation = CorrelationInput(
-            workspace_id=workspace_id,
-            agent_id=agent.id,
-            user_id=user_id,
-            session_id=engine_session,
-            goal=goal[:200],
-            existing_task_id=uuid.UUID(task_ref.id),
-        )
-        model_name = model or (
-            agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"
-        )
-        outcome = await entry.execute(
-            agent_mode="chat",
-            messages=messages,
-            model=model_name,
-            tools=effective_tools or None,
-            stream=stream,
-            session_id=engine_session,
-            agent_id=agent.id,
-            workspace_id=workspace_id,
-            correlation=correlation,
-        )
-        if stream:
-            result_gen = outcome.result
-            if isinstance(result_gen, dict):
-                return str(result_gen.get("content", "") or "")
-            mapper = RunEventMapper(task_ref, run_ref)
-            events = PlatformEventService(db)
-            content_parts: list[str] = []
-            async for raw in result_gen:
-                envelope = mapper.map_stream_event(raw if isinstance(raw, dict) else {"type": "raw"})
-                await events.append_resequenced(envelope, workspace_id=workspace_id)
-                if envelope.payload.get("type") == "message" and envelope.payload.get("content"):
-                    content_parts.append(str(envelope.payload["content"]))
-            return "".join(content_parts)
-        result = outcome.result
-        if not isinstance(result, dict):
-            raise TaskControlValidationError(f"unexpected entry result type {type(result)}")
-        return str(result.get("content", "") or "")
+        if not tasks or self._backend != POSTGRES_BACKEND or not hasattr(self._store, "list_run_actions"):
+            return []
+        actions: list[dict[str, Any]] = []
+        for entry in tasks:
+            try:
+                task_id = uuid.UUID(entry["task_ref"]["id"])
+            except (KeyError, ValueError):
+                continue
+            try:
+                task = await self._get_task(workspace_id, task_id)
+            except TaskControlNotFoundError:
+                continue  # foreign/unresolvable task refs are not surfaced
+            runs = await self._registry.list_runs_for_task(task.id, workspace_id)
+            if not runs:
+                continue
+            run_actions = await asyncio.to_thread(self._store.list_run_actions, run_row_ref(runs[-1]))
+            for action in run_actions:
+                actions.append({"task_id": str(task.id), **action})
+        return actions
 
     # ------------------------------------------------------------------
     # helpers
@@ -977,69 +813,9 @@ class TaskControlService:
     async def _lifecycle_map(self, workspace_id: uuid.UUID, task_ids: list[str]) -> dict[str, str]:
         if not task_ids:
             return {}
-        rows = (
-            (
-                await self._db.execute(
-                    select(TaskLifecycleStateModel).where(
-                        TaskLifecycleStateModel.workspace_id == workspace_id,
-                        TaskLifecycleStateModel.task_ref_id.in_(task_ids),
-                        TaskLifecycleStateModel.deleted.is_(False),
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        return {row.task_ref_id: row.lifecycle_state for row in rows}
-
-    async def _attribute_command(self, command_id: str, workspace_id: uuid.UUID) -> None:
-        if self._backend == POSTGRES_BACKEND:
-            await self._db.execute(
-                update(ControlCommandModel)
-                .where(ControlCommandModel.command_id == command_id)
-                .values(workspace_id=workspace_id)
-            )
-            await self._db.flush()
-        else:
-            _command_workspaces[command_id] = workspace_id
-
-    async def _emit_state_event(
-        self,
-        db: AsyncSession,
-        task_ref: BackendRef,
-        run_ref: BackendRef,
-        workspace_id: uuid.UUID,
-        state: TaskLifecycleState,
-    ) -> None:
-        """One governance event per lifecycle transition (dispatch-side)."""
-        await PlatformEventService(db).emit(
-            task_ref=task_ref,
-            run_ref=run_ref,
-            payload_schema_ref=TASK_STATE_CHANGED,
-            payload={"lifecycle_state": state.value},
-            actor=ActorRef(kind=ActorKind.PLATFORM, id="task-control"),
-            workspace_id=workspace_id,
-        )
-
-    async def _emit_command_event(
-        self,
-        task_ref: BackendRef,
-        record: ControlCommandRecord,
-        workspace_id: uuid.UUID,
-        state: CommandState,
-    ) -> None:
-        run_ref = record.run_ref or BackendRef(RefKind.RUN, task_ref.issuer_domain, "unassigned")
-        await PlatformEventService(self._db).emit(
-            task_ref=task_ref,
-            run_ref=run_ref,
-            payload_schema_ref=COMMAND_RECORDED if state is CommandState.REQUESTED else COMMAND_TRANSITIONED,
-            payload={"command_id": record.command_id, "kind": record.kind.value, "state": state.value},
-            actor=ActorRef(kind=ActorKind.SERVICE, id=record.issuer),
-            workspace_id=workspace_id,
-        )
-
-    @staticmethod
-    def _actor(user_id: uuid.UUID | None) -> ActorRef:
-        if user_id is not None:
-            return ActorRef(kind=ActorKind.HUMAN, id=str(user_id))
-        return ActorRef(kind=ActorKind.SERVICE, id="task-control")
+        states: dict[str, str] = {}
+        for raw in task_ids:
+            record = await asyncio.to_thread(self._store.get_task_state, task_ref_of(raw))
+            if record is not None:
+                states[raw] = record.lifecycle_state.value
+        return states

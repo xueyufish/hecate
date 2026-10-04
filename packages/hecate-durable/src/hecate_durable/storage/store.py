@@ -138,13 +138,16 @@ def _association_of(row: SubmissionRow) -> SubmissionAssociation:
 
 
 def _task_record_of(row: TaskStateRow) -> TaskStateRecord:
+    extra = dict(row.extra or {})
+    if row.workspace_id is not None:
+        extra.setdefault("workspace_id", row.workspace_id)
     return TaskStateRecord(
         task_ref=_task_ref(row.task_issuer, row.task_id),
         lifecycle_state=TaskLifecycleState(row.lifecycle_state),
         revision=row.revision,
         recorded_at=row.recorded_at or _EPOCH_SENTINEL,
         writer_source=row.writer_source,
-        extra=dict(row.extra or {}),
+        extra=extra,
     )
 
 
@@ -238,6 +241,12 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     def _session(self) -> Session:
         return self._session_factory()
+
+    @property
+    def session_factory(self) -> sessionmaker[Session]:
+        """The store's session factory (worker/relay run their own sessions)."""
+
+        return self._session_factory
 
     # -- DurableTaskStore -----------------------------------------------------
 
@@ -358,6 +367,8 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         expected_revision: int | None = None,
         reconciled: bool = False,
         recorded_at: str = "",
+        extra_update: dict[str, Any] | None = None,
+        input_payload: dict[str, Any] | None = None,
     ) -> TaskStateRecord:
         recorded = recorded_at or self._clock()
         with self._session() as session, session.begin():
@@ -382,12 +393,19 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                         lifecycle_state=target.value,
                         revision=revision,
                         recorded_at=recorded,
+                        writer_source="submit",
                         created_at=recorded,
                         updated_at=recorded,
+                        extra=dict(extra_update or {}),
+                        input_payload=input_payload,
                     )
                 )
                 record = TaskStateRecord(
-                    task_ref=task_ref, lifecycle_state=target, revision=revision, recorded_at=recorded
+                    task_ref=task_ref,
+                    lifecycle_state=target,
+                    revision=revision,
+                    recorded_at=recorded,
+                    extra=dict(extra_update or {}),
                 )
             else:
                 current = TaskLifecycleState(row.lifecycle_state)
@@ -399,8 +417,16 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 row.revision = revision
                 row.recorded_at = recorded
                 row.updated_at = recorded
+                if extra_update:
+                    row.extra = {**(row.extra or {}), **extra_update}
+                if input_payload is not None:
+                    row.input_payload = input_payload
                 record = TaskStateRecord(
-                    task_ref=task_ref, lifecycle_state=target, revision=revision, recorded_at=recorded
+                    task_ref=task_ref,
+                    lifecycle_state=target,
+                    revision=revision,
+                    recorded_at=recorded,
+                    extra=dict(row.extra or {}),
                 )
             run_ref = self._run_linkage(session, task_ref)
             if run_ref is not None:
@@ -430,6 +456,19 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         with self._session() as session:
             row = session.get(TaskStateRow, (task_ref.issuer_domain, task_ref.id))
             return None if row is None else _task_record_of(row)
+
+    def attach_workspace(self, task_ref: BackendRef, workspace_id: Any) -> None:
+        """Platform attribution for scoped queries; the standalone host ignores it."""
+
+        with self._session() as session, session.begin():
+            session.execute(
+                update(TaskStateRow)
+                .where(
+                    TaskStateRow.task_issuer == task_ref.issuer_domain,
+                    TaskStateRow.task_id == task_ref.id,
+                )
+                .values(workspace_id=str(workspace_id))
+            )
 
     def get_task_input(self, task_ref: BackendRef) -> dict[str, Any] | None:
         """Host-written replay input for one task (or ``None``)."""
@@ -468,6 +507,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                             task_id=command.task_ref.id,
                             issued_at=command.issued_at,
                             state=command.state.value,
+                            workspace_id=command.extra.get("workspace_id"),
                             run_issuer=command.run_ref.issuer_domain if command.run_ref else None,
                             run_id=command.run_ref.id if command.run_ref else None,
                             expires_at=command.expires_at,
@@ -528,6 +568,22 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         with self._session() as session:
             row = session.get(CommandRow, command_id)
             return None if row is None else _command_of(row)
+
+    def list_pending_commands(self, workspace_id: str) -> list[ControlCommandRecord]:
+        """Workspace-scoped ``requested`` receipts (lazy-expiry sweep input)."""
+
+        with self._session() as session:
+            rows = (
+                session.execute(
+                    select(CommandRow).where(
+                        CommandRow.workspace_id == str(workspace_id),
+                        CommandRow.state == CommandState.REQUESTED.value,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            return [_command_of(row) for row in rows]
 
     # -- ActionLedger ----------------------------------------------------------
 
@@ -884,6 +940,36 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     def read_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100) -> EventPage:
         return self.events.read(run_ref, cursor=cursor, limit=limit)
+
+    def emit_event(
+        self,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+        correlation_id: str | None = None,
+        causation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Append one governance event to the outbox on its own transaction.
+
+        The host-facing emission path for events that are not a side effect
+        of a state write (e.g. ``run_terminal`` from a dispatcher): same
+        sequence allocation, validation, and dedup rules as the in-transaction
+        emissions, just on its own short-lived session.
+        """
+
+        with self._session() as session, session.begin():
+            envelope = self.events.emit(
+                session,
+                task_ref=task_ref,
+                run_ref=run_ref,
+                event_type=event_type,
+                payload=payload,
+                correlation_id=correlation_id,
+                causation_id=causation_id,
+            )
+        return envelope.to_dict()
 
     def run_for_task(self, task_ref: BackendRef) -> BackendRef | None:
         """The run linked to a task at submission time, when known."""
