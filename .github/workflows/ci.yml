@@ -83,15 +83,16 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # Deliberately the plain sequential run that PRs #103–#107 passed with
-    # (~16 min wall). Do NOT add pytest-xdist (-n auto), matrix sharding, or
-    # a concurrency/cancel-in-progress block here without a separate infra PR:
-    # each of those was tried on PR #109 and caused cascading failures —
-    # cancel-in-progress killed in-flight runs on every follow-up push, and
-    # matrix.shard detached this job from the branch-protection `test`
-    # required check. timeout-minutes 60 = ~4x historical wall time; a single
-    # hanging test surfaces as a clear FAIL via pytest-timeout instead of a
-    # silent job cancellation.
+    # Parallel pytest via xdist inside this single job (supersedes the plain
+    # sequential run that PRs #103–#107 passed with, ~16 min at the then-suite
+    # size). The job name `test` is unchanged, so the branch-protection
+    # required check keeps working — the PR #109 failure mode where
+    # matrix.shard detached this job from branch protection does not apply.
+    # cancel-in-progress remains deliberately absent (PR #109: it killed
+    # in-flight runs on every follow-up push). `--dist loadfile` keeps each
+    # test file on one worker so module-level test state stays intact.
+    # timeout-minutes 60 stays as the backstop; tighten it once the parallel
+    # wall time has settled across a few merge-queue runs.
     #
     # Docs-only gating (needs: changes + job-level if) is safe for the
     # required check: a job skipped via `if` reports Success and satisfies
@@ -122,7 +123,7 @@ jobs:
           # npm ci stays here (not only in pilot-ts): the live_backend fixture
           # compiles the pilot with tsc for the B-side interop tests.
           npm ci --prefix pilots/execution-backend-ts
-          uv run pytest tests/ -q --timeout=600 -p no:cacheprovider
+          uv run pytest tests/ -q --timeout=600 -n auto --dist loadfile -p no:cacheprovider
           uv run pytest packages/hecate-durable/tests/ -q --timeout=120 -p no:cacheprovider
           uv run pytest packages/hecate-runner/tests/ -q --timeout=120 -p no:cacheprovider
 
