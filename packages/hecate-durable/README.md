@@ -63,8 +63,9 @@ The `hecate-runner` durable profile consumes this package; see
 ```python
 from hecate_durable.worker import DurableWorker, OutboxRelay
 
-async def dispatcher(task_ref, record, lease) -> None:
-    ...  # drive one task to terminal/waiting via store.apply_task_state
+
+async def dispatcher(task_ref, record, lease) -> None: ...  # drive to terminal/waiting
+
 
 worker = DurableWorker(store, dispatcher, leases=store.leases)
 relay = OutboxRelay(store.session_factory, project_event, relay_key="platform")
