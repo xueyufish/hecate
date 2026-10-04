@@ -24,13 +24,13 @@ async def viewer_role_client() -> AsyncGenerator[AsyncClient, None]:
     """An httpx.AsyncClient wired to the FastAPI app with an injected
     AuthContext reporting VIEWER role and a fresh workspace. Bypasses the
     JWT membership gate so the role decision is the only variable.
+
+    The autouse ``setup_database`` fixture handles schema setup and row
+    cleanup; this fixture only injects the role-scoped auth context.
     """
     from hecate.core.config import settings
     from hecate.main import app
-    from tests.conftest import Base, test_engine, test_session_factory
-
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    from tests.conftest import test_session_factory
 
     workspace_id = uuid.uuid4()
     async with test_session_factory() as session:
@@ -71,19 +71,18 @@ async def viewer_role_client() -> AsyncGenerator[AsyncClient, None]:
             yield ac
         finally:
             app.dependency_overrides.clear()
-            async with test_engine.begin() as conn:
-                await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest.fixture
 async def editor_role_client() -> AsyncGenerator[AsyncClient, None]:
-    """Companion to viewer_role_client: injected AuthContext reports EDITOR."""
+    """Companion to viewer_role_client: injected AuthContext reports EDITOR.
+
+    Like viewer_role_client, schema setup and row cleanup are left to the
+    autouse ``setup_database`` fixture.
+    """
     from hecate.core.config import settings
     from hecate.main import app
-    from tests.conftest import Base, test_engine, test_session_factory
-
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    from tests.conftest import test_session_factory
 
     workspace_id = uuid.uuid4()
     async with test_session_factory() as session:
@@ -124,8 +123,6 @@ async def editor_role_client() -> AsyncGenerator[AsyncClient, None]:
             yield ac
         finally:
             app.dependency_overrides.clear()
-            async with test_engine.begin() as conn:
-                await conn.run_sync(Base.metadata.drop_all)
 
 
 @pytest.mark.parametrize(

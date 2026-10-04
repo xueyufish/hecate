@@ -7,8 +7,10 @@ Provides a self-contained test infrastructure that keeps each test isolated:
 - **Session-scoped event loop** — ``asyncio_default_*_loop_scope = "session"``
   in ``pyproject.toml`` keeps every async test and fixture on one loop per
   worker, matching the session-scoped engine and session factory below.
-- **Per-test database lifecycle** — ``setup_database`` creates all tables
-  before each test and drops them afterwards, guaranteeing a clean schema.
+- **Session-scoped schema, per-test row cleanup** — ``_create_schema_once``
+  builds all tables once per pytest session (per xdist worker);
+  ``setup_database`` then clears every table's rows before each test, which
+  is far cheaper than a per-test create/drop DDL cycle across ~5,600 tests.
 - **Rollback-after-yield session** so database mutations never leak between
   tests.
 - **ASGI-backed HTTP client** that exercises the FastAPI application stack
@@ -90,20 +92,31 @@ test_session_factory = async_sessionmaker(
 DEFAULT_WORKSPACE_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
 
-@pytest_asyncio.fixture(autouse=True)
-async def setup_database():
-    """Create all tables before the test and drop them afterwards.
+@pytest_asyncio.fixture(autouse=True, scope="session")
+async def _create_schema_once() -> AsyncGenerator[None, None]:
+    """Create the full schema once per pytest session (one per xdist worker).
 
-    Using ``autouse=True`` ensures every test starts with a pristine schema,
-    even if the test author forgets to request the fixture explicitly.
-    The ``create_all`` / ``drop_all`` cycle runs inside a transaction via
-    ``engine.begin()`` so the DDL is applied and rolled back cleanly.
+    Must run on the session event loop (the only loop this process uses) so
+    the engine's aiosqlite connections stay on a live loop.
     """
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
+    await test_engine.dispose()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def setup_database() -> AsyncGenerator[None, None]:
+    """Clear every table's rows before the test, children before parents.
+
+    Row-level ``DELETE`` replaces the old per-test ``create_all``/``drop_all``
+    cycle, whose DDL dominated suite time. Cleanup runs before the test (not
+    after) so the next test starts pristine even if a predecessor crashed.
+    """
     async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        for table in reversed(Base.metadata.sorted_tables):
+            await conn.execute(table.delete())
+    yield
 
 
 @pytest_asyncio.fixture
@@ -235,9 +248,6 @@ async def client(auth_context: AuthContext) -> AsyncGenerator[AsyncClient, None]
     from hecate.core.deps_workspace import get_auth_context
     from hecate.main import app
 
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with test_session_factory() as session:
             try:
@@ -274,9 +284,6 @@ async def client(auth_context: AuthContext) -> AsyncGenerator[AsyncClient, None]
 
     app.dependency_overrides.clear()
 
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
 
 # Raw platform admin bootstrap token used by auth-gate tests.
 PLATFORM_ADMIN_TEST_TOKEN = "platform-admin-test-token"
@@ -292,9 +299,6 @@ async def anonymous_client() -> AsyncGenerator[AsyncClient, None]:
     """
     from hecate.core.database import get_db
     from hecate.main import app
-
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with test_session_factory() as session:
@@ -352,9 +356,6 @@ async def admin_client(auth_context: AuthContext) -> AsyncGenerator[AsyncClient,
     from hecate.core.deps import get_current_user_id, verify_api_key
     from hecate.core.deps_workspace import get_auth_context, require_platform_admin
     from hecate.main import app
-
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with test_session_factory() as session:
