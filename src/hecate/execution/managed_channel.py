@@ -234,9 +234,12 @@ class ManagedDeliveryService:
         stmt = select(ManagedDeliveryModel).where(
             ManagedDeliveryModel.enrollment_id == enrollment_id,
             ManagedDeliveryModel.deleted.is_(False),
+            ManagedDeliveryModel.accepted_refs.is_(None),
         )
-        if cursor:
-            stmt = stmt.where(ManagedDeliveryModel.created_at > _parse_cursor(cursor))
+        # The timestamp cursor is advisory. An unacknowledged intent must
+        # remain deliverable even after response loss or a late DB commit.
+        if cursor and cursor != "0":
+            _parse_cursor(cursor)
         return list(
             (
                 await self._session.execute(
@@ -355,19 +358,45 @@ class ManagedProjectionService:
             raise ManagedChannelError("no accepted delivery maps the host's local task reference")
 
         projected, skipped = 0, 0
+        fresh: list[dict[str, Any]] = []
         events = PlatformEventService(self._session)
         platform_run_id = uuid.UUID(delivery.run_ref["id"]) if delivery.run_ref.get("id") else None
         for envelope in envelopes:
+            if envelope.get("task_ref") != delivery.accepted_refs.get("task_ref") or envelope.get(
+                "run_ref"
+            ) != delivery.accepted_refs.get("run_ref"):
+                raise ManagedChannelError("event task/run does not match the accepted delivery")
+            from hecate.contracts.execution.events import EventEnvelope, validate_governance_event
+
+            try:
+                validate_governance_event(EventEnvelope.from_dict(envelope))
+            except (ValueError, KeyError, TypeError) as exc:
+                raise ManagedChannelError("invalid governance event envelope") from exc
             if envelope.get("event_id") is None:
                 skipped += 1
                 continue
-            if await events.find_by_event_id(envelope["event_id"]) is not None:
+            stored = _rebind_envelope(envelope, platform_run_id=platform_run_id)
+            existing = await events.find_by_event_id(envelope["event_id"])
+            if existing is not None:
+                expected_digest = (existing.extra.get("detail_ns") or {}).get("host_origin", {}).get("event_digest")
+                if (
+                    existing.run_ref != stored.run_ref
+                    or existing.task_ref != stored.task_ref
+                    or existing.payload != stored.payload
+                    or existing.actor != stored.actor
+                    or existing.source != stored.source
+                    or (
+                        expected_digest is not None
+                        and expected_digest != stored.extra["detail_ns"]["host_origin"]["event_digest"]
+                    )
+                ):
+                    raise ManagedChannelError("event_id replay conflicts with recorded host facts")
                 skipped += 1
                 continue
-            stored = _rebind_envelope(envelope, platform_run_id=platform_run_id)
             await events.append_resequenced(stored, workspace_id=host.workspace_id)
+            fresh.append(envelope)
             projected += 1
-        await self._update_run_projection(host, local_task_ref, envelopes)
+        await self._update_run_projection(host, local_task_ref, fresh)
         await self._session.commit()
         return {"projected": projected, "skipped_duplicates": skipped}
 
@@ -380,36 +409,46 @@ class ManagedProjectionService:
         if delivery is None or delivery.run_ref.get("id") is None:
             return
         from hecate.execution.task_run_registry import TaskRunRegistry
+        from hecate.models.run import RunModel
 
-        latest_state = None
-        terminal = None
-        for envelope in envelopes:
-            event_type = (envelope.get("payload") or {}).get("event_type")
-            if event_type == "task_state":
-                latest_state = envelope["payload"].get("state")
-            elif event_type == "run_terminal":
-                terminal = envelope["payload"]
-        projection: dict[str, Any] = {}
-        if terminal is not None:
-            projection = {
-                "state": terminal.get("status", "unknown"),
-                "error": terminal.get("error"),
-                "result_preview": str(terminal.get("content") or "")[:2000]
-                if terminal.get("content") is not None
-                else None,
-            }
-        elif latest_state is not None:
-            projection = {"state": latest_state}
-        if not projection:
-            return
-        from hecate.execution.task_run_registry import TaskNotFoundError
-
-        try:
-            run = await TaskRunRegistry(self._session).get_run(uuid.UUID(delivery.run_ref["id"]), host.workspace_id)
-        except TaskNotFoundError:
+        run = (
+            await self._session.execute(
+                select(RunModel)
+                .where(
+                    RunModel.id == uuid.UUID(delivery.run_ref["id"]),
+                    RunModel.workspace_id == host.workspace_id,
+                    RunModel.deleted.is_(False),
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if run is None:
             return
         merged = dict(run.projection or {})
-        merged.update({k: v for k, v in projection.items() if v is not None})
+        cursors = dict(merged.get("source_cursors") or {})
+        for envelope in sorted(envelopes, key=lambda e: e["source_sequence"]):
+            source = str(envelope.get("source"))
+            sequence = envelope["source_sequence"]
+            if sequence <= cursors.get(source, 0):
+                continue
+            cursors[source] = sequence
+            payload = envelope.get("payload") or {}
+            event_type = payload.get("event_type")
+            if merged.get("state") in {"succeeded", "failed", "cancelled"} and not (
+                event_type == "run_terminal" and payload.get("status") == merged.get("state")
+            ):
+                continue  # late/replayed observations never reopen a terminal run
+            if event_type == "task_state":
+                merged["state"] = payload.get("state")
+            elif event_type == "run_terminal":
+                merged.update(
+                    {
+                        "state": payload.get("status", "unknown"),
+                        "error": payload.get("error"),
+                        "result_preview": str(payload.get("content") or "")[:2000],
+                    }
+                )
+        merged["source_cursors"] = cursors
         await TaskRunRegistry(self._session).update_projection(run.id, host.workspace_id, projection=merged)
 
 
@@ -418,6 +457,7 @@ def _rebind_envelope(envelope: dict[str, Any], *, platform_run_id: uuid.UUID | N
 
     from dataclasses import replace
 
+    from hecate.contracts.execution.durable import canonical_request_digest
     from hecate.contracts.execution.events import EventEnvelope
     from hecate.contracts.execution.references import run_ref as mk_run_ref
     from hecate.contracts.execution.references import task_ref as mk_task_ref
@@ -437,6 +477,16 @@ def _rebind_envelope(envelope: dict[str, Any], *, platform_run_id: uuid.UUID | N
         task_ref=new_task,
         run_ref=new_run,
         source_sequence=stored.source_sequence,
+        extra={
+            **stored.extra,
+            "detail_ns": {
+                **(stored.extra.get("detail_ns") or {}),
+                "host_origin": {
+                    "source_sequence": stored.source_sequence,
+                    "event_digest": canonical_request_digest({k: v for k, v in envelope.items() if k != "received_at"}),
+                },
+            },
+        },
     )
 
 

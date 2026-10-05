@@ -100,6 +100,7 @@ class WorkflowExecutionService:
         self,
         port: Any,
         db: AsyncSession | None = None,
+        action_hook: Any | None = None,
         suggestion_service: Any = None,
         pre_llm_hook: PreLLMHook | None = None,
         post_llm_hook: PostLLMHook | None = None,
@@ -116,6 +117,7 @@ class WorkflowExecutionService:
         grounding_scoring: Any = None,
     ) -> None:
         self._port = port
+        self._action_hook = action_hook
         self._db = db
         self._suggestion_service = suggestion_service
         self._pre_llm_hook = pre_llm_hook
@@ -405,6 +407,7 @@ class WorkflowExecutionService:
                 approval_callback=self._approval_callback,
                 tool_policy_rules=self._tool_policy_rules,
                 event_store=self._event_store,
+                action_hook=self._action_hook,
                 denial_tracker=self._denial_tracker,
                 suggestion_service=self._suggestion_service,
                 # 2.6a controller — evidence provider built per execution by
@@ -734,6 +737,7 @@ class WorkflowExecutionService:
             approval_callback=self._approval_callback,
             tool_policy_rules=self._tool_policy_rules,
             event_store=self._event_store,
+            action_hook=self._action_hook,
             denial_tracker=self._denial_tracker,
             suggestion_service=self._suggestion_service,
             # 2.6a controller — evidence provider wired from the composition

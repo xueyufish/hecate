@@ -468,6 +468,7 @@ async def stop_durable_worker(app: FastAPI) -> None:
     if worker is None:
         return
     worker.request_drain()
+    remaining = await worker.drain()
     if relay is not None:
         relay.stop()
     for task_attr in ("durable_worker_task", "durable_relay_task"):
@@ -476,7 +477,6 @@ async def stop_durable_worker(app: FastAPI) -> None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-    remaining = await worker.drain()
     if remaining:
         logger.warning("durable worker stopped with %d dispatch(es) in flight", remaining)
 

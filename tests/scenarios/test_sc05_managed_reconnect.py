@@ -1,15 +1,9 @@
-"""SC05: reconnect and duplicate control commands (managed runner channel).
+"""SC05 delivery/projection slices over the managed channel wire format.
 
-Gates the managed-runner-enrollment slice end to end over the real wire
-format (the platform's /managed API + the runner's ManagedChannel client):
-after re-verifying trust and authorization the host accepts new work;
-historical events are deduplicated on replay; duplicate deliveries and
-stale ownership do not repeat business actions; and the state projection
-never overwrites the host's local execution facts.
-
-The four manifest assertions map to the test methods below; the fixture
-composes the platform API (ASGI transport) with the host channel exactly
-as deployment does.
+These ASGI/client component tests verify enrollment, delivery acceptance,
+deduplication and event projection. They do not run the installed runner CLI,
+execute managed business tools or enforce a lease at action dispatch. The
+complete SC05 remains planned until those paths pass process-level acceptance.
 """
 
 from __future__ import annotations
@@ -211,7 +205,7 @@ async def test_sc05_reconnect_reverification_then_new_work(managed_stack) -> Non
     from hecate_durable.contracts.references import BackendRef
 
     state = managed_stack["store"].get_task_state(BackendRef.from_dict(local_ref))
-    assert state is not None and state.lifecycle_state is TaskLifecycleStateEnum.RUNNING
+    assert state is not None and state.lifecycle_state is TaskLifecycleStateEnum.QUEUED
 
 
 TaskLifecycleStateEnum = __import__("hecate_durable").contracts.durable.TaskLifecycleState
@@ -221,13 +215,17 @@ async def test_sc05_duplicate_delivery_never_repeats_execution(managed_stack) ->
     """Assertion 3 (deliveries): a redelivered row is answered, not executed."""
 
     channel = await _connect(managed_stack)
-    await managed_stack["queue_delivery"]({"messages": []})
+    delivery_id = await managed_stack["queue_delivery"]({"messages": []})
     assert await channel.pull_once() == 1
 
     channel._delivery_cursor = None  # simulate a lost accept response
     duplicated = await channel.pull_once()
     assert duplicated == 0
-    assert channel.stats.deliveries_duplicate == 1
+    assert channel.stats.deliveries_duplicate == 0
+    assert (
+        await channel._accept_delivery({"delivery_row_id": delivery_id, "input_payload": {"messages": []}})
+        == "duplicate"
+    )
 
 
 async def test_sc05_events_deduplicated_on_replay(managed_stack) -> None:
@@ -258,7 +256,7 @@ async def test_sc05_events_deduplicated_on_replay(managed_stack) -> None:
     assert uploaded_first >= 1
     # The replay (host retried the same batch after a lost response) is
     # deduplicated upstream — zero new projections, zero loss.
-    channel._event_cursor = 0
+    channel._event_cursors.clear()
     uploaded_replay = await channel.upload_events()
     assert uploaded_replay == 0
 
@@ -308,3 +306,60 @@ async def test_sc05_revoked_trust_root_stops_new_work(managed_stack) -> None:
     # The current lease stays valid until its TTL — revocation propagates
     # with the plan's bounded stale window, never instant self-revocation.
     # New deliveries are refused at the platform for the whole window.
+
+
+async def test_sc05_upload_cursors_are_independent_per_run(managed_stack) -> None:
+    channel = await _connect(managed_stack)
+    await managed_stack["queue_delivery"]({"messages": []})
+    await managed_stack["queue_delivery"]({"messages": []})
+    assert await channel.pull_once() == 2
+    from hecate_durable.contracts.durable import TaskLifecycleState
+
+    for task in managed_stack["store"].list_tasks():
+        managed_stack["store"].apply_task_state(task.task_ref, TaskLifecycleState.RUNNING)
+    count = await channel.upload_events()
+    assert count == 4  # each run contributes submitted and running events
+    assert len(channel._event_cursors) == 2
+    assert channel.stats.events_uploaded == count
+    channel._event_cursors.clear()
+    assert await channel.upload_events() == 0
+
+
+async def test_sc05_unconfirmed_accept_is_redelivered_after_cursor_advance(managed_stack, monkeypatch) -> None:
+    channel = await _connect(managed_stack)
+    await managed_stack["queue_delivery"]({"messages": []})
+    original = channel._request
+    dropped = False
+
+    async def request(method, path, **kwargs):
+        nonlocal dropped
+        if path == "/managed/host/accept" and not dropped:
+            dropped = True
+            return None  # local acceptance persisted, platform has no receipt
+        return await original(method, path, **kwargs)
+
+    monkeypatch.setattr(channel, "_request", request)
+    assert await channel.pull_once() == 1
+    assert channel._delivery_cursor is not None
+    assert await channel.pull_once() == 0
+    assert channel.stats.deliveries_duplicate == 1
+    assert len(managed_stack["store"].list_tasks()) == 1
+
+
+async def test_sc05_conflicting_replay_is_rejected(managed_stack) -> None:
+    channel = await _connect(managed_stack)
+    await managed_stack["queue_delivery"]({"messages": []})
+    await channel.pull_once()
+    store = managed_stack["store"]
+    task = store.list_tasks()[0]
+    run = store.run_for_task(task.task_ref)
+    original = store.read_events(run).events[0].to_dict()
+    assert await channel.upload_events() == 1
+    changed = {**original, "payload": {**original["payload"], "event_type": "run_terminal", "status": "succeeded"}}
+    result = await channel._request(
+        "POST",
+        "/managed/host/events",
+        auth=True,
+        payload={"local_task_ref": task.task_ref.to_dict(), "envelopes": [changed]},
+    )
+    assert result is None

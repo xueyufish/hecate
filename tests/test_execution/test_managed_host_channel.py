@@ -244,7 +244,7 @@ async def test_register_pull_accept_upload_cycle(platform, host_store, secrets):
     channel._delivery_cursor = None
     duplicated = await channel.pull_once()
     assert duplicated == 0
-    assert channel.stats.deliveries_duplicate == 1
+    assert channel.stats.deliveries_duplicate == 0  # confirmed acceptance no longer needs redelivery
     assert delivery_state == "pending"  # local snapshot unchanged; platform flipped it
 
 

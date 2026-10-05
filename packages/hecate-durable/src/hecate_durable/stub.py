@@ -50,7 +50,7 @@ class InMemoryDurableTaskStore(DurableTaskStore):
         with self._lock:
             existing = self._submissions.get(key.key)
             if existing is not None:
-                if existing.key.request_digest != key.request_digest:
+                if existing.key != key:
                     raise IdempotencyConflictError(key.key, existing.key.request_digest)
                 return existing
             association = SubmissionAssociation(key=key, task_ref=task_ref, run_ref=run_ref)
@@ -348,7 +348,7 @@ class InMemoryLeaseManager:
                 return None  # another holder's lease is still valid
             if current is None:
                 token = 1
-            elif current[0] == holder:
+            elif current[0] == holder and current[2] > now:
                 token = current[1]  # re-acquiring one's own lease does not bump
             else:
                 token = current[1] + 1  # takeover of an expired lease bumps
@@ -360,11 +360,18 @@ class InMemoryLeaseManager:
                 expires_at=datetime.fromtimestamp(now + ttl_seconds, tz=UTC).isoformat(),
             )
 
-    def renew(self, lease_key: str, holder: str, ttl_seconds: float) -> LeaseHandle | None:
+    def renew(
+        self, lease_key: str, holder: str, ttl_seconds: float, *, fencing_token: int | None = None
+    ) -> LeaseHandle | None:
         now = self._clock().timestamp()
         with self._lock:
             current = self._leases.get(lease_key)
-            if current is None or current[0] != holder:
+            if (
+                current is None
+                or current[0] != holder
+                or current[2] <= now
+                or (fencing_token is not None and current[1] != fencing_token)
+            ):
                 return None
             self._leases[lease_key] = (holder, current[1], now + ttl_seconds)
             return LeaseHandle(
@@ -374,12 +381,12 @@ class InMemoryLeaseManager:
                 expires_at=datetime.fromtimestamp(now + ttl_seconds, tz=UTC).isoformat(),
             )
 
-    def release(self, lease_key: str, holder: str) -> bool:
+    def release(self, lease_key: str, holder: str, *, fencing_token: int | None = None) -> bool:
         with self._lock:
             current = self._leases.get(lease_key)
-            if current is None or current[0] != holder:
+            if current is None or current[0] != holder or (fencing_token is not None and current[1] != fencing_token):
                 return False
-            del self._leases[lease_key]
+            self._leases[lease_key] = (holder, current[1], 0.0)
             return True
 
     def current_token(self, lease_key: str) -> int | None:

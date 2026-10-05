@@ -465,6 +465,7 @@ class ToolWorker(Worker):
         execution_context: dict | None = None,
         tool_name: str = "",
         arguments: dict | None = None,
+        ledger_claimed: bool = False,
     ) -> dict[str, Any] | None:
         """Resolve the execution's recovery state into an action.
 
@@ -485,7 +486,7 @@ class ToolWorker(Worker):
         if self._event_store is not None:
             resolution = await resolve_tool_execution_state(self._event_store, session_key, execution_id)
         hook_resolution: ToolExecutionResolution | None = None
-        if self._action_hook is not None:
+        if self._action_hook is not None and not ledger_claimed:
             hook_resolution = await self._hook_resolution(session_key, execution_id)
         merged = _merge_resolutions(resolution, hook_resolution)
         if merged is not None:
@@ -842,6 +843,9 @@ class ToolWorker(Worker):
                         classification=side_effect_class,
                         messages=messages,
                         claim=True,
+                        # The durable gate just granted this executor its claim.
+                        # Re-reading that claim would mistake it for a crash.
+                        ledger_claimed=self._action_hook is not None,
                         execution_context=execution_context,
                         tool_name=name,
                         arguments=arguments,

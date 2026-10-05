@@ -46,7 +46,7 @@ from hecate_durable.contracts.credentials import (
 from hecate_durable.contracts.credentials import (
     solve_challenge as issue_challenge_answer,
 )
-from hecate_durable.contracts.durable import IdempotencyKey, TaskLifecycleState
+from hecate_durable.contracts.durable import IdempotencyKey, canonical_request_digest
 from hecate_durable.contracts.references import BackendRef, RefKind
 from hecate_durable.storage.lease import LeaseHandle, StaleFenceError
 from hecate_durable.storage.store import SqlDurableStore
@@ -155,7 +155,7 @@ class ManagedChannel:
         self._gate = LeaseGate(secret, deployment_domain=trust_root, clock=clock)
         self._credential: dict[str, Any] | None = None
         self._delivery_cursor: str | None = None
-        self._event_cursor = 0
+        self._event_cursors: dict[tuple[str, str], int] = {}
         self._upload_exhausted = False
         self.stats = ManagedStats()
         self._loop_task: asyncio.Task[None] | None = None
@@ -278,14 +278,17 @@ class ManagedChannel:
                     key=f"managed-delivery:{delivery_row_id}",
                     subject=self._host_id,
                     workspace=self._workspace_id,
-                    request_digest=delivery_row_id,
+                    request_digest=canonical_request_digest(
+                        {
+                            "delivery_row_id": delivery_row_id,
+                            "input_payload": dict(delivery.get("input_payload") or {}),
+                        }
+                    ),
                 ),
                 task_ref=local_task,
                 run_ref=local_run,
                 input_payload=dict(delivery.get("input_payload") or {}),
             )
-            if not replayed:
-                self._store.apply_task_state(association.task_ref, TaskLifecycleState.RUNNING)
             return replayed, association.task_ref, association.run_ref
 
         replayed, task_ref_out, run_ref_out = await asyncio.to_thread(_accept)
@@ -305,9 +308,7 @@ class ManagedChannel:
             logger.warning("delivery %s accept not confirmed; redelivery will reconcile", delivery_row_id)
         if replayed:
             return "duplicate"
-        # Lease-gated execution preview: the managed profile marks the task
-        # running (already done above); driving the engine is the host's
-        # normal dispatch path and stays there.
+        # Acceptance is a queued intent, not proof that execution started.
         return "accepted"
 
     async def upload_events(self) -> int:
@@ -319,8 +320,12 @@ class ManagedChannel:
             run_ref = await asyncio.to_thread(self._store.run_for_task, record.task_ref)
             if run_ref is None:
                 continue
+            stream_key = (run_ref.issuer_domain, run_ref.id)
             page = await asyncio.to_thread(
-                self._store.read_events, run_ref, cursor=self._event_cursor, limit=self._upload_batch
+                self._store.read_events,
+                run_ref,
+                cursor=self._event_cursors.get(stream_key, 0),
+                limit=self._upload_batch,
             )
             envelopes = [event.to_dict() for event in page.events if event.kind.value == "event"]
             if not envelopes:
@@ -336,9 +341,10 @@ class ManagedChannel:
             )
             if result is None:
                 return uploaded
-            uploaded += int(result.get("projected", 0))
-            self._event_cursor = max(self._event_cursor, page.next_cursor)
-            self.stats.events_uploaded += uploaded
+            count = int(result.get("projected", 0))
+            uploaded += count
+            self._event_cursors[stream_key] = page.next_cursor
+            self.stats.events_uploaded += count
         return uploaded
 
     # -- transport ---------------------------------------------------------------

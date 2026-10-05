@@ -188,6 +188,7 @@ class ExecutionEngine:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._tasks: set[asyncio.Task] = set()
         self._closing = False
+        self._resuming = False
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Record the loop runs are scheduled on (set by the server layer)."""
@@ -294,7 +295,7 @@ class ExecutionEngine:
 
     @property
     def busy(self) -> bool:
-        return self._lock.locked()
+        return self._lock.locked() or self._resuming
 
     @property
     def closing(self) -> bool:
@@ -324,7 +325,7 @@ class ExecutionEngine:
             "local_evidence": "enforced",
         }
         if self._durable is not None:
-            return {**supported, **DURABLE_CAPABILITIES, **UNSUPPORTED_CAPABILITIES}
+            return {**supported, **UNSUPPORTED_CAPABILITIES, **DURABLE_CAPABILITIES}
         return {**supported, **UNSUPPORTED_CAPABILITIES}
 
     async def submit(
@@ -346,12 +347,14 @@ class ExecutionEngine:
         raises :class:`IdempotencyConflictError`.
         """
 
-        if self._closing or self._lock.locked():
+        if self._closing or self.busy:
             return "", None
         self.validate_run_input(run_input)
         if self._durable is not None:
             self._admit_protected(run_input)
-            submission = self._durable.submit(principal=principal, run_input=run_input, idempotency_key=idempotency_key)
+            submission = self._durable.submit(
+                principal=principal, run_input=run_input, idempotency_key=idempotency_key, domains=domains
+            )
             run_ref = submission.association.run_ref
             task_ref = submission.association.task_ref
             if submission.replayed:
@@ -430,13 +433,32 @@ class ExecutionEngine:
         per action come from the ledger inside the normal dispatch gate.
         """
 
-        if self._durable is None or self._closing or self._lock.locked():
+        if self._durable is None or self._closing or self.busy:
             return None
+        from hecate_durable.contracts.durable import TaskLifecycleState
+
+        record = self._durable.store.get_task_state(task_ref)
+        if record is None or record.lifecycle_state not in {TaskLifecycleState.QUEUED, TaskLifecycleState.RUNNING}:
+            return None
+        # This snapshot is written by DurableRuntime from verified admission
+        # context, never from the caller's role/domain claims.
+        persisted_input = self._durable.store.get_task_input(task_ref) or {}
+        trusted = persisted_input.get("_host_identity") or {}
+        principal = trusted.get("principal")
+        matches = [identity for identity in self._profile.identities if identity.principal == principal]
+        domains = trusted.get("domains")
+        if domains is None and len(matches) == 1:
+            domains = list(matches[0].domains)
+        if not isinstance(domains, list) or not any(set(domains).issubset(i.domains) for i in matches):
+            self._durable.finish_run(task_ref, "unknown", needs_reconciliation=True)
+            return None
+        self._admit_protected(run_input)
+        run_input = persisted_input
         state = RunState(
             run_id=run_ref.id,
             status="running",
-            principal="host-recovery",
-            domains=(),
+            principal=principal,
+            domains=tuple(domains),
             task_ref=task_ref,
             run_ref=run_ref,
         )
@@ -449,14 +471,17 @@ class ExecutionEngine:
             # _execute's finally releases the slot, exactly like the submit
             # path — no double release here.
             await self._lock.acquire()
+            self._resuming = False
             self._runs[state.run_id] = state
             await self._execute(state.run_id, state, run_input, resume=True)
 
         try:
+            self._resuming = True
             task = asyncio.create_task(_runner())
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
         except BaseException:
+            self._resuming = False
             raise
         return state.run_id
 

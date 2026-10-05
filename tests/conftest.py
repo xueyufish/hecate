@@ -79,6 +79,7 @@ from hecate.models.workspace_member import WorkspaceMemberModel, WorkspaceRole
 
 # In-memory SQLite — every test process gets its own private database.
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
+_schema_tables: set[str] = set()
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 test_session_factory = async_sessionmaker(
@@ -100,6 +101,7 @@ async def _create_schema_once() -> AsyncGenerator[None, None]:
     """
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        _schema_tables.update(Base.metadata.tables)
     yield
     await test_engine.dispose()
 
@@ -113,6 +115,12 @@ async def setup_database() -> AsyncGenerator[None, None]:
     after) so the next test starts pristine even if a predecessor crashed.
     """
     async with test_engine.begin() as conn:
+        # Composition lazily imports models after the session schema exists.
+        # Create only newly registered tables before clearing their rows.
+        new_tables = [table for table in Base.metadata.sorted_tables if table.key not in _schema_tables]
+        if new_tables:
+            await conn.run_sync(lambda sync: Base.metadata.create_all(sync, tables=new_tables))
+            _schema_tables.update(table.key for table in new_tables)
         for table in reversed(Base.metadata.sorted_tables):
             await conn.execute(table.delete())
     yield

@@ -13,17 +13,24 @@ as a certified interchangeable backend based on endpoint names alone.
 
 ## Status: technical preview
 
-Not production. The preview explicitly does **not** provide: durable tasks,
-background retries, long-task recovery, write or approval tools, event
-streaming, or any remote-revocation guarantee. These are declared
-`unsupported` on `/capabilities` and land in step6/7/10/11. Execution is
-serial (one run at a time). Do not expose the service beyond localhost.
+The default profile admits read-only tools. An opt-in `durable` profile
+adds persistent task/action records, write-tool recovery and bounded serial
+restart admission. It remains a technical preview: the shared execution
+application service, formal step3 backend adapter, approval/input waiting and
+process-level PostgreSQL recovery acceptance are incomplete. Capability
+statements describe available primitives, not production certification.
+Execution is serial. Bind to localhost.
+
+The managed channel currently provides library-level delivery acceptance and
+event projection. The CLI rejects `control_plane` configuration until the
+managed dispatch loop and action-time lease enforcement are wired. Channel
+component tests do not certify managed business execution.
 
 ## Install
 
 ```bash
 uv build --package hecate-runner
-pip install dist/hecate_runner-*.whl   # pulls hecate-runtime only — never the full hecate app
+pip install dist/hecate_runner-*.whl   # pulls runtime and durable packages — never the full hecate app
 ```
 
 ## Profile layout
@@ -51,6 +58,20 @@ pip install dist/hecate_runner-*.whl   # pulls hecate-runtime only — never the
   "evidence": {"retention_days": 30, "capacity_limit": 104857600}
 }
 ```
+
+## Durable profile
+
+Add an explicit host-owned database and deployment/data domain:
+
+```json
+{"durable": {"database_url": "postgresql+psycopg://USER:PASSWORD@HOST/DATABASE", "workspace": "customer-a"}}
+```
+
+Install `hecate-durable[postgres]` for the PostgreSQL driver. SQLite is a
+local development option. Back up and upgrade the host schema while drained;
+`create_schema()` creates missing tables, and is not a general migration tool.
+Recovery trusts the persisted principal/domain snapshot only after checking
+current `identity.json`; it never substitutes client-provided identity fields.
 
 ## Evidence retention
 
@@ -90,8 +111,8 @@ certification is implied).
 The endpoint adapter sends `{"prompt": "...", "tools": ["query_inventory"]}`
 and expects `{"content": "..."}`; optional `model.auth_env` references a bearer
 token. Endpoint errors fail the run. This profile uses a fixed tool plan and
-does not implement model-driven tool selection. Only `query_inventory` is mapped
-by the preview business adapter; other mappings fail startup. Its arguments
+does not implement model-driven tool selection. The default profile maps `query_inventory`; the durable profile additionally
+allows manifest-declared `write_inventory`. Other mappings fail startup. Its arguments
 require non-empty string `domain` and `sku`; declared tool schemas must be listed
 and digest-verified in the manifest.
 
@@ -121,7 +142,8 @@ anonymous-denial records from local JSONL files. A run is admitted only after
 its local evidence is flushed; an unwritable store refuses execution. Cancellation
 stops later tool calls cooperatively and cannot revoke an external call already
 in progress. Shutdown stops admission and closes in-process tasks; unresolved
-work is recorded as `unknown`, without recovery guarantees.
+work is recorded as `unknown`. Durable restart validates the retained identity
+and action ledger; unresolved protected results require reconciliation.
 
 ## Scenario coverage
 

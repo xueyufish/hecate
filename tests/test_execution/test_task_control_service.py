@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from hecate.contracts.execution.durable import CommandState, ControlCommandKind, TaskLifecycleState
 from hecate.core.database import Base
-from hecate.execution.governance_events import RUN_TERMINAL
+from hecate.execution.governance_events import RUN_TERMINAL, TASK_SUBMITTED
 from hecate.execution.task_control import (
     SubmissionConflictError,
     TaskControlService,
@@ -433,9 +433,8 @@ async def test_expired_command_converges_on_read(harness, monkeypatch):
                 expires_at=past,
             )
             record = await _service(harness, db).get_command(WS, issued.record.command_id)
-            # The queued cancel CAS-applied before its expiry could converge;
-            # the applied receipt is terminal, so the lazy sweep leaves it.
-            assert record.state is CommandState.APPLIED
+            assert record.state is CommandState.EXPIRED
+            assert harness["store"].get_task_state(result.task_ref).lifecycle_state is TaskLifecycleState.QUEUED
     finally:
         gated.unpatch()
 
@@ -464,14 +463,17 @@ async def test_events_pagination_resumes_by_cursor(harness):
             result = await _submit(harness, db, service, wait=True)
             run_id = uuid.UUID(result.run_ref.id)
 
-            # The direct-emitted read-model event is the run terminal; the
-            # governance events land via the outbox relay (tested with the
-            # relay in test_event_relay_projection).
+            # All governance facts use the outbox. A one-event page must
+            # resume through state changes and end at one terminal event.
             first = await service.read_run_events(WS, run_id, limit=1)
             assert len(first.events) == 1
-            assert first.events[-1].payload_schema_ref == RUN_TERMINAL
+            assert first.events[-1].payload_schema_ref == TASK_SUBMITTED
             second = await service.read_run_events(WS, run_id, cursor=first.next_cursor, limit=100)
-            assert list(second.events) == []
+            assert second.events[-1].payload_schema_ref == RUN_TERMINAL
+            complete = [*first.events, *second.events]
+            assert len({e.event_id for e in complete}) == len(complete)
+            assert sum(e.payload_schema_ref == RUN_TERMINAL for e in complete) == 1
+            assert list((await service.read_run_events(WS, run_id, cursor=second.next_cursor)).events) == []
     finally:
         stub.unpatch()
 
@@ -560,3 +562,61 @@ async def test_durable_wait_and_wake(harness):
             assert reuse.record.state is CommandState.REJECTED
     finally:
         dispatcher_module.PlatformTaskDispatcher._execute = real
+
+
+async def test_committed_submission_recovers_missing_platform_records(harness, monkeypatch) -> None:
+    """Crash after durable submit retains the original IDs and frozen identity."""
+    from hecate_durable.worker import DurableWorker
+
+    import hecate.execution.task_control as task_control_module
+    import hecate.execution.task_registration as registration
+
+    monkeypatch.setattr(task_control_module, "_spawn_background", lambda coro: coro.close())
+    real = registration.ensure_submission_registration
+
+    async def crash(*args, **kwargs):
+        raise RuntimeError("crash after durable commit")
+
+    monkeypatch.setattr(registration, "ensure_submission_registration", crash)
+    async with harness["session_factory"]() as db:
+        with pytest.raises(RuntimeError, match="crash after durable commit"):
+            await _submit(harness, db, idempotency_key="crash-registration")
+    monkeypatch.setattr(registration, "ensure_submission_registration", real)
+    records = harness["store"].list_tasks()
+    assert len(records) == 1
+    task_ref = records[0].task_ref
+    original = harness["store"].get_task_input(task_ref)
+    stub = _EntryStub()
+    stub.patch()
+    try:
+        worker = DurableWorker(harness["store"], _dispatcher(harness), leases=harness["store"].leases)
+        assert await worker.reconcile() == 1
+        async with harness["session_factory"]() as db:
+            service = _service(harness, db)
+            replay = await _submit(harness, db, service, idempotency_key="crash-registration")
+            assert replay.task_ref == task_ref
+            assert replay.run_ref.id == original["platform_run_id"]
+            detail = await service.get_task_detail(WS, uuid.UUID(task_ref.id))
+            assert len(detail["runs"]) == 1
+    finally:
+        stub.unpatch()
+
+
+async def test_stale_expected_revision_rejects_cancel_without_effect(harness, monkeypatch) -> None:
+    import hecate.execution.task_control as task_control_module
+
+    monkeypatch.setattr(task_control_module, "_spawn_background", lambda coro: coro.close())
+    async with harness["session_factory"]() as db:
+        service = _service(harness, db)
+        result = await _submit(harness, db, service)
+        harness["store"].apply_task_state(result.task_ref, TaskLifecycleState.RUNNING, expected_revision=0)
+        harness["store"].apply_task_state(result.task_ref, TaskLifecycleState.WAITING_INPUT, expected_revision=1)
+        issued = await service.issue_command(
+            workspace_id=WS,
+            task_id=uuid.UUID(result.task_ref.id),
+            kind=ControlCommandKind.CANCEL,
+            issuer=str(OWNER),
+            expected_revision=0,
+        )
+        assert issued.record.state is CommandState.REJECTED
+        assert harness["store"].get_task_state(result.task_ref).lifecycle_state is TaskLifecycleState.WAITING_INPUT

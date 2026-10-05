@@ -217,3 +217,15 @@ class OutboxCursorRow(Base):
     failing_event_id: Mapped[str | None] = mapped_column(String(64))
     failure_count: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[str] = mapped_column(String(64))
+
+
+class OutboxReceiptRow(Base):
+    """Per-relay delivery receipt; allocation order is not commit order."""
+
+    __tablename__ = "durable_outbox_receipt"
+
+    relay_key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    state: Mapped[str] = mapped_column(String(16))
+    failure_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[str] = mapped_column(String(64))

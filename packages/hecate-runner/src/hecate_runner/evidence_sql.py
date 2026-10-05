@@ -30,6 +30,7 @@ from sqlalchemy import (
     insert,
     select,
 )
+from sqlalchemy.exc import SQLAlchemyError
 
 from .evidence import (
     BOOKKEEPING_KINDS,
@@ -141,8 +142,11 @@ class SqlEvidenceStore:
         protected actions (SC06 local half).
         """
 
-        self._enforce_capacity()
-        self.append(GATE_KIND, "host", "probe", OUTCOME_OK, {"check": "writable"})
+        try:
+            self._enforce_capacity()
+            self.append(GATE_KIND, "host", "probe", OUTCOME_OK, {"check": "writable"})
+        except SQLAlchemyError as exc:
+            raise OSError("local evidence database cannot accept writes") from exc
 
     def usage(self) -> int:
         """Current evidence usage in rows (bookkeeping kinds excluded)."""

@@ -345,3 +345,40 @@ def hook_digest_for(arguments: dict) -> str:
     from hecate.runtime.action_ledger import tool_arguments_digest
 
     return tool_arguments_digest(arguments)
+
+
+async def test_platform_assembly_wires_sql_ledger_and_backfills_real_result(tmp_path) -> None:
+    from hecate_durable.runtime_hook import SqlActionLedgerHook
+    from hecate_durable.storage import SqlDurableStore
+
+    from hecate.contracts.execution.references import run_ref, task_ref
+    from hecate.execution.entry_service import EntryExecutionService
+
+    durable = SqlDurableStore(f"sqlite:///{tmp_path / 'actions.db'}")
+    durable.create_schema()
+    task, run = task_ref("platform", "task"), run_ref("platform", "run")
+    session_id = uuid.uuid4()
+    port = _StubPort()
+    try:
+        for _ in range(2):
+            hook = SqlActionLedgerHook(durable, task_ref=task, run_ref=run)
+            entry = EntryExecutionService(
+                port=port, entry_name="task-control", event_store=InMemoryEventStore(), action_hook=hook
+            )
+            worker = entry._service._create_composite_worker()
+            result = await worker.execute(
+                "tools",
+                {"_node_type": "tool-call"},
+                _payload("call-1", "write_file", {"path": "f", "content": "x"}),
+                _execution_context(session_id),
+            )
+            content = _last_result(result)["content"]
+            assert not content.startswith("["), content
+            assert content in (str({"executed": True}), json.dumps({"executed": True}))
+        assert len(port.calls) == 1
+        actions = durable.list_run_actions(run)
+        assert len(actions) == 1
+        assert actions[0]["tool_call_id"] == "call-1"
+        assert actions[0]["result_payload"] == {"executed": True}
+    finally:
+        durable.dispose()

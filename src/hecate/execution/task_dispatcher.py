@@ -27,6 +27,7 @@ terminal state — the wake path lives on the task-control command surface.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -93,6 +94,7 @@ class _DispatchContext:
     messages: list[dict[str, Any]]
     model: str | None
     stream: bool
+    provided: dict[str, Any] | None
 
 
 class PlatformTaskDispatcher:
@@ -119,15 +121,20 @@ class PlatformTaskDispatcher:
         if db is not None:
             # Inline (in-request) dispatch: run on the caller's session so
             # the execution lands on the same database the request used.
-            await self._run(task_ref, db, record, context)
+            await self._run(task_ref, db, record, context, lease=lease)
             return
         async with self._db() as session:
-            await self._run(task_ref, session, record, context)
+            await self._run(task_ref, session, record, context, lease=lease)
 
     async def _run(
-        self, task_ref: BackendRef, db: AsyncSession, record: TaskStateRecord, context: _DispatchContext
+        self, task_ref: BackendRef, db: AsyncSession, record: TaskStateRecord, context: _DispatchContext, *, lease: Any
     ) -> None:
         registry = TaskRunRegistry(db)
+        payload = await asyncio.to_thread(self._store.get_task_input, task_ref) or {}
+        if "identity_chain" in payload:
+            from hecate.execution.task_registration import ensure_submission_registration
+
+            await ensure_submission_registration(db, task_ref, payload, sql_store=hasattr(self._store, "engine"))
         task = await registry.get_task(context.task_id, context.workspace_id)
         runs = await registry.list_runs_for_task(context.task_id, context.workspace_id)
         latest = runs[-1] if runs else None
@@ -142,12 +149,38 @@ class PlatformTaskDispatcher:
                 "content": str(projection.get("result_preview") or ""),
                 "error": projection.get("error"),
             }
-            await self._finish(db, task_ref, run_row_ref(latest), context, outcome, run=latest)
+            await self._finish(
+                db,
+                task_ref,
+                run_row_ref(latest),
+                context,
+                outcome,
+                run=latest,
+                expected_revision=record.revision + 1,
+                lease=lease,
+            )
             return
 
         if record.revision == 0 and latest is not None and not (latest.projection or {}):
             run = latest  # the attempt minted at submit; never executed
         else:
+            if latest is not None and hasattr(self._store, "list_run_actions"):
+                actions = await asyncio.to_thread(self._store.list_run_actions, run_row_ref(latest))
+                if any((action.get("intent") or {}).get("side_effect_class") != "readonly" for action in actions):
+                    # A new model run cannot promise to generate the same tool
+                    # calls. Until checkpoint recovery is wired, require
+                    # reconciliation rather than replaying a business write.
+                    await asyncio.to_thread(
+                        self._store.apply_task_state,
+                        task_ref,
+                        TaskLifecycleState.RECONCILIATION_REQUIRED,
+                        expected_revision=record.revision + 1,
+                        extra_update={"reconciliation_reason": "interrupted attempt contains protected actions"},
+                        **({"lease": lease} if lease is not None else {}),
+                    )
+                    return
+            if lease is not None and hasattr(self._store, "engine"):
+                await db.run_sync(lambda session: self._store.leases.assert_valid(session, lease))
             run = await self._new_attempt(db, task, latest, context)
         r_ref = run_row_ref(run)
         engine_session = self._engine_session_of(run)
@@ -158,12 +191,35 @@ class PlatformTaskDispatcher:
                 engine_session=engine_session,
                 task_ref=task_ref,
                 run_ref=r_ref,
+                lease=lease,
             )
         except TaskWaitingSignalError as wait:
             await db.commit()
-            await self._park(task_ref, wait, context)
+            await self._park(task_ref, wait, context, run_ref=r_ref, expected_revision=record.revision + 1, lease=lease)
             return
-        await self._finish(db, task_ref, r_ref, context, outcome, run=run)
+        if hasattr(self._store, "list_run_actions"):
+            actions = await asyncio.to_thread(self._store.list_run_actions, r_ref)
+            if any(action.get("pending_reconciliation") or action.get("active_claim") for action in actions):
+                await db.commit()
+                await asyncio.to_thread(
+                    self._store.apply_task_state,
+                    task_ref,
+                    TaskLifecycleState.RECONCILIATION_REQUIRED,
+                    expected_revision=record.revision + 1,
+                    extra_update={"reconciliation_reason": "action outcome is not established"},
+                    **({"lease": lease} if lease is not None else {}),
+                )
+                return
+        await self._finish(
+            db,
+            task_ref,
+            r_ref,
+            context,
+            outcome,
+            run=run,
+            expected_revision=record.revision + 1,
+            lease=lease,
+        )
 
     # -- internals -------------------------------------------------------------
 
@@ -193,6 +249,7 @@ class PlatformTaskDispatcher:
             messages=messages,
             model=payload.get("model"),
             stream=bool(payload.get("stream")),
+            provided=payload.get("provided"),
         )
 
     @staticmethod
@@ -246,6 +303,7 @@ class PlatformTaskDispatcher:
         engine_session: uuid.UUID,
         task_ref: BackendRef,
         run_ref: BackendRef,
+        lease: Any = None,
     ) -> dict[str, Any]:
         """Run one execution through the platform entry service (shared assembly)."""
 
@@ -283,6 +341,17 @@ class PlatformTaskDispatcher:
                 )
 
         port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
+        action_hook = None
+        if hasattr(self._store, "claim_ex"):
+            from hecate_durable.runtime_hook import SqlActionLedgerHook
+
+            action_hook = SqlActionLedgerHook(
+                self._store,
+                task_ref=task_ref,
+                run_ref=run_ref,
+                holder=lease.holder if lease is not None else "platform-inline",
+                lease=lease,
+            )
         entry = EntryExecutionService(
             port=port,
             entry_name="task-control",
@@ -293,6 +362,7 @@ class PlatformTaskDispatcher:
             tool_policy_rules=bundle.rules if bundle else None,
             middleware_chains=bundle.middleware_chains if bundle else None,
             denial_tracker=bundle.denial_tracker if bundle else None,
+            action_hook=action_hook,
         )
         correlation = CorrelationInput(
             workspace_id=context.workspace_id,
@@ -307,7 +377,14 @@ class PlatformTaskDispatcher:
         )
         outcome = await entry.execute(
             agent_mode="chat",
-            messages=context.messages,
+            messages=[
+                *context.messages,
+                *(
+                    [{"role": "user", "content": json.dumps({"provided_input": context.provided}, ensure_ascii=False)}]
+                    if context.provided is not None
+                    else []
+                ),
+            ],
             model=model_name,
             tools=effective_tools or None,
             stream=context.stream,
@@ -316,6 +393,8 @@ class PlatformTaskDispatcher:
             workspace_id=context.workspace_id,
             correlation=correlation,
         )
+        if action_hook is not None and action_hook.has_failed_outcomes:
+            raise RuntimeError("action outcome persistence failed; reconciliation required")
         if context.stream:
             result_gen = outcome.result
             if isinstance(result_gen, dict):
@@ -334,7 +413,16 @@ class PlatformTaskDispatcher:
             raise ValueError(f"unexpected entry result type {type(result)}")
         return {"status": "succeeded", "content": str(result.get("content", "") or "")}
 
-    async def _park(self, task_ref: BackendRef, wait: TaskWaitingSignalError, context: _DispatchContext) -> None:
+    async def _park(
+        self,
+        task_ref: BackendRef,
+        wait: TaskWaitingSignalError,
+        context: _DispatchContext,
+        *,
+        run_ref: BackendRef,
+        expected_revision: int,
+        lease: Any,
+    ) -> None:
         """Persist the durable wait: state + single-use token + deadline."""
 
         token = uuid.uuid4().hex
@@ -355,6 +443,9 @@ class PlatformTaskDispatcher:
             self._store.apply_task_state,
             task_ref,
             target,
+            expected_revision=expected_revision,
+            **({"event_run_ref": run_ref} if hasattr(self._store, "engine") else {}),
+            **({"lease": lease} if lease is not None else {}),
             extra_update={
                 "wait": {
                     "wake_kind": wait.wake_kind.value,
@@ -376,39 +467,56 @@ class PlatformTaskDispatcher:
         outcome: dict[str, Any],
         *,
         run: RunModel,
+        expected_revision: int,
+        lease: Any,
     ) -> None:
-        terminal = TaskLifecycleState.SUCCEEDED if outcome.get("status") == "succeeded" else TaskLifecycleState.FAILED
+        terminal = {
+            "succeeded": TaskLifecycleState.SUCCEEDED,
+            "failed": TaskLifecycleState.FAILED,
+            "cancelled": TaskLifecycleState.CANCELLED,
+        }.get(outcome.get("status"), TaskLifecycleState.RECONCILIATION_REQUIRED)
         # Stream-mode executions leave uncommitted event rows on this
         # session; close them before the seam store's own transaction.
         await db.commit()
-        await asyncio.to_thread(self._store.apply_task_state, task_ref, terminal)
+        await asyncio.to_thread(
+            self._store.apply_task_state,
+            task_ref,
+            terminal,
+            expected_revision=expected_revision,
+            **({"lease": lease} if lease is not None else {}),
+            **(
+                {
+                    "event_run_ref": r_ref,
+                    "extra_update": {"result": outcome},
+                    **(
+                        {"terminal_payload": outcome}
+                        if terminal is not TaskLifecycleState.RECONCILIATION_REQUIRED
+                        else {}
+                    ),
+                }
+                if hasattr(self._store, "engine")
+                else {}
+            ),
+        )
         try:
             await TaskRunRegistry(db).update_projection(
                 run.id,
                 context.workspace_id,
                 projection={
-                    "state": outcome["status"],
+                    "state": terminal.value,
                     "error": outcome.get("error"),
                     "result_preview": (outcome.get("content") or "")[:2000],
                 },
             )
         except TaskRunRegistryError:
             logger.warning("task %s run projection update skipped", task_ref.id)
-        await PlatformEventService(db).emit(
-            task_ref=task_ref,
-            run_ref=r_ref,
-            payload_schema_ref="hecate.platform.run_terminal/0",
-            payload={"status": outcome["status"], "error": outcome.get("error")},
-            actor=ActorRef(kind=ActorKind.PLATFORM, id="task-control"),
-            workspace_id=context.workspace_id,
-        )
+        if not hasattr(self._store, "engine") and terminal is not TaskLifecycleState.RECONCILIATION_REQUIRED:
+            await PlatformEventService(db).emit(
+                task_ref=task_ref,
+                run_ref=r_ref,
+                payload_schema_ref="hecate.platform.run_terminal/0",
+                payload={"status": outcome["status"], "error": outcome.get("error")},
+                actor=ActorRef(kind=ActorKind.PLATFORM, id="task-control"),
+                workspace_id=context.workspace_id,
+            )
         await db.commit()
-        # The durable run-terminal event rides the outbox so the relay
-        # projects it into the read model with the other governance events.
-        await asyncio.to_thread(
-            self._store.emit_event,
-            task_ref,
-            r_ref,
-            event_type=_RUN_TERMINAL_EVENT,
-            payload={"status": outcome["status"], "error": outcome.get("error")},
-        )

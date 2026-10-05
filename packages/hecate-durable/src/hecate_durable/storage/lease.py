@@ -68,8 +68,9 @@ class LeaseManager:
         """Take the lease when free, expired, or already held by ``holder``.
 
         Returns ``None`` when another holder's lease is still valid. Taking
-        over an expired lease bumps the fencing token; re-acquiring one's own
-        lease extends it without bumping (no ownership change).
+        over any expired or released lease bumps the fencing token, including
+        a restart using the same holder name. Only a still-live re-acquisition
+        by the same holder extends it without changing generation.
         """
 
         now = self._clock()
@@ -95,7 +96,7 @@ class LeaseManager:
                         return LeaseHandle(lease_key, holder, 1, expires_at)
                     except IntegrityError:
                         continue  # concurrent creator won; retry the decision path
-                if row.holder == holder:
+                if row.holder == holder and row.expires_at_epoch > now.timestamp():
                     session.execute(
                         update(LeaseRow)
                         .where(LeaseRow.lease_key == lease_key)
@@ -119,7 +120,9 @@ class LeaseManager:
                 return None
         raise RuntimeError("lease acquire did not converge")  # pragma: no cover
 
-    def renew(self, lease_key: str, holder: str, ttl_seconds: float) -> LeaseHandle | None:
+    def renew(
+        self, lease_key: str, holder: str, ttl_seconds: float, *, fencing_token: int | None = None
+    ) -> LeaseHandle | None:
         """Extend a lease still held by ``holder``; ``None`` when it was lost."""
 
         now = self._clock()
@@ -127,7 +130,12 @@ class LeaseManager:
             row = session.execute(
                 select(LeaseRow).where(LeaseRow.lease_key == lease_key).with_for_update()
             ).scalar_one_or_none()
-            if row is None or row.holder != holder:
+            if (
+                row is None
+                or row.holder != holder
+                or row.expires_at_epoch <= now.timestamp()
+                or (fencing_token is not None and row.fencing_token != fencing_token)
+            ):
                 return None
             expires_at = _iso(now.timestamp() + ttl_seconds)
             session.execute(
@@ -137,16 +145,28 @@ class LeaseManager:
             )
             return LeaseHandle(lease_key, holder, row.fencing_token, expires_at)
 
-    def release(self, lease_key: str, holder: str) -> bool:
+    def release(self, lease_key: str, holder: str, *, fencing_token: int | None = None) -> bool:
         """Release when still held by ``holder``; the fencing token stays."""
 
         with self._session_factory() as session, session.begin():
-            result = session.execute(
-                update(LeaseRow)
-                .where(LeaseRow.lease_key == lease_key, LeaseRow.holder == holder)
-                .values(expires_at=_iso(0.0), expires_at_epoch=0.0)
-            )
+            statement = update(LeaseRow).where(LeaseRow.lease_key == lease_key, LeaseRow.holder == holder)
+            if fencing_token is not None:
+                statement = statement.where(LeaseRow.fencing_token == fencing_token)
+            result = session.execute(statement.values(expires_at=_iso(0.0), expires_at_epoch=0.0))
             return result.rowcount == 1
+
+    def assert_valid(self, session: Session, handle: LeaseHandle) -> None:
+        """Fence a state write inside its transaction, including lease expiry."""
+        row = session.execute(
+            select(LeaseRow).where(LeaseRow.lease_key == handle.lease_key).with_for_update()
+        ).scalar_one_or_none()
+        if (
+            row is None
+            or row.holder != handle.holder
+            or row.fencing_token != handle.fencing_token
+            or row.expires_at_epoch <= self._clock().timestamp()
+        ):
+            raise StaleFenceError(handle.lease_key, handle.fencing_token, row.fencing_token if row else -1)
 
     def current_token(self, lease_key: str) -> int | None:
         """Current fencing token for the lease, or ``None`` when never issued."""

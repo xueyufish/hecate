@@ -113,6 +113,7 @@ class EntryExecutionService:
         middleware_chains: dict | None = None,
         denial_tracker: Any | None = None,
         suggestion_service: Any | None = None,
+        action_hook: Any | None = None,
     ) -> None:
         # Lazy sibling-domain import: the execution domain must not import
         # studio at module level (tests/test_layering_domain.py).
@@ -132,6 +133,7 @@ class EntryExecutionService:
             middleware_chains=middleware_chains,
             denial_tracker=denial_tracker,
             suggestion_service=suggestion_service,
+            action_hook=action_hook,
         )
 
     async def execute(self, *, correlation: CorrelationInput | None = None, **execute_kwargs: Any) -> ExecutionOutcome:

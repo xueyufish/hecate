@@ -2470,13 +2470,17 @@ dependencies = [
 postgres = [
     { name = "psycopg", extra = ["binary"] },
 ]
+runtime = [
+    { name = "hecate-runtime" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "hecate-runtime", marker = "extra == 'runtime'", editable = "packages/hecate-runtime" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2" },
     { name = "sqlalchemy", specifier = ">=2.0.36" },
 ]
-provides-extras = ["postgres"]
+provides-extras = ["postgres", "runtime"]
 
 [[package]]
 name = "hecate-enterprise"

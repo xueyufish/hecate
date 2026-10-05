@@ -251,3 +251,26 @@ def test_evidence_durable_backend_with_durable_profile(tmp_path: Path, shutdown_
     )
     assert profile.config.evidence is not None
     assert profile.config.evidence.backend == "durable"
+
+
+def test_jsonl_retention_preserves_unexpired_records_in_boundary_day(tmp_path) -> None:
+    from datetime import UTC, datetime
+
+    now = {"t": datetime(2026, 1, 1, 23, tzinfo=UTC).timestamp()}
+    store = EvidenceStore(tmp_path / "audit", EvidencePolicy(retention_days=1), now=lambda: now["t"])
+    store.append("execution", "app", "boundary", "ok")
+    now["t"] = datetime(2026, 1, 2, 12, tzinfo=UTC).timestamp()
+    store.append("execution", "app", "new", "ok")
+    assert {r.ref for r in store.query(kind="execution")} == {"boundary", "new"}
+
+
+def test_sql_probe_reports_database_failure_as_unwritable(tmp_path) -> None:
+    from hecate_runner.evidence_sql import SqlEvidenceStore
+    from sqlalchemy import text
+
+    store = SqlEvidenceStore(f"sqlite:///{tmp_path / 'broken.db'}")
+    store.create_schema()
+    with store._engine.begin() as db:
+        db.execute(text("DROP TABLE evidence_records"))
+    with pytest.raises(OSError, match="cannot accept writes"):
+        store.probe()

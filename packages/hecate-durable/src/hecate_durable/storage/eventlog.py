@@ -291,6 +291,8 @@ class SqlEventLog:
         safely; gaps beyond the observed maximum are never fabricated.
         """
 
+        if cursor < 0 or limit < 1:
+            raise ValueError("cursor must be non-negative and limit must be positive")
         with self._session_factory() as session:
             rows = (
                 session.execute(
@@ -302,6 +304,7 @@ class SqlEventLog:
                         EventRow.source_sequence > cursor,
                     )
                     .order_by(EventRow.source_sequence)
+                    .limit(limit)
                 )
                 .scalars()
                 .all()
@@ -328,6 +331,9 @@ class SqlEventLog:
                         gap=GapRange(from_sequence=expected, to_sequence=row.source_sequence - 1),
                     )
                 )
+                last_sequence = row.source_sequence - 1
+                if len(events) >= limit:
+                    break
             events.append(EventEnvelope.from_dict(row.envelope))
             expected = row.source_sequence + 1
             last_sequence = row.source_sequence

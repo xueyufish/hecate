@@ -62,7 +62,7 @@ from hecate_durable.contracts.durable import (
 from hecate_durable.contracts.references import BackendRef, RefKind
 from hecate_durable.seams import ActionLedger, ControlCommandRecorder, DurableTaskStore
 from hecate_durable.storage.eventlog import EventPage, SqlEventLog
-from hecate_durable.storage.lease import LeaseManager
+from hecate_durable.storage.lease import LeaseHandle, LeaseManager
 from hecate_durable.storage.models import (
     ActionIntentRow,
     ActionOutcomeRow,
@@ -282,7 +282,11 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     @staticmethod
     def _check_submission_digest(key: IdempotencyKey, existing: SubmissionRow) -> None:
-        if existing.request_digest != key.request_digest:
+        if (
+            existing.request_digest != key.request_digest
+            or existing.subject != key.subject
+            or existing.workspace != key.workspace
+        ):
             raise IdempotencyConflictError(key.key, existing.request_digest)
 
     def submit_task(
@@ -324,6 +328,7 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                                 revision=0,
                                 recorded_at=now,
                                 writer_source="submit",
+                                workspace_id=key.workspace,
                                 run_issuer=run_ref.issuer_domain,
                                 run_id=run_ref.id,
                                 input_payload=input_payload,
@@ -369,9 +374,15 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         recorded_at: str = "",
         extra_update: dict[str, Any] | None = None,
         input_payload: dict[str, Any] | None = None,
+        lease: LeaseHandle | None = None,
+        event_run_ref: BackendRef | None = None,
+        terminal_payload: dict[str, Any] | None = None,
+        applied_command_id: str | None = None,
     ) -> TaskStateRecord:
         recorded = recorded_at or self._clock()
         with self._session() as session, session.begin():
+            if lease is not None:
+                self.leases.assert_valid(session, lease)
             row = session.execute(
                 select(TaskStateRow)
                 .where(
@@ -429,6 +440,11 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                     extra=dict(row.extra or {}),
                 )
             run_ref = self._run_linkage(session, task_ref)
+            if event_run_ref is not None:
+                run_ref = event_run_ref
+                row = session.get(TaskStateRow, (task_ref.issuer_domain, task_ref.id))
+                if row is not None:
+                    row.run_issuer, row.run_id = run_ref.issuer_domain, run_ref.id
             if run_ref is not None:
                 self.events.emit(
                     session,
@@ -437,6 +453,39 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                     event_type="task_state",
                     payload={"state": target.value, "revision": revision},
                 )
+                if terminal_payload is not None:
+                    self.events.emit(
+                        session,
+                        task_ref=task_ref,
+                        run_ref=run_ref,
+                        event_type="run_terminal",
+                        payload=terminal_payload,
+                    )
+            if applied_command_id is not None:
+                command = session.execute(
+                    select(CommandRow).where(CommandRow.command_id == applied_command_id).with_for_update()
+                ).scalar_one()
+                if (command.task_issuer, command.task_id) != (task_ref.issuer_domain, task_ref.id):
+                    raise ValueError("command is bound to another task")
+                validate_command_transition(CommandState(command.state), CommandState.APPLIED)
+                if command.expires_at is not None:
+                    deadline = datetime.fromisoformat(command.expires_at)
+                    now = datetime.fromisoformat(recorded)
+                    if deadline.tzinfo is None:
+                        deadline = deadline.replace(tzinfo=UTC)
+                    if now.tzinfo is None:
+                        now = now.replace(tzinfo=UTC)
+                    if deadline <= now:
+                        raise ValueError("command expired before effect commit")
+                command.state, command.updated_at = CommandState.APPLIED.value, recorded
+                if run_ref is not None:
+                    self.events.emit(
+                        session,
+                        task_ref=task_ref,
+                        run_ref=run_ref,
+                        event_type="command_state",
+                        payload={"command_id": applied_command_id, "state": CommandState.APPLIED.value},
+                    )
         return record
 
     def _run_linkage(self, session: Session, task_ref: BackendRef) -> BackendRef | None:
@@ -495,7 +544,11 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                 with self._session() as session, session.begin():
                     existing = session.get(CommandRow, command.command_id)
                     if existing is not None:
-                        if _command_of(existing).to_dict() != command.to_dict():
+                        saved = _command_of(existing).to_dict()
+                        incoming = command.to_dict()
+                        if {k: v for k, v in saved.items() if k != "state"} != {
+                            k: v for k, v in incoming.items() if k != "state"
+                        }:
                             raise ValueError(f"command {command.command_id!r} already recorded with different content")
                         return _command_of(existing)
                     session.add(
@@ -599,13 +652,20 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         session_id: str | None = None,
         execution_id: str | None = None,
         tool_call_id: str | None = None,
+        lease: LeaseHandle | None = None,
     ) -> None:
         for attempt in range(3):
             try:
                 with self._session() as session, session.begin():
+                    if lease is not None:
+                        self.leases.assert_valid(session, lease)
                     existing = session.get(ActionIntentRow, intent.action_key)
                     if existing is not None:
-                        if existing.arguments_digest != intent.arguments_digest:
+                        if (
+                            existing.arguments_digest != intent.arguments_digest
+                            or existing.action_name != intent.action_name
+                            or existing.side_effect_class != intent.side_effect_class.value
+                        ):
                             raise IdempotencyConflictError(intent.action_key, existing.arguments_digest)
                         return
                     now = self._clock()
@@ -652,7 +712,9 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         receipt, _token = self.claim_ex(action_key, holder=None)
         return receipt
 
-    def claim_ex(self, action_key: str, *, holder: str | None = None) -> tuple[ClaimReceipt, int | None]:
+    def claim_ex(
+        self, action_key: str, *, holder: str | None = None, lease: LeaseHandle | None = None
+    ) -> tuple[ClaimReceipt, int | None]:
         """Atomic claim: at most one concurrent claimer flips the slot.
 
         The winner receives the incremented claim token (the per-action
@@ -661,6 +723,8 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
         """
 
         with self._session() as session, session.begin():
+            if lease is not None:
+                self.leases.assert_valid(session, lease)
             row = session.execute(
                 select(ActionIntentRow).where(ActionIntentRow.action_key == action_key).with_for_update()
             ).scalar_one_or_none()

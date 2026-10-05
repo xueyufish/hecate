@@ -506,3 +506,55 @@ def test_outcome_persist_failure_keeps_task_pending_reconciliation(
     assert record.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED, (
         "an unrecordable outcome must stay pending reconciliation, never silently succeed"
     )
+
+
+def test_durable_capabilities_override_preview_defaults(harness) -> None:
+    capabilities = harness.engine.capabilities()
+    for name in ("durable_tasks", "long_task_recovery", "write_tools"):
+        assert capabilities[name].startswith("supported:")
+    assert capabilities["pause"].startswith("unsupported:")
+
+
+def test_restart_revalidates_persisted_identity(harness) -> None:
+    from dataclasses import replace
+
+    request = _write_request()
+    submission = harness.durable.submit(
+        principal="app-reader",
+        domains=("inventory",),
+        run_input=request,
+        idempotency_key="revoked",
+    )
+    harness.durable.begin_run(submission.association.task_ref)
+    harness.engine._profile = replace(harness.profile, identities=())
+    assert (
+        harness.engine.resume(
+            submission.association.task_ref,
+            submission.association.run_ref,
+            {**request, "_host_identity": {"principal": "attacker", "domains": ["all"]}},
+        )
+        is None
+    )
+    state = harness.store.get_task_state(submission.association.task_ref)
+    assert state.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
+
+
+def test_cancel_command_retry_preserves_applied_receipt(harness) -> None:
+    from hecate_durable.contracts.durable import CommandState
+
+    submission = harness.durable.submit(
+        principal="app-reader", run_input=_write_request(), idempotency_key="cancel-replay"
+    )
+    arguments = dict(
+        command_id="cancel-once",
+        issuer="app-reader",
+        task_ref=submission.association.task_ref,
+        run_ref=submission.association.run_ref,
+    )
+    original = harness.durable.record_cancel(**arguments)
+    harness.durable.cancel_applied(original.command_id)
+    replay = harness.durable.record_cancel(**arguments)
+    assert replay.state is CommandState.APPLIED
+    assert replay.issued_at == original.issued_at
+    with pytest.raises(ValueError, match="another cancellation"):
+        harness.durable.record_cancel(**{**arguments, "issuer": "other-principal"})

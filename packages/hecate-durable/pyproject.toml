@@ -10,6 +10,10 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
+runtime = ["hecate-runtime"]
+
+[tool.uv.sources]
+hecate-runtime = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

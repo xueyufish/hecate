@@ -346,3 +346,28 @@ def test_concurrent_claims_admit_exactly_one(store: SqlDurableStore) -> None:
     assert sum(results) == 1
     losers = [r for r in results if not r]
     assert len(losers) == 7
+
+
+@pytest.mark.parametrize(("subject", "workspace"), [("other", "ws"), ("app", "other")])
+def test_idempotency_replay_cannot_cross_identity_scope(store, subject, workspace) -> None:
+    from hecate_durable.contracts.durable import IdempotencyConflictError
+
+    store.record_submission(_key(), TASK, RUN)
+    rebound = IdempotencyKey(key="k1", subject=subject, workspace=workspace, request_digest="d" * 64)
+    with pytest.raises(IdempotencyConflictError):
+        store.record_submission(rebound, TASK, RUN)
+
+
+def test_intent_cannot_change_tool_or_side_effect_class(store) -> None:
+    from hecate_durable.contracts.durable import IdempotencyConflictError
+
+    first = _write_intent()
+    store.record_intent(first)
+    rebound = ActionIntent(
+        action_key=first.action_key,
+        action_name="different_tool",
+        arguments_digest=first.arguments_digest,
+        side_effect_class=first.side_effect_class,
+    )
+    with pytest.raises(IdempotencyConflictError):
+        store.record_intent(rebound)
