@@ -262,9 +262,11 @@ sc_scenarios:
   - id: SC05
     title: 重连与重复控制命令
     run_mode: managed
-    status: implemented
+    status: planned
     tier: 1
     responsible_step: 4/6/7
+    blocked_by: runner managed dispatch loop, action-time lease enforcement and process restart acceptance
+    implemented_slices: [delivery_acceptance, event_projection]
     assertions: >-
       After re-verifying trust and authorization the host accepts new work;
       historical events are deduplicated on replay; duplicate commands and

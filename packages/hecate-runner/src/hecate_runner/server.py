@@ -29,12 +29,14 @@ import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, unquote
 
 from hecate_durable.contracts.durable import IdempotencyConflictError
+from hecate_durable.contracts.references import BackendRef, RefKind
 
+from . import contract
 from .durable import DurableRuntime
-from .engine import EvidenceUnavailableError, ExecutionEngine
+from .engine import EvidenceUnavailableError, ExecutionEngine, RunState
 from .evidence import OUTCOME_DENIED, EvidenceStore
 from .profile import Profile, resolve_identity
 
@@ -140,6 +142,7 @@ class RunnerServer:
             def _send_json(self, status: int, payload: dict, content_type: str = "application/json") -> None:
                 body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 self.send_response(status)
+                self.send_header("X-Contract-Version", contract.CONTRACT_VERSION)
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -154,6 +157,17 @@ class RunnerServer:
                     {"type": f"urn:hecate:problem:{type_}", "title": title, "detail": detail, "status": status},
                     "application/problem+json",
                 )
+
+            def _send_problem_document(
+                self,
+                status: int,
+                type_: str,
+                title: str,
+                document: dict[str, Any],
+            ) -> None:
+                self.close_connection = True
+                payload = {"type": type_, "title": title, "status": status, **document}
+                self._send_json(status, payload, "application/problem+json")
 
             def _identity(self) -> dict | None:
                 auth = self.headers.get("Authorization", "")
@@ -180,6 +194,38 @@ class RunnerServer:
 
             def _authorized_run(self, run_id: str, identity: dict):
                 state = server._engine.get_state(run_id)
+                if state is None and server._durable is not None:
+                    run_ref = BackendRef(
+                        kind=RefKind.RUN,
+                        issuer_domain=contract.ISSUER_DOMAIN,
+                        id=run_id,
+                    )
+                    association = server._durable.association_for_run(run_ref)
+                    if association is not None:
+                        if association.key.subject != identity["principal"]:
+                            server._evidence.append(
+                                "denial",
+                                identity["principal"],
+                                run_id,
+                                OUTCOME_DENIED,
+                                {"reason": "forbidden"},
+                            )
+                            raise _ProblemError(
+                                403,
+                                "forbidden",
+                                "Request denied",
+                                "run is outside the trusted identity scope",
+                            )
+                        record = server._durable.store.get_task_state(association.task_ref)
+                        state = RunState(
+                            run_id=run_id,
+                            status=record.lifecycle_state.value,
+                            principal=association.key.subject,
+                            domains=(),
+                            task_ref=association.task_ref,
+                            run_ref=association.run_ref,
+                            received_at=record.recorded_at,
+                        )
                 if state is None:
                     raise _ProblemError(404, "run-not-found", "Run not found", "run does not resolve")
                 if state.principal != identity["principal"] or not set(state.domains).issubset(identity["domains"]):
@@ -207,7 +253,12 @@ class RunnerServer:
                         )
                         return
                     if path == "/capabilities":
-                        self._send_json(200, server._engine.capabilities())
+                        payload = contract.capabilities(
+                            server._engine.capabilities(),
+                            durable=server._durable is not None,
+                        )
+                        payload.update(server._engine.capabilities())
+                        self._send_json(200, payload)
                         return
                     identity = self._identity()
                     if identity is None:
@@ -315,9 +366,20 @@ class RunnerServer:
                         return
 
                     if len(parts) in (2, 3) and parts[0] == "runs":
-                        run_id = parts[1]
+                        raw_ref = unquote(parts[1])
+                        run_id, issuer_domain = contract.parse_run_path_segment(raw_ref)
+                        formal = issuer_domain is not None or self.headers.get("X-Contract-Version") is not None
+                        if issuer_domain is not None and issuer_domain != contract.ISSUER_DOMAIN:
+                            self._send_problem(404, "run-not-found", "Run not found", "unknown run issuer")
+                            return
                         state = self._authorized_run(run_id, identity)
                         if len(parts) == 2:
+                            if formal:
+                                self._send_json(
+                                    200,
+                                    contract.run_status(run_id, state, state.run_ref),
+                                )
+                                return
                             self._send_json(
                                 200,
                                 {
@@ -329,6 +391,44 @@ class RunnerServer:
                             )
                             return
                         if parts[2] == "events":
+                            params = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                            cursor_values = params.get("cursor")
+                            cursor_value = cursor_values[0] if cursor_values else None
+                            if formal:
+                                durable_page = None
+                                if server._durable is not None and state.run_ref is not None:
+                                    try:
+                                        cursor_int = int(cursor_value) if cursor_value is not None else 0
+                                        if cursor_int < 0:
+                                            raise ValueError
+                                    except ValueError:
+                                        raise _ProblemError(
+                                            400,
+                                            "invalid-cursor",
+                                            "Invalid cursor",
+                                            "cursor is not a valid continuation",
+                                        ) from None
+                                    durable_page = server._durable.read_execution_events(
+                                        state.run_ref,
+                                        cursor=cursor_int,
+                                    )
+                                try:
+                                    self._send_json(
+                                        200,
+                                        contract.event_page(
+                                            state,
+                                            cursor=cursor_value,
+                                            durable_page=durable_page,
+                                        ),
+                                    )
+                                except contract.ContractValidationError as exc:
+                                    raise _ProblemError(
+                                        400,
+                                        "invalid-cursor",
+                                        "Invalid cursor",
+                                        str(exc),
+                                    ) from exc
+                                return
                             if server._durable is not None and state.run_ref is not None:
                                 # Durable profile: events come from the
                                 # persistent log — cursors survive restarts.
@@ -374,6 +474,9 @@ class RunnerServer:
                             )
                             return
                         if parts[2] == "artifacts":
+                            if formal:
+                                self._send_json(200, contract.artifact_page(run_id, state, state.run_ref))
+                                return
                             self._send_json(200, {"run_ref": f"runs/{run_id}", "artifacts": state.events})
                             return
                     self._send_problem(404, "not-found", "Not found", f"no route for {path}")
@@ -418,6 +521,22 @@ class RunnerServer:
                             return
                         body = self._read_body()
                         request = json.loads(body or b"{}")
+                        formal_request = contract.is_execution_request(request)
+                        formal_request_body = dict(request) if formal_request else {}
+                        if formal_request:
+                            try:
+                                request = contract.parse_execution_request(
+                                    request,
+                                    idempotency_header=self.headers.get("Idempotency-Key"),
+                                )
+                            except contract.ContractValidationError as exc:
+                                self._send_problem(
+                                    400,
+                                    "invalid-request",
+                                    "Invalid execution request",
+                                    str(exc),
+                                )
+                                return
                         # Self-reported role/domain claims are ignored by design:
                         # only the server-side identity mapping grants scope.
                         try:
@@ -436,6 +555,22 @@ class RunnerServer:
                                 )
                             )
                         except IdempotencyConflictError as exc:
+                            if formal_request:
+                                self._send_problem_document(
+                                    409,
+                                    "https://hecate.dev/contracts/errors/version_conflict",
+                                    "Version conflict",
+                                    {
+                                        "code": "version_conflict",
+                                        "request_ref": formal_request_body["run_ref"],
+                                        "message": "idempotency key already registered with different content",
+                                        "detail_ns": {
+                                            "reason": "idempotency_key_content_mismatch",
+                                            "registered_digest": exc.registered_digest,
+                                        },
+                                    },
+                                )
+                                return
                             self._send_problem(
                                 409,
                                 "idempotency-conflict",
@@ -454,14 +589,22 @@ class RunnerServer:
                         if state is None:
                             self._send_problem(503, "busy", "Runner busy", "serial preview: another run is in flight")
                             return
-                        response = {"run_ref": f"runs/{run_id}", "status": state.status}
-                        if state.replayed:
-                            response["replayed"] = True
+                        if formal_request:
+                            response = contract.submit_receipt(run_id, state, state.run_ref)
+                        else:
+                            response = {"run_ref": f"runs/{run_id}", "status": state.status}
+                            if state.replayed:
+                                response["replayed"] = True
                         self._send_json(202, response)
                         return
 
                     if len(parts) == 3 and parts[0] == "runs" and parts[2] == "cancel":
-                        run_id = parts[1]
+                        raw_ref = unquote(parts[1])
+                        run_id, issuer_domain = contract.parse_run_path_segment(raw_ref)
+                        formal = issuer_domain is not None or self.headers.get("X-Contract-Version") is not None
+                        if issuer_domain is not None and issuer_domain != contract.ISSUER_DOMAIN:
+                            self._send_problem(404, "run-not-found", "Run not found", "unknown run issuer")
+                            return
                         state = self._authorized_run(run_id, identity)
                         command_id = None
                         if server._durable is not None and state.task_ref is not None and state.run_ref is not None:
@@ -479,21 +622,40 @@ class RunnerServer:
                             return server._engine.request_cancel(run_id, command_id=command_id)
 
                         if server._run_coro(cancel()):
-                            self._send_json(
-                                202,
-                                {
+                            if formal:
+                                payload = contract.cancel_receipt(
+                                    run_id,
+                                    accepted=True,
+                                    state=state,
+                                    run_ref=state.run_ref,
+                                )
+                            else:
+                                payload = {
                                     "run_ref": f"runs/{run_id}",
                                     "cancel": "requested",
                                     "command_id": command_id,
                                     "note": "cooperative at tool boundaries; applied only on actual effect",
-                                },
-                            )
+                                }
+                            if command_id is not None:
+                                payload["command_id"] = command_id
+                            self._send_json(202, payload)
                         else:
                             if command_id is not None:
                                 server._durable.cancel_rejected(command_id)
-                            self._send_json(
-                                200, {"run_ref": f"runs/{run_id}", "cancel": "no-op", "status": state.status}
-                            )
+                            if formal:
+                                payload = contract.cancel_receipt(
+                                    run_id,
+                                    accepted=False,
+                                    state=state,
+                                    run_ref=state.run_ref,
+                                )
+                                if command_id is not None:
+                                    payload["command_id"] = command_id
+                                self._send_json(202, payload)
+                            else:
+                                self._send_json(
+                                    200, {"run_ref": f"runs/{run_id}", "cancel": "no-op", "status": state.status}
+                                )
                         return
 
                     self._send_problem(404, "not-found", "Not found", f"no route for {path}")

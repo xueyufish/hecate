@@ -1,30 +1,47 @@
 # hecate-runner
 
-Standalone execution host for the [`hecate-runtime`](../hecate-runtime) kernel —
-the step5c technical preview. It cold-starts from a profile directory with no
-management platform, no platform management tables, and no repository source
-path, and serves a host-specific preview HTTP API in a strictly
-**read-only** posture.
+Standalone execution host for the [`hecate-runtime`](../hecate-runtime) kernel.
+It cold-starts from a profile directory with no management platform, no platform
+management tables, and no repository source path. The same HTTP paths now expose
+both the legacy preview shape and the step3 execution-backend binding; formal
+clients submit an `ExecutionRequest` with `Idempotency-Key` and use the returned
+structured backend `run_ref`.
 
-This API is not yet the complete step3 execution-backend binding: the preview
-uses its own run request, string references and event shape. The contract adapter
-and shared execution application service remain step5c work; do not register it
-as a certified interchangeable backend based on endpoint names alone.
+The host and the platform builtin backend consume the same
+`hecate_runtime.execution_service` application behavior. Each side keeps its own
+identity, evidence, storage, and persistence adapters.
 
 ## Status: technical preview
 
-Not production. The preview explicitly does **not** provide: durable tasks,
+Not production. The base profile explicitly does **not** provide durable tasks,
 background retries, long-task recovery, write or approval tools, event
-streaming, or any remote-revocation guarantee. These are declared
-`unsupported` on `/capabilities` and land in step6/7/10/11. Execution is
-serial (one run at a time). Do not expose the service beyond localhost.
+streaming, or any remote-revocation guarantee. The optional durable profile adds
+persistent local tasks/actions, replay-gated recovery, local write tools, and
+restart-queryable execution events. It still does not provide production
+certification, managed authorization guarantees, persistent input/approval
+waiting, or an event stream. Execution is serial (one run at a time). Do not
+expose the service beyond localhost.
+
+The default profile admits read-only tools. An opt-in `durable` profile adds
+persistent task/action records, write-tool recovery and bounded serial restart
+admission. The managed channel currently provides library-level delivery
+acceptance and event projection; the CLI rejects `control_plane` configuration
+until managed dispatch and action-time lease enforcement are wired. Capability
+statements describe available primitives, not production certification.
 
 ## Install
 
 ```bash
 uv build --package hecate-runner
-pip install dist/hecate_runner-*.whl   # pulls hecate-runtime only — never the full hecate app
+pip install dist/hecate_runner-*.whl   # pulls hecate-runtime and hecate-durable — never the full hecate app
 ```
+
+The wheel carries the authoritative execution-contract JSON Schema snapshot in
+`hecate_runner/_contract_schemas`. The source of truth remains
+`src/hecate/contracts/schemas`; run
+`python packages/hecate-runner/scripts/sync_contract_schemas.py` after changing
+it. `packages/hecate-runner/tests/test_schema_publication.py` fails if the
+published snapshot drifts.
 
 ## Profile layout
 
@@ -51,6 +68,20 @@ pip install dist/hecate_runner-*.whl   # pulls hecate-runtime only — never the
   "evidence": {"retention_days": 30, "capacity_limit": 104857600}
 }
 ```
+
+## Durable profile
+
+Add an explicit host-owned database and deployment/data domain:
+
+```json
+{"durable": {"database_url": "postgresql+psycopg://USER:PASSWORD@HOST/DATABASE", "workspace": "customer-a"}}
+```
+
+Install `hecate-durable[postgres]` for the PostgreSQL driver. SQLite is a
+local development option. Back up and upgrade the host schema while drained;
+`create_schema()` creates missing tables, and is not a general migration tool.
+Recovery trusts the persisted principal/domain snapshot only after checking
+current `identity.json`; it never substitutes client-provided identity fields.
 
 ## Evidence retention
 
@@ -90,8 +121,8 @@ certification is implied).
 The endpoint adapter sends `{"prompt": "...", "tools": ["query_inventory"]}`
 and expects `{"content": "..."}`; optional `model.auth_env` references a bearer
 token. Endpoint errors fail the run. This profile uses a fixed tool plan and
-does not implement model-driven tool selection. Only `query_inventory` is mapped
-by the preview business adapter; other mappings fail startup. Its arguments
+does not implement model-driven tool selection. The default profile maps `query_inventory`; the durable profile additionally
+allows manifest-declared `write_inventory`. Other mappings fail startup. Its arguments
 require non-empty string `domain` and `sku`; declared tool schemas must be listed
 and digest-verified in the manifest.
 
@@ -103,9 +134,14 @@ hecate-runner --profile ./my-profile [--business-api http://127.0.0.1:8601]
 
 ## HTTP surface
 
-Preview host API: `GET /capabilities`, `POST /runs`, `GET /runs/{id}`,
-`GET /runs/{id}/events?cursor=`, `POST /runs/{id}/cancel`,
-`GET /runs/{id}/artifacts`. Host extensions: `GET /healthz`,
+Formal execution-backend binding: `GET /capabilities`, `POST /runs`,
+`GET /runs/{issuer_domain}/{run_id}`, `GET /runs/{...}/events?cursor=`,
+`POST /runs/{...}/cancel`, and `GET /runs/{...}/artifacts`. Formal submissions
+require the body `ExecutionRequest` and `Idempotency-Key` header to use the same
+key; receipts, status, normalized events, artifacts, cancel receipts, and
+`version_conflict` errors follow the schemas in this wheel. The legacy preview
+body and string `runs/{id}` references remain compatible. Host extensions:
+`GET /healthz`,
 `GET /v1/evidence?outcome=&principal=`, `POST /admin/shutdown`
 (token in JSON body). Errors are `urn:hecate:problem:*` problem+json.
 
@@ -121,7 +157,8 @@ anonymous-denial records from local JSONL files. A run is admitted only after
 its local evidence is flushed; an unwritable store refuses execution. Cancellation
 stops later tool calls cooperatively and cannot revoke an external call already
 in progress. Shutdown stops admission and closes in-process tasks; unresolved
-work is recorded as `unknown`, without recovery guarantees.
+work is recorded as `unknown`. Durable restart validates the retained identity
+and action ledger; unresolved protected results require reconciliation.
 
 ## Scenario coverage
 

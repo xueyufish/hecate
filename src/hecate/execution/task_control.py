@@ -173,6 +173,17 @@ class TaskControlService:
         self._session_factory = session_factory
         self._worker = worker
         self._relay = relay
+        if relay is None and hasattr(store, "session_factory"):
+            from hecate_durable.worker import OutboxRelay
+
+            from hecate.core.database import async_session_factory
+            from hecate.execution.event_relay import PlatformOutboxProjector
+
+            self._relay = OutboxRelay(
+                store.session_factory,
+                PlatformOutboxProjector(store, session_factory or async_session_factory),
+                relay_key="platform",
+            )
         self._registry = TaskRunRegistry(db)
         if dispatcher is not None:
             self._dispatcher = dispatcher
@@ -214,6 +225,8 @@ class TaskControlService:
         deployment = await self._default_deployment(agent_id, workspace_id)
         if deployment is None:
             raise TaskControlValidationError(f"agent {agent_id} has no default deployment")
+        if deployment.backend_type != "builtin" or deployment.access_mode != "in_process":
+            raise TaskControlValidationError("task-control dispatch currently supports builtin/in_process deployments")
 
         digest = canonical_request_digest({"goal": goal, "agent_id": str(agent_id), "input": input, "stream": stream})
         minted_task, minted_run, engine_session = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
@@ -221,6 +234,7 @@ class TaskControlService:
         run_backend_ref = run_ref(deployment.issuer_domain, str(engine_session))
         # The input payload rides the durable task row: a restart re-dispatches
         # from durable state, never from a lost in-process closure.
+        chain = await self._identity_chain(workspace_id, agent_id, user_id, deployment)
         persisted_input = {
             "goal": goal,
             "agent_id": str(agent_id),
@@ -230,6 +244,9 @@ class TaskControlService:
             "messages": messages,
             "model": input.get("model"),
             "stream": stream,
+            "identity_chain": chain.to_dict(),
+            "platform_run_id": str(minted_run),
+            "backend_run_ref": run_backend_ref.to_dict(),
         }
         key = IdempotencyKey(
             key=idempotency_key or f"auto:{minted_task}",
@@ -250,30 +267,24 @@ class TaskControlService:
                 f"idempotency key {idempotency_key!r} is already registered with a different request digest"
             ) from exc
         if association.task_ref != t_ref:
-            return await self._replay_result(workspace_id, association)
+            saved = await asyncio.to_thread(self._store.get_task_input, association.task_ref) or {}
+            if "identity_chain" in saved:
+                from hecate.execution.task_registration import ensure_submission_registration
 
-        chain = await self._identity_chain(workspace_id, agent_id, user_id, deployment)
+                await ensure_submission_registration(
+                    self._db, association.task_ref, saved, sql_store=hasattr(self._store, "engine")
+                )
+            return await self._replay_result(workspace_id, association)
         try:
-            task = await self._registry.create_task(
-                goal=goal,
-                initiator_ref=chain.to_dict(),
-                workspace_id=workspace_id,
-                task_id=minted_task,
-            )
-            run = await self._registry.create_run(
-                task_id=task.id,
-                workspace_id=workspace_id,
-                deployment_id=deployment.id,
-                identity_chain=chain,
-                backend_run_ref=run_backend_ref,
-                run_id=minted_run,
+            from hecate.execution.task_registration import ensure_submission_registration
+
+            task, run = await ensure_submission_registration(
+                self._db, t_ref, persisted_input, sql_store=hasattr(self._store, "engine")
             )
         except TaskRunRegistryError as exc:
             raise TaskControlValidationError(str(exc)) from exc
-        # Commit the rows before the seam write: the durable store rides its
-        # own engine/transaction, and holding this transaction open across
-        # that write locks the database (single-writer sqlite today; one
-        # independent session per transaction regardless).
+        # Release the registration transaction before dispatch writes through
+        # the durable store's separate engine/session.
         await self._db.commit()
 
         if hasattr(self._store, "attach_workspace"):
@@ -298,16 +309,37 @@ class TaskControlService:
 
         if self._worker is not None:
             await self._worker.dispatch_once(t_ref)
+            await self._pump_events()
+            return
+        if hasattr(self._store, "engine") and self._dispatcher is not None:
+            from hecate_durable.worker import DurableWorker
+
+            async def inline_dispatch(task_ref, record, lease) -> None:
+                await self._dispatcher(task_ref, record, lease, db=self._db)
+
+            worker = DurableWorker(self._store, inline_dispatch, leases=self._store.leases)
+            await worker.dispatch_once(t_ref)
+            await self._pump_events()
             return
         record = await asyncio.to_thread(self._store.get_task_state, t_ref)
         if record is None or record.lifecycle_state is not TaskLifecycleState.QUEUED:
             return
         if self._dispatcher is None:
             raise TaskControlValidationError("no dispatcher bound; cannot execute tasks")
-        await asyncio.to_thread(self._store.apply_task_state, t_ref, TaskLifecycleState.RUNNING)
+        await asyncio.to_thread(
+            self._store.apply_task_state, t_ref, TaskLifecycleState.RUNNING, expected_revision=record.revision
+        )
         # Inline dispatch runs on this request's session (same DB); the
         # worker path opens its own sessions instead.
         await self._dispatcher(t_ref, record, None, db=self._db)
+        await self._pump_events()
+
+    async def _pump_events(self) -> None:
+        if self._relay is not None:
+            try:
+                await self._relay.pump_once()
+            except Exception:
+                logger.exception("outbox projection deferred; authoritative state remains durable")
 
     async def _dispatch_task(self, t_ref: BackendRef) -> None:
         """Background dispatch trigger; same path as the worker's cycle."""
@@ -450,6 +482,7 @@ class TaskControlService:
         cursor: str | None = None,
         limit: int = 100,
     ) -> EventPage:
+        await self._pump_events()
         try:
             run = await self._registry.get_run(run_id, workspace_id)
         except TaskNotFoundError as exc:
@@ -510,6 +543,11 @@ class TaskControlService:
         detail_ns: dict[str, Any] | None = None,
     ) -> CommandIssueResult:
         """Record a command and act on what the platform can enforce."""
+        if expires_at is not None:
+            try:
+                datetime.fromisoformat(expires_at)
+            except (TypeError, ValueError) as exc:
+                raise TaskControlValidationError("expires_at must be an ISO timestamp") from exc
         task = await self._get_task(workspace_id, task_id)
         t_ref = task_ref_of(task.id)
         runs = await self._registry.list_runs_for_task(task.id, workspace_id)
@@ -537,6 +575,13 @@ class TaskControlService:
         # the application session (one independent session per transaction).
         await self._db.commit()
 
+        if _expired(record.expires_at):
+            expired = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)
+            return CommandIssueResult(record=expired, detail="command expired before execution")
+        current = await asyncio.to_thread(self._store.get_task_state, t_ref)
+        if record.expected_revision is not None and (current is None or current.revision != record.expected_revision):
+            rejected = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+            return CommandIssueResult(record=rejected, detail="expected task revision no longer matches")
         if kind is ControlCommandKind.CANCEL:
             detail = await self._request_cancel(t_ref, record, workspace_id)
         elif kind is ControlCommandKind.PROVIDE_INPUT:
@@ -593,14 +638,21 @@ class TaskControlService:
                 self._store.apply_task_state,
                 t_ref,
                 TaskLifecycleState.QUEUED,
-                expected_revision=current.revision,
+                expected_revision=record.expected_revision
+                if record.expected_revision is not None
+                else current.revision,
                 extra_update={"wait": {**wait, "consumed": True}},
                 input_payload=merged_input,
+                **({"applied_command_id": record.command_id} if hasattr(self._store, "engine") else {}),
             )
         except (InvalidTaskTransitionError, ValueError):
             await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
             return "task moved on concurrently; wake rejected"
-        applied = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
+        applied = (
+            await asyncio.to_thread(self._recorder.get, record.command_id)
+            if hasattr(self._store, "engine")
+            else await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
+        )
         logger.info("task %s woken from %s; requeued with provided input", t_ref.id, expected_state.value)
         return f"wake accepted; task requeued (receipt {applied.state.value})"
 
@@ -627,11 +679,22 @@ class TaskControlService:
                     self._store.apply_task_state,
                     t_ref,
                     TaskLifecycleState.CANCELLED,
-                    expected_revision=current.revision if current else None,
+                    expected_revision=(
+                        record.expected_revision
+                        if record.expected_revision is not None
+                        else current.revision
+                        if current
+                        else None
+                    ),
+                    **({"applied_command_id": record.command_id} if hasattr(self._store, "engine") else {}),
                 )
             except (InvalidTaskTransitionError, ValueError):
                 return "dispatch raced the cancel; the command stays requested"
-            applied = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
+            applied = (
+                await asyncio.to_thread(self._recorder.get, record.command_id)
+                if hasattr(self._store, "engine")
+                else await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.APPLIED)
+            )
             return f"cancel applied before dispatch (receipt {applied.state.value})"
         await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REQUESTED)
         return _CANCEL_RUNNING_NOTE

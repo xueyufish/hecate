@@ -488,7 +488,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 - [x] step5a：先实现 `HecateExecutionBackend` 包装当前 `WorkflowExecutionService`，固定兼容样本；再抽出图编译/Worker/上下文/guardrail 的共享装配函数和执行应用服务。平台 ORM 查询、定义解析、平台授权映射留在平台 adapter，转换为执行输入后调用共享装配；只包装旧服务不能作为独立消费的完成证据。（`runtime-shared-assembly` 已交付：装配落 `src/hecate/runtime/execution_assembly.py`（studio/ORM 零 import，分层守卫扫描全部 import 位点），`HecateExecutionBackend` 在 `src/hecate/execution/builtin.py` 经共享装配执行，契约测试参数化 Stub/live/builtin 三实现，builtin 兼容样本钉住漂移；既有执行服务测试零断言修改全绿）
 - [x] step5b：按 step1 依赖闭包抽取 `hecate-runtime` 与最小类型/契约依赖；构建非 editable wheel，并提供声明式 extras/adapter 依赖。清除首个独立 profile 路径上的延迟跨域 import，包括编译输入、工具安全、上下文和证据写入；可选功能未安装时启动声明 `unsupported`，不能等运行中 ImportError。平台兼容导入只转发到新包，禁止新包反向依赖完整 `hecate`。（`packages/hecate-runtime` 落地：内核 88 模块、无 `hecate` 反向依赖、settings/数据库耦合清零（RuntimeConfig+memory 接缝注入）、五行"待解除耦合"清除、wheel 干净安装冒烟 + CI `runtime-wheel-clean-install` job、capability_status 启动期声明；独立基线 §8 证据登记；SC01/SC02 留 step5c 不翻转）
-- [ ] step5c：实现独立执行宿主（建议 `hecate-runner`），提供本地 manifest 加载、可信配置/secret 引用解析、业务身份和策略 adapter、模型/工具装配、最小执行/状态/事件接口、健康与关闭处理。与平台 adapter 共享执行应用服务；HTTP 身份校验不能以客户端自报角色替代。独立包安装样例只配置模型、模拟业务 API 和本地证据存储，不启动管理服务。（`packages/hecate-runner` 已交付本地只读预览（PR #208）：manifest、可信身份、预览 HTTP API 与本地证据；本轮补齐查询隔离、JSON Schema、实际 endpoint 调用、准入审计、串行准入、协作取消及关闭。**仍未完成**：宿主使用专用固定图，尚未复用完整共享执行应用服务；其 HTTP 请求/receipt/事件/能力声明尚未符合正式 Step3 后端绑定。须分别完成共享服务迁移与契约 adapter 回归才能勾选此项，不能以 SC01/SC02 通过替代或将契约一致性整体推迟到 Step6。见 [补充复核](step5-execution-review-report.md)）
+- [x] step5c：实现独立执行宿主（`hecate-runner`），提供本地 manifest 加载、可信配置/secret 引用解析、业务身份和策略 adapter、模型/工具装配、最小执行/状态/事件接口、健康与关闭处理；与平台 adapter 共享执行应用服务，HTTP 身份校验不能以客户端自报角色替代。（PR #208 交付本地预览并补齐身份隔离、参数/能力校验、endpoint 调用、准入审计、串行准入、协作取消与关闭；change `runner-contract-shared-service` 交付 `hecate_runtime.execution_service` 供平台 builtin 与 Runner 共用，Runner 正式支持 `ExecutionRequest`/`SubmitReceipt`/`RunStatus`/`EventPage`/`CancelReceipt`/artifact 引用与 `version_conflict`，wheel 携带与权威 schema 逐字节校验的契约快照，durable profile 的执行事件按稳定 event id 持久化并支持重启后按结构化 backend run ref 查询。验证：Runner 包 100 项测试、平台 builtin/契约 34 项、SC01 干净安装 6 项、scoped mypy 与 wheel 构建通过。固定工具计划和 Stub/endpoint 模型仍是技术预览边界；生产身份/授权/审批/受管组合认证不因本项完成而授予，仍归 step7/8/16。）
 - [x] step5c：先提供本地只读技术预览：允许列表工具、参数校验、可信身份、隔离数据域和持久的基础审计必须生效；写工具、后台自动重试、长任务恢复等未验证能力拒绝启用。提供 Stub 模型的确定性 CI 样例和可配置模型 endpoint 的集成入口；真实模型调用证据单独记录，不用 Stub 宣称供应商已认证。（SC01/SC02 随该切片翻转为 `implemented`：`tests/scenarios/test_sc01_cold_start.py`/`test_sc02_inventory_read.py` + `tests/scenarios/tools/`（库存 fixture 与 runner harness）；基线 §5 登记更新，生产认证仍归 step16/step7）
 - [ ] step5d：迁移平台调用方，使其选用同一共享装配或独立宿主 adapter；内置执行包与宿主可以单独升级，支持窗口由契约/依赖矩阵界定。Python 嵌入入口复用共享装配但首版不自动授予生产支持；非 Python App 通过公开 HTTP/JSON 样例接入，不必等待 SDK 生成器。（第一切片（change `platform-entry-migration`）：HTTP/MCP/IM/评估四链改经 `EntryExecutionService` 并登记 Task/Run；第二切片（change `entry-tail-migration`）：A2A executor 与定时任务 agent executor 亦经入口服务执行，`llm_service.chat` 直连清除。剩余登记：A2A 协议级 per-agent 身份缺口（调度器 `manager._execute_task` 接线 executor registry 已由 step6 平台轨 change `platform-task-control-api` 完成：cron 触发经 registry 分派 agent/workflow 执行器、结果如实映射 success/failed，空转路径删除）。复核轮（change `step5-review-hardening`，报告 [step5-review-report](step5-review-report.md)）：入口事件存储收敛为单进程共享实例（`core/composition/entry_assembly`），工具装配公开化并纳入分层扫描；A2A 改为显式 `A2A_AGENT_WORKSPACE_ID` 作用域唯一解析（未配置/零/多命中协议内拒绝，全局第一 agent 选取删除），失败响应不再泄露内部错误）
 - [ ] 将 Pregel stream、状态、错误和产物映射到平台契约；原始事件作为后端详情保留。（事件映射层已落 `src/hecate/execution/entry_events.py`：RunEventMapper 客户端安全投影 + 后端详情保留 + tool 配对校验；HTTP 流式已切换消费，错误/产物映射待续）
@@ -514,32 +514,36 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 ### step6 — 建立持久化任务、控制命令与治理事件
 
-**目标：**任务不依赖 HTTP 请求存活，平台重启后仍知道任务在哪、发生过什么、哪些命令尚未确认。
+**目标：**任务不依赖 HTTP 请求存活；执行事实由宿主保存，平台获得可恢复的状态和证据投影；重试不得盲目重做业务写入。
 
-**操作：**
+**复核结论：部分完成，不能整体验收。** 已交付持久存储、worker、平台控制 API 和 Runner 本地恢复基础。复核修正了真实平台执行未受租约 fencing 保护、动作台账未注入工具执行链、outbox 提交乱序漏投、恢复身份与受管投影等问题。原先全部勾选的记录混用了契约测试、组件测试和完整宿主验收，以下重新区分。详细问题、验证方法和剩余边界见 [Step6 执行复核报告](step6-execution-review-report.md)。
 
-- [x] 建立 `POST /api/tasks`、查询、事件分页/SSE 和控制命令接口；提交成功后返回持久化 task_id/run_id。(平台轨已交付(change `platform-task-control-api`):`/api/tasks` 全量端点(幂等提交/wait 同步视图/查询)、`/api/runs/{id}/events` 游标分页与 SSE 订阅视图、`/api/tasks/{id}/commands`+`/cancel` 与回执查询、`/api/reconciliation/pending`;生命周期/回执语义全部来自 `durable-execution-contract`,开发期经 composition 绑定 InMemory Stub,生产绑定平台 PostgreSQL adapter 并全量通过参数化契约套件。跨重启后台保证已随 worker change `durable-execution-worker` 交付:postgres 后端三接缝统一绑定 `SqlDurableStore`,提交持久化输入 payload 后经 `DurableWorker`(租约认领/重启对账/有界重试)派发,`HECATE_DURABLE_WORKER=on` 随 lifespan 启动、off 时可由独立进程 `python -m hecate_durable.worker` 接管)
-- [x] PostgreSQL 作业记录、事务 outbox 和独立 worker 作为参考实现，复用现有基础设施；不同时建设第二套 Temporal 调度。定义最小 TaskStore/TaskScheduler 接入边界，只有出现第二个真实实现时才抽象为稳定扩展点。（worker change `durable-execution-worker`:`hecate_durable.worker` 的 `DurableWorker` 租约认领+对账+有界重试+drain,`OutboxRelay` 游标中继,独立进程入口 `python -m hecate_durable.worker`;状态/命令/台账/事件经 `SqlDurableStore` 单引擎事务域,Phase 0 接缝即 TaskStore 边界,第二实现出现前不抽象调度扩展点）
-- [x] 本地可靠执行先行：将已验证持久化实现置于可独立安装的 adapter，不依赖 Studio 或平台管理表；独立宿主保存任务/Run/Action 意图、领取、结果引用、审批等待和事件游标。首个可靠 profile 使用单宿主与 PostgreSQL；其他存储通过同等故障集后才认证，开发内存存储不得承诺重启恢复。进程内后台线程不替代持久调度。（`durable-execution-core`：独立包 `packages/hecate-durable`(SQL 参考存储,PostgreSQL 参考/SQLite 开发方言,契约集群迁入并以 shim 保持原 API);runner durable profile 保存任务/Run/Action/事件游标;故障注入集对两种方言参数化,PG 模式经 `DURABLE_TEST_POSTGRES_URL` 于 CI migrations job 真库运行）
-- [x] 随后接通受管投递与状态投影：平台提交意图与 outbox、宿主接受记录与执行事实各自本地事务，不尝试跨数据库事务。按部署来源、Run ID、命令 ID 和序号去重；提交响应丢失先查已接受记录，状态未知不能再启动同义执行。调度所有权改变需要 fencing；第一版默认不迁移活跃 Run。（`managed-runner-enrollment`:平台 `managed_deliveries` 表为持久派发意图(意图先于宿主动作的 outbox 属性),宿主经 durable `submit_task` 幂等接受——重投递按接受记录应答不重复执行;投影经 event_id 去重单向落平台读模型,永不回写宿主;SC05 已翻转 implemented)（step7 剩余:策略/审批语义与 SC04 完整 profile）
-- [x] 审计留存可委托已验证业务存储或本地 adapter；关键写动作前持久化意图，完成后写回执。中心离线只影响获准上传，不能影响本地事实留存；容量阈值、留存策略和存储失败均有显式行为。关键证据不可写时停止新受保护动作；执行后落盘失败保持待对账，不能把上传重试变成业务动作重试。（意图先于写/回执与执行后待对账随 Action 台账交付；不可写 fail-closed 随 SC06 本地半边交付；断连本地事实留存随 SC05 交付。容量阈值/留存期/失败类别/委托面由 change `audit-retention-policy` 收口：`evidence` 配置块(retention_days/capacity_limit,单位由后端声明——JSONL 字节/SQL 行),未配置即显式无策略并在能力摘要报告;容量先清理后拒绝,清理后仍超限 fail-closed 且 readonly 不受影响;失败类别(unwritable/capacity)落 `evidence_gate` 拒绝记录并经健康面可见;`backend: durable` 把留存委托宿主本地库(共享 durable 引擎,不触平台表),双后端参数化套件钉同语义;簿记记录不计容量计量。中心上传缓冲归 step10,SC06 保持 `planned`）
-- [x] 明确平台 Task/Run 状态与外部调度器 job 状态的字段所有权及单一写入方；外部调度器可负责投递/重试，但不得与平台形成互相覆盖的双主状态。(平台轨:生命周期投影/提交关联/命令回执/平台事件四表各自单写入方——seam adapter 独立短事务;worker change 已交付双主验证:静态断言(manager 不 import seam store、task_control 不写 job 表)+并发注入测试(调度器重试 vs worker 重派:同幂等键回填、过期 fencing 拒绝))
-- [x] Task 状态至少区分 queued、running、waiting_input、waiting_approval、succeeded、failed、cancelled、reconciliation_required；暂停只有后端确认后成立。(平台轨:八态封闭枚举按 Phase 0 契约落地为持久投影,终态吸收/待对账显式收敛/revision 乐观校验经契约套件与 API 测试钉住;waiting_input/waiting_approval 的持久等待机制已随 worker change 交付:进入(dispatcher 上报 TaskWaitingSignal)+单次消费 token(revision CAS)+期限+重启保持,`provide_input`/`resume` 唤醒并重放输入;审批策略判定归 step7,pause 仍显式拒绝未声明能力)
-- [x] 取消等控制命令使用独立记录：requested、acknowledged、applied、rejected、expired。收到 HTTP 成功响应不等于远程动作已停止。(平台轨已交付:`control_commands` 表 + 命令端点;queued 未派发任务的取消经派发仲裁真实 `applied`,running 内联执行无协作中止通道时回执停留 `requested` 并显式说明,终态任务取消 `rejected`,过期命令读取时惰性收敛 `expired`)
-- [x] worker 使用租约和 fencing token；任务状态修改必须校验当前 ownership 版本。每个数据库事务使用独立 session，不在并发 Run 间共享 AsyncSession。（`LeaseManager` 资源键租约+单调 fencing token+可注入时钟,过期夺取 token 递增、旧持有者 `StaleFenceError` 拒绝;Action 领取返回 claim token,迟到回执被拒并留事件痕;task 修订经 `expected_revision` 乐观校验;每次方法调用独立 session/事务）
-- [x] 提交幂等键绑定调用主体、workspace 和请求摘要；相同键、不同内容返回冲突。外部后端不支持幂等提交时，超时进入对账，不盲目再次启动。（`Idempotency-Key` 头绑定服务端验证主体+部署域+canonical 请求摘要;同键同体返回原 Task/Run,异体 409;参数化契约套件与 runner durable 测试钉住）(平台轨已交付:`task_submissions` 表 + 规范化请求摘要,同键同体重放返回原关联、异体冲突,键作用域来自服务端验证上下文)
-- [x] 平台治理事件采用版本化 envelope：event_id、task_id、run_id、actor、source、source_sequence、correlation/causation、事件/接收时间、payload schema、证据引用。（复用 `EventEnvelope`(phase-0 actor/source profile);`SqlEventLog` 写入前 `validate_governance_event`,状态写入同事务落 envelope 行）(平台轨已交付:`platform_events` 表按 Phase 0 envelope 全字段持久化,治理事件 actor/source 必填校验、per-run 单调序号、提交/迁移/命令/终态事件均发射并按 run 引用+游标可读)
-- [x] 让确定性工作流通过平台 Task/Run 接口启动 Agent 子任务、等待外部事件或人工输入；定义回调认证、关联键、期限、重复/迟到处理和状态恢复。编排实现可替换；平台只保证跨后端关联与命令真实状态，不强迫外部 Runtime 支持原上下文恢复。（worker change:`test_worker_integration.py` 编排最小场景——父任务经平台 Task/Run 接口提交子任务、以 waiting_input 持久等待并绑定子任务 task_ref 关联键,子任务终态后经单次消费 token 唤醒;重复 token/过期/终态后唤醒均拒绝并留痕;委派/验收语义归 step13）
-- [x] 重复事件去重、乱序容忍、缺口标记；只承诺定义范围内的顺序，不用客户端时钟构造虚假的全局顺序。（`event_id` 幂等去重、同位序号冲突拒绝、乱序接受按 `source_sequence` 读序、缺失序号显式 gap envelope、尾部/空页保持游标;故障注入套件 `test_fault_injection.py` 钉住）
-- [x] 关键状态与 outbox 同事务提交；事件投递重试和重放有界，慢订阅者使用游标恢复。（postgres 后端三接缝统一 `SqlDurableStore`:状态/命令/台账写入同事务落 `durable_event_log`;`OutboxRelay` 按 event_id 幂等投影到 `platform_events` 读模型,游标持久化 `durable_outbox_cursor`,有界重试+毒丸显式跳过记录,中继故障不阻塞状态写入;治理事件单写者收敛,task_control 直发 emit 点按绑定状态迁移逐点删除）
-- [x] 复用 #177 的 execution_id、状态和副作用分类，完成 G2：Action 意图/领取/结果有持久化状态，恢复返回真实结果引用，工具名及参数摘要冲突拒绝。平台 Action 与 Runtime TOOL_CALL/TOOL_RESULT 显式关联，不要求外部后端伪造 Pregel 事件。（ledger 落盘意图/领取/outcome 含真实结果内容+引用+摘要;kernel `ActionLedgerHook` 钩子镜像领取/回执并以关联列(session/execution/tool_call)显式关联 TOOL_CALL/TOOL_RESULT;决策表提取为单一 `recovery_decision` 双权威共用;重启恢复经 runner durable 测试证明真实结果回填与 claimed 写入安全停止）
-- [x] 此步就运行 worker 崩溃、租约过期、迟到回执和存储失败测试，并提供最小事件/待对账查询 API；step16 负责扩大负载和部署组合，不补做本应在这里完成的正确性。（`packages/hecate-durable/tests/` 四类故障注入(SQLite/PG 参数化);runner `GET /tasks`、`GET /tasks/{id}`、`GET /tasks/{id}/actions`(四态+真实结果引用+待对账)、events 游标查询）(平台轨:事件分页/游标恢复、待对账查询 API、过期命令惰性收敛已交付并有测试)
+**已完成的切片：**
 
-**验收：**提交后断开 HTTP，任务仍继续；重启 worker 不重复创建同一后端 Run；重复回调不会重复产出终态；失联显示状态未知/待对账，而不是虚报成功或取消。
+- [x] 平台 Task/Run 提交、查询、事件分页/SSE、控制命令与待对账查询 API。提交前固化身份链、Task/Run ID 与输入；提交后平台登记中断可按原 ID 补齐。仅已接通的内置进程内部署允许进入本入口，不能把外部部署登记成功当作可执行。
+- [x] 独立 `hecate-durable` SQL adapter、PostgreSQL 参考存储、开发 SQLite、事务治理事件、租约 worker、drain 和有界失败／崩溃重试。第二个真实调度器出现前保留具名接缝，不新增通用调度框架。
+- [x] SQL worker 的状态迁移和 Action 意图／领取在事务内校验有效 ownership；同名持有者重启、租约释放和过期均不能复用旧 fencing token。真实平台 dispatcher 传递租约，迟到成功／失败不能覆盖接管方。
+- [x] 八种 Task 生命周期与独立命令回执状态；过期命令和过时 `expected_revision` 在执行前拒绝。SQL 唤醒／排队取消的状态、输入或一次性 token 消费、`applied` 回执与事件原子提交；运行中的取消尚无实际效果时保持 `requested`。
+- [x] 幂等提交校验调用主体、workspace 和请求摘要，异体／跨域复用拒绝；当前底层原始 key 仍为全局唯一，跨作用域同名 key 返回冲突，尚不是独立命名空间。重放保留原关联，不能生成第二个后端 Run。
+- [x] 版本化治理 envelope、重复去重、乱序及缺口标记；平台终态和 outbox 原子提交。中继以逐事件回执而非最大 ID 判定已投递，支持低 ID 晚提交、重启、有界重试和显式毒丸记录；投影失败不能吞掉非去重冲突。
+- [x] 真实平台共享装配链和独立 Runner 使用持久动作账本钩子；工具名、参数摘要和副作用分类冲突拒绝，领取和结果通过 execution/tool-call 关联。相同动作的已完成结果可真实回填；未确定结果保留待对账。**这不等于平台完整执行上下文已能跨进程恢复。**
+- [x] 本地 Runner 恢复重新验证持久化身份及当前可信配置，不接受重启请求补入新主体／扩大数据域；只调度可执行状态，等待／待对账状态不自动重跑。证据不可写拒绝新受保护动作；回执落盘失败保持待对账；JSONL 清理只删除整日均已过期的文件。
+- [x] 受管接收／投影片段：持久接受记录按投递 ID 和请求摘要去重，确认丢失允许重投，已确认项不挤占新批次；上传游标按来源和 Run 分开。平台只接受对应已登记本地 Task/Run 的事件，同 ID 异体拒绝，旧序号不能回滚终态。接收只表示 `queued`，不伪报已执行。
 
-独立宿主在从未连接控制面的情况下，通过本地任务重启/审批等待/动作未知结果测试；随后连接并重复投递历史事件和命令，不重复派发任务、不覆盖本地实际状态、不重做业务写入。独立和受管是分别记录的测试组合，不能用平台 PostgreSQL 测试代替独立发行包的运行验证。
+**剩余实施顺序：**以下属于 Step6 的关闭门槛，不转移给 step16；涉及共享服务、身份和审批的前置能力分别与 step5c、step7 同步交付。
 
-**迁移/回退：**保留现有 Runtime EventStore，平台治理事件另设存储语义；不把所有 Pregel token/superstep 写入平台强一致事务。关闭新入口前先 drain 已提交作业。
+- [ ] step6a：完成 step5c 共享执行服务和正式后端绑定，再在 Runner CLI 装配 `ManagedChannel`、持久接收队列、串行执行槽、结果上传及关闭处理。持久接受后宕机，重启只恢复同一 Task/Run；未接通前含 `control_plane` 的 CLI 配置明确启动失败。通过安装后的独立 Runner 进程对接真实平台 HTTP 的最小投递—执行—投影测试。
+- [ ] step6b：把受管 `LeaseGate` 接入实际 Action 意图／领取／工具派发入口，而不是单独调用验证器。恢复、重连及每个受保护动作验证当前主体、部署、动作范围和授权期限；配合 step7 实现撤权／审批。授权到期后禁止新动作，已有未知结果只对账，不能重新授权后重做。用实际业务 API 调用计数验证断连到期、跨域与旧授权拒绝。
+- [ ] step6c：实现独立宿主持久 `waiting_input`／`waiting_approval` 的进入和一次性命令唤醒；等待记录绑定原 Task/Run、参数摘要、审批或输入契约及期限。step7 提供合法审批判定，Step6 提供可靠等待。进程强制终止后重启仍等待，过期／重复唤醒不会派发工具。现有通用 TaskStore 支持等待状态，Runner 暂无完整等待路径。
+- [ ] step6d：完成平台共享执行的 checkpoint／动作恢复关联，恢复原逻辑执行和已记录结果；不要仅创建新 Run 并期待模型再次生成相同 execution_id。当前中断尝试已有受保护 Action 时保守进入 `reconciliation_required`。用真实入口验证落盘成功后崩溃、外部写成功但回执失败、未知结果、工具／参数冲突，完成后才关闭整体 G2。
+- [ ] step6e：将已测试的父子任务等待原语接到确定性工作流节点或具名外部 workflow adapter；提供经过来源认证的回调入口，绑定父／子引用、workspace、关联键和期限。父子分别重启、跨 workspace 伪造、重复／迟到回调均运行真实接口验收。现有手写 orchestrator 测试不等于工作流产品入口交付。
+- [ ] step6f：从非 editable wheel 启动独立／受管组合，在隔离 PostgreSQL 中执行真实进程 kill/restart、等待、租约接管、迟到回执、重复命令、证据故障及重连。测试须统计业务副作用次数并查原 Task/Run、Action 和命令回执；独立安装包不能用仓库源码单测替代。SC03、SC04、完整 SC05 和 SC06 分别按实际覆盖更新场景清单，部分测试保留但不标整场景完成。
+
+**落点：**`packages/hecate-durable` 承载独立契约／SQL adapter／worker，`packages/hecate-runner` 承载宿主装配；`execution/` 承载平台登记、投影和命令入口，`core/composition` 负责绑定。Runtime kernel 只依赖动作钩子语义，不导入平台存储。平台与宿主各自本地事务，不引入跨数据库事务或双主生命周期。
+
+**验收：**提交后断开 HTTP，任务继续；重启不会因确认丢失重复创建同一后端 Run；旧 owner 和重复／迟到回调不能改写实际结果；动作未知显示待对账；命令成功回执必须有已发生的效果。独立宿主未连接控制面也能通过持久等待和恢复；受管组合另行通过授权、投递和重连测试。未达到的能力继续明确拒绝或标注未认证。
+
+**迁移／回退：**平台部署执行 Alembic 后才启动新中继；新增 `durable_outbox_receipt` 为派生投递记录，升级后旧事件可能重放一次，投影必须幂等。独立宿主在停机／drain 后升级本地存储 schema。关闭新入口先 drain 已接受任务；保留 Runtime EventStore，不将 token/superstep 全部写入平台强一致事务。降级前核对状态格式，不能恢复已消费等待或放开待对账动作。
 
 ### step7 — 实现与 Runtime 无关的强制治理
 
@@ -566,7 +570,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 - [ ] 对 MCP 入站工具调用和 A2A 入站任务分别验证协议凭据、目标受众、租户/主体映射、资源授权、限流和回调来源；出站连接固定允许的目标、数据类别与授权范围。远程 Agent Card、工具描述、检索结果和消息体均按不可信内容处理，不能从内容中提升权限或覆盖平台指令。
 - [ ] 为可计量调用设置预算预留和结算，按 invocation_id 幂等记账；远程未知用量标记 estimated/unverified，不宣称可强制控制其内部消费。
 - [ ] 明确策略/凭据服务不可用时的规则：未授权的新副作用停止；受管低风险离线行为必须有预先签发且尚有效的限域授权。中心撤销在断连时无法即时传播，profile 必须规定授权期限和最大陈旧窗口；高风险操作要求在线判定，或已被企业批准且当前可验证的本地审批机制。策略版本固定不允许越过本地已知拒绝，时钟回拨/有效期无法可信判断时拒绝依赖该期限的新动作。
-- [x] 重连先验证宿主与当前授权、撤销和期望配置，再允许新受保护动作；历史证据按游标去重补传。过期审批、旧授权和迟到命令不能重新激活动作；未对账 Run 维持原身份/版本与待对账状态。信任根更新与退出受管模式须显式管理员流程及审计，不接受普通控制事件修改信任根。（`managed-runner-enrollment`:每个通道请求重验凭据→准入→信任根解析(撤销即 403 拒绝重连);事件按 event_id 去重补传;重复命令经 command_id 幂等;信任根更新/撤销经操作员流程;期望配置指纹刷新有 API,宿主侧指纹比对归 step7 剩余）
+- [ ] 重连先验证宿主与当前授权、撤销和期望配置，再允许新受保护动作；历史证据按游标去重补传。过期审批、旧授权和迟到命令不能重新激活动作；未对账 Run 维持原身份/版本与待对账状态。信任根更新与退出受管模式须显式管理员流程及审计，不接受普通控制事件修改信任根。（`managed-runner-enrollment`:每个通道请求重验凭据→准入→信任根解析(撤销即 403 拒绝重连);事件按 event_id 去重补传;重复命令经 command_id 幂等;信任根更新/撤销经操作员流程;期望配置指纹刷新有 API,宿主侧指纹比对、实际执行入口的授权闸门与命令恢复仍未接通，不能以通道组件测试标记本项完成；见 step6a/6b）
 - [ ] 关键动作留存 attempt/outcome。外部动作成功但回执持久化失败时进入对账；不声称数据库事务能让外部系统达到 exactly-once。
 
 **落点：**`enterprise/`、`tools/gateway/`、`tools/policy/`、`models/approval.py`、`ops/`，由 composition 接入内置及外部 adapter。

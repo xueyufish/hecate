@@ -40,7 +40,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from hecate_durable.contracts.durable import (
     InvalidTaskTransitionError,
@@ -48,8 +48,8 @@ from hecate_durable.contracts.durable import (
     TaskStateRecord,
 )
 from hecate_durable.contracts.references import BackendRef
-from hecate_durable.storage.lease import LeaseHandle, StaleFenceError
-from hecate_durable.storage.models import EventRow, OutboxCursorRow
+from hecate_durable.storage.lease import LeaseHandle, LeaseManager, StaleFenceError
+from hecate_durable.storage.models import EventRow, OutboxCursorRow, OutboxReceiptRow
 
 logger = logging.getLogger(__name__)
 
@@ -135,13 +135,13 @@ class DurableWorker:
         honestly rather than forced.
         """
 
-        if self._draining:
+        if self._draining or self._lease_key(task_ref) in self._inflight:
             return False
         record = await asyncio.to_thread(self._store.get_task_state, task_ref)
         if record is None or record.lifecycle_state is not TaskLifecycleState.QUEUED or not self._due(record):
             return False
         key = self._lease_key(task_ref)
-        handle = await asyncio.to_thread(self._leases.acquire, key, self._worker_id, self._lease_ttl)
+        handle = await asyncio.to_thread(self._leases.acquire, key, self._claim_holder(), self._lease_ttl)
         if handle is None:
             return False  # another worker instance owns the dispatch
         record = await asyncio.to_thread(self._store.get_task_state, task_ref)
@@ -151,7 +151,7 @@ class DurableWorker:
             or not self._due(record)
             or handle.fencing_token != self._leases.current_token(key)
         ):
-            await asyncio.to_thread(self._leases.release, key, self._worker_id)
+            await self._release(handle)
             return False  # moved on concurrently, or the lease was taken over
         try:
             await asyncio.to_thread(
@@ -159,9 +159,11 @@ class DurableWorker:
                 task_ref,
                 TaskLifecycleState.RUNNING,
                 expected_revision=record.revision,
+                extra_update={"dispatch_starts": int(record.extra.get("dispatch_starts", 0)) + 1},
+                **self._fence_kwargs(handle),
             )
-        except (InvalidTaskTransitionError, ValueError):
-            await asyncio.to_thread(self._leases.release, key, self._worker_id)
+        except (InvalidTaskTransitionError, ValueError, StaleFenceError):
+            await self._release(handle)
             return False  # cancelled or otherwise moved between read and claim
         self._inflight.add(key)
         heartbeat = asyncio.create_task(self._heartbeat(key, handle))
@@ -173,14 +175,16 @@ class DurableWorker:
             raise
         except Exception as exc:  # noqa: BLE001 — dispatch failure is a retryable outcome
             logger.warning("dispatch failed for task %s: %s", task_ref.id, exc)
-            await self._record_failure(task_ref, exc)
+            await self._record_failure(task_ref, exc, expected_revision=record.revision + 1, handle=handle)
             return False
         finally:
             self._inflight.discard(key)
             heartbeat.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await heartbeat
             self._heartbeat_tasks.discard(heartbeat)
             try:
-                await asyncio.to_thread(self._leases.release, key, self._worker_id)
+                await self._release(handle)
             except Exception:  # noqa: BLE001 — lease expiry clears it regardless
                 logger.exception("lease release failed for task %s", task_ref.id)
 
@@ -189,17 +193,22 @@ class DurableWorker:
 
         dispatched = 0
         queued = await asyncio.to_thread(self._store.list_tasks, {TaskLifecycleState.QUEUED})
-        for record in queued[: self._batch]:
+        due = [record for record in queued if self._due(record)]
+        for record in due[: self._batch]:
             if self._draining:
                 break
             if await self.dispatch_once(record.task_ref):
                 dispatched += 1
         running = await asyncio.to_thread(self._store.list_tasks, {TaskLifecycleState.RUNNING})
-        for record in running[: self._batch]:
+        recovered = 0
+        for record in running:
             if self._draining:
                 break
             if await self._recover_stale_running(record):
                 dispatched += 1
+                recovered += 1
+                if recovered >= self._batch:
+                    break
         return dispatched
 
     async def run_forever(self) -> None:
@@ -233,6 +242,17 @@ class DurableWorker:
     def _lease_key(self, task_ref: BackendRef) -> str:
         return f"dispatch:{task_ref.issuer_domain}:{task_ref.id}"
 
+    def _claim_holder(self) -> str:
+        return f"{self._worker_id}:{uuid.uuid4().hex}"
+
+    def _fence_kwargs(self, handle: LeaseHandle) -> dict[str, Any]:
+        return {"lease": handle} if getattr(self._store, "leases", None) is self._leases else {}
+
+    async def _release(self, handle: LeaseHandle) -> None:
+        await asyncio.to_thread(
+            self._leases.release, handle.lease_key, handle.holder, fencing_token=handle.fencing_token
+        )
+
     def _due(self, record: TaskStateRecord) -> bool:
         next_at = record.extra.get("next_dispatch_at")
         if not next_at:
@@ -247,7 +267,13 @@ class DurableWorker:
         while True:
             await asyncio.sleep(interval)
             try:
-                renewed = await asyncio.to_thread(self._leases.renew, lease_key, self._worker_id, self._lease_ttl)
+                renewed = await asyncio.to_thread(
+                    self._leases.renew,
+                    lease_key,
+                    handle.holder,
+                    self._lease_ttl,
+                    fencing_token=handle.fencing_token,
+                )
             except StaleFenceError:
                 logger.warning("dispatch lease %s was taken over; renewal stopped", lease_key)
                 return
@@ -260,12 +286,24 @@ class DurableWorker:
 
         task_ref = record.task_ref
         key = self._lease_key(task_ref)
-        handle = await asyncio.to_thread(self._leases.acquire, key, self._worker_id, self._lease_ttl)
+        if key in self._inflight:
+            return False
+        handle = await asyncio.to_thread(self._leases.acquire, key, self._claim_holder(), self._lease_ttl)
         if handle is None:
             return False  # a live executor holds it
         try:
             fresh = await asyncio.to_thread(self._store.get_task_state, task_ref)
             if fresh is None or fresh.lifecycle_state is not TaskLifecycleState.RUNNING:
+                return False
+            if int(fresh.extra.get("dispatch_starts", 0)) >= self._max_attempts:
+                await asyncio.to_thread(
+                    self._store.apply_task_state,
+                    task_ref,
+                    TaskLifecycleState.RECONCILIATION_REQUIRED,
+                    expected_revision=fresh.revision,
+                    extra_update={"last_error": "dispatch restart budget exhausted"},
+                    **self._fence_kwargs(handle),
+                )
                 return False
             await asyncio.to_thread(
                 self._store.apply_task_state,
@@ -273,21 +311,29 @@ class DurableWorker:
                 TaskLifecycleState.QUEUED,
                 expected_revision=fresh.revision,
                 extra_update={"requeued_reason": "dispatch lease expired"},
+                **self._fence_kwargs(handle),
             )
-        except (InvalidTaskTransitionError, ValueError):
+        except (InvalidTaskTransitionError, ValueError, StaleFenceError):
             return False  # moved on concurrently; the revision CAS fences it
         finally:
             try:
-                await asyncio.to_thread(self._leases.release, key, self._worker_id)
+                await self._release(handle)
             except Exception:  # noqa: BLE001
                 logger.exception("lease release failed during recovery of task %s", task_ref.id)
         return await self.dispatch_once(task_ref)
 
-    async def _record_failure(self, task_ref: BackendRef, error: Exception) -> None:
+    async def _record_failure(
+        self, task_ref: BackendRef, error: Exception, *, expected_revision: int, handle: LeaseHandle
+    ) -> None:
         """Count the attempt; re-queue with backoff or park in reconciliation."""
 
         record = await asyncio.to_thread(self._store.get_task_state, task_ref)
-        if record is None or record.lifecycle_state is not TaskLifecycleState.RUNNING:
+        if (
+            record is None
+            or record.lifecycle_state is not TaskLifecycleState.RUNNING
+            or record.revision != expected_revision
+            or self._leases.current_token(handle.lease_key) != handle.fencing_token
+        ):
             return  # the dispatcher already drove a terminal/waiting state
         attempts = int(record.extra.get("dispatch_attempts", 0)) + 1
         failure_note = {"dispatch_attempts": attempts, "last_error": str(error)[:512]}
@@ -298,6 +344,8 @@ class DurableWorker:
                     task_ref,
                     TaskLifecycleState.RECONCILIATION_REQUIRED,
                     extra_update=failure_note,
+                    expected_revision=expected_revision,
+                    **self._fence_kwargs(handle),
                 )
             else:
                 backoff = self._backoff_base**attempts
@@ -307,8 +355,10 @@ class DurableWorker:
                     task_ref,
                     TaskLifecycleState.QUEUED,
                     extra_update={**failure_note, "next_dispatch_at": next_at.isoformat()},
+                    expected_revision=expected_revision,
+                    **self._fence_kwargs(handle),
                 )
-        except (InvalidTaskTransitionError, ValueError):
+        except (InvalidTaskTransitionError, ValueError, StaleFenceError):
             # The dispatcher moved the task concurrently; its outcome is
             # authoritative and the failure note is dropped with the attempt.
             logger.info("failure recording skipped for task %s: state moved on", task_ref.id)
@@ -344,10 +394,20 @@ class OutboxRelay:
         self._poll_interval = poll_interval
         self._clock = clock or _utc_now
         self._stopping = False
+        self._leases = LeaseManager(session_factory, clock=self._clock)
 
     async def pump_once(self) -> int:
         """Project one bounded batch; returns the number of events projected."""
 
+        handle = self._leases.acquire(f"outbox:{self._relay_key}", uuid.uuid4().hex, 60.0)
+        if handle is None:
+            return 0
+        try:
+            return await self._pump(handle)
+        finally:
+            self._leases.release(handle.lease_key, handle.holder, fencing_token=handle.fencing_token)
+
+    async def _pump(self, handle: LeaseHandle) -> int:
         with self._session_factory() as session:
             cursor = self._cursor(session)
             last_id = cursor.last_event_row_id
@@ -360,13 +420,13 @@ class OutboxRelay:
         projected = 0
         advanced = last_id
         for row in rows:
+            if self._leases.renew(handle.lease_key, handle.holder, 60.0, fencing_token=handle.fencing_token) is None:
+                break
+            failure_count = self._failure_count(row.event_id)
             try:
                 await self._project(row.envelope)
             except Exception:  # noqa: BLE001 — projection failure is the relay's concern
-                if failing_id == row.event_id:
-                    failure_count += 1
-                else:
-                    failing_id, failure_count = row.event_id, 1
+                failing_id, failure_count = row.event_id, failure_count + 1
                 if failure_count >= self._max_failures:
                     logger.error(
                         "outbox event %s failed %d consecutive projections; skipping with explicit gap",
@@ -375,15 +435,18 @@ class OutboxRelay:
                         exc_info=True,
                     )
                     skipped.append(row.event_id)
+                    self._receipt(row.event_id, "skipped", failure_count, handle)
                     failing_id, failure_count = None, 0
-                    advanced = row.id
+                    advanced = max(advanced, row.id)
                     self._advance(advanced, skipped, failing_id, failure_count)
                     continue
+                self._receipt(row.event_id, "retry", failure_count, handle)
                 self._advance(advanced, skipped, failing_id, failure_count)
                 break  # transient: retry the same cursor next pump
             else:
                 failing_id, failure_count = None, 0
-                advanced = row.id
+                self._receipt(row.event_id, "projected", 0, handle)
+                advanced = max(advanced, row.id)
                 projected += 1
         self._advance(advanced, skipped, failing_id, failure_count)
         return projected
@@ -409,7 +472,7 @@ class OutboxRelay:
                 "relay_key": self._relay_key,
                 "last_event_row_id": cursor.last_event_row_id,
                 "durable_max_id": max_id or 0,
-                "lag": (max_id or 0) - cursor.last_event_row_id,
+                "lag": session.execute(select(func.count()).select_from(EventRow).where(self._pending())).scalar_one(),
                 "skipped_event_ids": list(cursor.skipped_event_ids or []),
             }
 
@@ -433,10 +496,39 @@ class OutboxRelay:
     def _fetch(self, after_id: int) -> list[EventRow]:
         with self._session_factory() as session:
             return list(
-                session.execute(select(EventRow).where(EventRow.id > after_id).order_by(EventRow.id).limit(self._batch))
+                session.execute(select(EventRow).where(self._pending()).order_by(EventRow.id).limit(self._batch))
                 .scalars()
                 .all()
             )
+
+    def _pending(self) -> Any:
+        # A PostgreSQL sequence is allocated before commit. Scanning by a
+        # high-water ID alone permanently loses a lower-ID late commit.
+        return (
+            ~select(OutboxReceiptRow.event_id)
+            .where(
+                OutboxReceiptRow.relay_key == self._relay_key,
+                OutboxReceiptRow.event_id == EventRow.event_id,
+                OutboxReceiptRow.state.in_(("projected", "skipped")),
+            )
+            .exists()
+        )
+
+    def _failure_count(self, event_id: str) -> int:
+        with self._session_factory() as session:
+            receipt = session.get(OutboxReceiptRow, (self._relay_key, event_id))
+            return receipt.failure_count if receipt else 0
+
+    def _receipt(self, event_id: str, state: str, failures: int, handle: LeaseHandle) -> None:
+        with self._session_factory() as session, session.begin():
+            self._leases.assert_valid(session, handle)
+            receipt = session.get(OutboxReceiptRow, (self._relay_key, event_id))
+            if receipt is None:
+                receipt = OutboxReceiptRow(relay_key=self._relay_key, event_id=event_id)
+                session.add(receipt)
+            receipt.state = state
+            receipt.failure_count = failures
+            receipt.updated_at = self._clock().isoformat()
 
     def _advance(self, last_event_row_id: int, skipped: list[str], failing_id: str | None, failure_count: int) -> None:
         with self._session_factory() as session, session.begin():

@@ -132,6 +132,7 @@ class WorkerDependencies:
     denial_tracker: Any | None = None
     suggestion_service: Any | None = None
     controller_evidence_port: Any | None = None
+    action_hook: Any | None = None
 
 
 class CompositeWorker:
@@ -221,6 +222,7 @@ def create_composite_worker(
         event_store=deps.event_store,
         middleware_chains=deps.middleware_chains,
         denial_tracker=deps.denial_tracker,
+        action_hook=deps.action_hook,
     )
     agent_worker = AgentWorker(port=deps.port)
     knowledge_worker = KnowledgeWorker(port=deps.port)

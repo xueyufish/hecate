@@ -156,9 +156,14 @@ def test_sc_implemented_tests_binding() -> None:
         for path in sorted(SCENARIO_DIR.glob("test_*.py"))
         for match in SC_TEST_DEF_PATTERN.finditer(path.read_text(encoding="utf-8"))
     }
-    missing_tests = implemented - found
+    partial = {e["id"].lower() for e in manifest["sc_scenarios"] if e.get("implemented_slices")}
+    for entry in manifest["sc_scenarios"]:
+        if entry.get("implemented_slices"):
+            assert entry["status"] == "planned", "partial SC coverage must retain its remaining acceptance gate"
+            assert isinstance(entry["implemented_slices"], list) and all(entry["implemented_slices"])
+    missing_tests = (implemented | partial) - found
     assert not missing_tests, f"implemented SC scenarios without test_sc<nn>_* tests: {sorted(missing_tests)}"
-    orphan_tests = found - implemented
+    orphan_tests = found - implemented - partial
     assert not orphan_tests, f"test_sc<nn>_* tests without an implemented SC entry: {sorted(orphan_tests)}"
 
 

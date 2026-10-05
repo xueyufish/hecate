@@ -79,11 +79,25 @@ class PlatformOutboxProjector:
             stored = replace(envelope, payload_schema_ref=schema_ref, received_at=stored_now())
             try:
                 await events.append_resequenced(stored, workspace_id=workspace_id)
+                if event_type == "run_terminal" and workspace_id is not None:
+                    from hecate.execution.task_run_registry import TaskRunRegistry
+
+                    await TaskRunRegistry(db).update_projection(
+                        uuid.UUID(envelope.run_ref.id),
+                        workspace_id,
+                        projection={
+                            "state": payload["status"],
+                            "error": payload.get("error"),
+                            "result_preview": str(payload.get("content") or "")[:2000],
+                        },
+                    )
                 await db.commit()
             except IntegrityError:
                 # Lost a dedup race with another relay instance — the event
                 # is projected; nothing to do.
                 await db.rollback()
+                if await events.find_by_event_id(envelope.event_id) is None:
+                    raise
 
     async def _resolve_workspace(self, task_ref: Any) -> uuid.UUID | None:
         """Task attribution: the row column, then the persisted input payload."""

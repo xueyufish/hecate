@@ -1,0 +1,261 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.2/capabilities.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BackendCapabilities",
+  "description": "Capability declaration with three-level semantics: unsupported (requesting it yields a structured UNSUPPORTED error), cooperative (backend participates when asked), enforced (platform-verified control). Ownership is declared on three independent axes - harness owner, environment owner, tool/data-access execution point - never collapsed into a single hosting label. Every non-unsupported capability MUST carry a verification entry (source, checked_at, and expiry conditions); absent or blank verification counts as missing. v0.2 adds reconciliation_support: hosted backends declare whether a lost submit response can be reconciled by vendor session lookup.",
+  "type": "object",
+  "required": ["contract_version", "backend_type", "ownership", "capabilities"],
+  "additionalProperties": true,
+  "properties": {
+    "contract_version": {"type": "string", "minLength": 1},
+    "backend_type": {"type": "string", "minLength": 1},
+    "ownership": {
+      "type": "object",
+      "required": ["harness", "environment", "tool_execution"],
+      "additionalProperties": false,
+      "properties": {
+        "harness": {"enum": ["hecate", "enterprise", "vendor"]},
+        "environment": {"enum": ["hecate", "enterprise", "vendor", "none"]},
+        "tool_execution": {"enum": ["hecate_gateway", "backend", "vendor_internal", "mixed"]}
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["provide_input", "resolve_approval", "pause", "resume", "export_context"],
+      "additionalProperties": false,
+      "properties": {
+        "provide_input": {"$ref": "#/$defs/level"},
+        "resolve_approval": {"$ref": "#/$defs/level"},
+        "pause": {"$ref": "#/$defs/level"},
+        "resume": {"$ref": "#/$defs/level"},
+        "export_context": {"$ref": "#/$defs/level"},
+        "cancel": {"$ref": "#/$defs/level"},
+        "events_resume": {"$ref": "#/$defs/level"},
+        "tool_proxy": {"$ref": "#/$defs/level"},
+        "sandbox": {"$ref": "#/$defs/level"},
+        "callback": {"$ref": "#/$defs/level"},
+        "internal_tools_visibility": {"$ref": "#/$defs/level"},
+        "subtask_tracking": {"$ref": "#/$defs/level"}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "description": "Keyed by capability name; required for every capability whose level is not unsupported.",
+      "patternProperties": {
+        "^[a-z_]+$": {
+          "type": "object",
+          "required": ["source", "checked_at"],
+          "additionalProperties": false,
+          "properties": {
+            "source": {"type": "string", "minLength": 1},
+            "checked_at": {"type": "string", "minLength": 1},
+            "contract_version": {"type": "string"},
+            "valid_until": {"type": "string"},
+            "deployment_shape": {"type": "string", "minLength": 1},
+            "backend_version": {"type": "string", "minLength": 1},
+            "evidence_ref": {"type": "string", "minLength": 1},
+            "observation_source": {"enum": ["backend_reported", "platform_observed", "independent_test"]}
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "reconciliation_support": {
+      "type": "object",
+      "description": "Hosted-backend reconciliation abilities. Absent means unsupported: a lost submit response cannot be reconciled by vendor session lookup and must be marked unknown.",
+      "additionalProperties": false,
+      "properties": {"query_by_vendor_session": {"type": "boolean"}}
+    }
+  },
+  "$defs": {
+    "level": {"enum": ["unsupported", "cooperative", "enforced"]},
+    "enforcedVerification": {
+      "type": "object",
+      "required": [
+        "observation_source",
+        "contract_version",
+        "backend_version",
+        "deployment_shape",
+        "valid_until",
+        "evidence_ref"
+      ],
+      "properties": {"observation_source": {"enum": ["platform_observed", "independent_test"]}}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "capabilities": {"required": ["provide_input"], "properties": {"provide_input": {"enum": ["cooperative", "enforced"]}}}
+        }
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["provide_input"]}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "required": ["resolve_approval"],
+            "properties": {"resolve_approval": {"enum": ["cooperative", "enforced"]}}
+          }
+        }
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["resolve_approval"]}}}
+    },
+    {
+      "if": {
+        "properties": {"capabilities": {"required": ["pause"], "properties": {"pause": {"enum": ["cooperative", "enforced"]}}}}
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["pause"]}}}
+    },
+    {
+      "if": {
+        "properties": {"capabilities": {"required": ["resume"], "properties": {"resume": {"enum": ["cooperative", "enforced"]}}}}
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["resume"]}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {"required": ["export_context"], "properties": {"export_context": {"enum": ["cooperative", "enforced"]}}}
+        }
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["export_context"]}}}
+    },
+    {
+      "if": {
+        "properties": {"capabilities": {"required": ["cancel"], "properties": {"cancel": {"enum": ["cooperative", "enforced"]}}}}
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["cancel"]}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {"required": ["events_resume"], "properties": {"events_resume": {"enum": ["cooperative", "enforced"]}}}
+        }
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["events_resume"]}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {"required": ["tool_proxy"], "properties": {"tool_proxy": {"enum": ["cooperative", "enforced"]}}}
+        }
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["tool_proxy"]}}}
+    },
+    {
+      "if": {
+        "properties": {"capabilities": {"required": ["sandbox"], "properties": {"sandbox": {"enum": ["cooperative", "enforced"]}}}}
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["sandbox"]}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {"required": ["callback"], "properties": {"callback": {"enum": ["cooperative", "enforced"]}}}
+        }
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["callback"]}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "required": ["internal_tools_visibility"],
+            "properties": {"internal_tools_visibility": {"enum": ["cooperative", "enforced"]}}
+          }
+        }
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["internal_tools_visibility"]}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "required": ["subtask_tracking"],
+            "properties": {"subtask_tracking": {"enum": ["cooperative", "enforced"]}}
+          }
+        }
+      },
+      "then": {"required": ["verification"], "properties": {"verification": {"required": ["subtask_tracking"]}}}
+    },
+    {
+      "if": {
+        "properties": {"capabilities": {"required": ["provide_input"], "properties": {"provide_input": {"const": "enforced"}}}}
+      },
+      "then": {"properties": {"verification": {"properties": {"provide_input": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {"required": ["resolve_approval"], "properties": {"resolve_approval": {"const": "enforced"}}}
+        }
+      },
+      "then": {
+        "properties": {"verification": {"properties": {"resolve_approval": {"$ref": "#/$defs/enforcedVerification"}}}}
+      }
+    },
+    {
+      "if": {"properties": {"capabilities": {"required": ["pause"], "properties": {"pause": {"const": "enforced"}}}}},
+      "then": {"properties": {"verification": {"properties": {"pause": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {"properties": {"capabilities": {"required": ["resume"], "properties": {"resume": {"const": "enforced"}}}}},
+      "then": {"properties": {"verification": {"properties": {"resume": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {
+        "properties": {"capabilities": {"required": ["export_context"], "properties": {"export_context": {"const": "enforced"}}}}
+      },
+      "then": {"properties": {"verification": {"properties": {"export_context": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {"properties": {"capabilities": {"required": ["cancel"], "properties": {"cancel": {"const": "enforced"}}}}},
+      "then": {"properties": {"verification": {"properties": {"cancel": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {
+        "properties": {"capabilities": {"required": ["events_resume"], "properties": {"events_resume": {"const": "enforced"}}}}
+      },
+      "then": {"properties": {"verification": {"properties": {"events_resume": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {
+        "properties": {"capabilities": {"required": ["tool_proxy"], "properties": {"tool_proxy": {"const": "enforced"}}}}
+      },
+      "then": {"properties": {"verification": {"properties": {"tool_proxy": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {"properties": {"capabilities": {"required": ["sandbox"], "properties": {"sandbox": {"const": "enforced"}}}}},
+      "then": {"properties": {"verification": {"properties": {"sandbox": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {"properties": {"capabilities": {"required": ["callback"], "properties": {"callback": {"const": "enforced"}}}}},
+      "then": {"properties": {"verification": {"properties": {"callback": {"$ref": "#/$defs/enforcedVerification"}}}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "required": ["internal_tools_visibility"],
+            "properties": {"internal_tools_visibility": {"const": "enforced"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {"verification": {"properties": {"internal_tools_visibility": {"$ref": "#/$defs/enforcedVerification"}}}}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {"required": ["subtask_tracking"], "properties": {"subtask_tracking": {"const": "enforced"}}}
+        }
+      },
+      "then": {
+        "properties": {"verification": {"properties": {"subtask_tracking": {"$ref": "#/$defs/enforcedVerification"}}}}
+      }
+    }
+  ]
+}

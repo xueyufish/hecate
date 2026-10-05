@@ -267,6 +267,8 @@ def test_storage_failure_write_paths_raise(store: SqlDurableStore) -> None:
 
 
 def test_event_log_dedup_and_conflict(store: SqlDurableStore) -> None:
+    from dataclasses import replace
+
     from hecate_durable.storage import EventConflictError
     from hecate_durable.storage.eventlog import build_envelope
 
@@ -282,6 +284,12 @@ def test_event_log_dedup_and_conflict(store: SqlDurableStore) -> None:
     )
     assert store.events.append(envelope) == 1
     assert store.events.append(envelope) == 1, "identical replay is idempotent"
+    replay_with_new_timestamps = replace(
+        envelope,
+        occurred_at="2026-01-02T00:00:00Z",
+        received_at="2026-01-02T00:00:01Z",
+    )
+    assert store.events.append(replay_with_new_timestamps) == 1, "event identity is stable across replay clocks"
 
     different = build_envelope(
         task_ref=TASK,
@@ -346,3 +354,28 @@ def test_concurrent_claims_admit_exactly_one(store: SqlDurableStore) -> None:
     assert sum(results) == 1
     losers = [r for r in results if not r]
     assert len(losers) == 7
+
+
+@pytest.mark.parametrize(("subject", "workspace"), [("other", "ws"), ("app", "other")])
+def test_idempotency_replay_cannot_cross_identity_scope(store, subject, workspace) -> None:
+    from hecate_durable.contracts.durable import IdempotencyConflictError
+
+    store.record_submission(_key(), TASK, RUN)
+    rebound = IdempotencyKey(key="k1", subject=subject, workspace=workspace, request_digest="d" * 64)
+    with pytest.raises(IdempotencyConflictError):
+        store.record_submission(rebound, TASK, RUN)
+
+
+def test_intent_cannot_change_tool_or_side_effect_class(store) -> None:
+    from hecate_durable.contracts.durable import IdempotencyConflictError
+
+    first = _write_intent()
+    store.record_intent(first)
+    rebound = ActionIntent(
+        action_key=first.action_key,
+        action_name="different_tool",
+        arguments_digest=first.arguments_digest,
+        side_effect_class=first.side_effect_class,
+    )
+    with pytest.raises(IdempotencyConflictError):
+        store.record_intent(rebound)

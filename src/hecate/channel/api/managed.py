@@ -336,8 +336,8 @@ async def host_credential(
 async def host_pull(
     db: Annotated[AsyncSession, Depends(get_db)],
     host: HostDep,
-    cursor: Annotated[int, Query()] = 0,
-    limit: Annotated[int, Query()] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
 ):
     """Pull deliveries after the cursor; the response carries a fresh lease.
 

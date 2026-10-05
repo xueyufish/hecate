@@ -8,6 +8,7 @@ parameterization rule as the fault-injection suite.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
@@ -56,6 +57,7 @@ def suite(request: pytest.FixtureRequest, tmp_path) -> AsyncIterator[tuple[objec
         Base.metadata.drop_all(store.engine)
         Base.metadata.create_all(store.engine)
         leases = LeaseManager(store.session_factory, clock=lambda: clock.now)
+        store.leases = leases
 
     yield store, leases, clock
     if request.param != "inmemory":
@@ -293,3 +295,141 @@ async def test_relay_skips_poison_after_bounded_failures(tmp_path) -> None:
     status = relay.status()
     assert first_event_id in status["skipped_event_ids"]
     assert status["lag"] == 0  # cursor moved past the explicit gap
+
+
+def test_expired_same_holder_gets_new_generation(suite) -> None:
+    store, leases, clock = suite
+    first = leases.acquire("resource", "worker", 30)
+    clock.advance(31)
+    assert leases.renew("resource", "worker", 30, fencing_token=first.fencing_token) is None
+    second = leases.acquire("resource", "worker", 30)
+    assert second.fencing_token > first.fencing_token
+    assert leases.release("resource", "worker", fencing_token=first.fencing_token) is False
+    assert leases.current_token("resource") == second.fencing_token
+    leases.release("resource", "worker", fencing_token=second.fencing_token)
+    third = leases.acquire("resource", "worker", 30)
+    assert third.fencing_token > second.fencing_token
+
+
+async def test_old_dispatch_failure_cannot_requeue_new_running_attempt(suite) -> None:
+    store, leases, clock = suite
+    ref = submit_task(store, "late-failure")
+    entered, finish = asyncio.Event(), asyncio.Event()
+
+    async def stale_dispatch(task, record, lease):
+        entered.set()
+        await finish.wait()
+        raise RuntimeError("old executor woke up")
+
+    worker = make_worker(store, leases, clock, stale_dispatch)
+    old = asyncio.create_task(worker.dispatch_once(ref))
+    await entered.wait()
+    clock.advance(31)
+    successor = leases.acquire(f"dispatch:{ref.issuer_domain}:{ref.id}", "successor", 30)
+    assert successor is not None
+    store.apply_task_state(ref, TaskLifecycleState.QUEUED, expected_revision=1)
+    store.apply_task_state(ref, TaskLifecycleState.RUNNING, expected_revision=2)
+    fresh = store.get_task_state(ref)
+    finish.set()
+    assert await old is False
+    assert store.get_task_state(ref) == fresh
+
+
+async def test_deferred_old_tasks_do_not_starve_due_tasks(suite) -> None:
+    store, leases, clock = suite
+    submit_task(store, "deferred", next_dispatch_at="2099-01-01T00:00:00+00:00")
+    ready = submit_task(store, "ready")
+    dispatcher = RecordingDispatcher()
+    dispatcher.bind(store)
+    worker = make_worker(store, leases, clock, dispatcher, batch=1)
+    assert await worker.reconcile() == 1
+    assert store.get_task_state(ready).lifecycle_state is TaskLifecycleState.SUCCEEDED
+
+
+async def test_outbox_late_lower_id_is_delivered_and_cursor_survives_restart(tmp_path) -> None:
+    from hecate_durable.storage.models import EventRow
+    from sqlalchemy import select
+
+    store = make_store("sqlite", tmp_path, name="late-commit.db")
+    store.create_schema()
+    _submit_with_stream(store, "first")
+    with store.session_factory() as session, session.begin():
+        late = session.execute(select(EventRow)).scalar_one()
+        session.delete(late)
+    _submit_with_stream(store, "second")
+    with store.session_factory() as session, session.begin():
+        second = session.execute(select(EventRow)).scalar_one()
+        second.id = 2
+    seen: list[str] = []
+
+    async def project(event):
+        seen.append(event["event_id"])
+
+    relay = OutboxRelay(store.session_factory, project)
+    assert await relay.pump_once() == 1
+    with store.session_factory() as session, session.begin():
+        # The SQLite test reproduces visibility order; PostgreSQL allocates
+        # this lower ID in an earlier, still uncommitted transaction.
+        session.add(
+            EventRow(
+                id=1,
+                run_issuer=late.run_issuer,
+                run_id=late.run_id,
+                source=late.source,
+                source_sequence=late.source_sequence,
+                event_id=late.event_id,
+                envelope=late.envelope,
+                received_at=late.received_at,
+            )
+        )
+    restarted = OutboxRelay(store.session_factory, project)
+    assert restarted.status()["lag"] == 1
+    assert await restarted.pump_once() == 1
+    assert seen == [second.event_id, late.event_id]
+    assert await restarted.pump_once() == 0
+    store.dispose()
+
+
+async def test_postgres_reordered_commits_are_not_lost(store) -> None:
+    """Real PG transactions allocate IDs in one order and commit in another."""
+    if store.engine.dialect.name != "postgresql":
+        pytest.skip("requires PostgreSQL for concurrent writer transactions")
+    seen = []
+
+    async def project(envelope):
+        seen.append(envelope["event_id"])
+
+    with store.session_factory() as slow, slow.begin():
+        early = store.events.emit(
+            slow,
+            task_ref=BackendRef(RefKind.TASK, "pg", "a"),
+            run_ref=BackendRef(RefKind.RUN, "pg", "a"),
+            event_type="test",
+            payload={},
+        )
+        slow.flush()
+        with store.session_factory() as fast, fast.begin():
+            late = store.events.emit(
+                fast,
+                task_ref=BackendRef(RefKind.TASK, "pg", "b"),
+                run_ref=BackendRef(RefKind.RUN, "pg", "b"),
+                event_type="test",
+                payload={},
+            )
+        relay = OutboxRelay(store.session_factory, project)
+        assert await relay.pump_once() == 1
+        assert seen == [late.event_id]
+    assert await relay.pump_once() == 1
+    assert seen == [late.event_id, early.event_id]
+
+
+@pytest.mark.asyncio
+async def test_crash_restart_budget_is_bounded(suite) -> None:
+    store, leases, clock = suite
+    ref = submit_task(store, "crash-loop", state=TaskLifecycleState.RUNNING, dispatch_starts=2)
+    dispatcher = RecordingDispatcher()
+    dispatcher.bind(store)
+    worker = make_worker(store, leases, clock, dispatcher, max_attempts=2)
+    assert await worker.reconcile() == 0
+    assert store.get_task_state(ref).lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
+    assert dispatcher.calls == []

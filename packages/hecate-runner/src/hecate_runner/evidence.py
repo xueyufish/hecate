@@ -231,7 +231,7 @@ class EvidenceStore:
         deleted = 0
         for path in sorted(self._dir.glob("evidence-*.jsonl")):
             day = self._file_day(path)
-            if day is None or day >= cutoff:
+            if day is None or day + SECONDS_PER_DAY > cutoff:
                 continue
             try:
                 path.unlink()

@@ -317,3 +317,99 @@ async def harness(tmp_path: Path):
     lease_module._default_clock = original_default
     await async_engine.dispose()
     store.dispose()
+
+
+async def test_real_platform_dispatcher_rejects_late_success(harness, monkeypatch) -> None:
+    """Exercise the production callback, rather than a CAS-aware test double."""
+    from hecate_durable.worker import DurableWorker
+
+    import hecate.execution.task_control as task_control_module
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+
+    monkeypatch.setattr(task_control_module, "_spawn_background", lambda coro: coro.close())
+    store = harness["store"]
+    entered_a, entered_b = asyncio.Event(), asyncio.Event()
+    finish_a, finish_b = asyncio.Event(), asyncio.Event()
+    calls = 0
+
+    async def execute(self, db, context, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            entered_a.set()
+            await finish_a.wait()
+            return {"status": "succeeded", "content": "stale"}
+        entered_b.set()
+        await finish_b.wait()
+        return {"status": "succeeded", "content": "current"}
+
+    monkeypatch.setattr(PlatformTaskDispatcher, "_execute", execute)
+    async with harness["session_factory"]() as db:
+        result = await TaskControlService(
+            db,
+            store=store,
+            recorder=store,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        ).submit(
+            workspace_id=WS,
+            user_id=OWNER,
+            goal="real fencing",
+            agent_id=harness["agent_id"],
+            input={"messages": [{"role": "user", "content": "go"}]},
+        )
+    dispatcher = PlatformTaskDispatcher(store, harness["session_factory"])
+    worker_a = DurableWorker(store, dispatcher, leases=store.leases, worker_id="a", lease_ttl=30)
+    worker_b = DurableWorker(store, dispatcher, leases=store.leases, worker_id="b", lease_ttl=30)
+    old = asyncio.create_task(worker_a.dispatch_once(result.task_ref))
+    await asyncio.wait_for(entered_a.wait(), 5)
+    harness["clock"].advance(31)
+    new = asyncio.create_task(worker_b.reconcile())
+    await asyncio.wait_for(entered_b.wait(), 5)
+    fresh = store.get_task_state(result.task_ref)
+    finish_a.set()
+    assert await old is False
+    assert store.get_task_state(result.task_ref) == fresh
+    finish_b.set()
+    assert await new == 1
+    assert store.get_task_state(result.task_ref).extra["result"]["content"] == "current"
+
+
+async def test_lifespan_shutdown_drains_protected_dispatch_before_cancelling(harness) -> None:
+    from types import SimpleNamespace
+
+    from hecate_durable.worker import DurableWorker
+
+    from hecate.contracts.execution.references import task_ref
+    from hecate.core.composition.wiring import stop_durable_worker
+
+    store = harness["store"]
+    ref = task_ref("hecate", str(uuid.uuid4()))
+    store.apply_task_state(ref, TaskLifecycleState.QUEUED)
+    started = asyncio.Event()
+
+    async def dispatch(task, record, lease):
+        started.set()
+        await asyncio.sleep(0.05)
+        await asyncio.to_thread(
+            store.apply_task_state,
+            task,
+            TaskLifecycleState.SUCCEEDED,
+            expected_revision=record.revision + 1,
+            lease=lease,
+        )
+
+    worker = DurableWorker(store, dispatch, leases=store.leases, poll_interval=0.01)
+    loop = asyncio.create_task(worker.run_forever())
+    app = SimpleNamespace(
+        state=SimpleNamespace(
+            durable_worker=worker,
+            durable_worker_task=loop,
+            durable_outbox_relay=None,
+            durable_relay_task=None,
+        )
+    )
+    await asyncio.wait_for(started.wait(), 5)
+    await stop_durable_worker(app)
+    assert store.get_task_state(ref).lifecycle_state is TaskLifecycleState.SUCCEEDED

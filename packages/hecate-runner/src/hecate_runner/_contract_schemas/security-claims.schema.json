@@ -1,0 +1,25 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/security-claims.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SecurityClaims",
+  "description": "Out-of-process identity and authorization claim set. This schema defines claim NAMES and constraints only - possession of a claim set is not authentication; verification (signature, audience check, expiry) is the receiving adapter's responsibility (plan step7). iss and aud are identities: aud MUST bind the claims to one target backend service so tokens cannot be replayed across services. sub is the caller's workload identity - never a human principal and never a platform administrator. exp is an RFC3339 UTC timestamp; claims MUST be short-lived (the upper bound is a normative binding-document constraint, not asserted by this schema). Identity NEVER comes from the request body: self-asserted role or admin fields in a request body MUST be ignored by receivers.",
+  "type": "object",
+  "required": ["iss", "aud", "sub", "tenant", "exp"],
+  "additionalProperties": true,
+  "properties": {
+    "iss": { "type": "string", "minLength": 1 },
+    "aud": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Audience: the target backend service identity. Missing aud would allow cross-service token replay."
+    },
+    "sub": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Subject: the caller's workload identity. A workload proves its deployment instance; it does not inherit human or platform-administrator rights."
+    },
+    "tenant": { "type": "string", "minLength": 1 },
+    "delegation_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/authorizationRef" },
+    "exp": { "type": "string", "minLength": 1 }
+  }
+}

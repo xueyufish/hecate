@@ -40,7 +40,7 @@ Beyond the seams, the storage layer adds what the plan's step6 requires:
 - **Leases + fencing** — resource-key leases with monotonic tokens; claim
   tokens fence action outcomes so a late receipt from an expired holder is
   rejected and journaled, never applied over authoritative state.
-- **G2 closure across restarts** — intents and outcomes carry
+- **G2 action recovery primitives** — intents and outcomes carry
   session/execution/tool-call correlation columns, so platform Actions map
   explicitly onto runtime `TOOL_CALL`/`TOOL_RESULT` events, and outcomes
   persist real result content/digest/reference for recovery.
@@ -73,7 +73,9 @@ relay = OutboxRelay(store.session_factory, project_event, relay_key="platform")
 
 - **Claiming** — one lease per task (`dispatch:{issuer}:{id}`); concurrent
   worker instances are safe. The lifecycle revision CAS additionally fences a
-  superseded executor's late terminal write.
+  superseded executor's late terminal write. Dispatchers must pass the supplied
+  lease to SQL state and protected action writes; a custom dispatcher that
+  ignores ownership is not certified.
 - **Reconciliation** — queued tasks re-enter claiming; `running` tasks whose
   lease expired are re-queued under a fresh token and re-dispatched; live
   leases are untouched. Outcomes arbitrate through the submission idempotency
@@ -82,8 +84,9 @@ relay = OutboxRelay(store.session_factory, project_event, relay_key="platform")
 - **Retry** — bounded by `max_attempts` with exponential backoff; exhausted
   tasks park in `reconciliation_required` with the failure journaled.
 - **Outbox relay** — projects committed event rows into a read model
-  idempotently per `event_id`; the cursor row (`durable_outbox_cursor`)
-  persists across restarts and records explicitly skipped poison events —
+  idempotently per `event_id`; per-event receipts (`durable_outbox_receipt`)
+  survive commit reordering and restart. The cursor row is diagnostic and
+  records explicitly skipped poison events —
   the authoritative log row always remains.
 - **Standalone process** — `python -m hecate_durable.worker --dsn ... --dispatcher
   'module:factory'` runs the same loop outside the app process; startup
@@ -100,3 +103,13 @@ durable profile's full form.
 `DURABLE_TEST_POSTGRES_URL` to run the same fault-injection suite against a
 real PostgreSQL instance (crash, lease expiry, late receipts, storage
 failure).
+
+## Runtime ledger integration
+
+`hecate-durable[runtime]` supplies `SqlActionLedgerHook` for the kernel's
+existing action hook. The core SQL store remains usable without the kernel or
+platform. Platform/runner composition injects this bridge into actual tool
+execution; a stored result can be recovered only when the same logical action
+identity is retained. Full platform checkpoint recovery remains separate
+Step6 acceptance, and interrupted protected attempts currently require
+reconciliation instead of starting a fresh model run.

@@ -167,13 +167,20 @@ class RunnerInstance:
         self.port = port
 
     def request(
-        self, method: str, path: str, body: dict | None = None, token: str | None = READER_TOKEN
+        self,
+        method: str,
+        path: str,
+        body: dict | None = None,
+        token: str | None = READER_TOKEN,
+        headers: dict[str, str] | None = None,
     ) -> tuple[int, dict]:
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=data, method=method)
         if token is not None:
             req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/json")
+        for key, value in (headers or {}).items():
+            req.add_header(key, value)
         try:
             with urllib.request.urlopen(req, timeout=30) as response:
                 return response.status, json.loads(response.read())

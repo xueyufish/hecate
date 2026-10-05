@@ -36,6 +36,13 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
+from hecate_runtime.execution_service import (
+    RuntimeEventDecision,
+    RuntimeExecutionRequest,
+    RuntimeScheduleCancelledError,
+    runtime_execution_service,
+)
+
 from hecate.contracts.execution.capabilities import (
     BackendCapabilities,
     CapabilityLevel,
@@ -361,24 +368,32 @@ class HecateExecutionBackend(AgentExecutionBackend):
                 context_offload_enabled=self._context_offload_enabled,
                 context_offload_threshold_tokens=self._context_offload_threshold_tokens,
             )
-            seq = 0
-            async for event in assembled.runtime.execute(
-                session_id=session_id,
-                initial_input=assembled.initial_input,
-                stream_mode=StreamMode.VALUES,
-                execution_mode=assembled.execution_mode,
-            ):
-                record.events.append(self._envelope(request, run_ref, seq, event))
-                seq += 1
+
+            def observe(event: Any) -> RuntimeEventDecision:
+                record.events.append(self._envelope(request, run_ref, len(record.events), event))
                 if isinstance(event, dict) and event.get("type") == "interrupt":
-                    record.state = RunState.UNKNOWN
-                    record.detail = {"reason": "execution interrupted; continuation controls are unsupported"}
-                    return
-            record.state = RunState.SUCCEEDED
-        except asyncio.CancelledError:
+                    return RuntimeEventDecision.STOP_UNKNOWN
+                return RuntimeEventDecision.CONTINUE
+
+            result = await runtime_execution_service.execute(
+                RuntimeExecutionRequest(
+                    runtime=assembled.runtime,
+                    session_id=session_id,
+                    initial_input=assembled.initial_input,
+                    execution_mode=assembled.execution_mode,
+                    stream_mode=StreamMode.VALUES,
+                    observer=observe,
+                )
+            )
+            record.state = RunState(result.state.value)
+            if result.state.value == "unknown":
+                record.detail = {"reason": "execution interrupted; continuation controls are unsupported"}
+            elif result.error is not None:
+                record.detail = {"reason": result.error}
+        except RuntimeScheduleCancelledError as exc:
             record.state = RunState.UNKNOWN
             record.detail = {"reason": "schedule cancelled before completion (loop shutdown)"}
-            raise
+            raise asyncio.CancelledError from exc
         except Exception as exc:  # noqa: BLE001 — engine failure is a run fact, not a crash
             logger.warning("builtin run %s failed: %s", run_ref.id, exc, exc_info=True)
             record.state = RunState.FAILED

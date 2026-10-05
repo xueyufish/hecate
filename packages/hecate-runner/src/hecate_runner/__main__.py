@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from .durable import DurableRuntime
-from .engine import ExecutionEngine
+from .engine import EvidenceUnavailableError, ExecutionEngine
 from .evidence import EvidenceStore
 from .profile import Profile, ProfileError, load_profile
 from .server import RunnerServer
@@ -41,6 +41,14 @@ def main(argv: list[str] | None = None) -> int:
         profile: Profile = load_profile(args.profile)
     except ProfileError as exc:
         print(f"hecate-runner: profile error: {exc}", file=sys.stderr)
+        return 2
+
+    if profile.config.control_plane is not None:
+        print(
+            "hecate-runner: managed execution is not wired to the CLI yet; "
+            "use the standalone profile. Enrollment/channel adapters are available for integration tests.",
+            file=sys.stderr,
+        )
         return 2
 
     business_api = args.business_api
@@ -149,7 +157,7 @@ def _schedule_pending_resumes(durable: DurableRuntime, engine: ExecutionEngine, 
             pending = [
                 record
                 for record, _input in durable.pending_tasks()
-                if record.lifecycle_state is not TaskLifecycleState.RECONCILIATION_REQUIRED
+                if record.lifecycle_state in {TaskLifecycleState.QUEUED, TaskLifecycleState.RUNNING}
                 and record.task_ref.id not in unresumable
             ]
             if not pending:
@@ -161,7 +169,12 @@ def _schedule_pending_resumes(durable: DurableRuntime, engine: ExecutionEngine, 
                     unresumable.add(record.task_ref.id)
                     continue
                 run_input = durable.store.get_task_input(record.task_ref)
-                if engine.resume(record.task_ref, run_ref, dict(run_input or {})) is not None:
+                try:
+                    run_id = engine.resume(record.task_ref, run_ref, dict(run_input or {}))
+                except (OSError, EvidenceUnavailableError):
+                    logger.warning("startup reconcile: evidence unavailable; task retained", exc_info=True)
+                    run_id = None
+                if run_id is not None:
                     logger.info("startup reconcile: resumed task %s", record.task_ref.id)
                     resumed = True
                     break

@@ -1,0 +1,62 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/event-envelope.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EventEnvelope",
+  "description": "Normalized cross-process event envelope. kind=event carries a payload declared by payload_schema_ref; kind=gap is an explicit marker for a missing sequence range (never silently skipped). source_sequence is per-run and monotonically increasing as emitted by the backend; receivers MUST NOT reconstruct a global order from it. Backend-internal events (e.g. Pregel supersteps) stay backend details - the envelope only carries the normalized projection. Unknown fields MUST be tolerated.",
+  "type": "object",
+  "required": ["contract_version", "kind", "event_id", "task_ref", "run_ref", "source_sequence", "occurred_at", "received_at"],
+  "additionalProperties": true,
+  "properties": {
+    "contract_version": { "type": "string", "minLength": 1 },
+    "kind": { "enum": ["event", "gap"] },
+    "event_id": { "type": "string", "minLength": 1 },
+    "task_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/taskRef" },
+    "run_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/runRef" },
+    "source_sequence": { "type": "integer", "minimum": 0 },
+    "occurred_at": { "type": "string", "minLength": 1 },
+    "received_at": { "type": "string", "minLength": 1 },
+    "payload_schema_ref": { "type": "string", "minLength": 1 },
+    "payload": { "type": "object" },
+    "evidence_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/artifactRef" },
+    "correlation_id": { "type": "string" },
+    "causation_id": { "type": "string" },
+    "actor": { "$ref": "#/$defs/actor" },
+    "source": { "$ref": "#/$defs/eventSource" },
+    "gap": {
+      "type": "object",
+      "required": ["from_sequence", "to_sequence"],
+      "additionalProperties": false,
+      "properties": {
+        "from_sequence": { "type": "integer", "minimum": 0 },
+        "to_sequence": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "event" } } },
+      "then": { "required": ["payload_schema_ref"] }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "gap" } } },
+      "then": { "required": ["gap"] }
+    }
+  ],
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string", "enum": ["human", "agent_principal", "service", "platform"] },
+        "id": { "type": "string", "minLength": 1 },
+        "on_behalf_of": { "type": "string", "minLength": 1 }
+      }
+    },
+    "eventSource": {
+      "type": "string",
+      "description": "Authoritative writer of the event; distinguishes platform-directly-observed actions from host- or backend-reported ones.",
+      "enum": ["platform", "standalone_host", "execution_backend"]
+    }
+  }
+}
