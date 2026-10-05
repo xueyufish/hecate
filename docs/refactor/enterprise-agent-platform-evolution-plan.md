@@ -532,7 +532,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **剩余实施顺序：**以下属于 Step6 的关闭门槛，不转移给 step16；涉及共享服务、身份和审批的前置能力分别与 step5c、step7 同步交付。
 
-- [ ] step6a：完成 step5c 共享执行服务和正式后端绑定，再在 Runner CLI 装配 `ManagedChannel`、持久接收队列、串行执行槽、结果上传及关闭处理。持久接受后宕机，重启只恢复同一 Task/Run；未接通前含 `control_plane` 的 CLI 配置明确启动失败。通过安装后的独立 Runner 进程对接真实平台 HTTP 的最小投递—执行—投影测试。
+- [ ] step6a：完成 step5c 共享执行服务和正式后端绑定，再在 Runner CLI 装配 `ManagedChannel`、持久接收队列、串行执行槽、结果上传及关闭处理。持久接受后宕机，重启只恢复同一 Task/Run；未接通前含 `control_plane` 的 CLI 配置明确启动失败。通过安装后的独立 Runner 进程对接真实平台 HTTP 的最小投递—执行—投影测试。（部分交付(`managed-execution-loop`):Runner CLI 已装配 `ManagedChannel`、持久接收队列(幂等接受,接受≠执行)、串行执行调度、`run_terminal` 结果上传与关闭 drain;重启按原 Task/Run 恢复,standalone replay 与受管调度按 issuer 分流,重连重注册+按 Run 游标补传,缺 durable 的 `control_plane` 启动失败;身份打点漂移转待对账。剩余:安装制品的独立 Runner 进程对接真实平台 HTTP 的进程级测试归 step6f,动作时租约强制归 step6b/step7）
 - [ ] step6b：把受管 `LeaseGate` 接入实际 Action 意图／领取／工具派发入口，而不是单独调用验证器。恢复、重连及每个受保护动作验证当前主体、部署、动作范围和授权期限；配合 step7 实现撤权／审批。授权到期后禁止新动作，已有未知结果只对账，不能重新授权后重做。用实际业务 API 调用计数验证断连到期、跨域与旧授权拒绝。
 - [ ] step6c：实现独立宿主持久 `waiting_input`／`waiting_approval` 的进入和一次性命令唤醒；等待记录绑定原 Task/Run、参数摘要、审批或输入契约及期限。step7 提供合法审批判定，Step6 提供可靠等待。进程强制终止后重启仍等待，过期／重复唤醒不会派发工具。现有通用 TaskStore 支持等待状态，Runner 暂无完整等待路径。
 - [ ] step6d：完成平台共享执行的 checkpoint／动作恢复关联，恢复原逻辑执行和已记录结果；不要仅创建新 Run 并期待模型再次生成相同 execution_id。当前中断尝试已有受保护 Action 时保守进入 `reconciliation_required`。用真实入口验证落盘成功后崩溃、外部写成功但回执失败、未知结果、工具／参数冲突，完成后才关闭整体 G2。

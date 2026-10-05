@@ -24,10 +24,15 @@ expose the service beyond localhost.
 
 The default profile admits read-only tools. An opt-in `durable` profile adds
 persistent task/action records, write-tool recovery and bounded serial restart
-admission. The managed channel currently provides library-level delivery
-acceptance and event projection; the CLI rejects `control_plane` configuration
-until managed dispatch and action-time lease enforcement are wired. Capability
-statements describe available primitives, not production certification.
+admission. With both `durable` and `control_plane` configured, the host joins
+the managed closed loop: registered deliveries land in the persistent receive
+queue (idempotent accept; accept means accepted, never running), a serial
+scheduler drives accepted tasks through the same engine slot, task facts and
+terminal results upload to the platform projection with per-run cursors
+(reconnect backfill is deduplicated upstream), and shutdown drains honestly.
+Action-time lease enforcement, persistent waiting, and checkpoint recovery are
+later-step scope. Capability statements describe available primitives, not
+production certification.
 
 ## Install
 
@@ -82,6 +87,41 @@ local development option. Back up and upgrade the host schema while drained;
 `create_schema()` creates missing tables, and is not a general migration tool.
 Recovery trusts the persisted principal/domain snapshot only after checking
 current `identity.json`; it never substitutes client-provided identity fields.
+
+## Managed profile (control_plane)
+
+With the durable profile present, an optional `control_plane` block joins the
+managed closed loop:
+
+```json
+{
+  "control_plane": {
+    "base_url": "https://platform.example",
+    "workspace_id": "<workspace uuid>",
+    "trust_root": "host-root-1",
+    "host_id": "host-1",
+    "issuer_domain": "platform-issuer",
+    "secret_ref": "env:MANAGED_TRUST_SECRET",
+    "lease_ttl_seconds": 120,
+    "data_domains": ["domain_a"]
+  }
+}
+```
+
+- `control_plane` without the durable profile refuses startup — the managed
+  receive queue is the persistent task ledger.
+- Accepted deliveries map to local tasks `managed-<delivery-id>` under the
+  `managed-host` issuer and carry an accept-time identity stamp
+  (`principal: managed:<trust_root>`, `domains: data_domains`); recovery
+  re-checks the stamp against the current configuration and stops drifted
+  tasks into reconciliation instead of re-homing them.
+- `data_domains` scopes which data domains managed tool dispatches may
+  address; the default (empty) is deny-by-default at the existing domain
+  check.
+- Disconnects degrade to local retry: pulls/uploads fail soft, executions
+  continue from the local queue, and events backfill per run on reconnect
+  (upstream deduplicates per event id). An expired lease stops new protected
+  actions and never falls back to local self-authorization.
 
 ## Evidence retention
 

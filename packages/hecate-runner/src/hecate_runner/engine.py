@@ -48,6 +48,7 @@ from jsonschema import Draft202012Validator
 
 from .durable import DurableRuntime, gate_dispatch_async, record_outcome_async
 from .evidence import OUTCOME_FAILED, EvidenceStore
+from .managed import MANAGED_ISSUER, ManagedIdentity
 from .profile import BUILTIN_TOOL_SCHEMAS, Profile
 
 DURABLE_CAPABILITIES: dict[str, str] = {
@@ -174,12 +175,16 @@ class ExecutionEngine:
         evidence: EvidenceStore,
         tool_dispatch,
         durable: DurableRuntime | None = None,
+        managed_identity: ManagedIdentity | None = None,
     ) -> None:
         # ``tool_dispatch`` signature: (tool_name, arguments, principal, domains).
         self._profile = profile
         self._evidence = evidence
         self._tool_dispatch = tool_dispatch
         self._durable = durable
+        # Managed execution identity: present only in the managed assembly;
+        # ``resume_managed`` refuses to drive managed tasks without it.
+        self._managed_identity = managed_identity
         # Side-effect class per allowlisted tool from the manifest's declared
         # permission: read → readonly, write → conservative non-idempotent.
         self._side_effects: dict[str, ToolSideEffectClass] = {
@@ -449,9 +454,14 @@ class ExecutionEngine:
         Returns the run id when dispatched, or ``None`` when the serial slot
         is busy (the caller retries on the next tick) — recovery decisions
         per action come from the ledger inside the normal dispatch gate.
+        Managed-issuer tasks belong to :meth:`resume_managed` and are left
+        untouched here so the two recovery entries can never fight over one
+        task.
         """
 
         if self._durable is None or self._closing or self.busy:
+            return None
+        if task_ref.issuer_domain == MANAGED_ISSUER:
             return None
         from hecate_durable.contracts.durable import TaskLifecycleState
 
@@ -470,8 +480,54 @@ class ExecutionEngine:
         if not isinstance(domains, list) or not any(set(domains).issubset(i.domains) for i in matches):
             self._durable.finish_run(task_ref, "unknown", needs_reconciliation=True)
             return None
+        return self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains))
+
+    def resume_managed(self, task_ref: BackendRef, run_ref: BackendRef) -> str | None:
+        """Re-drive an accepted managed task after (re)start (step6a loop).
+
+        The task's accept-time identity stamp (verified channel principal +
+        operator-configured domains) must match the engine's current managed
+        identity exactly — configuration drift stops the task into
+        ``reconciliation_required`` instead of re-homing the execution.
+        Returns the run id when dispatched, ``None`` when the slot is busy
+        or the task did not resumable-check.
+        """
+
+        if self._durable is None or self._closing or self.busy:
+            return None
+        if self._managed_identity is None:
+            raise ValueError("resume_managed requires the managed assembly (managed_identity)")
+        if task_ref.issuer_domain != MANAGED_ISSUER:
+            return None
+        from hecate_durable.contracts.durable import TaskLifecycleState
+
+        record = self._durable.store.get_task_state(task_ref)
+        if record is None or record.lifecycle_state not in {TaskLifecycleState.QUEUED, TaskLifecycleState.RUNNING}:
+            return None
+        persisted_input = self._durable.store.get_task_input(task_ref) or {}
+        trusted = persisted_input.get("_host_identity") or {}
+        principal = trusted.get("principal")
+        domains = trusted.get("domains")
+        if (
+            principal != self._managed_identity.principal
+            or not isinstance(domains, list)
+            or list(self._managed_identity.domains) != domains
+        ):
+            self._durable.finish_run(task_ref, "unknown", needs_reconciliation=True)
+            return None
+        return self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains))
+
+    def _schedule_durable_resume(
+        self,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        run_input: dict,
+        principal: str,
+        domains: tuple[str, ...],
+    ) -> str:
+        """Shared serial-slot dispatch tail for both recovery entries."""
+
         self._admit_protected(run_input)
-        run_input = persisted_input
         state = RunState(
             run_id=run_ref.id,
             status="running",
@@ -639,6 +695,7 @@ class ExecutionEngine:
                         state.task_ref,
                         state.status,
                         needs_reconciliation=state.needs_reconciliation or bool(hook_failed),
+                        error=state.error,
                     )
                     state.status = record.lifecycle_state.value
                 except Exception:

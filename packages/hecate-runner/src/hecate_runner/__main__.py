@@ -6,7 +6,13 @@ reports in-flight state honestly. With the durable profile configured, the
 host additionally opens the persistent task/action ledger and, before
 serving, reconciles non-terminal tasks from previous processes: replayable
 work is re-driven through the ledger-gated graph while claimed writes stop
-safely into ``reconciliation_required``.
+safely into ``reconciliation_required``. With ``control_plane`` configured,
+the host joins the managed closed loop: the channel registers and pulls
+persisted deliveries into the receive queue (idempotent accept), a serial
+scheduler drives accepted tasks through the same engine slot, execution
+events and terminal results upload back to the platform, and shutdown
+drains honestly (no new pulls, in-flight convergence, best-effort final
+upload).
 """
 
 from __future__ import annotations
@@ -20,7 +26,13 @@ from pathlib import Path
 from .durable import DurableRuntime
 from .engine import EvidenceUnavailableError, ExecutionEngine
 from .evidence import EvidenceStore
-from .profile import Profile, ProfileError, load_profile
+from .managed import (
+    ManagedChannel,
+    ManagedExecutionScheduler,
+    ManagedIdentity,
+    managed_principal_for,
+)
+from .profile import Profile, ProfileError, load_profile, resolve_secret_ref
 from .server import RunnerServer
 from .tools import BusinessApiToolDispatcher
 
@@ -43,13 +55,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"hecate-runner: profile error: {exc}", file=sys.stderr)
         return 2
 
-    if profile.config.control_plane is not None:
-        print(
-            "hecate-runner: managed execution is not wired to the CLI yet; "
-            "use the standalone profile. Enrollment/channel adapters are available for integration tests.",
-            file=sys.stderr,
+    # Managed assembly (step6a): control_plane + durable is the closed loop
+    # (channel + persistent receive queue + serial scheduling + upload +
+    # shutdown drain). control_plane without durable cannot persist the
+    # receive queue and is refused; the standalone path below is unchanged.
+    managed: tuple[ManagedChannel, ManagedExecutionScheduler] | None = None
+    managed_identity: ManagedIdentity | None = None
+    control_plane = profile.config.control_plane
+    if control_plane is not None:
+        if profile.config.durable is None:
+            print(
+                "hecate-runner: control_plane requires the durable profile "
+                "(durable.database_url) — the managed receive queue is the persistent task ledger",
+                file=sys.stderr,
+            )
+            return 2
+        managed_identity = ManagedIdentity(
+            principal=managed_principal_for(control_plane.trust_root), domains=control_plane.data_domains
         )
-        return 2
 
     business_api = args.business_api
     if business_api is None:
@@ -103,11 +126,30 @@ def main(argv: list[str] | None = None) -> int:
         # identity (engine.submit); request-body claims never reach here.
         return await dispatcher(tool_name, arguments, principal, domains)
 
-    engine = ExecutionEngine(profile, evidence, dispatch, durable=durable)
+    engine = ExecutionEngine(profile, evidence, dispatch, durable=durable, managed_identity=managed_identity)
+
+    if profile.config.control_plane is not None and durable is not None:
+        secret = resolve_secret_ref(control_plane.secret_ref, profile.directory).encode("utf-8")
+        channel = ManagedChannel(
+            base_url=control_plane.base_url,
+            workspace_id=control_plane.workspace_id,
+            trust_root=control_plane.trust_root,
+            host_id=control_plane.host_id,
+            secret=secret,
+            issuer_domain=control_plane.issuer_domain,
+            store=durable.store,
+            lease_ttl_seconds=control_plane.lease_ttl_seconds,
+            poll_interval_seconds=control_plane.poll_interval_seconds,
+            upload_batch=control_plane.upload_batch,
+            data_domains=control_plane.data_domains,
+        )
+        managed = (channel, ManagedExecutionScheduler(store=durable.store, engine=engine))
     server = RunnerServer(profile, engine, evidence, durable=durable)
 
     if durable is not None:
         _schedule_pending_resumes(durable, engine, server)
+    if managed is not None:
+        _start_managed(managed[0], managed[1], engine, server)
 
     httpd = server.serve()
     actual_port = httpd.server_address[1]
@@ -119,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"hecate-runner: serving on {profile.config.host}:{actual_port} "
         f"(backend={profile.manifest.backend_type}, model={profile.config.model_backend}, "
-        f"tools={list(profile.config.tool_allowlist)}, durable={durable is not None})",
+        f"tools={list(profile.config.tool_allowlist)}, durable={durable is not None}, "
+        f"managed={managed is not None})",
         flush=True,
     )
     try:
@@ -129,6 +172,12 @@ def main(argv: list[str] | None = None) -> int:
         server.wait_shutdown_sync()
     finally:
         httpd.server_close()
+        if managed is not None:
+            # Stop pulling/scheduling, converge in-flight runs honestly,
+            # then one best-effort final upload so the platform projection
+            # reflects the host's last known facts; a failed upload backfills
+            # on the next start.
+            server._run_coro(_managed_drain(managed[0], managed[1], engine))
         server.close()
         if durable is not None:
             durable.store.dispose()
@@ -136,11 +185,63 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _start_managed(
+    channel: ManagedChannel,
+    scheduler: ManagedExecutionScheduler,
+    engine: ExecutionEngine,
+    server: RunnerServer,
+) -> None:
+    """Boot the managed loops on the runner loop (reconnect-tolerant).
+
+    Registration retries until the platform answers — an unreachable or
+    not-yet-enrolled host keeps serving locally, and once registration and
+    the credential exchange succeed the pull/upload and scheduling loops
+    start. Local evidence retention and the local HTTP surface are
+    unaffected by the retrying (per the managed overlay contract).
+    """
+
+    import asyncio
+
+    async def _boot() -> None:
+        try:
+            while not engine.closing:
+                if await channel.register():
+                    break
+                await asyncio.sleep(channel.poll_interval)
+            if not engine.closing:
+                channel.start()
+                scheduler.start()
+        except Exception:  # noqa: BLE001 — a boot failure must not kill the loop thread
+            logger.exception("managed boot failed; the host continues standalone")
+
+    asyncio.run_coroutine_threadsafe(_boot(), server._loop)
+
+
+async def _managed_drain(
+    channel: ManagedChannel,
+    scheduler: ManagedExecutionScheduler,
+    engine: ExecutionEngine,
+) -> None:
+    """Graceful managed shutdown, on the runner loop."""
+
+    await scheduler.stop()
+    await channel.stop()
+    await engine.close()
+    try:
+        await channel.upload_events()
+    except Exception:  # noqa: BLE001 — shutdown must not hang on upload
+        logger.warning("final managed event upload failed; events backfill on next start", exc_info=True)
+
+
 def _schedule_pending_resumes(durable: DurableRuntime, engine: ExecutionEngine, server: RunnerServer) -> None:
     """Re-drive non-terminal tasks from previous processes (replay path).
 
     ``reconciliation_required`` tasks stay put — converging them is an
-    explicit operator action, never a startup side effect. The serial host
+    explicit operator action, never a startup side effect. Managed-issuer
+    tasks are skipped here: they belong to the managed scheduler (step6a),
+    which recovers them as the same Task/Run when the channel loop is
+    configured; without that configuration they are left untouched rather
+    than mis-reconciled by the standalone identity path. The serial host
     resumes one task at a time; the loop drains the backlog as the slot
     frees, then exits. Per-action safety comes from the ledger gate inside
     normal dispatch: succeeded actions backfill their recorded result,
@@ -151,6 +252,8 @@ def _schedule_pending_resumes(durable: DurableRuntime, engine: ExecutionEngine, 
 
     from hecate_durable.contracts.durable import TaskLifecycleState
 
+    from .managed import MANAGED_ISSUER
+
     async def _resume_loop() -> None:
         unresumable: set[str] = set()
         while not engine.closing:
@@ -158,6 +261,7 @@ def _schedule_pending_resumes(durable: DurableRuntime, engine: ExecutionEngine, 
                 record
                 for record, _input in durable.pending_tasks()
                 if record.lifecycle_state in {TaskLifecycleState.QUEUED, TaskLifecycleState.RUNNING}
+                and record.task_ref.issuer_domain != MANAGED_ISSUER
                 and record.task_ref.id not in unresumable
             ]
             if not pending:

@@ -75,9 +75,14 @@ class ControlPlaneConfig:
     trust_root: str
     host_id: str
     secret_ref: str
+    issuer_domain: str
     lease_ttl_seconds: float = 120.0
     poll_interval_seconds: float = 5.0
     upload_batch: int = 100
+    # Data domains managed deliveries may dispatch tools with. Empty (the
+    # default) = deny-by-default: the run's existing domain check refuses
+    # every domain-carrying dispatch until the operator maps a scope.
+    data_domains: tuple[str, ...] = ()
 
 
 def _load_control_plane(data: dict, profile_dir: Path) -> ControlPlaneConfig | None:
@@ -102,28 +107,39 @@ def _load_control_plane(data: dict, profile_dir: Path) -> ControlPlaneConfig | N
     host_id = raw.get("host_id")
     if not isinstance(trust_root, str) or not trust_root or not isinstance(host_id, str) or not host_id:
         raise ProfileError("control_plane.trust_root and control_plane.host_id must be non-empty strings")
+    issuer_domain = raw.get("issuer_domain")
+    if not isinstance(issuer_domain, str) or not issuer_domain:
+        raise ProfileError("control_plane.issuer_domain must be a non-empty string")
     secret_ref = raw.get("secret_ref")
     if not isinstance(secret_ref, str) or not secret_ref:
         raise ProfileError("control_plane.secret_ref must be a secret reference (env:NAME or file:path)")
-    _resolve_secret_ref(secret_ref, profile_dir)  # fail fast at startup
+    resolve_secret_ref(secret_ref, profile_dir)  # fail fast at startup
     lease_ttl = raw.get("lease_ttl_seconds", 120.0)
     poll = raw.get("poll_interval_seconds", 5.0)
     upload_batch = raw.get("upload_batch", 100)
+    data_domains_raw = raw.get("data_domains", [])
     if not isinstance(lease_ttl, (int, float)) or lease_ttl <= 0:
         raise ProfileError("control_plane.lease_ttl_seconds must be a positive number")
     if not isinstance(poll, (int, float)) or poll <= 0:
         raise ProfileError("control_plane.poll_interval_seconds must be a positive number")
     if not isinstance(upload_batch, int) or upload_batch <= 0:
         raise ProfileError("control_plane.upload_batch must be a positive integer")
+    if not isinstance(data_domains_raw, list) or any(not isinstance(d, str) or not d for d in data_domains_raw):
+        raise ProfileError("control_plane.data_domains must be an array of non-empty strings")
+    if len(data_domains_raw) != len(set(data_domains_raw)):
+        raise ProfileError("control_plane.data_domains must not contain duplicate domains")
+    data_domains = tuple(data_domains_raw)
     return ControlPlaneConfig(
         base_url=base_url.rstrip("/"),
         workspace_id=workspace_id,
         trust_root=trust_root,
         host_id=host_id,
         secret_ref=secret_ref,
+        issuer_domain=issuer_domain,
         lease_ttl_seconds=float(lease_ttl),
         poll_interval_seconds=float(poll),
         upload_batch=upload_batch,
+        data_domains=data_domains,
     )
 
 
@@ -187,7 +203,7 @@ class TrustedIdentity:
     credential_sha256: str
 
 
-def _resolve_secret_ref(ref: str, profile_dir: Path) -> str:
+def resolve_secret_ref(ref: str, profile_dir: Path) -> str:
     """Resolve a secret reference (``env:NAME`` or ``file:relative/path``)."""
 
     if ref.startswith("env:"):
@@ -409,7 +425,7 @@ def _load_identities(profile_dir: Path) -> tuple[TrustedIdentity, ...]:
         if errors:
             raise ProfileError(f"invalid identities[{index}]: " + "; ".join(errors))
 
-        material = _resolve_secret_ref(credential, profile_dir)
+        material = resolve_secret_ref(credential, profile_dir)
         digest = hashlib.sha256(material.encode("utf-8")).hexdigest()
         if digest in seen_credentials:
             raise ProfileError(f"identities[{index}]: duplicate credential material")
@@ -539,7 +555,7 @@ def load_profile(profile_dir: Path) -> Profile:
     if entry.get("kind") != "entry" or entry.get("tools") != list(config.tool_allowlist):
         raise ProfileError("preview entry must declare kind='entry' and the configured tools in order")
 
-    shutdown_token = _resolve_secret_ref(config.shutdown_token_ref, profile_dir)
+    shutdown_token = resolve_secret_ref(config.shutdown_token_ref, profile_dir)
     if config.model_auth_env and not os.environ.get(config.model_auth_env):
         raise ProfileError(f"model auth reference env:{config.model_auth_env} is not set")
 

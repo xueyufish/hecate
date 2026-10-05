@@ -141,8 +141,15 @@ class DurableRuntime:
         outcome: str,
         *,
         needs_reconciliation: bool = False,
+        error: str | None = None,
     ) -> TaskStateRecord:
-        """Converge a task; withheld actions land in ``reconciliation_required``."""
+        """Converge a task; withheld actions land in ``reconciliation_required``.
+
+        Non-reconciliation targets commit a ``run_terminal`` governance event
+        in the same transaction as the state change, carrying the honest
+        outcome (status + error); that event is what the platform projection
+        folds into the managed Run's terminal state.
+        """
 
         if needs_reconciliation:
             return self.store.apply_task_state(task_ref, TaskLifecycleState.RECONCILIATION_REQUIRED)
@@ -152,7 +159,10 @@ class DurableRuntime:
             "cancelled": TaskLifecycleState.CANCELLED,
             "unknown": TaskLifecycleState.RECONCILIATION_REQUIRED,
         }[outcome]
-        return self.store.apply_task_state(task_ref, target)
+        terminal_payload = (
+            {"status": outcome, "error": error} if target is not TaskLifecycleState.RECONCILIATION_REQUIRED else None
+        )
+        return self.store.apply_task_state(task_ref, target, terminal_payload=terminal_payload)
 
     # -- control commands --------------------------------------------------------
 
