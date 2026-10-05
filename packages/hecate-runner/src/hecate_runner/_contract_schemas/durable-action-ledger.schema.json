@@ -1,0 +1,67 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/durable-action-ledger.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DurableActionLedger",
+  "description": "Persistent action ledger contract. The four recovery states mirror the runtime tool-recovery semantics verbatim (a drift test pins the two enums together): intent (action key, action name, arguments digest, side-effect class) MUST be persisted before business dispatch; claiming is atomic (at most one concurrent claimer); recovery returns the real result reference or an explicit reconciliation marker - never placeholder text; a changed arguments digest on the same action key is a conflict. store_unavailable MUST NOT be downgraded into never-started. The side-effect vocabulary is the same five-value enum as the tool contract. Unknown fields MUST be tolerated.",
+  "type": "object",
+  "$defs": {
+    "actionState": {
+      "type": "string",
+      "enum": ["never_started", "claimed", "outcome_unknown", "store_unavailable"]
+    },
+    "sideEffectClass": {
+      "type": "string",
+      "enum": [
+        "readonly",
+        "idempotent_write",
+        "non_idempotent_write",
+        "external_side_effect",
+        "unknown"
+      ]
+    },
+    "actionIntent": {
+      "type": "object",
+      "required": ["action_key", "action_name", "arguments_digest", "side_effect_class"],
+      "additionalProperties": true,
+      "properties": {
+        "action_key": { "type": "string", "minLength": 1 },
+        "action_name": { "type": "string", "minLength": 1 },
+        "arguments_digest": { "type": "string", "minLength": 1 },
+        "side_effect_class": { "$ref": "#/$defs/sideEffectClass" }
+      }
+    },
+    "actionOutcome": {
+      "type": "object",
+      "required": ["action_key", "outcome"],
+      "additionalProperties": true,
+      "properties": {
+        "action_key": { "type": "string", "minLength": 1 },
+        "outcome": { "type": "string", "enum": ["succeeded", "failed", "unknown"] },
+        "result_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/artifactRef" },
+        "result_digest": { "type": "string", "minLength": 1 }
+      }
+    },
+    "actionRecovery": {
+      "type": "object",
+      "required": ["action_key", "state"],
+      "additionalProperties": true,
+      "properties": {
+        "action_key": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/$defs/actionState" },
+        "intent": { "$ref": "#/$defs/actionIntent" },
+        "last_outcome": { "$ref": "#/$defs/actionOutcome" },
+        "pending_reconciliation": { "type": "boolean" }
+      }
+    },
+    "claimReceipt": {
+      "type": "object",
+      "required": ["action_key", "claimed", "recovery"],
+      "additionalProperties": true,
+      "properties": {
+        "action_key": { "type": "string", "minLength": 1 },
+        "claimed": { "type": "boolean" },
+        "recovery": { "$ref": "#/$defs/actionRecovery" }
+      }
+    }
+  }
+}

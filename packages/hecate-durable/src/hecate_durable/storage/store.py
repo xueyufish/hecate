@@ -1061,3 +1061,19 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
             if row is None:
                 return None
             return _task_ref(row.task_issuer, row.task_id)
+
+    def submission_for_run(self, run_ref: BackendRef) -> SubmissionAssociation | None:
+        """Return the idempotent submission that created a backend run."""
+
+        with self._session() as session:
+            row = (
+                session.execute(
+                    select(SubmissionRow).where(
+                        SubmissionRow.run_issuer == run_ref.issuer_domain,
+                        SubmissionRow.run_id == run_ref.id,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            return None if row is None else _association_of(row)

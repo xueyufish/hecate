@@ -346,8 +346,9 @@ def _task_ref_of(envelope_dict: dict[str, Any]) -> BackendRef:
 
 def _same_content(recorded: dict[str, Any], envelope: EventEnvelope) -> bool:
     incoming = envelope.to_dict()
-    return {k: v for k, v in recorded.items() if k != "received_at"} == {
-        k: v for k, v in incoming.items() if k != "received_at"
+    timestamp_fields = {"occurred_at", "received_at"}
+    return {k: v for k, v in recorded.items() if k not in timestamp_fields} == {
+        k: v for k, v in incoming.items() if k not in timestamp_fields
     }
 
 

@@ -6,6 +6,9 @@
 
 变更由 [step5-execution-review](../../openspec/changes/step5-execution-review/proposal.md) 承接。既有报告的测试记录属于各自基线；本报告的验证记录以本轮修改为准。
 
+> 2026-10-05 更新：change `runner-contract-shared-service` 已补齐当时指出的两项 Step5c 缺口——平台 builtin 与 Runner 共用 `hecate_runtime.execution_service`，Runner HTTP 面正式映射 Step3 请求/回执/事件/能力声明，并在 durable profile 中提供重启可查询的执行事件游标。本报告的历史结论保留，不再代表当前 Step5c 状态。
+
+
 ## 发现、修复与回归
 
 | 问题 | 原行为与影响 | 本轮修改 | 验证位置 |

@@ -25,7 +25,13 @@ from hecate_durable.contracts.references import BackendRef
 from hecate_durable.contracts.tools import ToolSideEffectClass
 from hecate_runtime.action_ledger import ActionLedgerHook
 from hecate_runtime.checkpoint import InMemoryCheckpointStore
-from hecate_runtime.pregel import PregelRuntime
+from hecate_runtime.execution_service import (
+    CooperativeCancellationError,
+    RuntimeEventDecision,
+    RuntimeExecutionRequest,
+    RuntimeScheduleCancelledError,
+    runtime_execution_service,
+)
 from hecate_runtime.types import (
     ChannelDef,
     ChannelType,
@@ -151,6 +157,8 @@ class RunState:
     needs_reconciliation: bool = False
     replayed: bool = False
     cancel_command_id: str | None = None
+    received_at: str | None = None
+    idempotency_key: str | None = None
 
 
 class EvidenceUnavailableError(Exception):
@@ -205,7 +213,7 @@ class ExecutionEngine:
         """
 
         if state.cancel_requested:
-            raise _CooperativeCancelError
+            raise CooperativeCancellationError
         effect = self._side_effects.get(tool_name, ToolSideEffectClass.UNKNOWN)
         if state.action_hook is not None:
             withheld, claim_blocked = await gate_dispatch_async(
@@ -377,11 +385,20 @@ class ExecutionEngine:
                 domains=tuple(domains),
                 task_ref=task_ref,
                 run_ref=run_ref,
+                received_at=self._durable.task_state(task_ref.id).recorded_at,
+                idempotency_key=idempotency_key,
             )
             state.action_hook = self._durable.hook_for(task_ref, run_ref)
         else:
             run_id = uuid.uuid4().hex
-            state = RunState(run_id=run_id, status="running", principal=principal, domains=tuple(domains))
+            state = RunState(
+                run_id=run_id,
+                status="running",
+                principal=principal,
+                domains=tuple(domains),
+                received_at=_now_iso(),
+                idempotency_key=idempotency_key,
+            )
         try:
             self._evidence.append(
                 "submission", principal, state.run_id, "accepted", {"model_source": self._profile.config.model_backend}
@@ -423,6 +440,7 @@ class ExecutionEngine:
             task_ref=task_ref,
             run_ref=run_ref,
             replayed=True,
+            received_at=record.recorded_at if record is not None else None,
         )
 
     def resume(self, task_ref: BackendRef, run_ref: BackendRef, run_input: dict) -> str | None:
@@ -548,6 +566,18 @@ class ExecutionEngine:
         return self._runs.get(run_id)
 
     def _append_event(self, state: RunState, event: dict) -> None:
+        if self._durable is not None and state.task_ref is not None and state.run_ref is not None:
+            try:
+                self._durable.emit_execution_event(
+                    task_ref=state.task_ref,
+                    run_ref=state.run_ref,
+                    source_sequence=len(state.events) + 1,
+                    event_type="tool_result" if event.get("type") == "tool_result" else "engine_event",
+                    payload={"event": event},
+                )
+            except Exception:
+                state.needs_reconciliation = True
+                raise
         state.events.append(event)
 
     async def _execute(self, run_id: str, state: RunState, run_input: dict, *, resume: bool = False) -> None:
@@ -560,23 +590,28 @@ class ExecutionEngine:
             # retries) derives identical action keys for the same logical
             # execution instead of fresh random identities.
             session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"runner-run:{run_id}")
-            runtime = PregelRuntime(self._graph, _FanOutWorker(self, state), self._checkpoint_store)
             try:
-                async for event in runtime.execute(session_id, initial_input={"input": run_input}):
+
+                def observe(event: dict) -> RuntimeEventDecision:
                     self._append_event(state, event)
-                final_status = "cancelled" if state.cancel_requested else "succeeded"
-            except _CooperativeCancelError:
-                final_status = "cancelled"
-            except asyncio.CancelledError:
+                    return RuntimeEventDecision.CONTINUE
+
+                result = await runtime_execution_service.execute(
+                    RuntimeExecutionRequest(
+                        runtime=self._assemble_runtime(state),
+                        session_id=session_id,
+                        initial_input={"input": run_input},
+                        observer=observe,
+                        should_cancel=lambda: state.cancel_requested,
+                    )
+                )
+                final_status = result.state.value
+                if result.state.value == "failed":
+                    state.error = "execution failed; inspect local service logs"
+                    logger.warning("Runner execution %s failed: %s", run_id, result.error)
+            except RuntimeScheduleCancelledError:
                 final_status = "unknown"
                 state.error = "runner shut down; outcome is not established"
-            except Exception as exc:  # noqa: BLE001 - the run fails; the server stays up
-                if state.cancel_requested:
-                    final_status = "cancelled"
-                else:
-                    final_status = "failed"
-                    state.error = "execution failed; inspect local service logs"
-                    logger.warning("Runner execution %s failed", run_id, exc_info=exc)
             result_ref = f"runs/{run_id}/artifacts" if final_status == "succeeded" else None
             self._evidence.append(
                 "execution",
@@ -625,6 +660,11 @@ class ExecutionEngine:
     def record_tool_result(self, state: RunState, tool_name: str, outcome: dict) -> None:
         self._append_event(state, {"type": "tool_result", "tool": tool_name, "outcome": outcome})
 
+    def _assemble_runtime(self, state: RunState):
+        from hecate_runtime.pregel import PregelRuntime
+
+        return PregelRuntime(self._graph, _FanOutWorker(self, state), self._checkpoint_store)
+
 
 class _FanOutWorker(Worker):
     """Routes each node to the model or read-tool worker by node id."""
@@ -638,7 +678,7 @@ class _FanOutWorker(Worker):
         self, node_id: str, node_config: dict, channel_snapshot: dict, execution_context: dict | None = None
     ) -> WorkerResult:
         if self._state.cancel_requested:
-            raise _CooperativeCancelError
+            raise CooperativeCancellationError
         if node_id == "model":
             worker: Worker = ModelNodeWorker(self._engine._profile)
         else:
@@ -650,5 +690,7 @@ class _FanOutWorker(Worker):
         return await worker.execute(node_id, node_config, channel_snapshot, execution_context)
 
 
-class _CooperativeCancelError(Exception):
-    """No further tools may start after an accepted cancellation request."""
+def _now_iso() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(tz=UTC).isoformat()

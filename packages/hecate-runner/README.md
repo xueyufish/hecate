@@ -1,37 +1,47 @@
 # hecate-runner
 
-Standalone execution host for the [`hecate-runtime`](../hecate-runtime) kernel —
-the step5c technical preview. It cold-starts from a profile directory with no
-management platform, no platform management tables, and no repository source
-path, and serves a host-specific preview HTTP API in a strictly
-**read-only** posture.
+Standalone execution host for the [`hecate-runtime`](../hecate-runtime) kernel.
+It cold-starts from a profile directory with no management platform, no platform
+management tables, and no repository source path. The same HTTP paths now expose
+both the legacy preview shape and the step3 execution-backend binding; formal
+clients submit an `ExecutionRequest` with `Idempotency-Key` and use the returned
+structured backend `run_ref`.
 
-This API is not yet the complete step3 execution-backend binding: the preview
-uses its own run request, string references and event shape. The contract adapter
-and shared execution application service remain step5c work; do not register it
-as a certified interchangeable backend based on endpoint names alone.
+The host and the platform builtin backend consume the same
+`hecate_runtime.execution_service` application behavior. Each side keeps its own
+identity, evidence, storage, and persistence adapters.
 
 ## Status: technical preview
 
-The default profile admits read-only tools. An opt-in `durable` profile
-adds persistent task/action records, write-tool recovery and bounded serial
-restart admission. It remains a technical preview: the shared execution
-application service, formal step3 backend adapter, approval/input waiting and
-process-level PostgreSQL recovery acceptance are incomplete. Capability
-statements describe available primitives, not production certification.
-Execution is serial. Bind to localhost.
+Not production. The base profile explicitly does **not** provide durable tasks,
+background retries, long-task recovery, write or approval tools, event
+streaming, or any remote-revocation guarantee. The optional durable profile adds
+persistent local tasks/actions, replay-gated recovery, local write tools, and
+restart-queryable execution events. It still does not provide production
+certification, managed authorization guarantees, persistent input/approval
+waiting, or an event stream. Execution is serial (one run at a time). Do not
+expose the service beyond localhost.
 
-The managed channel currently provides library-level delivery acceptance and
-event projection. The CLI rejects `control_plane` configuration until the
-managed dispatch loop and action-time lease enforcement are wired. Channel
-component tests do not certify managed business execution.
+The default profile admits read-only tools. An opt-in `durable` profile adds
+persistent task/action records, write-tool recovery and bounded serial restart
+admission. The managed channel currently provides library-level delivery
+acceptance and event projection; the CLI rejects `control_plane` configuration
+until managed dispatch and action-time lease enforcement are wired. Capability
+statements describe available primitives, not production certification.
 
 ## Install
 
 ```bash
 uv build --package hecate-runner
-pip install dist/hecate_runner-*.whl   # pulls runtime and durable packages — never the full hecate app
+pip install dist/hecate_runner-*.whl   # pulls hecate-runtime and hecate-durable — never the full hecate app
 ```
+
+The wheel carries the authoritative execution-contract JSON Schema snapshot in
+`hecate_runner/_contract_schemas`. The source of truth remains
+`src/hecate/contracts/schemas`; run
+`python packages/hecate-runner/scripts/sync_contract_schemas.py` after changing
+it. `packages/hecate-runner/tests/test_schema_publication.py` fails if the
+published snapshot drifts.
 
 ## Profile layout
 
@@ -124,9 +134,14 @@ hecate-runner --profile ./my-profile [--business-api http://127.0.0.1:8601]
 
 ## HTTP surface
 
-Preview host API: `GET /capabilities`, `POST /runs`, `GET /runs/{id}`,
-`GET /runs/{id}/events?cursor=`, `POST /runs/{id}/cancel`,
-`GET /runs/{id}/artifacts`. Host extensions: `GET /healthz`,
+Formal execution-backend binding: `GET /capabilities`, `POST /runs`,
+`GET /runs/{issuer_domain}/{run_id}`, `GET /runs/{...}/events?cursor=`,
+`POST /runs/{...}/cancel`, and `GET /runs/{...}/artifacts`. Formal submissions
+require the body `ExecutionRequest` and `Idempotency-Key` header to use the same
+key; receipts, status, normalized events, artifacts, cancel receipts, and
+`version_conflict` errors follow the schemas in this wheel. The legacy preview
+body and string `runs/{id}` references remain compatible. Host extensions:
+`GET /healthz`,
 `GET /v1/evidence?outcome=&principal=`, `POST /admin/shutdown`
 (token in JSON body). Errors are `urn:hecate:problem:*` problem+json.
 

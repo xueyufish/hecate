@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from hecate_durable.contracts.durable import (
@@ -36,10 +37,12 @@ from hecate_durable.contracts.durable import (
     TaskStateRecord,
     canonical_request_digest,
 )
+from hecate_durable.contracts.events import EventEnvelope, EventSource
 from hecate_durable.contracts.references import BackendRef, RefKind
 from hecate_durable.contracts.tools import ToolSideEffectClass
 from hecate_durable.runtime_hook import SqlActionLedgerHook as RunnerLedgerHook
 from hecate_durable.storage import SqlDurableStore
+from hecate_durable.storage.eventlog import EventPage, SqlEventLog, build_envelope
 from hecate_runtime.action_ledger import (
     ToolExecutionResolution,
     ToolExecutionState,
@@ -90,6 +93,12 @@ class DurableRuntime:
     def __init__(self, store: SqlDurableStore, *, workspace: str) -> None:
         self.store = store
         self.workspace = workspace
+        self.execution_events = SqlEventLog(
+            store.session_factory,
+            source=EventSource.EXECUTION_BACKEND.value,
+            actor_id="hecate-runner",
+            clock=lambda: datetime.now(tz=UTC).isoformat(),
+        )
 
     # -- submission / lifecycle ------------------------------------------------
 
@@ -195,8 +204,37 @@ class DurableRuntime:
     def read_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100):
         return self.store.read_events(run_ref, cursor=cursor, limit=limit)
 
+    def emit_execution_event(
+        self,
+        *,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        source_sequence: int,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> EventEnvelope:
+        envelope = build_envelope(
+            task_ref=task_ref,
+            run_ref=run_ref,
+            source=EventSource.EXECUTION_BACKEND,
+            source_sequence=source_sequence,
+            event_type=event_type,
+            payload=payload,
+            occurred_at=datetime.now(tz=UTC).isoformat(),
+            actor_id="hecate-runner",
+            event_id=f"execution-{run_ref.id}-{source_sequence}",
+        )
+        self.execution_events.append(envelope)
+        return envelope
+
+    def read_execution_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100) -> EventPage:
+        return self.execution_events.read(run_ref, cursor=cursor, limit=limit)
+
     def task_state(self, task_id: str):
         return self.store.get_task_state(BackendRef(kind=RefKind.TASK, issuer_domain=ISSUER, id=task_id))
+
+    def association_for_run(self, run_ref: BackendRef) -> SubmissionAssociation | None:
+        return self.store.submission_for_run(run_ref)
 
     def hook_for(self, task_ref: BackendRef, run_ref: BackendRef) -> RunnerLedgerHook:
         return RunnerLedgerHook(self.store, task_ref=task_ref, run_ref=run_ref)

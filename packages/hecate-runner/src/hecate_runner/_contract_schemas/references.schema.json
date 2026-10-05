@@ -1,0 +1,47 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/references.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hecate execution contract - logical references",
+  "description": "Logical references carry an issuing domain. Receivers resolve them from the request itself and trusted local registration, never by querying a platform ORM. Encoding: IDs are opaque strings; enums are lowercase strings; timestamps are RFC3339 UTC ('Z'). Platform-side kinds (task/run/deployment/authorization/artifact/evidence) and vendor-side kinds (session/turn) are distinct - a reference of one kind MUST NOT be passed where another kind is required.",
+  "$defs": {
+    "ref": {
+      "type": "object",
+      "required": ["kind", "issuer_domain", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": ["task", "run", "deployment", "session", "turn", "artifact", "evidence", "approval", "authorization"]
+        },
+        "issuer_domain": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "taskRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "task" } } }]
+    },
+    "runRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "run" } } }]
+    },
+    "deploymentRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "deployment" } } }]
+    },
+    "sessionRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "session" } } }]
+    },
+    "turnRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "turn" } } }]
+    },
+    "artifactRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "artifact" } } }]
+    },
+    "evidenceRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "evidence" } } }]
+    },
+    "approvalRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "approval" } } }]
+    },
+    "authorizationRef": {
+      "allOf": [{ "$ref": "#/$defs/ref" }, { "properties": { "kind": { "const": "authorization" } } }]
+    }
+  }
+}

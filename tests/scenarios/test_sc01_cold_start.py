@@ -10,6 +10,7 @@ capability declarations that state what the preview does not provide.
 from __future__ import annotations
 
 import subprocess
+import urllib.parse
 
 import pytest
 
@@ -63,6 +64,71 @@ def test_sc01_capabilities_declare_preview_limits(runner_stack: runner_harness.R
     assert body["submit"] == "enforced"
     for capability in ("durable_tasks", "background_retry", "long_task_recovery", "write_tools", "approval_tools"):
         assert body[capability].startswith("unsupported"), capability
+
+
+def test_sc01_clean_install_carries_contract_schemas(runner_stack: runner_harness.RunnerInstance) -> None:
+    result = subprocess.run(
+        [
+            str(runner_stack.python_exe),
+            "-c",
+            "from hecate_runner.contract import bundled_schema_names; print('\\n'.join(bundled_schema_names()))",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    )
+    schemas = tuple(result.stdout.splitlines())
+    assert len(schemas) == 16
+    assert "execution-request.schema.json" in schemas
+    assert "capabilities.schema.json" in schemas
+
+
+def test_sc01_formal_contract_submission_works_without_full_hecate(
+    runner_stack: runner_harness.RunnerInstance,
+) -> None:
+    request = {
+        "contract_version": "0.1",
+        "task_ref": {"kind": "task", "issuer_domain": "hecate-platform", "id": "sc01-task"},
+        "run_ref": {"kind": "run", "issuer_domain": "hecate-platform", "id": "sc01-run"},
+        "deployment_ref": {
+            "kind": "deployment",
+            "issuer_domain": "hecate-platform",
+            "id": "sc01-deployment",
+        },
+        "authorization_ref": {
+            "kind": "authorization",
+            "issuer_domain": "hecate-platform",
+            "id": "sc01-authorization",
+        },
+        "input": {
+            "prompt": "check stock for SKU-A1",
+            "tool_arguments": {"domain": "domain_a", "sku": "SKU-A1"},
+        },
+        "idempotency_key": "sc01-contract-key",
+        "trace_correlation": {"trace_id": "sc01-contract-trace"},
+    }
+    status, receipt = runner_stack.request(
+        "POST",
+        "/runs",
+        request,
+        headers={"Idempotency-Key": request["idempotency_key"]},
+    )
+    assert status == 202, receipt
+    assert receipt["run_ref"]["kind"] == "run"
+    assert receipt["run_ref"]["issuer_domain"] == "standalone-host"
+    wire_ref = urllib.parse.quote(f"{receipt['run_ref']['issuer_domain']}/{receipt['run_ref']['id']}", safe="")
+
+    final_status, run = runner_stack.wait_run(receipt["run_ref"]["id"])
+    assert final_status == 200
+    assert run["status"] == "succeeded"
+    _, formal_run = runner_stack.request("GET", f"/runs/{wire_ref}")
+    assert formal_run["state"] == "succeeded"
+    _, events = runner_stack.request("GET", f"/runs/{wire_ref}/events")
+    assert events["events"] and events["next_cursor"]
+    assert all(event["source"] == "execution_backend" for event in events["events"])
+    _, artifacts = runner_stack.request("GET", f"/runs/{wire_ref}/artifacts")
+    assert all(ref["kind"] == "artifact" for ref in artifacts["artifacts"])
 
 
 def test_sc01_read_only_run_completes_without_control_plane(runner_stack: runner_harness.RunnerInstance) -> None:
