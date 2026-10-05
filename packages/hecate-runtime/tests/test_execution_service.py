@@ -34,7 +34,7 @@ def _request(runtime: _Runtime, **kwargs: Any) -> RuntimeExecutionRequest:
     from uuid import uuid4
 
     return RuntimeExecutionRequest(
-        runtime=runtime,  # type: ignore[arg-type]
+        runtime=runtime,
         session_id=uuid4(),
         initial_input={},
         **kwargs,
@@ -43,10 +43,15 @@ def _request(runtime: _Runtime, **kwargs: Any) -> RuntimeExecutionRequest:
 
 async def test_successful_run_captures_events() -> None:
     observed: list[Any] = []
+
+    def observe(event: Any) -> RuntimeEventDecision:
+        observed.append(event)
+        return RuntimeEventDecision.CONTINUE
+
     result = await runtime_execution_service.execute(
         _request(
             _Runtime([{"type": "update", "value": 1}, {"type": "values", "value": 2}]),
-            observer=lambda event: observed.append(event) or RuntimeEventDecision.CONTINUE,
+            observer=observe,
         )
     )
     assert result.state is RuntimeExecutionState.SUCCEEDED
