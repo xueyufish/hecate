@@ -28,6 +28,7 @@ def write_profile(
     *,
     allowlist: list[str] | None = None,
     durable: dict | None = None,
+    evidence: dict | None = None,
     with_write_tool: bool = False,
 ) -> Path:
     """Materialize a valid profile; return its directory.
@@ -75,6 +76,8 @@ def write_profile(
     }
     if durable is not None:
         config["durable"] = durable
+    if evidence is not None:
+        config["evidence"] = evidence
     (profile / "runner.json").write_text(json.dumps(config), encoding="utf-8")
 
     (profile / "identity.json").write_text(

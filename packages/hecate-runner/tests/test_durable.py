@@ -38,7 +38,7 @@ from hecate_durable.contracts.tools import ToolSideEffectClass
 from hecate_durable.storage import SqlDurableStore
 from hecate_runner.durable import DurableRuntime, action_key_for
 from hecate_runner.engine import ExecutionEngine
-from hecate_runner.evidence import EvidenceStore
+from hecate_runner.evidence import EvidenceCapacityError, EvidenceStore
 from hecate_runner.profile import load_profile
 from hecate_runner.server import RunnerServer
 from hecate_runner.tools import BusinessApiToolDispatcher
@@ -467,6 +467,26 @@ def test_unwritable_evidence_stops_new_protected_runs(
             ro.close(abandon=True)
     finally:
         readonly_api.close()
+
+
+def test_capacity_gate_records_failure_category(
+    harness: _Harness,
+    api: _WriteAwareBusinessApi,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Over-capacity is a policy refusal, not a disk fault: the category travels."""
+
+    def _over_capacity(_self) -> None:
+        raise EvidenceCapacityError("evidence over capacity after retention cleanup", usage=10, limit=9, unit="bytes")
+
+    monkeypatch.setattr(EvidenceStore, "probe", _over_capacity)
+    status, protected = harness.call("POST", "/runs", _write_request())
+    assert status == 503
+    assert protected["type"].endswith("evidence-unavailable")
+    assert api.write_calls == []
+    denials = harness.evidence.query(kind="evidence_gate", outcome="denied")
+    assert len(denials) == 1
+    assert denials[0].detail["category"] == "capacity"
 
 
 def test_outcome_persist_failure_keeps_task_pending_reconciliation(

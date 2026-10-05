@@ -221,11 +221,17 @@ class ExecutionEngine:
                 return blocked
             if effect is not ToolSideEffectClass.READONLY:
                 # SC06 local half: stop new protected actions when the local
-                # evidence store cannot accept writes.
+                # evidence store cannot accept writes; the failure carries an
+                # explicit category (unwritable vs over-capacity policy).
                 try:
                     self._evidence.probe()
                 except OSError as exc:
-                    blocked = {"status": "store_unavailable", "detail": f"local evidence unwritable: {exc}"}
+                    category = getattr(exc, "category", "unwritable")
+                    self._evidence.record_gate_failure(category, f"local evidence gate: {exc}")
+                    blocked = {
+                        "status": "store_unavailable",
+                        "detail": f"local evidence unavailable ({category}): {exc}",
+                    }
                     self._mark_reconciliation(state, blocked)
                     self.record_tool_result(state, tool_name, blocked)
                     return blocked
@@ -387,13 +393,19 @@ class ExecutionEngine:
         return state.run_id, state
 
     def _admit_protected(self, run_input: dict) -> None:
-        """SC06 admission gate: refuse protected runs while evidence is unwritable."""
+        """SC06 admission gate: refuse protected runs while evidence is unavailable.
+
+        The failure carries an explicit category (unwritable vs over-capacity
+        policy) and is recorded as an auditable gate denial.
+        """
 
         if any(effect is not ToolSideEffectClass.READONLY for effect in self._side_effects.values()):
             try:
                 self._evidence.probe()
             except OSError as exc:
-                raise EvidenceUnavailableError(f"local evidence store unwritable: {exc}") from exc
+                category = getattr(exc, "category", "unwritable")
+                self._evidence.record_gate_failure(category, f"local evidence gate: {exc}")
+                raise EvidenceUnavailableError(f"local evidence unavailable ({category}): {exc}") from exc
 
     def _durable_task_state(
         self, task_ref: BackendRef, principal: str, domains: tuple[str, ...], run_ref: BackendRef

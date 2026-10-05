@@ -47,9 +47,40 @@ pip install dist/hecate_runner-*.whl   # pulls hecate-runtime only — never the
   "business_api_base": "http://127.0.0.1:8601",
   "model": {"backend": "stub"},
   "tool_allowlist": ["query_inventory"],
-  "shutdown_token_ref": "env:RUNNER_SHUTDOWN_TOKEN"
+  "shutdown_token_ref": "env:RUNNER_SHUTDOWN_TOKEN",
+  "evidence": {"retention_days": 30, "capacity_limit": 104857600}
 }
 ```
+
+## Evidence retention
+
+Audit evidence retention is explicit. The optional top-level `evidence` block
+carries:
+
+- `retention_days` — records older than this age are cleaned up (deletion is
+  traced in the evidence itself); absent means no expiry, ever.
+- `capacity_limit` — when usage exceeds the limit the store first runs
+  retention cleanup and re-checks; still over, new protected (non-`readonly`)
+  actions are refused with the `capacity` failure category until space frees.
+  Units are declared by the backend: the default JSONL backend counts bytes,
+  the SQL backend (below) counts rows. Absent means no limit.
+- `dir` — optional evidence directory override (default: `evidence_dir`).
+- `backend` — `jsonl` (default) or `durable`.
+
+An unconfigured block is itself explicit: the capability summary and
+`GET /healthz` report `evidence_policy_configured: false` with no limits and
+no expiry — nothing is truncated or dropped silently. Gate failures carry an
+explicit category (`unwritable` vs `capacity`), are recorded as auditable
+`evidence_gate` denials, and surface in the health report
+(`evidence_last_gate_failure`). Host bookkeeping (gate probes, cleanup traces)
+never counts toward the capacity meter, so a cleanup can always reopen the
+gate; bookkeeping records still age out through retention.
+
+Durable-profile hosts may delegate audit retention to their own local SQL
+database — `{"backend": "durable"}` shares the persistent task store's engine
+and adds an `evidence_records` table to the host's database. This is a
+host-local storage delegation: it never writes platform tables and adds no
+upload path. Both backends run the same parametrized assertion suite.
 
 Secrets are referenced, never inlined: `env:NAME` or `file:relative/path`.
 `model.backend` is `stub` (deterministic, CI) or `endpoint` (calls

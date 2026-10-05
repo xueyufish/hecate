@@ -143,6 +143,12 @@ def test_health_reports_profile(running_server) -> None:
     assert body["backend_type"] == "pregel"
     assert body["model_source"] == "stub"
     assert body["read_tools"] == ["query_inventory"]
+    # Evidence policy is explicit even when unconfigured (no limits, no expiry).
+    assert body["evidence_backend"] == "jsonl"
+    assert body["evidence_policy_configured"] is False
+    assert body["evidence_retention_days"] is None
+    assert body["evidence_capacity_limit"] is None
+    assert body["evidence_usage"] >= 0
 
 
 def test_capabilities_declare_unsupported(running_server) -> None:
