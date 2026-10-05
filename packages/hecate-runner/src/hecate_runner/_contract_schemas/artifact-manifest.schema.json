@@ -1,0 +1,63 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/artifact-manifest.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ArtifactManifest",
+  "description": "Execution artifact manifest for a standard archive (tar.gz). Integrity is per-file sha256; nothing in the manifest may carry plaintext credentials, business data, or online platform ID lookup prerequisites; backend-specific graphs/scripts live in backend_ns (other backends never need to understand them). There are no installer-script fields: loaders MUST NOT execute installation scripts, and unknown executable declarations are rejected. entry and file paths are archive-relative; leading '/' and '..' segments are rejected.",
+  "type": "object",
+  "required": ["manifest_version", "contract_version", "backend_type", "backend_compat_version", "entry", "files"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_version": { "const": "1" },
+    "contract_version": { "type": "string", "minLength": 1 },
+    "backend_type": { "type": "string", "minLength": 1 },
+    "backend_compat_version": { "type": "string", "minLength": 1 },
+    "entry": { "$ref": "#/$defs/archivePath" },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "size"],
+        "additionalProperties": false,
+        "properties": {
+          "path": { "$ref": "#/$defs/archivePath" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "size": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "required_capabilities": { "type": "array", "items": { "type": "string" } },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "schema_ref", "permission"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "schema_ref": { "type": "string", "minLength": 1 },
+          "permission": { "enum": ["read", "write", "approval_required"] }
+        }
+      }
+    },
+    "model_config_ref": { "type": "string" },
+    "component_config_refs": { "type": "array", "items": { "type": "string" } },
+    "artifact_schema_ref": { "type": "string" },
+    "evidence_refs": { "type": "array", "items": { "type": "string" } },
+    "publisher_ref": { "type": "string", "description": "Publisher identity resolved against host-configured trust roots, never trusted merely because declared here." },
+    "license_expression": { "type": "string", "description": "License declaration evaluated against host policy before loading." },
+    "signature_ref": { "type": "string", "description": "Detached signature or attestation reference binding the exact manifest and file digests. Missing means unverified; digest validation alone is not publisher authentication." },
+    "backend_ns": {
+      "type": "object",
+      "description": "Backend-specific namespace (e.g. pregel graph definitions). Generic fields never require any backend to understand a vendor DSL."
+    }
+  },
+  "$defs": {
+    "archivePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!.*[\\\\:\\u0000])(?!.*(^|/)\\.{1,2}($|/))[^/]+(/[^/]+)*$",
+      "description": "Portable relative regular-file path; no drive prefix, backslash, NUL, empty segment, '.' or '..'. entry must name a listed file. Archives contain exactly the listed regular files, with no duplicate names, links, directories or devices."
+    }
+  }
+}

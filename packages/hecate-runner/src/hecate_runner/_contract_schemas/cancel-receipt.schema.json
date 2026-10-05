@@ -1,0 +1,17 @@
+{
+  "$id": "https://hecate.dev/contracts/execution/0.1/cancel-receipt.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CancelReceipt",
+  "description": "Receipt for a cancellation request. REQUESTED is never reported as APPLIED: receiving an HTTP 202 means the request was accepted, not that the remote execution has stopped. HTTP success must never be presented as a confirmed cancel.",
+  "type": "object",
+  "required": ["run_ref", "state"],
+  "additionalProperties": true,
+  "properties": {
+    "run_ref": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/runRef" },
+    "state": { "enum": ["requested", "acknowledged", "applied", "rejected", "unknown"] },
+    "detail_ns": {
+      "type": "object",
+      "description": "Backend-specific detail namespace (e.g. why the request was rejected)."
+    }
+  }
+}

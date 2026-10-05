@@ -267,6 +267,8 @@ def test_storage_failure_write_paths_raise(store: SqlDurableStore) -> None:
 
 
 def test_event_log_dedup_and_conflict(store: SqlDurableStore) -> None:
+    from dataclasses import replace
+
     from hecate_durable.storage import EventConflictError
     from hecate_durable.storage.eventlog import build_envelope
 
@@ -282,6 +284,12 @@ def test_event_log_dedup_and_conflict(store: SqlDurableStore) -> None:
     )
     assert store.events.append(envelope) == 1
     assert store.events.append(envelope) == 1, "identical replay is idempotent"
+    replay_with_new_timestamps = replace(
+        envelope,
+        occurred_at="2026-01-02T00:00:00Z",
+        received_at="2026-01-02T00:00:01Z",
+    )
+    assert store.events.append(replay_with_new_timestamps) == 1, "event identity is stable across replay clocks"
 
     different = build_envelope(
         task_ref=TASK,

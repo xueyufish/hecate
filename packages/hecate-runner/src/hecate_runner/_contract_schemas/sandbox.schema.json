@@ -1,0 +1,88 @@
+{
+  "$id": "https://hecate.dev/contracts/sandbox/0.1/sandbox.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Hecate sandbox provider contract - DTOs",
+  "description": "Independent sandbox-provider contract (versioned separately from the execution contract). Environment creation and command submission accept idempotent IDs: replaying the same ID returns the original resource, never a second instance. Command timeout or connection loss maps to state=unknown (reconcile by command ID), never to an automatic success/failure. A termination request is not a destroyed instance and a lost connection is not a released resource. File transfer uses references (sandbox-relative paths), never host paths or container objects.",
+  "$defs": {
+    "runRef": { "$ref": "https://hecate.dev/contracts/execution/0.1/references.schema.json#/$defs/runRef" },
+    "sandboxState": {
+      "enum": ["creating", "ready", "terminating", "terminated", "failed", "unknown"]
+    },
+    "commandState": {
+      "enum": ["queued", "running", "completed", "failed", "unknown"]
+    },
+    "createEnvironmentRequest": {
+      "type": "object",
+      "required": ["idempotency_id", "run_ref"],
+      "additionalProperties": true,
+      "properties": {
+        "idempotency_id": { "type": "string", "minLength": 1 },
+        "run_ref": { "$ref": "#/$defs/runRef" },
+        "isolation_profile": { "type": "string" },
+        "egress_policy_ref": { "type": "string" },
+        "resource_limits": { "type": "object" },
+        "backend_config_ns": { "type": "object" }
+      }
+    },
+    "sandboxInfo": {
+      "type": "object",
+      "required": ["sandbox_id", "run_ref", "state"],
+      "additionalProperties": true,
+      "properties": {
+        "sandbox_id": { "type": "string", "minLength": 1 },
+        "run_ref": { "$ref": "#/$defs/runRef" },
+        "state": { "$ref": "#/$defs/sandboxState" },
+        "leases_until": { "type": "string" },
+        "detail_ns": { "type": "object" }
+      }
+    },
+    "commandRequest": {
+      "type": "object",
+      "required": ["command_id", "sandbox_id", "argv"],
+      "additionalProperties": true,
+      "properties": {
+        "command_id": { "type": "string", "minLength": 1 },
+        "sandbox_id": { "type": "string", "minLength": 1 },
+        "argv": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+        "timeout_seconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "commandRecord": {
+      "type": "object",
+      "required": ["command_id", "sandbox_id", "state"],
+      "additionalProperties": true,
+      "properties": {
+        "command_id": { "type": "string", "minLength": 1 },
+        "sandbox_id": { "type": "string", "minLength": 1 },
+        "state": { "$ref": "#/$defs/commandState" },
+        "exit_code": { "type": "integer" },
+        "stdout_ref": { "type": "string" },
+        "stderr_ref": { "type": "string" },
+        "submitted_at": { "type": "string" }
+      }
+    },
+    "sandboxFileRef": {
+      "type": "object",
+      "required": ["sandbox_id", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "sandbox_id": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1, "pattern": "^(?!.*[\\\\:\\u0000])(?!.*(^|/)\\.{1,2}($|/))[^/]+(/[^/]+)*$", "description": "Portable sandbox-relative path; never a host path." }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["pause", "resume", "snapshot", "fork", "browser", "gpu"],
+      "additionalProperties": false,
+      "properties": {
+        "pause": { "$ref": "#/$defs/level" },
+        "resume": { "$ref": "#/$defs/level" },
+        "snapshot": { "$ref": "#/$defs/level" },
+        "fork": { "$ref": "#/$defs/level" },
+        "browser": { "$ref": "#/$defs/level" },
+        "gpu": { "$ref": "#/$defs/level" }
+      }
+    },
+    "level": { "enum": ["unsupported", "cooperative", "enforced"] }
+  }
+}
