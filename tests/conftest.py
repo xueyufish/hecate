@@ -63,6 +63,7 @@ from hecate.models import (  # noqa: F401
     tool,
     tool_policy,
     trace,
+    trust_root,
     user,
     workflow,
     workspace,
