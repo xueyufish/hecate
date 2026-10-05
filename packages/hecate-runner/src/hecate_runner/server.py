@@ -198,7 +198,12 @@ class RunnerServer:
                     path = self.path.split("?", 1)[0]
                     if path == "/healthz":
                         self._send_json(
-                            200, {"ready": not server._engine.closing, **server._profile.capabilities_summary()}
+                            200,
+                            {
+                                "ready": not server._engine.closing,
+                                **server._profile.capabilities_summary(),
+                                **server._evidence.policy_summary(),
+                            },
                         )
                         return
                     if path == "/capabilities":

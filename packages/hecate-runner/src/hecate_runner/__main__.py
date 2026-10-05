@@ -56,14 +56,6 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    evidence = EvidenceStore(profile.config.evidence_dir)
-    dispatcher = BusinessApiToolDispatcher(business_api)
-
-    async def dispatch(tool_name: str, arguments: dict, principal: str, domains: list[str]) -> dict:
-        # principal/domains travel with the run from the server-verified
-        # identity (engine.submit); request-body claims never reach here.
-        return await dispatcher(tool_name, arguments, principal, domains)
-
     durable: DurableRuntime | None = None
     if profile.config.durable is not None:
         from hecate_durable.storage import SqlDurableStore
@@ -71,6 +63,37 @@ def main(argv: list[str] | None = None) -> int:
         store = SqlDurableStore(profile.config.durable.database_url)
         store.create_schema()
         durable = DurableRuntime(store, workspace=profile.config.durable.workspace)
+
+    # Evidence store: the durable backend delegates audit retention to the
+    # host's own durable database (shared engine); profile validation has
+    # already refused that backend without a durable profile (fail-fast).
+    evidence_cfg = profile.config.evidence
+    evidence_dir = (
+        evidence_cfg.dir_override
+        if evidence_cfg is not None and evidence_cfg.dir_override
+        else profile.config.evidence_dir
+    )
+    policy = None
+    if evidence_cfg is not None:
+        from .evidence import EvidencePolicy
+
+        policy = EvidencePolicy(retention_days=evidence_cfg.retention_days, capacity_limit=evidence_cfg.capacity_limit)
+    if evidence_cfg is not None and evidence_cfg.backend == "durable":
+        if durable is None:  # unreachable: profile validation refuses this combination
+            raise ProfileError("evidence.backend 'durable' requires the durable profile")
+        from .evidence import evidence_backend
+
+        evidence = evidence_backend("durable")(durable.store.engine, policy=policy)
+        evidence.create_schema()
+    else:
+        evidence = EvidenceStore(evidence_dir, policy=policy)
+
+    dispatcher = BusinessApiToolDispatcher(business_api)
+
+    async def dispatch(tool_name: str, arguments: dict, principal: str, domains: list[str]) -> dict:
+        # principal/domains travel with the run from the server-verified
+        # identity (engine.submit); request-body claims never reach here.
+        return await dispatcher(tool_name, arguments, principal, domains)
 
     engine = ExecutionEngine(profile, evidence, dispatch, durable=durable)
     server = RunnerServer(profile, engine, evidence, durable=durable)

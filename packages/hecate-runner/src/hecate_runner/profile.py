@@ -174,6 +174,7 @@ class RunnerConfig:
     max_concurrency: int
     durable: DurableConfig | None = None
     control_plane: ControlPlaneConfig | None = None
+    evidence: EvidenceConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -311,9 +312,15 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
     # (ruff S101) for the type checker.
     evidence_dir_str = evidence_dir if isinstance(evidence_dir, str) else ""
 
+    durable_config = _load_durable(data)
+    evidence_config = _load_evidence(data, profile_dir)
+    if evidence_config is not None and evidence_config.backend == "durable" and durable_config is None:
+        raise ProfileError("evidence.backend 'durable' requires the durable profile (durable.database_url)")
+
     return RunnerConfig(
-        durable=_load_durable(data),
+        durable=durable_config,
         control_plane=_load_control_plane(data, profile_dir),
+        evidence=evidence_config,
         host=host if isinstance(host, str) else "127.0.0.1",
         port=port,
         evidence_dir=profile_dir / evidence_dir_str,
@@ -324,6 +331,54 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
         shutdown_token_ref=shutdown_ref,
         max_request_bytes=max_request_bytes,
         max_concurrency=1,
+    )
+
+
+@dataclass(frozen=True)
+class EvidenceConfig:
+    """Evidence retention settings (optional top-level ``evidence`` block).
+
+    ``retention_days``/``capacity_limit`` are ``None`` when not configured —
+    the no-policy default is explicit (no limits, no expiry) and reported
+    as such by the capability summary. Units are declared by the backend
+    (jsonl: bytes; durable: rows).
+    """
+
+    dir_override: Path | None
+    backend: str  # "jsonl" | "durable"
+    retention_days: int | None
+    capacity_limit: int | None
+
+
+def _load_evidence(data: dict, profile_dir: Path) -> EvidenceConfig | None:
+    """Parse and validate the optional ``evidence`` block of ``runner.json``."""
+
+    raw = data.get("evidence")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ProfileError("invalid runner config: evidence must be an object")
+    backend = raw.get("backend", "jsonl")
+    if backend not in ("jsonl", "durable"):
+        raise ProfileError("evidence.backend must be 'jsonl' or 'durable'")
+    dir_raw = raw.get("dir")
+    if dir_raw is not None and (not isinstance(dir_raw, str) or not dir_raw):
+        raise ProfileError("evidence.dir must be a non-empty string")
+    retention_days = raw.get("retention_days")
+    if retention_days is not None and (
+        not isinstance(retention_days, int) or isinstance(retention_days, bool) or retention_days < 1
+    ):
+        raise ProfileError("evidence.retention_days must be a positive integer")
+    capacity_limit = raw.get("capacity_limit")
+    if capacity_limit is not None and (
+        not isinstance(capacity_limit, int) or isinstance(capacity_limit, bool) or capacity_limit < 1
+    ):
+        raise ProfileError("evidence.capacity_limit must be a positive integer")
+    return EvidenceConfig(
+        dir_override=(profile_dir / dir_raw) if isinstance(dir_raw, str) else None,
+        backend=backend,
+        retention_days=retention_days,
+        capacity_limit=capacity_limit,
     )
 
 
@@ -402,6 +457,12 @@ class Profile:
         if self.config.durable is not None:
             summary["durable"] = True
             summary["durable_workspace"] = self.config.durable.workspace
+        evidence = self.config.evidence
+        summary["evidence_backend"] = evidence.backend if evidence is not None else "jsonl"
+        summary["evidence_retention_days"] = evidence.retention_days if evidence is not None else None
+        summary["evidence_capacity_limit"] = evidence.capacity_limit if evidence is not None else None
+        # The no-policy default is declared, not silent: no limits, no expiry.
+        summary["evidence_policy_configured"] = evidence is not None
         return summary
 
 
