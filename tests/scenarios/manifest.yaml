@@ -262,10 +262,9 @@ sc_scenarios:
   - id: SC05
     title: 重连与重复控制命令
     run_mode: managed
-    status: planned
+    status: implemented
     tier: 1
     responsible_step: 4/6/7
-    blocked_by: managed-runner-enrollment
     assertions: >-
       After re-verifying trust and authorization the host accepts new work;
       historical events are deduplicated on replay; duplicate commands and

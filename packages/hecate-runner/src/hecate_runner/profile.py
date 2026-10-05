@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import os
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -55,6 +56,75 @@ BUILTIN_TOOL_SCHEMAS = {
         },
     },
 }
+
+
+@dataclass(frozen=True)
+class ControlPlaneConfig:
+    """Managed-channel settings (optional overlay; step6/7 managed slice).
+
+    All fields come from the optional ``control_plane`` block of
+    ``runner.json``. Absent block = standalone mode, zero managed wiring.
+    ``secret_ref`` names the trust material for the HMAC challenge and
+    channel credentials; ``lease_ttl_seconds`` IS the plan's maximum stale
+    window — after expiry without a successful pull, new protected actions
+    stop (never falling back to local self-authorization).
+    """
+
+    base_url: str
+    workspace_id: str
+    trust_root: str
+    host_id: str
+    secret_ref: str
+    lease_ttl_seconds: float = 120.0
+    poll_interval_seconds: float = 5.0
+    upload_batch: int = 100
+
+
+def _load_control_plane(data: dict, profile_dir: Path) -> ControlPlaneConfig | None:
+    """Parse and validate the optional ``control_plane`` block."""
+
+    raw = data.get("control_plane")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ProfileError("invalid runner config: control_plane must be an object")
+    base_url = raw.get("base_url")
+    if not isinstance(base_url, str) or not base_url.startswith(("http://", "https://")):
+        raise ProfileError("control_plane.base_url must be an http(s) URL")
+    workspace_id = raw.get("workspace_id")
+    if not isinstance(workspace_id, str) or not workspace_id:
+        raise ProfileError("control_plane.workspace_id must be a non-empty string")
+    try:
+        uuid.UUID(workspace_id)
+    except ValueError as exc:
+        raise ProfileError("control_plane.workspace_id must be a uuid") from exc
+    trust_root = raw.get("trust_root")
+    host_id = raw.get("host_id")
+    if not isinstance(trust_root, str) or not trust_root or not isinstance(host_id, str) or not host_id:
+        raise ProfileError("control_plane.trust_root and control_plane.host_id must be non-empty strings")
+    secret_ref = raw.get("secret_ref")
+    if not isinstance(secret_ref, str) or not secret_ref:
+        raise ProfileError("control_plane.secret_ref must be a secret reference (env:NAME or file:path)")
+    _resolve_secret_ref(secret_ref, profile_dir)  # fail fast at startup
+    lease_ttl = raw.get("lease_ttl_seconds", 120.0)
+    poll = raw.get("poll_interval_seconds", 5.0)
+    upload_batch = raw.get("upload_batch", 100)
+    if not isinstance(lease_ttl, (int, float)) or lease_ttl <= 0:
+        raise ProfileError("control_plane.lease_ttl_seconds must be a positive number")
+    if not isinstance(poll, (int, float)) or poll <= 0:
+        raise ProfileError("control_plane.poll_interval_seconds must be a positive number")
+    if not isinstance(upload_batch, int) or upload_batch <= 0:
+        raise ProfileError("control_plane.upload_batch must be a positive integer")
+    return ControlPlaneConfig(
+        base_url=base_url.rstrip("/"),
+        workspace_id=workspace_id,
+        trust_root=trust_root,
+        host_id=host_id,
+        secret_ref=secret_ref,
+        lease_ttl_seconds=float(lease_ttl),
+        poll_interval_seconds=float(poll),
+        upload_batch=upload_batch,
+    )
 
 
 @dataclass(frozen=True)
@@ -103,6 +173,7 @@ class RunnerConfig:
     max_request_bytes: int
     max_concurrency: int
     durable: DurableConfig | None = None
+    control_plane: ControlPlaneConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -242,6 +313,7 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
 
     return RunnerConfig(
         durable=_load_durable(data),
+        control_plane=_load_control_plane(data, profile_dir),
         host=host if isinstance(host, str) else "127.0.0.1",
         port=port,
         evidence_dir=profile_dir / evidence_dir_str,

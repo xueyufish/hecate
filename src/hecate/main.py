@@ -22,6 +22,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response as StarletteResponse
 
 from hecate.channel.api.a2a import router as a2a_management_router
+from hecate.channel.api.managed import router as managed_router
 from hecate.channel.api.tasks import (
     commands_router as task_commands_router,
 )
@@ -424,6 +425,7 @@ except ImportError:
 
 app.include_router(audit_router, prefix="/api", tags=["audit"])
 app.include_router(task_control_router, prefix="/api", tags=["tasks"])
+app.include_router(managed_router, prefix="/api", tags=["managed"])
 app.include_router(task_runs_router, prefix="/api", tags=["tasks"])
 app.include_router(task_commands_router, prefix="/api", tags=["tasks"])
 app.include_router(task_reconciliation_router, prefix="/api", tags=["tasks"])

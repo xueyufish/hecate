@@ -1,4 +1,8 @@
-# 持久执行核心包(`hecate-durable`,可独立安装):以 SQL 参考存储实现 phase-0 定义的三个接缝(`DurableTaskStore`/`ControlCommandRecorder`/`ActionLedger`),补齐租约/fencing、事件游标、关键状态与 outbox 同事务提交,并以故障注入验收集(崩溃、租约过期、迟到回执、存储失败)证明 G2 语义跨重启成立。本能力是 `durable-execution-contract` 的生产实现侧;契约语义本身不变。
+# durable-execution-storage Specification
+
+## Purpose
+
+持久执行核心包(`hecate-durable`,可独立安装):以 SQL 参考存储实现 phase-0 定义的三个接缝(`DurableTaskStore`/`ControlCommandRecorder`/`ActionLedger`),补齐租约/fencing、事件游标、关键状态与 outbox 同事务提交,并以故障注入验收集(崩溃、租约过期、迟到回执、存储失败)证明 G2 语义跨重启成立。本能力是 `durable-execution-contract` 的生产实现侧;契约语义本身不变。
 
 ## Requirements
 
