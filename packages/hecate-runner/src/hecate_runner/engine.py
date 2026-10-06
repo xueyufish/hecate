@@ -24,7 +24,7 @@ import httpx
 from hecate_durable.contracts.credentials import CredentialError
 from hecate_durable.contracts.references import BackendRef
 from hecate_durable.contracts.tools import ToolSideEffectClass
-from hecate_runtime.action_ledger import ActionLedgerHook
+from hecate_runtime.action_ledger import ActionLedgerHook, tool_arguments_digest
 from hecate_runtime.checkpoint import InMemoryCheckpointStore
 from hecate_runtime.execution_service import (
     CooperativeCancellationError,
@@ -164,6 +164,11 @@ class RunState:
     # Provenance: True only for tasks driven through the managed scheduler;
     # their protected dispatches pass the lease gate (step6b).
     managed: bool = False
+    # step6c: set at the dispatch boundary when the run must park into a
+    # persistent wait (approval tool or input_required outcome); the graph
+    # stops at the next event boundary and _execute persists the wait.
+    wait_request: dict | None = None
+    wait_token: str | None = None
 
 
 class EvidenceUnavailableError(Exception):
@@ -203,6 +208,13 @@ class ExecutionEngine:
             for tool in profile.manifest.tools
             if tool.name in profile.config.tool_allowlist
         }
+        # step6c: approval-declared tools park into a persistent wait instead
+        # of dispatching; the wake command is the recorded decision.
+        self._approval_tools = {
+            tool.name
+            for tool in profile.manifest.tools
+            if tool.permission == "approval_required" and tool.name in profile.config.tool_allowlist
+        }
         self._checkpoint_store = InMemoryCheckpointStore()
         self._lock = asyncio.Lock()
         self._runs: dict[str, RunState] = {}
@@ -228,6 +240,11 @@ class ExecutionEngine:
 
         if state.cancel_requested:
             raise CooperativeCancellationError
+        digest = tool_arguments_digest(arguments)
+        if state.wait_request is not None:
+            # A wait was already requested on this run: nothing further may
+            # dispatch while the graph unwinds to the stop boundary.
+            return {"status": "withheld", "detail": "run is entering a persistent wait"}
         effect = self._side_effects.get(tool_name, ToolSideEffectClass.UNKNOWN)
         if state.managed and effect is not ToolSideEffectClass.READONLY:
             # step6b action boundary: no current lease, no action intent —
@@ -265,12 +282,43 @@ class ExecutionEngine:
                     self._mark_reconciliation(state, blocked)
                     self.record_tool_result(state, tool_name, blocked)
                     return blocked
+        if tool_name in self._approval_tools:
+            grant = self._consume_wake_grant(state, tool_name, digest)
+            if not grant:
+                # step6c: the intent/claim above is the last execution fact —
+                # the business call does not happen until a resume command
+                # applies. The claimed action stays claimed (never executed);
+                # the wake's new attempt run claims its own key.
+                state.wait_request = {
+                    "wake_kind": "resume",
+                    "contract_ref": {"tool": tool_name, "arguments_digest": digest, "kind": "approval"},
+                }
+                outcome = {"status": "awaiting_approval", "detail": "parked in waiting_approval; resume to dispatch"}
+                self.record_tool_result(state, tool_name, outcome)
+                return outcome
+            state.wait_request = None  # granted: dispatch proceeds as normal
         self._evidence.append("tool_dispatch", state.principal, state.run_id, "started", {"tool": tool_name})
         if arguments.get("domain") not in state.domains:
             outcome = {"status": "authorization", "detail": "requested domain is outside the trusted identity scope"}
         else:
             outcome = await self._tool_dispatch(tool_name, arguments, state.principal, list(state.domains))
         status = outcome.get("status")
+        if status == "input_required" and not self._consume_wake_grant(state, tool_name, digest):
+            # step6c: the business API requested more input (no side effect
+            # performed per its contract); park instead of recording an
+            # outcome — the wake's new attempt re-dispatches fresh with the
+            # merged provided input, and the matching grant lets it through.
+            state.wait_request = {
+                "wake_kind": "provide_input",
+                "contract_ref": {
+                    "tool": tool_name,
+                    "arguments_digest": digest,
+                    "kind": "input",
+                    "contract": outcome.get("contract"),
+                },
+            }
+            self.record_tool_result(state, tool_name, outcome)
+            return outcome
         evidence_outcome = "ok" if status == "ok" else "denied" if status == "authorization" else "failed"
         self._evidence.append(
             "tool_result", state.principal, state.run_id, evidence_outcome, {"tool": tool_name, "status": status}
@@ -322,6 +370,22 @@ class ExecutionEngine:
         )
         self.record_tool_result(state, tool_name, denial)
         return denial
+
+    def _consume_wake_grant(self, state: RunState, tool_name: str, digest: str) -> bool:
+        """True when the persisted input carries a matching one-shot grant.
+
+        The grant is stamped by the wake application (the recorded decision)
+        and consumed by the first matching dispatch of the new attempt; a
+        mismatched or missing grant re-parks the run.
+        """
+
+        granted = None
+        if state.task_ref is not None:
+            persisted = self._durable.store.get_task_input(state.task_ref) or {}
+            granted = persisted.get("_wake_grant")
+        return (
+            isinstance(granted, dict) and granted.get("tool") == tool_name and granted.get("arguments_digest") == digest
+        )
 
     def _mark_reconciliation(self, state: RunState, outcome: dict) -> None:
         """A withheld/blocked durable action keeps the task pending reconciliation."""
@@ -701,10 +765,24 @@ class ExecutionEngine:
             # retries) derives identical action keys for the same logical
             # execution instead of fresh random identities.
             session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"runner-run:{run_id}")
+            provided = run_input.get("provided")
+            if isinstance(provided, dict) and provided:
+                # step6c wake composition: the operator-supplied input fills
+                # gaps in each tool's persisted arguments (persisted args
+                # stay authoritative on conflicts).
+                merged_args: dict = {}
+                for name, args in (run_input.get("tool_arguments") or {}).items():
+                    merged_args[name] = {**provided, **args} if isinstance(args, dict) else args
+                run_input = {**run_input, "tool_arguments": merged_args}
             try:
 
                 def observe(event: dict) -> RuntimeEventDecision:
                     self._append_event(state, event)
+                    if state.wait_request is not None:
+                        # step6c: the dispatch boundary requested a persistent
+                        # wait — stop the graph instead of running further
+                        # nodes; _execute parks the task below.
+                        return RuntimeEventDecision.STOP_UNKNOWN
                     return RuntimeEventDecision.CONTINUE
 
                 result = await runtime_execution_service.execute(
@@ -716,6 +794,29 @@ class ExecutionEngine:
                         should_cancel=lambda: state.cancel_requested,
                     )
                 )
+                if state.wait_request is not None:
+                    # step6c: persist the wait and hold the task — the
+                    # service's UNKNOWN classification is the stop vehicle,
+                    # not the run's truth.
+                    token = self._durable.park_wait(
+                        state.task_ref,
+                        state.run_ref,
+                        wake_kind=state.wait_request["wake_kind"],
+                        contract_ref=state.wait_request["contract_ref"],
+                        expires_at=state.wait_request.get("expires_at"),
+                    )
+                    state.wait_token = token
+                    state.status = (
+                        "waiting_input" if state.wait_request["wake_kind"] == "provide_input" else "waiting_approval"
+                    )
+                    self._evidence.append(
+                        "execution",
+                        state.principal,
+                        run_id,
+                        "waiting",
+                        {"status": state.status, "tool": state.wait_request["contract_ref"].get("tool")},
+                    )
+                    return
                 final_status = result.state.value
                 if result.state.value == "failed":
                     state.error = "execution failed; inspect local service logs"
@@ -743,7 +844,19 @@ class ExecutionEngine:
             state.result_ref = None
             state.error = "local evidence write failed; outcome requires inspection"
         finally:
-            if self._durable is not None and state.task_ref is not None:
+            if (
+                self._durable is not None
+                and state.task_ref is not None
+                and state.status
+                in (
+                    "waiting_input",
+                    "waiting_approval",
+                )
+            ):
+                # Parked (step6c): the wait transition already committed on
+                # the signal path; no terminal convergence happens here.
+                pass
+            elif self._durable is not None and state.task_ref is not None:
                 hook_failed = getattr(state.action_hook, "has_failed_outcomes", False)
                 try:
                     record = self._durable.finish_run(

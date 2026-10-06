@@ -9,6 +9,7 @@ authorization, database, Task/Run projection, evidence, or transport state.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -82,19 +83,34 @@ class RuntimeExecutionService:
         events: list[Any] = []
         cancel_requested = False
         try:
-            async for event in request.runtime.execute(
+            stream = request.runtime.execute(
                 session_id=request.session_id,
                 initial_input=request.initial_input,
                 stream_mode=request.stream_mode,
                 execution_mode=request.execution_mode,
-            ):
-                events.append(event)
-                if request.observer is not None and request.observer(event) is RuntimeEventDecision.STOP_UNKNOWN:
-                    return RuntimeExecutionResult(
-                        state=RuntimeExecutionState.UNKNOWN,
-                        events=tuple(events),
-                        detail={"reason": "observer requested unknown stop"},
-                    )
+            )
+            try:
+                async for event in stream:
+                    events.append(event)
+                    if request.observer is not None and request.observer(event) is RuntimeEventDecision.STOP_UNKNOWN:
+                        # Close the generator NOW, on this task and in this
+                        # context: leaving it to GC would run the runtime's
+                        # span/OTel cleanup under whichever task collects it,
+                        # detaching context tokens across contexts.
+                        await stream.aclose()
+                        return RuntimeExecutionResult(
+                            state=RuntimeExecutionState.UNKNOWN,
+                            events=tuple(events),
+                            detail={"reason": "observer requested unknown stop"},
+                        )
+                    if request.should_cancel():
+                        cancel_requested = True
+                        raise CooperativeCancellationError
+            finally:
+                # The with-block body must not leave the stream unclosed on
+                # any other early exit either (cancel, exceptions).
+                with contextlib.suppress(Exception):
+                    await stream.aclose()
                 if request.should_cancel():
                     cancel_requested = True
                     raise CooperativeCancellationError

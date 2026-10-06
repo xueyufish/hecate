@@ -108,6 +108,37 @@ class RunnerServer:
         future = asyncio.run_coroutine_threadsafe(self.wait_shutdown(), self._loop)
         future.result(timeout=timeout)
 
+    def _schedule_redrive(self, task_ref) -> None:
+        """Re-drive a woken standalone task until the serial slot takes it.
+
+        The wake requeued the task on a new attempt run; the slot may be
+        busy, so retry until the engine dispatches, the task moves on, or
+        the host closes. Managed-issuer tasks are left to the managed
+        scheduler's own continuous loop.
+        """
+
+        from .managed import MANAGED_ISSUER
+
+        if task_ref.issuer_domain == MANAGED_ISSUER:
+            return
+
+        async def _redrive() -> None:
+            attempts = 0
+            while not self._engine.closing and attempts < 600:
+                record = await asyncio.to_thread(self._durable.store.get_task_state, task_ref)
+                if record is None or record.lifecycle_state.value != "queued":
+                    return
+                run_ref = await asyncio.to_thread(self._durable.store.run_for_task, task_ref)
+                if run_ref is None:
+                    return
+                if self._engine.resume(task_ref, run_ref, {}) is not None:
+                    return
+                attempts += 1
+                await asyncio.sleep(0.2)
+            logger.warning("woken task %s could not be re-driven; it stays queued", task_ref.id)
+
+        asyncio.run_coroutine_threadsafe(_redrive(), self._loop)
+
     def close(self) -> None:
         """Close execution, listener and loop without leaving orphaned tasks."""
         if self._loop.is_closed():
@@ -234,6 +265,84 @@ class RunnerServer:
                     )
                     raise _ProblemError(403, "forbidden", "Request denied", "run is outside the trusted identity scope")
                 return state
+
+            def _handle_wake(self, action: str, raw_ref: str, identity: dict, body: dict) -> None:
+                """Apply one wake command (provide-input/resume) for a waiting run.
+
+                The caller must be the run's recorded principal and present
+                the wait's one-time token; the command receipt is idempotent
+                by command_id. An applied wake requeues the task on a new
+                attempt run, which the server then re-drives through the
+                serial slot.
+                """
+
+                import asyncio as asyncio_mod
+
+                if server._durable is None:
+                    raise _ProblemError(
+                        503,
+                        "not-durable",
+                        "Wake requires the durable profile",
+                        "persistent waiting needs the durable task ledger",
+                    )
+                run_id, issuer_domain = contract.parse_run_path_segment(raw_ref)
+                if issuer_domain is not None and issuer_domain != contract.ISSUER_DOMAIN:
+                    raise _ProblemError(404, "run-not-found", "Run not found", "unknown run issuer")
+                run_ref = BackendRef(kind=RefKind.RUN, issuer_domain=contract.ISSUER_DOMAIN, id=run_id)
+                association = server._durable.association_for_run(run_ref)
+                task_ref = (
+                    association.task_ref if association is not None else server._durable.store.task_for_run(run_ref)
+                )
+                if task_ref is None:
+                    raise _ProblemError(404, "run-not-found", "Run not found", "run does not resolve")
+                persisted = server._durable.store.get_task_input(task_ref) or {}
+                trusted = persisted.get("_host_identity") or {}
+                if trusted.get("principal") != identity["principal"]:
+                    server._evidence.append(
+                        "denial", identity["principal"], run_id, OUTCOME_DENIED, {"reason": "forbidden"}
+                    )
+                    raise _ProblemError(403, "forbidden", "Request denied", "run is outside the trusted identity scope")
+
+                command_id = str(body.get("command_id") or "")
+                wait_token = str(body.get("wait_token") or "")
+                if not command_id or not wait_token:
+                    raise _ProblemError(
+                        422, "invalid-wake", "Invalid wake command", "command_id and wait_token are required"
+                    )
+                input_payload = body.get("input")
+                if action == "provide-input":
+                    if input_payload is not None and not isinstance(input_payload, dict):
+                        raise _ProblemError(422, "invalid-wake", "Invalid wake command", "input must be an object")
+                else:
+                    input_payload = None
+
+                kind = "provide_input" if action == "provide-input" else "resume"
+
+                async def _apply():
+                    return await asyncio_mod.to_thread(
+                        server._durable.apply_wake,
+                        command_id=command_id,
+                        kind=kind,
+                        issuer=identity["principal"],
+                        task_ref=task_ref,
+                        wait_token=wait_token,
+                        input_payload=input_payload,
+                    )
+
+                receipt, reason = server._run_coro(_apply())
+                if receipt.state.value == "applied":
+                    server._evidence.append(
+                        "wake", identity["principal"], run_id, "applied", {"command_id": command_id, "kind": kind}
+                    )
+                    server._schedule_redrive(task_ref)
+                else:
+                    server._evidence.append(
+                        "wake", identity["principal"], run_id, "rejected", {"command_id": command_id, "reason": reason}
+                    )
+                payload = {"run_ref": f"runs/{run_id}", "command_id": command_id, "state": receipt.state.value}
+                if reason is not None:
+                    payload["reason"] = reason
+                self._send_json(202, payload)
 
             def _deny(self, type_: str, detail: str, status: int, principal: str = "anonymous") -> None:
                 server._evidence.append("denial", principal, self.path, OUTCOME_DENIED, {"reason": type_})
@@ -380,15 +489,25 @@ class RunnerServer:
                                     contract.run_status(run_id, state, state.run_ref),
                                 )
                                 return
-                            self._send_json(
-                                200,
-                                {
-                                    "run_ref": f"runs/{run_id}",
-                                    "status": state.status,
-                                    "result_ref": state.result_ref,
-                                    "error": state.error,
-                                },
-                            )
+                            payload = {
+                                "run_ref": f"runs/{run_id}",
+                                "status": state.status,
+                                "result_ref": state.result_ref,
+                                "error": state.error,
+                            }
+                            if state.status in ("waiting_input", "waiting_approval") and server._durable is not None:
+                                # step6c authorized wait view: the wake token
+                                # is only visible to the run's recorded
+                                # principal (identity was verified above).
+                                wait = server._durable.wait_of(state.task_ref)
+                                if wait is not None:
+                                    payload["wait"] = {
+                                        "wake_kind": wait.get("wake_kind"),
+                                        "contract_ref": wait.get("contract_ref"),
+                                        "wait_token": wait.get("wait_token"),
+                                        "wait_expires_at": wait.get("wait_expires_at"),
+                                    }
+                            self._send_json(200, payload)
                             return
                         if parts[2] == "events":
                             params = parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
@@ -479,6 +598,14 @@ class RunnerServer:
                                 return
                             self._send_json(200, {"run_ref": f"runs/{run_id}", "artifacts": state.events})
                             return
+                    if len(parts) == 3 and parts[0] == "runs" and parts[2] in ("provide-input", "resume"):
+                        raw = self._read_body()
+                        parsed = json.loads(raw.decode("utf-8")) if raw else {}
+                        if not isinstance(parsed, dict):
+                            raise _ProblemError(400, "invalid-json", "Invalid JSON", "wake body must be an object")
+                        self._handle_wake(parts[2], unquote(parts[1]), identity, parsed)
+                        return
+
                     self._send_problem(404, "not-found", "Not found", f"no route for {path}")
                 except _ProblemError as problem:
                     self._send_problem(problem.status, problem.type, problem.title, problem.detail)
@@ -656,6 +783,14 @@ class RunnerServer:
                                 self._send_json(
                                     200, {"run_ref": f"runs/{run_id}", "cancel": "no-op", "status": state.status}
                                 )
+                        return
+
+                    if len(parts) == 3 and parts[0] == "runs" and parts[2] in ("provide-input", "resume"):
+                        raw = self._read_body()
+                        parsed = json.loads(raw.decode("utf-8")) if raw else {}
+                        if not isinstance(parsed, dict):
+                            raise _ProblemError(400, "invalid-json", "Invalid JSON", "wake body must be an object")
+                        self._handle_wake(parts[2], unquote(parts[1]), identity, parsed)
                         return
 
                     self._send_problem(404, "not-found", "Not found", f"no route for {path}")

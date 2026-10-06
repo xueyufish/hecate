@@ -10,6 +10,7 @@ from hecate_runtime.manifest import sha256_hex
 ENTRY_NAME = "agents/summary/main.json"
 ENTRY_CONTENT = b'{"kind": "entry", "tools": ["query_inventory"]}'
 WRITE_ENTRY_CONTENT = b'{"kind": "entry", "tools": ["query_inventory", "submit_inventory_update"]}'
+APPROVAL_ENTRY_CONTENT = b'{"kind": "entry", "tools": ["query_inventory", "submit_inventory_update", "submit_ticket"]}'
 READER_TOKEN = "reader-secret-token"
 
 WRITE_TOOL_SCHEMA = {
@@ -30,23 +31,40 @@ def write_profile(
     durable: dict | None = None,
     evidence: dict | None = None,
     with_write_tool: bool = False,
+    with_approval_tool: bool = False,
 ) -> Path:
     """Materialize a valid profile; return its directory.
 
     ``durable`` is merged into ``runner.json`` as the ``durable`` block
     (persistent task/action ledger); ``with_write_tool`` declares the
     builtin ``submit_inventory_update`` write tool, which only the durable
-    profile admits.
+    profile admits; ``with_approval_tool`` declares a manifest-defined
+    approval-required tool (durable waiting, step6c).
     """
 
     tools = allowlist if allowlist is not None else ["query_inventory"]
-    entry_content = WRITE_ENTRY_CONTENT if with_write_tool else ENTRY_CONTENT
+    # The preview entry must declare the configured tools in order, so it
+    # is derived from the allowlist instead of a fixed shape.
+    entry_content = json.dumps({"kind": "entry", "tools": tools}).encode()
     profile = tmp_path / "profile"
     (profile / "files" / "agents/summary").mkdir(parents=True, exist_ok=True)
     (profile / "files" / ENTRY_NAME).write_bytes(entry_content)
 
     files = [{"path": ENTRY_NAME, "sha256": sha256_hex(entry_content), "size": len(entry_content)}]
     manifest_tools: list[dict] = []
+    if with_approval_tool:
+        schema_name = "tools/submit_ticket.schema.json"
+        schema_bytes = json.dumps(
+            {
+                "type": "object",
+                "required": ["ticket"],
+                "properties": {"ticket": {"type": "string", "minLength": 1}},
+            }
+        ).encode()
+        (profile / "files" / "tools").mkdir(exist_ok=True)
+        (profile / "files" / schema_name).write_bytes(schema_bytes)
+        files.append({"path": schema_name, "sha256": sha256_hex(schema_bytes), "size": len(schema_bytes)})
+        manifest_tools.append({"name": "submit_ticket", "schema_ref": schema_name, "permission": "approval_required"})
     if with_write_tool:
         schema_name = "tools/submit_inventory_update.schema.json"
         schema_bytes = json.dumps(WRITE_TOOL_SCHEMA).encode()

@@ -164,6 +164,174 @@ class DurableRuntime:
         )
         return self.store.apply_task_state(task_ref, target, terminal_payload=terminal_payload)
 
+    # -- persistent waiting (step6c) ----------------------------------------------
+
+    def park_wait(
+        self,
+        task_ref: BackendRef,
+        run_ref: BackendRef,
+        *,
+        wake_kind: str,
+        contract_ref: dict[str, Any],
+        expires_at: str | None = None,
+    ) -> str:
+        """Park a running task into a persistent wait; returns the wake token.
+
+        The wait record rides the state transition's transaction (the same
+        shape the platform dispatcher parks): wake kind, contract reference,
+        one-time token, deadline, and the unconsumed flag. The task's run
+        linkage stays on the waiting attempt until a wake rebinds a new one.
+        """
+
+        token = uuid.uuid4().hex
+        target = (
+            TaskLifecycleState.WAITING_INPUT
+            if wake_kind == ControlCommandKind.PROVIDE_INPUT.value
+            else TaskLifecycleState.WAITING_APPROVAL
+        )
+        self.store.apply_task_state(
+            task_ref,
+            target,
+            event_run_ref=run_ref,
+            extra_update={
+                "wait": {
+                    "wake_kind": wake_kind,
+                    "contract_ref": contract_ref,
+                    "wait_token": token,
+                    "wait_expires_at": expires_at,
+                    "consumed": False,
+                }
+            },
+        )
+        return token
+
+    def apply_wake(
+        self,
+        *,
+        command_id: str,
+        kind: str,
+        issuer: str,
+        task_ref: BackendRef,
+        wait_token: str,
+        input_payload: dict[str, Any] | None = None,
+        expires_at: str | None = None,
+    ) -> tuple[ControlCommandRecord, str | None]:
+        """Record and atomically apply one wake command (provide_input/resume).
+
+        Returns ``(receipt, rejection_reason)`` — the reason is ``None`` for
+        applied and idempotent replays. Idempotent by ``command_id``: a
+        terminal receipt replays as-is; a recorded-but-unapplied command
+        resumes its application. Validation failures move the receipt to
+        ``rejected`` with the reason on the caller — the wait record is
+        untouched and nothing dispatches. A valid application consumes the
+        wait token, merges the provided input into the task's stored input,
+        requeues the task on a NEW attempt run, and flips the command to
+        ``applied`` — all in the store's single transaction.
+        """
+
+        wake_kind = (
+            ControlCommandKind.PROVIDE_INPUT
+            if kind == ControlCommandKind.PROVIDE_INPUT.value
+            else ControlCommandKind.RESUME
+        )
+        existing = self.store.get(command_id)
+        if existing is not None:
+            if (existing.kind, existing.task_ref) != (wake_kind, task_ref):
+                raise ValueError("command ID is already bound to another command")
+            if existing.state is CommandState.APPLIED:
+                return existing, None
+            if existing.state is CommandState.REJECTED:
+                return existing, "previously rejected"
+        else:
+            has_payload = input_payload is not None
+            self.store.record(
+                ControlCommandRecord(
+                    command_id=command_id,
+                    kind=wake_kind,
+                    issuer=issuer,
+                    task_ref=task_ref,
+                    issued_at=_now_iso(),
+                    state=CommandState.REQUESTED,
+                    expires_at=expires_at,
+                    payload={"input": input_payload} if has_payload else {},
+                    payload_schema_ref=("urn:hecate:runner:wake-input/0" if has_payload else None),
+                )
+            )
+
+        def _reject(reason: str) -> tuple[ControlCommandRecord, str | None]:
+            logger.info("wake command %s rejected: %s", command_id, reason)
+            return self.store.transition(command_id, CommandState.REJECTED), reason
+
+        record = self.store.get_task_state(task_ref)
+        if record is None or record.lifecycle_state not in (
+            TaskLifecycleState.WAITING_INPUT,
+            TaskLifecycleState.WAITING_APPROVAL,
+        ):
+            return _reject("task is not in a persistent wait")
+        expected_state = (
+            TaskLifecycleState.WAITING_INPUT
+            if wake_kind is ControlCommandKind.PROVIDE_INPUT
+            else TaskLifecycleState.WAITING_APPROVAL
+        )
+        if record.lifecycle_state is not expected_state:
+            return _reject(f"task waits for {record.lifecycle_state.value}, not {wake_kind.value}")
+        wait = (record.extra or {}).get("wait") or {}
+        if wait.get("consumed"):
+            return _reject("wait token already consumed")
+        if wait.get("wait_token") != wait_token:
+            return _reject("wait token mismatch")
+        wait_deadline = wait.get("wait_expires_at")
+        if wait_deadline is not None:
+            from datetime import datetime as _dt
+
+            deadline = _dt.fromisoformat(wait_deadline)
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=__import__("datetime").UTC)
+            if deadline <= _dt.now(__import__("datetime").UTC):
+                return _reject("wait expired")
+
+        persisted = self.store.get_task_input(task_ref) or {}
+        wait = (record.extra or {}).get("wait") or {}
+        contract_ref = wait.get("contract_ref") or {}
+        merged = {**persisted, "provided": input_payload} if input_payload is not None else dict(persisted)
+        # One-shot dispatch grant for the parked tool: the wake decision is
+        # the recorded approval; the new attempt's dispatch boundary
+        # consumes it instead of re-parking (the ledger claim for the old
+        # attempt stays claimed; the new attempt claims its own key).
+        merged["_wake_grant"] = {
+            "tool": contract_ref.get("tool"),
+            "arguments_digest": contract_ref.get("arguments_digest"),
+        }
+        new_run = BackendRef(RefKind.RUN, ISSUER, f"run-{uuid.uuid4()}")
+        try:
+            # One transaction: requeue on the new attempt run, merge the
+            # provided input, consume the wait token, and flip the command
+            # to applied (the store validates the command's expiry and task
+            # binding inside the same commit).
+            self.store.apply_task_state(
+                task_ref,
+                TaskLifecycleState.QUEUED,
+                input_payload=merged,
+                event_run_ref=new_run,
+                applied_command_id=command_id,
+                extra_update={"wait": {**wait, "consumed": True}},
+            )
+        except Exception as exc:  # expired command / stale revision in the store
+            return _reject(str(exc))
+        receipt = self.store.get(command_id)
+        if receipt is None:  # pragma: no cover - recorded above in this call
+            raise ValueError(f"wake command {command_id} vanished after apply")
+        return receipt, None
+
+    def wait_of(self, task_ref: BackendRef) -> dict[str, Any] | None:
+        """The authorized view of a task's wait record (None when not waiting)."""
+
+        record = self.store.get_task_state(task_ref)
+        if record is None:
+            return None
+        wait = (record.extra or {}).get("wait")
+        return dict(wait) if wait else None
+
     # -- control commands --------------------------------------------------------
 
     def record_cancel(

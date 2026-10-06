@@ -23,6 +23,7 @@ follows the interrupted node in the edge graph.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import uuid
 from collections.abc import AsyncGenerator
@@ -534,10 +535,19 @@ class PregelRuntime:
         # Create root OTel trace span for session execution.
         # Child spans from Workers auto-nest via contextvars.
         if _tracer is not None:
-            with _tracer.start_as_current_span(
-                f"session:{session_id}",
-                attributes={"session.id": str(session_id)},
-            ) as _root_span:
+            # The consumer may close this generator early (observer-requested
+            # stop, task cancellation); an async generator's finally/cleanup
+            # then runs on whatever task called aclose — often a different
+            # context than the one that created the span token, and detaching
+            # it there raises. Suppress that cleanup-only error: the trace
+            # span is already ended by the context manager itself.
+            with (
+                contextlib.suppress(ValueError),
+                _tracer.start_as_current_span(
+                    f"session:{session_id}",
+                    attributes={"session.id": str(session_id)},
+                ) as _root_span,
+            ):
                 async for event in self._execute_inner(
                     session_id=session_id,
                     initial_input=initial_input,
