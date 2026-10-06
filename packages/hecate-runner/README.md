@@ -210,6 +210,20 @@ in progress. Shutdown stops admission and closes in-process tasks; unresolved
 work is recorded as `unknown`. Durable restart validates the retained identity
 and action ledger; unresolved protected results require reconciliation.
 
+## Checkpoint recovery (durable profile)
+
+Execution checkpoints persist in the host's own database (a discardable
+cache, superstep granularity) under a task-level stable session — every
+attempt of one task shares it. When a restart resumes an interrupted task,
+the host continues the SAME attempt from the last persisted superstep
+instead of replaying the graph from the top; the action ledger still
+arbitrates every dispatch, so succeeded actions backfill their recorded
+real results (no repeated business calls) and claimed writes stop into
+`reconciliation_required`. Missing or unreadable checkpoints fall back to
+the existing replay path with identical side-effect safety. Waiting-wake
+attempts (step6c) start clean — the wake's one-shot grant authorizes the
+re-dispatch, not the parked attempt's old graph state.
+
 ## Persistent waiting and wake (durable profile)
 
 A durable host can park a task into a persistent wait instead of dispatching:

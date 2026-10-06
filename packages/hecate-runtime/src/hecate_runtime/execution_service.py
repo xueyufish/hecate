@@ -59,6 +59,9 @@ class RuntimeExecutionRequest:
     stream_mode: StreamMode = StreamMode.VALUES
     observer: Callable[[Any], RuntimeEventDecision] | None = None
     should_cancel: Callable[[], bool] = lambda: False
+    # step6d: forwarded to the runtime's resume path — restores channel
+    # state from the session's persisted checkpoint before executing.
+    resume_value: Any = None
 
 
 @dataclass(frozen=True)
@@ -88,6 +91,7 @@ class RuntimeExecutionService:
                 initial_input=request.initial_input,
                 stream_mode=request.stream_mode,
                 execution_mode=request.execution_mode,
+                resume_value=request.resume_value,
             )
             try:
                 async for event in stream:

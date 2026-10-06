@@ -167,9 +167,59 @@ class PlatformTaskDispatcher:
             if latest is not None and hasattr(self._store, "list_run_actions"):
                 actions = await asyncio.to_thread(self._store.list_run_actions, run_row_ref(latest))
                 if any((action.get("intent") or {}).get("side_effect_class") != "readonly" for action in actions):
-                    # A new model run cannot promise to generate the same tool
-                    # calls. Until checkpoint recovery is wired, require
-                    # reconciliation rather than replaying a business write.
+                    # step6d: an interrupted attempt with protected actions
+                    # recovers on ITS OWN engine session when that session's
+                    # state is still loadable — the ledger arbitrates every
+                    # action (succeeded backfills, claimed writes stop), so
+                    # no business side effect is redone. Only an unloadable
+                    # session stays conservative: a new model run cannot
+                    # promise to generate the same tool calls.
+                    if await self._session_recoverable(latest, context):
+                        # Re-affirm RUNNING on the recovered attempt (the
+                        # worker's claim already moved the row once, so the
+                        # finish revision is claim + this confirmation).
+                        await asyncio.to_thread(
+                            self._store.apply_task_state,
+                            task_ref,
+                            TaskLifecycleState.RUNNING,
+                            expected_revision=record.revision + 1,
+                            **({"lease": lease} if lease is not None else {}),
+                        )
+                        run = latest
+                        r_ref = run_row_ref(run)
+                        engine_session = self._engine_session_of(run)
+                        recovered_revision = record.revision + 2
+                        try:
+                            outcome = await self._execute(
+                                db,
+                                context,
+                                engine_session=engine_session,
+                                task_ref=task_ref,
+                                run_ref=r_ref,
+                                lease=lease,
+                            )
+                        except TaskWaitingSignalError as wait:
+                            await db.commit()
+                            await self._park(
+                                task_ref,
+                                wait,
+                                context,
+                                run_ref=r_ref,
+                                expected_revision=recovered_revision,
+                                lease=lease,
+                            )
+                            return
+                        await self._finish(
+                            db,
+                            task_ref,
+                            r_ref,
+                            context,
+                            outcome,
+                            run=run,
+                            expected_revision=recovered_revision,
+                            lease=lease,
+                        )
+                        return
                     await asyncio.to_thread(
                         self._store.apply_task_state,
                         task_ref,
@@ -260,6 +310,26 @@ class PlatformTaskDispatcher:
     def _engine_session_of(run: RunModel) -> uuid.UUID:
         backend = run.backend_ref if isinstance(run.backend_ref, dict) else {}
         return uuid.UUID(str(backend.get("id")))
+
+    @staticmethod
+    async def _session_recoverable(run: RunModel, context: _DispatchContext) -> bool:
+        """True when the run's engine session state is still loadable.
+
+        Uses the shared session-state (checkpoint) store the entry service
+        writes; any failure to load means the conservative path stands.
+        """
+
+        from hecate.core.composition.entry_assembly import get_shared_session_state_store
+
+        try:
+            store = get_shared_session_state_store()
+            state = await store.load(
+                context.workspace_id, context.user_id, PlatformTaskDispatcher._engine_session_of(run)
+            )
+            return state is not None
+        except Exception:
+            logger.debug("engine session %s not recoverable", run.backend_ref, exc_info=True)
+            return False
 
     async def _new_attempt(
         self, db: AsyncSession, task: Any, latest: RunModel | None, context: _DispatchContext
