@@ -93,12 +93,22 @@ class DurableRuntime:
     def __init__(self, store: SqlDurableStore, *, workspace: str) -> None:
         self.store = store
         self.workspace = workspace
+        # step6d: persistent execution checkpoints share the host's own
+        # database (a discardable cache over the same durable session).
+        from hecate_durable.storage import AsyncSqlCheckpointStore, SqlCheckpointStore
+
+        self.checkpoints = SqlCheckpointStore(store.session_factory)
+        self.async_checkpoints = AsyncSqlCheckpointStore(store.session_factory)
         self.execution_events = SqlEventLog(
             store.session_factory,
             source=EventSource.EXECUTION_BACKEND.value,
             actor_id="hecate-runner",
             clock=lambda: datetime.now(tz=UTC).isoformat(),
         )
+
+    @staticmethod
+    def _task_session(task_ref: BackendRef):
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"runner-task:{task_ref.id}")
 
     # -- submission / lifecycle ------------------------------------------------
 
@@ -318,6 +328,10 @@ class DurableRuntime:
             )
         except Exception as exc:  # expired command / stale revision in the store
             return _reject(str(exc))
+        # step6d: the wake starts its new attempt CLEAN — the parked
+        # attempt's partial-graph checkpoints are obsolete (the grant, not
+        # the old channel state, authorizes the re-dispatch).
+        self.checkpoints.delete_session_sync(self._task_session(task_ref))
         receipt = self.store.get(command_id)
         if receipt is None:  # pragma: no cover - recorded above in this call
             raise ValueError(f"wake command {command_id} vanished after apply")

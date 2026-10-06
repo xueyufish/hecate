@@ -54,7 +54,9 @@ from .profile import BUILTIN_TOOL_SCHEMAS, Profile
 
 DURABLE_CAPABILITIES: dict[str, str] = {
     "durable_tasks": "supported: persistent task/action ledger (hecate-durable)",
-    "long_task_recovery": "supported: replay-based restart recovery, ledger-gated",
+    "long_task_recovery": (
+        "supported: restart recovery via persisted checkpoints (same-attempt resume) with ledger-gated replay fallback"
+    ),
     "write_tools": "supported: manifest-declared write tools through the action ledger",
 }
 
@@ -65,7 +67,8 @@ logger = logging.getLogger(__name__)
 UNSUPPORTED_CAPABILITIES: dict[str, str] = {
     "durable_tasks": "unsupported: persistence lands in step6",
     "background_retry": "unsupported: automatic retries are a step6/7 concern",
-    "long_task_recovery": "unsupported: checkpoint recovery is step6 scope",
+    # The durable profile overrides this one (persisted checkpoints).
+    "long_task_recovery": "unsupported: checkpoint recovery requires the durable profile",
     "write_tools": "unsupported: preview profile serves read tools only",
     "approval_tools": "unsupported: approval gating lands in step7",
     "event_stream": "unsupported: use cursor-based /events polling in the preview",
@@ -215,7 +218,10 @@ class ExecutionEngine:
             for tool in profile.manifest.tools
             if tool.permission == "approval_required" and tool.name in profile.config.tool_allowlist
         }
-        self._checkpoint_store = InMemoryCheckpointStore()
+        # step6d: the durable assembly persists execution checkpoints in the
+        # host's own database so a restart can resume the SAME attempt from
+        # the last superstep; the preview profile keeps the in-memory store.
+        self._checkpoint_store = self._build_checkpoint_store()
         self._lock = asyncio.Lock()
         self._runs: dict[str, RunState] = {}
         self._graph = self._compile_graph()
@@ -228,6 +234,28 @@ class ExecutionEngine:
         """Record the loop runs are scheduled on (set by the server layer)."""
 
         self._loop = loop
+
+    def _build_checkpoint_store(self):
+        """Persistent checkpoints when durable, in-memory otherwise."""
+
+        if self._durable is None:
+            return InMemoryCheckpointStore()
+        return self._durable.async_checkpoints
+
+    @staticmethod
+    def _session_for_task(task_ref: BackendRef) -> uuid.UUID:
+        """The stable, task-level recovery session (all attempts share it)."""
+
+        from .durable import DurableRuntime
+
+        return DurableRuntime._task_session(task_ref)
+
+    def _resume_from_checkpoint(self, task_ref: BackendRef) -> bool:
+        """True when this task's stable session has a persisted checkpoint."""
+
+        if self._durable is None:
+            return False
+        return self._checkpoint_store.has_checkpoint_sync(self._session_for_task(task_ref))
 
     async def _dispatch_tool(self, state: RunState, tool_name: str, arguments: dict) -> dict:
         """Run one tool with the run's server-verified identity scope.
@@ -761,10 +789,19 @@ class ExecutionEngine:
                 # RUNNING→RUNNING on resume is an absorbing no-op; a fresh
                 # submission moves QUEUED→RUNNING here, never inside submit.
                 self._durable.begin_run(state.task_ref)
-            # Stable session id per run so replay-based recovery (restarts,
-            # retries) derives identical action keys for the same logical
-            # execution instead of fresh random identities.
-            session_id = uuid.uuid5(uuid.NAMESPACE_URL, f"runner-run:{run_id}")
+            # step6d: the recovery session is TASK-level and stable — every
+            # attempt of one task shares it, so persisted checkpoints carry
+            # across restart-driven resumes. The in-flight run id keeps
+            # action-key identity per attempt.
+            session_id = (
+                self._session_for_task(state.task_ref)
+                if state.task_ref is not None
+                else uuid.uuid5(uuid.NAMESPACE_URL, f"runner-run:{run_id}")
+            )
+            # step6d: a resumed interrupted attempt continues from the last
+            # persisted superstep instead of replaying the graph from the
+            # top; the ledger still arbitrates every action.
+            resume_value = f"resume:{run_id}" if (resume and self._resume_from_checkpoint(state.task_ref)) else None
             provided = run_input.get("provided")
             if isinstance(provided, dict) and provided:
                 # step6c wake composition: the operator-supplied input fills
@@ -792,6 +829,7 @@ class ExecutionEngine:
                         initial_input={"input": run_input},
                         observer=observe,
                         should_cancel=lambda: state.cancel_requested,
+                        resume_value=resume_value,
                     )
                 )
                 if state.wait_request is not None:

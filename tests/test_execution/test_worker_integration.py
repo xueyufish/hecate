@@ -413,3 +413,135 @@ async def test_lifespan_shutdown_drains_protected_dispatch_before_cancelling(har
     await asyncio.wait_for(started.wait(), 5)
     await stop_durable_worker(app)
     assert store.get_task_state(ref).lifecycle_state is TaskLifecycleState.SUCCEEDED
+
+
+async def test_protected_interrupt_recovers_same_run_when_session_loadable(harness, monkeypatch) -> None:
+    """step6d: a protected-action interrupted attempt recovers on its OWN run
+    when the engine session state is loadable; an unloadable session keeps
+    the conservative reconciliation_required."""
+    from hecate_durable.contracts.durable import ActionIntent, TaskLifecycleState
+    from hecate_durable.contracts.references import run_ref as mk_run_ref
+    from hecate_durable.contracts.tools import ToolSideEffectClass
+    from sqlalchemy import select
+
+    import hecate.execution.task_control as task_control_module
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+    from hecate.models.run import RunModel
+
+    monkeypatch.setattr(task_control_module, "_spawn_background", lambda coro: coro.close())
+    store = harness["store"]
+    executed_sessions: list[uuid.UUID] = []
+
+    async def execute(self, db, context, **kwargs):
+        executed_sessions.append(uuid.UUID(str(kwargs["engine_session"])))
+        return {"status": "succeeded", "content": "recovered"}
+
+    monkeypatch.setattr(PlatformTaskDispatcher, "_execute", execute)
+    async with harness["session_factory"]() as db:
+        result = await TaskControlService(
+            db,
+            store=store,
+            recorder=store,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        ).submit(
+            workspace_id=WS,
+            user_id=OWNER,
+            goal="protected recovery",
+            agent_id=harness["agent_id"],
+            input={"messages": [{"role": "user", "content": "go"}]},
+        )
+    task_ref = result.task_ref
+
+    # Simulate the interrupted attempt: revision moved past the first
+    # dispatch, and the minted run carries a protected action intent from
+    # the crash window.
+    async with harness["session_factory"]() as db:
+        run = (await db.execute(select(RunModel).where(RunModel.task_id == uuid.UUID(task_ref.id)))).scalars().first()
+        engine_session = uuid.UUID(str(run.backend_ref["id"]))
+    store.apply_task_state(task_ref, TaskLifecycleState.RUNNING)
+    store.apply_task_state(task_ref, TaskLifecycleState.QUEUED)
+    store.record_intent_ex(
+        ActionIntent(
+            action_key=f"{run.id}:submit_ticket",
+            action_name="submit_ticket",
+            arguments_digest="dig",
+            side_effect_class=ToolSideEffectClass.NON_IDEMPOTENT_WRITE,
+        ),
+        task_ref=task_ref,
+        run_ref=mk_run_ref("hecate", str(run.id)),
+        session_id=str(run.id),
+        execution_id=f"{run.id}:submit_ticket",
+        tool_call_id=f"{run.id}:submit_ticket",
+    )
+
+    from hecate_durable.worker import DurableWorker
+
+    dispatcher = PlatformTaskDispatcher(store, harness["session_factory"])
+
+    async def _recoverable_true(run, context):
+        return True
+
+    # Recoverable session: the SAME run and engine session re-execute and
+    # the task converges.
+    monkeypatch.setattr(PlatformTaskDispatcher, "_session_recoverable", staticmethod(_recoverable_true))
+    worker = DurableWorker(store, dispatcher, leases=store.leases, worker_id="rec", lease_ttl=30)
+    assert await worker.dispatch_once(task_ref) is True
+    assert store.get_task_state(task_ref).lifecycle_state is TaskLifecycleState.SUCCEEDED
+    assert executed_sessions == [engine_session]
+
+    # Unloadable session on a fresh interruption: conservative reconciliation,
+    # and _execute is never invoked for it.
+    from hecate_durable.contracts.durable import ActionIntent
+    from hecate_durable.contracts.tools import ToolSideEffectClass
+
+    executed_sessions.clear()
+
+    async def _recoverable_false(run, context):
+        return False
+
+    async def _fail_execute(self, db, context, **kwargs):
+        raise AssertionError("must not execute when the session is not recoverable")
+
+    monkeypatch.setattr(PlatformTaskDispatcher, "_execute", _fail_execute)
+    monkeypatch.setattr(PlatformTaskDispatcher, "_session_recoverable", staticmethod(_recoverable_false))
+    # Drive a second protected interruption through a fresh task.
+    async with harness["session_factory"]() as db:
+        result2 = await TaskControlService(
+            db,
+            store=store,
+            recorder=store,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        ).submit(
+            workspace_id=WS,
+            user_id=OWNER,
+            goal="protected conservative",
+            agent_id=harness["agent_id"],
+            input={"messages": [{"role": "user", "content": "go"}]},
+        )
+    task2 = result2.task_ref
+    async with harness["session_factory"]() as db:
+        run_b = (await db.execute(select(RunModel).where(RunModel.task_id == uuid.UUID(task2.id)))).scalars().first()
+    store.apply_task_state(task2, TaskLifecycleState.RUNNING)
+    store.apply_task_state(task2, TaskLifecycleState.QUEUED)
+    store.record_intent_ex(
+        ActionIntent(
+            action_key=f"{run_b.id}:submit_ticket",
+            action_name="submit_ticket",
+            arguments_digest="dig",
+            side_effect_class=ToolSideEffectClass.NON_IDEMPOTENT_WRITE,
+        ),
+        task_ref=task2,
+        run_ref=mk_run_ref("hecate", str(run_b.id)),
+        session_id=str(run_b.id),
+        execution_id=f"{run_b.id}:submit_ticket",
+        tool_call_id=f"{run_b.id}:submit_ticket",
+    )
+    worker2 = DurableWorker(store, dispatcher, leases=store.leases, worker_id="rec2", lease_ttl=30)
+    assert await worker2.dispatch_once(task2) is True
+    fresh = store.get_task_state(task2)
+    assert fresh.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
+    assert fresh.extra["reconciliation_reason"] == "interrupted attempt contains protected actions"
