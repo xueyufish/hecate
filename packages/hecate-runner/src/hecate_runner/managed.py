@@ -36,7 +36,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from hecate_durable.contracts.credentials import (
     Claims,
@@ -51,7 +51,34 @@ from hecate_durable.contracts.references import BackendRef, RefKind
 from hecate_durable.storage.lease import LeaseHandle, StaleFenceError
 from hecate_durable.storage.store import SqlDurableStore
 
+if TYPE_CHECKING:
+    from .engine import ExecutionEngine
+
 logger = logging.getLogger(__name__)
+
+# Local reference convention for accepted deliveries (step6a): the local
+# task/run ids are derived from the platform delivery row id under one
+# issuer domain, making the managed receive queue a partition of the host's
+# durable ledger that both recovery entries can route on.
+MANAGED_ISSUER = "managed-host"
+
+
+def managed_principal_for(trust_root: str) -> str:
+    """The managed execution principal derived from the enrolled trust root."""
+
+    return f"managed:{trust_root}"
+
+
+def managed_task_ref(delivery_row_id: str) -> BackendRef:
+    """The local task reference an accepted delivery maps to (idempotent)."""
+
+    return BackendRef(RefKind.TASK, MANAGED_ISSUER, f"managed-{delivery_row_id}")
+
+
+def managed_run_ref(delivery_row_id: str) -> BackendRef:
+    """The local run reference an accepted delivery maps to (idempotent)."""
+
+    return BackendRef(RefKind.RUN, MANAGED_ISSUER, f"managed-run-{delivery_row_id}")
 
 
 class LeaseGate:
@@ -135,6 +162,7 @@ class ManagedChannel:
         lease_ttl_seconds: float = 120.0,
         poll_interval_seconds: float = 5.0,
         upload_batch: int = 100,
+        data_domains: tuple[str, ...] = (),
         transport=None,
         clock=None,
     ) -> None:
@@ -148,10 +176,14 @@ class ManagedChannel:
         self._lease_ttl = lease_ttl_seconds
         self._poll_interval = poll_interval_seconds
         self._upload_batch = upload_batch
+        # The managed execution identity stamped into every accepted
+        # delivery's persisted input; principal derives from the trust root
+        # the platform verified, domains are the operator-declared scope
+        # (empty = deny-by-default at the existing domain check).
+        self._managed_principal = managed_principal_for(trust_root)
+        self._managed_domains = tuple(data_domains)
         self._transport = transport
         self._clock = clock or (lambda: datetime.now(UTC))
-        # The host's deployment domain is its trust-root name — the same
-        # identifier the platform binds the lease audience to (design D6).
         self._gate = LeaseGate(secret, deployment_domain=trust_root, clock=clock)
         self._credential: dict[str, Any] | None = None
         self._delivery_cursor: str | None = None
@@ -166,17 +198,24 @@ class ManagedChannel:
     def gate(self) -> LeaseGate:
         return self._gate
 
+    @property
+    def poll_interval(self) -> float:
+        return self._poll_interval
+
     async def register(self) -> bool:
         """Prove possession + register; returns True when the channel admits pulls.
 
         Admission (managed new runs) is the platform operator's decision —
         a pending enrollment registers successfully but pulls return no
-        deliveries (403 on the host routes until admitted).
+        deliveries (403 on the host routes until admitted). Re-registration
+        on every boot is the reconnect path: an already-enrolled host gets
+        the platform's duplicate-registration rejection, which is tolerated
+        — possession is (re)proven by the credential exchange that follows.
         """
 
         nonce = self._new_nonce()
         answer = issue_challenge_answer(self._secret, nonce)
-        registered = await self._request(
+        await self._request(
             "POST",
             "/managed/enrollments",
             payload={
@@ -200,8 +239,6 @@ class ManagedChannel:
             auth=False,
             tolerate=(409, 422),  # already registered / pending review is fine
         )
-        if registered is None:
-            return False
         credential = await self._exchange_credential()
         return credential is not None
 
@@ -259,13 +296,23 @@ class ManagedChannel:
         The durable store's ``submit_task`` arbitration is the accept record:
         the same delivery id returns the original local task/run, so a
         redelivered row (lost accept response) answers without executing.
+        The idempotency digest covers the delivery content only — the host
+        identity stamp below is provenance, not part of conflict detection,
+        so a config change between redeliveries cannot fork the mapping.
         """
 
         delivery_row_id = str(delivery["delivery_row_id"])
-        local_task_id = f"managed-{delivery_row_id}"
-        local_run_id = f"managed-run-{delivery_row_id}"
-        local_task = BackendRef(RefKind.TASK, self._store_issuer(), local_task_id)
-        local_run = BackendRef(RefKind.RUN, self._store_issuer(), local_run_id)
+        local_task = managed_task_ref(delivery_row_id)
+        local_run = managed_run_ref(delivery_row_id)
+        delivery_input = dict(delivery.get("input_payload") or {})
+        # Accept-time identity stamp: recovery and execution resolve THIS
+        # recorded identity (verified channel + operator-configured scope),
+        # never caller-supplied claims; `resume_managed` re-checks it
+        # against the current config and stops into reconciliation on drift.
+        persisted_input = {
+            **delivery_input,
+            "_host_identity": {"principal": self._managed_principal, "domains": list(self._managed_domains)},
+        }
 
         def _accept() -> tuple[bool, BackendRef, BackendRef]:
             # Redelivery detection is durable, not in-memory: an existing
@@ -281,13 +328,13 @@ class ManagedChannel:
                     request_digest=canonical_request_digest(
                         {
                             "delivery_row_id": delivery_row_id,
-                            "input_payload": dict(delivery.get("input_payload") or {}),
+                            "input_payload": delivery_input,
                         }
                     ),
                 ),
                 task_ref=local_task,
                 run_ref=local_run,
-                input_payload=dict(delivery.get("input_payload") or {}),
+                input_payload=persisted_input,
             )
             return replayed, association.task_ref, association.run_ref
 
@@ -348,9 +395,6 @@ class ManagedChannel:
         return uploaded
 
     # -- transport ---------------------------------------------------------------
-
-    def _store_issuer(self) -> str:
-        return "managed-host"
 
     def _new_nonce(self) -> str:
         import secrets as secrets_mod
@@ -419,6 +463,92 @@ class ManagedChannel:
         if not response.content:
             return {}
         return response.json()
+
+
+@dataclass(frozen=True)
+class ManagedIdentity:
+    """The host's managed execution identity (accept stamp ↔ engine check)."""
+
+    principal: str
+    domains: tuple[str, ...]
+
+
+class ManagedExecutionScheduler:
+    """Serial dispatch of accepted managed tasks through the engine.
+
+    The engine's serial slot is the only execution path: ``drain_once``
+    starts at most one accepted (QUEUED/RUNNING) managed task per tick and
+    the slot refuses concurrent work. Tasks whose durable state leaves the
+    resumable set (executed to terminal, parked in reconciliation) are
+    simply skipped; a task that cannot be resumed while the slot is free is
+    remembered so one bad row cannot starve the queue.
+    """
+
+    def __init__(
+        self,
+        *,
+        store: SqlDurableStore,
+        engine: ExecutionEngine,
+        poll_interval_seconds: float = 0.5,
+    ) -> None:
+        self._store = store
+        self._engine = engine
+        self._poll_interval = poll_interval_seconds
+        self._unresumable: set[str] = set()
+        self._loop_task: asyncio.Task[None] | None = None
+
+    async def drain_once(self) -> bool:
+        """Start at most one accepted managed task; True when one started."""
+
+        if self._engine.closing:
+            return False
+        from hecate_durable.contracts.durable import TaskLifecycleState
+
+        resumable = self._store.list_tasks(states={TaskLifecycleState.QUEUED, TaskLifecycleState.RUNNING})
+        for record in resumable:
+            if record.task_ref.issuer_domain != MANAGED_ISSUER or record.task_ref.id in self._unresumable:
+                continue
+            run_ref = self._store.run_for_task(record.task_ref)
+            if run_ref is None:
+                self._unresumable.add(record.task_ref.id)
+                continue
+            try:
+                run_id = self._engine.resume_managed(record.task_ref, run_ref)
+            except Exception as exc:
+                from .engine import EvidenceUnavailableError
+
+                if not isinstance(exc, EvidenceUnavailableError):
+                    raise
+                # Local evidence unwritable refuses NEW protected work; the
+                # accepted task is retained and retried on a later tick.
+                logger.warning("managed scheduler: evidence unavailable; task %s retained", record.task_ref.id)
+                return False
+            if run_id is not None:
+                return True
+            if not self._engine.busy:
+                # Slot free + refusal means persistent rejection (e.g. the
+                # task converged inside the entry check); retrying would
+                # only spin, so remember it and move on.
+                self._unresumable.add(record.task_ref.id)
+        return False
+
+    async def run_forever(self) -> None:
+        while True:
+            try:
+                started = await self.drain_once()
+            except Exception:  # noqa: BLE001 — the loop outlives a bad cycle
+                logger.exception("managed scheduler cycle failed; will retry")
+                started = False
+            await asyncio.sleep(0.05 if started else self._poll_interval)
+
+    def start(self) -> None:
+        self._loop_task = asyncio.get_running_loop().create_task(self.run_forever())
+
+    async def stop(self) -> None:
+        if self._loop_task is not None:
+            self._loop_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._loop_task
 
 
 async def record_lease_fenced_outcome(store: SqlDurableStore, handle: LeaseHandle, action_key: str) -> None:
