@@ -69,13 +69,19 @@ class DeliveryConflictError(ManagedChannelError):
 
 @dataclass(frozen=True)
 class HostContext:
-    """The verified host identity behind one channel request."""
+    """The verified host identity behind one channel request.
+
+    ``managed_scope`` is the enrollment's operator-controlled data-domain
+    allowlist; it travels with the host so pull responses can carry it
+    inside the issued lease (step6b).
+    """
 
     workspace_id: uuid.UUID
     enrollment_id: uuid.UUID
     deployment_domain: str
     host_name: str
     claims: Claims
+    managed_scope: list[str]
 
 
 async def authenticate_host(
@@ -149,12 +155,17 @@ async def authenticate_host(
                 deployment_domain=str(host_ref.get("name") or claims.iss),
                 host_name=str(host_ref.get("id") or claims.sub),
                 claims=claims,
+                managed_scope=list(enrollment.managed_scope or []),
             )
     raise CredentialAuthenticationError("credential does not match an enrolled host identity")
 
 
 def issue_lease_for(host: HostContext, secret: bytes, *, ttl_seconds: float) -> dict[str, Any]:
-    """One authorization lease for the verified host (pull responses carry it)."""
+    """One authorization lease for the verified host (pull responses carry it).
+
+    The lease carries the enrollment's managed scope: the operator-declared
+    data domains protected actions may address until the next pull.
+    """
 
     lease, _nonce = lease_claims(
         secret,
@@ -162,6 +173,7 @@ def issue_lease_for(host: HostContext, secret: bytes, *, ttl_seconds: float) -> 
         deployment_domain=host.deployment_domain,
         sub=host.claims.sub,
         ttl_seconds=ttl_seconds,
+        scope=host.managed_scope,
     )
     return lease
 

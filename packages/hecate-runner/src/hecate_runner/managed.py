@@ -163,6 +163,7 @@ class ManagedChannel:
         poll_interval_seconds: float = 5.0,
         upload_batch: int = 100,
         data_domains: tuple[str, ...] = (),
+        lease_gate: LeaseGate | None = None,
         transport=None,
         clock=None,
     ) -> None:
@@ -184,7 +185,9 @@ class ManagedChannel:
         self._managed_domains = tuple(data_domains)
         self._transport = transport
         self._clock = clock or (lambda: datetime.now(UTC))
-        self._gate = LeaseGate(secret, deployment_domain=trust_root, clock=clock)
+        # The gate is shared with the execution engine when the assembly
+        # passes one in: pulls update it, protected dispatches check it.
+        self._gate = lease_gate or LeaseGate(secret, deployment_domain=trust_root, clock=clock)
         self._credential: dict[str, Any] | None = None
         self._delivery_cursor: str | None = None
         self._event_cursors: dict[tuple[str, str], int] = {}

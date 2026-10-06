@@ -63,6 +63,12 @@ ISSUER = "managed-loop-issuer"
 SECRET = b"managed-loop-secret"
 ENTRY_NAME = "agents/summary/main.json"
 ENTRY_CONTENT = b'{"kind": "entry", "tools": ["query_inventory"]}'
+READ_SCHEMA_NAME = "tools/query_inventory.schema.json"
+READ_SCHEMA = {
+    "type": "object",
+    "required": ["domain", "sku"],
+    "properties": {"domain": {"type": "string", "minLength": 1}, "sku": {"type": "string", "minLength": 1}},
+}
 # One managed run with one tool dispatch mirrors exactly seven task facts:
 # task_submitted, running task_state, terminal task_state, run_terminal,
 # plus the action-ledger trio (action_intent, action_claimed,
@@ -262,14 +268,20 @@ def _write_managed_profile(tmp_path: Path, database_url: str) -> Path:
     profile = tmp_path / "profile"
     (profile / "files" / "agents/summary").mkdir(parents=True, exist_ok=True)
     (profile / "files" / ENTRY_NAME).write_bytes(ENTRY_CONTENT)
+    schema_bytes = json.dumps(READ_SCHEMA).encode()
+    (profile / "files" / "tools").mkdir(parents=True, exist_ok=True)
+    (profile / "files" / READ_SCHEMA_NAME).write_bytes(schema_bytes)
     manifest = {
         "manifest_version": "1",
         "contract_version": "0.1",
         "backend_type": "pregel",
         "backend_compat_version": "0.1",
         "entry": ENTRY_NAME,
-        "files": [{"path": ENTRY_NAME, "sha256": sha256_hex(ENTRY_CONTENT), "size": len(ENTRY_CONTENT)}],
-        "tools": [],
+        "files": [
+            {"path": ENTRY_NAME, "sha256": sha256_hex(ENTRY_CONTENT), "size": len(ENTRY_CONTENT)},
+            {"path": READ_SCHEMA_NAME, "sha256": sha256_hex(schema_bytes), "size": len(schema_bytes)},
+        ],
+        "tools": [{"name": "query_inventory", "schema_ref": READ_SCHEMA_NAME, "permission": "read"}],
     }
     (profile / "agent-manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     (profile / "runner.json").write_text(

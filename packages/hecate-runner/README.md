@@ -118,10 +118,20 @@ managed closed loop:
 - `data_domains` scopes which data domains managed tool dispatches may
   address; the default (empty) is deny-by-default at the existing domain
   check.
+- Protected (non-readonly) managed dispatches pass the shared lease gate at
+  the action boundary — signature, expiry, deployment binding, an
+  unconsumed nonce, and the requested domain inside the lease's `scope`
+  (operator-controlled `managed_scope`, issued by the platform on every
+  pull). One lease authorizes one protected action; refusals are explicit
+  evidence with zero business side effects and never fall back to local
+  self-authorization. Readonly dispatches and standalone runs bypass the
+  gate entirely.
 - Disconnects degrade to local retry: pulls/uploads fail soft, executions
   continue from the local queue, and events backfill per run on reconnect
   (upstream deduplicates per event id). An expired lease stops new protected
-  actions and never falls back to local self-authorization.
+  actions and never falls back to local self-authorization; unknown-outcome
+  actions reconcile through the action ledger and are never redone after
+  re-authorization.
 
 ## Evidence retention
 

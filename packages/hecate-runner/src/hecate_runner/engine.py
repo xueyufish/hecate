@@ -21,6 +21,7 @@ import uuid
 from dataclasses import dataclass, field
 
 import httpx
+from hecate_durable.contracts.credentials import CredentialError
 from hecate_durable.contracts.references import BackendRef
 from hecate_durable.contracts.tools import ToolSideEffectClass
 from hecate_runtime.action_ledger import ActionLedgerHook
@@ -48,7 +49,7 @@ from jsonschema import Draft202012Validator
 
 from .durable import DurableRuntime, gate_dispatch_async, record_outcome_async
 from .evidence import OUTCOME_FAILED, EvidenceStore
-from .managed import MANAGED_ISSUER, ManagedIdentity
+from .managed import MANAGED_ISSUER, LeaseGate, ManagedIdentity
 from .profile import BUILTIN_TOOL_SCHEMAS, Profile
 
 DURABLE_CAPABILITIES: dict[str, str] = {
@@ -160,6 +161,9 @@ class RunState:
     cancel_command_id: str | None = None
     received_at: str | None = None
     idempotency_key: str | None = None
+    # Provenance: True only for tasks driven through the managed scheduler;
+    # their protected dispatches pass the lease gate (step6b).
+    managed: bool = False
 
 
 class EvidenceUnavailableError(Exception):
@@ -176,6 +180,7 @@ class ExecutionEngine:
         tool_dispatch,
         durable: DurableRuntime | None = None,
         managed_identity: ManagedIdentity | None = None,
+        lease_gate: LeaseGate | None = None,
     ) -> None:
         # ``tool_dispatch`` signature: (tool_name, arguments, principal, domains).
         self._profile = profile
@@ -185,6 +190,10 @@ class ExecutionEngine:
         # Managed execution identity: present only in the managed assembly;
         # ``resume_managed`` refuses to drive managed tasks without it.
         self._managed_identity = managed_identity
+        # The channel's live lease gate (updated on every pull); present
+        # only in the managed assembly. None = no lease enforcement, which
+        # is the standalone posture.
+        self._lease_gate = lease_gate
         # Side-effect class per allowlisted tool from the manifest's declared
         # permission: read → readonly, write → conservative non-idempotent.
         self._side_effects: dict[str, ToolSideEffectClass] = {
@@ -220,6 +229,13 @@ class ExecutionEngine:
         if state.cancel_requested:
             raise CooperativeCancellationError
         effect = self._side_effects.get(tool_name, ToolSideEffectClass.UNKNOWN)
+        if state.managed and effect is not ToolSideEffectClass.READONLY:
+            # step6b action boundary: no current lease, no action intent —
+            # a refusal must not masquerade as an execution fact in the
+            # ledger, so this runs BEFORE the intent/claim gate.
+            refusal = await self._lease_refusal(state, tool_name, arguments)
+            if refusal is not None:
+                return refusal
         if state.action_hook is not None:
             withheld, claim_blocked = await gate_dispatch_async(
                 state.action_hook,
@@ -269,6 +285,43 @@ class ExecutionEngine:
             )
         self.record_tool_result(state, tool_name, outcome)
         return outcome
+
+    async def _lease_refusal(self, state: RunState, tool_name: str, arguments: dict) -> dict | None:
+        """Lease-gate one managed protected dispatch; ``None`` = authorized.
+
+        Verifies the CURRENT lease (signature, expiry, deployment binding,
+        unconsumed nonce) and that the requested data domain is inside the
+        lease's scope. The refusal is an explicit, evidenced denial with
+        zero business side effects; nonce consumption on a scope denial is
+        deliberate conservatism — a used lease authorizes nothing further.
+        """
+
+        requested_domain = arguments.get("domain")
+        denial: dict | None
+        try:
+            claims = await self._lease_gate.check() if self._lease_gate is not None else None
+            if claims is None:
+                denial = {"status": "authorization", "detail": f"tool {tool_name} withheld: no managed lease gate"}
+            elif requested_domain not in (claims.scope or []):
+                denial = {
+                    "status": "authorization",
+                    "detail": (
+                        f"tool {tool_name} withheld: domain {requested_domain!r} is outside the current lease scope"
+                    ),
+                }
+            else:
+                return None
+        except CredentialError as exc:
+            denial = {"status": "authorization", "detail": f"tool {tool_name} withheld: {exc}"}
+        self._evidence.append(
+            "tool_result",
+            state.principal,
+            state.run_id,
+            "denied",
+            {"tool": tool_name, "status": "authorization", "reason": denial["detail"]},
+        )
+        self.record_tool_result(state, tool_name, denial)
+        return denial
 
     def _mark_reconciliation(self, state: RunState, outcome: dict) -> None:
         """A withheld/blocked durable action keeps the task pending reconciliation."""
@@ -480,7 +533,7 @@ class ExecutionEngine:
         if not isinstance(domains, list) or not any(set(domains).issubset(i.domains) for i in matches):
             self._durable.finish_run(task_ref, "unknown", needs_reconciliation=True)
             return None
-        return self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains))
+        return self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains)).run_id
 
     def resume_managed(self, task_ref: BackendRef, run_ref: BackendRef) -> str | None:
         """Re-drive an accepted managed task after (re)start (step6a loop).
@@ -515,7 +568,9 @@ class ExecutionEngine:
         ):
             self._durable.finish_run(task_ref, "unknown", needs_reconciliation=True)
             return None
-        return self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains))
+        state = self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains))
+        state.managed = True
+        return state.run_id
 
     def _schedule_durable_resume(
         self,
@@ -524,7 +579,7 @@ class ExecutionEngine:
         run_input: dict,
         principal: str,
         domains: tuple[str, ...],
-    ) -> str:
+    ) -> RunState:
         """Shared serial-slot dispatch tail for both recovery entries."""
 
         self._admit_protected(run_input)
@@ -557,7 +612,7 @@ class ExecutionEngine:
         except BaseException:
             self._resuming = False
             raise
-        return state.run_id
+        return state
 
     def request_cancel(self, run_id: str, *, command_id: str | None = None) -> bool:
         """Request cancellation at the next tool boundary; never revoke a completed call."""

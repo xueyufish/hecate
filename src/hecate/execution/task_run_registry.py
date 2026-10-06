@@ -415,13 +415,24 @@ class TaskRunRegistry:
         managed_new_runs: bool,
         operator_id: uuid.UUID,
         admitted: bool,
+        managed_scope: list[str] | None = None,
     ) -> StandaloneEnrollmentModel:
         """Operator-reviewed transition of the managed new-runs opt-in.
 
         A network reconnect has no operator and therefore no path here -
         the audit row records who decided, and scheduling rights change
-        only through this door.
+        only through this door. ``managed_scope`` is the operator-declared
+        data-domain allowlist placed into every pull lease; empty/absent
+        authorizes nothing (deny-by-default).
         """
+        if managed_scope is not None:
+            if (
+                not isinstance(managed_scope, list)
+                or any(not isinstance(domain, str) or not domain.strip() for domain in managed_scope)
+                or len(managed_scope) != len(set(managed_scope))
+            ):
+                raise TaskRunValidationError("managed scope must be a list of unique non-empty strings")
+            managed_scope = [domain.strip() for domain in managed_scope]
         enrollment = await self._session.get(StandaloneEnrollmentModel, enrollment_id)
         if enrollment is None or enrollment.deleted or enrollment.workspace_id != workspace_id:
             raise TaskNotFoundError(f"enrollment {enrollment_id} not found in workspace")
@@ -470,6 +481,7 @@ class TaskRunRegistry:
             )
             raise TaskRunValidationError(reason)
         enrollment.managed_new_runs = managed_new_runs
+        enrollment.managed_scope = list(managed_scope) if managed_scope is not None else []
         enrollment.admission = AdmissionResult.ADMITTED if admitted else AdmissionResult.REJECTED
         enrollment.operator_id = operator_id
         enrollment.admitted_at = _now()
