@@ -210,6 +210,38 @@ in progress. Shutdown stops admission and closes in-process tasks; unresolved
 work is recorded as `unknown`. Durable restart validates the retained identity
 and action ledger; unresolved protected results require reconciliation.
 
+## Persistent waiting and wake (durable profile)
+
+A durable host can park a task into a persistent wait instead of dispatching:
+
+- a manifest-declared `approval_required` tool records its action intent and
+  claim, then parks the task into `waiting_approval` — the business call waits
+  for a recorded decision (the judgment itself is step7 scope);
+- a business API answer of `{"status": "input_required", "contract": ...}`
+  parks the task into `waiting_input` with no further dispatch.
+
+The wait record binds the original Task/Run, the tool and argument digest, a
+contract reference, a one-time `wait_token`, and a deadline, committed in the
+same transaction as the state transition. Waiting tasks hold no execution slot
+and are never re-driven automatically — they survive hard restarts as waits.
+
+Wake it with an authorized command (run-owner bearer identity):
+
+```
+POST /runs/{run}/resume         {"command_id": "...", "wait_token": "..."}
+POST /runs/{run}/provide-input  {"command_id": "...", "wait_token": "...", "input": {...}}
+```
+
+A valid wake applies atomically: token consumed, provided input merged into
+the task input (filling gaps in each tool's arguments), the task requeued on a
+NEW attempt run, and the command receipt flipped to `applied` — then the host
+re-drives it through the serial slot once. `GET /runs/{run}` shows the wait
+record (including the token) to the run's owner while it waits. Expired
+commands, expired waits, wrong tokens, and command replays return explicit
+`rejected` receipts or the idempotent original — nothing dispatches. The
+preview (non-durable) profile still refuses `approval_required` tools: no
+persistence, no reliable waiting.
+
 ## Scenario coverage
 
 SC01 (clean-install cold start) and SC02 (structured inventory read and

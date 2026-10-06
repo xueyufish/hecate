@@ -39,12 +39,22 @@ PREVIEW_ROLE = "read_only"
 # SC03's "no platform approval service"). Approval-bound tools stay
 # refused until step7 ships runner-side approval binding.
 _PREVIEW_FORBIDDEN_PERMISSIONS = {"write", "approval_required"}
-_DURABLE_ALLOWED_PERMISSIONS = {"read", "write"}
+# step6c: durable waiting provides the approval-binding mechanics; the
+# approval JUDGMENT stays with step7 — an approval_required tool parks
+# the task into a persistent wait instead of dispatching.
+_DURABLE_ALLOWED_PERMISSIONS = {"read", "write", "approval_required"}
 BUILTIN_TOOL_SCHEMAS = {
     "query_inventory": {
         "type": "object",
         "required": ["domain", "sku"],
         "properties": {"domain": {"type": "string", "minLength": 1}, "sku": {"type": "string", "minLength": 1}},
+    },
+    # step6c builtin approval tool: dispatches never reach the business API;
+    # the run parks into waiting_approval until a resume command applies.
+    "submit_ticket": {
+        "type": "object",
+        "required": ["ticket"],
+        "properties": {"ticket": {"type": "string", "minLength": 1}},
     },
     "submit_inventory_update": {
         "type": "object",
@@ -507,16 +517,13 @@ def load_profile(profile_dir: Path) -> Profile:
 
     allowed_permissions = _DURABLE_ALLOWED_PERMISSIONS if config.durable is not None else {"read"}
     for tool in manifest.tools:
-        if tool.permission == "approval_required":
-            raise ProfileError(
-                f"profile forbids tool {tool.name!r} with permission 'approval_required'; "
-                "approval binding lands in step7"
-            )
         if tool.permission not in allowed_permissions:
             qualifier = (
                 "only 'read' tools are allowed"
                 if config.durable is None
-                else ("only 'read' and durable-profile 'write' tools are allowed")
+                else (
+                    "only 'read', durable-profile 'write', and 'approval_required' (persistent wait) tools are allowed"
+                )
             )
             raise ProfileError(f"profile forbids tool {tool.name!r} with permission {tool.permission!r}; {qualifier}")
 
