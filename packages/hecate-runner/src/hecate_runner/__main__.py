@@ -27,6 +27,7 @@ from .durable import DurableRuntime
 from .engine import EvidenceUnavailableError, ExecutionEngine
 from .evidence import EvidenceStore
 from .managed import (
+    LeaseGate,
     ManagedChannel,
     ManagedExecutionScheduler,
     ManagedIdentity,
@@ -126,10 +127,14 @@ def main(argv: list[str] | None = None) -> int:
         # identity (engine.submit); request-body claims never reach here.
         return await dispatcher(tool_name, arguments, principal, domains)
 
-    engine = ExecutionEngine(profile, evidence, dispatch, durable=durable, managed_identity=managed_identity)
-
+    # The lease gate is created here and shared by the channel (pulls
+    # update it) and the engine (protected dispatches check it) — one
+    # authorization state for the whole managed assembly.
+    channel: ManagedChannel | None = None
+    lease_gate: LeaseGate | None = None
     if profile.config.control_plane is not None and durable is not None:
         secret = resolve_secret_ref(control_plane.secret_ref, profile.directory).encode("utf-8")
+        lease_gate = LeaseGate(secret, deployment_domain=control_plane.trust_root)
         channel = ManagedChannel(
             base_url=control_plane.base_url,
             workspace_id=control_plane.workspace_id,
@@ -142,7 +147,19 @@ def main(argv: list[str] | None = None) -> int:
             poll_interval_seconds=control_plane.poll_interval_seconds,
             upload_batch=control_plane.upload_batch,
             data_domains=control_plane.data_domains,
+            lease_gate=lease_gate,
         )
+
+    engine = ExecutionEngine(
+        profile,
+        evidence,
+        dispatch,
+        durable=durable,
+        managed_identity=managed_identity,
+        lease_gate=lease_gate,
+    )
+
+    if channel is not None:
         managed = (channel, ManagedExecutionScheduler(store=durable.store, engine=engine))
     server = RunnerServer(profile, engine, evidence, durable=durable)
 

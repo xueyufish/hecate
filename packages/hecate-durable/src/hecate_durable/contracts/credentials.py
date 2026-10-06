@@ -62,7 +62,13 @@ def new_nonce() -> str:
 
 @dataclass(frozen=True)
 class Claims:
-    """The managed-channel claims set (security-claims semantics)."""
+    """The managed-channel claims set (security-claims semantics).
+
+    ``scope`` is the lease-side data-domain allowlist (step6b): present
+    only on authorization leases, it names the data domains the lease's
+    holder may address with protected actions. The HMAC covers it because
+    the signature digests whatever :meth:`to_dict` emits.
+    """
 
     iss: str
     aud: str
@@ -71,6 +77,7 @@ class Claims:
     nonce: str
     tenant: str | None = None
     delegation_ref: str | None = None
+    scope: list[str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -85,11 +92,16 @@ class Claims:
             out["tenant"] = self.tenant
         if self.delegation_ref is not None:
             out["delegation_ref"] = self.delegation_ref
+        if self.scope is not None:
+            out["scope"] = list(self.scope)
         return out
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Claims:
         try:
+            scope = data.get("scope")
+            if scope is not None and not (isinstance(scope, list) and all(isinstance(d, str) for d in scope)):
+                raise CredentialError("credential scope must be a list of data-domain strings")
             return cls(
                 iss=str(data["iss"]),
                 aud=str(data["aud"]),
@@ -98,6 +110,7 @@ class Claims:
                 nonce=str(data["nonce"]),
                 tenant=data.get("tenant"),
                 delegation_ref=data.get("delegation_ref"),
+                scope=list(scope) if scope is not None else None,
             )
         except KeyError as exc:
             raise CredentialError(f"credential claims missing field {exc}") from exc
@@ -184,12 +197,15 @@ def lease_claims(
     deployment_domain: str,
     sub: str,
     ttl_seconds: float,
+    scope: list[str] | None = None,
     now: datetime | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Sign one authorization lease (aud = the deployment domain binding).
 
     The lease's audience is the host's deployment domain — a lease issued
-    for one enrolled host does not verify against another's gate.
+    for one enrolled host does not verify against another's gate. ``scope``
+    names the data domains protected actions may address; a lease without
+    one authorizes nothing scope-checkable (the gate denies by default).
     """
 
     moment = now or datetime.now(UTC)
@@ -199,6 +215,7 @@ def lease_claims(
         sub=sub,
         exp=(moment + timedelta(seconds=ttl_seconds)).isoformat(),
         nonce=new_nonce(),
+        scope=list(scope) if scope is not None else None,
     )
     body = claims.to_dict()
     signature = hmac.new(secret, canonical_claims_digest(body).encode(), hashlib.sha256).hexdigest()

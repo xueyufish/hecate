@@ -47,6 +47,8 @@ class StandaloneEnrollmentModel(BaseModel):
     - **managed_new_runs** — explicit operator-controlled opt-in for
       receiving managed new runs; defaults false and is never flipped by
       network events.
+    - **managed_scope** — operator-controlled data-domain allowlist placed
+      inside every pull lease; empty list authorizes nothing.
     - **operator_id / admitted_at / admission** — who reviewed the
       enrollment, when, and with what outcome; pattern transitions carry
       these, reconnects do not.
@@ -62,6 +64,9 @@ class StandaloneEnrollmentModel(BaseModel):
     trust_root_ref: Mapped[dict] = mapped_column(JSON, nullable=False)
     installed_versions: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     managed_new_runs: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Operator-controlled data-domain allowlist issued inside every pull
+    # lease (step6b); empty = the lease authorizes no scope-checkable domain.
+    managed_scope: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     operator_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     admitted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

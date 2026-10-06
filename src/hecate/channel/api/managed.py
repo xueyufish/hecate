@@ -108,6 +108,7 @@ class RegisterRequest(BaseModel):
 class OptInRequest(BaseModel):
     managed_new_runs: bool
     admitted: bool
+    managed_scope: list[str] | None = None
 
 
 class TrustRootRequest(BaseModel):
