@@ -454,9 +454,12 @@ async def test_installed_runner_uses_platform_http_across_lost_accept_and_restar
                 await asyncio.sleep(0.1)
             log_path = runner.workdir / "runner.log" if runner is not None else None
             runner_log = log_path.read_text(encoding="utf-8", errors="replace")[-3000:] if log_path else ""
+            local_run_id = f"managed-run-{delivery_id}"
+            runner_status = runner.request("GET", f"/runs/{local_run_id}") if runner is not None else None
             raise AssertionError(
                 f"delivery {delivery_id} did not project a succeeded host run; observed={observed}; "
-                f"http={http_requests}; business_calls={business_calls}; runner_log={runner_log}"
+                f"http={http_requests}; business_calls={business_calls}; runner_status={runner_status}; "
+                f"runner_log={runner_log}"
             )
 
         async def _queue_one() -> str:
