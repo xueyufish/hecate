@@ -128,6 +128,8 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
             await TrustRootRegistry(session).revoke(WS, ROOT_NAME)
             await session.commit()
 
+    execution_binding: tuple[uuid.UUID, uuid.UUID] | None = None
+
     async def queue_delivery(input_payload: dict) -> str:
         from sqlalchemy import select
 
@@ -142,6 +144,7 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
         from hecate.models.agent_version import AgentVersionModel
         from hecate.models.standalone_enrollment import StandaloneEnrollmentModel
 
+        nonlocal execution_binding
         async with test_session_factory() as session:
             row = (
                 (
@@ -153,36 +156,43 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
                 .first()
             )
             assert row is not None
-            agent = AgentModel(workspace_id=WS, name=f"sc05-agent-{uuid.uuid4().hex[:8]}")
-            session.add(agent)
-            await session.flush()
-            version = AgentVersionModel(agent_id=agent.id, version=1, config_snapshot={}, content_hash="a" * 64)
-            session.add(version)
-            await session.flush()
-            session.add(
-                AgentPrincipalModel(
-                    id=agent.id,
-                    agent_id=agent.id,
-                    workspace_id=WS,
-                    organization_id=WS,
-                    owner_user_id=ADMIN,
+            if execution_binding is None:
+                agent = AgentModel(workspace_id=WS, name=f"sc05-agent-{uuid.uuid4().hex[:8]}")
+                session.add(agent)
+                await session.flush()
+                version = AgentVersionModel(agent_id=agent.id, version=1, config_snapshot={}, content_hash="a" * 64)
+                session.add(version)
+                await session.flush()
+                session.add(
+                    AgentPrincipalModel(
+                        id=agent.id,
+                        agent_id=agent.id,
+                        workspace_id=WS,
+                        organization_id=WS,
+                        owner_user_id=ADMIN,
+                    )
                 )
-            )
-            deployment = AgentDeploymentModel(
-                agent_id=agent.id,
-                agent_version_id=version.id,
-                workspace_id=WS,
-                backend_type=BackendType.BUILTIN,
-                access_mode=AccessMode.IN_PROCESS,
-                issuer_domain="hecate",
-                capability_snapshot={},
-                axes_harness="hecate",
-                axes_environment="none",
-                axes_tool_execution="hecate_gateway",
-                is_default=True,
-            )
-            session.add(deployment)
-            await session.flush()
+                deployment = AgentDeploymentModel(
+                    agent_id=agent.id,
+                    agent_version_id=version.id,
+                    workspace_id=WS,
+                    backend_type=BackendType.BUILTIN,
+                    access_mode=AccessMode.IN_PROCESS,
+                    issuer_domain="hecate",
+                    capability_snapshot={},
+                    axes_harness="hecate",
+                    axes_environment="none",
+                    axes_tool_execution="hecate_gateway",
+                    is_default=True,
+                )
+                session.add(deployment)
+                await session.flush()
+                execution_binding = (agent.id, deployment.id)
+            else:
+                agent_id, deployment_id = execution_binding
+                agent = await session.get(AgentModel, agent_id)
+                deployment = await session.get(AgentDeploymentModel, deployment_id)
+                assert agent is not None and deployment is not None
             chain = IdentityChain(
                 initiator=None,
                 principal_id=str(agent.id),
