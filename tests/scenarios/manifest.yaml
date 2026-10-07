@@ -242,11 +242,13 @@ sc_scenarios:
     tier: 1
     responsible_step: 6/7
     blocked_by: standalone-durable-actions
+    implemented_slices: [wheel_process_restart, ledger_backfill_no_redo]
     assertions: >-
       The protected write executes only with valid parameter binding, current
       permission, and approval; after restart the wait/result is recoverable
       or reconciled, unknown results are never rewritten, and no platform
-      approval service is involved.
+      approval service is involved. Process-level: wheel clean install, hard
+      kill + restart over the same database, business-side call counting.
   - id: SC04
     title: 受管断连与授权过期
     run_mode: managed
@@ -266,7 +268,11 @@ sc_scenarios:
     tier: 1
     responsible_step: 4/6/7
     blocked_by: runner managed dispatch loop, action-time lease enforcement and process restart acceptance
-    implemented_slices: [delivery_acceptance, event_projection]
+    implemented_slices: [delivery_acceptance, event_projection, lease_gate, managed_loop, action_authorization]
+    gaps: >-
+      Process-level acceptance (installed wheels + real platform control plane
+      + hard restart/lease takeover) remains planned; the delivered slices are
+      component/integration level.
     assertions: >-
       After re-verifying trust and authorization the host accepts new work;
       historical events are deduplicated on replay; duplicate commands and
@@ -279,11 +285,15 @@ sc_scenarios:
     tier: 1
     responsible_step: 6/7/10
     blocked_by: standalone-durable-actions
+    implemented_slices: [local_evidence_gate_process]
     assertions: >-
       Local evidence-store failure stops new protected actions; central
       unavailability with valid local retention buffers uploads up to the
       declared limit with an explicit gap report; recovery retransmits
-      evidence only, never business actions.
+      evidence only, never business actions. Process-level local half
+      delivered; note: the engine is fail-closed for ALL dispatches while
+      the store is unwritable (readonly continuation is a registered gap);
+      central-upload buffering remains planned (step10).
   - id: SC07
     title: 制品篡改、不兼容与回滚
     run_mode: standalone

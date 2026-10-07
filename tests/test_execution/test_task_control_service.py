@@ -526,8 +526,11 @@ async def test_durable_wait_and_wake(harness):
             assert wait["wake_kind"] == "provide_input"
             assert wait["consumed"] is False
 
+            # Worker-deployment wiring: the wake requeues only; the durable
+            # worker's cycle performs the re-dispatch (the inline spawn is
+            # exercised by the workflow-callback API tests).
             # Wrong token is rejected.
-            wrong = await _service(harness, db).issue_command(
+            wrong = await _service(harness, db, worker=worker).issue_command(
                 workspace_id=WS,
                 task_id=task_uuid,
                 kind=Kind.PROVIDE_INPUT,
@@ -537,7 +540,7 @@ async def test_durable_wait_and_wake(harness):
             assert wrong.record.state is CommandState.REJECTED
 
             # The correct token wakes and requeues the task.
-            ok = await _service(harness, db).issue_command(
+            ok = await _service(harness, db, worker=worker).issue_command(
                 workspace_id=WS,
                 task_id=task_uuid,
                 kind=Kind.PROVIDE_INPUT,
@@ -552,7 +555,7 @@ async def test_durable_wait_and_wake(harness):
             assert detail["wait"]["consumed"] is True
 
             # Token reuse is rejected.
-            reuse = await _service(harness, db).issue_command(
+            reuse = await _service(harness, db, worker=worker).issue_command(
                 workspace_id=WS,
                 task_id=task_uuid,
                 kind=Kind.PROVIDE_INPUT,
