@@ -221,7 +221,9 @@ async def test_wake_does_not_repeat_write_before_approval(tmp_path: Path):
         )
         task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run_id))
         await _wait_task_state(harness, task, "waiting_approval")
-        token = harness.durable.wait_of(task)["wait_token"]
+        wait = harness.durable.wait_of(task)
+        assert wait is not None
+        token = wait["wait_token"]
         status, response = harness.call(
             "POST",
             f"/runs/{run_id}/resume",
@@ -269,7 +271,9 @@ async def test_wake_replay_rejects_changed_token(tmp_path: Path):
         )
         task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run_id))
         await _wait_task_state(harness, task, "waiting_approval")
-        token = harness.durable.wait_of(task)["wait_token"]
+        wait = harness.durable.wait_of(task)
+        assert wait is not None
+        token = wait["wait_token"]
         assert (
             harness.call("POST", f"/runs/{run_id}/resume", {"command_id": "bound-wake", "wait_token": token})[1][
                 "state"
@@ -324,7 +328,9 @@ async def test_get_cannot_apply_wake(tmp_path: Path):
         )
         task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run))
         await _wait_task_state(harness, task, "waiting_approval")
-        token = harness.durable.wait_of(task)["wait_token"]
+        wait = harness.durable.wait_of(task)
+        assert wait is not None
+        token = wait["wait_token"]
         assert harness.call("GET", f"/runs/{run}/resume", {"command_id": "unsafe-get", "wait_token": token})[0] == 405
         assert harness.store.get_task_state(task).lifecycle_state is TaskLifecycleState.WAITING_APPROVAL
         assert harness.store.get("unsafe-get") is None
@@ -343,7 +349,9 @@ async def test_wake_commit_survives_restart_without_loading_old_checkpoint(tmp_p
         )
         task = first.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, old_run))
         await _wait_task_state(first, task, "waiting_approval")
-        token = first.durable.wait_of(task)["wait_token"]
+        wait = first.durable.wait_of(task)
+        assert wait is not None
+        token = wait["wait_token"]
         monkeypatch.setattr(first.server, "_schedule_redrive", lambda *args: None)
         status, receipt = first.call(
             "POST", f"/runs/{old_run}/resume", {"command_id": "commit-before-crash", "wait_token": token}
@@ -384,7 +392,9 @@ async def test_concurrent_wakes_consume_token_once(tmp_path, same_id):
         ref = BackendRef(RefKind.RUN, ISSUER, run)
         task = harness.store.task_for_run(ref)
         await _wait_task_state(harness, task, "waiting_approval")
-        token = harness.durable.wait_of(task)["wait_token"]
+        wait = harness.durable.wait_of(task)
+        assert wait is not None
+        token = wait["wait_token"]
         receipts = await asyncio.gather(
             *[
                 asyncio.to_thread(
@@ -450,14 +460,18 @@ async def test_changed_definition_rejects_wake_before_consuming_token(tmp_path):
         )
         task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run))
         await _wait_task_state(harness, task, "waiting_approval")
-        token = harness.durable.wait_of(task)["wait_token"]
+        wait = harness.durable.wait_of(task)
+        assert wait is not None
+        token = wait["wait_token"]
         changed = replace(harness.profile, config=replace(harness.profile.config, tool_allowlist=("submit_ticket",)))
         harness.server._engine = ExecutionEngine(changed, harness.evidence, api, durable=harness.durable)
         status, _ = harness.call(
             "POST", f"/runs/{run}/resume", {"command_id": "changed-definition", "wait_token": token}
         )
         assert status == 409
-        assert harness.durable.wait_of(task)["consumed"] is False
+        wait = harness.durable.wait_of(task)
+        assert wait is not None
+        assert wait["consumed"] is False
         assert harness.store.get("changed-definition") is None
         assert api.tools() == ["query_inventory"]
     finally:

@@ -12,7 +12,9 @@ def test_checkpoint_id_cannot_read_another_session(tmp_path):
     first, second = uuid.uuid4(), uuid.uuid4()
     try:
         checkpoint = checkpoints.save_sync(first, 1, None, {"secret": "first session"})
-        assert checkpoints.load_sync(first, checkpoint)["channel_state"]["secret"] == "first session"
+        loaded = checkpoints.load_sync(first, checkpoint)
+        assert loaded is not None
+        assert loaded["channel_state"]["secret"] == "first session"
         assert checkpoints.load_sync(second, checkpoint) is None
     finally:
         store.dispose()
