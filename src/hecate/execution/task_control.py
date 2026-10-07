@@ -313,8 +313,10 @@ class TaskControlService:
             replayed=False,
         )
 
-    async def _dispatch_now(self, t_ref: BackendRef) -> None:
+    async def _dispatch_now(self, t_ref: BackendRef, *, db: AsyncSession | None = None) -> None:
         """Dispatch one task synchronously (the ``wait`` submission view)."""
+
+        active_db = db or self._db
 
         if self._worker is not None:
             await self._worker.dispatch_once(t_ref)
@@ -324,7 +326,7 @@ class TaskControlService:
             from hecate_durable.worker import DurableWorker
 
             async def inline_dispatch(task_ref, record, lease) -> None:
-                await self._dispatcher(task_ref, record, lease, db=self._db)
+                await self._dispatcher(task_ref, record, lease, db=active_db)
 
             worker = DurableWorker(self._store, inline_dispatch, leases=self._store.leases)
             await worker.dispatch_once(t_ref)
@@ -340,7 +342,7 @@ class TaskControlService:
         )
         # Inline dispatch runs on this request's session (same DB); the
         # worker path opens its own sessions instead.
-        await self._dispatcher(t_ref, record, None, db=self._db)
+        await self._dispatcher(t_ref, record, None, db=active_db)
         await self._pump_events()
 
     async def _pump_events(self) -> None:
@@ -357,7 +359,12 @@ class TaskControlService:
             if self._worker is not None:
                 await self._worker.dispatch_once(t_ref)
                 return
-            await self._dispatch_now(t_ref)
+            if self._session_factory is None:
+                await self._dispatch_now(t_ref)
+                return
+            async with self._session_factory() as session:
+                await self._dispatch_now(t_ref, db=session)
+                await session.commit()
         except Exception:  # noqa: BLE001 — a background dispatch never crashes the loop
             logger.exception("background dispatch failed for task %s", t_ref.id)
 
@@ -603,6 +610,25 @@ class TaskControlService:
         # transaction runs — the seam store never shares a transaction with
         # the application session (one independent session per transaction).
         await self._db.commit()
+
+        # Managed executions own their task/run facts on the enrolled host.
+        # Persist the command in the platform outbox and let the host report
+        # its effect; applying the platform's local durable state here would
+        # make delivery look like execution and could consume a wait twice.
+        from hecate.execution.managed_channel import ManagedChannelError, ManagedDeliveryService
+
+        try:
+            managed_delivery = await ManagedDeliveryService(self._db).get_by_task_ref(workspace_id, t_ref.to_dict())
+        except ManagedChannelError as exc:
+            raise TaskControlValidationError(str(exc)) from exc
+        if managed_delivery is not None:
+            if _expired(record.expires_at):
+                expired = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)
+                return CommandIssueResult(record=expired, detail="command expired before host delivery")
+            if kind is ControlCommandKind.PAUSE:
+                rejected = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                return CommandIssueResult(record=rejected, detail="managed runner declares no pause capability")
+            return CommandIssueResult(record=record, detail="command persisted for managed host delivery")
 
         if _expired(record.expires_at):
             expired = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)

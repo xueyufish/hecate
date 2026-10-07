@@ -293,14 +293,145 @@ class ManagedDeliveryService:
         await self._session.flush()
         return row
 
-    async def get_by_task_ref(self, workspace_id: uuid.UUID, task_ref: dict[str, Any]) -> ManagedDeliveryModel | None:
+    async def get_by_task_ref(
+        self,
+        workspace_id: uuid.UUID,
+        task_ref: dict[str, Any],
+        *,
+        enrollment_id: uuid.UUID | None = None,
+    ) -> ManagedDeliveryModel | None:
         """The delivery that carries one platform task (host mapping lookups)."""
 
+        stmt = select(ManagedDeliveryModel).where(
+            ManagedDeliveryModel.workspace_id == workspace_id,
+            ManagedDeliveryModel.deleted.is_(False),
+        )
+        if enrollment_id is not None:
+            stmt = stmt.where(ManagedDeliveryModel.enrollment_id == enrollment_id)
+        rows = (await self._session.execute(stmt)).scalars().all()
+        matches = [
+            row
+            for row in rows
+            if row.task_ref.get("id") == task_ref.get("id")
+            and row.task_ref.get("issuer_domain") == task_ref.get("issuer_domain")
+        ]
+        if len(matches) > 1:
+            raise ManagedChannelError("platform task is assigned to multiple managed enrollments")
+        return matches[0] if matches else None
+
+    async def associate_attempt(
+        self,
+        host: HostContext,
+        *,
+        local_task_ref: dict[str, Any],
+        local_run_ref: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist the platform mapping for a host attempt before execution facts arrive."""
+
+        delivery = await self._find_host_delivery(host, local_task_ref)
+        if delivery is None or delivery.accepted_refs is None:
+            raise ManagedChannelError("no accepted delivery maps the host's local task reference")
+        accepted = dict(delivery.accepted_refs)
+        if accepted.get("task_ref") != local_task_ref:
+            raise ManagedChannelError("attempt task reference does not match the accepted delivery")
+        if accepted.get("run_ref") == local_run_ref:
+            return dict(delivery.run_ref)
+
+        successors = list(accepted.get("successor_runs") or [])
+        for mapping in successors:
+            if mapping.get("local_run_ref") == local_run_ref:
+                return dict(mapping["platform_run_ref"])
+
+        from hecate.contracts.execution.identity import IdentityChain
+        from hecate.contracts.execution.references import BackendRef, RefKind
+        from hecate.execution.task_run_registry import TaskRunRegistry
+        from hecate.models.run import RunModel
+
+        try:
+            local_run = BackendRef.from_dict(local_run_ref)
+            if local_run.kind is not RefKind.RUN:
+                raise ValueError("local_run_ref must identify a run")
+            original = await self._session.get(RunModel, uuid.UUID(delivery.run_ref["id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ManagedChannelError("accepted delivery has an invalid platform run reference") from exc
+        if original is None or original.workspace_id != host.workspace_id or original.deleted:
+            raise ManagedChannelError("accepted delivery's platform run is unavailable")
+
+        registry = TaskRunRegistry(self._session)
+        run = await registry.import_observation_run(
+            task_id=original.task_id,
+            workspace_id=host.workspace_id,
+            deployment_id=original.deployment_id,
+            identity_chain=IdentityChain.from_dict(original.identity_chain),
+            backend_run_ref=local_run,
+            local_source={"issuer_domain": local_run.issuer_domain, "local_run_id": local_run.id},
+        )
+        mapping = {
+            "local_run_ref": local_run.to_dict(),
+            "platform_run_ref": {"kind": "run", "issuer_domain": "hecate", "id": str(run.id)},
+        }
+        successors.append(mapping)
+        delivery.accepted_refs = {**accepted, "successor_runs": successors}
+        await self._session.flush()
+        return dict(mapping["platform_run_ref"])
+
+    async def command_for_host(self, host: HostContext, command: Any) -> dict[str, Any] | None:
+        """Translate one platform command into the accepted host-local references."""
+
+        delivery = await self.get_by_task_ref(
+            host.workspace_id,
+            command.task_ref.to_dict(),
+            enrollment_id=host.enrollment_id,
+        )
+        if delivery is None or delivery.accepted_refs is None:
+            return None
+        accepted = delivery.accepted_refs
+        platform_run_ref = command.run_ref.to_dict() if command.run_ref is not None else None
+        local_run_ref = None
+        if platform_run_ref is not None:
+            if _same_ref(platform_run_ref, delivery.run_ref):
+                local_run_ref = accepted.get("run_ref")
+            else:
+                for mapping in accepted.get("successor_runs") or []:
+                    if _same_ref(platform_run_ref, mapping.get("platform_run_ref") or {}):
+                        local_run_ref = mapping.get("local_run_ref")
+                        break
+                if local_run_ref is None:
+                    return None
+        return {
+            "command": command.to_dict(),
+            "local_task_ref": accepted.get("task_ref"),
+            "local_run_ref": local_run_ref,
+        }
+
+    async def validate_command_receipt(
+        self,
+        host: HostContext,
+        *,
+        command: Any,
+        local_task_ref: dict[str, Any],
+        local_run_ref: dict[str, Any] | None,
+    ) -> bool:
+        """Check that a host receipt belongs to this enrollment's task mapping."""
+
+        mapped = await self.command_for_host(host, command)
+        return bool(
+            mapped is not None
+            and mapped["local_task_ref"] == local_task_ref
+            and mapped["local_run_ref"] == local_run_ref
+        )
+
+    async def _find_host_delivery(
+        self,
+        host: HostContext,
+        local_task_ref: dict[str, Any],
+    ) -> ManagedDeliveryModel | None:
         rows = (
             (
                 await self._session.execute(
                     select(ManagedDeliveryModel).where(
-                        ManagedDeliveryModel.workspace_id == workspace_id,
+                        ManagedDeliveryModel.enrollment_id == host.enrollment_id,
+                        ManagedDeliveryModel.workspace_id == host.workspace_id,
                         ManagedDeliveryModel.deleted.is_(False),
                     )
                 )
@@ -309,9 +440,8 @@ class ManagedDeliveryService:
             .all()
         )
         for row in rows:
-            if row.task_ref.get("id") == task_ref.get("id") and row.task_ref.get("issuer_domain") == task_ref.get(
-                "issuer_domain"
-            ):
+            accepted = row.accepted_refs or {}
+            if accepted.get("task_ref") == local_task_ref:
                 return row
         return None
 
@@ -370,15 +500,17 @@ class ManagedProjectionService:
         if delivery is None or delivery.accepted_refs is None:
             raise ManagedChannelError("no accepted delivery maps the host's local task reference")
 
+        platform_run_ref = self._platform_run_ref(delivery, envelopes)
+        platform_run_id = uuid.UUID(platform_run_ref["id"]) if platform_run_ref else None
+
         projected, skipped = 0, 0
         fresh: list[dict[str, Any]] = []
         events = PlatformEventService(self._session)
-        platform_run_id = uuid.UUID(delivery.run_ref["id"]) if delivery.run_ref.get("id") else None
         for envelope in envelopes:
-            if envelope.get("task_ref") != delivery.accepted_refs.get("task_ref") or envelope.get(
-                "run_ref"
-            ) != delivery.accepted_refs.get("run_ref"):
+            if envelope.get("task_ref") != delivery.accepted_refs.get("task_ref"):
                 raise ManagedChannelError("event task/run does not match the accepted delivery")
+            if self._platform_run_ref(delivery, [envelope]) != platform_run_ref:
+                raise ManagedChannelError("event run does not match the associated host attempt")
             from hecate.contracts.execution.events import EventEnvelope, validate_governance_event
 
             try:
@@ -409,17 +541,40 @@ class ManagedProjectionService:
             await events.append_resequenced(stored, workspace_id=host.workspace_id)
             fresh.append(envelope)
             projected += 1
-        await self._update_run_projection(host, local_task_ref, fresh)
+        await self._update_run_projection(host, local_task_ref, fresh, platform_run_id=platform_run_id)
         await self._session.commit()
         return {"projected": projected, "skipped_duplicates": skipped}
 
+    @staticmethod
+    def _platform_run_ref(
+        delivery: ManagedDeliveryModel,
+        envelopes: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Resolve a host-local run only through a previously persisted association."""
+
+        if not envelopes:
+            return None
+        local_run_ref = envelopes[0].get("run_ref")
+        accepted = delivery.accepted_refs or {}
+        if local_run_ref == accepted.get("run_ref"):
+            return delivery.run_ref
+        for mapping in accepted.get("successor_runs") or []:
+            if mapping.get("local_run_ref") == local_run_ref:
+                return mapping.get("platform_run_ref")
+        raise ManagedChannelError("host attempt has no platform association")
+
     async def _update_run_projection(
-        self, host: HostContext, local_task_ref: dict[str, Any], envelopes: list[dict[str, Any]]
+        self,
+        host: HostContext,
+        local_task_ref: dict[str, Any],
+        envelopes: list[dict[str, Any]],
+        *,
+        platform_run_id: uuid.UUID | None,
     ) -> None:
         """Fold the host's latest task_state/run_terminal payloads into the Run projection."""
 
         delivery = await self._find_accepted_delivery(host, local_task_ref)
-        if delivery is None or delivery.run_ref.get("id") is None:
+        if delivery is None or platform_run_id is None:
             return
         from hecate.execution.task_run_registry import TaskRunRegistry
         from hecate.models.run import RunModel
@@ -428,7 +583,7 @@ class ManagedProjectionService:
             await self._session.execute(
                 select(RunModel)
                 .where(
-                    RunModel.id == uuid.UUID(delivery.run_ref["id"]),
+                    RunModel.id == platform_run_id,
                     RunModel.workspace_id == host.workspace_id,
                     RunModel.deleted.is_(False),
                 )
@@ -505,6 +660,12 @@ def _rebind_envelope(envelope: dict[str, Any], *, platform_run_id: uuid.UUID | N
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _same_ref(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    """Compare named references while tolerating omitted kind in legacy rows."""
+
+    return all(left.get(key) == right.get(key) for key in ("issuer_domain", "id"))
 
 
 def _parse_cursor(value: str) -> datetime:

@@ -393,3 +393,55 @@ async def test_projection_deduplicates_and_maps_to_platform_run(client: AsyncCli
     async with test_session_factory() as check:
         fresh = (await check.execute(select(RunModel).where(RunModel.id == run.id))).scalar_one()
         assert (fresh.projection or {}).get("state") == "succeeded"
+
+    # A successor attempt is not projected until the host has persisted its
+    # platform association. This also proves the successor gets its own Run
+    # row instead of rewriting the original waiting attempt.
+    successor_local_run_ref = {
+        "kind": "run",
+        "issuer_domain": "host",
+        "id": str(uuid.uuid4()),
+    }
+    successor_event = {
+        **envelope,
+        "event_id": f"evt-{uuid.uuid4()}",
+        "run_ref": successor_local_run_ref,
+        "source_sequence": 1,
+        "payload": {"event_type": "run_terminal", "status": "succeeded", "content": "resumed"},
+    }
+    unassociated = await client.post(
+        "/managed/host/events",
+        json={"local_task_ref": local_task_ref, "envelopes": [successor_event]},
+        headers=headers,
+    )
+    assert unassociated.status_code == 422
+
+    association = await client.post(
+        "/managed/host/attempts",
+        json={"local_task_ref": local_task_ref, "local_run_ref": successor_local_run_ref},
+        headers=headers,
+    )
+    assert association.status_code == 200, association.text
+    successor_platform_ref = association.json()["platform_run_ref"]
+    replayed_association = await client.post(
+        "/managed/host/attempts",
+        json={"local_task_ref": local_task_ref, "local_run_ref": successor_local_run_ref},
+        headers=headers,
+    )
+    assert replayed_association.json()["platform_run_ref"] == successor_platform_ref
+
+    projected_successor = await client.post(
+        "/managed/host/events",
+        json={"local_task_ref": local_task_ref, "envelopes": [successor_event]},
+        headers=headers,
+    )
+    assert projected_successor.status_code == 200, projected_successor.text
+    successor_platform_id = uuid.UUID(successor_platform_ref["id"])
+    async with test_session_factory() as check:
+        successor = (await check.execute(select(RunModel).where(RunModel.id == successor_platform_id))).scalar_one()
+        original = (await check.execute(select(RunModel).where(RunModel.id == run.id))).scalar_one()
+        assert successor.attempt_no == 2
+        assert successor.control_owner == "host"
+        assert successor.local_run_id == successor_local_run_ref["id"]
+        assert (successor.projection or {}).get("state") == "succeeded"
+        assert (original.projection or {}).get("state") == "succeeded"

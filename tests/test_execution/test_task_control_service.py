@@ -32,7 +32,9 @@ from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
 from hecate.models.agent_principal import AgentPrincipalModel
 from hecate.models.agent_version import AgentVersionModel
+from hecate.models.managed_delivery import ManagedDeliveryModel  # noqa: F401
 from hecate.models.organization import OrganizationModel
+from hecate.models.standalone_enrollment import StandaloneEnrollmentModel  # noqa: F401
 from hecate.models.user import UserModel
 from hecate.models.workspace import WorkspaceModel
 
@@ -308,6 +310,52 @@ async def test_command_replay_authorizes_task_and_binds_request(harness):
                 await service.issue_command(**{**args, "issuer": "someone-else"})
     finally:
         stub.unpatch()
+
+
+async def test_managed_command_is_persisted_without_platform_side_effect(harness, monkeypatch):
+    """Managed commands remain requested until the host returns an effect receipt."""
+
+    import hecate.execution.task_control as task_control_module
+
+    monkeypatch.setattr(task_control_module, "_spawn_background", lambda coro: coro.close())
+    async with harness["session_factory"]() as db:
+        service = _service(harness, db)
+        submitted = await _submit(harness, db, service)
+        enrollment = StandaloneEnrollmentModel(
+            workspace_id=WS,
+            host_identity_ref={"issuer_domain": "test", "id": "managed-host"},
+            trust_root_ref={"issuer_domain": "test", "id": "managed-root"},
+        )
+        db.add(enrollment)
+        await db.flush()
+        db.add(
+            ManagedDeliveryModel(
+                enrollment_id=enrollment.id,
+                workspace_id=WS,
+                task_ref=submitted.task_ref.to_dict(),
+                run_ref=submitted.run_ref.to_dict(),
+                input_payload={},
+                state="delivered",
+                accepted_refs={
+                    "task_ref": {"kind": "task", "issuer_domain": "managed-host", "id": "local-task"},
+                    "run_ref": {"kind": "run", "issuer_domain": "managed-host", "id": "local-run"},
+                },
+            )
+        )
+        await db.commit()
+
+        issued = await service.issue_command(
+            workspace_id=WS,
+            task_id=uuid.UUID(submitted.task_ref.id),
+            kind=ControlCommandKind.CANCEL,
+            issuer=str(OWNER),
+            command_id="managed-cancel",
+        )
+
+        assert issued.record.state is CommandState.REQUESTED
+        assert issued.detail == "command persisted for managed host delivery"
+        assert harness["store"].get_task_state(submitted.task_ref).lifecycle_state is TaskLifecycleState.QUEUED
+        assert harness["store"].get("managed-cancel").state is CommandState.REQUESTED
 
 
 async def test_background_dispatch_via_worker_reconciles(harness, monkeypatch):

@@ -64,6 +64,8 @@ def _write_profile(
     durable: dict | None = None,
     tool_allowlist: list[str] | None = None,
     tool_schemas: dict[str, dict] | None = None,
+    control_plane: dict | None = None,
+    managed_secret: bytes | None = None,
 ) -> None:
     """Materialize a preview (or durable) profile with absolute local paths.
 
@@ -110,6 +112,8 @@ def _write_profile(
     }
     if durable is not None:
         config["durable"] = durable
+    if control_plane is not None:
+        config["control_plane"] = dict(control_plane)
     (profile_dir / "runner.json").write_text(json.dumps(config), encoding="utf-8")
     (profile_dir / "identity.json").write_text(
         json.dumps(
@@ -128,6 +132,8 @@ def _write_profile(
     )
     (profile_dir / "secrets").mkdir(exist_ok=True)
     (profile_dir / "secrets/app-reader-token").write_text(READER_TOKEN, encoding="utf-8")
+    if managed_secret is not None:
+        (profile_dir / "secrets/managed-secret").write_bytes(managed_secret)
 
 
 def _start_business_api() -> tuple[ThreadingHTTPServer, list[dict]]:
@@ -254,6 +260,9 @@ def start_runner(
     durable: bool = False,
     tool_allowlist: list[str] | None = None,
     tool_schemas: dict[str, dict] | None = None,
+    control_plane: dict | None = None,
+    managed_secret: bytes | None = None,
+    durable_database_url: str | None = None,
 ) -> tuple[RunnerInstance, ThreadingHTTPServer, list[dict]]:
     """Build, install, profile, launch.
 
@@ -293,12 +302,22 @@ def start_runner(
         capture_output=True,
         timeout=300,
     )
+    if durable_database_url is not None and durable_database_url.startswith("postgresql"):
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(python_exe), "psycopg[binary]>=3.2"],
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
 
     business_server, business_calls = _start_business_api()
     profile_dir = workdir / "profile"
     durable_config = None
     if durable:
-        durable_config = {"database_url": f"sqlite:///{(workdir / 'host.db').as_posix()}", "workspace": "sc"}
+        durable_config = {
+            "database_url": durable_database_url or f"sqlite:///{(workdir / 'host.db').as_posix()}",
+            "workspace": "sc",
+        }
     _write_profile(
         profile_dir,
         business_api_port=business_server.server_address[1],
@@ -306,6 +325,8 @@ def start_runner(
         durable=durable_config,
         tool_allowlist=tool_allowlist,
         tool_schemas=tool_schemas,
+        control_plane=control_plane,
+        managed_secret=managed_secret,
     )
 
     runner = start_runner_from(workdir, profile_dir, python_exe)
