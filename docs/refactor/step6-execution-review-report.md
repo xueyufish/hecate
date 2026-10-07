@@ -1,5 +1,7 @@
 # Step6 持久执行复核报告
 
+> 本文是前轮基线的历史记录。后续切片及本轮修正见 [Step1～Step6 验收复核](step1-step6-acceptance-review.md)，当前交付状态以演进方案和该报告为准。
+
 ## 结论与范围
 
 本轮以 main 的 `7c22a2bb2fd111ab64c6e4052f27bf4a9735a042` 为基线，检查演进方案 Step6、对应实现和测试。修复位于独立 `codex/step6-review` 分支，未修改主检出目录，未推送。

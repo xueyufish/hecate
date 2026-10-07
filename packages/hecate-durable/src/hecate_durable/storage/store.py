@@ -597,8 +597,15 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
             if row is None:
                 raise KeyError(f"unknown command {command_id!r}")
             validate_command_transition(CommandState(row.state), target)
-            row.state = target.value
-            row.updated_at = self._clock()
+            changed = session.execute(
+                update(CommandRow)
+                .where(CommandRow.command_id == command_id, CommandRow.state == row.state)
+                .values(state=target.value, updated_at=self._clock())
+                .execution_options(synchronize_session=False)
+            )
+            if changed.rowcount != 1:
+                raise ValueError("command state changed concurrently")
+            session.refresh(row)
             record = _command_of(row)
             task_ref = _task_ref(row.task_issuer, row.task_id)
             run_ref = (
@@ -965,6 +972,20 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     # -- host-facing queries -----------------------------------------------------
 
+    def action_result(self, action_key: str, task_ref: BackendRef) -> Any:
+        """Read the real result of an action owned by this logical task."""
+        with self._session() as session:
+            row = session.execute(
+                select(ActionOutcomeRow.result_payload)
+                .join(ActionIntentRow, ActionIntentRow.action_key == ActionOutcomeRow.action_key)
+                .where(
+                    ActionIntentRow.action_key == action_key,
+                    ActionIntentRow.task_issuer == task_ref.issuer_domain,
+                    ActionIntentRow.task_id == task_ref.id,
+                )
+            ).first()
+        return row[0] if row is not None else None
+
     def list_run_actions(self, run_ref: BackendRef) -> list[dict[str, Any]]:
         """Reconciliation view: every action of one run with its verdict.
 
@@ -1004,6 +1025,22 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
 
     def read_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100) -> EventPage:
         return self.events.read(run_ref, cursor=cursor, limit=limit)
+
+    def event_runs_for_task(self, task_ref: BackendRef) -> list[BackendRef]:
+        """List historical event streams, including attempts no longer current."""
+        from hecate_durable.storage.models import EventRow
+
+        with self._session() as session:
+            rows = session.execute(
+                select(EventRow.run_issuer, EventRow.run_id)
+                .where(
+                    EventRow.envelope["task_ref"]["issuer_domain"].as_string() == task_ref.issuer_domain,
+                    EventRow.envelope["task_ref"]["id"].as_string() == task_ref.id,
+                )
+                .distinct()
+                .order_by(EventRow.run_issuer, EventRow.run_id)
+            ).all()
+        return [_run_ref(issuer, run_id) for issuer, run_id in rows]
 
     def emit_event(
         self,

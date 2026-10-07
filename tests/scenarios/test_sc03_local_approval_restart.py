@@ -1,4 +1,4 @@
-"""SC03 (step6f): local approved write and restart — wheel clean install.
+"""SC03 slices: terminal-write persistence and approval wait across process restarts.
 
 The durable runner is built from wheels, installed into a fresh venv (no
 repo source path), and driven as a real subprocess. A protected write
@@ -56,9 +56,11 @@ def harness(tmp_path: Path):
         tool_allowlist=["query_inventory", "submit_inventory_update"],
         tool_schemas=TOOL_SCHEMAS,
     )
-    yield {"runner": runner, "calls": calls, "server": server, "profile": runner.profile_dir}
-    if runner.process.poll() is None:
-        runner.stop()
+    stack = {"runner": runner, "calls": calls, "server": server, "profile": runner.profile_dir}
+    yield stack
+    # A restart replaces the fixture's current process; stop that instance,
+    # rather than only the original process that already exited.
+    stack["runner"].stop()
     runner_harness.stop_business_api(server)
 
 
@@ -83,7 +85,7 @@ def _submit_run(runner, tool_arguments: dict) -> str:
     return body["run_ref"].rsplit("/", 1)[-1]
 
 
-def test_sc03_approved_write_executes_once_and_survives_hard_restart(harness) -> None:
+def test_sc03_terminal_write_executes_once_and_survives_hard_restart(harness) -> None:
     runner = harness["runner"]
     calls = harness["calls"]
 
@@ -117,3 +119,47 @@ def test_sc03_approved_write_executes_once_and_survives_hard_restart(harness) ->
     status, run2_body = runner.wait_run(run2)
     assert run2_body["status"] == "succeeded"
     assert len(_write_calls(calls)) == 2
+
+
+def test_sc03_approval_wait_survives_kill_then_wakes_once(tmp_path):
+    tools = [dict(tool) for tool in MANIFEST_TOOLS]
+    tools[1]["permission"] = "approval_required"
+    runner, server, calls = runner_harness.start_runner(
+        tmp_path,
+        manifest_tools=tools,
+        durable=True,
+        tool_allowlist=["query_inventory", "submit_inventory_update"],
+        tool_schemas=TOOL_SCHEMAS,
+    )
+    try:
+        run_id = _submit_run(runner, {})
+        status, waiting = runner.wait_run(run_id)
+        assert status == 200 and waiting["status"] == "waiting_approval"
+        assert len(_write_calls(calls)) == 0
+        token = waiting["wait"]["wait_token"]
+        runner = runner.restart(kill_previous=True)
+        assert runner.request("GET", f"/runs/{run_id}")[1]["status"] == "waiting_approval"
+        status, receipt = runner.request(
+            "POST", f"/runs/{run_id}/resume", {"command_id": "sc03-approval", "wait_token": token}
+        )
+        assert status == 202 and receipt["state"] == "applied"
+        status, tasks = runner.request("GET", "/tasks")
+        assert status == 200
+        new_run = tasks["tasks"][0]["run_ref"].rsplit("/", 1)[-1]
+        assert new_run != run_id
+        assert runner.wait_run(new_run)[1]["status"] == "succeeded"
+        assert len(_write_calls(calls)) == 1
+        reads = [call for call in calls if "quantity" not in call["arguments"]]
+        assert len(reads) == 1
+        assert (
+            runner.request("POST", f"/runs/{run_id}/resume", {"command_id": "sc03-approval", "wait_token": token})[1][
+                "state"
+            ]
+            == "applied"
+        )
+        runner = runner.restart(kill_previous=True)
+        assert runner.request("GET", f"/runs/{new_run}")[1]["status"] == "succeeded"
+        assert len(_write_calls(calls)) == 1
+    finally:
+        runner.stop()
+        runner_harness.stop_business_api(server)

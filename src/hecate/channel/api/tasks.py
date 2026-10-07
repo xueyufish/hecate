@@ -78,10 +78,12 @@ class CommandRequest(BaseModel):
     """One control command body (payload must declare its schema ref)."""
 
     kind: ControlCommandKind
+    command_id: str | None = Field(default=None, min_length=1, max_length=256)
     payload: dict[str, Any] | None = None
     payload_schema_ref: str | None = None
     expected_revision: int | None = None
     expires_at: str | None = None
+    detail_ns: dict[str, Any] = Field(default_factory=dict)
 
 
 def get_task_control_service(
@@ -300,11 +302,13 @@ async def _issue(
             workspace_id=_workspace_id(ctx),
             task_id=task_id,
             kind=kind,
+            command_id=body.command_id,
             issuer=str(ctx.user_id) if ctx.user_id is not None else "anonymous",
             payload=body.payload,
             payload_schema_ref=body.payload_schema_ref,
             expected_revision=body.expected_revision,
             expires_at=body.expires_at,
+            detail_ns=body.detail_ns,
         )
     except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
         raise _map_service_error(exc) from exc

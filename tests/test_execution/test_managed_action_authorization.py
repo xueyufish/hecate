@@ -383,7 +383,14 @@ class _Host:
         self.api = api
         cp = self.profile.config.control_plane
         assert cp is not None
-        self.gate = LeaseGate(SECRET, deployment_domain=cp.trust_root, clock=clock)
+        self.gate = LeaseGate(
+            SECRET,
+            deployment_domain=cp.trust_root,
+            clock=clock,
+            issuer_domain=cp.issuer_domain,
+            host_id=cp.host_id,
+            workspace_id=cp.workspace_id,
+        )
         self.channel = ManagedChannel(
             base_url=cp.base_url,
             workspace_id=cp.workspace_id,
@@ -395,6 +402,7 @@ class _Host:
             poll_interval_seconds=0.05,
             data_domains=cp.data_domains,
             lease_gate=self.gate,
+            execution_definition=self.profile.execution_definition_digest(),
             transport=transport,
             clock=clock,
         )
@@ -610,6 +618,36 @@ async def test_foreign_deployment_lease_refuses(platform, tmp_path: Path):
         )
         assert refusal["outcome"]["status"] == "authorization"
         assert "does not bind deployment" in refusal["outcome"]["detail"]
+    finally:
+        host.close()
+
+
+@pytest.mark.parametrize("field", ["iss", "sub", "tenant"])
+async def test_foreign_signed_lease_identity_withholds_business_write(platform, tmp_path, field):
+    """Dispatch verifies identity binding even when the HMAC is valid."""
+    await platform["admit"]()
+    profile_dir = _write_auth_profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}", data_domains=("domain_a",))
+    api = _BusinessApi()
+    host = _Host(profile_dir, platform["transport"], api=api)
+    try:
+        assert await host.channel.register()
+        await platform["opt_in"](managed_scope=["domain_a"])
+        delivery = await _accept(platform, host, _input())
+        cp = host.profile.config.control_plane
+        claims = {"iss": cp.issuer_domain, "sub": cp.host_id, "tenant": cp.workspace_id}
+        claims[field] = "foreign"
+        token, _ = lease_claims(
+            SECRET,
+            deployment_domain=cp.trust_root,
+            ttl_seconds=60,
+            scope=["domain_a"],
+            **claims,
+        )
+        host.gate.update(token)
+        assert await host.scheduler.drain_once()
+        await _wait_terminal(host.store, managed_task_ref(delivery))
+        assert api.count("submit_inventory_update") == 0
+        assert host.engine.get_state(f"managed-run-{delivery}").status == "failed"
     finally:
         host.close()
 

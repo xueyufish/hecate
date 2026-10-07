@@ -209,14 +209,54 @@ async def test_verified_callback_wakes_parent_and_replay_is_idempotent(
     detail = await _wait_terminal(client, parent_task_id)
     assert detail["lifecycle_state"] == "succeeded"
 
-    # Replay of the same command id is an idempotent applied receipt — the
-    # parent is NOT requeued a second time.
     replay = await client.post(f"/api/tasks/{parent_task_id}/workflow-callback", json=body)
     assert replay.status_code == 200
     assert replay.json()["state"] == "applied"
     assert replay.json()["detail"] == "idempotent replay of a settled command"
 
-    detail = (await client.get(f"/api/tasks/{parent_task_id}")).json()
+
+async def test_command_http_preserves_wake_token_and_id(client, db_session, entry_stub, monkeypatch):
+    """The public command route must carry the same fields as the service."""
+    agent = await _seed_agent(db_session)
+    child = await _submit(client, agent, "child", wait=True)
+    parent = await _park_parent_on(client, agent, child["task_id"], monkeypatch)
+    body = {
+        "kind": "provide_input",
+        "command_id": "http-wake",
+        "detail_ns": {"wait_token": parent["wait"]["wait_token"]},
+    }
+    response = await client.post(f"/api/tasks/{parent['task_id']}/commands", json=body)
+    assert response.status_code == 201, response.text
+    assert response.json()["state"] == "applied"
+    assert response.json()["command_id"] == "http-wake"
+    assert (await client.post(f"/api/tasks/{parent['task_id']}/commands", json=body)).json()["state"] == "applied"
+
+
+async def test_callback_result_cannot_forge_verified_child_fields(client, db_session, entry_stub, monkeypatch):
+    """Caller summaries cannot replace authoritative child attribution."""
+    from hecate.core.composition.durable_platform import get_durable_suite
+    from hecate.execution.task_control import task_ref_of
+
+    agent = await _seed_agent(db_session)
+    child = await _submit(client, agent, "child", wait=True)
+    parent = await _park_parent_on(client, agent, child["task_id"], monkeypatch)
+    body = _callback_body(parent, child["task_id"], result={"child_task_id": "forged", "child_state": "failed"})
+    response = await client.post(f"/api/tasks/{parent['task_id']}/workflow-callback", json=body)
+    assert response.json()["state"] == "applied", response.text
+    stored = get_durable_suite().store.get_task_input(task_ref_of(uuid.UUID(parent["task_id"])))
+    assert stored["provided"]["child_outcome"]["child_task_id"] == child["task_id"]
+    assert stored["provided"]["child_outcome"]["child_state"] == "succeeded"
+    changed = {**body, "wait_token": "other-token"}
+    assert (await client.post(f"/api/tasks/{parent['task_id']}/workflow-callback", json=changed)).status_code == 422
+
+    # Replay of the same command id is an idempotent applied receipt — the
+    # parent is NOT requeued a second time.
+    replay = await client.post(f"/api/tasks/{parent['task_id']}/workflow-callback", json=body)
+    assert replay.status_code == 200
+    assert replay.json()["state"] == "applied"
+    assert replay.json()["detail"] == "idempotent replay of a settled command"
+
+    detail = await _wait_terminal(client, parent["task_id"])
     assert detail["lifecycle_state"] == "succeeded"
 
 

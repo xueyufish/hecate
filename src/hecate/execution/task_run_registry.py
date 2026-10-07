@@ -188,6 +188,13 @@ class TaskRunRegistry:
             raise TaskNotFoundError(f"run {run_id} not found in workspace")
         return run
 
+    async def validate_run_execution(self, run: RunModel) -> None:
+        """Revalidate current authority and the attempt's frozen deployment."""
+        deployment = await self._require_workspace_deployment(run.deployment_id, run.workspace_id)
+        await self._validate_run_identity(IdentityChain.from_dict(run.identity_chain), deployment, require_active=True)
+        if run.execution_snapshot != await self._execution_snapshot(deployment):
+            raise TaskRunValidationError("deployment or version changed since the attempt was admitted")
+
     async def list_runs_for_task(self, task_id: uuid.UUID, workspace_id: uuid.UUID) -> list[RunModel]:
         """All attempts of one task, ordered by attempt number."""
         await self.get_task(task_id, workspace_id)

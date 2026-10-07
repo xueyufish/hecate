@@ -40,13 +40,16 @@ def uv_available() -> bool:
 
 def _build_wheels(dist_dir: Path) -> tuple[Path, Path, Path]:
     for package in ("hecate-runtime", "hecate-durable", "hecate-runner"):
-        subprocess.run(
+        result = subprocess.run(
             ["uv", "build", "--package", package, "--out-dir", str(dist_dir)],
-            check=True,
+            check=False,
             cwd=REPO_ROOT,
             capture_output=True,
             timeout=300,
         )
+        if result.returncode:
+            diagnostics = (result.stderr or result.stdout).decode("utf-8", errors="replace")
+            raise RuntimeError(f"wheel build failed for {package}: {diagnostics}")
     runtime_wheel = next(dist_dir.glob("hecate_runtime-*.whl"))
     durable_wheel = next(dist_dir.glob("hecate_durable-*.whl"))
     runner_wheel = next(dist_dir.glob("hecate_runner-*.whl"))

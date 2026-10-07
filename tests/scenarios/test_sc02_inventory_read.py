@@ -56,7 +56,7 @@ def test_sc02_cross_domain_read_denied_before_dispatch(runner_stack) -> None:
     runner, calls = runner_stack
     before = len(calls)
     status, run, (run_id, events) = _submit(runner, {"domain": "domain_b", "sku": "SKU-B1"})
-    assert status == 202 and run["status"] == "succeeded"
+    assert status == 202 and run["status"] == "failed"
     tool_results = [e for e in events["events"] if e.get("type") == "tool_result"]
     assert tool_results[-1]["outcome"]["status"] == "authorization"
     assert len(calls) == before, "the runner must not dispatch outside the trusted identity scope"

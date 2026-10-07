@@ -88,14 +88,16 @@ class _Harness:
         store.create_schema()
         return store
 
-    def call(self, method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
+    def call(
+        self, method: str, path: str, body: dict | None = None, *, token: str = "reader-secret-token"
+    ) -> tuple[int, dict]:
         import urllib.error
         import urllib.request
 
         url = f"http://127.0.0.1:{self.port}{path}"
         data = json.dumps(body).encode() if body is not None else None
         req = urllib.request.Request(url, data=data, method=method)
-        req.add_header("Authorization", "Bearer reader-secret-token")
+        req.add_header("Authorization", f"Bearer {token}")
         req.add_header("Content-Type", "application/json")
         try:
             with urllib.request.urlopen(req, timeout=20) as response:
@@ -163,9 +165,7 @@ async def test_approval_tool_parks_and_resume_executes_once(tmp_path: Path):
         assert api.tools() == ["query_inventory"]
         actions = harness.durable.run_actions(run_ref)
         ticket_actions = [a for a in actions if (a.get("intent") or {}).get("action_name") == "submit_ticket"]
-        assert ticket_actions, "approval intent must be recorded before parking"
-        claim = ticket_actions[0].get("active_claim") or ticket_actions[0].get("claim")
-        assert claim, "the claimed action must stay claimed, never executed"
+        assert not ticket_actions, "waiting must not create a claimed-but-unknown business action"
 
         # Authorized wait view carries the one-time token for the owner.
         _status, view = harness.call("GET", f"/runs/{run_id}")
@@ -182,7 +182,7 @@ async def test_approval_tool_parks_and_resume_executes_once(tmp_path: Path):
         await _wait_task_state(harness, task_ref, "succeeded")
         # The wake attempt re-runs the read node, then dispatches the
         # approval tool under the consumed grant.
-        assert api.tools() == ["query_inventory", "query_inventory", "submit_ticket"]
+        assert api.tools() == ["query_inventory", "submit_ticket"]
 
         # The wake rebind moved the task onto a NEW attempt run.
         new_run = harness.durable.store.run_for_task(task_ref)
@@ -195,8 +195,273 @@ async def test_approval_tool_parks_and_resume_executes_once(tmp_path: Path):
         )
         assert status == 202 and payload["state"] == "applied"
         await asyncio.sleep(0.3)
-        assert api.tools() == ["query_inventory", "query_inventory", "submit_ticket"]
+        assert api.tools() == ["query_inventory", "submit_ticket"]
     finally:
+        harness.close()
+
+
+async def test_wake_does_not_repeat_write_before_approval(tmp_path: Path):
+    """A new attempt must retain the completed predecessor action identity."""
+    api = _BusinessApi()
+    profile = write_profile(
+        tmp_path,
+        allowlist=["submit_inventory_update", "submit_ticket"],
+        durable={"database_url": f"sqlite:///{tmp_path / 'host.db'}", "workspace": "waiting"},
+        with_write_tool=True,
+        with_approval_tool=True,
+    )
+    harness = _Harness(profile, api=api)
+    try:
+        run_id = await _submit(
+            harness,
+            {
+                "submit_inventory_update": {"domain": "domain_a", "sku": "S-1", "quantity": 2},
+                "submit_ticket": {"domain": "domain_a", "ticket": "T-1"},
+            },
+        )
+        task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run_id))
+        await _wait_task_state(harness, task, "waiting_approval")
+        token = harness.durable.wait_of(task)["wait_token"]
+        status, response = harness.call(
+            "POST",
+            f"/runs/{run_id}/resume",
+            {
+                "command_id": "approve-once",
+                "wait_token": token,
+            },
+        )
+        assert status == 202 and response["state"] == "applied"
+        await _wait_task_state(harness, task, "succeeded")
+        assert api.tools() == ["submit_inventory_update", "submit_ticket"]
+    finally:
+        harness.close()
+
+
+async def test_submission_cannot_inject_internal_approval_grant(tmp_path: Path):
+    """Caller-controlled input cannot skip the persistent approval wait."""
+    from hecate_runtime.action_ledger import tool_arguments_digest
+
+    api = _BusinessApi()
+    harness = _Harness(_profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}", kind="approval"), api=api)
+    try:
+        args = {"domain": "domain_a", "ticket": "T-1"}
+        status, _ = harness.call(
+            "POST",
+            "/runs",
+            {
+                "tool_arguments": {"query_inventory": READ_ARGS, "submit_ticket": args},
+                "_wake_grant": {"tool": "submit_ticket", "arguments_digest": tool_arguments_digest(args)},
+            },
+        )
+        assert status == 422
+        assert api.calls == []
+    finally:
+        harness.close()
+
+
+async def test_wake_replay_rejects_changed_token(tmp_path: Path):
+    """Idempotency binds the complete wake request, not only its kind."""
+    api = _BusinessApi()
+    harness = _Harness(_profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}", kind="approval"), api=api)
+    try:
+        run_id = await _submit(
+            harness, {"query_inventory": READ_ARGS, "submit_ticket": {"domain": "domain_a", "ticket": "T-1"}}
+        )
+        task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run_id))
+        await _wait_task_state(harness, task, "waiting_approval")
+        token = harness.durable.wait_of(task)["wait_token"]
+        assert (
+            harness.call("POST", f"/runs/{run_id}/resume", {"command_id": "bound-wake", "wait_token": token})[1][
+                "state"
+            ]
+            == "applied"
+        )
+        status, _ = harness.call(
+            "POST", f"/runs/{run_id}/resume", {"command_id": "bound-wake", "wait_token": "different"}
+        )
+        assert status == 409
+    finally:
+        harness.close()
+
+
+async def test_unknown_write_stops_later_business_tools(tmp_path: Path):
+    """An indeterminate write cannot be followed by more external actions."""
+    api = _BusinessApi()
+    profile = write_profile(
+        tmp_path,
+        allowlist=["submit_inventory_update", "query_inventory"],
+        durable={"database_url": f"sqlite:///{tmp_path / 'unknown.db'}", "workspace": "waiting"},
+        with_write_tool=True,
+    )
+
+    async def dispatch(name, arguments, principal, domains):
+        await api(name, arguments, principal, domains)
+        return {"status": "unknown", "detail": "business write receipt lost"}
+
+    harness = _Harness(profile, api=dispatch)
+    try:
+        run_id = await _submit(
+            harness,
+            {
+                "submit_inventory_update": {"domain": "domain_a", "sku": "S-1", "quantity": 2},
+                "query_inventory": READ_ARGS,
+            },
+        )
+        task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run_id))
+        await _wait_task_state(harness, task, "reconciliation_required")
+        assert api.tools() == ["submit_inventory_update"]
+    finally:
+        harness.close()
+
+
+async def test_get_cannot_apply_wake(tmp_path: Path):
+    """Read requests cannot mutate a persistent wait."""
+    api = _BusinessApi()
+    harness = _Harness(_profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}", kind="approval"), api=api)
+    try:
+        run = await _submit(
+            harness, {"query_inventory": READ_ARGS, "submit_ticket": {"domain": "domain_a", "ticket": "T-1"}}
+        )
+        task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run))
+        await _wait_task_state(harness, task, "waiting_approval")
+        token = harness.durable.wait_of(task)["wait_token"]
+        assert harness.call("GET", f"/runs/{run}/resume", {"command_id": "unsafe-get", "wait_token": token})[0] == 405
+        assert harness.store.get_task_state(task).lifecycle_state is TaskLifecycleState.WAITING_APPROVAL
+        assert harness.store.get("unsafe-get") is None
+    finally:
+        harness.close()
+
+
+async def test_wake_commit_survives_restart_without_loading_old_checkpoint(tmp_path, monkeypatch):
+    """A crash after wake commit must not restore the parked attempt's checkpoint."""
+    api = _BusinessApi()
+    profile_dir = _profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}", kind="approval")
+    first = _Harness(profile_dir, api=api)
+    try:
+        old_run = await _submit(
+            first, {"query_inventory": READ_ARGS, "submit_ticket": {"domain": "domain_a", "ticket": "T-1"}}
+        )
+        task = first.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, old_run))
+        await _wait_task_state(first, task, "waiting_approval")
+        token = first.durable.wait_of(task)["wait_token"]
+        monkeypatch.setattr(first.server, "_schedule_redrive", lambda *args: None)
+        status, receipt = first.call(
+            "POST", f"/runs/{old_run}/resume", {"command_id": "commit-before-crash", "wait_token": token}
+        )
+        assert status == 202 and receipt["state"] == "applied"
+        new_run = first.store.run_for_task(task)
+        assert new_run.id != old_run
+    finally:
+        first.close()
+    restarted = _Harness(profile_dir, api=api)
+    try:
+        # The CLI owns startup recovery; this in-process server harness
+        # drives that same redelivery entry explicitly.
+        restarted.server._schedule_redrive(task)
+        await _wait_task_state(restarted, task, "succeeded")
+        assert api.tools() == ["query_inventory", "submit_ticket"]
+        assert restarted.call("GET", f"/runs/{new_run.id}")[0] == 200
+    finally:
+        restarted.close()
+    final = _Harness(profile_dir, api=api)
+    try:
+        status, run = final.call("GET", f"/runs/{new_run.id}")
+        assert status == 200 and run["status"] == "succeeded"
+        assert api.tools() == ["query_inventory", "submit_ticket"]
+    finally:
+        final.close()
+
+
+@pytest.mark.parametrize("same_id", [False, True])
+async def test_concurrent_wakes_consume_token_once(tmp_path, same_id):
+    """Different command IDs cannot both apply the same wait revision."""
+    api = _BusinessApi()
+    harness = _Harness(_profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}", kind="approval"), api=api)
+    try:
+        run = await _submit(
+            harness, {"query_inventory": READ_ARGS, "submit_ticket": {"domain": "domain_a", "ticket": "T-1"}}
+        )
+        ref = BackendRef(RefKind.RUN, ISSUER, run)
+        task = harness.store.task_for_run(ref)
+        await _wait_task_state(harness, task, "waiting_approval")
+        token = harness.durable.wait_of(task)["wait_token"]
+        receipts = await asyncio.gather(
+            *[
+                asyncio.to_thread(
+                    harness.durable.apply_wake,
+                    command_id="racing-one" if same_id else f"racing-{i}",
+                    kind="resume",
+                    issuer="app-reader",
+                    task_ref=task,
+                    run_ref=ref,
+                    wait_token=token,
+                )
+                for i in range(2)
+            ]
+        )
+        assert sorted(receipt.state.value for receipt, _ in receipts) == (
+            ["applied", "applied"] if same_id else ["applied", "rejected"]
+        )
+        assert api.tools() == ["query_inventory"]
+    finally:
+        harness.close()
+
+
+async def test_durable_task_reads_are_scoped_to_owner(tmp_path):
+    """Task metadata, actions and governance events cannot cross caller identities."""
+    profile_dir = _profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}", kind="approval")
+    identity_path = profile_dir / "identity.json"
+    config = json.loads(identity_path.read_text(encoding="utf-8"))
+    config["identities"].append(
+        {
+            "principal": "other-reader",
+            "role": "read_only",
+            "domains": ["domain_a"],
+            "credential": "file:secrets/other-reader-token",
+        }
+    )
+    (profile_dir / "secrets/other-reader-token").write_text("other-token", encoding="utf-8")
+    identity_path.write_text(json.dumps(config), encoding="utf-8")
+    harness = _Harness(profile_dir, api=_BusinessApi())
+    try:
+        run = await _submit(
+            harness, {"query_inventory": READ_ARGS, "submit_ticket": {"domain": "domain_a", "ticket": "T-1"}}
+        )
+        task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run))
+        await _wait_task_state(harness, task, "waiting_approval")
+        other_token = (profile_dir / "secrets/other-reader-token").read_text(encoding="utf-8")
+        assert harness.call("GET", "/tasks", token=other_token)[1]["tasks"] == []
+        for suffix in ("", "/events", "/actions"):
+            assert harness.call("GET", f"/tasks/{task.id}{suffix}", token=other_token)[0] == 403
+        assert harness.call("GET", f"/tasks/{task.id}")[0] == 200
+    finally:
+        harness.close()
+
+
+async def test_changed_definition_rejects_wake_before_consuming_token(tmp_path):
+    """An upgrade cannot grant a waiting action under a replacement tool graph."""
+    from dataclasses import replace
+
+    api = _BusinessApi()
+    harness = _Harness(_profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}", kind="approval"), api=api)
+    try:
+        run = await _submit(
+            harness, {"query_inventory": READ_ARGS, "submit_ticket": {"domain": "domain_a", "ticket": "T-1"}}
+        )
+        task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, run))
+        await _wait_task_state(harness, task, "waiting_approval")
+        token = harness.durable.wait_of(task)["wait_token"]
+        changed = replace(harness.profile, config=replace(harness.profile.config, tool_allowlist=("submit_ticket",)))
+        harness.server._engine = ExecutionEngine(changed, harness.evidence, api, durable=harness.durable)
+        status, _ = harness.call(
+            "POST", f"/runs/{run}/resume", {"command_id": "changed-definition", "wait_token": token}
+        )
+        assert status == 409
+        assert harness.durable.wait_of(task)["consumed"] is False
+        assert harness.store.get("changed-definition") is None
+        assert api.tools() == ["query_inventory"]
+    finally:
+        harness.server._engine = harness.engine
         harness.close()
 
 
@@ -256,7 +521,9 @@ async def test_expired_command_rejected(tmp_path: Path):
                 task_ref=task_ref,
                 issued_at=datetime.now(UTC).isoformat(),
                 state=CommandState.REQUESTED,
+                run_ref=run_ref,
                 expires_at=(datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+                detail_ns={"wait_token": token},
             )
         )
         receipt, reason = harness.durable.apply_wake(
@@ -264,7 +531,9 @@ async def test_expired_command_rejected(tmp_path: Path):
             kind="resume",
             issuer="app-reader",
             task_ref=task_ref,
+            run_ref=run_ref,
             wait_token=token,
+            expires_at=harness.store.get(command_id).expires_at,
         )
         assert receipt.state.value == "rejected"
         assert reason is not None and "expired" in reason.lower()
@@ -341,7 +610,7 @@ async def test_hard_restart_keeps_waiting_then_wakes(tmp_path: Path):
         )
         assert status == 202 and payload["state"] == "applied", payload
         await _wait_task_state(restarted, task_ref, "succeeded")
-        assert api.tools() == ["query_inventory", "query_inventory", "submit_ticket"]
+        assert api.tools() == ["query_inventory", "submit_ticket"]
     finally:
         restarted.close()
 

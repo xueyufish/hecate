@@ -516,7 +516,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **目标：**任务不依赖 HTTP 请求存活；执行事实由宿主保存，平台获得可恢复的状态和证据投影；重试不得盲目重做业务写入。
 
-**复核结论：部分完成，不能整体验收。** 已交付持久存储、worker、平台控制 API 和 Runner 本地恢复基础。复核修正了真实平台执行未受租约 fencing 保护、动作台账未注入工具执行链、outbox 提交乱序漏投、恢复身份与受管投影等问题。原先全部勾选的记录混用了契约测试、组件测试和完整宿主验收，以下重新区分。详细问题、验证方法和剩余边界见 [Step6 执行复核报告](step6-execution-review-report.md)。
+**复核结论：部分完成，不能整体验收。** 已交付持久存储、worker、共享执行服务、平台控制 API、Runner 本地等待/恢复及受管环路。后续复核修正了等待后重复前序写入、内部 grant 注入、命令异体重放、checkpoint 作用域、执行定义漂移与错误恢复判定。原先全部勾选的记录混用了契约测试、组件测试和完整宿主验收，以下重新区分。历史问题见 [Step6 执行复核报告](step6-execution-review-report.md)，本轮最新代码核对、修正和剩余门槛见 [Step1～Step6 验收复核](step1-step6-acceptance-review.md)。
 
 **已完成的切片：**
 
@@ -532,18 +532,20 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **剩余实施顺序：**以下属于 Step6 的关闭门槛，不转移给 step16；涉及共享服务、身份和审批的前置能力分别与 step5c、step7 同步交付。
 
-- [ ] step6a：完成 step5c 共享执行服务和正式后端绑定，再在 Runner CLI 装配 `ManagedChannel`、持久接收队列、串行执行槽、结果上传及关闭处理。持久接受后宕机，重启只恢复同一 Task/Run；未接通前含 `control_plane` 的 CLI 配置明确启动失败。通过安装后的独立 Runner 进程对接真实平台 HTTP 的最小投递—执行—投影测试。（部分交付(`managed-execution-loop`):Runner CLI 已装配 `ManagedChannel`、持久接收队列(幂等接受,接受≠执行)、串行执行调度、`run_terminal` 结果上传与关闭 drain;重启按原 Task/Run 恢复,standalone replay 与受管调度按 issuer 分流,重连重注册+按 Run 游标补传,缺 durable 的 `control_plane` 启动失败;身份打点漂移转待对账。剩余:安装制品的独立 Runner 进程对接真实平台 HTTP 的进程级测试归 step6f,动作时租约强制归 step6b/step7）
-- [ ] step6b：把受管 `LeaseGate` 接入实际 Action 意图／领取／工具派发入口，而不是单独调用验证器。恢复、重连及每个受保护动作验证当前主体、部署、动作范围和授权期限；配合 step7 实现撤权／审批。授权到期后禁止新动作，已有未知结果只对账，不能重新授权后重做。用实际业务 API 调用计数验证断连到期、跨域与旧授权拒绝。（部分交付(`managed-action-authorization`):租约携带数据域 scope(enrollment 操作员字段),受管保护动作在台账门之前经共享租约门验证签名/期限/部署绑定/nonce/scope,拒绝零副作用留证据;断连到期、跨域、旧授权重放、跨部署租约、重启空门均以业务 API 调用计数验证;readonly 与 standalone 路径不变。剩余:撤权/审批联动归 step7,策略引擎对接与动作范围细粒度(工具级)授权归 step7）
-- [ ] step6c：实现独立宿主持久 `waiting_input`／`waiting_approval` 的进入和一次性命令唤醒；等待记录绑定原 Task/Run、参数摘要、审批或输入契约及期限。step7 提供合法审批判定，Step6 提供可靠等待。进程强制终止后重启仍等待，过期／重复唤醒不会派发工具。现有通用 TaskStore 支持等待状态，Runner 暂无完整等待路径。（部分交付(`durable-waiting-wake`):Runner 侧持久等待进入(审批工具 claim 后 park、业务 `input_required` park)、一次性唤醒命令面(`provide-input`/`resume`,原子应用:token 消费+输入合并+新 attempt Run 重绑+命令 applied)、过期/错 token/重复唤醒显式 rejected 且零派发、强制重启后保持等待并可合法唤醒;唤醒经一次性 grant 防止新 attempt 重复 park。剩余:审批判定与策略归 step7,受管通道的命令下发归受管切片,进程级验收归 step6f）
-- [ ] step6d：完成平台共享执行的 checkpoint／动作恢复关联，恢复原逻辑执行和已记录结果；不要仅创建新 Run 并期待模型再次生成相同 execution_id。当前中断尝试已有受保护 Action 时保守进入 `reconciliation_required`。用真实入口验证落盘成功后崩溃、外部写成功但回执失败、未知结果、工具／参数冲突，完成后才关闭整体 G2。（部分交付(`checkpoint-recovery`):宿主 checkpoint 持久化(任务级稳定会话,discardable cache),重启恢复在同一 attempt 上从最近 superstep 继续,台账仲裁不变(已决动作回填真实结果、claimed 写停审、业务调用计数零重做);无 checkpoint 回退 replay 安全语义不变;等待唤醒 attempt 清除旧 checkpoint 从干净状态开始。平台侧:含保护动作的中断尝试在 engine 会话状态可装载时沿用原 Run 恢复(会话延续+台账仲裁),不可装载保持 `reconciliation_required`。剩余:G2 整体关闭仍需外部写成功但回执失败、工具/参数冲突的真实入口矩阵(部分已有),进程级验收归 step6f）
-- [ ] step6e：将已测试的父子任务等待原语接到确定性工作流节点或具名外部 workflow adapter；提供经过来源认证的回调入口，绑定父／子引用、workspace、关联键和期限。父子分别重启、跨 workspace 伪造、重复／迟到回调均运行真实接口验收。现有手写 orchestrator 测试不等于工作流产品入口交付。（部分交付(`workflow-callback-entry`):具名 REST 回调入口 `POST /tasks/{id}/workflow-callback`,回调经平台自有记录核实子任务事实(同 workspace、终态、声明一致)后才消费一次性 token 唤醒;伪造/跨 workspace/状态不符/重复/迟到回调显式 rejected 零副作用;唤醒后 inline 部署自动重派发,worker 部署由 worker 轮询拾取;父等待与子终态跨持久重启保持。剩余:确定性工作流图节点消费回调的编排语义归具体工作流切片）
-- [ ] step6f：从非 editable wheel 启动独立／受管组合，在隔离 PostgreSQL 中执行真实进程 kill/restart、等待、租约接管、迟到回执、重复命令、证据故障及重连。测试须统计业务副作用次数并查原 Task/Run、Action 和命令回执；独立安装包不能用仓库源码单测替代。SC03、SC04、完整 SC05 和 SC06 分别按实际覆盖更新场景清单，部分测试保留但不标整场景完成。（部分交付(`scenario-acceptance-matrix`):SC03/SC06 进程级切片交付(wheel 干净安装+子进程硬杀重启+业务副作用计数,SC清单登记 implemented_slices 并保持 planned);SC04/SC05 登记已有组件切片(租约门/受管环路/动作授权/投递接受/事件投影)与进程级缺口。剩余:受管组合 wheel 进程级(需平台控制面入场景)、PostgreSQL 参考存储进程矩阵(存储层由 durable 包 CI PostgreSQL 用例覆盖)、readonly-continuation 语义(引擎当前全量 fail-closed,已登记)、SC03/SC06 整场景完成标记）
+- [ ] step6a：受管 CLI、持久接收、串行执行、结果上传与 drain 已接通；接受只代表排队，重投保留原 Task/Run。上传过滤独立来源，并按历史 Run 分流，单个失败流不阻塞其他任务。**关闭门槛：**安装后的 Runner 进程对接真实平台 HTTP，验证接受响应丢失、执行、状态投影、宿主重启及重连；ASGI/组件测试不能替代。
+- [ ] step6b：实际受保护 Action 派发前已检查 Lease 的签名、issuer、host subject、workspace、部署、数据域、期限与 nonce；拒绝使执行失败并停止后续工具，未知动作保持待对账。当前每个 Lease 只允许一次受保护派发，HMAC 是预览信任材料。**关闭门槛：**与 step7 接通工具级动作范围、合法审批、撤权及声明的断连窗口；明确多写动作执行期间的续租或拒绝策略，并完成实际业务调用计数验收。
+- [ ] step6c：Runner 已提供持久等待和 owner/token 技术唤醒。审批等待发生在 claim 前；唤醒原子消费 token、合并/校验输入、绑定新 attempt 并应用命令；前序已完成动作保留原 key、回填结果。拒绝内部字段注入、GET 唤醒、并发重复消费和异体重放；任务列表/事件/动作按 owner 与可信数据域隔离。独立 wheel 进程已验证等待后 kill/restart、合法唤醒和重复回执。**关闭门槛：**step7 合法审批判定、受管命令下发及新 attempt 的平台关联；有 token 不代表有企业审批权限。
+- [ ] step6d：Runner 持久 checkpoint 按 attempt 隔离，同一 attempt 重启可原生继续；无 checkpoint 仅按冻结固定图及账本恢复。旧 task 级 checkpoint 只用于可验证的原 attempt，新等待唤醒不读取它。恢复前校验 manifest、工具顺序/Schema、模型引用与业务派发绑定；缺摘要或漂移不执行。平台派发已重验 Principal/部署/版本，使用冻结配置，但**普通 SessionState 是聊天历史，不是原生 continuation**；已有受保护动作的中断必须待对账。**关闭门槛：**平台共享执行真实 continuation、冻结动作关联和外部写/回执丢失故障矩阵；保持 G2 未关闭，不建设平台通用 checkpoint 引擎。
+- [ ] step6e：REST 工作流回调已核实同 workspace 的真实子终态，匹配完整 child 引用和一次性 token；附加载荷不能覆盖可信 child ID/state，command ID 绑定完整原请求。**关闭门槛：**将等待/回调接到确定性工作流节点或具名 adapter，运行真实父子执行与各自进程重启；手写或 monkeypatch orchestrator 只能证明原语。
+- [ ] step6f：独立 wheel 进程已覆盖 SC01/SC02、SC03 的终态写持久化与审批等待重启、SC06 本地证据拒绝切片；PostgreSQL durable 存储和 Alembic 升级链另行验证。**关闭门槛：**受管 Runner+真实平台 HTTP 的 wheel 进程验收、PostgreSQL 上完整宿主故障矩阵、未决外部写和迟到回执；SC03/SC04/SC05/SC06 按实际范围保持部分覆盖，不因组件测试通过标整场景完成。证据不可写时只读继续及中心缓冲/补传限额仍需 step7/10 明确策略。
 
 **落点：**`packages/hecate-durable` 承载独立契约／SQL adapter／worker，`packages/hecate-runner` 承载宿主装配；`execution/` 承载平台登记、投影和命令入口，`core/composition` 负责绑定。Runtime kernel 只依赖动作钩子语义，不导入平台存储。平台与宿主各自本地事务，不引入跨数据库事务或双主生命周期。
 
 **验收：**提交后断开 HTTP，任务继续；重启不会因确认丢失重复创建同一后端 Run；旧 owner 和重复／迟到回调不能改写实际结果；动作未知显示待对账；命令成功回执必须有已发生的效果。独立宿主未连接控制面也能通过持久等待和恢复；受管组合另行通过授权、投递和重连测试。未达到的能力继续明确拒绝或标注未认证。
 
 **迁移／回退：**平台部署执行 Alembic 后才启动新中继；新增 `durable_outbox_receipt` 为派生投递记录，升级后旧事件可能重放一次，投影必须幂等。独立宿主在停机／drain 后升级本地存储 schema。关闭新入口先 drain 已接受任务；保留 Runtime EventStore，不将 token/superstep 全部写入平台强一致事务。降级前核对状态格式，不能恢复已消费等待或放开待对账动作。
+
+**本轮安全兼容处理：**缺少执行定义摘要的历史 Runner 非终态任务不自动恢复；历史等待拒绝未经原版本验证的唤醒，终态仍可查询。不得用当前定义补签历史输入绕过。受管宿主升级后需要重新 pull 携带 workspace 的 Lease；已消费 token 和动作来源须保留，回退不能重新开放聊天历史恢复或盲目重做前序写入。
 
 ### step7 — 实现与 Runtime 无关的强制治理
 

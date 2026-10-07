@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -93,6 +94,7 @@ class DurableRuntime:
     def __init__(self, store: SqlDurableStore, *, workspace: str) -> None:
         self.store = store
         self.workspace = workspace
+        self.execution_definition: str | None = None
         # step6d: persistent execution checkpoints share the host's own
         # database (a discardable cache over the same durable session).
         from hecate_durable.storage import AsyncSqlCheckpointStore, SqlCheckpointStore
@@ -137,6 +139,7 @@ class DurableRuntime:
             input_payload={
                 **run_input,
                 "_host_identity": {"principal": principal, "domains": list(domains) if domains is not None else None},
+                "_host_definition": self.execution_definition,
             },
         )
         replayed = association.run_ref.id != run_id
@@ -225,6 +228,8 @@ class DurableRuntime:
         wait_token: str,
         input_payload: dict[str, Any] | None = None,
         expires_at: str | None = None,
+        run_ref: BackendRef | None = None,
+        input_validator: Callable[[dict], None] | None = None,
     ) -> tuple[ControlCommandRecord, str | None]:
         """Record and atomically apply one wake command (provide_input/resume).
 
@@ -244,33 +249,67 @@ class DurableRuntime:
             if kind == ControlCommandKind.PROVIDE_INPUT.value
             else ControlCommandKind.RESUME
         )
+        current_run = run_ref or self.store.run_for_task(task_ref)
+        expected_payload = {"input": input_payload} if input_payload is not None else {}
+        expected_detail = {"wait_token": wait_token}
         existing = self.store.get(command_id)
         if existing is not None:
-            if (existing.kind, existing.task_ref) != (wake_kind, task_ref):
-                raise ValueError("command ID is already bound to another command")
+            if (
+                (existing.kind, existing.task_ref, existing.issuer) != (wake_kind, task_ref, issuer)
+                or existing.payload != expected_payload
+                or existing.detail_ns != expected_detail
+                or existing.run_ref != current_run
+                or existing.expires_at != expires_at
+            ):
+                raise ValueError("command ID is already bound to another wake request")
             if existing.state is CommandState.APPLIED:
                 return existing, None
             if existing.state is CommandState.REJECTED:
                 return existing, "previously rejected"
         else:
             has_payload = input_payload is not None
-            self.store.record(
-                ControlCommandRecord(
+            try:
+                self.store.record(
+                    ControlCommandRecord(
+                        command_id=command_id,
+                        kind=wake_kind,
+                        issuer=issuer,
+                        task_ref=task_ref,
+                        issued_at=_now_iso(),
+                        state=CommandState.REQUESTED,
+                        run_ref=current_run,
+                        expires_at=expires_at,
+                        payload=expected_payload,
+                        payload_schema_ref=("urn:hecate:runner:wake-input/0" if has_payload else None),
+                        detail_ns=expected_detail,
+                    )
+                )
+            except ValueError:
+                if self.store.get(command_id) is None:
+                    raise
+                # Concurrent duplicate admission may differ only in the
+                # server timestamp. Re-read and bind the original request.
+                return self.apply_wake(
                     command_id=command_id,
-                    kind=wake_kind,
+                    kind=kind,
                     issuer=issuer,
                     task_ref=task_ref,
-                    issued_at=_now_iso(),
-                    state=CommandState.REQUESTED,
+                    wait_token=wait_token,
+                    input_payload=input_payload,
                     expires_at=expires_at,
-                    payload={"input": input_payload} if has_payload else {},
-                    payload_schema_ref=("urn:hecate:runner:wake-input/0" if has_payload else None),
+                    run_ref=current_run,
+                    input_validator=input_validator,
                 )
-            )
 
         def _reject(reason: str) -> tuple[ControlCommandRecord, str | None]:
             logger.info("wake command %s rejected: %s", command_id, reason)
-            return self.store.transition(command_id, CommandState.REJECTED), reason
+            try:
+                return self.store.transition(command_id, CommandState.REJECTED), reason
+            except ValueError:
+                settled = self.store.get(command_id)
+                if settled is not None and settled.state is CommandState.APPLIED:
+                    return settled, None
+                raise
 
         record = self.store.get_task_state(task_ref)
         if record is None or record.lifecycle_state not in (
@@ -278,6 +317,8 @@ class DurableRuntime:
             TaskLifecycleState.WAITING_APPROVAL,
         ):
             return _reject("task is not in a persistent wait")
+        if self.store.run_for_task(task_ref) != current_run:
+            return _reject("wait belongs to another run")
         expected_state = (
             TaskLifecycleState.WAITING_INPUT
             if wake_kind is ControlCommandKind.PROVIDE_INPUT
@@ -303,15 +344,45 @@ class DurableRuntime:
         persisted = self.store.get_task_input(task_ref) or {}
         wait = (record.extra or {}).get("wait") or {}
         contract_ref = wait.get("contract_ref") or {}
-        merged = {**persisted, "provided": input_payload} if input_payload is not None else dict(persisted)
+        merged = dict(persisted)
+        raw_args = dict(persisted.get("tool_arguments") or {})
+        tool = contract_ref.get("tool")
+        candidate = raw_args.get(tool)
+        arguments = candidate if isinstance(candidate, dict) else raw_args
+        if input_payload is not None:
+            if any(key.startswith("_") for key in input_payload):
+                return _reject("internal host fields cannot be supplied")
+            contract = contract_ref.get("contract") or {}
+            fields = contract.get("fields", [])
+            if any(field not in input_payload and field not in arguments for field in fields):
+                return _reject("provided input does not satisfy the wait contract")
+            arguments = {**input_payload, **arguments}
+            if tool in raw_args and isinstance(raw_args[tool], dict):
+                raw_args[tool] = arguments
+            else:
+                raw_args = arguments
+            merged["tool_arguments"] = raw_args
+            merged["provided"] = input_payload
+        origins = dict(persisted.get("_action_origins") or {})
+        for action in self.store.list_run_actions(current_run):
+            name = (action.get("intent") or {}).get("action_name")
+            if name and name != tool:
+                origins.setdefault(name, current_run.id)
+        origins.pop(tool, None)
+        merged["_action_origins"] = origins
         # One-shot dispatch grant for the parked tool: the wake decision is
         # the recorded approval; the new attempt's dispatch boundary
-        # consumes it instead of re-parking (the ledger claim for the old
-        # attempt stays claimed; the new attempt claims its own key).
+        # consumes it instead of re-parking. The waiting tool receives a new
+        # action key; completed predecessors retain their original keys.
         merged["_wake_grant"] = {
-            "tool": contract_ref.get("tool"),
-            "arguments_digest": contract_ref.get("arguments_digest"),
+            "tool": tool,
+            "arguments_digest": tool_arguments_digest(arguments),
         }
+        if input_validator is not None:
+            try:
+                input_validator({key: value for key, value in merged.items() if not key.startswith("_")})
+            except ValueError as exc:
+                return _reject(str(exc))
         new_run = BackendRef(RefKind.RUN, ISSUER, f"run-{uuid.uuid4()}")
         try:
             # One transaction: requeue on the new attempt run, merge the
@@ -321,6 +392,7 @@ class DurableRuntime:
             self.store.apply_task_state(
                 task_ref,
                 TaskLifecycleState.QUEUED,
+                expected_revision=record.revision,
                 input_payload=merged,
                 event_run_ref=new_run,
                 applied_command_id=command_id,
@@ -328,10 +400,8 @@ class DurableRuntime:
             )
         except Exception as exc:  # expired command / stale revision in the store
             return _reject(str(exc))
-        # step6d: the wake starts its new attempt CLEAN — the parked
-        # attempt's partial-graph checkpoints are obsolete (the grant, not
-        # the old channel state, authorizes the re-dispatch).
-        self.checkpoints.delete_session_sync(self._task_session(task_ref))
+        # Checkpoints are attempt-scoped: the new Run cannot load the parked
+        # attempt's state, even if the process dies immediately after commit.
         receipt = self.store.get(command_id)
         if receipt is None:  # pragma: no cover - recorded above in this call
             raise ValueError(f"wake command {command_id} vanished after apply")

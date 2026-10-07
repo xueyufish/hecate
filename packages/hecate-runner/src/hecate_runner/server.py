@@ -232,8 +232,11 @@ class RunnerServer:
                         id=run_id,
                     )
                     association = server._durable.association_for_run(run_ref)
-                    if association is not None:
-                        if association.key.subject != identity["principal"]:
+                    task_ref = association.task_ref if association else server._durable.store.task_for_run(run_ref)
+                    if task_ref is not None:
+                        trusted = (server._durable.store.get_task_input(task_ref) or {}).get("_host_identity") or {}
+                        principal = trusted.get("principal") or (association.key.subject if association else None)
+                        if principal != identity["principal"]:
                             server._evidence.append(
                                 "denial",
                                 identity["principal"],
@@ -247,14 +250,14 @@ class RunnerServer:
                                 "Request denied",
                                 "run is outside the trusted identity scope",
                             )
-                        record = server._durable.store.get_task_state(association.task_ref)
+                        record = server._durable.store.get_task_state(task_ref)
                         state = RunState(
                             run_id=run_id,
                             status=record.lifecycle_state.value,
-                            principal=association.key.subject,
-                            domains=(),
-                            task_ref=association.task_ref,
-                            run_ref=association.run_ref,
+                            principal=principal,
+                            domains=tuple(trusted.get("domains") or ()),
+                            task_ref=task_ref,
+                            run_ref=run_ref,
                             received_at=record.recorded_at,
                         )
                 if state is None:
@@ -265,6 +268,12 @@ class RunnerServer:
                     )
                     raise _ProblemError(403, "forbidden", "Request denied", "run is outside the trusted identity scope")
                 return state
+
+            def _task_visible(self, record, identity: dict) -> bool:
+                trusted = (server._durable.store.get_task_input(record.task_ref) or {}).get("_host_identity") or {}
+                return trusted.get("principal") == identity["principal"] and set(trusted.get("domains") or []).issubset(
+                    identity["domains"]
+                )
 
             def _handle_wake(self, action: str, raw_ref: str, identity: dict, body: dict) -> None:
                 """Apply one wake command (provide-input/resume) for a waiting run.
@@ -297,12 +306,20 @@ class RunnerServer:
                     raise _ProblemError(404, "run-not-found", "Run not found", "run does not resolve")
                 persisted = server._durable.store.get_task_input(task_ref) or {}
                 trusted = persisted.get("_host_identity") or {}
-                if trusted.get("principal") != identity["principal"]:
+                if trusted.get("principal") != identity["principal"] or not set(trusted.get("domains") or []).issubset(
+                    identity["domains"]
+                ):
                     server._evidence.append(
                         "denial", identity["principal"], run_id, OUTCOME_DENIED, {"reason": "forbidden"}
                     )
                     raise _ProblemError(403, "forbidden", "Request denied", "run is outside the trusted identity scope")
 
+                try:
+                    server._engine.validate_durable_input(persisted)
+                except ValueError as exc:
+                    raise _ProblemError(
+                        409, "execution-definition-conflict", "Execution definition conflict", str(exc)
+                    ) from exc
                 command_id = str(body.get("command_id") or "")
                 wait_token = str(body.get("wait_token") or "")
                 if not command_id or not wait_token:
@@ -325,11 +342,17 @@ class RunnerServer:
                         kind=kind,
                         issuer=identity["principal"],
                         task_ref=task_ref,
+                        run_ref=run_ref,
                         wait_token=wait_token,
                         input_payload=input_payload,
+                        expires_at=body.get("expires_at"),
+                        input_validator=server._engine.validate_run_input,
                     )
 
-                receipt, reason = server._run_coro(_apply())
+                try:
+                    receipt, reason = server._run_coro(_apply())
+                except ValueError as exc:
+                    raise _ProblemError(409, "command-conflict", "Command conflict", str(exc)) from exc
                 if receipt.state.value == "applied":
                     server._evidence.append(
                         "wake", identity["principal"], run_id, "applied", {"command_id": command_id, "kind": kind}
@@ -416,6 +439,8 @@ class RunnerServer:
                             records = server._durable.store.list_tasks()
                             items = []
                             for r in records:
+                                if not self._task_visible(r, identity):
+                                    continue
                                 run_ref = server._durable.store.run_for_task(r.task_ref)
                                 items.append(
                                     {
@@ -431,6 +456,11 @@ class RunnerServer:
                         record = server._durable.task_state(task_id)
                         if record is None:
                             raise _ProblemError(404, "task-not-found", "Task not found", "task does not resolve")
+                        if not self._task_visible(record, identity):
+                            self._deny(
+                                "forbidden", "task is outside the trusted identity scope", 403, identity["principal"]
+                            )
+                            return
                         if len(parts) == 3 and parts[2] == "actions":
                             run_ref = server._durable.store.run_for_task(record.task_ref)
                             actions = server._durable.run_actions(run_ref) if run_ref is not None else []
@@ -599,11 +629,10 @@ class RunnerServer:
                             self._send_json(200, {"run_ref": f"runs/{run_id}", "artifacts": state.events})
                             return
                     if len(parts) == 3 and parts[0] == "runs" and parts[2] in ("provide-input", "resume"):
-                        raw = self._read_body()
-                        parsed = json.loads(raw.decode("utf-8")) if raw else {}
-                        if not isinstance(parsed, dict):
-                            raise _ProblemError(400, "invalid-json", "Invalid JSON", "wake body must be an object")
-                        self._handle_wake(parts[2], unquote(parts[1]), identity, parsed)
+                        # Drain a declared body before closing the HTTP
+                        # connection so refusal is not lost as a TCP reset.
+                        self._read_body()
+                        self._send_problem(405, "method-not-allowed", "Method not allowed", "wake requires POST")
                         return
 
                     self._send_problem(404, "not-found", "Not found", f"no route for {path}")

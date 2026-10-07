@@ -182,11 +182,8 @@ class SqlActionLedgerHook(ActionLedgerHook):
             )
         if last is not None and last.outcome is ActionOutcome.SUCCEEDED:
             # The real recorded result content is the cross-restart backfill.
-            content = None
-            for action in self._store.list_run_actions(self._run_ref):
-                if action.get("action_key") == execution_id and action.get("result_payload") is not None:
-                    content = _stringify(action["result_payload"])
-                    break
+            payload = self._store.action_result(execution_id, self._task_ref)
+            content = _stringify(payload) if payload is not None else None
             return ToolExecutionResolution(
                 state=ToolExecutionState.SUCCEEDED,
                 arguments_digest=recovery.intent.arguments_digest if recovery.intent else None,

@@ -242,7 +242,12 @@ sc_scenarios:
     tier: 1
     responsible_step: 6/7
     blocked_by: standalone-durable-actions
-    implemented_slices: [wheel_process_restart, ledger_backfill_no_redo]
+    implemented_slices: [wheel_process_restart, terminal_write_persistence, approval_wait_process_restart, ledger_backfill_no_redo]
+    gaps: >-
+      Owner/token wake is a technical waiting primitive. Independent approval
+      authority, separation of duties and parameter-bound business permission
+      remain step7 work; interrupted external writes and PostgreSQL process
+      acceptance remain step6 closure gates.
     assertions: >-
       The protected write executes only with valid parameter binding, current
       permission, and approval; after restart the wait/result is recoverable

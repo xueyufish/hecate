@@ -357,6 +357,7 @@ class _Host:
             poll_interval_seconds=0.05,
             data_domains=cp.data_domains,
             transport=transport,
+            execution_definition=self.profile.execution_definition_digest(),
         )
         self.scheduler = ManagedExecutionScheduler(store=self.store, engine=self.engine, poll_interval_seconds=0.05)
 
@@ -671,3 +672,46 @@ async def test_identity_drift_stops_task_into_reconciliation(platform, tmp_path:
         assert preserved["_host_identity"]["domains"] == ["domain_a"]
     finally:
         drifted.close()
+
+
+async def test_unprojectable_stream_does_not_starve_other_runs_or_upload_local_tasks(platform, tmp_path, monkeypatch):
+    """The upload loop isolates both event streams and independent task origins."""
+    await platform["admit"]()
+    host = _Host(
+        _write_managed_profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}"),
+        platform["transport"],
+        api=_BusinessApi(),
+    )
+    try:
+        assert await host.channel.register()
+        await platform["opt_in"]()
+        first = await platform["queue_delivery"](_delivery_input(1))
+        second = await platform["queue_delivery"](_delivery_input(2))
+        assert await host.channel.pull_once() == 2
+        await _drain_all(host, (first, second))
+        host.durable.submit(
+            principal="local-reader",
+            domains=("domain_a",),
+            run_input=_delivery_input(3),
+            idempotency_key="local-task",
+        )
+        original = host.channel._request
+        attempts = []
+
+        async def rejecting_first(method, path, **kwargs):
+            if path == "/managed/host/events":
+                ref = kwargs["payload"]["local_task_ref"]
+                attempts.append(ref)
+                if ref["id"] == managed_task_ref(first).id:
+                    return None
+            return await original(method, path, **kwargs)
+
+        monkeypatch.setattr(host.channel, "_request", rejecting_first)
+        assert await host.channel.upload_events() == FACTS_PER_RUN
+        assert all(ref["issuer_domain"] == "managed-host" for ref in attempts)
+        assert (await _run_projection(await _platform_run_id_of(first))) == {}
+        assert (await _run_projection(await _platform_run_id_of(second)))["state"] == "succeeded"
+        monkeypatch.setattr(host.channel, "_request", original)
+        assert await host.channel.upload_events() == FACTS_PER_RUN
+    finally:
+        host.close()

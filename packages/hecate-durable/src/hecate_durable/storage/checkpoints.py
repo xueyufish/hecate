@@ -83,7 +83,10 @@ class SqlCheckpointStore:
                 ).scalar_one_or_none()
             else:
                 row = session.execute(
-                    select(CheckpointRow).where(CheckpointRow.checkpoint_id == str(checkpoint_id))
+                    select(CheckpointRow).where(
+                        CheckpointRow.session_id == str(session_id),
+                        CheckpointRow.checkpoint_id == str(checkpoint_id),
+                    )
                 ).scalar_one_or_none()
             if row is None:
                 return None

@@ -198,6 +198,7 @@ def lease_claims(
     sub: str,
     ttl_seconds: float,
     scope: list[str] | None = None,
+    tenant: str | None = None,
     now: datetime | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Sign one authorization lease (aud = the deployment domain binding).
@@ -216,6 +217,7 @@ def lease_claims(
         exp=(moment + timedelta(seconds=ttl_seconds)).isoformat(),
         nonce=new_nonce(),
         scope=list(scope) if scope is not None else None,
+        tenant=tenant,
     )
     body = claims.to_dict()
     signature = hmac.new(secret, canonical_claims_digest(body).encode(), hashlib.sha256).hexdigest()

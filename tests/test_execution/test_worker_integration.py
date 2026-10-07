@@ -415,10 +415,8 @@ async def test_lifespan_shutdown_drains_protected_dispatch_before_cancelling(har
     assert store.get_task_state(ref).lifecycle_state is TaskLifecycleState.SUCCEEDED
 
 
-async def test_protected_interrupt_recovers_same_run_when_session_loadable(harness, monkeypatch) -> None:
-    """step6d: a protected-action interrupted attempt recovers on its OWN run
-    when the engine session state is loadable; an unloadable session keeps
-    the conservative reconciliation_required."""
+async def test_protected_interrupt_does_not_treat_conversation_as_checkpoint(harness, monkeypatch) -> None:
+    """Conversation history cannot establish native protected-action recovery."""
     from hecate_durable.contracts.durable import ActionIntent, TaskLifecycleState
     from hecate_durable.contracts.references import run_ref as mk_run_ref
     from hecate_durable.contracts.tools import ToolSideEffectClass
@@ -459,7 +457,6 @@ async def test_protected_interrupt_recovers_same_run_when_session_loadable(harne
     # the crash window.
     async with harness["session_factory"]() as db:
         run = (await db.execute(select(RunModel).where(RunModel.task_id == uuid.UUID(task_ref.id)))).scalars().first()
-        engine_session = uuid.UUID(str(run.backend_ref["id"]))
     store.apply_task_state(task_ref, TaskLifecycleState.RUNNING)
     store.apply_task_state(task_ref, TaskLifecycleState.QUEUED)
     store.record_intent_ex(
@@ -480,16 +477,17 @@ async def test_protected_interrupt_recovers_same_run_when_session_loadable(harne
 
     dispatcher = PlatformTaskDispatcher(store, harness["session_factory"])
 
-    async def _recoverable_true(run, context):
-        return True
+    from hecate.core.composition import entry_assembly
 
-    # Recoverable session: the SAME run and engine session re-execute and
-    # the task converges.
-    monkeypatch.setattr(PlatformTaskDispatcher, "_session_recoverable", staticmethod(_recoverable_true))
+    class HistoryStore:
+        async def load(self, *args):
+            return {"messages": [{"role": "assistant", "content": "write already done"}]}
+
+    monkeypatch.setattr(entry_assembly, "get_shared_session_state_store", lambda: HistoryStore())
     worker = DurableWorker(store, dispatcher, leases=store.leases, worker_id="rec", lease_ttl=30)
     assert await worker.dispatch_once(task_ref) is True
-    assert store.get_task_state(task_ref).lifecycle_state is TaskLifecycleState.SUCCEEDED
-    assert executed_sessions == [engine_session]
+    assert store.get_task_state(task_ref).lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
+    assert executed_sessions == []
 
     # Unloadable session on a fresh interruption: conservative reconciliation,
     # and _execute is never invoked for it.
@@ -498,14 +496,10 @@ async def test_protected_interrupt_recovers_same_run_when_session_loadable(harne
 
     executed_sessions.clear()
 
-    async def _recoverable_false(run, context):
-        return False
-
     async def _fail_execute(self, db, context, **kwargs):
         raise AssertionError("must not execute when the session is not recoverable")
 
     monkeypatch.setattr(PlatformTaskDispatcher, "_execute", _fail_execute)
-    monkeypatch.setattr(PlatformTaskDispatcher, "_session_recoverable", staticmethod(_recoverable_false))
     # Drive a second protected interruption through a fresh task.
     async with harness["session_factory"]() as db:
         result2 = await TaskControlService(
@@ -545,3 +539,113 @@ async def test_protected_interrupt_recovers_same_run_when_session_loadable(harne
     fresh = store.get_task_state(task2)
     assert fresh.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
     assert fresh.extra["reconciliation_reason"] == "interrupted attempt contains protected actions"
+
+
+@pytest.mark.parametrize("drift", ["principal", "deployment", "version"])
+async def test_queued_execution_revalidates_admitted_identity_and_version(harness, monkeypatch, drift):
+    """Admission cannot authorize execution after authority or configuration drifts."""
+    from hecate_durable.worker import DurableWorker
+    from sqlalchemy import select
+
+    import hecate.execution.task_control as control_module
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher
+    from hecate.models.agent_principal import PrincipalLifecycle
+
+    monkeypatch.setattr(control_module, "_spawn_background", lambda coro: coro.close())
+    async with harness["session_factory"]() as db:
+        result = await TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        ).submit(
+            workspace_id=WS,
+            user_id=OWNER,
+            goal="queued admission",
+            agent_id=harness["agent_id"],
+            input={"messages": [{"role": "user", "content": "go"}]},
+        )
+        if drift == "principal":
+            principal = await db.get(AgentPrincipalModel, harness["agent_id"])
+            principal.lifecycle = PrincipalLifecycle.REVOKED
+        elif drift == "deployment":
+            deployment = (await db.execute(select(AgentDeploymentModel))).scalar_one()
+            deployment.backend_version = "changed"
+        else:
+            version = (await db.execute(select(AgentVersionModel))).scalar_one()
+            version.config_snapshot = {"tools": ["changed"]}
+        await db.commit()
+
+    async def forbidden_execute(*args, **kwargs):
+        raise AssertionError("invalid execution admission must stop before runtime")
+
+    monkeypatch.setattr(PlatformTaskDispatcher, "_execute", forbidden_execute)
+    worker = DurableWorker(
+        harness["store"],
+        PlatformTaskDispatcher(harness["store"], harness["session_factory"]),
+        leases=harness["store"].leases,
+    )
+    assert await worker.dispatch_once(result.task_ref)
+    state = harness["store"].get_task_state(result.task_ref)
+    assert state.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
+    assert "execution admission no longer valid" in state.extra["reconciliation_reason"]
+
+
+async def test_platform_entry_uses_frozen_version_instead_of_mutable_agent(harness, monkeypatch):
+    """Editing an agent cannot silently replace an admitted attempt's tools."""
+    from types import SimpleNamespace
+
+    from sqlalchemy import select
+
+    import hecate.execution.task_control as control_module
+    from hecate.core.composition import runtime_port_adapter
+    from hecate.execution import entry_service
+    from hecate.execution.task_dispatcher import PlatformTaskDispatcher, run_row_ref
+    from hecate.models.run import RunModel
+
+    monkeypatch.setattr(control_module, "_spawn_background", lambda coro: coro.close())
+    captured = {}
+
+    class StubEntry:
+        def __init__(self, **kwargs):
+            pass
+
+        async def execute(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(result={"content": "done"})
+
+    monkeypatch.setattr(entry_service, "EntryExecutionService", StubEntry)
+    monkeypatch.setattr(runtime_port_adapter, "create_runtime_port", lambda *args, **kwargs: object())
+    async with harness["session_factory"]() as db:
+        result = await TaskControlService(
+            db,
+            store=harness["store"],
+            recorder=harness["store"],
+            backend="postgres",
+            ledger_source="core",
+            session_factory=harness["session_factory"],
+        ).submit(
+            workspace_id=WS,
+            user_id=OWNER,
+            goal="frozen config",
+            agent_id=harness["agent_id"],
+            input={"messages": [{"role": "user", "content": "go"}]},
+        )
+        agent = await db.get(AgentModel, harness["agent_id"])
+        agent.tools = [{"name": "unadmitted-tool"}]
+        await db.commit()
+        run = (await db.execute(select(RunModel))).scalar_one()
+        dispatcher = PlatformTaskDispatcher(harness["store"])
+        context = dispatcher._context_of(result.task_ref, harness["store"].get_task_input(result.task_ref))
+        await dispatcher._execute(
+            db,
+            context,
+            engine_session=uuid.uuid4(),
+            task_ref=result.task_ref,
+            run_ref=run_row_ref(run),
+        )
+    assert captured["tools"] is None
+    assert captured["agent_version"] == 1
+    assert captured["skill_ref_manifest"] == []

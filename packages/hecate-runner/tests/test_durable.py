@@ -489,18 +489,23 @@ def test_capacity_gate_records_failure_category(
     assert denials[0].detail["category"] == "capacity"
 
 
+@pytest.mark.parametrize("failed_tool", ["query_inventory", "submit_inventory_update"])
 def test_outcome_persist_failure_keeps_task_pending_reconciliation(
-    harness: _Harness, api: _WriteAwareBusinessApi, monkeypatch: pytest.MonkeyPatch
+    harness: _Harness, api: _WriteAwareBusinessApi, monkeypatch: pytest.MonkeyPatch, failed_tool: str
 ) -> None:
+    real = SqlDurableStore.record_outcome_ex
+
     def _failing_outcome(self, outcome, **kwargs):  # noqa: ANN001
-        raise RuntimeError("ledger write failed after execution")
+        if outcome.action_key.endswith(f":{failed_tool}"):
+            raise RuntimeError("ledger write failed after execution")
+        return real(self, outcome, **kwargs)
 
     monkeypatch.setattr(SqlDurableStore, "record_outcome_ex", _failing_outcome)
     status, submitted = harness.call("POST", "/runs", _write_request())
     assert status == 202
     run_id = submitted["run_ref"].split("/")[1]
     harness.engine.wait_for_sync(run_id)
-    assert len(api.write_calls) == 1, "the write itself executed"
+    assert len(api.write_calls) == (1 if failed_tool == "submit_inventory_update" else 0)
     task_id = _wait_task_terminal(harness, run_id)["task_ref"]
     record = harness.durable.task_state(task_id)
     assert record.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED, (
