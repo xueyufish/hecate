@@ -31,6 +31,7 @@ from .managed import (
     ManagedChannel,
     ManagedExecutionScheduler,
     ManagedIdentity,
+    apply_managed_command,
     managed_principal_for,
 )
 from .profile import Profile, ProfileError, load_profile, resolve_secret_ref
@@ -168,7 +169,21 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if channel is not None:
-        managed = (channel, ManagedExecutionScheduler(store=durable.store, engine=engine))
+        if durable is None:  # guarded by the managed profile validation above
+            raise RuntimeError("managed command processing requires the durable runner")
+
+        async def handle_managed_command(item: dict) -> dict | None:
+            return await apply_managed_command(item, durable=durable, engine=engine)
+
+        channel.set_command_handler(handle_managed_command)
+        managed = (
+            channel,
+            ManagedExecutionScheduler(
+                store=durable.store,
+                engine=engine,
+                associate_attempt=channel.associate_attempt,
+            ),
+        )
     server = RunnerServer(profile, engine, evidence, durable=durable)
 
     if durable is not None:

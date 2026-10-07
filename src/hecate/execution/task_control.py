@@ -604,6 +604,25 @@ class TaskControlService:
         # the application session (one independent session per transaction).
         await self._db.commit()
 
+        # Managed executions own their task/run facts on the enrolled host.
+        # Persist the command in the platform outbox and let the host report
+        # its effect; applying the platform's local durable state here would
+        # make delivery look like execution and could consume a wait twice.
+        from hecate.execution.managed_channel import ManagedChannelError, ManagedDeliveryService
+
+        try:
+            managed_delivery = await ManagedDeliveryService(self._db).get_by_task_ref(workspace_id, t_ref.to_dict())
+        except ManagedChannelError as exc:
+            raise TaskControlValidationError(str(exc)) from exc
+        if managed_delivery is not None:
+            if _expired(record.expires_at):
+                expired = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)
+                return CommandIssueResult(record=expired, detail="command expired before host delivery")
+            if kind is ControlCommandKind.PAUSE:
+                rejected = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                return CommandIssueResult(record=rejected, detail="managed runner declares no pause capability")
+            return CommandIssueResult(record=record, detail="command persisted for managed host delivery")
+
         if _expired(record.expires_at):
             expired = await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.EXPIRED)
             return CommandIssueResult(record=expired, detail="command expired before execution")

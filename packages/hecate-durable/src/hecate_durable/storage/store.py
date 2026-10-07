@@ -479,6 +479,11 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
                         raise ValueError("command expired before effect commit")
                 command.state, command.updated_at = CommandState.APPLIED.value, recorded
                 if run_ref is not None:
+                    command.extra = {
+                        **(command.extra or {}),
+                        "effect_run_ref": run_ref.to_dict(),
+                    }
+                if run_ref is not None:
                     self.events.emit(
                         session,
                         task_ref=task_ref,

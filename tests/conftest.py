@@ -47,6 +47,7 @@ from hecate.models import (  # noqa: F401
     gateway_target,
     intent_package,
     knowledge,
+    managed_delivery,
     memory,
     metric,
     model_pricing,

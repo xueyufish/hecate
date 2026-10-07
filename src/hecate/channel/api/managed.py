@@ -130,6 +130,20 @@ class EventsUploadRequest(BaseModel):
     envelopes: list[dict[str, Any]]
 
 
+class AttemptAssociationRequest(BaseModel):
+    local_task_ref: dict[str, Any]
+    local_run_ref: dict[str, Any]
+
+
+class CommandEffectRequest(BaseModel):
+    command_id: str = Field(min_length=1, max_length=256)
+    state: str
+    local_task_ref: dict[str, Any]
+    local_run_ref: dict[str, Any] | None = None
+    successor_run_ref: dict[str, Any] | None = None
+    detail: str | None = None
+
+
 # --- operator routes (workspace-admin session auth) -------------------------
 
 
@@ -351,6 +365,14 @@ async def host_pull(
 
     service = ManagedDeliveryService(db)
     rows = await service.pull_batch(enrollment_id=host.enrollment_id, cursor=cursor or None, limit=limit)
+    from hecate.core.composition.durable_platform import get_durable_suite
+
+    suite = get_durable_suite()
+    commands = []
+    for command in suite.recorder.list_pending_commands(str(host.workspace_id)):
+        command_payload = await service.command_for_host(host, command)
+        if command_payload is not None:
+            commands.append(command_payload)
     lease = issue_lease_for(host, _secrets()[host.claims.iss], ttl_seconds=DEFAULT_LEASE_TTL_SECONDS)
     next_cursor = rows[-1].created_at.isoformat() if rows else cursor
     return {
@@ -364,6 +386,7 @@ async def host_pull(
             }
             for row in rows
         ],
+        "commands": commands,
         "next_cursor": next_cursor,
         "lease": lease,
     }
@@ -396,6 +419,82 @@ async def host_accept(
     except ManagedChannelError as exc:
         raise _host_error(exc) from exc
     return {"delivery_row_id": row.id, "state": row.state}
+
+
+@router.post("/host/attempts")
+async def host_associate_attempt(
+    body: AttemptAssociationRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    host: HostDep,
+):
+    """Persist a successor attempt mapping before the host executes or uploads it."""
+
+    from hecate.execution.managed_channel import ManagedChannelError, ManagedDeliveryService
+
+    service = ManagedDeliveryService(db)
+    try:
+        platform_run_ref = await service.associate_attempt(
+            host,
+            local_task_ref=body.local_task_ref,
+            local_run_ref=body.local_run_ref,
+        )
+        await db.commit()
+    except ManagedChannelError as exc:
+        await db.rollback()
+        raise _host_error(exc) from exc
+    return {"local_run_ref": body.local_run_ref, "platform_run_ref": platform_run_ref}
+
+
+@router.post("/host/commands/effect")
+async def host_command_effect(
+    body: CommandEffectRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    host: HostDep,
+):
+    """Record a host command effect only after its durable local receipt exists."""
+
+    from hecate.contracts.execution.durable import CommandState
+    from hecate.core.composition.durable_platform import get_durable_suite
+    from hecate.execution.managed_channel import ManagedChannelError, ManagedDeliveryService
+
+    try:
+        target = CommandState(body.state)
+    except ValueError as exc:
+        raise _host_error(ManagedChannelError("command effect state is invalid")) from exc
+    if target not in (CommandState.APPLIED, CommandState.REJECTED, CommandState.EXPIRED):
+        raise _host_error(ManagedChannelError("only terminal command effects may be uploaded"))
+
+    suite = get_durable_suite()
+    command = suite.recorder.get(body.command_id)
+    if command is None or command.extra.get("workspace_id") != str(host.workspace_id):
+        raise _host_error(ManagedChannelError("command does not belong to this workspace"))
+    service = ManagedDeliveryService(db)
+    if not await service.validate_command_receipt(
+        host,
+        command=command,
+        local_task_ref=body.local_task_ref,
+        local_run_ref=body.local_run_ref,
+    ):
+        raise _host_error(ManagedChannelError("command receipt does not match this host's accepted task"))
+
+    if body.successor_run_ref is not None:
+        try:
+            await service.associate_attempt(
+                host,
+                local_task_ref=body.local_task_ref,
+                local_run_ref=body.successor_run_ref,
+            )
+            await db.commit()
+        except ManagedChannelError as exc:
+            await db.rollback()
+            raise _host_error(exc) from exc
+    if command.state is target:
+        return {"command_id": body.command_id, "state": target.value}
+    try:
+        updated = suite.recorder.transition(body.command_id, target)
+    except (KeyError, ValueError) as exc:
+        raise _host_error(ManagedChannelError(str(exc))) from exc
+    return {"command_id": updated.command_id, "state": updated.state.value}
 
 
 @router.post("/host/events")

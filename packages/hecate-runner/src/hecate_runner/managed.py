@@ -34,6 +34,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -52,6 +53,7 @@ from hecate_durable.storage.lease import LeaseHandle, StaleFenceError
 from hecate_durable.storage.store import SqlDurableStore
 
 if TYPE_CHECKING:
+    from .durable import DurableRuntime
     from .engine import ExecutionEngine
 
 logger = logging.getLogger(__name__)
@@ -167,6 +169,8 @@ class ManagedStats:
     events_uploaded: int = 0
     upload_failures: int = 0
     lease_gate_refusals: int = 0
+    command_effects_uploaded: int = 0
+    command_failures: int = 0
 
 
 class ManagedChannel:
@@ -190,6 +194,7 @@ class ManagedChannel:
         transport=None,
         clock=None,
         execution_definition: str | None = None,
+        command_handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._workspace_id = workspace_id
@@ -208,6 +213,7 @@ class ManagedChannel:
         self._managed_principal = managed_principal_for(trust_root)
         self._managed_domains = tuple(data_domains)
         self._execution_definition = execution_definition
+        self._command_handler = command_handler
         self._transport = transport
         self._clock = clock or (lambda: datetime.now(UTC))
         # The gate is shared with the execution engine when the assembly
@@ -295,6 +301,14 @@ class ManagedChannel:
     def start(self) -> None:
         self._loop_task = asyncio.get_running_loop().create_task(self.run_forever())
 
+    def set_command_handler(
+        self,
+        handler: Callable[[dict[str, Any]], Awaitable[dict[str, Any] | None]],
+    ) -> None:
+        """Bind the host's durable command executor after engine assembly."""
+
+        self._command_handler = handler
+
     async def stop(self) -> None:
         if self._loop_task is not None:
             self._loop_task.cancel()
@@ -322,8 +336,31 @@ class ManagedChannel:
                 self.stats.deliveries_accepted += 1
             elif outcome == "duplicate":
                 self.stats.deliveries_duplicate += 1
+        for command in payload.get("commands", []):
+            try:
+                await self._apply_command(command)
+            except Exception:  # noqa: BLE001 — retry from the durable platform outbox
+                self.stats.command_failures += 1
+                logger.exception("managed command processing failed")
         self._delivery_cursor = payload.get("next_cursor") or self._delivery_cursor
         return accepted
+
+    async def _apply_command(self, command: dict[str, Any]) -> None:
+        """Apply a platform command through the host's durable command ledger."""
+
+        if self._command_handler is None:
+            return
+        effect = await self._command_handler(command)
+        if effect is None:
+            return
+        result = await self._request(
+            "POST",
+            "/managed/host/commands/effect",
+            payload=effect,
+            auth=True,
+        )
+        if result is not None:
+            self.stats.command_effects_uploaded += 1
 
     async def _accept_delivery(self, delivery: dict[str, Any]) -> str:
         """Idempotently map one delivery to a local task/run; never re-executes.
@@ -404,6 +441,9 @@ class ManagedChannel:
                 continue
             runs = await asyncio.to_thread(self._store.event_runs_for_task, record.task_ref)
             for run_ref in runs:
+                association = await self.associate_attempt(record.task_ref, run_ref)
+                if association is None:
+                    continue
                 stream_key = (run_ref.issuer_domain, run_ref.id)
                 page = await asyncio.to_thread(
                     self._store.read_events,
@@ -430,6 +470,16 @@ class ManagedChannel:
                 self._event_cursors[stream_key] = page.next_cursor
                 self.stats.events_uploaded += count
         return uploaded
+
+    async def associate_attempt(self, task_ref: BackendRef, run_ref: BackendRef) -> dict[str, Any] | None:
+        """Register a host-local attempt before execution facts are projected."""
+
+        return await self._request(
+            "POST",
+            "/managed/host/attempts",
+            payload={"local_task_ref": task_ref.to_dict(), "local_run_ref": run_ref.to_dict()},
+            auth=True,
+        )
 
     # -- transport ---------------------------------------------------------------
 
@@ -510,6 +560,162 @@ class ManagedIdentity:
     domains: tuple[str, ...]
 
 
+async def apply_managed_command(
+    item: dict[str, Any],
+    *,
+    durable: DurableRuntime,
+    engine: ExecutionEngine,
+) -> dict[str, Any] | None:
+    """Apply a managed command through the host's durable ledger."""
+
+    from hecate_durable.contracts.durable import (
+        CommandState,
+        ControlCommandKind,
+        ControlCommandRecord,
+        TaskLifecycleState,
+    )
+    from hecate_durable.contracts.references import BackendRef
+
+    command = item["command"]
+    local_task_ref = BackendRef.from_dict(item["local_task_ref"])
+    local_run_ref = BackendRef.from_dict(item["local_run_ref"])
+
+    def settled_effect(state: CommandState, successor_run_ref: BackendRef | None = None) -> dict[str, Any]:
+        return {
+            "command_id": command["command_id"],
+            "state": state.value,
+            "local_task_ref": local_task_ref.to_dict(),
+            "local_run_ref": local_run_ref.to_dict(),
+            "successor_run_ref": successor_run_ref.to_dict() if successor_run_ref is not None else None,
+        }
+
+    previous = await asyncio.to_thread(durable.store.get, command["command_id"])
+    if previous is not None and previous.state in (
+        CommandState.APPLIED,
+        CommandState.REJECTED,
+        CommandState.EXPIRED,
+    ):
+        effect_run = previous.extra.get("effect_run_ref")
+        successor = BackendRef.from_dict(effect_run) if isinstance(effect_run, dict) else None
+        if successor == local_run_ref:
+            successor = None
+        return settled_effect(previous.state, successor)
+
+    expires_at = command.get("expires_at")
+    if expires_at is not None:
+        deadline = datetime.fromisoformat(expires_at)
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=UTC)
+        if deadline <= datetime.now(UTC):
+            if previous is not None:
+                expired = await asyncio.to_thread(durable.store.transition, command["command_id"], CommandState.EXPIRED)
+            else:
+                expired = await asyncio.to_thread(
+                    durable.store.record,
+                    ControlCommandRecord(
+                        command_id=command["command_id"],
+                        kind=ControlCommandKind(command["kind"]),
+                        issuer=command["issuer"],
+                        task_ref=local_task_ref,
+                        run_ref=local_run_ref,
+                        issued_at=command["issued_at"],
+                        expires_at=expires_at,
+                        state=CommandState.EXPIRED,
+                        detail_ns=command.get("detail_ns") or {},
+                        payload=command.get("payload") or {},
+                        payload_schema_ref=command.get("payload_schema_ref"),
+                    ),
+                )
+            return settled_effect(expired.state)
+
+    kind = ControlCommandKind(command["kind"])
+    if kind in (ControlCommandKind.PROVIDE_INPUT, ControlCommandKind.RESUME):
+        input_payload = command.get("payload") or {}
+        if kind is ControlCommandKind.RESUME:
+            input_payload = None
+        receipt, _reason = await asyncio.to_thread(
+            durable.apply_wake,
+            command_id=command["command_id"],
+            kind=kind.value,
+            issuer=command["issuer"],
+            task_ref=local_task_ref,
+            run_ref=local_run_ref,
+            wait_token=str((command.get("detail_ns") or {}).get("wait_token") or ""),
+            input_payload=input_payload,
+            expires_at=expires_at,
+            input_validator=engine.validate_run_input,
+        )
+        current_run = await asyncio.to_thread(durable.store.run_for_task, local_task_ref)
+        successor = current_run if current_run != local_run_ref else None
+        if receipt.state in (CommandState.APPLIED, CommandState.REJECTED, CommandState.EXPIRED):
+            return settled_effect(receipt.state, successor)
+        return None
+
+    if kind is ControlCommandKind.CANCEL:
+        record = await asyncio.to_thread(
+            durable.record_cancel,
+            command_id=command["command_id"],
+            issuer=command["issuer"],
+            task_ref=local_task_ref,
+            run_ref=local_run_ref,
+        )
+        if record.state in (CommandState.APPLIED, CommandState.REJECTED, CommandState.EXPIRED):
+            return settled_effect(record.state)
+        state_record = await asyncio.to_thread(durable.store.get_task_state, local_task_ref)
+        if state_record is None or state_record.lifecycle_state in (
+            TaskLifecycleState.SUCCEEDED,
+            TaskLifecycleState.FAILED,
+            TaskLifecycleState.CANCELLED,
+            TaskLifecycleState.RECONCILIATION_REQUIRED,
+        ):
+            rejected = await asyncio.to_thread(durable.store.transition, command["command_id"], CommandState.REJECTED)
+            return settled_effect(rejected.state)
+        if state_record.lifecycle_state in (
+            TaskLifecycleState.QUEUED,
+            TaskLifecycleState.WAITING_INPUT,
+            TaskLifecycleState.WAITING_APPROVAL,
+        ):
+            try:
+                await asyncio.to_thread(
+                    durable.store.apply_task_state,
+                    local_task_ref,
+                    TaskLifecycleState.CANCELLED,
+                    expected_revision=state_record.revision,
+                    applied_command_id=command["command_id"],
+                )
+            except ValueError:
+                if engine.request_cancel(local_run_ref.id, command_id=command["command_id"]):
+                    return None
+                latest = await asyncio.to_thread(durable.store.get, command["command_id"])
+                return (
+                    settled_effect(latest.state)
+                    if latest is not None and latest.state in (CommandState.APPLIED, CommandState.REJECTED)
+                    else None
+                )
+            applied = await asyncio.to_thread(durable.store.get, command["command_id"])
+            return settled_effect(applied.state if applied is not None else CommandState.APPLIED)
+        engine.request_cancel(local_run_ref.id, command_id=command["command_id"])
+        return None
+
+    rejected = await asyncio.to_thread(
+        durable.store.record,
+        ControlCommandRecord(
+            command_id=command["command_id"],
+            kind=kind,
+            issuer=command["issuer"],
+            task_ref=local_task_ref,
+            run_ref=local_run_ref,
+            issued_at=command["issued_at"],
+            expires_at=expires_at,
+            state=CommandState.REJECTED,
+            payload=command.get("payload") or {},
+            payload_schema_ref=command.get("payload_schema_ref"),
+            detail_ns=command.get("detail_ns") or {},
+        ),
+    )
+    return settled_effect(rejected.state)
+
+
 class ManagedExecutionScheduler:
     """Serial dispatch of accepted managed tasks through the engine.
 
@@ -526,10 +732,12 @@ class ManagedExecutionScheduler:
         *,
         store: SqlDurableStore,
         engine: ExecutionEngine,
+        associate_attempt: Callable[[BackendRef, BackendRef], Awaitable[dict[str, Any] | None]] | None = None,
         poll_interval_seconds: float = 0.5,
     ) -> None:
         self._store = store
         self._engine = engine
+        self._associate_attempt = associate_attempt
         self._poll_interval = poll_interval_seconds
         self._unresumable: set[str] = set()
         self._loop_task: asyncio.Task[None] | None = None
@@ -549,6 +757,12 @@ class ManagedExecutionScheduler:
             if run_ref is None:
                 self._unresumable.add(record.task_ref.id)
                 continue
+            if self._associate_attempt is not None:
+                association = await self._associate_attempt(record.task_ref, run_ref)
+                if association is None:
+                    # Do not execute a successor until the platform has a
+                    # durable mapping for its facts and subsequent events.
+                    continue
             try:
                 run_id = self._engine.resume_managed(record.task_ref, run_ref)
             except Exception as exc:

@@ -353,6 +353,111 @@ async def test_revoked_enrollment_refuses_channel(platform, host_store, secrets)
     assert channel.stats.pulls == 1  # the refused pull is not a counted cycle
 
 
+async def test_managed_command_is_delivered_and_receipt_is_durable(platform, host_store, secrets):
+    """Commands flow through the public host API and settle only on a host receipt."""
+
+    from hecate.contracts.execution.durable import (
+        CommandState,
+        ControlCommandKind,
+        ControlCommandRecord,
+    )
+    from hecate.contracts.execution.references import BackendRef, run_ref, task_ref
+    from hecate.core.composition.durable_platform import DurableSuite, set_durable_suite
+    from hecate.execution.stub_durable import (
+        InMemoryActionLedger,
+        InMemoryControlCommandRecorder,
+        InMemoryDurableTaskStore,
+    )
+
+    platform_store = InMemoryDurableTaskStore()
+    platform_recorder = InMemoryControlCommandRecorder()
+    set_durable_suite(
+        DurableSuite(
+            store=platform_store,
+            recorder=platform_recorder,
+            ledger=InMemoryActionLedger(),
+            backend="stub",
+            ledger_source="stub",
+        )
+    )
+    try:
+        await platform["admit"]()
+        channel = _make_channel(platform)
+        assert await channel.register() is True
+        await platform["opt_in_last_enrollment"]()
+
+        platform_task_id, platform_run_id = str(uuid.uuid4()), str(uuid.uuid4())
+        delivery_id = await _queue_delivery(
+            platform, enrollment_id=None, task_id=platform_task_id, run_id=platform_run_id
+        )
+        assert await channel.pull_once() == 1
+
+        command_id = str(uuid.uuid4())
+        platform_task_ref = task_ref("hecate", platform_task_id)
+        platform_run_ref = run_ref("hecate", platform_run_id)
+        platform_recorder.record(
+            ControlCommandRecord(
+                command_id=command_id,
+                kind=ControlCommandKind.RESUME,
+                issuer="operator",
+                task_ref=platform_task_ref,
+                run_ref=platform_run_ref,
+                issued_at=datetime.now(UTC).isoformat(),
+                state=CommandState.REQUESTED,
+                expires_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+                detail_ns={"wait_token": "host-wait-token"},
+                extra={"workspace_id": str(WS)},
+            )
+        )
+
+        received: list[str] = []
+
+        async def reject_command(item: dict) -> dict:
+            command = item["command"]
+            task_ref = BackendRef.from_dict(item["local_task_ref"])
+            run_ref = BackendRef.from_dict(item["local_run_ref"])
+            received.append(command["command_id"])
+            host_store.record(
+                ControlCommandRecord(
+                    command_id=command["command_id"],
+                    kind=ControlCommandKind(command["kind"]),
+                    issuer=command["issuer"],
+                    task_ref=task_ref,
+                    run_ref=run_ref,
+                    issued_at=command["issued_at"],
+                    state=CommandState.REQUESTED,
+                    expires_at=command.get("expires_at"),
+                    detail_ns=command.get("detail_ns") or {},
+                )
+            )
+            receipt = host_store.transition(command["command_id"], CommandState.REJECTED)
+            return {
+                "command_id": receipt.command_id,
+                "state": receipt.state.value,
+                "local_task_ref": task_ref.to_dict(),
+                "local_run_ref": run_ref.to_dict(),
+            }
+
+        channel.set_command_handler(reject_command)
+        channel._delivery_cursor = None
+        await channel.pull_once()
+
+        assert received == [command_id]
+        local_command = host_store.get(command_id)
+        assert local_command is not None and local_command.state is CommandState.REJECTED
+        assert platform_recorder.get(command_id).state is CommandState.REJECTED
+        assert channel.stats.command_effects_uploaded == 1
+
+        # A settled platform command is omitted from the next delivery poll.
+        channel._delivery_cursor = None
+        await channel.pull_once()
+        assert received == [command_id]
+        assert host_store.get(command_id).state is CommandState.REJECTED
+        assert delivery_id
+    finally:
+        set_durable_suite(None)
+
+
 async def test_event_upload_reaches_platform_read_model(platform, host_store, secrets):
     await platform["admit"]()
     channel = _make_channel(platform)

@@ -1,13 +1,13 @@
-"""SC05 delivery/projection slices over the managed channel wire format.
+"""Managed-channel scenarios, including installed Runner HTTP acceptance.
 
-These ASGI/client component tests verify enrollment, delivery acceptance,
-deduplication and event projection. They do not run the installed runner CLI,
-execute managed business tools or enforce a lease at action dispatch. The
-complete SC05 remains planned until those paths pass process-level acceptance.
+The suite covers component-level delivery/projection behavior and a clean-
+installed Runner process over platform HTTP. PostgreSQL process acceptance is
+enabled by ``HECATE_STEP6_POSTGRES_URL`` when the host can reach that database.
 """
 
 from __future__ import annotations
 
+import os
 import uuid
 
 import httpx
@@ -34,6 +34,7 @@ ADMIN = uuid.uuid4()
 ROOT_NAME = "host-root-sc05"
 ISSUER = "managed-sc05-issuer"
 SECRET = b"sc05-managed-channel-secret"
+_STEP6_POSTGRES_URL = os.environ.get("HECATE_STEP6_POSTGRES_URL")
 
 
 @pytest.fixture
@@ -130,6 +131,15 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
     async def queue_delivery(input_payload: dict) -> str:
         from sqlalchemy import select
 
+        from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
+        from hecate.contracts.execution.references import deployment_ref
+        from hecate.contracts.execution.references import run_ref as mk_run_ref
+        from hecate.contracts.execution.references import task_ref as mk_task_ref
+        from hecate.execution.task_run_registry import TaskRunRegistry
+        from hecate.models.agent import AgentModel
+        from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
+        from hecate.models.agent_principal import AgentPrincipalModel
+        from hecate.models.agent_version import AgentVersionModel
         from hecate.models.standalone_enrollment import StandaloneEnrollmentModel
 
         async with test_session_factory() as session:
@@ -142,13 +152,61 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
                 .scalars()
                 .first()
             )
+            assert row is not None
+            agent = AgentModel(workspace_id=WS, name=f"sc05-agent-{uuid.uuid4().hex[:8]}")
+            session.add(agent)
+            await session.flush()
+            version = AgentVersionModel(agent_id=agent.id, version=1, config_snapshot={}, content_hash="a" * 64)
+            session.add(version)
+            await session.flush()
+            session.add(
+                AgentPrincipalModel(
+                    id=agent.id,
+                    agent_id=agent.id,
+                    workspace_id=WS,
+                    organization_id=WS,
+                    owner_user_id=ADMIN,
+                )
+            )
+            deployment = AgentDeploymentModel(
+                agent_id=agent.id,
+                agent_version_id=version.id,
+                workspace_id=WS,
+                backend_type=BackendType.BUILTIN,
+                access_mode=AccessMode.IN_PROCESS,
+                issuer_domain="hecate",
+                capability_snapshot={},
+                axes_harness="hecate",
+                axes_environment="none",
+                axes_tool_execution="hecate_gateway",
+                is_default=True,
+            )
+            session.add(deployment)
+            await session.flush()
+            chain = IdentityChain(
+                initiator=None,
+                principal_id=str(agent.id),
+                workload=WorkloadIdentity(
+                    deployment=deployment_ref("hecate", str(deployment.id)), workload_id="hecate:managed"
+                ),
+                audience="hecate:managed-channel",
+            )
+            registry = TaskRunRegistry(session)
+            task = await registry.create_task(goal="scenario delivery", initiator_ref=chain.to_dict(), workspace_id=WS)
+            run = await registry.create_run(
+                task_id=task.id,
+                workspace_id=WS,
+                deployment_id=deployment.id,
+                identity_chain=chain,
+                backend_run_ref=mk_run_ref("hecate", str(uuid.uuid4())),
+            )
             service = ManagedDeliveryService(session)
             delivery = await service.queue_delivery(
                 workspace_id=WS,
                 enrollment_id=row.id,
                 delivery_id=uuid.uuid4(),
-                task_ref={"kind": "task", "issuer_domain": "hecate", "id": str(uuid.uuid4())},
-                run_ref={"kind": "run", "issuer_domain": "hecate", "id": str(uuid.uuid4())},
+                task_ref={**mk_task_ref("hecate", str(task.id)).to_dict(), "kind": "task"},
+                run_ref={**mk_run_ref("hecate", str(run.id)).to_dict(), "kind": "run"},
                 input_payload=input_payload,
             )
             await session.commit()
@@ -173,6 +231,7 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
         return BackendRef(RefKind.TASK, "managed-host", f"managed-{delivery_row_id}").to_dict()
 
     yield {
+        "app": app,
         "channel": channel,
         "admit": admit,
         "opt_in": opt_in,
@@ -183,6 +242,28 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
     }
     store.dispose()
     app.dependency_overrides.clear()
+
+
+async def _serve_over_tcp(app: FastAPI):
+    """Serve the real managed router on a loopback TCP socket."""
+
+    import asyncio
+    import socket
+
+    import uvicorn
+
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(128)
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
+    task = asyncio.create_task(server.serve(sockets=[listener]))
+    deadline = asyncio.get_running_loop().time() + 10
+    while not server.started and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.02)
+    assert server.started, "managed platform HTTP server did not start"
+    return server, task, f"http://127.0.0.1:{port}"
 
 
 async def _connect(stack) -> ManagedChannel:
@@ -209,6 +290,197 @@ async def test_sc05_reconnect_reverification_then_new_work(managed_stack) -> Non
 
 
 TaskLifecycleStateEnum = __import__("hecate_durable").contracts.durable.TaskLifecycleState
+
+
+@pytest.fixture(
+    params=[None, *([_STEP6_POSTGRES_URL] if _STEP6_POSTGRES_URL else [])],
+    ids=["sqlite", "postgres"][: 1 + bool(_STEP6_POSTGRES_URL)],
+)
+def step6_runner_database_url(request):
+    """Run the same installed-host scenario on SQLite and optional PostgreSQL."""
+
+    return request.param
+
+
+async def test_installed_runner_uses_platform_http_across_lost_accept_and_restart(
+    managed_stack, tmp_path, step6_runner_database_url
+):
+    """A clean-installed Runner wheel completes the managed HTTP lifecycle."""
+
+    import asyncio
+
+    import pytest
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import Response
+
+    from hecate.models.managed_delivery import ManagedDeliveryModel
+    from hecate.models.run import RunModel
+    from tests.scenarios.tools import runner_harness
+
+    if not runner_harness.uv_available():
+        pytest.skip("uv is required for the installed Runner process acceptance")
+
+    dropped = {"accept": False}
+    http_requests: list[tuple[str, int, str]] = []
+
+    class DropFirstAcceptResponse(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            response = await call_next(request)
+            body = b"".join([chunk async for chunk in response.body_iterator])
+            if (
+                request.url.path in {"/managed/host/accept", "/managed/host/attempts", "/managed/host/events"}
+                and len(http_requests) < 30
+            ):
+                http_requests.append((request.url.path, response.status_code, body.decode("utf-8", errors="replace")))
+            if request.url.path == "/managed/host/accept" and not dropped["accept"]:
+                dropped["accept"] = True
+                return Response(status_code=503)
+            return Response(content=body, status_code=response.status_code, headers=dict(response.headers))
+
+    managed_stack["app"].add_middleware(DropFirstAcceptResponse)
+    await managed_stack["admit"]()
+    server, server_task, base_url = await _serve_over_tcp(managed_stack["app"])
+    runner = None
+    business_server = None
+    try:
+        control_plane = {
+            "base_url": base_url,
+            "workspace_id": str(WS),
+            "trust_root": ROOT_NAME,
+            "host_id": "installed-runner-sc05",
+            "issuer_domain": ISSUER,
+            "secret_ref": "file:secrets/managed-secret",
+            "poll_interval_seconds": 0.1,
+            "data_domains": ["domain_a"],
+        }
+        runner, business_server, business_calls = runner_harness.start_runner(
+            tmp_path,
+            durable=True,
+            tool_allowlist=["query_inventory"],
+            control_plane=control_plane,
+            managed_secret=SECRET,
+            durable_database_url=step6_runner_database_url,
+        )
+
+        async def _wait_enrollment() -> uuid.UUID:
+            from sqlalchemy import select
+
+            from hecate.models.standalone_enrollment import StandaloneEnrollmentModel
+
+            deadline = asyncio.get_running_loop().time() + 20
+            while asyncio.get_running_loop().time() < deadline:
+                async with test_session_factory() as db:
+                    row = (
+                        (
+                            await db.execute(
+                                select(StandaloneEnrollmentModel).where(
+                                    StandaloneEnrollmentModel.workspace_id == WS,
+                                    StandaloneEnrollmentModel.deleted.is_(False),
+                                )
+                            )
+                        )
+                        .scalars()
+                        .first()
+                    )
+                    if row is not None:
+                        return row.id
+                await asyncio.sleep(0.05)
+            raise AssertionError("installed Runner did not register over platform HTTP")
+
+        enrollment_id = await _wait_enrollment()
+        from hecate.execution.enrollment_resolver import HmacEnrollmentResolver
+        from hecate.execution.task_run_registry import TaskRunRegistry
+
+        async with test_session_factory() as db:
+            resolver = HmacEnrollmentResolver(db, secret_candidates={ROOT_NAME: SECRET})
+            await TaskRunRegistry(db, enrollment_resolver=resolver.verify).set_managed_opt_in(
+                enrollment_id,
+                WS,
+                managed_new_runs=True,
+                operator_id=ADMIN,
+                admitted=True,
+                managed_scope=["domain_a"],
+            )
+            await db.commit()
+
+        async def _wait_projected(delivery_id: str) -> dict:
+            deadline = asyncio.get_running_loop().time() + 10
+            observed = None
+            while asyncio.get_running_loop().time() < deadline:
+                async with test_session_factory() as db:
+                    delivery = await db.get(ManagedDeliveryModel, uuid.UUID(delivery_id))
+                    if delivery is not None:
+                        run = await db.get(RunModel, uuid.UUID(delivery.run_ref["id"]))
+                        projection = dict(run.projection or {}) if run is not None else {}
+                        task_runs = []
+                        if run is not None:
+                            from sqlalchemy import select
+
+                            task_runs = [
+                                {"id": str(row.id), "origin": str(row.origin), "projection": row.projection}
+                                for row in (
+                                    await db.execute(select(RunModel).where(RunModel.task_id == run.task_id))
+                                ).scalars()
+                            ]
+                        for attempt in (delivery.accepted_refs or {}).get("successor_runs") or []:
+                            platform_ref = attempt.get("platform_run_ref") or {}
+                            if platform_ref.get("issuer_domain") == "hecate":
+                                projected_run = await db.get(RunModel, uuid.UUID(platform_ref["id"]))
+                                projected = dict(projected_run.projection or {}) if projected_run is not None else {}
+                                if projected.get("state") == "succeeded":
+                                    return projected
+                        if projection.get("state") == "succeeded":
+                            return projection
+                        observed = {
+                            "delivery_state": delivery.state,
+                            "accepted_refs": delivery.accepted_refs,
+                            "run_id": delivery.run_ref.get("id"),
+                            "projection": projection,
+                            "task_runs": task_runs,
+                        }
+                await asyncio.sleep(0.1)
+            log_path = runner.workdir / "runner.log" if runner is not None else None
+            runner_log = log_path.read_text(encoding="utf-8", errors="replace")[-3000:] if log_path else ""
+            raise AssertionError(
+                f"delivery {delivery_id} did not project a succeeded host run; observed={observed}; "
+                f"http={http_requests}; business_calls={business_calls}; runner_log={runner_log}"
+            )
+
+        async def _queue_one() -> str:
+            return await managed_stack["queue_delivery"](
+                {"input": {"prompt": "managed TCP"}, "tool_arguments": {"domain": "domain_a", "sku": "SKU-A1"}}
+            )
+
+        first = await _queue_one()
+        first_projection = await _wait_projected(first)
+        assert first_projection["state"] == "succeeded"
+        assert dropped["accept"] is True, "the first committed accept response must have been lost"
+        assert len(business_calls) == 1, "redelivery after a lost accept must not execute the task twice"
+        from hecate_durable.storage import SqlDurableStore
+
+        local_database_url = step6_runner_database_url or f"sqlite:///{(runner.workdir / 'host.db').as_posix()}"
+        local_store = SqlDurableStore(local_database_url)
+        try:
+            assert len(local_store.list_tasks()) == 1, "lost accept must retain exactly one durable local Task"
+        finally:
+            local_store.dispose()
+
+        runner = runner.restart()
+        assert runner.request("GET", "/healthz", token=None)[0] == 200
+        second = await _queue_one()
+        assert (await _wait_projected(second))["state"] == "succeeded"
+        assert len(business_calls) == 2
+
+        third = await _queue_one()
+        assert (await _wait_projected(third))["state"] == "succeeded"
+        assert len(business_calls) == 3
+    finally:
+        if runner is not None:
+            runner.stop(kill=True)
+        if business_server is not None:
+            runner_harness.stop_business_api(business_server)
+        server.should_exit = True
+        await server_task
 
 
 async def test_sc05_duplicate_delivery_never_repeats_execution(managed_stack) -> None:

@@ -47,3 +47,11 @@ G2 和 SC03～SC06 的整体认证保持原门槛。尚未交付的功能继续�
 ## 升级与回退
 
 无新增表或 migration。EventPage 新字段有默认值；公开 HTTP Schema 已包含 has_more。历史 Run 保留原尝试事实，缺事实时不补造成功。升级前 drain 本地宿主并保留 Submission/事件/命令账本；回退不能恢复旧 Run 借用新 Task 状态、截断事件或改写已应用命令的行为。
+
+## 2026-10-07 Step6 补充验收
+
+本轮按 `complete-step6-recovery-gates` 的实施顺序完成了持久命令闭环、既有 continuation/replay 保证复核、真实工作流父子回调、受管 Action 派发授权检查，以及 clean-installed Runner 对接平台 HTTP 的 SC05 切片。SC05 全场景测试曾在本机 SQLite 配置下通过（`9 passed`），包含接受响应丢失后重投、真实业务 API 调用计数、平台 Run 投影、Runner 重启/重连和多个 Run 的事件补传。step6a 的 HTTP/wheel 门槛因此标记完成；这不等于 SC05 场景认证完成。
+
+PostgreSQL 完整宿主故障矩阵仍未通过。本机 Windows 执行环境中，pytest 主进程可连接临时 PostgreSQL，但 clean-installed Runner 子进程连接 Docker 发布的 localhost PostgreSQL 时被系统拒绝（`Permission denied (10013)`）；后续 durable PostgreSQL 专项尝试未能取得稳定的测试报告，不能记为通过。用于验证的临时数据库和角色已删除。下一轮应在 Linux CI/开发环境配置独立 `HECATE_STEP6_POSTGRES_URL` 和 `DURABLE_TEST_POSTGRES_URL`，运行 PostgreSQL 参数化的 Runner 进程验收与 durable 故障注入，覆盖已接受未执行、进程 kill/restart、外部写成功但回执丢失、迟到终态、重复命令、平台重启和宿主失联，再据结果关闭 step6f。
+
+最终提交前在沙箱外重跑后，`ruff check src/ tests/ packages/` 与 `ruff format --check src/ tests/ packages/` 通过；`mypy src/ packages/` 对 892 个源文件通过；OpenSpec strict 校验通过；受影响测试 `53 passed`，包括 SQLite SC05 安装制品/HTTP 场景。首次 mypy 发现的 nullable wait-record 测试错误已修复。之前在受限环境遇到的 uv 缓存写入和 OpenSpec realpath `EPERM` 属于执行环境限制，已通过在沙箱外执行验证解决。PostgreSQL Runner 子进程故障矩阵仍未通过，不能由这些检查替代；Step6 总体保持部分完成。

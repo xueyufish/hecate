@@ -200,6 +200,74 @@ async def test_approval_tool_parks_and_resume_executes_once(tmp_path: Path):
         harness.close()
 
 
+async def test_managed_wake_command_persists_effect_and_successor_once(tmp_path: Path):
+    from hecate_durable.contracts.durable import IdempotencyKey, canonical_request_digest
+    from hecate_runner.managed import MANAGED_ISSUER, apply_managed_command
+
+    api = _BusinessApi()
+    harness = _Harness(_profile(tmp_path, f"sqlite:///{tmp_path / 'managed-command.db'}", kind="approval"), api=api)
+    try:
+        task_ref = BackendRef(RefKind.TASK, MANAGED_ISSUER, "managed-task")
+        run_ref = BackendRef(RefKind.RUN, MANAGED_ISSUER, "managed-run")
+        run_input = {
+            "input": {"prompt": "managed wait"},
+            "tool_arguments": {
+                "query_inventory": READ_ARGS,
+                "submit_ticket": {"domain": "domain_a", "ticket": "T-1"},
+            },
+            "_host_identity": {"principal": "managed:root", "domains": ["domain_a"]},
+            "_host_definition": harness.engine._definition_digest,
+        }
+        harness.store.submit_task(
+            key=IdempotencyKey(
+                key="managed-command-test",
+                subject="managed:root",
+                workspace="waiting",
+                request_digest=canonical_request_digest(run_input),
+            ),
+            task_ref=task_ref,
+            run_ref=run_ref,
+            input_payload=run_input,
+        )
+        harness.store.apply_task_state(task_ref, TaskLifecycleState.RUNNING)
+        token = harness.durable.park_wait(
+            task_ref,
+            run_ref,
+            wake_kind="resume",
+            contract_ref={"tool": "submit_ticket", "contract": {"fields": ["ticket"]}},
+        )
+        command = {
+            "command_id": "managed-resume-once",
+            "kind": "resume",
+            "issuer": "operator",
+            "issued_at": datetime.now(UTC).isoformat(),
+            "expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+            "detail_ns": {"wait_token": token},
+            "payload": {},
+        }
+        item = {
+            "command": command,
+            "local_task_ref": task_ref.to_dict(),
+            "local_run_ref": run_ref.to_dict(),
+        }
+
+        effect = await apply_managed_command(item, durable=harness.durable, engine=harness.engine)
+        assert effect is not None and effect["state"] == "applied"
+        successor = BackendRef.from_dict(effect["successor_run_ref"])
+        assert successor != run_ref
+        assert harness.store.run_for_task(task_ref) == successor
+        wait_record = harness.durable.wait_of(task_ref)
+        assert wait_record is not None
+        assert wait_record["consumed"] is True
+        assert harness.store.get("managed-resume-once").state.value == "applied"
+
+        replay = await apply_managed_command(item, durable=harness.durable, engine=harness.engine)
+        assert replay == effect
+        assert api.tools() == []
+    finally:
+        harness.close()
+
+
 async def test_historical_waiting_run_retains_own_state_after_restart(tmp_path: Path):
     """Task completion cannot rewrite an earlier attempt or expose a stale token."""
     api = _BusinessApi()
