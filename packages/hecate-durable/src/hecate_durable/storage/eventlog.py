@@ -54,6 +54,7 @@ class EventPage:
 
     events: list[EventEnvelope]
     next_cursor: int
+    has_more: bool = False
 
 
 def build_envelope(
@@ -304,7 +305,7 @@ class SqlEventLog:
                         EventRow.source_sequence > cursor,
                     )
                     .order_by(EventRow.source_sequence)
-                    .limit(limit)
+                    .limit(limit + 1)
                 )
                 .scalars()
                 .all()
@@ -337,7 +338,27 @@ class SqlEventLog:
             events.append(EventEnvelope.from_dict(row.envelope))
             expected = row.source_sequence + 1
             last_sequence = row.source_sequence
-        return EventPage(events=events, next_cursor=last_sequence)
+        return EventPage(
+            events=events,
+            next_cursor=last_sequence,
+            has_more=any(row.source_sequence > last_sequence for row in rows),
+        )
+
+    def latest(self, run_ref: BackendRef, *, event_types: tuple[str, ...]) -> EventEnvelope | None:
+        """Read the latest matching fact in this source's complete Run scope."""
+        with self._session_factory() as session:
+            row = session.execute(
+                select(EventRow)
+                .where(
+                    EventRow.run_issuer == run_ref.issuer_domain,
+                    EventRow.run_id == run_ref.id,
+                    EventRow.source == self._source,
+                    EventRow.envelope["payload"]["event_type"].as_string().in_(event_types),
+                )
+                .order_by(EventRow.source_sequence.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            return EventEnvelope.from_dict(row.envelope) if row is not None else None
 
 
 def _task_ref_of(envelope_dict: dict[str, Any]) -> BackendRef:

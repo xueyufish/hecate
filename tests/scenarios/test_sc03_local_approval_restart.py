@@ -159,6 +159,9 @@ def test_sc03_approval_wait_survives_kill_then_wakes_once(tmp_path):
         )
         runner = runner.restart(kill_previous=True)
         assert runner.request("GET", f"/runs/{new_run}")[1]["status"] == "succeeded"
+        old = runner.request("GET", f"/runs/{run_id}")[1]
+        assert old["status"] == "waiting_approval"
+        assert "wait" not in old
         assert len(_write_calls(calls)) == 1
     finally:
         runner.stop()

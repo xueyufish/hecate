@@ -619,8 +619,10 @@ class ExecutionEngine:
     def _durable_task_state(
         self, task_ref: BackendRef, principal: str, domains: tuple[str, ...], run_ref: BackendRef
     ) -> RunState:
-        record = self._durable.store.get_task_state(task_ref) if self._durable else None
-        status = record.lifecycle_state.value if record is not None else "unknown"
+        status, error, recorded_at = (
+            self._durable.run_state(task_ref, run_ref) if self._durable else ("unknown", None, None)
+        )
+        association = self._durable.association_for_run(run_ref) if self._durable else None
         return RunState(
             run_id=run_ref.id,
             status=status,
@@ -629,7 +631,10 @@ class ExecutionEngine:
             task_ref=task_ref,
             run_ref=run_ref,
             replayed=True,
-            received_at=record.recorded_at if record is not None else None,
+            received_at=recorded_at,
+            error=error,
+            result_ref=f"runs/{run_ref.id}/artifacts" if status == "succeeded" else None,
+            idempotency_key=association.key.key if association is not None else None,
         )
 
     def resume(self, task_ref: BackendRef, run_ref: BackendRef, run_input: dict) -> str | None:
@@ -755,8 +760,8 @@ class ExecutionEngine:
 
     def request_cancel(self, run_id: str, *, command_id: str | None = None) -> bool:
         """Request cancellation at the next tool boundary; never revoke a completed call."""
-        state = self._runs[run_id]
-        if state.status != "running":
+        state = self._runs.get(run_id)
+        if state is None or state.status != "running":
             return False
         self._evidence.append("cancel", state.principal, run_id, "requested")
         state.cancel_requested = True
@@ -946,6 +951,7 @@ class ExecutionEngine:
                         state.status,
                         needs_reconciliation=state.needs_reconciliation or bool(hook_failed),
                         error=state.error,
+                        cancel_command_id=state.cancel_command_id,
                     )
                     state.status = record.lifecycle_state.value
                 except Exception:
@@ -956,9 +962,7 @@ class ExecutionEngine:
                     # when the cooperative boundary took hold, rejected when
                     # the run had already finished another way.
                     try:
-                        if state.status == "cancelled":
-                            self._durable.cancel_applied(state.cancel_command_id)
-                        else:
+                        if state.status in {"succeeded", "failed"}:
                             self._durable.cancel_rejected(state.cancel_command_id)
                     except Exception:
                         logger.exception("Could not converge cancel command %s", state.cancel_command_id)

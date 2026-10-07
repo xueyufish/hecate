@@ -2,7 +2,7 @@
 
 ## 结论与基线
 
-基线为本地 `main` / `origin/main` 的 `87520ea`，包含共享执行契约、受管执行环路、动作时授权、持久等待、checkpoint 和工作流回调等后续变更。审查与修正位于 `fix/step1-step6-acceptance-review`，对应 OpenSpec change `step1-step6-acceptance-hardening`；本报告描述该工作树的修正结果，未提交、未推送，尚未成为 main 的交付事实。
+原复核基线为 `87520ea`，包含共享执行契约、受管执行环路、动作时授权、持久等待、checkpoint 和工作流回调等后续变更。修正及 CI 后续修复已随 PR #230 合入 `main` 的 `b73af85`，对应 OpenSpec change `step1-step6-acceptance-hardening`。本报告保留该轮证据与未完成门槛；最新主线追加复核见 [Step6 主线追加复核](step6-followup-review.md)。
 
 **方向继续保留，但不能认定 Step1～Step6 的全部目标已经关闭。** Runtime kernel / 执行应用服务 / Runner 宿主 / 平台登记与投影的边界成立，语言中立契约和可独立安装包已有证据。发现的执行与授权缺陷已修正；平台原生 continuation、完整受管进程组合、合法审批和真实工作流节点仍是关闭门槛。
 

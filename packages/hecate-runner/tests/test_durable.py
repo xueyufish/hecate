@@ -394,7 +394,13 @@ def test_events_cursor_reads_persisted_log(harness: _Harness) -> None:
     assert tail["events"] == [] and tail["cursor"] == page["cursor"]
 
 
-def test_cancel_records_command_and_converges_on_effect(harness: _Harness, api: _WriteAwareBusinessApi) -> None:
+def test_cancel_records_command_and_converges_on_effect(
+    harness: _Harness, api: _WriteAwareBusinessApi, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def reject_separate_application(command_id: str) -> None:
+        raise AssertionError("cancellation must commit its receipt with the terminal fact")
+
+    monkeypatch.setattr(harness.durable, "cancel_applied", reject_separate_application)
     api.block_write.clear()  # hold the write so the run stays in flight
     status, submitted = harness.call("POST", "/runs", _write_request())
     run_id = submitted["run_ref"].split("/")[1]
@@ -409,6 +415,9 @@ def test_cancel_records_command_and_converges_on_effect(harness: _Harness, api: 
     assert len(api.write_calls) == 1
     status, cancel = harness.call("POST", f"/runs/{run_id}/cancel")
     assert status == 202 and cancel["command_id"]
+    repeated_status, repeated = harness.call("POST", f"/runs/{run_id}/cancel")
+    assert repeated_status == 202
+    assert repeated["command_id"] == cancel["command_id"]
     api.block_write.set()
     harness.engine.wait_for_sync(run_id)
 
@@ -416,6 +425,8 @@ def test_cancel_records_command_and_converges_on_effect(harness: _Harness, api: 
     assert record["state"] == "cancelled", record
     command = harness.durable.store.get(cancel["command_id"])
     assert command.state.value == "applied", "applied only after the cooperative boundary took hold"
+    assert harness.call("POST", f"/runs/{run_id}/cancel")[0] == 200
+    assert harness.durable.store.get(cancel["command_id"]).state.value == "applied"
 
 
 # --- SC06 local half --------------------------------------------------------------

@@ -1026,6 +1026,16 @@ class SqlDurableStore(DurableTaskStore, ControlCommandRecorder, ActionLedger):
     def read_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100) -> EventPage:
         return self.events.read(run_ref, cursor=cursor, limit=limit)
 
+    def submission_received_at(self, run_ref: BackendRef) -> str | None:
+        """Return the original receipt time, independent of later Task updates."""
+        with self._session() as session:
+            return session.execute(
+                select(SubmissionRow.created_at).where(
+                    SubmissionRow.run_issuer == run_ref.issuer_domain,
+                    SubmissionRow.run_id == run_ref.id,
+                )
+            ).scalar_one_or_none()
+
     def event_runs_for_task(self, task_ref: BackendRef) -> list[BackendRef]:
         """List historical event streams, including attempts no longer current."""
         from hecate_durable.storage.models import EventRow
