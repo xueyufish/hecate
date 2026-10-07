@@ -16,6 +16,10 @@
 - SC03 fixture 后续发现重启后子进程泄漏，只停原实例；已改为停止 stack 当前实例，仅清理该 review 下本轮子进程。fixture 修正后的 SC03 串行复测 `2 passed`，覆盖终态写/审批等待进程重启。
 - ruff check / format check：通过；mypy `src/ packages/hecate-runner/src packages/hecate-durable/src`：`Success: no issues found in 654 source files`；git diff check 和 OpenSpec strict：通过。
 
+## CI follow-up
+
+GitHub Actions full-suite run passed `6478` tests, skipped `58`, and failed only `test_sc03_approval_wait_survives_kill_then_wakes_once`: immediately after the wake receipt, the new run was still `queued`. `RunnerInstance.wait_run()` returned on any status other than `running`, so it treated this valid dispatch transition as a final result. The harness now polls through both `queued` and `running`, then returns on a waiting or terminal state. Local execution of the exact CI command was unavailable in this Windows session because the attached venv points to a missing `C:\Python314\python.exe`; GitHub Actions remains the authoritative verification for this follow-up.
+
 ## 可复现命令
 
 共享 venv 原 editable 指向旧 checkout，必须显式指向 review 源码。PowerShell：

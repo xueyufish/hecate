@@ -210,14 +210,14 @@ class RunnerInstance:
             return error.code, json.loads(error.read())
 
     def wait_run(self, run_id: str, timeout: float = 30.0) -> tuple[int, dict]:
-        """Poll until the run leaves 'running' (or the timeout expires)."""
+        """Poll until the run leaves queued/running (or the timeout expires)."""
 
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             status, run = self.request("GET", f"/runs/{run_id}")
             if status != 200:
                 return status, run
-            if run.get("status") != "running":
+            if run.get("status") not in {"queued", "running"}:
                 return status, run
             time.sleep(0.2)
         return self.request("GET", f"/runs/{run_id}")
