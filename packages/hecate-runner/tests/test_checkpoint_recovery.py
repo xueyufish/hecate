@@ -114,6 +114,7 @@ def _seed_crash_window(harness: _Harness, *, with_checkpoint: bool) -> tuple[Bac
         "input": {"prompt": "recovery"},
         "tool_arguments": {"query_inventory": READ_ARGS, "submit_inventory_update": WRITE_ARGS},
         "_host_identity": {"principal": "app-reader", "domains": ["domain_a"]},
+        "_host_definition": harness.profile.execution_definition_digest(),
     }
     harness.durable.store.submit_task(
         key=IdempotencyKey(
@@ -172,6 +173,38 @@ def _seed_crash_window(harness: _Harness, *, with_checkpoint: bool) -> tuple[Bac
             metadata={"log_version": 0},
         )
     return task_ref, run_ref, session_id
+
+
+@pytest.mark.parametrize("missing", [False, True])
+async def test_recovery_requires_the_admitted_execution_definition(tmp_path, missing):
+    """New tool graphs and unversioned legacy state cannot authorize recovery."""
+    from dataclasses import replace
+
+    api = _BusinessApi()
+    harness = _Harness(_profile(tmp_path, f"sqlite:///{tmp_path / 'host.db'}"), api=api)
+    try:
+        task, run, _ = _seed_crash_window(harness, with_checkpoint=True)
+        if missing:
+            payload = harness.store.get_task_input(task)
+            payload.pop("_host_definition")
+            record = harness.store.get_task_state(task)
+            harness.store.apply_task_state(
+                task,
+                TaskLifecycleState.QUEUED,
+                expected_revision=record.revision,
+                input_payload=payload,
+            )
+            engine = harness.engine
+        else:
+            changed = replace(
+                harness.profile, config=replace(harness.profile.config, tool_allowlist=("submit_inventory_update",))
+            )
+            engine = ExecutionEngine(changed, harness.evidence, api, durable=harness.durable)
+        assert engine.resume(task, run, {}) is None
+        assert harness.store.get_task_state(task).lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
+        assert api.calls == []
+    finally:
+        harness.close()
 
 
 async def _wait_task_state(store: SqlDurableStore, task_ref: BackendRef, *states: str, timeout: float = 15.0):

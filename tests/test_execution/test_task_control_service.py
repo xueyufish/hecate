@@ -280,6 +280,36 @@ async def test_submit_conflicting_replay_rejected(harness):
         stub.unpatch()
 
 
+async def test_command_replay_authorizes_task_and_binds_request(harness):
+    """A settled ID cannot disclose a foreign receipt or change command input."""
+    from hecate.execution.task_control import TaskControlNotFoundError, TaskControlValidationError
+
+    stub = _EntryStub()
+    stub.patch()
+    try:
+        async with harness["session_factory"]() as db:
+            service = _service(harness, db)
+            submitted = await _submit(harness, db, service, wait=True)
+            args = dict(
+                workspace_id=WS,
+                task_id=uuid.UUID(submitted.task_ref.id),
+                kind=ControlCommandKind.CANCEL,
+                issuer=str(OWNER),
+                command_id="fixed-command",
+            )
+            first = await service.issue_command(**args)
+            assert first.record.state is CommandState.REJECTED
+            assert (await service.issue_command(**args)).record.command_id == "fixed-command"
+            with pytest.raises(TaskControlNotFoundError):
+                await service.issue_command(**{**args, "workspace_id": OTHER_WS})
+            with pytest.raises(TaskControlValidationError):
+                await service.issue_command(**{**args, "kind": ControlCommandKind.PAUSE})
+            with pytest.raises(TaskControlValidationError):
+                await service.issue_command(**{**args, "issuer": "someone-else"})
+    finally:
+        stub.unpatch()
+
+
 async def test_background_dispatch_via_worker_reconciles(harness, monkeypatch):
     """A queued task survives the submission process: a second worker picks it up.
 

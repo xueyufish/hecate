@@ -134,7 +134,13 @@ def main(argv: list[str] | None = None) -> int:
     lease_gate: LeaseGate | None = None
     if profile.config.control_plane is not None and durable is not None:
         secret = resolve_secret_ref(control_plane.secret_ref, profile.directory).encode("utf-8")
-        lease_gate = LeaseGate(secret, deployment_domain=control_plane.trust_root)
+        lease_gate = LeaseGate(
+            secret,
+            deployment_domain=control_plane.trust_root,
+            issuer_domain=control_plane.issuer_domain,
+            host_id=control_plane.host_id,
+            workspace_id=control_plane.workspace_id,
+        )
         channel = ManagedChannel(
             base_url=control_plane.base_url,
             workspace_id=control_plane.workspace_id,
@@ -148,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
             upload_batch=control_plane.upload_batch,
             data_domains=control_plane.data_domains,
             lease_gate=lease_gate,
+            execution_definition=profile.execution_definition_digest(business_api),
         )
 
     engine = ExecutionEngine(
@@ -157,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         durable=durable,
         managed_identity=managed_identity,
         lease_gate=lease_gate,
+        dispatch_binding=business_api,
     )
 
     if channel is not None:

@@ -76,3 +76,22 @@ async def test_scope_ride_the_signature():
     gate.update(tampered)
     with pytest.raises(CredentialError, match="signature"):
         await gate.check()
+
+
+@pytest.mark.parametrize("field", ["iss", "sub", "tenant"])
+async def test_signed_foreign_host_identity_is_rejected(field):
+    """A valid signature cannot substitute another enrolled identity."""
+    claims = {"iss": ISSUER, "sub": "host-1", "tenant": "workspace-1"}
+    claims[field] = "foreign"
+    token, _ = lease_claims(SECRET, deployment_domain=DEPLOYMENT, ttl_seconds=60, **claims)
+    gate = LeaseGate(
+        SECRET,
+        deployment_domain=DEPLOYMENT,
+        issuer_domain=ISSUER,
+        host_id="host-1",
+        workspace_id="workspace-1",
+    )
+    gate.update(token)
+    assert gate.active is False
+    with pytest.raises(CredentialError, match="enrolled host"):
+        await gate.check()

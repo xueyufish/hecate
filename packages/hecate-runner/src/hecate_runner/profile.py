@@ -473,6 +473,23 @@ class Profile:
     entry_content: bytes
     tool_schemas: dict[str, dict]
 
+    def execution_definition_digest(self, dispatch_binding: str | None = None) -> str:
+        """Fingerprint the fixed graph inputs and its business dispatch binding."""
+        from hecate_durable.contracts.durable import canonical_request_digest
+
+        return canonical_request_digest(
+            {
+                "graph_contract": "runner-linear-v1",
+                "manifest": self.manifest.to_dict(),
+                "tool_allowlist": list(self.config.tool_allowlist),
+                "tool_schemas": self.tool_schemas,
+                "model_backend": self.config.model_backend,
+                "model_endpoint": self.config.model_endpoint,
+                "model_auth_env": self.config.model_auth_env,
+                "dispatch_binding": dispatch_binding,
+            }
+        )
+
     def capabilities_summary(self) -> dict:
         summary = {
             "backend_type": self.manifest.backend_type,

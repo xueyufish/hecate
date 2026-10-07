@@ -91,9 +91,21 @@ class LeaseGate:
     local self-authorization.
     """
 
-    def __init__(self, secret: bytes, *, deployment_domain: str, clock=None) -> None:
+    def __init__(
+        self,
+        secret: bytes,
+        *,
+        deployment_domain: str,
+        issuer_domain: str | None = None,
+        host_id: str | None = None,
+        workspace_id: str | None = None,
+        clock=None,
+    ) -> None:
         self._secret = secret
         self._deployment_domain = deployment_domain
+        self._issuer_domain = issuer_domain
+        self._host_id = host_id
+        self._workspace_id = workspace_id
         self._clock = clock or (lambda: datetime.now(UTC))
         self._consumed: set[str] = set()
         self._current: dict[str, Any] | None = None
@@ -117,6 +129,7 @@ class LeaseGate:
                 deployment_domain=self._deployment_domain,
                 now=self._clock(),
             )
+            self._check_identity(claims)
             if claims.nonce in self._consumed:
                 raise CredentialError("lease nonce already consumed (replay rejected)")
             self._consumed.add(claims.nonce)
@@ -128,10 +141,20 @@ class LeaseGate:
         if lease is None:
             return False
         try:
-            verify_lease(lease, self._secret, deployment_domain=self._deployment_domain, now=self._clock())
+            claims = verify_lease(lease, self._secret, deployment_domain=self._deployment_domain, now=self._clock())
+            self._check_identity(claims)
             return True
         except CredentialError:
             return False
+
+    def _check_identity(self, claims: Claims) -> None:
+        for actual, expected, label in (
+            (claims.iss, self._issuer_domain, "issuer"),
+            (claims.sub, self._host_id, "host"),
+            (claims.tenant, self._workspace_id, "workspace"),
+        ):
+            if expected is not None and actual != expected:
+                raise CredentialError(f"lease {label} does not match the enrolled host")
 
 
 @dataclass
@@ -166,6 +189,7 @@ class ManagedChannel:
         lease_gate: LeaseGate | None = None,
         transport=None,
         clock=None,
+        execution_definition: str | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._workspace_id = workspace_id
@@ -183,11 +207,19 @@ class ManagedChannel:
         # (empty = deny-by-default at the existing domain check).
         self._managed_principal = managed_principal_for(trust_root)
         self._managed_domains = tuple(data_domains)
+        self._execution_definition = execution_definition
         self._transport = transport
         self._clock = clock or (lambda: datetime.now(UTC))
         # The gate is shared with the execution engine when the assembly
         # passes one in: pulls update it, protected dispatches check it.
-        self._gate = lease_gate or LeaseGate(secret, deployment_domain=trust_root, clock=clock)
+        self._gate = lease_gate or LeaseGate(
+            secret,
+            deployment_domain=trust_root,
+            issuer_domain=issuer_domain,
+            host_id=host_id,
+            workspace_id=workspace_id,
+            clock=clock,
+        )
         self._credential: dict[str, Any] | None = None
         self._delivery_cursor: str | None = None
         self._event_cursors: dict[tuple[str, str], int] = {}
@@ -313,8 +345,9 @@ class ManagedChannel:
         # never caller-supplied claims; `resume_managed` re-checks it
         # against the current config and stops into reconciliation on drift.
         persisted_input = {
-            **delivery_input,
+            **{key: value for key, value in delivery_input.items() if not key.startswith("_")},
             "_host_identity": {"principal": self._managed_principal, "domains": list(self._managed_domains)},
+            "_host_definition": self._execution_definition,
         }
 
         def _accept() -> tuple[bool, BackendRef, BackendRef]:
@@ -367,34 +400,35 @@ class ManagedChannel:
         run_rows = await asyncio.to_thread(self._store.list_tasks)
         uploaded = 0
         for record in run_rows:
-            run_ref = await asyncio.to_thread(self._store.run_for_task, record.task_ref)
-            if run_ref is None:
+            if record.task_ref.issuer_domain != MANAGED_ISSUER:
                 continue
-            stream_key = (run_ref.issuer_domain, run_ref.id)
-            page = await asyncio.to_thread(
-                self._store.read_events,
-                run_ref,
-                cursor=self._event_cursors.get(stream_key, 0),
-                limit=self._upload_batch,
-            )
-            envelopes = [event.to_dict() for event in page.events if event.kind.value == "event"]
-            if not envelopes:
-                continue
-            if self._gate.active is False and not self._credential:
-                return uploaded  # nothing new will be accepted without a credential
-            result = await self._request(
-                "POST",
-                "/managed/host/events",
-                payload={"local_task_ref": record.task_ref.to_dict(), "envelopes": envelopes},
-                auth=True,
-                tolerate=(403, 422),
-            )
-            if result is None:
-                return uploaded
-            count = int(result.get("projected", 0))
-            uploaded += count
-            self._event_cursors[stream_key] = page.next_cursor
-            self.stats.events_uploaded += count
+            runs = await asyncio.to_thread(self._store.event_runs_for_task, record.task_ref)
+            for run_ref in runs:
+                stream_key = (run_ref.issuer_domain, run_ref.id)
+                page = await asyncio.to_thread(
+                    self._store.read_events,
+                    run_ref,
+                    cursor=self._event_cursors.get(stream_key, 0),
+                    limit=self._upload_batch,
+                )
+                envelopes = [event.to_dict() for event in page.events if event.kind.value == "event"]
+                if not envelopes:
+                    continue
+                if self._gate.active is False and not self._credential:
+                    return uploaded
+                result = await self._request(
+                    "POST",
+                    "/managed/host/events",
+                    payload={"local_task_ref": record.task_ref.to_dict(), "envelopes": envelopes},
+                    auth=True,
+                    tolerate=(403, 422),
+                )
+                if result is None:
+                    continue
+                count = int(result.get("projected", 0))
+                uploaded += count
+                self._event_cursors[stream_key] = page.next_cursor
+                self.stats.events_uploaded += count
         return uploaded
 
     # -- transport ---------------------------------------------------------------

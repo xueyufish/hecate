@@ -558,21 +558,30 @@ class TaskControlService:
                 datetime.fromisoformat(expires_at)
             except (TypeError, ValueError) as exc:
                 raise TaskControlValidationError("expires_at must be an ISO timestamp") from exc
-        # Caller-supplied command ids are idempotent end to end: a settled
-        # receipt replays as-is (same id = same command), never re-applied.
-        if command_id is not None:
-            existing = await asyncio.to_thread(self._recorder.get, command_id)
-            if existing is not None and existing.state in (
-                CommandState.APPLIED,
-                CommandState.REJECTED,
-                CommandState.EXPIRED,
-            ):
-                return CommandIssueResult(record=existing, detail="idempotent replay of a settled command")
         task = await self._get_task(workspace_id, task_id)
         t_ref = task_ref_of(task.id)
+        existing = None
+        # Authorize the resource and bind all immutable input before replay.
+        if command_id is not None:
+            existing = await asyncio.to_thread(self._recorder.get, command_id)
+            if existing is not None:
+                if (
+                    existing.task_ref != t_ref
+                    or existing.issuer != issuer
+                    or existing.kind is not kind
+                    or existing.payload != dict(payload or {})
+                    or existing.payload_schema_ref != (payload_schema_ref if payload else None)
+                    or existing.expires_at != expires_at
+                    or existing.expected_revision != expected_revision
+                    or existing.detail_ns != dict(detail_ns or {})
+                    or existing.extra.get("workspace_id") != str(workspace_id)
+                ):
+                    raise TaskControlValidationError("command ID is bound to a different request")
+                if existing.state in (CommandState.APPLIED, CommandState.REJECTED, CommandState.EXPIRED):
+                    return CommandIssueResult(record=existing, detail="idempotent replay of a settled command")
         runs = await self._registry.list_runs_for_task(task.id, workspace_id)
         latest_run = runs[-1] if runs else None
-        record = ControlCommandRecord(
+        record = existing or ControlCommandRecord(
             command_id=command_id or str(uuid.uuid4()),
             kind=kind,
             issuer=issuer,
@@ -653,14 +662,49 @@ class TaskControlService:
             )
         task = await self._get_task(workspace_id, task_id)
         t_ref = task_ref_of(task.id)
+        callback_digest = canonical_request_digest(
+            {
+                "task_ref": t_ref.to_dict(),
+                "workspace_id": str(workspace_id),
+                "issuer": issuer,
+                "child_task_id": str(child_task_id),
+                "declared_state": declared,
+                "wait_token": wait_token,
+                "payload": payload or {},
+                "result_summary": result_summary or {},
+            }
+        )
+        existing = await asyncio.to_thread(self._recorder.get, command_id)
+        if existing is not None:
+            if (
+                existing.task_ref != t_ref
+                or existing.issuer != issuer
+                or existing.extra.get("workspace_id") != str(workspace_id)
+                or existing.detail_ns.get("callback_digest") != callback_digest
+            ):
+                raise TaskControlValidationError("callback command ID is bound to a different request")
+            if existing.state in (CommandState.APPLIED, CommandState.REJECTED, CommandState.EXPIRED):
+                return CommandIssueResult(record=existing, detail="idempotent replay of a settled command")
         current = await asyncio.to_thread(self._store.get_task_state, t_ref)
         wait = (current.extra or {}).get("wait") or {} if current else {}
-        contract_child = ((wait.get("contract_ref") or {}).get("await_task_ref") or {}).get("id")
-        if contract_child is None:
-            rejected = await self._reject_callback(command_id, task, "task is not waiting on a child task callback")
+        contract_child = (wait.get("contract_ref") or {}).get("await_task_ref")
+        if not isinstance(contract_child, dict):
+            rejected = await self._reject_callback(
+                command_id,
+                task,
+                "task is not waiting on a child task callback",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
             return rejected
-        if str(contract_child) != str(child_task_id):
-            rejected = await self._reject_callback(command_id, task, "callback child does not match the wait contract")
+        if contract_child != task_ref_of(child_task_id).to_dict():
+            rejected = await self._reject_callback(
+                command_id,
+                task,
+                "callback child does not match the wait contract",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
             return rejected
 
         # The child's facts come from the platform's own records, scoped to
@@ -668,25 +712,37 @@ class TaskControlService:
         try:
             child = await self._get_task(workspace_id, child_task_id)
         except TaskControlNotFoundError:
-            rejected = await self._reject_callback(command_id, task, "child task does not exist in this workspace")
+            rejected = await self._reject_callback(
+                command_id,
+                task,
+                "child task does not exist in this workspace",
+                issuer=issuer,
+                callback_digest=callback_digest,
+            )
             return rejected
         child_record = await asyncio.to_thread(self._store.get_task_state, task_ref_of(child.id))
         child_state = child_record.lifecycle_state.value if child_record else UNRECORDED_LIFECYCLE
         if child_state not in _TERMINAL_LIFECYCLE_STATES:
             rejected = await self._reject_callback(
-                command_id, task, f"child task is {child_state}, not in a terminal state"
+                command_id,
+                task,
+                f"child task is {child_state}, not in a terminal state",
+                issuer=issuer,
+                callback_digest=callback_digest,
             )
             return rejected
         if child_state != declared:
             rejected = await self._reject_callback(
-                command_id, task, f"declared state {declared!r} does not match child task state {child_state!r}"
+                command_id,
+                task,
+                f"declared state {declared!r} does not match child task state {child_state!r}",
+                issuer=issuer,
+                callback_digest=callback_digest,
             )
             return rejected
 
-        child_summary = dict(result_summary or {})
-        child_summary.setdefault("child_task_id", str(child.id))
-        child_summary.setdefault("child_state", child_state)
-        merged_payload = {"child_outcome": child_summary, **(payload or {})}
+        child_summary = {**(result_summary or {}), "child_task_id": str(child.id), "child_state": child_state}
+        merged_payload = {**(payload or {}), "child_outcome": child_summary}
         return await self.issue_command(
             workspace_id=workspace_id,
             task_id=task_id,
@@ -695,22 +751,25 @@ class TaskControlService:
             command_id=command_id,
             payload=merged_payload,
             payload_schema_ref="urn:hecate:workflow-callback:child-outcome/0",
-            detail_ns={"wait_token": wait_token},
+            detail_ns={"wait_token": wait_token, "callback_digest": callback_digest},
             # The caller's command_id makes the callback idempotent end to
             # end: issue_command records under it and replays the receipt.
         )
 
-    async def _reject_callback(self, command_id: str, task: Any, reason: str) -> CommandIssueResult:
+    async def _reject_callback(
+        self, command_id: str, task: Any, reason: str, *, issuer: str, callback_digest: str
+    ) -> CommandIssueResult:
         """Record an explicit rejection receipt for one callback attempt."""
         t_ref = task_ref_of(task.id)
         record = ControlCommandRecord(
             command_id=command_id,
             kind=ControlCommandKind.PROVIDE_INPUT,
-            issuer="workflow-callback",
+            issuer=issuer,
             task_ref=t_ref,
             issued_at=_utc_now_iso(),
             state=CommandState.REQUESTED,
             extra={"workspace_id": str(task.workspace_id)},
+            detail_ns={"callback_digest": callback_digest},
         )
         record = await asyncio.to_thread(self._recorder.record, record)
         await self._db.commit()

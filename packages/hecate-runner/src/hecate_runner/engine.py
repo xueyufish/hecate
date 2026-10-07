@@ -7,9 +7,9 @@ The runner compiles one linear graph per manifest at startup:
 The model node produces the tool-selection payload; each tool node
 dispatches to the business API with the server-verified principal and
 domain scope. Execution is serial (``max_concurrency = 1``): a new run
-is refused while another is in flight rather than queued. Checkpoints
-are in-memory only — durable recovery is declared ``unsupported`` via
-the capabilities endpoint and lands in step6.
+is refused while another is in flight rather than queued. The preview
+profile uses in-memory checkpoints; the durable profile persists attempts,
+waiting facts, action receipts and checkpoints behind admission checks.
 """
 
 from __future__ import annotations
@@ -172,6 +172,7 @@ class RunState:
     # stops at the next event boundary and _execute persists the wait.
     wait_request: dict | None = None
     wait_token: str | None = None
+    dispatch_denied: bool = False
 
 
 class EvidenceUnavailableError(Exception):
@@ -189,6 +190,7 @@ class ExecutionEngine:
         durable: DurableRuntime | None = None,
         managed_identity: ManagedIdentity | None = None,
         lease_gate: LeaseGate | None = None,
+        dispatch_binding: str | None = None,
     ) -> None:
         # ``tool_dispatch`` signature: (tool_name, arguments, principal, domains).
         self._profile = profile
@@ -222,6 +224,9 @@ class ExecutionEngine:
         # host's own database so a restart can resume the SAME attempt from
         # the last superstep; the preview profile keeps the in-memory store.
         self._checkpoint_store = self._build_checkpoint_store()
+        self._definition_digest = profile.execution_definition_digest(dispatch_binding)
+        if self._durable is not None:
+            self._durable.execution_definition = self._definition_digest
         self._lock = asyncio.Lock()
         self._runs: dict[str, RunState] = {}
         self._graph = self._compile_graph()
@@ -250,12 +255,23 @@ class ExecutionEngine:
 
         return DurableRuntime._task_session(task_ref)
 
-    def _resume_from_checkpoint(self, task_ref: BackendRef) -> bool:
+    def _resume_from_checkpoint(self, task_ref: BackendRef, run_ref: BackendRef | None = None) -> bool:
         """True when this task's stable session has a persisted checkpoint."""
 
         if self._durable is None:
             return False
-        return self._checkpoint_store.has_checkpoint_sync(self._session_for_task(task_ref))
+        return self._checkpoint_store.has_checkpoint_sync(self._checkpoint_session(task_ref, run_ref))
+
+    def _checkpoint_session(self, task_ref: BackendRef, run_ref: BackendRef | None) -> uuid.UUID:
+        """Use attempt isolation, with a safe legacy interrupted-run fallback."""
+        legacy = self._session_for_task(task_ref)
+        wait = (self._durable.store.get_task_state(task_ref).extra or {}).get("wait") or {}
+        if not wait.get("consumed") and self._checkpoint_store.has_checkpoint_sync(legacy):
+            return legacy
+        run_ref = run_ref or self._durable.store.run_for_task(task_ref)
+        if run_ref is None:
+            return legacy
+        return uuid.uuid5(uuid.NAMESPACE_URL, f"runner-attempt:{run_ref.issuer_domain}:{run_ref.id}")
 
     async def _dispatch_tool(self, state: RunState, tool_name: str, arguments: dict) -> dict:
         """Run one tool with the run's server-verified identity scope.
@@ -274,17 +290,34 @@ class ExecutionEngine:
             # dispatch while the graph unwinds to the stop boundary.
             return {"status": "withheld", "detail": "run is entering a persistent wait"}
         effect = self._side_effects.get(tool_name, ToolSideEffectClass.UNKNOWN)
+        persisted = self._durable.store.get_task_input(state.task_ref) or {} if self._durable and state.task_ref else {}
+        origins = persisted.get("_action_origins") or {}
+        action_run_id = origins.get(tool_name, state.run_id)
         if state.managed and effect is not ToolSideEffectClass.READONLY:
             # step6b action boundary: no current lease, no action intent —
             # a refusal must not masquerade as an execution fact in the
             # ledger, so this runs BEFORE the intent/claim gate.
             refusal = await self._lease_refusal(state, tool_name, arguments)
             if refusal is not None:
+                state.dispatch_denied = True
                 return refusal
+        if (
+            tool_name in self._approval_tools
+            and tool_name not in origins
+            and not self._consume_wake_grant(state, tool_name, digest)
+        ):
+            # A wait is not an action claim: no business dispatch has begun.
+            state.wait_request = {
+                "wake_kind": "resume",
+                "contract_ref": {"tool": tool_name, "arguments_digest": digest, "kind": "approval"},
+            }
+            outcome = {"status": "awaiting_approval", "detail": "parked in waiting_approval; resume to dispatch"}
+            self.record_tool_result(state, tool_name, outcome)
+            return outcome
         if state.action_hook is not None:
             withheld, claim_blocked = await gate_dispatch_async(
                 state.action_hook,
-                run_id=state.run_id,
+                run_id=action_run_id,
                 tool_name=tool_name,
                 arguments=arguments,
                 side_effect_class=effect,
@@ -310,27 +343,19 @@ class ExecutionEngine:
                     self._mark_reconciliation(state, blocked)
                     self.record_tool_result(state, tool_name, blocked)
                     return blocked
-        if tool_name in self._approval_tools:
-            grant = self._consume_wake_grant(state, tool_name, digest)
-            if not grant:
-                # step6c: the intent/claim above is the last execution fact —
-                # the business call does not happen until a resume command
-                # applies. The claimed action stays claimed (never executed);
-                # the wake's new attempt run claims its own key.
-                state.wait_request = {
-                    "wake_kind": "resume",
-                    "contract_ref": {"tool": tool_name, "arguments_digest": digest, "kind": "approval"},
-                }
-                outcome = {"status": "awaiting_approval", "detail": "parked in waiting_approval; resume to dispatch"}
-                self.record_tool_result(state, tool_name, outcome)
-                return outcome
-            state.wait_request = None  # granted: dispatch proceeds as normal
         self._evidence.append("tool_dispatch", state.principal, state.run_id, "started", {"tool": tool_name})
         if arguments.get("domain") not in state.domains:
             outcome = {"status": "authorization", "detail": "requested domain is outside the trusted identity scope"}
         else:
-            outcome = await self._tool_dispatch(tool_name, arguments, state.principal, list(state.domains))
+            try:
+                outcome = await self._tool_dispatch(tool_name, arguments, state.principal, list(state.domains))
+            except Exception:
+                if effect is not ToolSideEffectClass.READONLY:
+                    state.needs_reconciliation = True
+                raise
         status = outcome.get("status")
+        if status == "authorization":
+            state.dispatch_denied = True
         if status == "input_required" and not self._consume_wake_grant(state, tool_name, digest):
             # step6c: the business API requested more input (no side effect
             # performed per its contract); park instead of recording an
@@ -354,11 +379,17 @@ class ExecutionEngine:
         if state.action_hook is not None:
             await record_outcome_async(
                 state.action_hook,
-                run_id=state.run_id,
+                run_id=action_run_id,
                 tool_name=tool_name,
                 arguments=arguments,
                 outcome=outcome,
             )
+            if getattr(state.action_hook, "has_failed_outcomes", False) or status in (
+                "unknown",
+                "reconciliation_required",
+                "store_unavailable",
+            ):
+                state.needs_reconciliation = True
         self.record_tool_result(state, tool_name, outcome)
         return outcome
 
@@ -464,6 +495,8 @@ class ExecutionEngine:
         """Validate every scheduled tool before accepting any execution."""
         if not isinstance(run_input, dict):
             raise ValueError("run request must be an object")
+        if any(key.startswith("_") for key in run_input):
+            raise ValueError("internal host fields cannot be supplied in a run request")
         if "input" in run_input and not isinstance(run_input["input"], dict):
             raise ValueError("input must be an object")
         raw = run_input.get("tool_arguments", {})
@@ -485,6 +518,12 @@ class ExecutionEngine:
         if self._durable is not None:
             return {**supported, **UNSUPPORTED_CAPABILITIES, **DURABLE_CAPABILITIES}
         return {**supported, **UNSUPPORTED_CAPABILITIES}
+
+    def validate_durable_input(self, run_input: dict) -> None:
+        """Validate trusted persisted input against the admitted execution definition."""
+        if run_input.get("_host_definition") != self._definition_digest:
+            raise ValueError("execution definition is missing or changed since admission")
+        self.validate_run_input({key: value for key, value in run_input.items() if not key.startswith("_")})
 
     async def submit(
         self,
@@ -625,7 +664,8 @@ class ExecutionEngine:
         if not isinstance(domains, list) or not any(set(domains).issubset(i.domains) for i in matches):
             self._durable.finish_run(task_ref, "unknown", needs_reconciliation=True)
             return None
-        return self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains)).run_id
+        state = self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains))
+        return state.run_id if state is not None else None
 
     def resume_managed(self, task_ref: BackendRef, run_ref: BackendRef) -> str | None:
         """Re-drive an accepted managed task after (re)start (step6a loop).
@@ -661,6 +701,8 @@ class ExecutionEngine:
             self._durable.finish_run(task_ref, "unknown", needs_reconciliation=True)
             return None
         state = self._schedule_durable_resume(task_ref, run_ref, persisted_input, principal, tuple(domains))
+        if state is None:
+            return None
         state.managed = True
         return state.run_id
 
@@ -671,9 +713,14 @@ class ExecutionEngine:
         run_input: dict,
         principal: str,
         domains: tuple[str, ...],
-    ) -> RunState:
+    ) -> RunState | None:
         """Shared serial-slot dispatch tail for both recovery entries."""
 
+        try:
+            self.validate_durable_input(run_input)
+        except ValueError:
+            self._durable.finish_run(task_ref, "unknown", needs_reconciliation=True)
+            return None
         self._admit_protected(run_input)
         state = RunState(
             run_id=run_ref.id,
@@ -789,32 +836,27 @@ class ExecutionEngine:
                 # RUNNING→RUNNING on resume is an absorbing no-op; a fresh
                 # submission moves QUEUED→RUNNING here, never inside submit.
                 self._durable.begin_run(state.task_ref)
-            # step6d: the recovery session is TASK-level and stable — every
-            # attempt of one task shares it, so persisted checkpoints carry
+            # The recovery session is stable within one attempt; each new
+            # attempt has its own session, so persisted checkpoints carry
             # across restart-driven resumes. The in-flight run id keeps
             # action-key identity per attempt.
             session_id = (
-                self._session_for_task(state.task_ref)
+                self._checkpoint_session(state.task_ref, state.run_ref)
                 if state.task_ref is not None
                 else uuid.uuid5(uuid.NAMESPACE_URL, f"runner-run:{run_id}")
             )
             # step6d: a resumed interrupted attempt continues from the last
             # persisted superstep instead of replaying the graph from the
             # top; the ledger still arbitrates every action.
-            resume_value = f"resume:{run_id}" if (resume and self._resume_from_checkpoint(state.task_ref)) else None
-            provided = run_input.get("provided")
-            if isinstance(provided, dict) and provided:
-                # step6c wake composition: the operator-supplied input fills
-                # gaps in each tool's persisted arguments (persisted args
-                # stay authoritative on conflicts).
-                merged_args: dict = {}
-                for name, args in (run_input.get("tool_arguments") or {}).items():
-                    merged_args[name] = {**provided, **args} if isinstance(args, dict) else args
-                run_input = {**run_input, "tool_arguments": merged_args}
+            resume_value = (
+                f"resume:{run_id}" if (resume and self._resume_from_checkpoint(state.task_ref, state.run_ref)) else None
+            )
             try:
 
                 def observe(event: dict) -> RuntimeEventDecision:
                     self._append_event(state, event)
+                    if state.needs_reconciliation or state.dispatch_denied:
+                        return RuntimeEventDecision.STOP_UNKNOWN
                     if state.wait_request is not None:
                         # step6c: the dispatch boundary requested a persistent
                         # wait — stop the graph instead of running further
@@ -856,6 +898,8 @@ class ExecutionEngine:
                     )
                     return
                 final_status = result.state.value
+                if state.dispatch_denied:
+                    final_status = "failed"
                 if result.state.value == "failed":
                     state.error = "execution failed; inspect local service logs"
                     logger.warning("Runner execution %s failed: %s", run_id, result.error)

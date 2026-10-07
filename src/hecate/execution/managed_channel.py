@@ -174,6 +174,7 @@ def issue_lease_for(host: HostContext, secret: bytes, *, ttl_seconds: float) -> 
         sub=host.claims.sub,
         ttl_seconds=ttl_seconds,
         scope=host.managed_scope,
+        tenant=str(host.workspace_id),
     )
     return lease
 
