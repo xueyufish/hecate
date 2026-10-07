@@ -141,7 +141,7 @@ def event_page(state, *, cursor: str | None, durable_page=None) -> dict[str, Any
         return {
             "events": [envelope.to_dict() for envelope in durable_page.events],
             "next_cursor": str(durable_page.next_cursor),
-            "has_more": False,
+            "has_more": durable_page.has_more,
         }
     try:
         start = max(int(cursor) if cursor is not None else 0, 0)

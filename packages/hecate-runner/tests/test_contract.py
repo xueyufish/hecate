@@ -135,18 +135,24 @@ def test_idempotent_contract_replay_keeps_original_receipt(contract_harness: _Ha
     validate_document(conflict, "errors")
 
 
+@pytest.mark.parametrize("deny", [False, True])
 def test_contract_status_and_events_survive_restart(
     contract_harness: _Harness,
     contract_profile: Path,
     contract_database_url: str,
+    deny: bool,
 ) -> None:
+    request = _execution_request(idempotency_key="contract-key-restart")
+    if deny:
+        request["input"]["tool_arguments"]["query_inventory"]["domain"] = "outside-domain"
     _, receipt = contract_harness.call(
         "POST",
         "/runs",
-        _execution_request(idempotency_key="contract-key-restart"),
+        request,
         headers={"Idempotency-Key": "contract-key-restart"},
     )
-    _wait_formal_terminal(contract_harness, receipt)
+    before = _wait_formal_terminal(contract_harness, receipt)
+    _, artifacts_before = contract_harness.call("GET", f"/runs/{_wire_run(receipt)}/artifacts")
     run_id = receipt["run_ref"]["id"]
     task_id = _wait_task_terminal(contract_harness, run_id)["task_ref"]
     del task_id
@@ -158,7 +164,15 @@ def test_contract_status_and_events_survive_restart(
         try:
             _, status = restarted.call("GET", f"/runs/{_wire_run(receipt)}")
             validate_document(status, "run-status")
-            assert status["state"] == "succeeded"
+            assert status["state"] == ("failed" if deny else "succeeded")
+            assert status["detail_ns"] == before["detail_ns"]
+            assert restarted.call("GET", f"/runs/{_wire_run(receipt)}/artifacts")[1] == artifacts_before
+            code, replay = restarted.call(
+                "POST", "/runs", request, headers={"Idempotency-Key": request["idempotency_key"]}
+            )
+            assert code == 202 and replay == receipt
+            code, cancelled = restarted.call("POST", f"/runs/{_wire_run(receipt)}/cancel")
+            assert code == 202 and cancelled["state"] == "rejected"
 
             _, events = restarted.call("GET", f"/runs/{_wire_run(receipt)}/events")
             validate_document(events, "event-page")
@@ -167,3 +181,66 @@ def test_contract_status_and_events_survive_restart(
             restarted.close(abandon=True)
     finally:
         api.close()
+
+
+def test_persistent_events_expose_all_pages(contract_harness: _Harness) -> None:
+    """Clients following has_more must receive every persisted event."""
+    request = _execution_request()
+    _, receipt = contract_harness.call(
+        "POST", "/runs", request, headers={"Idempotency-Key": request["idempotency_key"]}
+    )
+    _wait_formal_terminal(contract_harness, receipt)
+    state = contract_harness.engine.get_state(receipt["run_ref"]["id"])
+    assert state is not None and state.task_ref is not None and state.run_ref is not None
+    initial = contract_harness.durable.read_execution_events(state.run_ref, limit=1000)
+    for sequence in range(initial.next_cursor + 1, initial.next_cursor + 206):
+        contract_harness.durable.emit_execution_event(
+            task_ref=state.task_ref,
+            run_ref=state.run_ref,
+            source_sequence=sequence,
+            event_type="engine_event",
+            payload={"sequence": sequence},
+        )
+        contract_harness.store.emit_event(
+            state.task_ref, state.run_ref, event_type="progress", payload={"sequence": sequence}
+        )
+    cursor = "0"
+    ids: list[str] = []
+    while True:
+        _, page = contract_harness.call("GET", f"/runs/{_wire_run(receipt)}/events?cursor={cursor}")
+        ids.extend(event["event_id"] for event in page["events"])
+        cursor = page["next_cursor"]
+        if not page["has_more"]:
+            break
+    assert len(ids) == len(initial.events) + 205
+    assert len(set(ids)) == len(ids)
+    _, legacy = contract_harness.call("GET", f"/runs/{state.run_id}/events")
+    assert legacy["terminal"] is False
+    legacy_ids = [event["event_id"] for event in legacy["events"]]
+    while legacy["has_more"]:
+        _, legacy = contract_harness.call("GET", f"/runs/{state.run_id}/events?cursor={legacy['cursor']}")
+        legacy_ids.extend(event["event_id"] for event in legacy["events"])
+    assert legacy["terminal"] is True
+    assert len(legacy_ids) == len(contract_harness.store.read_events(state.run_ref, limit=1000).events)
+    assert len(set(legacy_ids)) == len(legacy_ids)
+
+
+def test_gap_marker_does_not_hide_following_event(contract_harness: _Harness) -> None:
+    """A gap consuming the final slot must keep the observed event available."""
+    from hecate_durable.contracts.references import BackendRef, RefKind
+
+    task = BackendRef(RefKind.TASK, "standalone-host", "gap-task")
+    run = BackendRef(RefKind.RUN, "standalone-host", "gap-run")
+    contract_harness.durable.emit_execution_event(
+        task_ref=task,
+        run_ref=run,
+        source_sequence=3,
+        event_type="engine_event",
+        payload={},
+    )
+    first = contract_harness.durable.read_execution_events(run, limit=1)
+    assert first.has_more
+    assert first.next_cursor == 2
+    second = contract_harness.durable.read_execution_events(run, cursor=first.next_cursor, limit=1)
+    assert not second.has_more
+    assert second.events[0].source_sequence == 3

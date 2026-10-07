@@ -18,7 +18,7 @@
 
 ## CI follow-up
 
-GitHub Actions full-suite run passed `6478` tests, skipped `58`, and failed only `test_sc03_approval_wait_survives_kill_then_wakes_once`: immediately after the wake receipt, the new run was still `queued`. `RunnerInstance.wait_run()` returned on any status other than `running`, so it treated this valid dispatch transition as a final result. The harness now polls through both `queued` and `running`, then returns on a waiting or terminal state. Local execution of the exact CI command was unavailable in this Windows session because the attached venv points to a missing `C:\Python314\python.exe`; GitHub Actions remains the authoritative verification for this follow-up.
+GitHub Actions full-suite run passed `6478` tests, skipped `58`, and failed only `test_sc03_approval_wait_survives_kill_then_wakes_once`: immediately after the wake receipt, the new run was still `queued`. `RunnerInstance.wait_run()` returned on any status other than `running`, so it treated this valid dispatch transition as a final result. The harness now polls through both `queued` and `running`, then returns on a waiting or terminal state. The restricted Windows session could not access the venv interpreter at `C:\Python314\python.exe`; that was an environment-access limitation, not proof that the interpreter was absent. The later `step6-run-evidence-consistency` review used the authorized test environment to run the installed-wheel SC03 successfully.
 
 ## 可复现命令
 

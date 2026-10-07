@@ -155,6 +155,7 @@ class DurableRuntime:
         *,
         needs_reconciliation: bool = False,
         error: str | None = None,
+        cancel_command_id: str | None = None,
     ) -> TaskStateRecord:
         """Converge a task; withheld actions land in ``reconciliation_required``.
 
@@ -175,7 +176,12 @@ class DurableRuntime:
         terminal_payload = (
             {"status": outcome, "error": error} if target is not TaskLifecycleState.RECONCILIATION_REQUIRED else None
         )
-        return self.store.apply_task_state(task_ref, target, terminal_payload=terminal_payload)
+        return self.store.apply_task_state(
+            task_ref,
+            target,
+            terminal_payload=terminal_payload,
+            applied_command_id=cancel_command_id if target is TaskLifecycleState.CANCELLED else None,
+        )
 
     # -- persistent waiting (step6c) ----------------------------------------------
 
@@ -465,6 +471,20 @@ class DurableRuntime:
 
     def read_events(self, run_ref: BackendRef, *, cursor: int = 0, limit: int = 100):
         return self.store.read_events(run_ref, cursor=cursor, limit=limit)
+
+    def run_state(self, task_ref: BackendRef, run_ref: BackendRef) -> tuple[str, str | None, str | None]:
+        """Restore an attempt's facts without borrowing a successor's Task state."""
+        record = self.store.get_task_state(task_ref)
+        event = self.store.events.latest(run_ref, event_types=("task_state", "run_terminal"))
+        if record is not None and self.store.run_for_task(task_ref) == run_ref:
+            status = record.lifecycle_state.value
+            recorded_at = record.recorded_at
+        else:
+            payload = event.payload if event is not None else {}
+            status = str(payload.get("status") or payload.get("state") or "unknown")
+            recorded_at = event.occurred_at if event is not None else None
+        error = event.payload.get("error") if event is not None else None
+        return status, error, self.store.submission_received_at(run_ref) or recorded_at
 
     def emit_execution_event(
         self,

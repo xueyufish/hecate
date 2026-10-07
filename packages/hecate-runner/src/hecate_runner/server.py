@@ -250,15 +250,18 @@ class RunnerServer:
                                 "Request denied",
                                 "run is outside the trusted identity scope",
                             )
-                        record = server._durable.store.get_task_state(task_ref)
+                        status, error, recorded_at = server._durable.run_state(task_ref, run_ref)
                         state = RunState(
                             run_id=run_id,
-                            status=record.lifecycle_state.value,
+                            status=status,
                             principal=principal,
                             domains=tuple(trusted.get("domains") or ()),
                             task_ref=task_ref,
                             run_ref=run_ref,
-                            received_at=record.recorded_at,
+                            received_at=recorded_at,
+                            error=error,
+                            result_ref=f"runs/{run_id}/artifacts" if status == "succeeded" else None,
+                            idempotency_key=association.key.key if association is not None else None,
                         )
                 if state is None:
                     raise _ProblemError(404, "run-not-found", "Run not found", "run does not resolve")
@@ -530,7 +533,11 @@ class RunnerServer:
                                 # is only visible to the run's recorded
                                 # principal (identity was verified above).
                                 wait = server._durable.wait_of(state.task_ref)
-                                if wait is not None:
+                                if (
+                                    wait is not None
+                                    and not wait.get("consumed")
+                                    and server._durable.store.run_for_task(state.task_ref) == state.run_ref
+                                ):
                                     payload["wait"] = {
                                         "wake_kind": wait.get("wake_kind"),
                                         "contract_ref": wait.get("contract_ref"),
@@ -599,7 +606,9 @@ class RunnerServer:
                                     {
                                         "cursor": page.next_cursor,
                                         "events": [envelope.to_dict() for envelope in page.events],
-                                        "terminal": state.status != "running",
+                                        "has_more": page.has_more,
+                                        "terminal": state.status in {"succeeded", "failed", "cancelled"}
+                                        and not page.has_more,
                                     },
                                 )
                                 return
@@ -618,7 +627,7 @@ class RunnerServer:
                                 {
                                     "cursor": cursor + len(events),
                                     "events": events,
-                                    "terminal": state.status != "running",
+                                    "terminal": state.status in {"succeeded", "failed", "cancelled"},
                                 },
                             )
                             return
@@ -762,22 +771,26 @@ class RunnerServer:
                             self._send_problem(404, "run-not-found", "Run not found", "unknown run issuer")
                             return
                         state = self._authorized_run(run_id, identity)
-                        command_id = None
-                        if server._durable is not None and state.task_ref is not None and state.run_ref is not None:
-                            import uuid as uuid_mod
 
-                            command_id = f"cancel-{uuid_mod.uuid4()}"
-                            server._durable.record_cancel(
-                                command_id=command_id,
-                                issuer=identity["principal"],
-                                task_ref=state.task_ref,
-                                run_ref=state.run_ref,
-                            )
+                        async def cancel() -> tuple[bool, str | None]:
+                            command_id = None
+                            if server._durable is not None and state.task_ref is not None and state.run_ref is not None:
+                                import uuid as uuid_mod
 
-                        async def cancel() -> bool:
-                            return server._engine.request_cancel(run_id, command_id=command_id)
+                                # Execute without yielding on the engine loop so
+                                # racing requests reuse one pending cancellation.
+                                pending_id = state.cancel_command_id if state.status == "running" else None
+                                command_id = pending_id or f"cancel-{uuid_mod.uuid4()}"
+                                server._durable.record_cancel(
+                                    command_id=command_id,
+                                    issuer=identity["principal"],
+                                    task_ref=state.task_ref,
+                                    run_ref=state.run_ref,
+                                )
+                            return server._engine.request_cancel(run_id, command_id=command_id), command_id
 
-                        if server._run_coro(cancel()):
+                        accepted, command_id = server._run_coro(cancel())
+                        if accepted:
                             if formal:
                                 payload = contract.cancel_receipt(
                                     run_id,

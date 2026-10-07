@@ -200,6 +200,43 @@ async def test_approval_tool_parks_and_resume_executes_once(tmp_path: Path):
         harness.close()
 
 
+async def test_historical_waiting_run_retains_own_state_after_restart(tmp_path: Path):
+    """Task completion cannot rewrite an earlier attempt or expose a stale token."""
+    api = _BusinessApi()
+    profile = _profile(tmp_path, f"sqlite:///{tmp_path / 'history.db'}", kind="approval")
+    harness = _Harness(profile, api=api)
+    try:
+        old_run = await _submit(
+            harness, {"query_inventory": READ_ARGS, "submit_ticket": {"domain": "domain_a", "ticket": "T-1"}}
+        )
+        task = harness.store.task_for_run(BackendRef(RefKind.RUN, ISSUER, old_run))
+        assert task is not None
+        await _wait_task_state(harness, task, "waiting_approval")
+        _, waiting = harness.call("GET", f"/runs/{old_run}")
+        assert harness.call("GET", f"/runs/{old_run}/events")[1]["terminal"] is False
+        status, receipt = harness.call(
+            "POST",
+            f"/runs/{old_run}/resume",
+            {"command_id": "history-wake", "wait_token": waiting["wait"]["wait_token"]},
+        )
+        assert status == 202 and receipt["state"] == "applied"
+        await _wait_task_state(harness, task, "succeeded")
+        new_run = harness.store.run_for_task(task)
+        assert new_run is not None
+        _, old_before_restart = harness.call("GET", f"/runs/{old_run}")
+        assert old_before_restart["status"] == "waiting_approval"
+        assert "wait" not in old_before_restart
+        harness.close()
+        harness = _Harness(profile, api=api)
+        _, old = harness.call("GET", f"/runs/{old_run}")
+        assert old["status"] == "waiting_approval"
+        assert "wait" not in old
+        assert harness.call("GET", f"/runs/{new_run.id}")[1]["status"] == "succeeded"
+        assert api.tools() == ["query_inventory", "submit_ticket"]
+    finally:
+        harness.close()
+
+
 async def test_wake_does_not_repeat_write_before_approval(tmp_path: Path):
     """A new attempt must retain the completed predecessor action identity."""
     api = _BusinessApi()
