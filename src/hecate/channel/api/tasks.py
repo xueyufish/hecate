@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import uuid
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response, StreamingResponse
@@ -227,6 +227,53 @@ async def cancel_task(task_id: uuid.UUID, service: ServiceDep, ctx: AuthDep) -> 
     """Request cancellation; success records the request, never applied."""
     cancel = CommandRequest(kind=ControlCommandKind.CANCEL)
     return await _issue(ctx, service, task_id, ControlCommandKind.CANCEL, cancel)
+
+
+class WorkflowCallbackRequest(BaseModel):
+    """One workflow callback asserting a child task's terminal outcome."""
+
+    command_id: str = Field(min_length=1)
+    wait_token: str = Field(min_length=1)
+    child_task_id: uuid.UUID
+    declared_state: Literal["succeeded", "failed", "cancelled"]
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/{task_id}/workflow-callback")
+async def workflow_callback(
+    task_id: uuid.UUID, body: WorkflowCallbackRequest, service: ServiceDep, ctx: AuthDep
+) -> dict[str, Any]:
+    """Wake a workflow's durable wait after verifying the child task's facts.
+
+    The platform trusts its own records, not the callback's assertion: the
+    parent's wait contract must name this child, and the child must be in a
+    terminal state matching ``declared_state`` — otherwise the callback is
+    rejected without consuming the wait token. A settled ``command_id``
+    replays its receipt idempotently.
+    """
+    try:
+        issued = await service.submit_workflow_callback(
+            workspace_id=_workspace_id(ctx),
+            task_id=task_id,
+            command_id=body.command_id,
+            wait_token=body.wait_token,
+            child_task_id=body.child_task_id,
+            declared_state=body.declared_state,
+            payload={"result": body.result} if body.result else None,
+            result_summary=body.result or None,
+            issuer=str(ctx.user_id) if ctx.user_id is not None else "anonymous",
+        )
+    except Exception as exc:  # noqa: BLE001 — narrowed by _map_service_error
+        raise _map_service_error(exc) from exc
+    record = issued.record
+    return {
+        "command_id": record.command_id,
+        "kind": record.kind.value,
+        "state": record.state.value,
+        "issued_at": record.issued_at,
+        "issuer": record.issuer,
+        "detail": issued.detail,
+    }
 
 
 @router.post("/{task_id}/commands", status_code=status.HTTP_201_CREATED)
