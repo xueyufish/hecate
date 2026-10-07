@@ -156,6 +156,14 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
                 .first()
             )
             assert row is not None
+            if execution_binding is not None:
+                agent_id, deployment_id = execution_binding
+                agent = await session.get(AgentModel, agent_id)
+                deployment = await session.get(AgentDeploymentModel, deployment_id)
+                principal = await session.get(AgentPrincipalModel, agent_id)
+                if agent is None or deployment is None or principal is None:
+                    execution_binding = None
+
             if execution_binding is None:
                 agent = AgentModel(workspace_id=WS, name=f"sc05-agent-{uuid.uuid4().hex[:8]}")
                 session.add(agent)
@@ -188,11 +196,6 @@ async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
                 session.add(deployment)
                 await session.flush()
                 execution_binding = (agent.id, deployment.id)
-            else:
-                agent_id, deployment_id = execution_binding
-                agent = await session.get(AgentModel, agent_id)
-                deployment = await session.get(AgentDeploymentModel, deployment_id)
-                assert agent is not None and deployment is not None
             chain = IdentityChain(
                 initiator=None,
                 principal_id=str(agent.id),
