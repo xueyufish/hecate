@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -47,7 +48,7 @@ from hecate_runtime.types import (
 from hecate_runtime.worker import Worker
 from jsonschema import Draft202012Validator
 
-from .durable import DurableRuntime, gate_dispatch_async, record_outcome_async
+from .durable import DurableRuntime, gate_dispatch_async, is_decided_action, record_outcome_async
 from .evidence import OUTCOME_FAILED, EvidenceStore
 from .managed import MANAGED_ISSUER, LeaseGate, ManagedIdentity
 from .profile import BUILTIN_TOOL_SCHEMAS, Profile
@@ -61,6 +62,11 @@ DURABLE_CAPABILITIES: dict[str, str] = {
 }
 
 logger = logging.getLogger(__name__)
+
+# A consumed/not-yet-arrived lease is transient while the channel keeps
+# pulling (one protected dispatch per lease): bounded wait for refresh.
+_LEASE_REFRESH_WAIT_SECONDS = 5.0
+_LEASE_REFRESH_POLL_SECONDS = 0.05
 
 # Capabilities the preview profile does not provide; surfaced verbatim on
 # /capabilities so absence is explicit, not a silent default.
@@ -293,10 +299,26 @@ class ExecutionEngine:
         persisted = self._durable.store.get_task_input(state.task_ref) or {} if self._durable and state.task_ref else {}
         origins = persisted.get("_action_origins") or {}
         action_run_id = origins.get(tool_name, state.run_id)
-        if state.managed and effect is not ToolSideEffectClass.READONLY:
+        if (
+            state.managed
+            and effect is not ToolSideEffectClass.READONLY
+            and not (
+                state.action_hook is not None
+                and await is_decided_action(
+                    state.action_hook,
+                    run_id=action_run_id,
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    side_effect_class=effect,
+                )
+            )
+        ):
             # step6b action boundary: no current lease, no action intent —
             # a refusal must not masquerade as an execution fact in the
-            # ledger, so this runs BEFORE the intent/claim gate.
+            # ledger, so this runs BEFORE the intent/claim gate. A decided
+            # action replays from the ledger without a business call, so it
+            # skips the gate: consuming the one-shot lease there would
+            # starve the attempt's real new dispatch of authorization.
             refusal = await self._lease_refusal(state, tool_name, arguments)
             if refusal is not None:
                 state.dispatch_denied = True
@@ -398,28 +420,39 @@ class ExecutionEngine:
 
         Verifies the CURRENT lease (signature, expiry, deployment binding,
         unconsumed nonce) and that the requested data domain is inside the
-        lease's scope. The refusal is an explicit, evidenced denial with
-        zero business side effects; nonce consumption on a scope denial is
-        deliberate conservatism — a used lease authorizes nothing further.
+        lease's scope. Each lease authorizes exactly one protected
+        dispatch, so a multi-action run consumes the current lease and the
+        NEXT dispatch waits (bounded) for the channel's next pull to
+        install a fresh one — "not yet refreshed" is transient, not a
+        denial. After the wait budget the refusal is an explicit,
+        evidenced denial with zero business side effects; nonce consumption
+        on a scope denial is deliberate conservatism — a used lease
+        authorizes nothing further.
         """
 
         requested_domain = arguments.get("domain")
-        denial: dict | None
-        try:
-            claims = await self._lease_gate.check() if self._lease_gate is not None else None
-            if claims is None:
-                denial = {"status": "authorization", "detail": f"tool {tool_name} withheld: no managed lease gate"}
-            elif requested_domain not in (claims.scope or []):
-                denial = {
-                    "status": "authorization",
-                    "detail": (
-                        f"tool {tool_name} withheld: domain {requested_domain!r} is outside the current lease scope"
-                    ),
-                }
-            else:
-                return None
-        except CredentialError as exc:
-            denial = {"status": "authorization", "detail": f"tool {tool_name} withheld: {exc}"}
+        denial: dict | None = None
+        deadline = time.monotonic() + _LEASE_REFRESH_WAIT_SECONDS
+        while True:
+            try:
+                claims = await self._lease_gate.check() if self._lease_gate is not None else None
+                if claims is None:
+                    denial = {"status": "authorization", "detail": f"tool {tool_name} withheld: no managed lease gate"}
+                elif requested_domain not in (claims.scope or []):
+                    denial = {
+                        "status": "authorization",
+                        "detail": (
+                            f"tool {tool_name} withheld: domain {requested_domain!r} is outside the current lease scope"
+                        ),
+                    }
+                else:
+                    return None
+            except CredentialError as exc:
+                denial = {"status": "authorization", "detail": f"tool {tool_name} withheld: {exc}"}
+                if time.monotonic() < deadline:
+                    await asyncio.sleep(_LEASE_REFRESH_POLL_SECONDS)
+                    continue
+            break
         self._evidence.append(
             "tool_result",
             state.principal,

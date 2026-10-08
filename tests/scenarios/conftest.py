@@ -26,6 +26,34 @@ from hecate.models.agent import AgentModel
 from hecate.models.tool import ToolModel
 from hecate.models.tool_policy import ToolPolicyRuleModel
 from hecate.runtime.eventstore import InMemoryEventStore
+from tests.scenarios.tools.managed_platform import (
+    ISSUER,
+    SECRET,
+    STEP6_POSTGRES_URL,
+)
+
+
+@pytest.fixture(
+    params=[None, *([STEP6_POSTGRES_URL] if STEP6_POSTGRES_URL else [])],
+    ids=["sqlite", "postgres"][: 1 + bool(STEP6_POSTGRES_URL)],
+)
+def step6_runner_database_url(request):
+    """Run the same installed-host scenarios on SQLite and optional PostgreSQL."""
+
+    return request.param
+
+
+@pytest.fixture
+def managed_secrets():
+    from hecate.core.composition.managed_secrets import (
+        clear_managed_secrets,
+        register_managed_secret,
+    )
+
+    register_managed_secret(ISSUER, SECRET)
+    yield
+    clear_managed_secrets()
+
 
 SCENARIO_TOOL = "create_test_ticket"
 SCENARIO_MODEL = "gpt-4o"

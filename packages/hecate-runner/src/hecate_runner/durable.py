@@ -528,6 +528,39 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+async def is_decided_action(
+    hook: RunnerLedgerHook,
+    *,
+    run_id: str,
+    tool_name: str,
+    arguments: dict,
+    side_effect_class: ToolSideEffectClass,
+) -> bool:
+    """True when the ledger already holds a decision for this action key.
+
+    A decided action replays from the ledger (the business API is not
+    called), so it is not a new protected dispatch and must not consume a
+    one-shot lease grant — otherwise a successor attempt's replay would
+    starve its real new dispatch of authorization.
+    """
+
+    execution_id = action_key_for(run_id, tool_name)
+    digest = tool_arguments_digest(arguments)
+    resolution = await hook.resolve(session_id=run_id, execution_id=execution_id)
+    return (
+        recovery_decision(
+            resolution,
+            tc_id=execution_id,
+            tool_name=tool_name,
+            arguments_digest=digest,
+            classification=_kernel_class(side_effect_class),
+            messages=[],
+            recorded_content=resolution.result_content,
+        )
+        is not None
+    )
+
+
 async def gate_dispatch_async(
     hook: RunnerLedgerHook,
     *,

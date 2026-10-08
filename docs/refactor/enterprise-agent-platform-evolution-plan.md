@@ -537,12 +537,16 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 **剩余实施顺序：**以下属于 Step6 的关闭门槛，不转移给 step16；涉及共享服务、身份和审批的前置能力分别与 step5c、step7 同步交付。
 
 - [x] step6a：受管 CLI、持久接收、串行执行、结果上传与 drain 已接通；接受只代表排队，重投保留原 Task/Run。上传过滤独立来源，并按历史 Run 分流，单个失败流不阻塞其他任务。安装后的 Runner wheel 已对接真实平台 HTTP，验证接受响应丢失、重投去重、执行业务工具、状态投影、宿主重启、重连及多 Run 事件补传；完整 PostgreSQL 宿主故障矩阵仍由 step6f 验收。
-- [ ] step6b：实际受保护 Action 派发前已检查 Lease 的签名、issuer、host subject、workspace、部署、数据域、期限与 nonce；拒绝使执行失败并停止后续工具，未知动作保持待对账。当前每个 Lease 只允许一次受保护派发，HMAC 是预览信任材料。**关闭门槛：**与 step7 接通工具级动作范围、合法审批、撤权及声明的断连窗口；明确多写动作执行期间的续租或拒绝策略，并完成实际业务调用计数验收。
+- [ ] step6b：实际受保护 Action 派发前已检查 Lease 的签名、issuer、host subject、workspace、部署、数据域、期限与 nonce；拒绝使执行失败并停止后续工具，未知动作保持待对账。当前每个 Lease 只允许一次受保护派发，HMAC 是预览信任材料；同 Run 多受保护派发的续租采用有界等待策略（等待新拉取的 lease，超时显式拒绝）。**关闭门槛：**与 step7 接通工具级动作范围、合法审批、撤权及声明的断连窗口；完成实际业务调用计数验收。
+
+  追加修正（2026-10-08，`managed-command-acceptance`）：runner 侧 `is_decided_action` 允许已决动作回填（重放时）跳过 Lease gate，否则唤醒后的新 attempt 会以回填名义消耗一次性租约、饿死真实派发；引擎 `_lease_refusal` 在 `CredentialError` 上加入有界等待，由通道持续拉取安装新 lease。进程级证据见 `docs/refactor/step6-followup-review.md` 的 `managed-command-acceptance` 验收记录。
 - [ ] step6c：Runner 已提供持久等待和 owner/token 技术唤醒。审批等待发生在 claim 前；唤醒原子消费 token、合并/校验输入、绑定新 attempt 并应用命令；前序已完成动作保留原 key、回填结果。拒绝内部字段注入、GET 唤醒、并发重复消费和异体重放；任务列表/事件/动作按 owner 与可信数据域隔离。独立 wheel 进程已验证等待后 kill/restart、合法唤醒和重复回执。**关闭门槛：**step7 合法审批判定、受管命令下发及新 attempt 的平台关联；有 token 不代表有企业审批权限。
 
   追加修正：旧尝试不返回已消费或新尝试的等待 token；运行中重复取消共用待处理命令，cancelled 与 applied 原子提交；无实际执行的历史 Run 取消如实拒绝，不改写原 applied 回执。
 
   追加修正（2026-10-08）：受管命令下发、宿主命令处理、效果回执上传与 waiting 唤醒后新 attempt 的平台关联代码已随 #232 交付（平台命令翻译 `managed_channel.command_for_host`、runner 命令 inbox `_apply_command` 与 effect 回执端点），上方关闭门槛中的"受管命令下发及新 attempt 的平台关联"不再列为待实现。剩余门槛收窄为：真实受管进程的全链验收（等待→命令→唤醒→新 attempt→终态，两端重启、确认丢失、重复/过期命令）与 step7 合法审批判定；证据与代码位置见 [Step6 主线追加复核](step6-followup-review.md) 的 2026-10-08 状态记录修正小节。
+
+  追加修正（2026-10-08，`managed-command-acceptance`）：进程级验收套件已交付——安装后的 Runner wheel 对接真实平台 HTTP（TCP，非 ASGI），覆盖全链 happy path、等待期宿主 kill/restart 后唤醒零重做前序写、平台 uvicorn 重启后命令幂等投递与回放、effect 上传首 503 重试仍只 applied、过期命令拒绝零副作用（`tests/scenarios/test_sc05_managed_wake_chain.py`，SQLite 默认参数化；PG 参数化由 `HECATE_STEP6_POSTGRES_URL` 门控，套件供 `step6-pg-process-matrix` 复用）。SC05 manifest slices 同步追加 `managed_wake_chain`/`managed_command_receipt`，场景整体保持 `planned`（剩余项：连接断连陈旧窗口、step7 合法审批判定、step6f 完整平台托管进程矩阵）。本条保留显式 step7 依赖行——技术 token 不等于企业审批权限。
 - [ ] step6d：Runner 持久 checkpoint 按 attempt 隔离，同一 attempt 重启可原生继续；无 checkpoint 仅按冻结固定图及账本恢复。旧 task 级 checkpoint 只用于可验证的原 attempt，新等待唤醒不读取它。恢复前校验 manifest、工具顺序/Schema、模型引用与业务派发绑定；缺摘要或漂移不执行。平台派发已重验 Principal/部署/版本，使用冻结配置，但**普通 SessionState 是聊天历史，不是原生 continuation**；已有受保护动作的中断必须待对账。**关闭门槛：**平台共享执行真实 continuation、冻结动作关联和外部写/回执丢失故障矩阵；保持 G2 未关闭，不建设平台通用 checkpoint 引擎。
 - [ ] step6e：REST 工作流回调已核实同 workspace 的真实子终态，匹配完整 child 引用和一次性 token；附加载荷不能覆盖可信 child ID/state，command ID 绑定完整原请求。**关闭门槛：**将等待/回调接到确定性工作流节点或具名 adapter，运行真实父子执行与各自进程重启；手写或 monkeypatch orchestrator 只能证明原语。
 - [ ] step6f：独立 wheel 进程已覆盖 SC01/SC02、SC03 的终态写持久化与审批等待重启、SC06 本地证据拒绝切片；受管 Runner wheel + 真实平台 HTTP 的 SC05 执行/重连切片已通过，PostgreSQL durable 存储和 Alembic 升级链另行验证。**关闭门槛：**PostgreSQL 上完整宿主故障矩阵、未决外部写和迟到回执；SC03/SC04/SC05/SC06 按实际范围保持部分覆盖，不因组件测试通过标整场景完成。证据不可写时只读继续及中心缓冲/补传限额仍需 step7/10 明确策略。
