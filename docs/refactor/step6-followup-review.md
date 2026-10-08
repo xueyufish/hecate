@@ -55,3 +55,25 @@ G2 和 SC03～SC06 的整体认证保持原门槛。尚未交付的功能继续�
 PostgreSQL 完整宿主故障矩阵仍未通过。本机 Windows 执行环境中，pytest 主进程可连接临时 PostgreSQL，但 clean-installed Runner 子进程连接 Docker 发布的 localhost PostgreSQL 时被系统拒绝（`Permission denied (10013)`）；后续 durable PostgreSQL 专项尝试未能取得稳定的测试报告，不能记为通过。用于验证的临时数据库和角色已删除。下一轮应在 Linux CI/开发环境配置独立 `HECATE_STEP6_POSTGRES_URL` 和 `DURABLE_TEST_POSTGRES_URL`，运行 PostgreSQL 参数化的 Runner 进程验收与 durable 故障注入，覆盖已接受未执行、进程 kill/restart、外部写成功但回执丢失、迟到终态、重复命令、平台重启和宿主失联，再据结果关闭 step6f。
 
 最终提交前在沙箱外重跑后，`ruff check src/ tests/ packages/` 与 `ruff format --check src/ tests/ packages/` 通过；`mypy src/ packages/` 对 892 个源文件通过；OpenSpec strict 校验通过；受影响测试 `53 passed`，包括 SQLite SC05 安装制品/HTTP 场景。首次 mypy 发现的 nullable wait-record 测试错误已修复。之前在受限环境遇到的 uv 缓存写入和 OpenSpec realpath `EPERM` 属于执行环境限制，已通过在沙箱外执行验证解决。PostgreSQL Runner 子进程故障矩阵仍未通过，不能由这些检查替代；Step6 总体保持部分完成。
+
+## 2026-10-08 状态记录修正
+
+对 `main`（`9b9dae5`）的代码核对发现上文 2026-10-07 小节所引 `complete-step6-recovery-gates` 的两处完成声明超出代码与验收证据，另有一处方案门槛文本滞后。本节登记更正；不改写归档勾选，注记已追加于该 change 的 `tasks.md`。
+
+| 记录 | 代码事实 | 更正 |
+|---|---|---|
+| Task2"完成内置 continuation" | `src/hecate/execution/task_dispatcher.py` 对含受保护动作的中断转 `reconciliation_required` 并以新 attempt 重放（注释明确：当前入口启动新模型执行，无法延续原动作身份）；`src/hecate/execution/builtin.py` 中断标记 `continuation controls are unsupported` | 实际交付为冻结动作关联 + 已决结果回放 + 保守待对账；平台原生 continuation 未实现，演进方案 step6d 门槛维持 |
+| Task3"接入真实工作流父子等待" | 生产代码仅有消费侧：`src/hecate/execution/task_control.py` 核实子任务事实后唤醒、`src/hecate/channel/api/tasks.py` 回调端点；全局检索无提交子任务并持久等待的生产节点/adapter；`tests/test_execution/test_worker_integration.py::test_orchestration_child_wait_and_wake` 经 monkeypatch 替换 `PlatformTaskDispatcher._execute` 制造等待 | 生产侧确定性父子 adapter 未实现，演进方案 step6e 门槛维持；monkeypatch 编排只证明原语 |
+| 方案 step6c 关闭门槛文本 | 受管命令下发、宿主命令处理、效果回执上传与新 attempt 平台关联代码已随 #232 交付（`src/hecate/execution/managed_channel.py` 的 `command_for_host`/命令回执校验、`packages/hecate-runner/src/hecate_runner/managed.py` 的命令 inbox `_apply_command` 与 effect 上传端点） | 方案 step6c 已追加修正行：剩余门槛为真实受管进程全链验收（等待→命令→唤醒→新 attempt→终态、两端重启、确认丢失、重复/过期命令）与 step7 合法审批判定 |
+
+**后续收口拆分（实施顺序建议，均为 Step6 自有工作，不等待 step8—19）：**
+
+| 后续 change | 内容 | 依赖 |
+|---|---|---|
+| `managed-command-acceptance` | 真实受管进程全链验收（6c 技术闭环）；场景参数化设计为 PG 复用 | 本 change |
+| `builtin-native-continuation` | 内置后端真实 checkpoint continuation、冻结动作关联、恢复入口重验（6d） | 本 change |
+| `workflow-child-adapter` | 生产侧确定性父子任务 adapter + 两端重启/重复/迟到回调（6e） | `builtin-native-continuation` |
+| `lease-renewal-policy` | 多写动作续租或拒绝策略 + 失联/过期/nonce 重放零副作用验收（6b 技术闭环） | 本 change，可与前两者并行 |
+| `step6-pg-process-matrix` | CI 配置 `HECATE_STEP6_POSTGRES_URL` 跑宿主矩阵（6f） | `managed-command-acceptance` 及其余实现 change |
+
+各 change 随自身验收证据翻转对应方案条目；企业授权、审批判定、断连窗口与中心证据策略仍归 step7/10，Step6 完成状态最终收敛为"技术交付完成，剩余项逐条列 Step7/10 依赖"。本节未运行新测试，结论来自静态代码核对；后续 change 的运行证据以其各自 verification 记录为准。
