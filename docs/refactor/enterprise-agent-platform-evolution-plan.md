@@ -541,6 +541,8 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 - [ ] step6c：Runner 已提供持久等待和 owner/token 技术唤醒。审批等待发生在 claim 前；唤醒原子消费 token、合并/校验输入、绑定新 attempt 并应用命令；前序已完成动作保留原 key、回填结果。拒绝内部字段注入、GET 唤醒、并发重复消费和异体重放；任务列表/事件/动作按 owner 与可信数据域隔离。独立 wheel 进程已验证等待后 kill/restart、合法唤醒和重复回执。**关闭门槛：**step7 合法审批判定、受管命令下发及新 attempt 的平台关联；有 token 不代表有企业审批权限。
 
   追加修正：旧尝试不返回已消费或新尝试的等待 token；运行中重复取消共用待处理命令，cancelled 与 applied 原子提交；无实际执行的历史 Run 取消如实拒绝，不改写原 applied 回执。
+
+  追加修正（2026-10-08）：受管命令下发、宿主命令处理、效果回执上传与 waiting 唤醒后新 attempt 的平台关联代码已随 #232 交付（平台命令翻译 `managed_channel.command_for_host`、runner 命令 inbox `_apply_command` 与 effect 回执端点），上方关闭门槛中的"受管命令下发及新 attempt 的平台关联"不再列为待实现。剩余门槛收窄为：真实受管进程的全链验收（等待→命令→唤醒→新 attempt→终态，两端重启、确认丢失、重复/过期命令）与 step7 合法审批判定；证据与代码位置见 [Step6 主线追加复核](step6-followup-review.md) 的 2026-10-08 状态记录修正小节。
 - [ ] step6d：Runner 持久 checkpoint 按 attempt 隔离，同一 attempt 重启可原生继续；无 checkpoint 仅按冻结固定图及账本恢复。旧 task 级 checkpoint 只用于可验证的原 attempt，新等待唤醒不读取它。恢复前校验 manifest、工具顺序/Schema、模型引用与业务派发绑定；缺摘要或漂移不执行。平台派发已重验 Principal/部署/版本，使用冻结配置，但**普通 SessionState 是聊天历史，不是原生 continuation**；已有受保护动作的中断必须待对账。**关闭门槛：**平台共享执行真实 continuation、冻结动作关联和外部写/回执丢失故障矩阵；保持 G2 未关闭，不建设平台通用 checkpoint 引擎。
 - [ ] step6e：REST 工作流回调已核实同 workspace 的真实子终态，匹配完整 child 引用和一次性 token；附加载荷不能覆盖可信 child ID/state，command ID 绑定完整原请求。**关闭门槛：**将等待/回调接到确定性工作流节点或具名 adapter，运行真实父子执行与各自进程重启；手写或 monkeypatch orchestrator 只能证明原语。
 - [ ] step6f：独立 wheel 进程已覆盖 SC01/SC02、SC03 的终态写持久化与审批等待重启、SC06 本地证据拒绝切片；受管 Runner wheel + 真实平台 HTTP 的 SC05 执行/重连切片已通过，PostgreSQL durable 存储和 Alembic 升级链另行验证。**关闭门槛：**PostgreSQL 上完整宿主故障矩阵、未决外部写和迟到回执；SC03/SC04/SC05/SC06 按实际范围保持部分覆盖，不因组件测试通过标整场景完成。证据不可写时只读继续及中心缓冲/补传限额仍需 step7/10 明确策略。
