@@ -77,3 +77,17 @@ PostgreSQL 完整宿主故障矩阵仍未通过。本机 Windows 执行环境中
 | `step6-pg-process-matrix` | CI 配置 `HECATE_STEP6_POSTGRES_URL` 跑宿主矩阵（6f） | `managed-command-acceptance` 及其余实现 change |
 
 各 change 随自身验收证据翻转对应方案条目；企业授权、审批判定、断连窗口与中心证据策略仍归 step7/10，Step6 完成状态最终收敛为"技术交付完成，剩余项逐条列 Step7/10 依赖"。本节未运行新测试，结论来自静态代码核对；后续 change 的运行证据以其各自 verification 记录为准。
+
+## 2026-10-08 `managed-command-acceptance` 验收记录
+
+`feat/managed-command-acceptance` 交付 step6c 关闭门槛的进程级部分。Runner wheel + 真实平台 HTTP（TCP）验收套件位于 `tests/scenarios/test_sc05_managed_wake_chain.py`（5 用例），覆盖：
+
+- 全链 happy path——等待→平台 resume 命令→runner 一次性 token 消费→successor attempt→终态；原等待 Run 的平台投影保持 `waiting_approval`，不继承 successor 状态。
+- 等待期宿主 `kill`+`restart` 后唤醒——前序受保护业务写入全链恰好一次。
+- 平台 `uvicorn` 重启后命令仍投递且幂等回放——同 `command_id` 重发返回原 applied 回执，无第二次业务效果。
+- effect 上传首请求 503 重试——业务计数证明无双重应用。
+- 过期命令被拒绝——零 post-wake 读，本地等待 Run 保留 `waiting_approval`。
+
+实现层发现并修补两处缺口（step6c + step6b 范围，未越界 step7）：runner 侧 `is_decided_action` 允许已决动作回填跳过 Lease gate；引擎 `_lease_refusal` 在 `CredentialError` 上加入有界等待（5 s 等待新拉取的 lease，超时显式拒绝）。
+
+平台栈与 SC05 共享（`tests/scenarios/tools/managed_platform.py`），SC05 原断言零修改；文件型 SQLite 解决 ASGI 与测试侧并发提交撞车。PG 参数化由 `HECATE_STEP6_POSTGRES_URL` 门控复用，套件结构供 `step6-pg-process-matrix` 在 Linux CI 接入。SC05 manifest 同步追加两个 slices；场景整体保持 `planned`。Step6 整体仍为"部分完成"，本 change 不翻转总体状态。

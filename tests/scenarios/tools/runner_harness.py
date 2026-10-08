@@ -56,6 +56,22 @@ def _build_wheels(dist_dir: Path) -> tuple[Path, Path, Path]:
     return runtime_wheel, durable_wheel, runner_wheel
 
 
+def ensure_wheels(dist_dir: Path) -> tuple[Path, Path, Path]:
+    """Build the three wheels into ``dist_dir`` once; reuse existing artifacts.
+
+    Scenario modules share one build across their process tests (serial
+    builds; see the SC03 precedent) while each test keeps its own venv,
+    profile, and durable database.
+    """
+
+    if not list(dist_dir.glob("hecate_runner-*.whl")):
+        _build_wheels(dist_dir)
+    runtime_wheel = next(dist_dir.glob("hecate_runtime-*.whl"))
+    durable_wheel = next(dist_dir.glob("hecate_durable-*.whl"))
+    runner_wheel = next(dist_dir.glob("hecate_runner-*.whl"))
+    return runtime_wheel, durable_wheel, runner_wheel
+
+
 def _write_profile(
     profile_dir: Path,
     *,
@@ -263,6 +279,7 @@ def start_runner(
     control_plane: dict | None = None,
     managed_secret: bytes | None = None,
     durable_database_url: str | None = None,
+    dist_dir: Path | None = None,
 ) -> tuple[RunnerInstance, ThreadingHTTPServer, list[dict]]:
     """Build, install, profile, launch.
 
@@ -271,16 +288,18 @@ def start_runner(
     API down via ``stop_business_api`` (or rely on daemon threads in tests).
     ``durable=True`` additionally wires the persistent task/action ledger
     and checkpoints (a file database inside the workdir) and admits
-    write/approval tools.
+    write/approval tools. ``dist_dir`` reuses previously built wheel
+    artifacts (``ensure_wheels``) instead of rebuilding per test.
     """
 
     if not uv_available():
         raise RuntimeError("uv is required for the clean-install harness")
 
     workdir = Path(tempfile.mkdtemp(prefix="sc-runner-", dir=tmp_root))
-    dist_dir = workdir / "dist"
+    dist_target = Path(dist_dir) if dist_dir is not None else workdir / "dist"
+    dist_target.mkdir(parents=True, exist_ok=True)
     venv_dir = workdir / "venv"
-    runtime_wheel, durable_wheel, runner_wheel = _build_wheels(dist_dir)
+    runtime_wheel, durable_wheel, runner_wheel = ensure_wheels(dist_target)
 
     subprocess.run(["uv", "venv", str(venv_dir), "--seed"], check=True, capture_output=True, timeout=120)
     python_exe = venv_dir / "Scripts" / "python.exe" if os.name == "nt" else venv_dir / "bin" / "python"

@@ -273,11 +273,15 @@ sc_scenarios:
     tier: 1
     responsible_step: 4/6/7
     blocked_by: runner managed dispatch loop, action-time lease enforcement and process restart acceptance
-    implemented_slices: [delivery_acceptance, event_projection, lease_gate, managed_loop, action_authorization]
+    implemented_slices: [delivery_acceptance, event_projection, lease_gate, managed_loop, action_authorization, managed_wake_chain, managed_command_receipt]
     gaps: >-
       Process-level acceptance (installed wheels + real platform control plane
       + hard restart/lease takeover) remains planned; the delivered slices are
-      component/integration level.
+      component/integration level, and the managed wake-chain suite covers
+      the SQLite path with a guarded PostgreSQL parametrization (see
+      HECATE_STEP6_POSTGRES_URL). Connection-loss stale window, legal approval
+      authority and the full platform-managed process matrix still need
+      step7 and step6f respectively.
     assertions: >-
       After re-verifying trust and authorization the host accepts new work;
       historical events are deduplicated on replay; duplicate commands and

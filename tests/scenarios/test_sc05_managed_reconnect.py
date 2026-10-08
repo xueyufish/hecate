@@ -3,45 +3,30 @@
 The suite covers component-level delivery/projection behavior and a clean-
 installed Runner process over platform HTTP. PostgreSQL process acceptance is
 enabled by ``HECATE_STEP6_POSTGRES_URL`` when the host can reach that database.
+The platform stack assembly is shared with the wake-chain acceptance suite
+(``tests/scenarios/tools/managed_platform.py``).
 """
 
 from __future__ import annotations
 
-import os
 import uuid
 
-import httpx
 import pytest
-from fastapi import FastAPI
-from hecate_runner.managed import ManagedChannel
+from hecate_durable.contracts.durable import TaskLifecycleState
 
-from hecate.channel.api.managed import router as managed_router
 from hecate.core.auth_context import AuthContext
-from hecate.core.composition.managed_secrets import clear_managed_secrets, register_managed_secret
-from hecate.core.deps import get_db
-from hecate.core.deps_workspace import get_auth_context
-from hecate.execution import managed_credentials as mc
-from hecate.execution.managed_channel import ManagedDeliveryService
-from hecate.execution.trust_roots import TrustRootRegistry
-from hecate.models.audit import AuditLogModel  # noqa: F401  (registers audit_logs before schema creation)
-from hecate.models.organization import OrganizationModel
-from hecate.models.user import UserModel
-from hecate.models.workspace import WorkspaceModel
-from tests.conftest import DEFAULT_WORKSPACE_ID, test_session_factory
+from tests.scenarios.tools.managed_platform import (
+    ADMIN,
+    ISSUER,
+    ROOT_NAME,
+    SECRET,
+    WS,
+    build_managed_stack,
+    connect_channel,
+    serve_over_tcp,
+)
 
-WS = DEFAULT_WORKSPACE_ID
-ADMIN = uuid.uuid4()
-ROOT_NAME = "host-root-sc05"
-ISSUER = "managed-sc05-issuer"
-SECRET = b"sc05-managed-channel-secret"
-_STEP6_POSTGRES_URL = os.environ.get("HECATE_STEP6_POSTGRES_URL")
-
-
-@pytest.fixture
-def secrets():
-    register_managed_secret(ISSUER, SECRET)
-    yield
-    clear_managed_secrets()
+TaskLifecycleStateEnum = TaskLifecycleState
 
 
 @pytest.fixture
@@ -54,245 +39,17 @@ def auth_context() -> AuthContext:
 
 
 @pytest.fixture
-async def managed_stack(auth_context: AuthContext, secrets, tmp_path):
+async def managed_stack(auth_context: AuthContext, managed_secrets, tmp_path):
     """Platform app (ASGI) + an enrolled host channel sharing the wire."""
 
-    from hecate_durable.storage import SqlDurableStore
-
-    from hecate.models.workspace_member import WorkspaceMemberModel, WorkspaceRole
-
-    app = FastAPI()
-    app.include_router(managed_router)
-
-    async def override_get_db():
-        async with test_session_factory() as session:
-            try:
-                yield session
-                await session.commit()
-            except Exception:
-                await session.rollback()
-                raise
-
-    app.dependency_overrides[get_db] = override_get_db
-    app.dependency_overrides[get_auth_context] = lambda: auth_context
-
-    async with test_session_factory() as db:
-        db.add(OrganizationModel(id=WS, name="org", slug=f"org-{WS.hex[:12]}", owner_id=ADMIN))
-        db.add(WorkspaceModel(id=WS, org_id=WS, name="ws", slug=f"ws-{WS.hex}"))
-        db.add(UserModel(id=ADMIN, email="admin@example.com", hashed_password=uuid.uuid4().hex))
-        db.add(WorkspaceMemberModel(workspace_id=WS, user_id=ADMIN, role=WorkspaceRole.ADMIN))
-        await db.commit()
-
-    store = SqlDurableStore(f"sqlite:///{tmp_path / 'sc05-host.db'}", source="standalone_host")
-    store.create_schema()
-    transport = httpx.ASGITransport(app=app)
-
-    async def admit() -> None:
-        async with test_session_factory() as session:
-            registry = TrustRootRegistry(session)
-            await registry.register(
-                workspace_id=WS,
-                name=ROOT_NAME,
-                material_digest=mc.material_digest(SECRET),
-                issuer_domain=ISSUER,
-                config_fingerprint="cfg-sc05",
-            )
-            await session.commit()
-
-    async def opt_in() -> None:
-        from sqlalchemy import select
-
-        from hecate.execution.enrollment_resolver import HmacEnrollmentResolver
-        from hecate.execution.task_run_registry import TaskRunRegistry
-        from hecate.models.standalone_enrollment import StandaloneEnrollmentModel
-
-        async with test_session_factory() as session:
-            row = (
-                (
-                    await session.execute(
-                        select(StandaloneEnrollmentModel).where(StandaloneEnrollmentModel.deleted.is_(False))
-                    )
-                )
-                .scalars()
-                .first()
-            )
-            assert row is not None
-            resolver = HmacEnrollmentResolver(session, secret_candidates={ROOT_NAME: SECRET})
-            await TaskRunRegistry(session, enrollment_resolver=resolver.verify).set_managed_opt_in(
-                row.id, WS, managed_new_runs=True, operator_id=ADMIN, admitted=True
-            )
-            await session.commit()
-
-    async def revoke_root() -> None:
-        async with test_session_factory() as session:
-            await TrustRootRegistry(session).revoke(WS, ROOT_NAME)
-            await session.commit()
-
-    execution_binding: tuple[uuid.UUID, uuid.UUID] | None = None
-
-    async def queue_delivery(input_payload: dict) -> str:
-        from sqlalchemy import select
-
-        from hecate.contracts.execution.identity import IdentityChain, WorkloadIdentity
-        from hecate.contracts.execution.references import deployment_ref
-        from hecate.contracts.execution.references import run_ref as mk_run_ref
-        from hecate.contracts.execution.references import task_ref as mk_task_ref
-        from hecate.execution.task_run_registry import TaskRunRegistry
-        from hecate.models.agent import AgentModel
-        from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
-        from hecate.models.agent_principal import AgentPrincipalModel
-        from hecate.models.agent_version import AgentVersionModel
-        from hecate.models.standalone_enrollment import StandaloneEnrollmentModel
-
-        nonlocal execution_binding
-        async with test_session_factory() as session:
-            row = (
-                (
-                    await session.execute(
-                        select(StandaloneEnrollmentModel).where(StandaloneEnrollmentModel.deleted.is_(False))
-                    )
-                )
-                .scalars()
-                .first()
-            )
-            assert row is not None
-            if execution_binding is not None:
-                agent_id, deployment_id = execution_binding
-                agent = await session.get(AgentModel, agent_id)
-                deployment = await session.get(AgentDeploymentModel, deployment_id)
-                principal = await session.get(AgentPrincipalModel, agent_id)
-                if agent is None or deployment is None or principal is None:
-                    execution_binding = None
-
-            if execution_binding is None:
-                agent = AgentModel(workspace_id=WS, name=f"sc05-agent-{uuid.uuid4().hex[:8]}")
-                session.add(agent)
-                await session.flush()
-                version = AgentVersionModel(agent_id=agent.id, version=1, config_snapshot={}, content_hash="a" * 64)
-                session.add(version)
-                await session.flush()
-                session.add(
-                    AgentPrincipalModel(
-                        id=agent.id,
-                        agent_id=agent.id,
-                        workspace_id=WS,
-                        organization_id=WS,
-                        owner_user_id=ADMIN,
-                    )
-                )
-                deployment = AgentDeploymentModel(
-                    agent_id=agent.id,
-                    agent_version_id=version.id,
-                    workspace_id=WS,
-                    backend_type=BackendType.BUILTIN,
-                    access_mode=AccessMode.IN_PROCESS,
-                    issuer_domain="hecate",
-                    capability_snapshot={},
-                    axes_harness="hecate",
-                    axes_environment="none",
-                    axes_tool_execution="hecate_gateway",
-                    is_default=True,
-                )
-                session.add(deployment)
-                await session.flush()
-                execution_binding = (agent.id, deployment.id)
-            chain = IdentityChain(
-                initiator=None,
-                principal_id=str(agent.id),
-                workload=WorkloadIdentity(
-                    deployment=deployment_ref("hecate", str(deployment.id)), workload_id="hecate:managed"
-                ),
-                audience="hecate:managed-channel",
-            )
-            registry = TaskRunRegistry(session)
-            task = await registry.create_task(goal="scenario delivery", initiator_ref=chain.to_dict(), workspace_id=WS)
-            run = await registry.create_run(
-                task_id=task.id,
-                workspace_id=WS,
-                deployment_id=deployment.id,
-                identity_chain=chain,
-                backend_run_ref=mk_run_ref("hecate", str(uuid.uuid4())),
-            )
-            service = ManagedDeliveryService(session)
-            delivery = await service.queue_delivery(
-                workspace_id=WS,
-                enrollment_id=row.id,
-                delivery_id=uuid.uuid4(),
-                task_ref={**mk_task_ref("hecate", str(task.id)).to_dict(), "kind": "task"},
-                run_ref={**mk_run_ref("hecate", str(run.id)).to_dict(), "kind": "run"},
-                input_payload=input_payload,
-            )
-            await session.commit()
-            return str(delivery.id)
-
-    channel = ManagedChannel(
-        base_url="http://platform.test",
-        workspace_id=str(WS),
-        trust_root=ROOT_NAME,
-        host_id="host-sc05",
-        secret=SECRET,
-        store=store,
-        issuer_domain=ISSUER,
-        lease_ttl_seconds=120.0,
-        poll_interval_seconds=0.05,
-        transport=transport,
-    )
-
-    async def accepted_local_task_ref(delivery_row_id: str) -> dict:
-        from hecate_durable.contracts.references import BackendRef, RefKind
-
-        return BackendRef(RefKind.TASK, "managed-host", f"managed-{delivery_row_id}").to_dict()
-
-    yield {
-        "app": app,
-        "channel": channel,
-        "admit": admit,
-        "opt_in": opt_in,
-        "revoke_root": revoke_root,
-        "queue_delivery": queue_delivery,
-        "accepted_local_task_ref": accepted_local_task_ref,
-        "store": store,
-    }
-    store.dispose()
-    app.dependency_overrides.clear()
-
-
-async def _serve_over_tcp(app: FastAPI):
-    """Serve the real managed router on a loopback TCP socket."""
-
-    import asyncio
-    import socket
-
-    import uvicorn
-
-    listener = socket.socket()
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    listener.bind(("127.0.0.1", 0))
-    listener.listen(128)
-    port = listener.getsockname()[1]
-    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
-    task = asyncio.create_task(server.serve(sockets=[listener]))
-    deadline = asyncio.get_running_loop().time() + 10
-    while not server.started and asyncio.get_running_loop().time() < deadline:
-        await asyncio.sleep(0.02)
-    assert server.started, "managed platform HTTP server did not start"
-    return server, task, f"http://127.0.0.1:{port}"
-
-
-async def _connect(stack) -> ManagedChannel:
-    """The reconnect flow: trust re-verified at registration and every pull."""
-
-    channel: ManagedChannel = stack["channel"]
-    await stack["admit"]()  # the operator provisions the trust material first
-    assert await channel.register() is True
-    await stack["opt_in"]()
-    return channel
+    async with build_managed_stack(auth_context, tmp_path) as stack:
+        yield stack
 
 
 async def test_sc05_reconnect_reverification_then_new_work(managed_stack) -> None:
     """Assertion 1: after re-verifying trust the host accepts new work."""
 
-    channel = await _connect(managed_stack)
+    channel = await connect_channel(managed_stack)
     delivery_row_id = await managed_stack["queue_delivery"]({"messages": [{"role": "user", "content": "sc05"}]})
     assert await channel.pull_once() == 1
     local_ref = await managed_stack["accepted_local_task_ref"](delivery_row_id)
@@ -300,19 +57,6 @@ async def test_sc05_reconnect_reverification_then_new_work(managed_stack) -> Non
 
     state = managed_stack["store"].get_task_state(BackendRef.from_dict(local_ref))
     assert state is not None and state.lifecycle_state is TaskLifecycleStateEnum.QUEUED
-
-
-TaskLifecycleStateEnum = __import__("hecate_durable").contracts.durable.TaskLifecycleState
-
-
-@pytest.fixture(
-    params=[None, *([_STEP6_POSTGRES_URL] if _STEP6_POSTGRES_URL else [])],
-    ids=["sqlite", "postgres"][: 1 + bool(_STEP6_POSTGRES_URL)],
-)
-def step6_runner_database_url(request):
-    """Run the same installed-host scenario on SQLite and optional PostgreSQL."""
-
-    return request.param
 
 
 async def test_installed_runner_uses_platform_http_across_lost_accept_and_restart(
@@ -352,7 +96,7 @@ async def test_installed_runner_uses_platform_http_across_lost_accept_and_restar
 
     managed_stack["app"].add_middleware(DropFirstAcceptResponse)
     await managed_stack["admit"]()
-    server, server_task, base_url = await _serve_over_tcp(managed_stack["app"])
+    server, server_task, base_url = await serve_over_tcp(managed_stack["app"])
     runner = None
     business_server = None
     try:
@@ -382,7 +126,7 @@ async def test_installed_runner_uses_platform_http_across_lost_accept_and_restar
 
             deadline = asyncio.get_running_loop().time() + 20
             while asyncio.get_running_loop().time() < deadline:
-                async with test_session_factory() as db:
+                async with managed_stack["session_factory"]() as db:
                     row = (
                         (
                             await db.execute(
@@ -404,7 +148,7 @@ async def test_installed_runner_uses_platform_http_across_lost_accept_and_restar
         from hecate.execution.enrollment_resolver import HmacEnrollmentResolver
         from hecate.execution.task_run_registry import TaskRunRegistry
 
-        async with test_session_factory() as db:
+        async with managed_stack["session_factory"]() as db:
             resolver = HmacEnrollmentResolver(db, secret_candidates={ROOT_NAME: SECRET})
             await TaskRunRegistry(db, enrollment_resolver=resolver.verify).set_managed_opt_in(
                 enrollment_id,
@@ -420,7 +164,7 @@ async def test_installed_runner_uses_platform_http_across_lost_accept_and_restar
             deadline = asyncio.get_running_loop().time() + 10
             observed = None
             while asyncio.get_running_loop().time() < deadline:
-                async with test_session_factory() as db:
+                async with managed_stack["session_factory"]() as db:
                     delivery = await db.get(ManagedDeliveryModel, uuid.UUID(delivery_id))
                     if delivery is not None:
                         run = await db.get(RunModel, uuid.UUID(delivery.run_ref["id"]))
@@ -502,7 +246,7 @@ async def test_installed_runner_uses_platform_http_across_lost_accept_and_restar
 async def test_sc05_duplicate_delivery_never_repeats_execution(managed_stack) -> None:
     """Assertion 3 (deliveries): a redelivered row is answered, not executed."""
 
-    channel = await _connect(managed_stack)
+    channel = await connect_channel(managed_stack)
     delivery_id = await managed_stack["queue_delivery"]({"messages": []})
     assert await channel.pull_once() == 1
 
@@ -521,13 +265,13 @@ async def test_sc05_events_deduplicated_on_replay(managed_stack) -> None:
 
     from hecate.contracts.execution.references import BackendRef, RefKind
 
-    channel = await _connect(managed_stack)
+    channel = await connect_channel(managed_stack)
     delivery_row_id = await managed_stack["queue_delivery"]({"messages": []})
     await channel.pull_once()
     local_task = BackendRef(RefKind.TASK, "managed-host", f"managed-{delivery_row_id}")
     local_run = BackendRef(RefKind.RUN, "managed-host", f"managed-run-{delivery_row_id}")
     # Accept happened during pull; record the mapping the upload needs.
-    async with test_session_factory() as db:
+    async with managed_stack["session_factory"]() as db:
         from hecate.execution.managed_channel import ManagedDeliveryService
 
         await ManagedDeliveryService(db).accept(
@@ -554,11 +298,11 @@ async def test_sc05_projection_never_overwrites_local_facts(managed_stack) -> No
 
     from hecate.contracts.execution.references import BackendRef, RefKind
 
-    channel = await _connect(managed_stack)
+    channel = await connect_channel(managed_stack)
     delivery_row_id = await managed_stack["queue_delivery"]({"messages": []})
     await channel.pull_once()
     local_task = BackendRef(RefKind.TASK, "managed-host", f"managed-{delivery_row_id}")
-    async with test_session_factory() as db:
+    async with managed_stack["session_factory"]() as db:
         from hecate.execution.managed_channel import ManagedDeliveryService
 
         await ManagedDeliveryService(db).accept(
@@ -585,7 +329,7 @@ async def test_sc05_projection_never_overwrites_local_facts(managed_stack) -> No
 async def test_sc05_revoked_trust_root_stops_new_work(managed_stack) -> None:
     """Reconnect after revocation: the re-verification chain refuses."""
 
-    channel = await _connect(managed_stack)
+    channel = await connect_channel(managed_stack)
     assert await channel.pull_once() == 0
     await managed_stack["revoke_root"]()
     channel._credential = None  # reconnect re-authenticates
@@ -597,7 +341,7 @@ async def test_sc05_revoked_trust_root_stops_new_work(managed_stack) -> None:
 
 
 async def test_sc05_upload_cursors_are_independent_per_run(managed_stack) -> None:
-    channel = await _connect(managed_stack)
+    channel = await connect_channel(managed_stack)
     await managed_stack["queue_delivery"]({"messages": []})
     await managed_stack["queue_delivery"]({"messages": []})
     assert await channel.pull_once() == 2
@@ -614,7 +358,7 @@ async def test_sc05_upload_cursors_are_independent_per_run(managed_stack) -> Non
 
 
 async def test_sc05_unconfirmed_accept_is_redelivered_after_cursor_advance(managed_stack, monkeypatch) -> None:
-    channel = await _connect(managed_stack)
+    channel = await connect_channel(managed_stack)
     await managed_stack["queue_delivery"]({"messages": []})
     original = channel._request
     dropped = False
@@ -635,7 +379,7 @@ async def test_sc05_unconfirmed_accept_is_redelivered_after_cursor_advance(manag
 
 
 async def test_sc05_conflicting_replay_is_rejected(managed_stack) -> None:
-    channel = await _connect(managed_stack)
+    channel = await connect_channel(managed_stack)
     await managed_stack["queue_delivery"]({"messages": []})
     await channel.pull_once()
     store = managed_stack["store"]
