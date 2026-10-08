@@ -71,6 +71,7 @@
 
 - **WHEN** 执行请求中的工具参数不符合工具声明的 schema
 - **THEN** 分发被拒绝,错误与拒绝证据记录参数校验失败,业务 API 未被调用
+
 ### Requirement: Local evidence with no default upload
 
 宿主 MUST 将每次执行与每次拒绝追加写入本地 append-only 证据存储,记录至少:时间、principal、动作或执行标识、outcome 分类(成功/拒绝类别/失败)与结果引用;证据 MUST 可经本地查询接口按 outcome 与 principal 过滤读取。宿主 MUST NOT 向配置之外的任何目标发送业务内容;除已配置的模型 endpoint 与工具指向的业务 API 外,默认零外发。
@@ -112,6 +113,7 @@
 
 - **WHEN** 关停请求到达时存在在途执行
 - **THEN** 宿主拒绝新请求;未启用 durable 时报告显式不可恢复,启用 durable 时在途动作留于持久台账待重启判定,不伪造超出实际保证的恢复承诺
+
 ### Requirement: 宿主执行与证据可观测且受身份隔离
 
 宿主 MUST 在接受运行前持久保存准入记录;运行、事件、产物与取消 MUST 限定为原 principal 且当前数据域覆盖原运行数据域。参数校验 MUST 先于业务分发;endpoint 模式 MUST 实际调用配置模型,失败不得静默回退 Stub。取消 MUST 记录请求,并在工具调用边界生效;不能承诺撤回已发生调用。
@@ -355,3 +357,128 @@ durable profile 的宿主 SHALL 把执行 checkpoint 持久化到宿主自有存
 
 - **WHEN** 恢复时该任务会话无可用的持久 checkpoint
 - **THEN** 宿主按既有全图 replay 恢复,动作台账逐工具仲裁,安全语义与现状一致
+
+### Requirement: 等待唤醒保持前序动作与可信宿主状态
+
+宿主 SHALL 在新等待唤醒 attempt 中保留前序工具的逻辑动作身份并回填真实结果；MUST NOT 因新 Run 或 checkpoint 清理窗口重新执行前序已完成写操作。宿主内部 grant 和动作来源 SHALL 仅由可信持久状态生成。并发唤醒 SHALL 通过 revision CAS 只应用一个；命令重放 SHALL 比对 Run、issuer、token、载荷和期限。
+
+#### Scenario: 写入后等待再唤醒
+- **WHEN** 前序业务写入已完成，后续工具等待审批或输入并被唤醒
+- **THEN** 前序写入调用次数保持一次，后续工具按合法唤醒执行
+
+#### Scenario: 伪造内部 grant
+- **WHEN** 提交请求包含宿主内部 grant 或动作来源字段
+- **THEN** 拒绝提交且无工具派发
+
+#### Scenario: 并发唤醒与异体重放
+- **WHEN** 两个命令使用相同 token 并发唤醒，或已应用 command ID 被不同请求重用
+- **THEN** 至多一个命令应用，异体重放冲突，原等待和回执不被覆盖
+
+### Requirement: 未知动作停止后续工具且受管补传按来源隔离
+
+动作结果未知、台账结果写失败或授权拒绝时，宿主 SHALL 停止本次执行的后续工具；未知动作 SHALL 保留待对账。受管通道 SHALL 仅上传受管任务的事件，独立任务或单个失败流 MUST NOT 阻塞其他受管 Run 的历史补传。
+
+#### Scenario: 前序写入结果未知
+- **WHEN** 业务写入已发生但回执失败或返回未知
+- **THEN** 后续业务工具零调用，任务待对账，恢复不重复未知写
+
+#### Scenario: 混合来源补传
+- **WHEN** 宿主同时保存独立和受管任务，且受管任务存在历次 Run
+- **THEN** 仅上传受管各 Run 的事件，一个流失败不影响其他流
+
+### Requirement: 恢复绑定接收时执行定义和可信调用主体
+
+Runner SHALL 从可信装配写入执行定义摘要，包含 manifest、工具顺序/Schema、模型引用和业务 API 绑定。恢复 SHALL 验证摘要一致；摘要缺失或漂移 SHALL 将可调度任务转待对账，等待任务 SHALL 拒绝唤醒且保留 token。终态仍允许 owner 查询。所有任务列表、动作及事件 SHALL 只对 owner 与当前可信数据域匹配的身份可见。
+
+#### Scenario: 升级改变旧执行定义
+- **WHEN** 非终态旧任务缺少原定义摘要或当前配置与摘要不符
+- **THEN** 不派发新工具，不凭当前配置推定旧执行可恢复
+
+#### Scenario: 跨身份读取持久任务
+- **WHEN** 另一个有效身份读取其他 owner 的 Task/Action/事件
+- **THEN** 列表不包含该任务，具名访问被拒绝
+
+### Requirement: 生产受管 Lease 绑定完整宿主身份
+
+受管 CLI SHALL 在受保护动作派发时同时校验 lease 的 issuer、host subject、workspace tenant、部署 audience、scope、期限及 nonce；即使签名有效，身份不匹配 MUST 拒绝且不调用业务写 API。
+
+#### Scenario: 同签名材料的其他主体或租户
+- **WHEN** 当前 Lease 签名有效但 issuer、subject 或 tenant 与已接入宿主不符
+- **THEN** 受保护业务 API 调用次数为零且执行失败
+
+### Requirement: Persistent run views survive successor attempts
+The Runner SHALL return each Run's own status after restart and SHALL NOT expose a later attempt's wait token through an earlier Run.
+
+#### Scenario: Waiting attempt is resumed and host restarts
+- **WHEN** a successor Run succeeds and the host restarts
+- **THEN** the original Run retains its recorded waiting state without a consumable wait token and the successor reports succeeded
+
+### Requirement: Event delivery exposes complete pagination
+The Runner SHALL propagate persistent event pagination and SHALL NOT label queued, waiting, or reconciliation-required Task states as terminal completion.
+
+#### Scenario: Completed run has multiple event pages
+- **WHEN** the first event page is full and more events exist
+- **THEN** the formal page declares has_more and the compatible stream does not close before its last page
+
+#### Scenario: Waiting task is queried
+- **WHEN** the Task is waiting for approval
+- **THEN** its event stream is not reported as terminal
+
+### Requirement: Restart preserves admission and result receipts
+The Runner SHALL return the original received_at and idempotency key on submission replay after restart and SHALL retain the original error and persisted artifact references.
+
+#### Scenario: Completed submission is replayed after restart
+- **WHEN** the same request is submitted again
+- **THEN** the submit receipt is unchanged and no additional execution occurs
+
+### Requirement: Repeated cancellation preserves pending effects
+The Runner SHALL reuse a pending cancellation receipt for repeated running-attempt cancellation and SHALL reject cancellation of an already completed persistent Run without an internal error.
+
+#### Scenario: Cancellation requested twice before taking effect
+- **WHEN** the cooperative cancellation boundary has not taken effect
+- **THEN** both requests refer to the same pending command and its receipt converges on the actual effect
+
+#### Scenario: Host crashes after persisting cancelled
+- **WHEN** cancellation produces a cancelled terminal fact
+- **THEN** its applied receipt is committed in the same local transaction, without a later update requirement
+
+#### Scenario: Cancel completed Run after restart
+- **WHEN** no in-memory execution remains for a completed Run
+- **THEN** the cancellation receipt is rejected and historical applied receipts remain unchanged
+
+### Requirement: Persistent commands are the only way to wake waiting tasks
+
+Durable runner hosts SHALL wake waiting_input and waiting_approval tasks only through persistent command records. A wake command SHALL bind the original Task/Run, wait token, expected waiting kind, input digest, issuer, expiry, and command_id; the host SHALL atomically validate the binding, consume the token, merge input, create a successor attempt, and mark the command applied. Expired, mismatched, replayed, or duplicate commands SHALL be rejected or replay the prior receipt and MUST NOT dispatch tools.
+
+#### Scenario: Mismatched wake command is rejected without tool dispatch
+
+- **WHEN** a wake command targets the wrong Run, waiting kind, or token
+- **THEN** the command is rejected, the wait token remains unchanged, and no tool or business API is called
+
+#### Scenario: Valid wake survives host restart
+
+- **WHEN** a task enters waiting_input, the host is terminated, and a valid wake command arrives after restart
+- **THEN** the host consumes the stored wait token once, creates a successor Run, and executes that successor once
+
+### Requirement: Native continuation preserves frozen action identity
+
+Durable runner hosts SHALL resume interrupted attempts through the backend's native checkpoint when available and SHALL preserve frozen action ids, tool schema digests, model references, principal, deployment, and data-domain snapshots. Completed protected actions SHALL replay their stored result references; claimed or outcome_unknown protected actions SHALL enter reconciliation and MUST NOT be re-executed automatically. If native continuation is unavailable, the host SHALL use the existing ledger replay semantics and report that no native checkpoint was used.
+
+#### Scenario: Completed action result is replayed during continuation
+
+- **WHEN** a host resumes an interrupted attempt with a completed protected action
+- **THEN** the business API is not called again and the stored result reference is returned to the runtime
+
+#### Scenario: Unknown write blocks automatic continuation
+
+- **WHEN** the checkpoint references a protected action whose external outcome is unknown
+- **THEN** the host marks the task reconciliation_required and does not continue by reissuing that action
+
+### Requirement: Evidence gate failure stops new protected actions
+
+Before dispatching a protected action, the runner SHALL verify that local evidence and action ledger writes are available and within configured local limits. If evidence is not writable or the local buffer is over limit after retention cleanup, the runner SHALL reject new protected actions fail-closed while allowing readonly actions to proceed according to existing policy. The rejection SHALL be queryable locally and SHALL record whether the cause was unwritable evidence, capacity, or lease failure.
+
+#### Scenario: Evidence storage unavailable rejects protected action
+
+- **WHEN** evidence storage cannot accept the probe or rejection record
+- **THEN** a new protected action is not dispatched, readonly actions remain eligible, and the protected business API call count is zero
