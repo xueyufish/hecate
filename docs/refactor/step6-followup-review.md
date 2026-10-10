@@ -118,3 +118,11 @@ PR #237（squash `8ef5be1`，经 merge queue 全绿合入）交付上表 `builti
 - **重放窗口收口**：`LeaseGate.update` 在安装前拒绝已消费 nonce 的重放租约（不得替换当前租约，计入 `lease_gate_refusals`）；其余无效租约保持既有语义——照常安装、由派发边界以精确原因拒绝（CI 首跑更正：初版宽验证改变了既有安全契约，已收窄，见该归档 change verification.md 的更正记录）；nonce 消费记录持久化到宿主本地状态（`lease-consumed-nonces.jsonl`，载入时丢弃过期条目、跳过坏行），写入失败保守拒绝授权——平台无状态签发下，宿主该记录是重启后唯一的重放记忆。
 - **进程级验收（SC04 技术切片）**：`tests/scenarios/test_sc04_lease_renewal_policy.py`，安装 wheel + 真实平台 HTTP，4 场景全绿——同 Run 双受保护写逐一续租（业务调用计数逐一核对、nonce 记录 ≥2 条）；平台在首次 accept 后停发 pull，第二个受保护动作在声明窗口内显式拒绝（Run 失败、拒绝后零业务调用、前序动作事实不变、失败终态仍上传投影）；租约范围外数据域立即拒绝（runner 配置放行、租约 scope 拒绝，证明拒绝来自租约层）且零业务调用；宿主重启后 nonce 记录延续、新租约正常武装（持久化不阻断合法续租）。
 - **范围说明**：6d 验收边界行曾把"平台事件日志追加的 fencing"指向 6b——本 change 明确不包含该工作（平台 EventStore 与租约的接线是另一条信任边界），该行已更正指向 6f 矩阵与 step7 撤权窗口。工具级动作范围、合法审批、撤权及断连窗口的策略认证仍归 step7；租约过期对真实时钟偏移的认证归 SC04/step7（平台签发 TTL 固定，过期拒绝路径由闸门级单测与断连变体覆盖）。场景清单 SC04 追加 `implemented_slices`，场景整体保持 planned。Step6 总体保持部分完成（6e/6f 及 step7 依赖未关）。
+
+## 2026-10-10 `step6-pg-process-matrix` 验收记录（step6f 关闭）
+
+`feat/step6-pg-process-matrix` 交付 step6f 关闭门槛：CI 新增 `step6-pg-process-matrix` job（postgres:16 服务容器 + `HECATE_STEP6_POSTGRES_URL`），SC04/SC05 受管宿主场景以 `[sqlite, postgres]` 双参数常态执行——上方"剩余实施顺序"表最后一行的宿主进程矩阵自此在真实 PostgreSQL 上运行（PR #241 merge queue 全绿，job 首跑通过）。
+
+- **实施层发现并修补**：共享 PG 库上多测试互相看见 durable 行（重连场景 `list_tasks` 断言 14≠1）——`step6_runner_database_url` fixture 为每个 PG 参数测试分配独立 schema（search_path URL options + CREATE/DROP DDL，经线程池执行避开 loop-thread psycopg 挂起）。本地预跑的残余失败为未隔离预跑在 public 残留表经 search_path 回退污染，清库即绿；CI 全新库不受影响。
+- **同 PR 携带**：评测报表时间炸弹修复——报表窗口"截至现在的最近 30 天"使锚定 2026-09-10 的种子在第 30 天滑出窗口（CI 首跑 5 处失败：pair_count 归零、override 消失、llm_judge 分组缺失、会话 rollup 少计）；种子改为锚定当前时间回退 4 天（覆盖 +3 天最大前向偏移），评测回归 302 passed。
+- **状态收敛**：Step6 技术交付完成——6a–6f 关闭门槛全部交付，演进方案 step6 总评已从"部分完成"收敛为"剩余项逐条列 Step7/10 依赖"。方案与场景清单同步更新。

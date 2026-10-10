@@ -520,6 +520,8 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **主线追加复核：**PR #230 的修正已成为 main 交付事实。基于该主线又修正持久事件分页截断、等待/排队误报终态、旧 Run 借用新尝试状态、重启后提交回执/错误/产物丢失，以及重复取消与取消回执的宕机窗口。新修正的范围、SQLite/PostgreSQL 与独立 wheel 验证、剩余门槛见 [Step6 主线追加复核](step6-followup-review.md)；未合入前按该报告分支状态区分，不据此关闭 Step6 总项。
 
+**2026-10-10 状态收敛：**step6a–6f 的关闭门槛已全部交付（a 受管 CLI/wheel HTTP；b 动作时授权与续租策略；c 持久等待与受管命令链；d 平台原生续跑；e 确定性父子 adapter；f PG 宿主进程矩阵常态化）。Step6 技术交付完成，状态不再以部分完成笼统标注；剩余项逐条列 Step7/10 依赖——合法审批判定、工具级动作范围、撤权与断连窗口策略、中心缓冲/补传限额、SC03/SC06 整场景认证——并保留在各条目的追加修正行内。
+
 **已完成的切片：**
 
 - [x] 平台 Task/Run 提交、查询、事件分页/SSE、控制命令与待对账查询 API。提交前固化身份链、Task/Run ID 与输入；提交后平台登记中断可按原 ID 补齐。仅已接通的内置进程内部署允许进入本入口，不能把外部部署登记成功当作可执行。
@@ -555,7 +557,9 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 - [x] step6e：REST 工作流回调已核实同 workspace 的真实子终态，匹配完整 child 引用和一次性 token；附加载荷不能覆盖可信 child ID/state，command ID 绑定完整原请求。**关闭门槛：**将等待/回调接到确定性工作流节点或具名 adapter，运行真实父子执行与各自进程重启；手写或 monkeypatch orchestrator 只能证明原语。
 
   追加修正（2026-10-10，`workflow-child-adapter`）：关闭门槛已交付——具名 adapter（`WorkflowChildTaskAdapter`）把任务输入中声明式 `workflow.steps` 驱动为真实子任务：每步经 `TaskControlService.submit` 系统发起（载荷盖章父引用）、父任务以 `await_task_ref` 契约挂持久等待；子任务终态路径从自身载荷发现父引用并自动发起经核实的 `submit_workflow_callback`（平台 issuer，幂等 command_id），父任务携带 `step_index`/`child_outcome` 唤醒推进下一步，推进计数全在持久事实。子任务执行异常直接收敛失败终态（触发回调），不走 worker 重试预算——失败处理归父任务的 `on_failure` 声明（fail/await）。验收 `tests/test_execution/test_workflow_child_adapter.py` 4 场景全绿：单步链、多步严格顺序+伪造回调拒绝、失败收敛、双端各自重启零重复提交；全程真实 dispatcher（无 `_execute` monkeypatch），monkeypatch 原语测试保留为契约层验证。`submit` 载荷白名单补 `workflow`/`workflow_parent` passthrough 并在提交时快速校验声明合法性。
-- [ ] step6f：独立 wheel 进程已覆盖 SC01/SC02、SC03 的终态写持久化与审批等待重启、SC06 本地证据拒绝切片；受管 Runner wheel + 真实平台 HTTP 的 SC05 执行/重连切片已通过，PostgreSQL durable 存储和 Alembic 升级链另行验证。**关闭门槛：**PostgreSQL 上完整宿主故障矩阵、未决外部写和迟到回执；SC03/SC04/SC05/SC06 按实际范围保持部分覆盖，不因组件测试通过标整场景完成。证据不可写时只读继续及中心缓冲/补传限额仍需 step7/10 明确策略。
+- [x] step6f：独立 wheel 进程已覆盖 SC01/SC02、SC03 的终态写持久化与审批等待重启、SC06 本地证据拒绝切片；受管 Runner wheel + 真实平台 HTTP 的 SC05 执行/重连切片已通过，PostgreSQL durable 存储和 Alembic 升级链另行验证。**关闭门槛：**PostgreSQL 上完整宿主故障矩阵、未决外部写和迟到回执；SC03/SC04/SC05/SC06 按实际范围保持部分覆盖，不因组件测试通过标整场景完成。证据不可写时只读继续及中心缓冲/补传限额仍需 step7/10 明确策略。
+
+  追加修正（2026-10-10，`step6-pg-process-matrix`）：关闭门槛已交付——CI 新增 `step6-pg-process-matrix` job（postgres:16 服务容器 + `HECATE_STEP6_POSTGRES_URL`），SC04/SC05 受管宿主场景以 `[sqlite, postgres]` 双参数常态执行，宿主故障矩阵（已接受未执行/kill-restart/外部写成功但回执丢失/过期命令/租约停发/控制面重启）的数据库、账本、命令与等待记录全部落在真实 PostgreSQL（PR #241 merge queue 全绿，job 首跑通过）。配套修复：场景 fixture 为每个 PG 参数测试分配独立 schema（共享库上多测试 durable 行互见曾使重连断言 14≠1）；同 PR 携带评测报表时间炸弹修复（种子锚定 now-4 天）。SC03/SC06 保持 SQLite 部分覆盖；只读继续与中心缓冲/补传限额策略仍归 step7/10。
 
 **落点：**`packages/hecate-durable` 承载独立契约／SQL adapter／worker，`packages/hecate-runner` 承载宿主装配；`execution/` 承载平台登记、投影和命令入口，`core/composition` 负责绑定。Runtime kernel 只依赖动作钩子语义，不导入平台存储。平台与宿主各自本地事务，不引入跨数据库事务或双主生命周期。
 
