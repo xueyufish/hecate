@@ -220,6 +220,51 @@ jobs:
           uv pip install pytest-timeout "psycopg[binary]>=3.2" "asyncpg>=0.29"
           uv run pytest tests/test_execution/test_builtin_continuation.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
 
+  # step6f process matrix: the managed host scenarios (SC04 lease renewal,
+  # SC05 wake chain + reconnect) are database-parametrized — with
+  # HECATE_STEP6_POSTGRES_URL set each scenario runs BOTH [sqlite] and
+  # [postgres], so the host database, action ledger, commands and waits of
+  # the fault matrix (accepted-not-executed, kill/restart, lost receipts,
+  # expired commands, stopped lease delivery, control-plane restart) land
+  # on real PostgreSQL. Windows hosts cannot certify this locally (the
+  # runner subprocess is refused by the Docker port proxy); Linux CI is
+  # the authoritative run.
+  step6-pg-process-matrix:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hecate
+          POSTGRES_PASSWORD: hecate
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hecate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
+      - name: Install hecate-runner into the dev environment (scenario imports)
+        run: uv pip install --no-deps -e packages/hecate-runner
+      - name: Managed process matrix against real PostgreSQL
+        env:
+          HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+        run: |
+          uv pip install pytest-timeout "psycopg[binary]>=3.2" "asyncpg>=0.29"
+          uv run pytest tests/scenarios/test_sc04_lease_renewal_policy.py tests/scenarios/test_sc05_managed_wake_chain.py tests/scenarios/test_sc05_managed_reconnect.py -q --timeout=420 -p no:cacheprovider
+
   # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
   # requires Docker-in-Docker and is covered by integration tests locally.
   runtime-wheel-clean-install:

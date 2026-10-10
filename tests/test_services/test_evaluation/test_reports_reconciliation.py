@@ -19,7 +19,13 @@ from hecate.ops.evaluation.reports.service import EvaluationReportService
 _WS = uuid.UUID("00000000-0000-0000-0000-0000000000aa")
 _AGENT = uuid.UUID("00000000-0000-0000-0000-0000000000cc")
 _SESSION = uuid.UUID("00000000-0000-0000-0000-0000000000dd")
-_BASE = datetime(2026, 9, 10, 12, 0, 0, tzinfo=UTC)
+# Anchor in the recent past with headroom for the largest forward offset
+# (+3 days): the report window is "last 30 days ending now", so rows must
+# be in the past AND inside the window — a fixed seed date ages out and
+# rots the assertions (this shipped 30 days after the seeds were written),
+# while a now-anchored base pushes offset rows into the future where the
+# end bound excludes them.
+_BASE = (datetime.now(UTC) - timedelta(days=4)).replace(minute=0, second=0, microsecond=0)
 
 
 async def _seed_task(db_session: AsyncSession) -> EvaluationTaskModel:

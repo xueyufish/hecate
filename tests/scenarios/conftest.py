@@ -38,9 +38,42 @@ from tests.scenarios.tools.managed_platform import (
     ids=["sqlite", "postgres"][: 1 + bool(STEP6_POSTGRES_URL)],
 )
 def step6_runner_database_url(request):
-    """Run the same installed-host scenarios on SQLite and optional PostgreSQL."""
+    """Run the same installed-host scenarios on SQLite and optional PostgreSQL.
 
-    return request.param
+    Each PostgreSQL-parametrized test gets its OWN schema on the shared
+    database (search_path via URL options): the scenario assertions count
+    durable rows (e.g. "exactly one local Task after a lost accept"), so
+    tests must not see each other's tasks. The DDL runs off-thread because
+    a sync psycopg connect must never execute on the event-loop thread
+    (Windows hang, see tests/test_execution/conftest.py).
+    """
+
+    if request.param is None:
+        yield None
+        return
+
+    import uuid
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import create_engine, text
+
+    schema = f"s_{uuid.uuid4().hex[:12]}"
+    engine = create_engine(request.param)
+
+    def _ddl(statement: str) -> None:
+        with engine.connect() as conn:
+            conn.execute(text(statement))
+            conn.commit()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_ddl, f'CREATE SCHEMA "{schema}"').result(timeout=30)
+    try:
+        separator = "&" if "?" in request.param else "?"
+        yield f"{request.param}{separator}options=-csearch_path%3D{schema}%2Cpublic"
+    finally:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(_ddl, f'DROP SCHEMA IF EXISTS "{schema}" CASCADE').result(timeout=30)
+        engine.dispose()
 
 
 @pytest.fixture
