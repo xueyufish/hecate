@@ -244,6 +244,15 @@ class TaskControlService:
         # The input payload rides the durable task row: a restart re-dispatches
         # from durable state, never from a lost in-process closure.
         chain = await self._identity_chain(workspace_id, agent_id, user_id, deployment)
+        if "workflow" in input:
+            # step6e: fail fast on a malformed declaration instead of
+            # silently degrading the task into a plain agent run.
+            from hecate.execution.workflow_child import WorkflowChildTaskAdapter
+
+            try:
+                WorkflowChildTaskAdapter.plan(input)
+            except ValueError as exc:
+                raise TaskControlValidationError(f"invalid workflow payload: {exc}") from exc
         persisted_input = {
             "goal": goal,
             "agent_id": str(agent_id),
@@ -256,6 +265,11 @@ class TaskControlService:
             "identity_chain": chain.to_dict(),
             "platform_run_id": str(minted_run),
             "backend_run_ref": run_backend_ref.to_dict(),
+            # step6e: the declarative workflow block rides the payload, and
+            # workflow children carry their parent stamp through the same
+            # durable surface.
+            "workflow": input.get("workflow"),
+            "workflow_parent": input.get("workflow_parent"),
         }
         key = IdempotencyKey(
             key=idempotency_key or f"auto:{minted_task}",

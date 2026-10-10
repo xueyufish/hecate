@@ -43,6 +43,7 @@ from hecate.contracts.execution.references import BackendRef, RefKind, deploymen
 from hecate.execution.entry_events import RunEventMapper
 from hecate.execution.governance_events import PlatformEventService
 from hecate.execution.task_run_registry import TaskRunRegistry, TaskRunRegistryError
+from hecate.execution.workflow_child import WorkflowChildTaskAdapter, WorkflowPlan
 from hecate.models.agent import AgentModel
 from hecate.models.run import RunModel
 
@@ -126,6 +127,10 @@ class _DispatchContext:
     model: str | None
     stream: bool
     provided: dict[str, Any] | None
+    # step6e: declarative child-step plan (parent side) and the parent
+    # stamp (child side). Both come from the persisted task input.
+    workflow_plan: WorkflowPlan | None = None
+    workflow_parent: dict[str, Any] | None = None
 
 
 class PlatformTaskDispatcher:
@@ -247,19 +252,41 @@ class PlatformTaskDispatcher:
         r_ref = run_row_ref(run)
         engine_session = self._engine_session_of(run)
         try:
-            outcome = await self._execute(
-                db,
-                context,
-                engine_session=engine_session,
-                task_ref=task_ref,
-                run_ref=r_ref,
-                lease=lease,
-                resume_interrupted=resume_interrupted,
-                run=run if isinstance(run, RunModel) else None,
-            )
+            if context.workflow_plan is not None:
+                outcome = await self._execute_workflow(db, context, task_ref=task_ref, lease=lease)
+            else:
+                outcome = await self._execute(
+                    db,
+                    context,
+                    engine_session=engine_session,
+                    task_ref=task_ref,
+                    run_ref=r_ref,
+                    lease=lease,
+                    resume_interrupted=resume_interrupted,
+                    run=run if isinstance(run, RunModel) else None,
+                )
         except TaskWaitingSignalError as wait:
             await db.commit()
             await self._park(task_ref, wait, context, run_ref=r_ref, expected_revision=record.revision + 1, lease=lease)
+            return
+        except Exception as exc:
+            if context.workflow_parent is None:
+                raise
+            # A workflow child converges deterministically: an execution
+            # failure becomes a failed terminal (which auto-calls the
+            # parent) instead of the worker's retry budget — orchestration
+            # handling is the parent's declared on_failure.
+            await db.commit()
+            await self._finish(
+                db,
+                task_ref,
+                r_ref,
+                context,
+                {"status": "failed", "content": "", "error": str(exc)},
+                run=run,
+                expected_revision=record.revision + 1,
+                lease=lease,
+            )
             return
         if hasattr(self._store, "list_run_actions"):
             actions = await asyncio.to_thread(self._store.list_run_actions, r_ref)
@@ -284,6 +311,106 @@ class PlatformTaskDispatcher:
             expected_revision=record.revision + 1,
             lease=lease,
         )
+
+    async def _execute_workflow(
+        self,
+        db: AsyncSession,
+        context: _DispatchContext,
+        *,
+        task_ref: BackendRef,
+        lease: Any,
+    ) -> dict[str, Any]:
+        """Drive one declarative workflow step (step6e named adapter).
+
+        Progress derives exclusively from persisted facts: the wake payload
+        (``provided``) carries the last completed step index and the child's
+        verified outcome, so a restarted dispatcher re-derives the next step
+        and never re-submits one. Each step is a REAL child task submitted
+        through ``TaskControlService.submit``; the parent parks on the
+        child's ``await_task_ref`` until the verified auto-callback wakes it.
+        """
+
+        plan = context.workflow_plan
+        if plan is None:  # unreachable: the caller branches on the plan
+            return {"status": "failed", "content": "", "error": "workflow plan missing"}
+        provided = context.provided or {}
+        done_index = provided.get("step_index")
+        if done_index is not None:
+            child_state = (provided.get("child_outcome") or {}).get("child_state")
+            if child_state != "succeeded":
+                detail = f"workflow step {done_index} child ended {child_state}"
+                if plan.on_failure == "await":
+                    return {"status": "awaiting_reconciliation", "content": detail}
+                return {"status": "failed", "content": "", "error": detail}
+        next_index = 0 if done_index is None else int(done_index) + 1
+        if next_index >= len(plan.steps):
+            return {"status": "succeeded", "content": f"workflow completed {len(plan.steps)} step(s)"}
+        service = self._task_control(db)
+        child_ref = await WorkflowChildTaskAdapter.submit_step(
+            service,
+            context.workspace_id,
+            context.agent_id,
+            task_ref,
+            plan.steps[next_index],
+            next_index,
+        )
+        raise TaskWaitingSignalError(
+            ControlCommandKind.PROVIDE_INPUT,
+            {"await_task_ref": child_ref.to_dict()},
+        )
+
+    def _task_control(self, db: AsyncSession) -> Any:
+        # Lazy import: task_control imports this module at its own module
+        # level (the dispatch spawn), so the reverse edge stays function-local.
+        from hecate.execution.task_control import TaskControlService
+
+        return TaskControlService(
+            db,
+            store=self._store,
+            recorder=self._store,
+            backend="postgres",
+            ledger_source="core",
+            session_factory=self._session_factory,
+        )
+
+    async def _issue_child_callback(self, db: AsyncSession, context: _DispatchContext, outcome: dict[str, Any]) -> None:
+        """Auto-callback: a workflow child's terminal fact wakes its parent.
+
+        The child's input payload carries the parent reference (stamped at
+        submit); the callback is issued through the REAL verified path
+        (``submit_workflow_callback``) with the parent's live wait token —
+        the platform trusts its own records, so no external caller is
+        involved. Failures are logged, never surfaced: the child's terminal
+        fact is already committed and must not be un-done by a callback
+        problem.
+        """
+
+        parent = context.workflow_parent or {}
+        raw_ref = parent.get("task_ref") or {}
+        declared = outcome.get("status")
+        if not isinstance(raw_ref, dict) or declared not in ("succeeded", "failed", "cancelled"):
+            return
+        try:
+            parent_ref = BackendRef(RefKind.TASK, str(raw_ref.get("issuer_domain")), str(raw_ref.get("id")))
+            state = await asyncio.to_thread(self._store.get_task_state, parent_ref)
+            wait = (state.extra or {}).get("wait") or {} if state else {}
+            token = str(wait.get("wait_token") or "")
+            if not token:
+                logger.warning("task %s workflow parent has no live wait; callback skipped", context.task_id)
+                return
+            service = self._task_control(db)
+            await service.submit_workflow_callback(
+                workspace_id=context.workspace_id,
+                task_id=uuid.UUID(parent_ref.id),
+                command_id=f"wf-callback-{context.task_id}",
+                wait_token=token,
+                child_task_id=context.task_id,
+                declared_state=str(declared),
+                payload={"step_index": parent.get("step_index")},
+                result_summary={"content": str(outcome.get("content") or "")},
+            )
+        except Exception:  # noqa: BLE001 — terminal fact is committed; callback problems must not undo it
+            logger.warning("task %s workflow auto-callback failed", context.task_id, exc_info=True)
 
     # -- internals -------------------------------------------------------------
 
@@ -314,6 +441,8 @@ class PlatformTaskDispatcher:
             model=payload.get("model"),
             stream=bool(payload.get("stream")),
             provided=payload.get("provided"),
+            workflow_plan=WorkflowChildTaskAdapter.plan(payload),
+            workflow_parent=(payload["workflow_parent"] if isinstance(payload.get("workflow_parent"), dict) else None),
         )
 
     @staticmethod
@@ -665,3 +794,7 @@ class PlatformTaskDispatcher:
                 workspace_id=context.workspace_id,
             )
         await db.commit()
+        if context.workflow_parent is not None:
+            # step6e: the child's terminal fact is committed — auto-callback
+            # the waiting parent through the verified path.
+            await self._issue_child_callback(db, context, outcome)
