@@ -91,3 +91,21 @@ PostgreSQL 完整宿主故障矩阵仍未通过。本机 Windows 执行环境中
 实现层发现并修补两处缺口（step6c + step6b 范围，未越界 step7）：runner 侧 `is_decided_action` 允许已决动作回填跳过 Lease gate；引擎 `_lease_refusal` 在 `CredentialError` 上加入有界等待（5 s 等待新拉取的 lease，超时显式拒绝）。
 
 平台栈与 SC05 共享（`tests/scenarios/tools/managed_platform.py`），SC05 原断言零修改；文件型 SQLite 解决 ASGI 与测试侧并发提交撞车。PG 参数化由 `HECATE_STEP6_POSTGRES_URL` 门控复用，套件结构供 `step6-pg-process-matrix` 在 Linux CI 接入。SC05 manifest 同步追加两个 slices；场景整体保持 `planned`。Step6 整体仍为"部分完成"，本 change 不翻转总体状态。
+
+## 2026-10-10 `builtin-native-continuation` 验收记录
+
+PR #237（squash `8ef5be1`，经 merge queue 全绿合入）交付上表 `builtin-native-continuation` 行（6d）并关闭其门槛：平台共享执行的中断 attempt 按首派发冻结的定义摘要（工具顺序/Schema、模型、guardrail/资源引用）在原 engine session 原生续跑（Pregel `resume_value` + checkpoint 缓存/日志尾折叠），续跑前重验准入与摘要；已决动作按账本回填零业务重复，回执丢失保守停止在 `reconciliation_required`，摘要漂移与 Principal 撤销先于续跑门拒绝，等待/唤醒与续跑互斥。上方 2026-10-08 修正表的"Task2 完成内置 continuation"更正在此被取代；演进方案 step6d 条目已翻转。
+
+**CI 首跑暴露并修复的三个缺陷**（4 个 PG 用例首次真实执行——本地 `_PG_SKIP` 此前从未运行它们）：
+
+| 缺陷 | 修正 |
+|---|---|
+| dispatcher 续跑分支 fall-through：闸门通过分支置 `run = latest` 后控制流落到无条件的 `_new_attempt`，原生续跑被"换壳"成新 attempt，干净账本会重做受保护动作；摘要漂移用例此前通过正因其走拒绝分支、不触达该行 | `_new_attempt` 加 `if not resume_interrupted` 守卫 |
+| SessionStateMaterializer 两层形状缺陷：`load` 把 `{"value": ...}` 存储信封原样交给 `ChannelManager.restore`，缓存恢复后 live 状态与全量日志折叠分歧，PROJECTION.EQUIVALENT fail-closed（等价守卫无 EventStore 时短路，故从未暴露）；save 按 `_` 前缀跳过通道，丢弃 logpolicy 显式可记录的 `_route`/`_dispatch` | `load` 对称解包信封（`_omitted` 占位符穿透）；save 过滤改以 `should_log_channel` 为准 |
+| conftest teardown `DROP SCHEMA IF NOT EXISTS` 非法 PostgreSQL 语法，4 用例清理全部报错 | 改为 `IF EXISTS` |
+
+另修正挂死恢复用例的编排：parked 进程在恢复窗口必须保持冻结，否则其向共享会话日志的迟到追加使 log-as-truth 比对落在移动尾部上（续跑的模型调用是新调用序号，不受 gate 影响）。顺带修复既有测试隔离地雷：`test_resume_endpoint`/`test_time_travel_endpoints` 在全局 app 上安装 stub auth/get_db 覆盖且不清理，同 xdist worker 后续测试继承 stub 身份（有效凭证 403、无效凭证 200）；本 PR 新增测试文件改变 loadfile 打包后暴露于 `test_audit_identity`，两个文件已加模块级 autouse 还原 fixture（`test_backup_api`/`test_replay_api` 一并加固）。
+
+**证据**：5 个 PostgreSQL 并发用例（`tests/test_execution/test_builtin_continuation.py`：同 Run 续跑+迟到写 fencing、回执丢失、摘要漂移、准入顺序、等待互斥）在本地专用 PG 容器连跑稳定全绿，CI `step6-continuation-pg`（postgres:16）绿；SQLite 层受影响面回归 2092 passed/30 skipped，`tests/test_api`+audit+workspace isolation 633 passed/8 skipped；mypy 892 文件零错。本地环境注记：Docker 端口代理的 IPv6 发布口（::1）为黑洞，psycopg 无 connect_timeout 时先试 `::1` 会永久挂起，本地运行统一 `127.0.0.1`（CI Linux 不受影响）。
+
+**边界**：迟到写者的事件日志追加不受 fencing 保护（状态写、动作账本与业务副作用均已闸），归 `lease-renewal-policy`（6b）；G2 保持未关闭；真实 kill/restart 进程矩阵归 `step6-pg-process-matrix`（6f）；不建设平台通用 checkpoint 引擎。Step6 总体保持部分完成（6b/6e/6f 及 step7 依赖未关）。
