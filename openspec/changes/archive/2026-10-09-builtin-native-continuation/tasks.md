@@ -32,7 +32,7 @@
 
 ## 4. 文档同步
 
-- [ ] 4.1 `docs/refactor/enterprise-agent-platform-evolution-plan.md` step6d 条目按 PG 验收证据更新;`docs/refactor/step6-followup-review.md` 追加验收记录。验证:方案文本与 CI 运行证据一致。
+- [x] 4.1 `docs/refactor/enterprise-agent-platform-evolution-plan.md` step6d 条目按 PG 验收证据更新;`docs/refactor/step6-followup-review.md` 追加验收记录。验证:方案文本与 CI 运行证据一致。(2026-10-10 完成:CI `step6-continuation-pg` 随 PR #237 merge queue 全绿,两处文档已按证据更新)
 
 ## 5. 验证
 

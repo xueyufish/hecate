@@ -92,3 +92,5 @@ mypy src/ packages/   # Success: no issues found in 892 source files
 ```
 
 CI `step6-continuation-pg` 的 Linux 首次绿灯仍为 3.x 关闭的形式门槛。
+
+**2026-10-10 补登**:该 CI job 随 PR #237 merge queue 全绿,形式门槛达成;4.1 文档翻转已完成(演进方案 step6d 条目 + `step6-followup-review.md` 2026-10-10 验收记录)。
