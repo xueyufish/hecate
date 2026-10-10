@@ -184,6 +184,42 @@ jobs:
           DRIFT_ADMIN_URL: postgresql://hecate:hecate@localhost:5432/postgres
         run: uv run pytest tests/test_migrations/test_upgrade_drift.py -v
 
+  # step6d continuation acceptance: the hang/resume + receipt-loss scenarios
+  # need a real multi-connection database (SQLite's single-writer semantics
+  # serialize them away on local runs).
+  step6-continuation-pg:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hecate
+          POSTGRES_PASSWORD: hecate
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hecate"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v3
+      - name: Install dependencies
+        run: uv sync --package hecate --package hecate-enterprise --package hecate-memory --package hecate-ops --package hecate-llm --package hecate-sandbox --package hecate-channel-slack --package hecate-channel-feishu --extra dev
+      - name: Platform-native continuation acceptance against real PostgreSQL
+        env:
+          HECATE_STEP6_POSTGRES_URL: postgresql+psycopg://hecate:hecate@localhost:5432/postgres
+        run: |
+          uv pip install pytest-timeout "psycopg[binary]>=3.2" "asyncpg>=0.29"
+          uv run pytest tests/test_execution/test_builtin_continuation.py -q --timeout=120 --timeout-method=thread -p no:cacheprovider
+
   # 6.27 browser sandbox image — smoke test only; full HTTP driver flow
   # requires Docker-in-Docker and is covered by integration tests locally.
   runtime-wheel-clean-install:

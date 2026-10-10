@@ -347,3 +347,179 @@ __all__ = [
     "schema_uri",
     "validate_against_schema",
 ]
+
+
+# --- durable-dispatch harness (step6 continuation acceptance) ----------------
+
+import asyncio as _asyncio  # noqa: E402
+import uuid as _uuid_mod  # noqa: E402
+
+import pytest_asyncio as _pytest_asyncio  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession  # noqa: E402
+from sqlalchemy.ext.asyncio import async_sessionmaker as _async_sessionmaker  # noqa: E402
+from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine  # noqa: E402
+
+from tests.conftest import Base as _Base  # noqa: E402
+
+HARNESS_WS = _uuid_mod.UUID("00000000-0000-0000-0000-0000000000a0")
+HARNESS_ORG = _uuid_mod.UUID("00000000-0000-0000-0000-0000000000a1")
+HARNESS_OWNER = _uuid_mod.UUID("00000000-0000-0000-0000-0000000000a2")
+
+# PostgreSQL for the concurrency-tier acceptance (hang/resume, receipt loss).
+# SQLite stays the default local tier; the concurrent dispatch scenarios need
+# a real multi-connection database (SQLite's single-writer semantics
+# serialize them away). One schema per test keeps PG runs isolated.
+HARNESS_POSTGRES_URL = os.environ.get("HECATE_STEP6_POSTGRES_URL")
+
+
+def _harness_schema_name(tmp_path) -> str:
+    import re as _re
+
+    return "s_" + _re.sub(r"[^0-9a-zA-Z_]", "_", tmp_path.name)[:40] + "_" + _uuid_mod.uuid4().hex[:8]
+
+
+def _pg_url_with_schema(url: str, schema: str) -> str:
+    sep = "&" if "?" in url else "?"
+    return f"{url}{sep}options=-csearch_path%3D{schema},public"
+
+
+@_pytest_asyncio.fixture
+async def harness(tmp_path):
+    """Durable-dispatch harness on SQLite (default) or PostgreSQL.
+
+    ``HECATE_STEP6_POSTGRES_URL`` switches both engines (platform ORM and
+    durable store) to PostgreSQL, one schema per test for isolation.
+    """
+
+    from datetime import UTC, datetime, timedelta
+
+    from hecate_durable.storage import SqlDurableStore
+
+    from hecate.models.agent import AgentModel
+    from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
+    from hecate.models.agent_principal import AgentPrincipalModel
+    from hecate.models.agent_version import AgentVersionModel
+    from hecate.models.organization import OrganizationModel
+    from hecate.models.user import UserModel
+    from hecate.models.workspace import WorkspaceModel
+
+    pg_url = HARNESS_POSTGRES_URL
+    schema = None
+    if pg_url:
+        # asyncpg for EVERYTHING on the event loop: psycopg3 SYNC connect
+        # hangs forever when its select() wait runs on the loop thread
+        # (Windows + Docker port proxy); in worker threads (to_thread) the
+        # same call is fine, so the sync-psycopg store stays.
+        from sqlalchemy import text as _text
+
+        schema = _harness_schema_name(tmp_path)
+        async_url = pg_url.replace("+psycopg", "+asyncpg")
+        async_admin = _create_async_engine(async_url)
+        async with async_admin.begin() as conn:
+            await conn.execute(_text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+        async_engine = _create_async_engine(
+            async_url,
+            connect_args={"server_settings": {"search_path": f"{schema},public"}},
+        )
+        store = SqlDurableStore(_pg_url_with_schema(pg_url, schema), source="platform")
+    else:
+        from sqlalchemy import event as sa_event
+
+        db_file = tmp_path / "orchestration.db"
+        async_engine = _create_async_engine(f"sqlite+aiosqlite:///{db_file}", connect_args={"timeout": 30})
+
+        @sa_event.listens_for(async_engine.sync_engine, "connect")
+        def _wal_async(dbapi_conn, _record):
+            dbapi_conn.execute("PRAGMA journal_mode=WAL")
+
+        store = SqlDurableStore(f"sqlite:///{db_file}", source="platform")
+
+        @sa_event.listens_for(store.engine, "connect")
+        def _wal_sync(dbapi_conn, _record):
+            dbapi_conn.execute("PRAGMA journal_mode=WAL")
+
+    if pg_url is None:
+        store.create_schema()
+    else:
+        # Sync-psycopg connects must run OFF the event loop thread (see the
+        # PG-branch comment above); create_schema is a blocking connect.
+        await _asyncio.to_thread(store.create_schema)
+    async with async_engine.begin() as conn:
+        await conn.run_sync(_Base.metadata.create_all)
+    session_factory = _async_sessionmaker(async_engine, class_=_AsyncSession, expire_on_commit=False)
+
+    class _Clock:
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+
+        def advance(self, seconds: float) -> None:
+            self.now = self.now + timedelta(seconds=seconds)
+
+    clock = _Clock()
+    import hecate_durable.storage.lease as lease_module
+
+    original_default = lease_module._default_clock
+    # The store builds its LeaseManager at __init__ with the real clock;
+    # rebuild it with the injectable test clock on BOTH dialects so the
+    # tests can expire the dead dispatch's lease without sleeping.
+    store.leases = lease_module.LeaseManager(store.session_factory, clock=lambda: clock.now)
+
+    async with session_factory() as db:
+        db.add(
+            OrganizationModel(id=HARNESS_ORG, name="org", slug=f"org-{HARNESS_ORG.hex[:12]}", owner_id=HARNESS_OWNER)
+        )
+        db.add(WorkspaceModel(id=HARNESS_WS, org_id=HARNESS_ORG, name="ws", slug=f"ws-{HARNESS_WS.hex}"))
+        db.add(UserModel(id=HARNESS_OWNER, email="owner@example.com", hashed_password=_uuid_mod.uuid4().hex))
+        agent = AgentModel(workspace_id=HARNESS_WS, name="orch-agent")
+        db.add(agent)
+        await db.flush()
+        version = AgentVersionModel(
+            agent_id=agent.id, version=1, config_snapshot={"model": "stub"}, content_hash="c" * 64
+        )
+        db.add(version)
+        await db.flush()
+        db.add(
+            AgentPrincipalModel(
+                id=agent.id,
+                agent_id=agent.id,
+                workspace_id=HARNESS_WS,
+                organization_id=HARNESS_ORG,
+                owner_user_id=HARNESS_OWNER,
+            )
+        )
+        db.add(
+            AgentDeploymentModel(
+                agent_id=agent.id,
+                agent_version_id=version.id,
+                workspace_id=HARNESS_WS,
+                backend_type=BackendType.BUILTIN,
+                access_mode=AccessMode.IN_PROCESS,
+                issuer_domain="hecate",
+                capability_snapshot={},
+                axes_harness="hecate",
+                axes_environment="none",
+                axes_tool_execution="hecate_gateway",
+                is_default=True,
+            )
+        )
+        await db.commit()
+        agent_id = agent.id
+
+    yield {
+        "session_factory": session_factory,
+        "store": store,
+        "agent_id": agent_id,
+        "clock": clock,
+        "pg": pg_url is not None,
+    }
+
+    lease_module._default_clock = original_default
+    await async_engine.dispose()
+    store.dispose()
+    if schema is not None:
+        from sqlalchemy import text as _text
+
+        async_url = pg_url.replace("+psycopg", "+asyncpg")
+        async_admin = _create_async_engine(async_url)
+        async with async_admin.begin() as conn:
+            await conn.execute(_text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        await async_admin.dispose()

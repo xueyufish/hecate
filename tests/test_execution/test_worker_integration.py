@@ -18,38 +18,28 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from pathlib import Path
 
 import pytest
 from hecate_durable.contracts.durable import InvalidTaskTransitionError
-from sqlalchemy import event as sa_event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-
-from hecate.contracts.execution.durable import (
-    CommandState,
-    ControlCommandKind,
-    TaskLifecycleState,
-)
-from hecate.core.database import Base
-from hecate.execution.task_control import TaskControlService, task_ref_of
-from hecate.models.agent import AgentModel
-from hecate.models.agent_deployment import AccessMode, AgentDeploymentModel, BackendType
-from hecate.models.agent_principal import AgentPrincipalModel
-from hecate.models.agent_version import AgentVersionModel
-from hecate.models.organization import OrganizationModel
-from hecate.models.user import UserModel
-from hecate.models.workspace import WorkspaceModel
-
-WS = uuid.UUID("00000000-0000-0000-0000-0000000000a0")
-ORG = uuid.UUID("00000000-0000-0000-0000-0000000000a1")
-OWNER = uuid.UUID("00000000-0000-0000-0000-0000000000a2")
-
 
 # Imported at module scope so the scheduler models register in Base.metadata
 # before the session-scoped create_all runs (the autouse row-clearing fixture
 # must see every table it deletes from).
 import hecate.execution.task_control as _tc_module  # noqa: E402, F401
 import hecate.ops.scheduling.manager as _manager_module  # noqa: E402, F401
+from hecate.contracts.execution.durable import (
+    CommandState,
+    ControlCommandKind,
+    TaskLifecycleState,
+)
+from hecate.execution.task_control import TaskControlService, task_ref_of
+from hecate.models.agent import AgentModel
+from hecate.models.agent_deployment import AgentDeploymentModel
+from hecate.models.agent_principal import AgentPrincipalModel
+from hecate.models.agent_version import AgentVersionModel
+from tests.test_execution.conftest import HARNESS_ORG as ORG  # noqa: F401
+from tests.test_execution.conftest import HARNESS_OWNER as OWNER  # noqa: F401
+from tests.test_execution.conftest import HARNESS_WS as WS  # noqa: F401
 
 
 def test_scheduler_and_task_control_have_disjoint_writers() -> None:
@@ -226,97 +216,6 @@ def _dispatcher_of(harness):
     from hecate.execution.task_dispatcher import PlatformTaskDispatcher
 
     return PlatformTaskDispatcher(harness["store"], harness["session_factory"])
-
-
-@pytest.fixture
-async def harness(tmp_path: Path):
-    db_file = tmp_path / "orchestration.db"
-    dsn = f"sqlite:///{db_file}"
-    async_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
-
-    @sa_event.listens_for(async_engine.sync_engine, "connect")
-    def _wal_async(dbapi_conn, _record):
-        dbapi_conn.execute("PRAGMA journal_mode=WAL")
-
-    from hecate_durable.storage import SqlDurableStore
-
-    store = SqlDurableStore(dsn, source="platform")
-
-    @sa_event.listens_for(store.engine, "connect")
-    def _wal_sync(dbapi_conn, _record):
-        dbapi_conn.execute("PRAGMA journal_mode=WAL")
-
-    store.create_schema()
-    async with async_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
-
-    from datetime import UTC, datetime, timedelta
-
-    class _Clock:
-        now = datetime(2026, 1, 1, tzinfo=UTC)
-
-        def advance(self, seconds: float) -> None:
-            self.now = self.now + timedelta(seconds=seconds)
-
-    clock = _Clock()
-    import hecate_durable.storage.lease as lease_module
-
-    original_default = lease_module._default_clock
-    lease_module._default_clock = lambda: clock.now
-    # The store builds its LeaseManager at __init__ with the real clock;
-    # rebuild it with the test clock.
-    store.leases = lease_module.LeaseManager(store.session_factory, clock=lambda: clock.now)
-
-    async with session_factory() as db:
-        db.add(OrganizationModel(id=ORG, name="org", slug=f"org-{ORG.hex[:12]}", owner_id=OWNER))
-        db.add(WorkspaceModel(id=WS, org_id=ORG, name="ws", slug=f"ws-{WS.hex}"))
-        db.add(UserModel(id=OWNER, email="owner@example.com", hashed_password=uuid.uuid4().hex))
-        agent = AgentModel(workspace_id=WS, name="orch-agent")
-        db.add(agent)
-        await db.flush()
-        version = AgentVersionModel(
-            agent_id=agent.id, version=1, config_snapshot={"model": "stub"}, content_hash="c" * 64
-        )
-        db.add(version)
-        await db.flush()
-        db.add(
-            AgentPrincipalModel(
-                id=agent.id,
-                agent_id=agent.id,
-                workspace_id=WS,
-                organization_id=ORG,
-                owner_user_id=OWNER,
-            )
-        )
-        db.add(
-            AgentDeploymentModel(
-                agent_id=agent.id,
-                agent_version_id=version.id,
-                workspace_id=WS,
-                backend_type=BackendType.BUILTIN,
-                access_mode=AccessMode.IN_PROCESS,
-                issuer_domain="hecate",
-                capability_snapshot={},
-                axes_harness="hecate",
-                axes_environment="none",
-                axes_tool_execution="hecate_gateway",
-                is_default=True,
-            )
-        )
-        await db.commit()
-        agent_id = agent.id
-
-    yield {
-        "session_factory": session_factory,
-        "store": store,
-        "agent_id": agent_id,
-        "clock": clock,
-    }
-
-    lease_module._default_clock = original_default
-    await async_engine.dispose()
-    store.dispose()
 
 
 async def test_real_platform_dispatcher_rejects_late_success(harness, monkeypatch) -> None:
@@ -538,7 +437,10 @@ async def test_protected_interrupt_does_not_treat_conversation_as_checkpoint(har
     assert await worker2.dispatch_once(task2) is True
     fresh = store.get_task_state(task2)
     assert fresh.lifecycle_state is TaskLifecycleState.RECONCILIATION_REQUIRED
-    assert fresh.extra["reconciliation_reason"] == "interrupted attempt contains protected actions"
+    # step6d gate: the crafted interruption never ran a real dispatch, so no
+    # definition digest was ever recorded — the resumption gate refuses
+    # before anything executes (conservative outcome unchanged).
+    assert fresh.extra["reconciliation_reason"] == "resume refused: no recorded definition digest"
 
 
 @pytest.mark.parametrize("drift", ["principal", "deployment", "version"])

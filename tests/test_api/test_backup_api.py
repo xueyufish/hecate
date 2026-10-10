@@ -15,6 +15,23 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import AsyncClient
 
+from hecate.main import app
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_overrides():
+    """Undo dependency overrides a test installed on the global app.
+
+    This file overrides ``get_auth_context`` with a system-scope context in
+    a test body; relying on the shared client fixture's teardown ``clear()``
+    is implicit — restore explicitly so nothing leaks to later tests on the
+    same xdist worker.
+    """
+    saved = dict(app.dependency_overrides)
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(saved)
+
 
 @pytest.fixture
 def mock_backup_record():
