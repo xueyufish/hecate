@@ -14,6 +14,7 @@ import asyncio
 import uuid
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from hecate.core.auth_context import AuthContext
@@ -28,6 +29,20 @@ from hecate.runtime.eventstore import (
     EventType,
     InMemoryEventStore,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_overrides():
+    """Undo dependency overrides a test installed on the global app.
+
+    Without this, an override (e.g. this file's stub auth context or its
+    stub get_db) leaks to every later test on the same xdist worker and
+    fails them far from the cause.
+    """
+    saved = dict(app.dependency_overrides)
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(saved)
 
 
 class _SessionRow:

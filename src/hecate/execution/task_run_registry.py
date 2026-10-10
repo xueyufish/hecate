@@ -192,7 +192,13 @@ class TaskRunRegistry:
         """Revalidate current authority and the attempt's frozen deployment."""
         deployment = await self._require_workspace_deployment(run.deployment_id, run.workspace_id)
         await self._validate_run_identity(IdentityChain.from_dict(run.identity_chain), deployment, require_active=True)
-        if run.execution_snapshot != await self._execution_snapshot(deployment):
+        # step6d: the dispatcher stamps the resolved-definition digest into
+        # the run snapshot after admission; it is dispatcher bookkeeping, not
+        # an admission change, so the equality check strips it.
+        bookkeeping = {"definition_digest"}
+        actual = {k: v for k, v in (run.execution_snapshot or {}).items() if k not in bookkeeping}
+        expected = {k: v for k, v in (await self._execution_snapshot(deployment)).items() if k not in bookkeeping}
+        if actual != expected:
             raise TaskRunValidationError("deployment or version changed since the attempt was admitted")
 
     async def list_runs_for_task(self, task_id: uuid.UUID, workspace_id: uuid.UUID) -> list[RunModel]:

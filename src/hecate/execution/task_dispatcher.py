@@ -54,6 +54,37 @@ _RUN_TERMINAL_EVENT = "run_terminal"
 _RUN_PROJECTION_TERMINAL = {"succeeded", "failed", "cancelled"}
 
 
+def _definition_digest(snapshot: dict[str, Any], effective_tools: list[dict[str, Any]], model_name: str) -> str:
+    """Freeze the resolved execution definition of one dispatch (step6d).
+
+    Covers tool ORDER plus each resolved tool's identity (name/permission/
+    schema), the model reference, and the persona/guardrail/manifest refs
+    from the frozen execution snapshot. Recorded on the run at first
+    dispatch and recomputed at resume; a mismatch means the interrupted
+    session would continue under a different definition than it started
+    with, so the gate refuses instead of silently re-homing the run.
+    """
+
+    from hecate_durable.contracts.durable import canonical_request_digest
+
+    return canonical_request_digest(
+        {
+            "tools": [
+                {
+                    "name": tool.get("name"),
+                    "permission": tool.get("permission"),
+                    "schema_ref": tool.get("schema_ref") or tool.get("schema"),
+                }
+                for tool in effective_tools
+            ],
+            "tool_refs": snapshot.get("config_snapshot", {}).get("tools") or [],
+            "model": model_name,
+            "guardrail_config": snapshot.get("config_snapshot", {}).get("guardrail_config"),
+            "ref_manifest": snapshot.get("ref_manifest") or [],
+        }
+    )
+
+
 class TaskWaitingSignalError(Exception):
     """Raised by an execution wrapper to park the task in a durable wait.
 
@@ -139,6 +170,7 @@ class PlatformTaskDispatcher:
         runs = await registry.list_runs_for_task(context.task_id, context.workspace_id)
         latest = runs[-1] if runs else None
 
+        resume_interrupted = False
         if latest is not None and self._run_is_terminal(latest):
             # Crash window: the run finished but the task-terminal write
             # never landed. Backfill from the run projection; never
@@ -182,21 +214,36 @@ class PlatformTaskDispatcher:
             if latest is not None and hasattr(self._store, "list_run_actions"):
                 actions = await asyncio.to_thread(self._store.list_run_actions, run_row_ref(latest))
                 if any((action.get("intent") or {}).get("side_effect_class") != "readonly" for action in actions):
-                    # The current entry starts a new model execution. Chat
-                    # history and a reused session ID cannot continue the old
-                    # action identities, so protected interruptions reconcile.
-                    await asyncio.to_thread(
-                        self._store.apply_task_state,
-                        task_ref,
-                        TaskLifecycleState.RECONCILIATION_REQUIRED,
-                        expected_revision=record.revision + 1,
-                        extra_update={"reconciliation_reason": "interrupted attempt contains protected actions"},
-                        **({"lease": lease} if lease is not None else {}),
-                    )
-                    return
+                    # step6d: an interrupted attempt with protected actions
+                    # resumes NATIVELY on the same run/engine session when the
+                    # resumption gate passes (snapshot loadable + frozen
+                    # definition digest matches); the ledger arbitrates the
+                    # actions (decided backfill, undecided stop). Chat history
+                    # alone never qualifies. Anything the gate refuses keeps
+                    # the conservative reconciliation.
+                    resume_session = await self._resume_engine_session(db, latest, context)
+                    if resume_session is not None:
+                        run = latest
+                        engine_session = resume_session
+                        resume_interrupted = True
+                    else:
+                        reason = self._last_resume_refusal or "interrupted attempt contains protected actions"
+                        await asyncio.to_thread(
+                            self._store.apply_task_state,
+                            task_ref,
+                            TaskLifecycleState.RECONCILIATION_REQUIRED,
+                            expected_revision=record.revision + 1,
+                            extra_update={"reconciliation_reason": reason},
+                            **({"lease": lease} if lease is not None else {}),
+                        )
+                        return
             if lease is not None and hasattr(self._store, "engine"):
                 await db.run_sync(lambda session: self._store.leases.assert_valid(session, lease))
-            run = await self._new_attempt(db, task, latest, context)
+            if not resume_interrupted:
+                # A gate-approved resume continues on ``latest``; minting a
+                # fresh attempt here would re-home the interrupted session
+                # onto a clean run and re-execute its protected actions.
+                run = await self._new_attempt(db, task, latest, context)
         r_ref = run_row_ref(run)
         engine_session = self._engine_session_of(run)
         try:
@@ -207,6 +254,8 @@ class PlatformTaskDispatcher:
                 task_ref=task_ref,
                 run_ref=r_ref,
                 lease=lease,
+                resume_interrupted=resume_interrupted,
+                run=run if isinstance(run, RunModel) else None,
             )
         except TaskWaitingSignalError as wait:
             await db.commit()
@@ -276,6 +325,66 @@ class PlatformTaskDispatcher:
         backend = run.backend_ref if isinstance(run.backend_ref, dict) else {}
         return uuid.UUID(str(backend.get("id")))
 
+    _last_resume_refusal: str | None = None
+
+    async def _resume_engine_session(
+        self, db: AsyncSession, latest: RunModel, context: _DispatchContext
+    ) -> uuid.UUID | None:
+        """step6d resumption gate for a protected-interrupted attempt.
+
+        Returns the engine session to resume natively, or ``None`` (with the
+        refusal reason recorded for the reconciliation trail) when any
+        precondition fails: no recorded definition digest, resolved
+        definition drift, a terminal projection on the run, or a missing
+        engine-session snapshot. Admission (principal/deployment/version)
+        has already been re-validated by the caller before this gate.
+        """
+
+        self._last_resume_refusal = None
+        snapshot = latest.execution_snapshot or {}
+        recorded = snapshot.get("definition_digest")
+        if not recorded:
+            self._last_resume_refusal = "resume refused: no recorded definition digest"
+            return None
+        if (latest.projection or {}).get("state") in _RUN_PROJECTION_TERMINAL:
+            self._last_resume_refusal = "resume refused: run already reached a terminal projection"
+            return None
+
+        from hecate.core.composition.entry_assembly import load_agent_tools
+
+        config = snapshot.get("config_snapshot") or {}
+        tool_refs = config.get("tools") or []
+        effective_tools: list[dict[str, Any]] = []
+        if tool_refs:
+            try:
+                effective_tools = await load_agent_tools(db, tool_refs, workspace_id=context.workspace_id)
+            except Exception as exc:  # noqa: BLE001 — drift/failure both refuse
+                self._last_resume_refusal = f"resume refused: tool resolution failed: {exc}"
+                return None
+        model_name = config.get("model_config", {}).get("model", "gpt-4o")
+        digest = _definition_digest(snapshot, effective_tools, model_name)
+        if digest != recorded:
+            self._last_resume_refusal = "resume refused: execution definition digest drifted"
+            return None
+
+        engine_session = self._engine_session_of(latest)
+        from hecate.core.composition.entry_assembly import get_shared_session_state_store
+
+        try:
+            state_store = get_shared_session_state_store()
+            snapshot_state = await state_store.load(
+                org_id=context.user_id,
+                user_id=context.user_id,
+                session_id=engine_session,
+            )
+        except Exception as exc:  # noqa: BLE001 — unloadable is unresumable
+            self._last_resume_refusal = f"resume refused: engine session snapshot not loadable: {exc}"
+            return None
+        if snapshot_state is None:
+            self._last_resume_refusal = "resume refused: engine session snapshot missing"
+            return None
+        return engine_session
+
     async def _new_attempt(
         self, db: AsyncSession, task: Any, latest: RunModel | None, context: _DispatchContext
     ) -> RunModel:
@@ -319,6 +428,8 @@ class PlatformTaskDispatcher:
         task_ref: BackendRef,
         run_ref: BackendRef,
         lease: Any = None,
+        resume_interrupted: bool = False,
+        run: RunModel | None = None,
     ) -> dict[str, Any]:
         """Run one execution through the platform entry service (shared assembly)."""
 
@@ -396,7 +507,17 @@ class PlatformTaskDispatcher:
             existing_task_id=uuid.UUID(task_ref.id),
         )
         model_name = context.model or (config.get("model_config") or {}).get("model", "gpt-4o")
+        digest = _definition_digest(snapshot, effective_tools, model_name)
+        if run is not None and (run.execution_snapshot or {}).get("definition_digest") is None:
+            # First dispatch of this attempt freezes the resolved definition
+            # (step6d); the resume gate recomputes and compares it. The
+            # commit is immediate ON PURPOSE: a crash mid-execution must
+            # still leave the digest recorded, or the interrupted attempt
+            # could never qualify for native continuation.
+            run.execution_snapshot = {**snapshot, "definition_digest": digest}
+            await db.commit()
         outcome = await entry.execute(
+            resume_interrupted=resume_interrupted,
             agent_mode="chat",
             messages=[
                 *context.messages,
@@ -414,6 +535,7 @@ class PlatformTaskDispatcher:
             agent_version=version.version,
             skill_ref_manifest=snapshot.get("ref_manifest") or [],
             workspace_id=context.workspace_id,
+            user_id=context.user_id,
             correlation=correlation,
         )
         if action_hook is not None and action_hook.has_failed_outcomes:

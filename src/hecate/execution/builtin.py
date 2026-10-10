@@ -387,7 +387,16 @@ class HecateExecutionBackend(AgentExecutionBackend):
             )
             record.state = RunState(result.state.value)
             if result.state.value == "unknown":
-                record.detail = {"reason": "execution interrupted; continuation controls are unsupported"}
+                # Honest interrupt fact (step6d): the engine session and its
+                # durable snapshot survive the interrupt, so this attempt is
+                # natively resumable on re-dispatch (subject to the
+                # dispatcher's resumption gate: identity, definition digest,
+                # snapshot loadability). NOT a failed run, NOT a completed one.
+                record.detail = {
+                    "reason": "execution interrupted; engine session persisted for native continuation",
+                    "resumable": True,
+                    "engine_session_id": str(session_id),
+                }
             elif result.error is not None:
                 record.detail = {"reason": result.error}
         except RuntimeScheduleCancelledError as exc:

@@ -49,13 +49,42 @@ def _bounded_retain(value: Any, head_chars: int = 32_000, tail_chars: int = 8_00
 
 
 def _project_channel_state(channel_state: dict[str, Any]) -> dict[str, Any]:
-    """Apply the bounded retainer over a channel snapshot."""
+    """Apply the bounded retainer over a channel snapshot.
+
+    Exclusion follows the log policy (single source of truth), not a name
+    heuristic: ``_route``/``_dispatch`` are underscore-prefixed but explicitly
+    logged because fold correctness depends on them — dropping them from the
+    cache desynchronizes cache+tail restore from the full-log fold and trips
+    the projection-equivalence check on resume.
+    """
+    from hecate_runtime.replay.logpolicy import should_log_channel
+
     projected: dict[str, Any] = {}
     for name, value in channel_state.items():
-        if name.startswith("_") or name.startswith("sys."):
+        if not should_log_channel(name):
             continue
         projected[name] = _bounded_retain(value)
     return projected
+
+
+def _unproject_channel_state(projected: dict[str, Any]) -> dict[str, Any]:
+    """Invert :func:`_project_channel_state` before handing state to the engine.
+
+    The storage envelope (``{"value": ...}`` per channel) is a materializer
+    detail: the engine's ``ChannelManager.restore`` assigns each entry as the
+    raw channel value, so an envelope would leak into execution state and trip
+    the log-as-truth projection equivalence check on resume. Unwrapping here
+    keeps the round-trip exact for any value shape (including a legitimate
+    ``{"value": ...}`` dict — save wraps, load unwraps). Oversized-string
+    placeholders carry no envelope and pass through untouched.
+    """
+    restored: dict[str, Any] = {}
+    for name, entry in projected.items():
+        if isinstance(entry, dict) and set(entry) == {"value"}:
+            restored[name] = entry["value"]
+        else:
+            restored[name] = entry
+    return restored
 
 
 class SessionStateMaterializer(CheckpointStore):
@@ -142,7 +171,7 @@ class SessionStateMaterializer(CheckpointStore):
             "session_id": session_id,
             "superstep": state.metadata.get("superstep", 0),
             "node_id": state.metadata.get("node_id"),
-            "channel_state": state.channel_state,
+            "channel_state": _unproject_channel_state(state.channel_state),
             "metadata": {**state.metadata, "log_version": state.event_position},
         }
 

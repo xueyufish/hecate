@@ -218,6 +218,7 @@ class WorkflowExecutionService:
         citation_provenance: dict | None = None,
         grounding_scoring: dict | None = None,
         skill_ref_manifest: list[dict[str, Any]] | None = None,
+        resume_interrupted: bool = False,
     ) -> dict[str, Any] | AsyncGenerator[dict[str, Any], None]:
         """Execute an agent through the unified graph engine.
 
@@ -425,6 +426,15 @@ class WorkflowExecutionService:
         initial_input = assembled.initial_input
         evidence_tracker = assembled.evidence_tracker
 
+        # Native continuation (step6d): re-drive an interrupted attempt on the
+        # SAME engine session. The caller's messages MUST NOT be rewritten as
+        # a new initial_input — the kernel restores channel state from the
+        # checkpoint cache + event-log tail and resumes at the interrupt point.
+        resume_value: dict[str, Any] | None = None
+        if resume_interrupted:
+            initial_input = None
+            resume_value = {"resumed": "interrupted_attempt"}
+
         stream_mode = StreamMode.MESSAGES if stream else StreamMode.VALUES
 
         if stream:
@@ -443,10 +453,13 @@ class WorkflowExecutionService:
                     org_id=user_id,
                     user_id=user_id,
                     agent_id=agent_id,
+                    resume_value=resume_value,
                 ),
             )
 
-        response = await self._non_stream_execute(runtime, session_id, initial_input, execution_mode)
+        response = await self._non_stream_execute(
+            runtime, session_id, initial_input, execution_mode, resume_value=resume_value
+        )
         await self._persist_evidence_rows(evidence_tracker)
         # Save AgentState after non-streaming execution (single atomic snapshot)
         if agent_state is not None and user_id is not None:
@@ -485,8 +498,9 @@ class WorkflowExecutionService:
         self,
         runtime: PregelRuntime,
         session_id: uuid.UUID,
-        initial_input: dict,
+        initial_input: dict | None,
         execution_mode: str = "conversational",
+        resume_value: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute non-streaming and return final response dict.
 
@@ -505,6 +519,7 @@ class WorkflowExecutionService:
             initial_input=initial_input,
             stream_mode=StreamMode.VALUES,
             execution_mode=execution_mode,
+            resume_value=resume_value,
         ):
             if event.get("type") == "values":
                 final_state = event.get("state", {})
@@ -521,7 +536,7 @@ class WorkflowExecutionService:
         suggested_questions = final_state.get("suggested_questions")
         result: dict[str, Any] = {
             "content": content,
-            "model": initial_input.get("model", "gpt-4o"),
+            "model": (initial_input or {}).get("model", "gpt-4o"),
             "usage": {},
             "finish_reason": "stop",
         }
@@ -541,6 +556,7 @@ class WorkflowExecutionService:
         org_id: str | uuid.UUID | None = None,
         user_id: str | uuid.UUID | None = None,
         agent_id: str | uuid.UUID | None = None,
+        resume_value: dict[str, Any] | None = None,
     ) -> AsyncGenerator[dict[str, Any], None]:
         """Execute streaming and yield events.
 
@@ -570,6 +586,7 @@ class WorkflowExecutionService:
                 initial_input=initial_input,
                 stream_mode=stream_mode,
                 execution_mode=execution_mode,
+                resume_value=resume_value,
             ):
                 if event.get("type") == "interrupt" and execution_mode == "conversational":
                     await self._mark_session_interrupted(session_id)

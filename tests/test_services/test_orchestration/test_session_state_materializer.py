@@ -67,6 +67,74 @@ def test_project_channel_state_skips_underscore_and_sys_channels():
     assert "sys.execution_mode" not in projected
 
 
+def test_project_channel_state_keeps_fold_relevant_route_and_dispatch():
+    # _route/_dispatch are underscore-prefixed but explicitly loggable
+    # (logpolicy): dropping them from the cache desynchronizes cache+tail
+    # restore from the full-log fold on resume.
+    projected = _project_channel_state({"_route": "tools", "_dispatch": {"fanout": True}})
+    assert projected["_route"] == {"value": "tools"}
+    assert projected["_dispatch"] == {"value": {"fanout": True}}
+
+
+@pytest.mark.asyncio
+async def test_load_unwraps_storage_envelope_to_raw_channel_values(
+    store: InMemorySessionStateStore,
+    event_store: EventStore,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> None:
+    materializer = SessionStateMaterializer(
+        session_state_store=store,
+        tenant_context_provider=lambda: (org_id, user_id),
+        event_store=event_store,
+    )
+    await materializer.save(
+        session_id=session_id,
+        superstep=1,
+        node_id="llm",
+        channel_state={
+            "messages": [{"role": "user", "content": "go"}],
+            "_route": "tools",
+            "llm_output": {"value": "legitimate nested envelope"},
+        },
+    )
+    record = await materializer.load(session_id)
+    assert record is not None
+    # ChannelManager.restore assigns each entry as the raw channel value;
+    # the storage envelope must never leak into engine state.
+    assert record["channel_state"]["messages"] == [{"role": "user", "content": "go"}]
+    assert record["channel_state"]["_route"] == "tools"
+    assert record["channel_state"]["llm_output"] == {"value": "legitimate nested envelope"}
+
+
+@pytest.mark.asyncio
+async def test_load_passes_omitted_placeholder_through(
+    store: InMemorySessionStateStore,
+    event_store: EventStore,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> None:
+    materializer = SessionStateMaterializer(
+        session_state_store=store,
+        tenant_context_provider=lambda: (org_id, user_id),
+        event_store=event_store,
+    )
+    big = "y" * 50_000
+    await materializer.save(
+        session_id=session_id,
+        superstep=1,
+        node_id="llm",
+        channel_state={"transcript": big},
+    )
+    record = await materializer.load(session_id)
+    assert record is not None
+    placeholder = record["channel_state"]["transcript"]
+    assert placeholder["_omitted"] is True
+    assert placeholder["_omitted_bytes"] == len(big) - (32_000 + 8_000)
+
+
 @pytest.mark.asyncio
 async def test_save_persists_channel_state_under_tenant_triple(
     store: InMemorySessionStateStore,

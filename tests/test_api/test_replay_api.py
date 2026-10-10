@@ -16,9 +16,24 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.deps_event_store import get_event_store
+from hecate.main import app
 from hecate.models.agent import AgentModel
 from hecate.models.session import SessionModel
 from hecate.runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION, Event, EventType, InMemoryEventStore
+
+
+@pytest.fixture(autouse=True)
+def _restore_app_overrides():
+    """Undo dependency overrides a test installed on the global app.
+
+    Tests here reach the app through ``client._transport.app`` to override
+    ``get_event_store``; restore explicitly so nothing leaks to later tests
+    on the same xdist worker.
+    """
+    saved = dict(app.dependency_overrides)
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(saved)
 
 
 def _make_event(
