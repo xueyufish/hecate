@@ -266,10 +266,11 @@ sc_scenarios:
       The step6b technical loop is delivered (tests/scenarios/
       test_sc04_lease_renewal_policy.py: multi-action renewal per declared
       window, bounded refusal on stopped lease delivery, immediate
-      out-of-scope refusal, restart-persistent nonce replay record).
+      out-of-scope refusal, restart-persistent nonce replay record) and
+      runs on both SQLite and PostgreSQL in CI (step6-pg-process-matrix).
       Expiry-policy certification against real clock skew, tool-level
       action scope, legal approval judgment and revocation windows remain
-      with step7; the full platform-managed process matrix is step6f.
+      with step7.
     assertions: >-
       Execution continues only within the granted scope and validity window;
       expired grants and untrustworthy time are rejected per policy;
@@ -284,13 +285,11 @@ sc_scenarios:
     blocked_by: runner managed dispatch loop, action-time lease enforcement and process restart acceptance
     implemented_slices: [delivery_acceptance, event_projection, lease_gate, managed_loop, action_authorization, managed_wake_chain, managed_command_receipt]
     gaps: >-
-      Process-level acceptance (installed wheels + real platform control plane
-      + hard restart/lease takeover) remains planned; the delivered slices are
-      component/integration level, and the managed wake-chain suite covers
-      the SQLite path with a guarded PostgreSQL parametrization (see
-      HECATE_STEP6_POSTGRES_URL). Connection-loss stale window, legal approval
-      authority and the full platform-managed process matrix still need
-      step7 and step6f respectively.
+      The managed wake-chain and reconnect suites run on both SQLite and
+      PostgreSQL in CI (step6-pg-process-matrix job, per-test schema
+      isolation on the shared database). Connection-loss stale window and
+      legal approval authority still need step7; the central buffer /
+      backlog-limit policy remains step10.
     assertions: >-
       After re-verifying trust and authorization the host accepts new work;
       historical events are deduplicated on replay; duplicate commands and

@@ -6,9 +6,9 @@
 
 ## 2. CI 绿灯确认与文档翻转(绿灯为前置)
 
-- [ ] 2.1 推送后确认 `step6-pg-process-matrix` job 绿灯(含 `[postgres]` 参数真实执行,非 skip)。验证:CI run 日志显示 postgres 参数用例执行并通过。
-- [ ] 2.2 演进方案 step6f 条目按绿灯证据追加修正(宿主故障矩阵/未决外部写/迟到回执的 PG 认证交付;SC03/SC06 部分覆盖与 step7/10 策略项保留);`docs/refactor/step6-followup-review.md` 追加验收记录;场景清单 SC04/SC05 的 gaps 更新(PG 矩阵常态化)。验证:方案文本与 CI 证据一致。
+- [x] 2.1 推送后确认 `step6-pg-process-matrix` job 绿灯(含 `[postgres]` 参数真实执行,非 skip)。验证:CI run 日志显示 postgres 参数用例执行并通过。(2026-10-10:PR #241 经 merge queue 全绿合入,job 首跑通过)
+- [x] 2.2 演进方案 step6f 条目按绿灯证据追加修正(宿主故障矩阵/未决外部写/迟到回执的 PG 认证交付;SC03/SC06 部分覆盖与 step7/10 策略项保留);`docs/refactor/step6-followup-review.md` 追加验收记录;场景清单 SC04/SC05 的 gaps 更新(PG 矩阵常态化)。验证:方案文本与 CI 证据一致。(随 docs/step6f-close 收尾 PR 完成)
 
 ## 3. 验证
 
-- [ ] 3.1 门禁:`ruff check src/ tests/ packages/`、`ruff format --check`、`mypy src/ packages/` 全绿(本 change 无生产代码改动,门禁覆盖 workflow YAML 的变更);受影响面本地回归(tests/test_execution/ 场景相关);OpenSpec strict 校验通过;CI 全绿(含新 job)。
+- [x] 3.1 门禁:`ruff check src/ tests/ packages/`、`ruff format --check`、`mypy src/ packages/` 全绿(本 change 无生产代码改动,门禁覆盖 workflow YAML 的变更);受影响面本地回归(tests/test_execution/ 场景相关);OpenSpec strict 校验通过;CI 全绿(含新 job)。(PR #241 merge queue 全绿;评测种子时间炸弹修复一并携带,302 passed)
