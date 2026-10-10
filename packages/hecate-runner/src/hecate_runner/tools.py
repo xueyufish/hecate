@@ -28,6 +28,12 @@ class BusinessApiToolDispatcher:
         if tool_name == "submit_inventory_update":
             payload_args = {key: arguments[key] for key in ("domain", "sku", "quantity") if key in arguments}
             return await self._post("/inventory/write", payload_args, principal, domains)
+        if tool_name == "submit_inventory_adjustment":
+            # Second protected write: lets acceptance runs put two protected
+            # dispatches in one run so the lease-renewal boundary is real
+            # (one lease authorizes one protected action).
+            payload_args = {key: arguments[key] for key in ("domain", "sku", "quantity") if key in arguments}
+            return await self._post("/inventory/write", payload_args, principal, domains)
         return {"status": "unsupported", "detail": f"tool {tool_name!r} has no business-API mapping"}
 
     async def _post(self, path: str, arguments: dict, principal: str, domains: list[str]) -> dict:

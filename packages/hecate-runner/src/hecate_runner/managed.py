@@ -37,6 +37,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from hecate_durable.contracts.credentials import (
@@ -91,6 +92,11 @@ class LeaseGate:
     lease cannot re-arm actions. When the current lease is expired or
     absent, new protected actions are refused — the gate has no path to
     local self-authorization.
+
+    Consumed nonces persist to ``nonce_record_path`` (append-only JSONL)
+    when provided: the platform issues leases statelessly, so this record
+    is the only replay memory across host restarts. Without a path the
+    gate keeps the legacy in-memory-only posture.
     """
 
     def __init__(
@@ -102,6 +108,7 @@ class LeaseGate:
         host_id: str | None = None,
         workspace_id: str | None = None,
         clock=None,
+        nonce_record_path: str | None = None,
     ) -> None:
         self._secret = secret
         self._deployment_domain = deployment_domain
@@ -110,13 +117,34 @@ class LeaseGate:
         self._workspace_id = workspace_id
         self._clock = clock or (lambda: datetime.now(UTC))
         self._consumed: set[str] = set()
+        self._nonce_record_path = nonce_record_path
+        self._consumed.update(self._load_consumed_nonces())
         self._current: dict[str, Any] | None = None
         self._lock = asyncio.Lock()
 
-    def update(self, lease: dict[str, Any]) -> None:
-        """Install a freshly pulled lease (replacing the expired one)."""
+    def update(self, lease: dict[str, Any]) -> bool:
+        """Install a freshly pulled lease; ``False`` = replay refused.
 
+        Only a lease whose nonce was already consumed is refused at install —
+        a replayed lease must not replace the current one, and with stateless
+        platform issuance the consumed-nonce record is the host's only replay
+        memory across restarts. Every other install-time invalidity (tampered,
+        expired, foreign binding) installs as before and is refused at the
+        dispatch boundary with its precise reason — the dispatch-time
+        validation contract and its refusal evidence stay untouched.
+        """
+
+        try:
+            claims = verify_lease(lease, self._secret, deployment_domain=self._deployment_domain, now=self._clock())
+        except CredentialError:
+            # Legacy posture: install anyway; the dispatch boundary refuses
+            # with the precise verification reason.
+            self._current = dict(lease)
+            return True
+        if claims.nonce in self._consumed:
+            return False
         self._current = dict(lease)
+        return True
 
     async def check(self) -> Claims:
         """Validate the current lease and consume its nonce; raises on refusal."""
@@ -135,6 +163,7 @@ class LeaseGate:
             if claims.nonce in self._consumed:
                 raise CredentialError("lease nonce already consumed (replay rejected)")
             self._consumed.add(claims.nonce)
+            self._record_consumed_nonce(claims)
             return claims
 
     @property
@@ -157,6 +186,55 @@ class LeaseGate:
         ):
             if expected is not None and actual != expected:
                 raise CredentialError(f"lease {label} does not match the enrolled host")
+
+    def _load_consumed_nonces(self) -> set[str]:
+        """Reload persisted consumed nonces, dropping expired entries.
+
+        A missing file is a first start (or lost state — the pre-persistence
+        posture); malformed lines are skipped so one bad record cannot brick
+        the guard.
+        """
+
+        if not self._nonce_record_path:
+            return set()
+        try:
+            now = self._clock()
+            with open(self._nonce_record_path, encoding="utf-8") as fh:
+                nonces: set[str] = set()
+                for line in fh:
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        if datetime.fromisoformat(entry["exp"]) > now:
+                            nonces.add(entry["nonce"])
+                    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+                        continue
+                return nonces
+        except FileNotFoundError:
+            return set()
+        except OSError:
+            return set()
+
+    def _record_consumed_nonce(self, claims: Claims) -> None:
+        """Append a consumed nonce to the persistent record.
+
+        Deliberately conservative on write failure: without the record a
+        restart could re-arm this still-valid lease, so the authorization
+        fails instead. The nonce is already consumed in memory — a retry of
+        the same lease is rejected as a replay either way.
+        """
+
+        if not self._nonce_record_path:
+            return
+        try:
+            path = Path(self._nonce_record_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            entry = json.dumps({"nonce": claims.nonce, "exp": claims.exp}, separators=(",", ":"))
+            with open(path, "a", encoding="utf-8") as fh:
+                fh.write(entry + "\n")
+        except OSError as exc:
+            raise CredentialError(f"lease nonce persistence failed; refusing to authorize: {exc}") from exc
 
 
 @dataclass
@@ -326,8 +404,12 @@ class ManagedChannel:
             return 0
         self.stats.pulls += 1
         lease = payload.get("lease")
-        if lease:
-            self._gate.update(lease)
+        if lease and not self._gate.update(lease):
+            # A refused install (expired/mismatched/replayed lease) keeps the
+            # current lease in place; the counter makes the refusal visible
+            # on the health surface without breaking the pull loop.
+            self.stats.lease_gate_refusals += 1
+            logger.warning("pulled lease refused by the lease gate; keeping the previous lease")
         accepted = 0
         for delivery in payload.get("deliveries", []):
             outcome = await self._accept_delivery(delivery)

@@ -65,6 +65,17 @@ BUILTIN_TOOL_SCHEMAS = {
             "quantity": {"type": "integer", "minimum": 1},
         },
     },
+    # Second protected write: acceptance runs put two protected dispatches
+    # in one run so the lease-renewal boundary is real (step6b).
+    "submit_inventory_adjustment": {
+        "type": "object",
+        "required": ["domain", "sku", "quantity"],
+        "properties": {
+            "domain": {"type": "string", "minLength": 1},
+            "sku": {"type": "string", "minLength": 1},
+            "quantity": {"type": "integer", "minimum": 1},
+        },
+    },
 }
 
 
@@ -89,6 +100,11 @@ class ControlPlaneConfig:
     lease_ttl_seconds: float = 120.0
     poll_interval_seconds: float = 5.0
     upload_batch: int = 100
+    # Declared renewal/disconnect window (step6b): how long a multi-action
+    # run's next protected dispatch waits for the channel's next pull to
+    # install a fresh lease before the refusal becomes final. Keep it within
+    # a small multiple of poll_interval_seconds.
+    lease_refresh_wait_seconds: float = 5.0
     # Data domains managed deliveries may dispatch tools with. Empty (the
     # default) = deny-by-default: the run's existing domain check refuses
     # every domain-carrying dispatch until the operator maps a scope.
@@ -134,6 +150,9 @@ def _load_control_plane(data: dict, profile_dir: Path) -> ControlPlaneConfig | N
         raise ProfileError("control_plane.poll_interval_seconds must be a positive number")
     if not isinstance(upload_batch, int) or upload_batch <= 0:
         raise ProfileError("control_plane.upload_batch must be a positive integer")
+    refresh_wait = raw.get("lease_refresh_wait_seconds", 5.0)
+    if not isinstance(refresh_wait, (int, float)) or refresh_wait <= 0:
+        raise ProfileError("control_plane.lease_refresh_wait_seconds must be a positive number")
     if not isinstance(data_domains_raw, list) or any(not isinstance(d, str) or not d for d in data_domains_raw):
         raise ProfileError("control_plane.data_domains must be an array of non-empty strings")
     if len(data_domains_raw) != len(set(data_domains_raw)):
@@ -149,6 +168,7 @@ def _load_control_plane(data: dict, profile_dir: Path) -> ControlPlaneConfig | N
         lease_ttl_seconds=float(lease_ttl),
         poll_interval_seconds=float(poll),
         upload_batch=upload_batch,
+        lease_refresh_wait_seconds=float(refresh_wait),
         data_domains=data_domains,
     )
 

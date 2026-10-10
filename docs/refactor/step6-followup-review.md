@@ -108,4 +108,13 @@ PR #237（squash `8ef5be1`，经 merge queue 全绿合入）交付上表 `builti
 
 **证据**：5 个 PostgreSQL 并发用例（`tests/test_execution/test_builtin_continuation.py`：同 Run 续跑+迟到写 fencing、回执丢失、摘要漂移、准入顺序、等待互斥）在本地专用 PG 容器连跑稳定全绿，CI `step6-continuation-pg`（postgres:16）绿；SQLite 层受影响面回归 2092 passed/30 skipped，`tests/test_api`+audit+workspace isolation 633 passed/8 skipped；mypy 892 文件零错。本地环境注记：Docker 端口代理的 IPv6 发布口（::1）为黑洞，psycopg 无 connect_timeout 时先试 `::1` 会永久挂起，本地运行统一 `127.0.0.1`（CI Linux 不受影响）。
 
-**边界**：迟到写者的事件日志追加不受 fencing 保护（状态写、动作账本与业务副作用均已闸），归 `lease-renewal-policy`（6b）；G2 保持未关闭；真实 kill/restart 进程矩阵归 `step6-pg-process-matrix`（6f）；不建设平台通用 checkpoint 引擎。Step6 总体保持部分完成（6b/6e/6f 及 step7 依赖未关）。
+**边界**：迟到写者的事件日志追加不受 fencing 保护（状态写、动作账本与业务副作用均已闸）；该事件存储级 fencing 涉及平台 EventStore 与租约的接线，属另一条信任边界，归 `step6-pg-process-matrix`（6f）与 step7 撤权窗口，不归 6b（见 2026-10-10 `lease-renewal-policy` 验收记录的范围说明）；G2 保持未关闭；真实 kill/restart 进程矩阵归 `step6-pg-process-matrix`（6f）；不建设平台通用 checkpoint 引擎。Step6 总体保持部分完成（6b/6e/6f 及 step7 依赖未关）。
+
+## 2026-10-10 `lease-renewal-policy` 验收记录
+
+`feat/lease-renewal-policy` 交付 step6b 的技术闭环（多写动作续租或拒绝策略 + 失联/过期/nonce 重放零副作用验收）：
+
+- **续租策略声明化**：`control_plane.lease_refresh_wait_seconds`（默认 5 s）取代引擎内硬编码等待预算，作为宿主断连/续租窗口声明进入 runner README（建议不超过一个 pull 周期的小倍数）；等待只覆盖"新租约未到达"，范围越界与身份不匹配立即拒绝。
+- **重放窗口收口**：`LeaseGate.update` 在安装前拒绝已消费 nonce 的重放租约（不得替换当前租约，计入 `lease_gate_refusals`）；其余无效租约保持既有语义——照常安装、由派发边界以精确原因拒绝（CI 首跑更正：初版宽验证改变了既有安全契约，已收窄，见该归档 change verification.md 的更正记录）；nonce 消费记录持久化到宿主本地状态（`lease-consumed-nonces.jsonl`，载入时丢弃过期条目、跳过坏行），写入失败保守拒绝授权——平台无状态签发下，宿主该记录是重启后唯一的重放记忆。
+- **进程级验收（SC04 技术切片）**：`tests/scenarios/test_sc04_lease_renewal_policy.py`，安装 wheel + 真实平台 HTTP，4 场景全绿——同 Run 双受保护写逐一续租（业务调用计数逐一核对、nonce 记录 ≥2 条）；平台在首次 accept 后停发 pull，第二个受保护动作在声明窗口内显式拒绝（Run 失败、拒绝后零业务调用、前序动作事实不变、失败终态仍上传投影）；租约范围外数据域立即拒绝（runner 配置放行、租约 scope 拒绝，证明拒绝来自租约层）且零业务调用；宿主重启后 nonce 记录延续、新租约正常武装（持久化不阻断合法续租）。
+- **范围说明**：6d 验收边界行曾把"平台事件日志追加的 fencing"指向 6b——本 change 明确不包含该工作（平台 EventStore 与租约的接线是另一条信任边界），该行已更正指向 6f 矩阵与 step7 撤权窗口。工具级动作范围、合法审批、撤权及断连窗口的策略认证仍归 step7；租约过期对真实时钟偏移的认证归 SC04/step7（平台签发 TTL 固定，过期拒绝路径由闸门级单测与断连变体覆盖）。场景清单 SC04 追加 `implemented_slices`，场景整体保持 planned。Step6 总体保持部分完成（6e/6f 及 step7 依赖未关）。
