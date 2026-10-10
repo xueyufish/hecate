@@ -130,7 +130,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # The lease gate is created here and shared by the channel (pulls
     # update it) and the engine (protected dispatches check it) — one
-    # authorization state for the whole managed assembly.
+    # authorization state for the whole managed assembly. Consumed nonces
+    # persist next to the evidence state so a restart cannot re-arm a
+    # replayed lease (step6b).
     channel: ManagedChannel | None = None
     lease_gate: LeaseGate | None = None
     if profile.config.control_plane is not None and durable is not None:
@@ -141,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             issuer_domain=control_plane.issuer_domain,
             host_id=control_plane.host_id,
             workspace_id=control_plane.workspace_id,
+            nonce_record_path=str(Path(evidence_dir) / "lease-consumed-nonces.jsonl"),
         )
         channel = ManagedChannel(
             base_url=control_plane.base_url,
@@ -166,6 +169,11 @@ def main(argv: list[str] | None = None) -> int:
         managed_identity=managed_identity,
         lease_gate=lease_gate,
         dispatch_binding=business_api,
+        **(
+            {"lease_refresh_wait_seconds": control_plane.lease_refresh_wait_seconds}
+            if profile.config.control_plane is not None
+            else {}
+        ),
     )
 
     if channel is not None:

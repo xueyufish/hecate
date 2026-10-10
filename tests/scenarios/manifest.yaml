@@ -261,6 +261,15 @@ sc_scenarios:
     tier: 1
     responsible_step: 7
     blocked_by: managed-runner-enrollment
+    implemented_slices: [lease_renewal_policy, disconnect_staleness_window, replay_window_persistence]
+    gaps: >-
+      The step6b technical loop is delivered (tests/scenarios/
+      test_sc04_lease_renewal_policy.py: multi-action renewal per declared
+      window, bounded refusal on stopped lease delivery, immediate
+      out-of-scope refusal, restart-persistent nonce replay record).
+      Expiry-policy certification against real clock skew, tool-level
+      action scope, legal approval judgment and revocation windows remain
+      with step7; the full platform-managed process matrix is step6f.
     assertions: >-
       Execution continues only within the granted scope and validity window;
       expired grants and untrustworthy time are rejected per policy;

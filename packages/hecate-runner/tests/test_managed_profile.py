@@ -122,6 +122,26 @@ def test_control_plane_parses_domains_and_issuer(tmp_path: Path, monkeypatch: py
     assert cp.issuer_domain == "issuer-a"
 
 
+def test_control_plane_renewal_window_default_and_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The declared renewal/disconnect window defaults to the historical 5 s
+    budget and accepts an explicit operator override (step6b)."""
+    monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "tok")
+    profile = load_profile(_write_profile(tmp_path, control_plane=_control_plane()))
+    assert profile.config.control_plane is not None
+    assert profile.config.control_plane.lease_refresh_wait_seconds == 5.0
+
+    overridden = load_profile(_write_profile(tmp_path, control_plane=_control_plane(lease_refresh_wait_seconds=12)))
+    assert overridden.config.control_plane is not None
+    assert overridden.config.control_plane.lease_refresh_wait_seconds == 12.0
+
+
+def test_control_plane_renewal_window_must_be_positive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "tok")
+    profile_dir = _write_profile(tmp_path, control_plane=_control_plane(lease_refresh_wait_seconds=0))
+    with pytest.raises(ProfileError, match="lease_refresh_wait_seconds"):
+        load_profile(profile_dir)
+
+
 def test_control_plane_absent_keeps_standalone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "tok")
     profile = load_profile(_write_profile(tmp_path))

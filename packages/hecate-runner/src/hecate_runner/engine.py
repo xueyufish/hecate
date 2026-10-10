@@ -197,6 +197,7 @@ class ExecutionEngine:
         managed_identity: ManagedIdentity | None = None,
         lease_gate: LeaseGate | None = None,
         dispatch_binding: str | None = None,
+        lease_refresh_wait_seconds: float = _LEASE_REFRESH_WAIT_SECONDS,
     ) -> None:
         # ``tool_dispatch`` signature: (tool_name, arguments, principal, domains).
         self._profile = profile
@@ -210,6 +211,11 @@ class ExecutionEngine:
         # only in the managed assembly. None = no lease enforcement, which
         # is the standalone posture.
         self._lease_gate = lease_gate
+        # Declared renewal/disconnect window (step6b): how long a protected
+        # dispatch waits for a fresh lease when the previous one is consumed
+        # before the refusal becomes final. Profile-injected; the module
+        # constant is only the default.
+        self._lease_refresh_wait_seconds = float(lease_refresh_wait_seconds)
         # Side-effect class per allowlisted tool from the manifest's declared
         # permission: read → readonly, write → conservative non-idempotent.
         self._side_effects: dict[str, ToolSideEffectClass] = {
@@ -432,7 +438,7 @@ class ExecutionEngine:
 
         requested_domain = arguments.get("domain")
         denial: dict | None = None
-        deadline = time.monotonic() + _LEASE_REFRESH_WAIT_SECONDS
+        deadline = time.monotonic() + self._lease_refresh_wait_seconds
         while True:
             try:
                 claims = await self._lease_gate.check() if self._lease_gate is not None else None

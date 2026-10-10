@@ -103,6 +103,7 @@ managed closed loop:
     "issuer_domain": "platform-issuer",
     "secret_ref": "env:MANAGED_TRUST_SECRET",
     "lease_ttl_seconds": 120,
+    "lease_refresh_wait_seconds": 5,
     "data_domains": ["domain_a"]
   }
 }
@@ -126,6 +127,19 @@ managed closed loop:
   evidence with zero business side effects and never fall back to local
   self-authorization. Readonly dispatches and standalone runs bypass the
   gate entirely.
+- Multi-action runs renew through the declared renewal window
+  (`lease_refresh_wait_seconds`, default 5): when the current lease nonce is
+  already consumed, the next protected dispatch waits bounded for the
+  channel's next pull to install a fresh lease, then proceeds; on timeout
+  the dispatch is refused explicitly and the run fails without further
+  business calls. Keep the window within a small multiple of
+  `poll_interval_seconds`. Scope violations refuse immediately — they never
+  wait. A replayed pulled lease (already-consumed nonce) is refused at
+  install (counter: `lease_gate_refusals`) and never replaces the current
+  one; other invalid pulled leases install and are refused at the action
+  boundary with the precise reason. Consumed nonces persist beside the evidence
+  state (`lease-consumed-nonces.jsonl`) so a restart cannot re-arm a
+  replayed lease; keep that file as safe as the evidence store.
 - Disconnects degrade to local retry: pulls/uploads fail soft, executions
   continue from the local queue, and events backfill per run on reconnect
   (upstream deduplicates per event id). An expired lease stops new protected

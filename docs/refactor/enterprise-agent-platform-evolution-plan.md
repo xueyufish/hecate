@@ -540,6 +540,8 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 - [ ] step6b：实际受保护 Action 派发前已检查 Lease 的签名、issuer、host subject、workspace、部署、数据域、期限与 nonce；拒绝使执行失败并停止后续工具，未知动作保持待对账。当前每个 Lease 只允许一次受保护派发，HMAC 是预览信任材料；同 Run 多受保护派发的续租采用有界等待策略（等待新拉取的 lease，超时显式拒绝）。**关闭门槛：**与 step7 接通工具级动作范围、合法审批、撤权及声明的断连窗口；完成实际业务调用计数验收。
 
   追加修正（2026-10-08，`managed-command-acceptance`）：runner 侧 `is_decided_action` 允许已决动作回填（重放时）跳过 Lease gate，否则唤醒后的新 attempt 会以回填名义消耗一次性租约、饿死真实派发；引擎 `_lease_refusal` 在 `CredentialError` 上加入有界等待，由通道持续拉取安装新 lease。进程级证据见 `docs/refactor/step6-followup-review.md` 的 `managed-command-acceptance` 验收记录。
+
+  追加修正（2026-10-10，`lease-renewal-policy`）：多写续租策略正式化并完成技术闭环验收——续租预算声明为 `control_plane.lease_refresh_wait_seconds`（默认 5 s，断连/续租窗口语义进入 runner README）；`LeaseGate.update` 安装前验证（过期/异体/篡改/同 nonce 回注一律拒装且保留当前租约，拒绝计入 `lease_gate_refusals`）；nonce 消费记录持久化到宿主本地状态（`lease-consumed-nonces.jsonl`，写入失败保守拒绝授权），宿主重启后回注已消费租约被拒。SC04 技术切片交付（`tests/scenarios/test_sc04_lease_renewal_policy.py`，4 场景：多动作逐一续租、停发租约有界拒绝零副作用、范围越界立即拒绝、重启后重放记录延续且新租约正常武装）。上方关闭门槛中"实际业务调用计数验收"已完成，剩余收窄为 step7 依赖行：工具级动作范围、合法审批、撤权及断连窗口的策略认证；租约过期对真实时钟偏移的认证归 SC04/step7，场景整体保持 planned。
 - [ ] step6c：Runner 已提供持久等待和 owner/token 技术唤醒。审批等待发生在 claim 前；唤醒原子消费 token、合并/校验输入、绑定新 attempt 并应用命令；前序已完成动作保留原 key、回填结果。拒绝内部字段注入、GET 唤醒、并发重复消费和异体重放；任务列表/事件/动作按 owner 与可信数据域隔离。独立 wheel 进程已验证等待后 kill/restart、合法唤醒和重复回执。**关闭门槛：**step7 合法审批判定、受管命令下发及新 attempt 的平台关联；有 token 不代表有企业审批权限。
 
   追加修正：旧尝试不返回已消费或新尝试的等待 token；运行中重复取消共用待处理命令，cancelled 与 applied 原子提交；无实际执行的历史 Run 取消如实拒绝，不改写原 applied 回执。
