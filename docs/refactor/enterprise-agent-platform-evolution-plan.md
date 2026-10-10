@@ -1,31 +1,21 @@
-# Hecate 企业 Agent 治理与协作平台调整方案
+# Hecate 企业 Agent 平台演进方案
 
-> 文档性质：重构方案定稿，固定本轮架构决策、实施顺序和退出条件；不表示规划能力已经实现，也不自动启动任何实施 change。新证据可通过后续 ADR 调整决策。
-> 复核基线：2026-09-27，本地 `main` 与本地远程跟踪分支 `origin/main` 均为 `8a8a84cd95d0c129beed6fb82df3f695657936db`；本轮未另行核验远程服务器状态。已纳入 #174—#182 的合并结果。实施前重新检查目标分支和在途 change。
-> 供应商原则：PI、Mem0、LangSmith 和 OpenAI Agents API 仅是讨论或验证的例子。平台必须允许企业选用其他项目、自研服务、不同语言实现、自托管或供应商托管的执行服务。
-> 竞品复核：[企业 Agent 平台实践对照](agent-platform-practice-review.md)记录官方资料、可借鉴边界与本方案修正；竞品宣称不等于 Hecate 接入认证。
-> 场景能力复核：依据用户提供的 `Problem_Lab.xlsx` 的 `Problem Checklist` 工作表中 P01—P08 实验任务；该工作簿是能力验证输入，不是产品功能目录或企业真实业务需求证明。
-> 独立交付增量：用户已提出车商 App 私有化交付这一具名消费者。本次在工作副本 `fe4817d` 上修订计划，保留既有基线和完成记录；新增独立运行要求是待实施目标，不代表已通过安装、运行或生产认证。第二节测试结果属于前轮核验，本次未重跑产品测试。
+> 本文维护架构决策、实施依赖和退出条件；规划、技术交付与生产认证分别记录。实现细节和复核过程见关联报告及 change，不在本文持续追加日志。
+> 本次只修订方案；定位、功能清单、路线图与代码的同步由所属步骤另行交付。历史勾选不代表本次新增要求已完成。
 
 ## 使用方式
 
-保留 step1 至 step19 作为工作包标识，按第四节的依赖和第七节的迭代切片推进，不要求一次完成整个工作包才验证。每一步给出代码落点、操作清单、交付物、验收和迁移策略。只有退出条件满足，才将对应步骤记为完成。步骤名称是建议的 OpenSpec change 名称，不是已创建的 change；一个步骤过大时，拆成独立 change 和 PR。
+保留 step1—step19 工作包编号，按第四节依赖和第七节切片实施。完成对应验收后才更新状态；同一步可拆分多个 change。当前交付事实与剩余门槛见第二节及 step1—step6，运行证据以关联报告、change 和场景清单为准。
 
-本次仅调整此方案。`positioning.md`、`feature-inventory.yaml`、`feature-catalog.md`、`roadmap.md` 和源代码的后续调整，是各步骤的交付内容。仓库实际文件名是 `feature-catalog.md`，不是 `feature-catalogue.md`。第二节是本轮代码快照，实施状态以关联 change、测试证据和功能清单为准。
+近期先补齐内置自主执行、最小治理及发布闭环，使业务 App 可独立消费；真实异构验证持续检验契约，外部后端按组合单独认证。不要把全部后端、团队协作或生态建设变成首次交付的前置。
 
-先完成 step1 与当前交付有关的剩余基线及独立消费增量，再做 step2 的文档对齐；step3 即启动真实外部后端的窄范围验证，step8 才授予正式接入认证。step5 提前交付可独立安装的执行组件和宿主，生产写入还须通过 step6/7、最小 step10/11 及对应 step16。不要先整体移动目录、重写 Runtime、建设微服务集群，或一次性创建全部接口。托管组合详查和团队成本比较可随所属步骤补齐，不阻塞无关部署形态。
-
-**本轮结论：**总体方向保留，实施路径需要收紧。已合并修复建立了较好的认证、回执和 Runtime 边界基础，但尚未实现统一控制面或独立演进的组件体系。此次调整重点是复用这些成果、补齐真实执行边界、提前异构验证和最小发布门禁，并把生产验证贯穿实施过程。
-
-**新增完成判据：**实施相关步骤后，企业应能用自选组件完成工作簿覆盖的知识接入与检索、工具动作、权限治理、确定性流程与 Agent 协作、评测和故障诊断实验；平台对每个组合只承诺经测试的能力。实验里的金融流程、Ontology、特定数据集、固定算法与指标阈值属于测试内容或可选实现，不直接纳入平台核心。step17 跨组织联邦、step18 完整生态分发和 step15 自治理不构成这批场景的共同前置条件；已交付范围仍须通过 step16 对应验证。
-
-**独立消费完成判据：**业务 App 可只安装所需的 Hecate 执行组件及适配器，在没有管理平台、Studio 和平台管理数据库时冷启动并完成声明范围内的执行。连接控制面是可选能力；切换到受管模式不复制执行内核、不改变业务 API 的最终授权责任，也不自动搬迁活跃 Run。RAG、向量库、Memory、模型网关、Sandbox 和集中评测/观测均按需要启用。独立运行与整体后端可替换分别验收，不能用一个目标的完成代替另一个。
+`Problem_Lab.xlsx` 的 P01—P08 是实验输入；车商 App 是独立消费的具名需求。先用合成数据和模拟业务 API 验证技术能力，行业规则、业务收益与真实负载须另行验收。PI、Mem0 等仅为候选，不是产品依赖。
 
 ## 一、目标定位与不可变边界
 
 ### 本轮确定的定位
 
-Hecate 是可自托管、支持云端部署、与模型及运行时无关的企业 Agent 控制与协作平台。企业可以注册、部署或接入不同来源的 Agent，包括企业自托管 Runtime 和供应商托管的完整 Agent 服务，并替换记忆、知识、评估、观测、策略、调度、审批、目录和证据存储等实现。Hecate 的核心不是必须自研这些服务，而是定义跨实现的治理语义、信任边界、强制执行点和可验证证据；默认实现、企业既有系统和第三方服务都可通过契约接入。
+Hecate 是可自托管、支持云端部署的企业 Agent 开发、执行、治理与协作平台。内置执行能力是长期维护的默认产品路径；模型与运行时中立体现为公开契约和外部接入能力，不削弱默认实现的质量、兼容与运维责任。企业可以注册、部署或接入不同来源的 Agent，包括企业自托管 Runtime 和供应商托管的完整 Agent 服务，并替换记忆、知识、评估、观测、策略、调度、审批、目录和证据存储等实现。Hecate 的核心不是必须自研这些服务，而是定义跨实现的治理语义、信任边界、强制执行点和可验证证据；默认实现、企业既有系统和第三方服务都可通过契约接入。
 
 Hecate 的核心交付价值是：企业能够回答某个 Agent 归谁负责、获准做什么、以谁的权限执行、使用了哪些版本和数据、谁干预过、产出了什么，以及出现异常时如何停止新动作、接管和追责。
 
@@ -33,15 +23,25 @@ Hecate 的核心交付价值是：企业能够回答某个 Agent 归谁负责、
 
 车商 App 是已提出的独立消费需求，用于验证私有化产品能否按需使用执行组件；具体 Agent 功能、真实业务指标和生产负载尚未确认。先用模拟库存 API 和合成数据验证集成，不在 Hecate 实现库存管理、定价规则或客户管理。结构化库存查询先走业务 API，需要文档检索时再接入可替换 Knowledge 服务。技术验证不能证明业务 ROI、真实用户体验或行业合规，后续接入真实场景时补充业务验收数据。
 
+### Agent 与 Workflow 的执行边界
+
+| 执行方式 | 核心责任 | 状态与组合边界 |
+|---|---|---|
+| 自主 Agent | 根据模型输出选择工具、消费结果并继续推理，直至结构化完成、预算耗尽、取消或等待审批 | 保存消息、工具调用/结果、预算和恢复所需状态；每个受保护动作仍须经过授权与账本 |
+| 确定性 Workflow | 按显式步骤、条件和失败策略推进；可调用普通 LLM、工具或 Agent | 拥有流程游标、节点结果和业务转移；调用 Agent 时通过子任务引用交接输入、产物和控制状态 |
+| 混合执行 | Workflow 调用自主 Agent，或 Agent 调用获准的 Workflow 工具 | 父子状态分别拥有；输出经 schema 与业务条件校验后推进，审批、重启和重复回调不能重做已完成副作用 |
+
+职责分离不预设引擎分离。当前保留 Pregel；step5e 比较现有图执行、直接工具循环与宿主路径，先统一对外行为和恢复语义，再依据复杂度、质量与维护成本决定内部实现。是否抽取独立 harness、收窄 Workflow 内核或增加包，均为待验证方案，不提前安排强制拆分。
+
 ### 交付边界、运行模式与独立消费
 
-Hecate 继续以技术中立的企业治理与协作为核心，同时交付可被垂直产品独立消费的参考执行组件。下表是交付边界，不要求对应不同仓库或全部微服务化；某项算法、数据库或供应商 SDK 不得成为所有边界的共同必装依赖。
+Hecate 同时交付可独立消费的默认执行组件与技术中立的企业管理平台。下表是交付边界，不要求对应不同仓库或全部微服务化；某项算法、数据库或供应商 SDK 不得成为所有边界的共同必装依赖。
 
 | 交付边界 | 最小责任与调用方 | 可选部分与排除项 |
 |---|---|---|
 | 中立契约与客户端 | 按能力发布 schema、请求/事件/回执样例及版本规则；业务 App、管理平台和各语言 adapter 均可使用 | SDK 是便利封装，不安装完整 Hecate；不含 ORM、Pregel DSL 或供应商私有状态 |
 | 独立执行组件 | 内置 Runtime 加执行宿主；宿主加载定义、装配已选 adapter、验证调用身份和权限、管理执行状态与本地证据；为业务 App 提供服务入口 | 模型实现、Memory/RAG、Sandbox、持久化及安全服务可配置；独立宿主不需要 Studio、组织目录或管理平台启动 |
-| 企业管理平台 | 登记/部署、集中准入、发布、团队、人工干预、评测管理及证据查询 | 可管理内置和外部 Runtime；不要求客户先部署管理平台才能使用参考执行组件 |
+| 企业管理平台 | 登记/部署、集中准入、发布、团队、人工干预、评测管理及证据查询 | 可管理内置和外部 Runtime；不要求客户先部署管理平台才能使用内置执行组件 |
 
 **执行内核与执行宿主：**Runtime 包含执行机制和 Agent 执行语义；宿主负责配置、依赖装配、服务生命周期与本地执行管理。业务 App 的语言不受 Python 限制：首个独立交付采用 HTTP/JSON 服务入口；Python 进程内嵌入复用同一装配和应用服务，有具名消费者再认证其进程生命周期与隔离限制。独立进程不自动等于不可信代码沙箱；执行任意代码或浏览器工具时，另启用通过验证的隔离后端。
 
@@ -79,13 +79,11 @@ Hecate 继续以技术中立的企业治理与协作为核心，同时交付可�
 
 工作簿列出的测试语料规模、比较算法数量、失败样本数量是该实验的接受条件，不应写死成平台 API 或生产容量限制。平台需要允许按数据集、权限范围、知识/组件版本、实验配置和结果来源重复运行并导出证据。对缺少内部可见性的提供方，能力声明应返回 `unsupported/unverified`，不能用平台生成的推测 trace 补齐。
 
-每项能力分别记录**架构角色**（治理契约/参考实现/集成/生态资产）、**成熟度**（实验/已验证/生产支持）和**部署形态**（同进程/独立进程/远程服务）。`Stable Core`、`Adapter`、`Labs` 不构成同一条晋级链：adapter 可以生产可用，核心的新契约也可能仍在实验。
+每项能力分别记录**架构角色**（治理契约/默认实现/集成/生态资产）、**成熟度**（实验/已验证/生产支持）和**部署形态**（同进程/独立进程/远程服务）。`Stable Core`、`Adapter`、`Labs` 不构成同一条晋级链：adapter 可以生产可用，核心的新契约也可能仍在实验。
 
 ### 组件与责任划分
 
-这三张表按三个问题阅读：**表1**说明企业使用 Hecate 时必须得到哪些保证；**表2**列出可以接入来提供这些能力的服务/组件，以及替换时要满足的条件；**表3**区分平台管理的资产与管理资产的服务。表1最后一列是可选实现示例，不是与前两列一一绑定的产品清单。表中的“平台保证”表示 Hecate 定义验收契约，并在自身控制的入口执行，或验证受信任执行方返回的回执；不表示所有服务都由 Hecate 自研。
-
-例如，企业可以用自己的身份系统登录，也可以接入第三方策略服务做授权决策；但真正调用工具前，仍需有受控执行点核对授权并记录动作结果。这样，身份和策略服务可以替换，企业的授权与审计保证仍然成立。
+治理责任由 Hecate 定义并在自身或经认证的执行点落实；服务实现与被管理资产分别列出。外部服务返回“允许”不能代替动作边界的验证和回执。
 
 **表1：Hecate 必须保证的治理结果**
 
@@ -102,8 +100,6 @@ Hecate 继续以技术中立的企业治理与协作为核心，同时交付可�
 
 **表2：可替换的服务/组件类型及接入条件**
 
-表1从“责任”角度组织；本表从“技术实现”角度组织，所以同一类服务可能支撑表1中的多项责任。例如 IdP 同时参与身份上下文和团队成员映射。
-
 | 服务/组件类型 | 典型可替换项 | 替换时 Hecate 必须验证 |
 |---|---|---|
 | 执行与调度 | 内置/自托管 Runtime、供应商托管 Agent 服务、任务调度器、队列/worker、checkpoint 服务 | 对接平台 Task/Run/事件/控制契约；区分平台与供应商拥有的会话状态，声明暂停、取消、恢复等保证等级；不要求模仿 Pregel 内部结构 |
@@ -116,17 +112,7 @@ Hecate 继续以技术中立的企业治理与协作为核心，同时交付可�
 
 语言和部署方式也是表2中的可替换维度：Python 内置实现、TypeScript Runtime、Go/Rust 网关、企业自托管服务或供应商托管 Agent 服务，只需满足对应能力的契约和治理验收，不需要移植为 Python 包，也不需要采用某个示例项目。跨语言组件以独立进程、容器或远程服务运行；同进程 Python 插件只是其中一种实现方式。网关是否选 Go/Rust，应依据实际吞吐、延迟、隔离需求和团队维护能力验证，不作为架构前提。
 
-**表3：被管理的生态资产与管理它们的服务**
-
-左列是被安装、绑定、运行和版本管理的内容；右列是负责查找、检查、分发和撤销这些内容的程序/平台。两者不是同一种东西，也不要求都由 Hecate 提供。
-
-| 生态资产（内容/制品） | 管理资产的生命周期服务（可替换） |
-|---|---|
-| Agent/团队包、Skill、工具描述、连接器、行业模板 | 注册、解析、扫描、签名校验、版本兼容、安装、升级、撤销服务 |
-
-举例：一个 Skill 包是资产；私有包仓库、漏洞扫描器和安装器是管理这个资产的服务。Hecate 可以提供默认实现，也应允许接入企业私有仓库或第三方目录，并以兼容 manifest、策略准入和符合性测试管理资产。外部策略服务的“允许”结果本身也不构成强制治理：动作必须经过 Hecate 或经验证的执行网关，且关键结果要有可关联回执。
-
-“整体可替换”指实现可替换，不表示授权、证据和租户隔离可以跳过。每个能力项应分别记录责任保证、实现提供方、强制执行点和验收证据，避免用单一“核心/插件”标签混淆边界。
+Agent/团队包、Skill、工具描述、连接器和模板是被管理的资产；目录、签名/扫描、安装、升级和撤销是生命周期服务。两者可由不同提供方交付，统一经过 manifest、准入及符合性检查。实现替换不能跳过授权、证据与租户隔离。
 
 **跨语言接入规则：**平台先定义与语言无关的请求、响应、事件、错误、能力声明和版本规则，再由 Python/TypeScript/Go/Rust 等各自实现 adapter。第一个进程外参考接入采用 HTTP/JSON 与 OpenAPI/JSON Schema，事件通过游标查询或流式订阅，较大的产物传引用；其他传输（如 gRPC）在有实际需求时增加映射，不能改变 Task/Run、Action 和治理事件的语义。Python 类和 ORM 只是内置实现，不能成为第三方必须导入的契约。服务间身份、租户上下文、短期凭据、传输加密、幂等键、超时/重试和回执验证均属于接入验收。
 
@@ -156,8 +142,6 @@ Hecate 继续以技术中立的企业治理与协作为核心，同时交付可�
 | 供应商托管 harness + 供应商环境或无环境 | 平台提交与准入、可控工具/数据入口、平台直接观察的动作证据 | 供应商环境、网络出口、内部工具、数据保留与取消实际生效；不能依据供应商 trace 宣称平台强制控制 |
 
 `Deployment` 固定两条轴及实际数据流、驻留地区、保留/删除条件、凭据与网络出口、控制等级和来源证据。数据分类策略先判断该组合是否允许使用；不满足私有部署、驻留或保留要求的供应商服务不得绑定相应任务。提供方条件会变化，具体限制应以准入时核验的服务版本、合同与文档为准。平台只承诺自己或经认证网关实际控制的动作；供应商可独立执行且无法封闭旁路的能力，应明确标为仅观察或不受控。
-
-以本次调研时的[OpenAI Agents API 官方说明](https://developers.openai.com/api/docs/guides/agents-api/overview)为例，该服务仅支持美国数据驻留，且不支持 Zero Data Retention；选择自托管 Sandbox 也不会改变这两项限制。这是该服务当前的准入条件示例，不应写成所有托管服务的通用属性，后续选型时必须重新核验。
 
 ### 云端 Sandbox 与持久工作环境
 
@@ -202,7 +186,7 @@ Sandbox 与 Runtime、Memory 并列作为可替换且可独立发布的能力。
 ### 本方案固定的设计约束
 
 - 保留模块化单体作为控制面，不为“可插拔”而先拆微服务。跨语言运行时通过独立进程、容器或远程服务接入。
-- 保留 Pregel 作为内置 Runtime；它的特性通过能力声明开放，不成为第三方必须模仿的内部结构。
+- 保留 Pregel 现有能力；Agent/Workflow 的内部机制由 step5e 验证后决定。对外通过能力声明接入，不要求第三方模仿内部图结构。
 - 受管模式下控制面拥有平台 Task 的责任/验收、Run 映射、授权和治理记录；执行方拥有实际执行事实、内部状态、checkpoint 和推理循环。独立模式由宿主拥有本地 Task/Run/Action 记录；接入平台后通过显式映射与事件投影关联，遵守第一节的字段所有权规则。
 - 供应商托管 harness 的 session/turn 与平台 Task/Run 分别拥有状态；平台保存映射、游标与可验证证据，不复制或伪造供应商 checkpoint。供应商内部 subagent 不是自动注册的企业 Team 成员。
 - 更换 Runtime 首先支持新任务切换；不承诺运行中状态无损迁移。上下文导出后重新执行必须明确记录为新的 Run。
@@ -216,70 +200,28 @@ Sandbox 与 Runtime、Memory 并列作为可替换且可独立发布的能力。
 
 ## 二、现状及可复用资产
 
-以下是架构调整的代码起点；以模块及职责定位。状态区分：**已合并**表示存在代码或文档交付；**部分完成**表示尚有启用、覆盖或语义缺口；**待实现**表示目标闭环尚未成立。已合并不自动等于生产认证，OpenSpec tasks 勾选也不替代实际调用链和验收证据。
+状态依据既有交付与复核记录整理，本次文档修订未重跑产品测试。“技术完成”只适用于已验证切片，不能替代整体场景或生产认证。
 
-| 当前资产 | 已有价值 | 本次调整方式 |
+| 已有资产 | 当前边界与后续责任 |
+|---|---|
+| `packages/hecate-runtime`、共享执行应用服务与 `hecate-runner` | 已有独立 wheel、共享装配及宿主。固定工具计划的预览不能证明模型自主选工具；step5e 补真实自主执行与混合场景 |
+| 平台 builtin、`EntryExecutionService` 与聊天路径 | 多个入口已迁移，直接工具循环与图执行仍并存；step5d/G3 收口入口、事件与兼容性，不另造一套生命周期 |
+| `packages/hecate-durable` 与平台任务控制 | step6a—6f 技术交付完成；合法审批、工具级权限、撤权窗口与证据策略仍依赖 step7/10 |
+| 语言中立执行契约、Deployment/Task/Run 模型 | 已有草案、隔离互操作和登记模型；登记成功不等于部署获准执行或取得治理等级 |
+| MemoryProvider、Knowledge/RAG、Sandbox、工具 Gateway、评估与观测 | 复用已有接口和实现；整体服务替换、ACL/删除、隔离及独立升级按 step7—step10/16 验证 |
+| 功能清单及生成工具、分层测试 | 保护历史 Feature ID 和证据；本次定位及验收增量仍需 step2 同步，不将文档改写视为实现交付 |
+
+历史依赖、入口和安全问题见[实施基线](platform-evolution-baseline.md)与[独立消费基线](standalone-consumption-baseline.md)；当前验收范围见[Step1～Step6 复核](step1-step6-acceptance-review.md)及[Step6 后续复核](step6-followup-review.md)。基线是历史快照，不覆盖后续交付事实。
+
+| 门槛 | 已有处置与尚须证明的内容 | 责任步骤 |
 |---|---|---|
-| [RuntimePort](../../src/hecate/runtime/ports.py) | 引擎调用模型、工具、知识、checkpoint 等外部服务的接口 | 保留其现有方向；不要直接改造成平台调用 Runtime 的接口 |
-| [WorkflowExecutionService](../../src/hecate/studio/workflows/execution_service.py) | 组装图、Worker、guardrail 并执行 Pregel | 包装为内置执行后端，再逐步迁移其平台职责 |
-| [AgentExecutionPort](../../src/hecate/core/composition/agent_execution_port.py) | 已从 runtime 移至 composition，承接具体平台服务 | 不再重复执行移出 runtime 的工作；其平台职责在 step5/7 向对应领域收敛，composition 不长期承载业务规则 |
-| [PregelRuntime](../../src/hecate/runtime/pregel.py) | 图执行、暂停、恢复、事件与状态管理 | 继续维护；不再要求所有外部 Agent 转换成其 Graph DSL |
-| [AgentModel](../../src/hecate/models/agent.py)、[AgentVersion](../../src/hecate/models/agent_version.py) | Agent 配置和不可变版本 | 增量补充身份、部署、后端绑定，不另造重复版本体系 |
-| [MemoryProvider](../../src/hecate/core/composition/memory_provider.py) | entry point、能力声明、读写及生命周期契约 | 扩展绑定和治理，拆出与内置算法有关的策略 |
-| [MemoryProvider 规格](../../openspec/specs/memory-provider-contract/spec.md) | 第三方接管记忆能力的已有设计 | 兼容升级，不从零重写 |
-| [hecate-memory RAG VectorStore](../../packages/hecate-memory/src/hecate_memory/rag/vector_store.py)、[EmbeddingService](../../packages/hecate-memory/src/hecate_memory/rag/embedding.py)、[Citation](../../packages/hecate-memory/src/hecate_memory/rag/types.py) | 已有多个向量库 adapter 和向量接口；Embedding 默认实现、Citation 描述仍带具体实现假设 | 复用已有接口，验收替换、索引兼容和 ACL/删除语义；对外 Knowledge 契约不得沿用 Qdrant 对象、固定向量维度或默认 Embedding 名称作为规范字段 |
-| [hecate-sandbox](../../packages/hecate-sandbox/README.md)、[AgentEnvironment](../../packages/hecate-sandbox/src/hecate_sandbox/environment/environment.py)、[EnvironmentManager](../../packages/hecate-sandbox/src/hecate_sandbox/environment/manager.py) | Docker 执行、环境管理、预热池及浏览器会话 | 将 local/docker 分支与本地 Path/全局配置依赖包在 adapter 内；新增进程外环境契约及提供方登记。LocalEnvironment 仅用于开发测试，不继承云端隔离承诺 |
-| [工具 Gateway](../../src/hecate/tools/gateway)、[策略流水线](../../src/hecate/tools/policy) | 工具聚合、授权与调用边界 | 演进为跨 Runtime 的受控动作入口 |
-| [审批组装](../../src/hecate/runtime/security/guardrail_assembly.py)、[审批模型](../../src/hecate/models/approval.py) | 内置执行中的安全控制 | 分离平台审批记录和 Runtime 暂停实现 |
-| [TaskAllocator](../../src/hecate/runtime/task_allocator.py)、[EventBus](../../src/hecate/runtime/eventbus.py) | 执行内的选人和消息协作 | 保留为策略/执行内组件；平台级任务责任和持久化调度另设边界 |
-| [A2A](../../src/hecate/channel/a2a) | 异构 Agent 通信和任务适配 | 纳入通用执行后端和组织间交换策略，不直接成为平台唯一状态源 |
-| [评估模块](../../src/hecate/ops/evaluation)、[hecate-ops](../../packages/hecate-ops/README.md) | 评估、观测和 OTLP 基础 | 保留统一结果及治理门禁，支持替换执行和分析后端 |
-| [分层测试](../../tests/test_layering_domain.py) | 依赖边界保护 | 扩展到新增领域，并补实际替换场景测试 |
-| [功能目录](../features/feature-catalog.md)、[路线图](../features/roadmap.md) | 已有 Feature ID 和交付历史 | 保留 ID，重排归属、依赖和里程碑，不把历史实现抹掉 |
-| [结构化功能清单](../features/feature-inventory.yaml)、[校验脚本](../../scripts/feature_inventory.py) | 已有 schema、依赖/证据/成熟度字段和 CI 校验入口 | 增量迁移字段所有权，保护已填写的治理数据，补生成与漂移检查；不从零重建 |
+| G1：动作授权 | 原 MCP 角色/可信上下文旁路已修复；保留回归，扩展至各协议与外部后端的不可旁路执行点 | step7/8 |
+| G2：未知副作用与恢复 | 已有安全停止、原子动作账本、真实结果回填及原生续跑；整体门槛仍未关闭。未知结果/存储不可用不盲目重试，参数冲突、旧 owner、迟到回执和各实际入口须分别验收 | step5—step7/16 |
+| G3：入口收敛 | 已有聊天引擎开关、workspace 路由及真实 HTTP 测试；入口迁移、持久事件与默认启用仍需收口，活跃 Run 保持原路由 | step5d/19 |
+| G4：用量与预算 | 可靠成本来源、reported/estimated/reconciled、取消/中断未知账、预留/结算及迟到修订仍须闭环；未知不记零，不承诺硬限制不可见的供应商账单 | step7/10 |
+| G5：规划数据来源 | 元数据保护与生成/漂移检查已交付；继续执行回归，新增或变更条目须保留证据、字段所有权和严格准入 | step2 |
 
-**独立消费增量核对：**已有 `tests/test_runtime/test_runtime_self_sufficiency.py` 主要证明导入隔离，不能替代发行包干净安装与端到端执行。`WorkflowExecutionService` 和 `core/composition/agent_execution_port.py` 仍涉及平台定义/ORM 与生产装配，`pyproject.toml` 尚未提供独立 Runtime 发行包。step1 增补实际依赖闭包与延迟导入清单，step5 将共享执行装配与平台定义查询分开；以上为静态核对，不是独立运行测试通过的结论。
-
-### 前轮建议的合并核对与处置
-
-下面的编号对应前轮修改建议，不新增 Feature ID。后续 change 应引用本表，避免把已完成修复重复排入重构。
-
-| 前轮建议 | 最新基线事实与证据 | 定稿处置与剩余工作 |
-|---|---|---|
-| 1、2、3、5：管理权限与租户身份 | #174/#175；[backup](../../src/hecate/ops/api/backup.py)、[AuthContext](../../src/hecate/core/auth_context.py)、[workspace 依赖](../../src/hecate/core/deps_workspace.py)、[JWT provider](../../src/hecate/enterprise/auth/jwt_provider.py) 已补管理权限、移除空 workspace 自动提权、校验存续成员关系；模型提供方变更受管理员限制 | 已合并，作为回归基线保留。仍须覆盖各协议的资源级授权，不宣称全平台授权审计已结束 |
-| 4：MCP 独立认证与隔离 | #175；[认证中间件](../../src/hecate/tools/mcp/auth_middleware.py) 与 [MCP server](../../src/hecate/tools/mcp/server.py) 已接入服务端身份和租户过滤 | 部分完成：认证不能代替写操作角色检查和受控工具执行，见 G1 |
-| 6、8：审计身份与 A2A 签名 | #176；请求绑定 auth_context；[A2A discovery](../../src/hecate/channel/a2a/client/discovery.py) 在开启签名校验时对无签名/不可信密钥失败关闭 | 已合并特定修复。是否强制校验由准入 profile 决定；签名不能代替资源授权，平台证据模型仍在 step6/7 |
-| 7：LLM 配置和费用 | #176；[Runtime adapter](../../src/hecate/core/composition/runtime_port_adapter.py) 已透传调用参数并优先用 provider token usage，缺失时估算 | 部分完成：固定 token 单价、估算来源和中断结算仍有缺口，见 G4；不得标为真实成本闭环 |
-| 9：聊天执行收敛 | #178；[chat](../../src/hecate/channel/api/v1/chat.py) 已有引擎路径；`CHAT_TOOL_LOOP_ENGINE_ENABLED` 默认仍为 false | 部分完成：保留并验证现有路径，按入口灰度，不重新实现一套；G3 通过后才清理旧循环 |
-| 10、11：Runtime 边界与替换测试 | #180；AgentExecutionPort 已迁出；[runtime 分层测试](../../tests/test_runtime/test_layering.py) 加强，已有 EventStore/Memory/LLM 契约测试 | 已完成边界修复；Stub/假后端证明接口可用，不等于真实异构 Runtime、Memory 或跨语言独立发布，后者交 step3/8/9 |
-| 12：工具回执与 Temporal | #177；[ToolWorker](../../src/hecate/runtime/workers/tool_worker.py) 已有 execution_id、结果状态和副作用分类；[Temporal worker pool](../../src/hecate/runtime/temporal/worker_pool.py) 未实现路径显式失败 | 部分完成：Temporal fail-fast 是正确降级，不是已实现分布式执行；回执恢复仍有 G2，不能作为可靠重试完成证据 |
-| 13、14、15：功能清单与规划收敛 | #181；YAML 清单、校验脚本、research 状态和路线图 Next Phase 已加入 | 部分完成：沿用成果，修复 G5；原 roadmap 的旧 Sprint/时间承诺与引擎中心定位仍需整体对齐，不能只在末尾追加路线 |
-| 16、17、18：部署组合、重复产品边界、知识治理 | 当前仍有多个可选包与默认依赖，尚无本方案的统一 binding/退出验收 | 保留已有交付事实；按 step9/10/16/19 做 ACL/删除传播、参考部署和依赖收敛，不把移入 research 当作代码退役 |
-| 19、20：发布负例、恢复门禁与示范闭环 | 已增加定向测试；尚未提供跨入口、跨后端、重启和发布组合的完整证据 | 在每个迭代建立技术验收场景，业务场景待真实需求出现后补齐；不以缺少客户为基础重构的阻塞条件 |
-
-### 实施门槛及基线处置
-
-以下保留前轮代码路径复核的原始问题及关闭标准，不是本次直接修改代码的清单。step1 已记录 G1/G2 分别经 #185/#186 修复，后续应保留回归并核对新路径，不重开同一修复；G3—G5 按关联 change 的最新证据确认。本地补丁关闭不等于外部后端或独立宿主自动取得同等认证。未关闭项先做最小复现和失败测试，只阻断受影响能力的启用，不阻断文档对齐、契约探索或隔离测试。
-
-| 门槛 | 当前具体缺口 | 需执行的调整 | 关闭证据与责任步骤 |
-|---|---|---|---|
-| G1：统一动作授权 | MCP 的 `agent_create/update/delete` 等主要检查身份/workspace；`tool_execute` 自行构造 BuiltInToolExecutor，使用全局 WORKSPACE_ROOT，调用 [ToolRegistry.execute](../../src/hecate/tools/tool/registry.py) 未传服务端上下文，Registry 本身不执行统一策略/审批。Gateway 可选中间件不能作为所有配置下的保证 | step1 先复用现有权限/策略服务补角色检查和可信主体、租户、资源根；无法安全授权的工具显式拒绝，生产 profile 禁止无认证模式；梳理共享种子资源权限。step7 再归并到完整 Action 应用服务，不要求 step1 提前建成整个控制面 | viewer 写入、跨租户文件/工具、未批准写操作在 REST/MCP/Workflow 的实际入口均拒绝；先在 step1 关闭现有旁路，step7 推广到外部后端 |
-| G2：不确定副作用与真实恢复 | `get_tool_receipt` 只找 TOOL_RESULT，读取失败返回 None；调用方只在 prior_status 非空时阻止重试。已有 TOOL_CALL 但结果缺失、存储不可读时可能再次执行。成功恢复仅返回占位文本，回执没有真实结果或产物引用；同 session/tool_call_id 的参数变化和并发领取也未构成完整保护 | 区分 never_started、claimed、outcome_unknown、store_unavailable；执行前持久化意图并原子领取，动作键绑定租户/Run/工具/参数摘要，冲突拒绝；结果存受 ACL 保护的引用；执行后异常不能仅凭异常类型判定无副作用；只能在明确幂等保证或已对账后重试 | 注入“写入成功→结果落盘前崩溃”、读库失败、重复 worker、同键不同参数，证明无盲目重复写；恢复得到真实结果。step1 先补安全停止语义，step6/7 完成持久化 Action 闭环 |
-| G3：入口与引擎收敛 | 引擎聊天尚未默认启用；[chat convergence 测试](../../tests/test_runtime/test_chat_engine_convergence.py) 部分直接调用 ToolWorker 或 mock Workflow 服务，不能证明完整 HTTP/SSE 多轮执行及恢复一致 | 复用现有开关；补真实入口至引擎的流式/非流式、多轮、审批拒绝、断线/恢复和取消测试；检查拒绝记录传递及 tool call/result 配对；按 workspace 切流，保留活跃 Run 路由 | step5 每迁移一个入口提供端到端结果；G2 关闭前不宣称可恢复生产写入；step19 有旧路径无调用证据后删除 |
-| G4：可解释用量与预算 | `_COST_PER_TOKEN` 仍为统一常量；估算未完整覆盖工具 schema/结构化调用；估算标记主要在日志，中断流未形成可靠结算链 | 用量记录区分 reported/estimated/reconciled、模型及价格版本、token 类别与来源；调用 ID 去重，异常/取消可记未知账，预留/结算/对账分离；无法获知托管消费时只限本地授权预算，不承诺硬限制供应商账单 | step7/10 用工具调用、provider usage 缺失、断流和迟到修订验证，不把未知当零；规则和样例由 step1 固定 |
-| G5：规划数据的权威来源 | `extract` 全量重建 YAML，会覆盖手填 maturity/dependencies/evidence/acceptance；`check` 比对 ID 集合，非严格模式允许缺证据；并非已实现文档生成 | 先保护存量数据，改为按 ID 合并或仅首次导入；明确字段所有权；再从 YAML 生成 catalog/roadmap 的受管区域并检测漂移。对本轮新增/变更或宣称 production 的条目强制验收字段，历史空缺登记补齐计划 | step2 保存提取前后元数据不丢失、冲突失败、生成幂等及状态一致测试；不得直接再运行当前 extract 覆盖已有清单 |
-
-G1/G2 是受保护写操作、自动恢复和外部执行接入的前置门槛；G3 是切换默认聊天路径的门槛；G4 是发布成本保证的门槛；G5 是依赖路线图自动化的门槛。新架构不能用“以后会统一”作为保留现有危险旁路的理由。
-
-### 前轮验证记录（历史证据）
-
-以下为前轮代码和文档复核、定向测试及功能清单校验的历史记录；不等于本次重跑、全面安全审计、生产压测或真实第三方接入认证。G2 复现描述修复前状态，修复后处置见 step1。
-
-- 使用本地 `.venv` Python 3.14.6 运行 tool receipts、chat convergence、RuntimePort cost、A2A signing、domain layering、旧 runtime layering 测试：44 passed、1 skipped。旧 layering 用例仍指向已不存在的 `src/hecate/engine/`，跳过不能当作分层通过；当前边界另由 domain layering 和 runtime self-sufficiency 验证。出现 pytest 缓存写入 warning，不影响该组断言结果。本次不是 Python 3.12 或完整 CI 矩阵认证。
-- 补跑 `test_runtime_self_sufficiency.py`、`test_backup_api.py`、`test_tenant_isolation.py`：21 passed；用 `-p no:cacheprovider` 避免本机缓存目录 warning。该结果支持具体边界修复，不涵盖 G1 所述全部协议授权路径。
-- 补跑 A2A discovery verification、audit identity：9 passed，1 项在临时目录 fixture 阶段因沙箱文件权限失败；使用新临时目录并经工具批准在沙箱外单独重跑该项，1 passed。不是产品断言失败。各组最终合计 75 passed、1 skipped，没有运行全量测试、生产数据库故障测试或真实供应商调用。
-- `python scripts/feature_inventory.py check`：347 条目、0 errors、2 warnings；333 项缺 evidence，333 项缺 acceptance。结构校验通过不能证明所有能力已通过验收。
-- G2 最小复现：复用 `test_tool_receipts.py` 的 StubPort/ToolWorker，同 session/call_id 连续执行同一未知写工具；正常 EventStore 仅调用一次，但恢复返回占位文本。将 `get_events` 过滤为保留 TOOL_CALL、缺失 TOOL_RESULT 后，StubPort 被调用两次。仅在内存和 Stub 中执行，无外部副作用；这证明缺失结果的恢复分支尚不能安全阻止重复写入，不代表已经模拟所有崩溃窗口。
+门槛只阻断受影响能力的启用。已修复问题不重复立项；Stub、导入隔离和组件测试不能替代真实宿主、异构后端或生产组合验证。
 
 ## 三、目标模块与依赖方向
 
@@ -292,8 +234,8 @@ G1/G2 是受保护写操作、自动恢复和外部执行接入的前置门槛�
 | `collaboration/` | Team、Assignment、Delegation、交接、验收、人工升级 | 所有外部消息协议的实现、重新实现 Pregel |
 | `enterprise/` | 身份、权限、策略协调、凭据和组织信任 | 供应商专属运行逻辑 |
 | `tools/` | 工具与数据资源接入、受控动作执行 | 决定谁是企业平台管理员 |
-| `runtime/` | 内置 Pregel 和内部扩展点 | 平台团队目录和外部 Runtime 管理 |
-| 独立执行宿主（建议 `packages/hecate-runner/`） | 本地定义加载、共享执行装配、身份/策略接入、持久化与证据 adapter、服务入口；可选择连接控制面 | 复制 Runtime、使用平台管理表启动、车商业务逻辑、强制装载全部后端 |
+| `packages/hecate-runtime`（`src/hecate/runtime/` 为兼容层） | 内置执行机制、Agent 语义与 Workflow 执行能力；内部边界由 step5e 验证 | 平台团队目录和外部 Runtime 管理 |
+| 独立执行宿主（`packages/hecate-runner/`） | 本地定义加载、共享执行装配、身份/策略接入、持久化与证据 adapter、服务入口；可选择连接控制面 | 复制 Runtime、使用平台管理表启动、车商业务逻辑、强制装载全部后端 |
 | `ops/` | 治理证据、评估结果和事件处置；向 Governance 提供发布所需证据 | 拥有发布批准真源、强制所有 trace/评分都存在内置系统 |
 | `studio/` | Agent Engineering 的配置/管理界面与人类协作界面 | 直接修改执行、授权或发布状态真源 |
 | `channel/` | REST、MCP、A2A、IM 等入站/出站协议适配；完成协议身份映射后调用平台服务 | 自建 Task/Run 状态或把协议身份直接当作平台授权 |
@@ -325,7 +267,7 @@ G1/G2 是受保护写操作、自动恢复和外部执行接入的前置门槛�
 | step2 | `governance-platform-positioning` | step1 的清单与边界结论；可与修复并行 | 定位、ADR、现有 YAML 增量治理、路线图 |
 | step3 | `execution-backend-contract` | step2 的边界决策 | 执行/本地制品草案契约、能力模型、非 Python 真实后端窄范围验证 |
 | step4 | `agent-deployment-task-model` | step3 | 身份关联、Deployment、Task、Run 数据模型 |
-| step5 | `builtin-execution-backend`，拆分见 step5a—5d | step3；平台入口映射依赖 step4，独立装配不依赖平台表 | 共享装配、独立发行包/宿主、本地只读技术预览、入口兼容 |
+| step5 | `builtin-execution-backend`，拆分见 step5a—5e | step3；平台入口映射依赖 step4，独立装配不依赖平台表 | 共享装配、独立发行包/宿主、入口兼容、自主执行与混合流程验证 |
 | step6 | `durable-task-control-plane`，本地持久化先行 | step5 的执行切片；平台投影另需 step4 | 本地持久任务/Action、平台任务映射、控制命令与治理事件 |
 | step7 | `runtime-independent-governance`，本地与受管分别验收 | step6 相应状态与回执；安全基线完成 | 本地业务身份/策略、受管授权租约、工具/审批/凭据/预算与断连边界 |
 | step8 | `external-execution-backend-pilot` | step7；复用 step3 验证 | 分别认证异构自托管、托管 harness、远程 Sandbox；未通过组合不影响已认证组合 |
@@ -343,231 +285,117 @@ G1/G2 是受保护写操作、自动恢复和外部执行接入的前置门槛�
 
 step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服务 builtin 及已认证后端，后者随 step8/9/10 增加组合。最小绑定记录只记录已使用的实现、配置摘要与版本，不依赖第三方 Memory 迁移完成。step16 是贯穿式质量工作包，生产支持按范围授予；step15、step17、step18 不阻塞基础平台的生产支持。step19 分批执行，不等待所有生态能力完成，也不一次性删除全部旧代码。
 
-**独立产品最短交付路径：**step1 增量 → step2 边界 → step3 本地制品/调用契约 → step5a/5b/5c → step6 本地可靠执行 → step7 本地授权/审批 → 最小 step10/11 + 对应 step16。到此可交付限定范围的独立生产 profile。step4 与 step5d 提供平台映射，step6/7 的受管切片完成后再连接控制面；独立交付不以组织/团队、知识库、全部平台入口迁移或完整生态建成为前置。实际启用的可选能力须额外完成其所属 step 与符合性测试。
+**独立产品最短交付路径：**step1 增量 → step2 边界 → step3 本地制品/调用契约 → step5a/5b/5c + step5e 自主执行验证 → step6 本地可靠执行 → step7 本地授权/审批 → 最小 step10/11 + 对应 step16。到此可交付限定范围的独立生产 profile。step4 与 step5d 提供平台映射，step6/7 的受管切片完成后再连接控制面；独立交付不以组织/团队、知识库、全部平台入口迁移或完整生态建成为前置。实际启用的可选能力须额外完成其所属 step 与符合性测试。
 
 ## 五、逐步实施清单
 
 ### step1 — 固定实施基线与验证场景
 
-**目标：**固定当前代码、执行链路与依赖基线，建立平台治理和组件独立消费的可重复验证场景；明确当前能力与目标能力之间的差距，不把旧问题、在途修复和架构调整混在一起。
+**状态：基线已交付，条件性验证保留。**
 
-**操作：**
+- [x] 记录执行入口、依赖闭包、能力/表归属、信任拓扑与旁路；保留 G1/G2 修复及旧协议/权限/恢复样本。
+- [x] 建立 P/SC 场景映射、模拟库存 API、隔离数据域和版本化评测输入；区分平台保证、可选实现及业务规则，固定预期产物、禁止动作、故障注入与复位方式。
+- [x] 明确独立/受管/完整平台及网络模式、状态 owner、本地证据和外部数据流；独立基线的静态依赖核对不冒充安装验证。
+- [ ] 随实际托管组合补齐会话、环境、MCP、回调与内部工具的数据流、驻留和保留条件；登记运行使用量及未核验动态依赖，启动所属 change 时指派 owner。
+- [ ] 在同一评测包上形成可靠的单 Agent 成本/结果基线，再比较多 Agent；成本来源依赖 G4，团队比较随 step12/13。业务收益保持未验证。
 
-- [x] 记录当前目标分支与基线提交，检查 `git status --short`、`openspec list --json`，列出在途 change、负责人和影响模块。（基线 §1；基线提交 `b8fd926`，当时在途 change 为空）
-- [x] 核对 #174—#182 与前轮建议，建立第二节的已合并/部分完成/待实现快照；不再等待已合并的 auth-boundary-hardening。
-- [x] 为 G1/G2 建立失败复现并单独修复；为 G3/G4/G5 记录启用门槛、owner 和目标 change。认证已修复不代表所有资源操作都授权正确。（G1/G2 初次修复已由 #185/#186 合并；复核补充修复见 `step1-review-hardening`，覆盖 MCP 文件写入角色、Postgres 锁与版本分配、工具身份及未决写恢复，待合入；G3—G5 门槛、复现指针与目标 change 记录于基线 §7，owner 指派暂缓（用户 2026-09-28 决定），对应 change 启动时指定）
-- [x] 建立执行入口清单：Agent chat、普通工具 chat、Workflow、MCP、A2A、定时任务、IM、评估调用。逐一记录实际执行服务、安全入口、事件存储和取消方式。（基线 §2，含入口层缺口 N1—N5）
-- [x] 建立后端清单：Runtime、Memory、Knowledge、Evaluation、Observability、Sandbox；标明哪些接口已存在、哪些只有内置实现。（基线 §3）
-- [x] 为每种部署形态绘制信任与数据流拓扑：人类客户端、控制面、Runtime、工具/MCP/A2A 网关、Memory、凭据代理、外部系统及网络出口；列出每条可能绕过授权或审计的直连路径、当前阻断机制与待验证负例。（基线 §4：B1—B5 直连路径带代码证据与当前阻断；部署层出口控制标注未核验）
-- [ ] 为托管执行组合补 harness 会话、Sandbox、远程 MCP、应用回调和供应商内部工具的数据流；区分供应商可见的数据、企业实际持有的环境、可由平台强制的动作。记录当前驻留、保留/删除和服务可用地区限制，作为接入门禁输入。（登记格式与已核验示例见基线 §5；实际组合数据流随 step4 Deployment 模型落地）
-- [x] 按第六节“已实现能力的边界复核清单”核对现有代码、启用状态、安装依赖、API/数据使用量及负责人；分别记录已是可选包、已拆包但仍为核心依赖、完全耦合在主应用中的情况。（基线 §11：十项能力逐项给出打包分类、依赖与挂载证据；运行时使用量标注【未核验】，owner 待指定）
-- [x] 为七个能力域建立现有代码/数据库归属清单：文件与表的 owner、跨包 import、直接写表、API 调用和事件流；标出未来拆分会触及的共享事务与全局状态，作为逐步迁移基线。（基线 §6：跨域读写样本、共享事务面与全局状态已登记，TODO-O1 关闭；反射式写入等动态路径标注未核验）
-- [x] 建立不依赖真实企业系统的验收样例：读取材料、产生摘要、独立复核、人工批准、向测试工单服务写入结果。（场景包 S11 全链；S01/S02/S03 覆盖分段）
-- [x] 固定架构评测包：输入材料及 ACL、测试工具和初始状态、预期产物 schema、禁止动作、审批人、故障注入点与环境复位。权限/副作用用确定性断言；内容质量使用明确 rubric 并记录 evaluator 版本，不能只判断 Agent 自称完成。（基线 §9 规格冻结 + `tests/scenarios/` 实现，manifest 一致性测试钉住漂移）
-- [x] 建立 `Problem_Lab.xlsx` P01—P08 到平台保证、可选实现、责任 step、验收 fixture 与未支持能力的映射；先以少量带版本、权限和标准引用位置的合成文档及测试工具贯通，不把表格中的固定样本规模和金融案例变成平台最低要求。（基线 §8 P 组摘要 + `tests/scenarios/manifest.yaml` 场景级唯一事实源）
-- [ ] 对同一评测包保留单 Agent 的成本/结果基线，再比较多 Agent；每次变更运行受影响场景。安全负例、重复写入和跨租户泄露不允许以平均质量分抵消。业务收益暂记未验证。（结果基线与成本采集口径已固定（Tier-2 记录 cost_baseline 块）；真实成本基线受 G4 门槛（目标 step7/10），多 Agent 比较随团队协作模型（step12/13）启用）
-- [x] 保存旧路径的响应协议、任务结果、权限负例和事件样本，作为迁移比较基线；模型回答比较业务结果，不比较随机文本逐字相等。（场景包 S10 黄金样本 + S02/S05—S08 负例与恢复样本）
-- [x] 将旧分支已有失败调查归档到基线记录，不能直接标成“与本次无关”。（基线 §10）
-
-**独立消费增量（新 change，不重做上面的已完成项）：**
-
-- [x] 重新记录此次实施所用提交、在途 change 和包版本；历史 `platform-evolution-baseline.md` 保持快照性质，新增 `docs/refactor/standalone-consumption-baseline.md` 并链接原证据，不覆盖原结论。（独立基线 §1；基线提交 `a4851bb`，在途 change 为本 change 与 `openspec-spec-hygiene`；仅静态核对，无安装/运行验证）
-- [x] 从实际生产执行链梳理定义加载、图编译、Worker、身份/策略、模型/工具、checkpoint、证据和启动配置的依赖闭包；包括 `runtime/AGENTS.md` 的函数内 import。逐项写明代码位置、是否执行必需、可由宿主注入/可选安装/待解除耦合及责任 step。核对 wheel 依赖，不以 import 探针通过代替可独立安装。（独立基线 §2 八链段闭包表 + 懒加载清单逐行归类，§3 wheel 交叉核对；全部为静态核对，安装性验证归 step5b）
-- [x] 为独立、受管、完整私有平台模式补拓扑；另记网络模式、可信身份来源、任务/执行状态 owner、凭据和数据出口。受管断连明确授权有效期及重新连接的责任方，不能沿用在线撤权保证。（独立基线 §4；断连授权有效期、最大陈旧窗口与重连责任方登记为目标语义，待 step6/7 落地）
-- [x] 在现有 `tests/scenarios/manifest.yaml` 追加独立消费场景组（建议前缀 `SC`，实施时检查未占用），保留 S/P 组 ID。提供模拟库存 API、两个隔离的数据域、只读身份与需审批的测试写动作；业务规则放 fixture，不新增 Hecate 车商领域模型，不引入 RAG 前置。（manifest `sc_scenarios` SC01—SC10 全部 `planned` 并绑定责任 step 与门禁 change，S/P 组零改动；fixture `tests/scenarios/tools/inventory_api.py` + `test_sc_fixture_inventory.py` 仅验证 stub 自身行为，不声称宿主能力）
-- [x] 固定验收规格：干净安装且无管理平台冷启动、读取/生成建议、无权调用拒绝、持久任务重启、受保护写入未知结果、断连授权过期、审计存储失败、重连重复命令及数据外发检查。记录当前支持/未支持/未验证及责任 step；尚未实现的能力不伪造通过报告，也不以永久 skip 当完成。（独立基线 §5 登记表 SC01—SC10 当前状态均为未支持，与 manifest 由 `test_manifest_consistency.py` 钉住一致；SC 实现测试随责任 change 交付后翻转）
-- [x] 建立差距表：step5 负责安装和只读执行，step6/7 负责持久化/本地强制策略和受管断连，step10/11 负责证据与制品门禁，step16 负责组合认证。每项挂实现 owner、验收 owner 的待指派字段和指派时点，不虚构人员或工期。（独立基线 §6 step5a—step16 差距行，owner 待指派、指派时点为 change 启动时；条件性延期项另见 §7）
-
-**落点与交付：**沿用既有 `docs/refactor/platform-evolution-baseline.md` 与场景包；独立消费增量写入单独基线文档及 manifest/fixture。step1 交付现状证据与可重复输入、预期断言，不要求目标 Runtime 已经独立运行；实际运行通过证据由所属步骤补齐。不接入实际发送或生产写入。
-
-**验收：**每个外部入口能指向具体执行调用链；至少有正常执行、拒绝动作、等待审批、后端失联、重复提交这些可重复场景。跨包实现依赖、共享表写入和共享事务已列入归属清单。每条受保护副作用路径都能指出强制执行点及潜在旁路；后续 step 对比的是同一基线。
-
-独立消费增量另验收：每项平台依赖有退出位置；每个 SC 场景有输入、预期结果、状态 owner、验证方式和责任 step；明确分开本地证据留存、中心同步与外部模型数据流。原已完成项保持历史勾选，新项分别完成后再勾选；本地基线完成不表示整个 step1 中条件性托管详查或团队成本比较已经完成。
-
-**迁移/回退：**基线文档和 fixture 的 change 不改变业务行为；G1/G2 另建修复 change，最小化收紧现有不安全路径并保留兼容说明。不要在安全修复 PR 中混入控制面建模、目录整体迁移，也不能回退到已经确认的越权或盲目重试行为。
+**证据与退出：**见[实施基线](platform-evolution-baseline.md)、[独立消费基线](standalone-consumption-baseline.md)和 `tests/scenarios/manifest.yaml`。每个场景必须有输入、预期断言、状态 owner、责任步骤及支持状态；实际运行证据由对应步骤补齐。安全负例、重复写入和跨租户泄露不能用平均质量分抵消。
 
 ### step2 — 更新定位、决策记录与功能归属
 
-**复核修正：**原 step2 由 #195 合入并归档；后续复核见 [step2 复核记录](step2-review-report.md) 与 step2-review-hardening。补齐增量严格准入、研究晋级证据门禁、逐字段漂移及区域完整性、§六逐行处置/独立缺口、契约 owner/发布窗口和候选迁移记录；完成仅表示规划与工具交付，目标执行能力仍须所属 step 的运行证据。
+**状态：原定位及清单治理已交付，本次方向增量待同步。**
 
-**目标：**正式停止“每个竞品功能都在核心实现”的规划方式。
+- [x] 定位、架构、ADR、消费者边界、能力域/契约 owner、功能处置及迭代映射已建立；独立运行与整体后端替换分别验收。
+- [x] 功能 YAML 增量迁移、受管区域生成、字段漂移及严格准入已交付；保留 Feature ID、历史状态、人工维护的证据与依赖，研究条目未获证据不晋级。
+- [ ] 同步本次“开发、执行、治理与协作”定位、内置默认产品责任、Agent/Workflow 边界、step5e 与 I-Ca 新验收至 positioning、架构/ADR、feature-inventory、catalog 和 roadmap。新增能力先核对现有 ID，再按规则追加后缀，不重编号。
 
-**操作：**
+**字段与迁移：**沿用 `id/title/phase/category/status/maturity/dependencies/evidence/acceptance` 等既有字段与治理字段所有权，不另建同义清单。YAML 受管区域由工具生成；变更前后核对元数据不丢失、冲突失败、生成幂等与状态一致。移出核心不等于从未实现或已经退役。
 
-- [x] 更新 `docs/design/positioning.md`，采用本方案定位。（positioning.md 战略摘要/边界章节已对齐;本次新增交付边界/部署模式/消费者契约章节,失效链接修复）
-- [x] 同步第一节的交付边界与部署模式。（positioning.md「Delivery boundaries and deployment modes」三边界+三模式表;ADR-035 批准包名方向）
-- [x] 为车商 App 记录消费者契约。（positioning.md 消费者契约段(中性表述:业务 App 私有化交付示例;技术预览/独立生产/受管生产三级门槛;HTTP/JSON 首入口)）
-- [x] 在定位与架构中将供应商托管 Agent 服务列为正式执行后端。（positioning.md hosted-backend 段(双轴登记+自托管≠数据驻留);ADR-034 §3;架构文档信任边界节）
-- [x] 更新 `docs/design/architecture.md`。（architecture.md 新增「Control Plane, Execution Access, and Trust Boundaries」与能力域/子包/例外登记章节;模块化单体保留）
-- [x] 新增 ADR，记录核心职责。（ADR-034(治理语义六决策)+ADR-035(包迁移方向);编号按 INDEX 实时取号）
-- [x] 按第六节映射调整 feature-catalog.md。（§六逐行处置映射进入 plan YAML 与受管表；当前实现、目标边界、处置类别、提供方及退出条件分列；保留既有 ID 和交付历史，见复核报告）
-- [x] 为上述 P01—P08 映射中的新增平台责任核对 Feature ID。（保留 8.13、9.18—9.20，并以 9.21/9.22 分开登记 Memory 与整体 Knowledge 接入；执行契约、实体责任、本地可靠执行和制品生命周期缺口追加未用后缀）
-- [x] 将 `roadmap.md` 的未完成部分改为第七节里程碑。（roadmap 新增「Delivery Iterations」(I-A…I-H)与「Stage Milestones」(M-S…M-R)受管区;Next Phase/Sprint 章节标注 Historical）
-- [x] 沿用现有 `feature-inventory.yaml`，先关闭 G5。（G5 已由 #194 关闭;本次 schema 1→2 全量迁移零字段丢失;extract/check 幂等;YAML 头注释覆盖 v2 字段所有权）
-- [x] 在字段稳定后增加确定性的受管表格生成。（sync 结构校验、全部 ID/字段漂移诊断、必需区域与 strict=true 完整性门禁；CI 使用 Git 基线，对新增/变更条目严格准入并保留历史欠账，见复核报告）
-- [x] 为 research/Labs 条目指定 owner。（8 个 research-candidate 条目(6.15/6.20/6.22/2.12/6.38/6.39/6.42/6.43)生命周期五字段已填(owner=pending 显式待定)）
-- [x] 对身份、策略、调度、审批、发布、证据和资产目录等能力，逐项标明。（七类能力约 25 个 ID 已填五元组(responsibility/implementation_mode/enforcement_point/state_owner/milestone),见 catalog 受管处置表）
-- [x] 在目录和 roadmap 中按“基础能力域与未来组件边界”标注 Agent Engineering、AgentOps、Agent Control Plane、Agent Governance、安全、评测、MCP/A2A 企业接入层的覆盖和缺口；能力域标签不等于现在的部署单元。（catalog/roadmap 各含「Capability Domains Coverage」受管表:七域现位置/目标子包/职责/缺口;与 architecture.md 能力域归属一致）
-- [x] 在架构文档中固定上表的子包 owner。（architecture.md 依赖方向+公开接口规则+分层检查规划+例外登记表(4 项历史例外带迁移步骤/退出条件;owner 按 2026-09-28 决定于 change 启动时指派)）
-- [x] 为 Runtime、Memory/Knowledge、Evaluation、Observability 和 Gateway 分别登记契约 owner。（受管 Registry 区分契约 owner、公开契约、独立发行单元、状态 owner 与当前版本/支持窗口；未发布或未验证窗口显式标注）
-- [x] 对下方已实现能力逐项给出处置；保留现有 Feature ID、已交付事实和迁移记录，不把移出核心改写成从未实现。（复核报告登记十类候选的代码/数据责任域、安装/挂载证据、使用量待验证状态、替代接口、兼容迁移及回退退出条件；没有候选被判为 retire-candidate）
-- [x] 在 `feature-catalog.md` 中为托管执行准入、供应商会话对账、托管工具强制入口和数据驻留门禁设独立验收条目。（2.10c/2.10d/2.10e 新条目(准入+驻留门禁/会话对账/强制入口回执);roadmap M-A 行明示 hosted verification 属里程碑本身,不写为单一供应商专属）
-
-**清单字段迁移：**保留现有 `id/title/phase/category/status/maturity/dependencies/evidence/acceptance` 名称，不新建同义的 feature_id/depends_on/acceptance_evidence。增量增加 `responsibility`、`implementation_mode`、`provider_or_adapter`、`enforcement_point`、`state_owner`、`milestone`、`superseded_by`，并升级 schema/校验器；未适用字段允许显式不适用。`responsibility` 使用 `platform-guarantee / shared-contract / provider-guarantee / optional-ecosystem`；`implementation_mode` 表示 builtin/in-process-plugin/out-of-process/external-service/asset 等实现方式，延期和退役归 status，不混入实现方式。maturity 独立表示验证程度，不由 delivered 自动推导 production。
-
-**验收：**§六本轮映射的每个未实现条目都有归属和明确处置；未纳入本轮的历史条目继续作为显式治理欠账，由所属实施 step 补齐而非自动填充结论；每个候选子包有公开接口、数据 owner、依赖规则和历史例外清单；“权限依赖 Ontology”“跨 Runtime 依赖 Pregel DSL”等不合理依赖被移除；公开市场不再排在内部目录之前。
-
-**迁移/回退：**仅修改文档和规划数据，不抹掉已交付功能及历史链接。研究建议与已接受 ADR 分开标注。
+**证据：**[Step2 复核](step2-review-report.md)。本次只更新本方案，不把上述同步项勾为完成。
 
 ### step3 — 定义并测试平台侧执行契约
 
-**目标：**建立“平台调用 Runtime”的接口，与现有 RuntimePort 的方向区分。
+**状态：草案与隔离互操作已交付，正式认证归 step8。**
 
-**复核结论：**GLM 合入的三次变更保留了正确边界，但原完成证据不能直接作为验收。复核补齐了真实只读 HTTP 工具回调、入站 Schema 校验、幂等作用域、实时游标续读、能力证据约束、归档与 Sandbox 负例及 CI 门禁。详细缺口、修正落点与复现命令见 [Step3 复核报告](step3-review-report.md)。本步完成的是语言中立契约草案与隔离互操作；不等于已切换平台 Runtime、已验证生产身份/可信制品加载或已认证供应商。
+- [x] 发布语言中立 JSON Schema/OpenAPI、标准样例和 Python 映射；最小后端能力包括发现、提交、状态、事件游标、产物及取消请求。
+- [x] 将输入、审批、暂停、恢复与上下文导出作为可选能力，区分 `unsupported/cooperative/enforced`；事件含来源、序号、关联与版本，错误区分拒绝、冲突、不可达和结果未知。
+- [x] 定义带签发域的 Task/Run/Deployment 与供应商 session/turn 引用、身份/授权引用、预算和幂等语义；独立宿主不查询平台 ORM，客户端声明不代替可信身份。
+- [x] 定义固定摘要的制品 manifest、加载边界及 Sandbox/命令生命周期契约；归档拒绝路径穿越、链接、重复成员和缺失入口，不自动执行安装脚本。真实信任与发布准入由 step5/11 验证。
+- [x] 非 Python 试点通过真实 HTTP 只读工具回调、Schema/错误/游标及能力负例；无生产凭据或受保护写入，不能据此授予生产控制等级。
 
-**操作：**
-
-- [x] 将 JSON Schema/OpenAPI 及事件 schema 作为进程外契约的发布源；`contracts/` 中的 Python 类型是对该契约的内置映射，不让第三方依赖 Python 对象、ORM 或平台进程。（`src/hecate/contracts/schemas/` 执行、工具、身份、制品与 Sandbox 权威 schema 集 + 纯 dataclass 映射 + 标准样本三方互检；OpenAPI/HTTP 绑定文档随非 Python 试点 change 交付）
-- [x] 为首个进程外接入规定 HTTP/JSON 绑定：能力发现、提交、状态与事件游标、控制命令、错误响应和 artifact 引用；流式订阅是可选视图，断线后仍能用游标恢复。其他传输由 adapter 映射同一语义，不要求所有服务都暴露 HTTP。（`contracts/openapi/execution-backend.http.v0_1.yaml` $ref 权威 schema 不复制；problem+json 四可返回码映射 501/403/429/409，`unreachable`/`outcome_unknown` 为调用方合成态非后端错误；SSE 标 optional capability；`openapi-spec-validator` 结构校验 + HTTP 样本互检）
-- [x] 定义 `AgentExecutionBackend` 的最小方法：`describe_capabilities`、`submit`、`get_run`、`read_events`、`list_artifacts`、`request_cancel`。（`src/hecate/execution/backend.py` + Stub 第二实现 + 参数化契约测试 `tests/test_execution/`）
-- [x] 将 `provide_input`、`resolve_approval`、`pause`、`resume`、`export_context` 定义为显式可选能力；分别声明 `unsupported / cooperative / enforced` 等可验证控制语义，不能只有含糊布尔值。（三级枚举 + Schema 与映射同时强制非 unsupported 能力的验证条目；未实现的输入/审批不再虚报 cooperative；pause 经实际 HTTP 返回 501，Stub 保留常驻负例）
-- [x] 定义 `ExecutionRequest`：任务和运行 ID、部署与版本引用、授权上下文引用、输入及 artifact 引用、预算/截止时间、幂等键、trace 关联、后端专属配置引用。（schema + 映射 + 样本；未知字段容忍且往返保留）
-- [x] 将执行请求中的标识定义为带签发域的逻辑引用，不能要求接收方查询平台 ORM。独立宿主从可信本地登记分配 Task/Run/Deployment 标识；受管 adapter 映射平台与后端标识。客户端提供的 ID/授权引用不能替代服务端身份校验或资源查找。（引用类型 kind 分离：平台侧与供应商 session/turn 不可互换，负例测试钉住）
-- [x] 定义最小执行制品 manifest：schema/后端类型与兼容版本、定义入口、内容摘要、所需能力、工具 schema 与权限声明、模型/可选组件配置引用、产物 schema 及批准/评测证据引用。后端专属图或脚本放命名空间内，其他 Runtime 无须实现 Pregel DSL；不包含明文凭据、业务数据或在线平台 ID 查找前提。（tar.gz + 逐文件 sha256；拒绝跨平台路径穿越、重复成员、链接/特殊成员、未列入口、未知字段与畸形结构；publisher/license/signature 引用声明可验证条件，真实信任验证由 step5 加载器实施）
-- [x] 定义本地安装与加载契约：静态文件/标准归档或 OCI 制品按摘要固定，可信发布者和许可策略可验证；首版不自创专用包格式，也不自动执行清单中的安装脚本。草案格式先由 step5 的本地加载器消费，step11 沿用其发布语义，避免先建完整目录服务才可启动。（首版标准归档（tar.gz），OCI 留待 step11 按需；无安装脚本字段且运行时/Schema 均拒绝未知声明；本地发布者信任根、签名与许可策略、未验证制品处置规则见 contracts/README.md，后续加载器不得以摘要成功代替身份验证）
-- [x] 为托管后端定义平台 `Task/Run` 到供应商 session/turn、事件游标、subagent 事件和 artifact 的映射；供应商持有其会话状态，平台只保存必要引用、接收状态与证据。提交响应丢失时先按供应商 ID/幂等能力对账，不盲目重建会话；无法对账时标记未知。（`contracts/hosted-mapping.md` 映射语义 + errors schema `query_by_vendor_session` 策略 + capabilities `reconciliation_support` 声明；subagent 事件命名空间化、绝不自动成为 Team 成员；真实验证属 step8）
-- [x] 定义错误语义：不支持能力、授权拒绝、预算不足、版本冲突、后端不可达、结果未知。超时不自动等同于任务失败。（六类封闭集 + 对账指引；version_conflict 覆盖契约版本窗口与幂等键内容复用两种情形）
-- [x] 为工具契约固定输入/输出 schema、版本与副作用类别；将参数验证失败、业务拒绝、系统故障、远端结果未知分别表达，并允许工具选择/参数生成与实际执行结果关联到同一 Run。第三方业务工具仍由其所有者实现和维护。（`tool.schema.json` 副作用五值原样采纳内部 `SideEffectClass` 并由测试钉死一致；四态分层——参数拒绝在分发前 400、业务拒绝=工具结果事件 Run 继续、系统故障=工具级错误事件、结果未知=`outcome_unknown`+对账；`tool_selection` 可观察事实关联同一 Run，不暴露隐藏推理）
-- [x] 固定跨语言编码规则：ID/时间/枚举/可空字段的表示、未知字段的兼容处理、版本协商、幂等键和 trace 关联；提供请求、事件、错误和回执的标准样本，避免不同语言各自解释状态。（`src/hecate/contracts/README.md` + 标准样本集；请求、事件、错误与 HTTP 回执的扩展字段保留；同一幂等键的请求体/header 一致，作用域来自传输身份；事件尾部/空页继续返回游标）
-- [x] 将执行契约与 Memory、Evaluation 等契约分别版本化；定义字段扩展与破坏性语义变更规则、并存窗口、弃用通知和支持终止条件。不得以一个 `hecate-contracts` 包版本要求所有后端同步升级。（执行契约与 Sandbox 契约独立 `$id` 版本空间已建立；0.x 草案不冻结，冻结以 step8 真实验证为前置；Memory/Evaluation 契约在各自 step 建立时沿用同一机制）
-- [x] 定义进程外服务身份与授权上下文传递：调用方认证、目标受众、租户作用域、短期凭据引用和回调认证；adapter 不接受客户端自报的管理员身份。（`security-claims.schema.json` 声明集（iss/aud/sub/tenant/delegation_ref/exp），样本带声明集合不带真实 JWT；bearer+mutualTLS 双 profile；回调独立受众凭据禁复用入站令牌；自报 role 落 `extra` 不进鉴权结构——映射行为负例钉住；验证语义归 step7）
-- [x] 能力声明附验证来源、适用部署形态、测试时间/版本及失效条件；`pause`、`cancel`、工具代理、沙箱、事件完整性分别认证，不以一项“支持治理”布尔值覆盖全部能力。远程自报事件与平台直接观察的动作使用不同来源等级。（verification 结构含来源等级、测试时间、契约/后端版本、部署形态、证据引用与失效时间；enforced 声明要求独立观察且具备作用域证据；实际来源认证、部署匹配与过期降级由 step4/7/8 实施，声明本身不能授予权限）
-- [x] 能力模型把 harness 所有方、环境所有方和工具执行点分开；针对供应商管理的会话逐项声明输入补充、取消、事件续读、回调、内部工具可见性和子任务追踪能力。平台不能控制的操作返回 `unsupported` 或 `cooperative`，不因 API 接受请求而标记 `enforced`。（OwnershipAxes 三轴枚举；除五种交互外增加 cancel/events_resume/tool_proxy/sandbox/callback/internal_tools_visibility/subtask_tracking，缺省 unsupported；完整 hosted 样本明确各项未知能力不默认支持；供应商实际认证仍由 step8 实施）
-- [x] 定义供应商配置命名空间；核心只验证通用字段，专属配置由 adapter schema 验证，不能从中读取平台管理员权限。（backend_config_ns 自由对象，核心零校验、零权限）
-- [x] 建立 `StubExecutionBackend` 和契约测试；草案接口标记未稳定，允许在 step8 根据真实适配修订。（Stub 即第二实现，满足 runtime-pluggability 两选一；具名消费者为非 Python 试点与 step5a 包装）
-- [x] 同时做一个真实非 Python 后端的窄范围 adapter 验证：仅限能力发现、提交、事件/结果、取消语义和一个无副作用工具回调；验证者不依赖 Hecate Python 包。此时保持隔离测试，不接生产凭据或受保护写入，用实际差异修订契约；不能仅用 Stub 冻结接口。（试点 `pilots/execution-backend-ts/` + A 侧 vitest/Ajv 自证 + B 侧 pytest live 参数与 Stub 共享断言；只读工具真正通过 HTTP 回调独立 Python 接收端，入站/回调使用不同受众的合成凭据；原 F1/F2 403/404 绑定缺口已补齐，不继续延期；CI 强制执行异构验证且构建失败不得跳过；契约保持 0.x 未冻结，详见试点及复核报告）
-- [x] 单独定义 SandboxProvider 最小契约：能力发现、创建/查询环境、提交/查询命令、文件传输、终止及续租；Sandbox 与命令分别使用幂等 ID，超时结果为 unknown/待对账。定义创建中、就绪、终止中、已终止、失败与状态未知的映射；暂停/恢复等可选状态按能力协商，不强迫所有后端提供快照。（`src/hecate/execution/sandbox.py` + `sandbox-provider-contract` 独立 capability spec；InMemory 测试替身 + 同键异内容冲突、未知结果对账、终止状态不回退、环境存在/就绪检查及跨平台文件路径负例；真实 Docker/云提供方仍在 step7 适配）
-
-**接口边界：**Graph、Channel、WorkerResult、checkpoint 和模型内部消息格式不进入最低契约；外部 agent 自带工具时，也必须申明其可治理范围。
-
-**落点与交付：**建议新增 `src/hecate/contracts/`、`src/hecate/execution/backend.py`、`tests/test_execution/test_backend_contract.py`；`core/composition/` 仅负责注册和选择实现。
-
-**验收：**进程外契约与 Python 类可独立阅读和实现，不导入 SQLAlchemy、FastAPI、Pregel 或供应商 SDK；至少一个不依赖 Hecate Python 包的客户端能按标准样本解析请求、事件和错误。供应商会话/turn 与平台 Task/Run 不混用；不支持暂停的后端提交暂停请求得到明确错误，不能返回伪造成功。
-
-**迁移/回退：**保留 RuntimePort；本步不更换现有执行服务，不宣称已支持新 Runtime。
+**边界与退出：**见[执行后端试点](execution-backend-pilot-report.md)、`src/hecate/contracts/`、`src/hecate/execution/backend.py` 与 `pilots/execution-backend-ts/`。现有 RuntimePort 保持“引擎调用领域能力”的方向；平台调用后端使用执行契约。最低契约不包含 Graph、Channel、WorkerResult、ORM 或私有 checkpoint；大产物传授权引用，未知扩展按版本规则处理，不伪造不支持的控制成功。
 
 ### step4 — 分离身份、定义、部署、任务与执行
 
-**目标：**让同一个 Agent 定义可以部署到不同 Runtime，让同一个业务任务可以产生多个有关系的执行尝试。
+**状态：模型和登记已交付，准入与实际执行分别验证。**
 
-**操作：**
+- [x] 复用 Agent 与不可变版本，建立 principal、负责人、Deployment、Task/Run；人类发起者、Agent、工作负载与委派身份分槽登记，受众和 workspace 必须匹配。
+- [x] Deployment 登记实现/契约版本、能力、环境、托管数据流和凭据引用；缺省能力不提升信任。Run 冻结实际配置及身份链，不复制秘密值，不用当前配置补造历史快照。
+- [x] 明确独立来源 ID、平台映射、字段 owner、观察导入及受管登记；pending/rejected 不能启用 managed，历史来源声明不产生调度或审批权。
+- [x] 建立 conversation/task/run/backend_session 映射、并发尝试号与幂等导入；增量回填旧 builtin deployment，缺身份/版本的记录待治理，不自动提权。
 
-- [x] 保留 `AgentModel` 与现有版本表，把它们视为定义和版本；避免新建同义的 AgentDefinitionVersion。（Deployment 外键引用 `agent_versions` 既有表（models/agent_deployment.py），未新建同义版本体系）
-- [x] 增加 Agent principal 及与现有 Agent 的关联：组织、负责人、生命周期、身份提供方映射。负责人是人类或明确的企业责任主体，不是 persona 字符串。（`principal_registry.py` 校验真实 workspace/组织、活跃负责人及其归属；生命周期转换带 workspace；IdP 成对登记。当前支持人类负责人，其他企业责任主体以可解析身份适配接入，不接受自由文本）
-- [x] 区分人类发起者、Agent principal、执行工作负载身份与 on-behalf-of 委派。Run 固定所用身份链和目标受众；工作负载证明其部署实例，不直接继承人类或平台管理员权限。（`IdentityChain` 保留独立身份槽及 `audience`；新建平台 Run 校验 workload 的部署引用和活跃 principal 归属，要求非空受众；委派使用 authorization 引用。这里只登记身份绑定，真实凭据/委派/受众鉴权属 step7）
-- [x] 增加 `AgentDeploymentModel`：AgentVersion、backend 类型和版本、进程内/本地进程/远程服务接入方式、传输契约版本、endpoint/配置引用、环境、能力快照、接入等级、健康状态、凭据引用。实现语言仅为登记元数据，不决定权限或能力等级。（`deployment_registry.py` 校验版本归属、完整能力快照与 backend/ownership 一致；缺省能力为 unsupported；登记 API 拒绝自行提升 enforced。默认部署使用行锁及部分唯一索引；真实认证提升由 step7/8 接入）
-- [x] 为 Deployment 的托管后端配置记录 harness 与环境提供方、服务地区、数据驻留和保留/删除条件、供应商内部工具范围及企业网关路径；Run 固定实际绑定的供应商 session/turn 引用。缺少可核实条件时不得默认判为私有部署或强制治理。（`hosted_config` 校验来源/核验时间及完整条件；完整供应商声明也仅标记 declared，缺失为 unverified。Run 的后端会话不可覆盖，绑定以签发域/ID 规范化约束；认证与驻留策略决策由 step7/8 实施）
-- [x] 增加 `TaskModel` 和 `RunModel`：Task 保存业务目标、发起者、验收和责任；Run 保存一次后端执行、尝试号、固定配置及后端运行 ID。（Task 不引入 step6 状态机；新平台 Run 的 `execution_snapshot` 复制版本配置及部署能力/配置/凭据引用，后续部署变更不改历史。秘密值不复制；历史 Run/观察导入未能证明的快照保持缺失，不以当前配置补造）
-- [x] 区分平台记录与独立宿主记录：平台 Task 的验收/责任、Run 的后端投影与宿主真实执行状态分别指定字段 owner。新增本地部署来源/本地 ID 映射、事件序号与控制 ownership；独立运行不读平台表，观察接入不能自动取得投递或审批权。（Run 使用 `origin`、`control_owner`、规范化来源键；projection/event_cursor 归平台且先验证再写。历史身份只是来源声明；step6/7 必须在真实投递和审批入口检查 origin/owner，不能把“登记服务没有投递 API”作为权限隔离证明）
-- [x] 定义独立部署注册流程：校验宿主身份与信任根、登记已安装版本/能力、显式选择受管的新 Run；历史 Run 仅按来源导入观察，活跃 Run 默认保持原模式。模式转换有操作者、准入与审计，不因网络重连自动改变调度权。（named refs 只登记 pending；准入需要活跃 workspace 管理员、版本/能力和可信解析器的肯定结果；解析器缺失/失败时拒绝。数据库禁止 rejected/pending 同时开启 managed。真实解析器装配、注册/断连/重连和授权租约由 step6/7 交付；本步不声称已有受管执行）
-- [x] 定义 `conversation_id / task_id / run_id / backend_session_id` 的映射；一个会话可以产生不同任务，一个任务重试产生新 Run，不能复用旧 run_id 冒充恢复。（`task_run_registry.py` 单写入方：Task 行锁串行分配尝试号；backend 会话以签发域/ID 永久保留，软删除不释放；本地导入按 workspace/部署/来源/本地 ID 幂等，不扫描整表）
-- [x] 对旧 Agent 回填 builtin deployment，对已有 session 建立兼容映射；缺少负责人或组织数据的记录标记待治理，不自动赋平台身份。（回填优先有效已发布版本、否则最新有效版本；无版本或未有 principal 者按真实组织与 Agent ID 记录幂等待治理审计。`link_session` 经真实 `Session.conversation_id` 建立映射；conversation 外键指向 conversations，双方必须同 workspace；治理未解析默认 pending，旧执行入口暂不切换）
-- [x] 设计增量迁移：先新增可空列/新表，再回填和校验，最后收紧约束。（修复迁移 `e9a4b72c6d10` 新增可空快照/标识字段、校正已存在的 session 映射和组织审计、补约束；重复或不可解析数据明确阻止升级供人工修复，不静默删除。Step4 与修复迁移 downgrade 均明确拒绝；应用回退保留新表及运行/审计记录，不能以删除表的 up→down→up 测试证明安全回退）
+**验收与迁移：**跨 workspace 引用拒绝，重试可追溯原 Task，历史绑定不被覆盖。迁移遇不可解析数据要求人工修复，不静默删除；应用回退保留新表和运行/审计记录，相关 schema 不支持破坏性 downgrade。拒绝审计须由 API 明确提交策略，不能 rollback 后声称已持久化。
 
-**验收：**旧 Agent 在默认 builtin deployment 上仍可执行；同一版本能登记不同后端部署；跨 workspace 不可读取或指定其他部署；重试可追溯到原 Task。
+**证据与限制：**[登记模型修正设计](../../openspec/changes/archive/2026-10-02-step4-review-hardening/design.md)及[验收复核](step1-step6-acceptance-review.md)。登记成功不代表可信解析器、真实凭据、断连授权或托管条件已获认证；这些由 step6—step8 交付。
 
-**迁移/回退：**保持旧字段可读，兼容期通过唯一服务层维护映射；不允许业务方独立双写导致两套配置失配。回滚应用时保留新表，禁止自动丢弃运行记录。
+### step5 — 收敛默认执行能力与平台入口
 
-**审查证据与后续边界：**见 [Step4 审查报告](step4-review-report.md)。注册值及引用不等价于认证/授权证明；托管条件尚需可信认证，独立宿主解析器尚需真实装配。拒绝审计随登记调用方事务保存，接入 API 必须明确拒绝事务的提交策略，不能无条件 rollback 后声称拒绝已持久审计。step5 才迁移旧执行入口，step6/7 才验证真实调度、权限和断连；Step4 模型完成不能替代这些步骤的验收。
+**目标：**内置执行能力可被业务 App 独立使用，也可由平台管理；Agent、Workflow 和混合执行均有明确的行为、质量与恢复证据。
 
-### step5 — 交付独立执行组件，逐条迁移平台入口
+| 切片 | 状态 | 已交付范围或剩余门槛 |
+|---|---|---|
+| step5a：共享装配 | 已交付 | 平台查询留在 adapter；图编译、Worker、上下文和 guardrail 通过共享装配执行 |
+| step5b：独立发行包 | 已交付 | `hecate-runtime` wheel、依赖闭包、配置注入、兼容转发与干净安装；不反向依赖完整 Hecate |
+| step5c：独立宿主 | 预览范围已交付 | Runner 与 builtin 共享执行应用服务；公开请求/回执/事件契约、本地制品与身份校验、SC01/SC02 只读场景。固定工具计划与 Stub/endpoint 不能证明自主工具选择 |
+| step5d：平台入口收敛 | 部分完成 | HTTP/MCP/IM/评估/A2A/定时 Agent 已迁移，workspace 路由与会话亲缘、OpenAI/SSE 兼容和分层守卫已交付；剩余项如下 |
+| step5e：内置自主执行收敛与验证 | 待实施 | 对齐自主工具循环、Workflow 与宿主语义，补真实模型及混合执行验收，再决定内部机制 |
 
-**目标：**让业务 App 不安装管理平台即可消费内置执行能力，同时保持平台入口、内置能力和已有客户端兼容。独立发行包是本步必需交付，不延至 step19。
+**step5d 剩余项：**
 
-**操作：**
+- [ ] 完成错误/产物到平台契约的映射，保留安全的后端详情；聊天事件接入持久存储，同步与流式成为同一 Task/Run 的视图。
+- [ ] 收口定时 WorkflowExecutor 经 `WorkflowTestRunner` 的路径、A2A per-agent 身份及入口安装/升级支持矩阵。
+- [ ] 完成 G3 实际入口的多轮、拒绝、取消、断连/恢复及默认启用证据；复用现有开关和路由，旧循环限制须显式保留。
 
-- [x] step5a：先实现 `HecateExecutionBackend` 包装当前 `WorkflowExecutionService`，固定兼容样本；再抽出图编译/Worker/上下文/guardrail 的共享装配函数和执行应用服务。平台 ORM 查询、定义解析、平台授权映射留在平台 adapter，转换为执行输入后调用共享装配；只包装旧服务不能作为独立消费的完成证据。（`runtime-shared-assembly` 已交付：装配落 `src/hecate/runtime/execution_assembly.py`（studio/ORM 零 import，分层守卫扫描全部 import 位点），`HecateExecutionBackend` 在 `src/hecate/execution/builtin.py` 经共享装配执行，契约测试参数化 Stub/live/builtin 三实现，builtin 兼容样本钉住漂移；既有执行服务测试零断言修改全绿）
-- [x] step5b：按 step1 依赖闭包抽取 `hecate-runtime` 与最小类型/契约依赖；构建非 editable wheel，并提供声明式 extras/adapter 依赖。清除首个独立 profile 路径上的延迟跨域 import，包括编译输入、工具安全、上下文和证据写入；可选功能未安装时启动声明 `unsupported`，不能等运行中 ImportError。平台兼容导入只转发到新包，禁止新包反向依赖完整 `hecate`。（`packages/hecate-runtime` 落地：内核 88 模块、无 `hecate` 反向依赖、settings/数据库耦合清零（RuntimeConfig+memory 接缝注入）、五行"待解除耦合"清除、wheel 干净安装冒烟 + CI `runtime-wheel-clean-install` job、capability_status 启动期声明；独立基线 §8 证据登记；SC01/SC02 留 step5c 不翻转）
-- [x] step5c：实现独立执行宿主（`hecate-runner`），提供本地 manifest 加载、可信配置/secret 引用解析、业务身份和策略 adapter、模型/工具装配、最小执行/状态/事件接口、健康与关闭处理；与平台 adapter 共享执行应用服务，HTTP 身份校验不能以客户端自报角色替代。（PR #208 交付本地预览并补齐身份隔离、参数/能力校验、endpoint 调用、准入审计、串行准入、协作取消与关闭；change `runner-contract-shared-service` 交付 `hecate_runtime.execution_service` 供平台 builtin 与 Runner 共用，Runner 正式支持 `ExecutionRequest`/`SubmitReceipt`/`RunStatus`/`EventPage`/`CancelReceipt`/artifact 引用与 `version_conflict`，wheel 携带与权威 schema 逐字节校验的契约快照，durable profile 的执行事件按稳定 event id 持久化并支持重启后按结构化 backend run ref 查询。验证：Runner 包 100 项测试、平台 builtin/契约 34 项、SC01 干净安装 6 项、scoped mypy 与 wheel 构建通过。固定工具计划和 Stub/endpoint 模型仍是技术预览边界；生产身份/授权/审批/受管组合认证不因本项完成而授予，仍归 step7/8/16。）
-- [x] step5c：先提供本地只读技术预览：允许列表工具、参数校验、可信身份、隔离数据域和持久的基础审计必须生效；写工具、后台自动重试、长任务恢复等未验证能力拒绝启用。提供 Stub 模型的确定性 CI 样例和可配置模型 endpoint 的集成入口；真实模型调用证据单独记录，不用 Stub 宣称供应商已认证。（SC01/SC02 随该切片翻转为 `implemented`：`tests/scenarios/test_sc01_cold_start.py`/`test_sc02_inventory_read.py` + `tests/scenarios/tools/`（库存 fixture 与 runner harness）；基线 §5 登记更新，生产认证仍归 step16/step7）
-- [ ] step5d：迁移平台调用方，使其选用同一共享装配或独立宿主 adapter；内置执行包与宿主可以单独升级，支持窗口由契约/依赖矩阵界定。Python 嵌入入口复用共享装配但首版不自动授予生产支持；非 Python App 通过公开 HTTP/JSON 样例接入，不必等待 SDK 生成器。（第一切片（change `platform-entry-migration`）：HTTP/MCP/IM/评估四链改经 `EntryExecutionService` 并登记 Task/Run；第二切片（change `entry-tail-migration`）：A2A executor 与定时任务 agent executor 亦经入口服务执行，`llm_service.chat` 直连清除。剩余登记：A2A 协议级 per-agent 身份缺口（调度器 `manager._execute_task` 接线 executor registry 已由 step6 平台轨 change `platform-task-control-api` 完成：cron 触发经 registry 分派 agent/workflow 执行器、结果如实映射 success/failed，空转路径删除）。复核轮（change `step5-review-hardening`，报告 [step5-review-report](step5-review-report.md)）：入口事件存储收敛为单进程共享实例（`core/composition/entry_assembly`），工具装配公开化并纳入分层扫描；A2A 改为显式 `A2A_AGENT_WORKSPACE_ID` 作用域唯一解析（未配置/零/多命中协议内拒绝，全局第一 agent 选取删除），失败响应不再泄露内部错误）
-- [ ] 将 Pregel stream、状态、错误和产物映射到平台契约；原始事件作为后端详情保留。（事件映射层已落 `src/hecate/execution/entry_events.py`：RunEventMapper 客户端安全投影 + 后端详情保留 + tool 配对校验；HTTP 流式已切换消费，错误/产物映射待续）
-- [ ] 按入口清单迁移：先内部 Agent/Workflow 调用，再评估/定时任务，再 REST/MCP/A2A/IM；每次仅切换一组调用链。（已完成：HTTP chat/agents、MCP agent_chat/session_resume（补齐 event_store/checkpoint 装配与 agent 工具面）、IM 注入适配器、评估 workflow 执行（单一内部 Task 关联）、A2A executor、定时任务 agent executor（后两者为 change `entry-tail-migration`，工具/guardrail 装配与 Task/Run 关联生效，分层扫描纳入 channel/a2a/server）；仍登记：定时任务 WorkflowExecutor 经 studio `WorkflowTestRunner` 测试入口（非 `llm_service` 绕过，独立后续条目）、A2A per-agent 身份（调度器与 executor registry 的接线已随 step6 平台轨完成））
-- [ ] 复用 #178 已有的引擎聊天子图和 `CHAT_TOOL_LOOP_ENGINE_ENABLED`，补 G3 的实际入口测试，再加入 workspace 路由和放量记录；不重复实现子图。兼容期明确旧循环不具备的恢复/回放保证，G2 未关闭时也不对新路径授予可靠副作用恢复保证。（已交付：workspace 覆盖（feature flag tenant allowlist）+ 放量审计记录 + 会话路径亲缘；真实入口测试 `tests/test_channel/test_chat_engine_g3_entry.py`（真实 HTTP 执行服务/图/工具 worker，仅 provider 边界 stub）：流式/非流式多轮、审批拒绝（durable APPROVAL 对）、亲缘；取消语义经 backend 契约 REQUESTED，HTTP 取消端点随 step6（已由 step6 平台轨交付：`POST /api/tasks/{id}/cancel`，回执语义同独立命令记录）；断线/恢复（复核轮）：流式中途断连持久化会话快照、恢复后不重复派发已完成的 tool 轮（从恢复的 tool result 直接作答）、全库 TOOL_CALL/TOOL_RESULT 配对完整；顺带修复流式路径未传 user_id/org_id 导致会话状态从不持久化的缺陷）
-- [ ] 同步和流式 API 成为 Task/Run 上的等待或订阅视图；不要保留独立执行生命周期。（入口服务同步/流式为同一委托执行的两个视图；事件按 run 引用+游标的持久化读取已随 step6 平台轨对任务控制面派发路径交付并测试，聊天入口的事件持久化迁移复用同一存储，随后续入口切片收口）
-- [x] 兼容现有 OpenAI 风格响应和 SSE 格式，在适配层转换平台事件，不把 backend 专属字段强塞给旧客户端。（SSE 从映射后 envelope 渲染，payload 仅客户端安全字段；未关联执行回退原始流并告警，不虚报已登记。已登记执行保持 OpenAI-clean，correlation 信息仅在登记缺失时显式返回（chat 适配层）；`tests/test_channel/test_chat_engine_g3_entry.py` 在真实 HTTP 入口断言 SSE chunk `choices[].delta` 与非流式 `choices[].message` 结构，既有 chat API 回归与新入口 parity 测试全绿）
-- [x] 在分层测试中限制入口层新增 `PregelRuntime`、`GraphCompiler` 具体导入。（`tests/test_layering_entry_imports.py`：channel/api、channel/im、tools/mcp 扫描 + 注入负例）
+**step5e 操作与决策门槛：**
 
-**验证落点：**复用 `tests/test_services/test_workflow/test_execution_service*.py`，增加各入口对同一契约的测试。
+- [ ] 建立直接工具循环、Pregel Agent 图、确定性 Workflow 与 Runner 的差异矩阵：模型调用、工具选择/结果回灌、结构化输出、预算/停止、审批等待、持久化、取消及错误事件。普通 LLM 节点不必承担自主 Agent 循环。
+- [ ] 固定共享的外部行为与状态责任，优先复用现有执行应用服务、动作账本和治理接缝，消除相同能力在平台与独立宿主上的语义差异。
+- [ ] 用真实模型执行“读材料→按反馈选择后续工具→生成结构化结果”的多轮任务；另验收预算/取消、审批后继续推理、重启恢复及未知写结果停止。预先固定数据、模型/工具版本、质量 rubric、延迟和成本阈值；确定性 CI 与真实模型报告分别保存。
+- [ ] 验证 Workflow 的显式步骤与条件，以及调用自主 Agent 子任务后的产物校验、失败处理、审批/重启与重复回调；父流程不依据 Agent 自称完成直接推进。
+- [ ] 比较复用现有图机制、收敛直接循环或抽取轻量 harness 的必要改动、依赖、恢复复杂度和维护成本。用相同任务及安全边界形成 ADR；无证据不预定拆包、移除 Pregel 或另设必做 step5f。
 
-**本轮复核修正（基线 `5619cce`）：**真实 Principal ID 解析、Task/Run 关联 savepoint 与安全错误、实际 session 一致性、无工具入口的共享存储、按 workspace 限定的工具定义/执行已补齐；评估改用真实 runtime factory，并传递 workspace、固定 workflow 版本、内部 Task 与 guardrail 装配。builtin 幂等比较纳入图/模型等执行配置，冻结 JSON 输入，不将 interrupt 误报为成功。独立宿主包级测试纳入 CI，干净安装子进程用隔离模式禁止继承源码路径。详细问题、证据与剩余门槛见 [Step5 执行链复核与修正](step5-execution-review-report.md)；5a/5b 的交付事实与 SC01/SC02 的场景状态保留，5c 架构总项恢复未完成。
+**交付与验收：**独立 wheel 在无源码、无平台管理库环境安装；按 profile 声明支持/未支持能力。5e 原型可与 step7 并行，生产启用依赖 step6/7、最小 step10/11 及 step16；不得以固定计划预览替代自主 Agent 认证，也不因新增目标抹去既有预览交付。
 
-独立消费另增加包级构建/安装测试和 SC 场景：在不挂载仓库、没有源码 `PYTHONPATH`、不安装完整 Hecate 的环境中安装 wheel/宿主；管理平台地址为空或不可达，运行模拟库存读取和无权请求，核对产物及本地证据。命令、配置、退出码、安装依赖清单和支持能力随包交付；镜像是可选分发方式，不能成为只会从源码启动的掩盖。
+**证据与回退：**[入口复核](step5-review-report.md)、[执行链复核](step5-execution-review-report.md)、[共享应用服务交付](../../openspec/changes/archive/2026-10-06-runner-contract-shared-service/tasks.md)。后者更新了早期报告中 5c 的共享服务缺口。路由只切新任务，活跃 Run 保留原绑定；影子验证不双执行外部写入，降级不得省略身份、账本或审计。
 
-**验收：**现有功能回归通过；同一 Agent 从不同入口执行，能关联统一 Task/Run；审批拒绝和终止原因不会因入口不同而变化。
+### step6 — 持久任务、控制命令与治理事件
 
-本步分别验收：5a 共享装配行为一致；5b 干净安装与依赖闭包成立；5c 无控制面冷启动并完成只读 SC 场景，未启用写权限且本地证据可查；5d 已迁移平台入口通过兼容测试。部分入口未迁移时只记录该切片完成，不勾选整个 step5。技术预览不承诺持久任务恢复、生产写入、即时远程撤权或高可用，后续由 step6/7、最小 step10/11 与 step16 关闭门槛。
+**状态：step6a—6f 技术交付完成；生产治理与场景整体认证仍有依赖。**详细过程见[执行复核](step6-execution-review-report.md)、[验收复核](step1-step6-acceptance-review.md)与[后续复核](step6-followup-review.md)。
 
-**迁移/回退：**用 workspace 级路由开关逐步放量；仅新任务改变后端路径，活跃任务固定原路径；影子验证只比配置和事件映射，不双执行外部写操作。
+| 切片 | 已交付及验证范围 | 保留的限制 |
+|---|---|---|
+| step6a：受管宿主 | 安装后的 Runner wheel 经真实平台 HTTP 完成持久接受、去重、执行、上传、重启、重连与 drain | 接受只表示排队；平台投影不拥有后端实际执行状态 |
+| step6b：动作租约与续租 | 派发时校验签名/主体/部署/数据域/期限；逐动作续租、有界等待和 nonce 持久化，拒绝后无新副作用 | HMAC 为预览信任材料；工具级范围、合法审批、撤权及断连窗口的策略认证归 step7 |
+| step6c：持久等待与命令链 | 原子消费等待 token、绑定新 attempt、回填已完成动作；真实 HTTP 宿主/平台重启、命令重投/过期和效果回执验收 | token 不等于企业审批；合法审批判定归 step7 |
+| step6d：原生续跑 | 同 attempt 按冻结定义及 checkpoint 续跑；重验身份/摘要，已决动作回填，结果未知待对账；PostgreSQL 并发验证 | 普通 SessionState 是聊天历史；事件日志迟到追加尚未获得完整 fencing 保证，不能宣称 G2 已关闭 |
+| step6e：确定性父子执行 | `WorkflowChildTaskAdapter` 通过真实 submit/dispatcher、持久等待、可信终态回调推进，支持失败策略及双方重启 | 父任务拥有 `on_failure` 决策；该固定步骤验证不能替代 step5e 的真实自主 Agent 混合执行 |
+| step6f：宿主故障矩阵 | SC04/SC05 的 SQLite/PostgreSQL 进程矩阵纳入 CI，覆盖确认丢失、重启、未知外部写、命令过期及停发租约 | SC03/SC06 仍为 SQLite 部分覆盖；整体场景状态以 manifest 为准 |
 
-独立包按已测试版本锁定；旧平台仍可用兼容 adapter，升级只影响新 Run。发行包退回旧版本前检查制品/状态格式兼容，禁止静默回退到省略身份或审计的裸执行入口。
+**持续保持的执行不变量：**
 
-### step6 — 建立持久化任务、控制命令与治理事件
+- Task 生命周期与命令回执分开；`requested` 不等于 `applied`。状态、等待消费、动作领取与效果回执按本地事务提交，平台和宿主不建跨库事务。
+- ownership/fencing 拒绝旧持有者改写状态、账本和业务副作用。幂等请求核对主体、workspace 与内容摘要；当前原始 key 仍全局唯一，跨域同名 key 冲突，不宣称独立命名空间。
+- Action 绑定工具、参数摘要及副作用分类；完成结果真实回填，未知/存储不可用停止受保护重试。等待和待对账任务不自动重跑，恢复不得注入新身份或扩大数据域。
+- 事件按来源/Run/序号投影，outbox 按逐事件回执处理低 ID 晚提交，缺口及毒丸显式记录；历史 Run 不借用后续尝试状态，分页未耗尽不提前关闭事件流。
+- 安装租约时拒绝已消费 nonce 重放并保留当前租约；其他无效租约按既有契约安装后在派发边界拒绝，不能误写为统一拒装。nonce 记录写入失败保守拒绝授权，已决动作回填不重复消耗租约。
+- 本地证据不可写时拒绝新受保护动作；回执丢失保持待对账。中心上传与本地留存分开，补传证据不得重新执行业务。
 
-**目标：**任务不依赖 HTTP 请求存活；执行事实由宿主保存，平台获得可恢复的状态和证据投影；重试不得盲目重做业务写入。
+**未完成的治理与认证：**
 
-**复核结论：部分完成，不能整体验收。** 已交付持久存储、worker、共享执行服务、平台控制 API、Runner 本地等待/恢复及受管环路。后续复核修正了等待后重复前序写入、内部 grant 注入、命令异体重放、checkpoint 作用域、执行定义漂移与错误恢复判定。原先全部勾选的记录混用了契约测试、组件测试和完整宿主验收，以下重新区分。历史问题见 [Step6 执行复核报告](step6-execution-review-report.md)，本轮最新代码核对、修正和剩余门槛见 [Step1～Step6 验收复核](step1-step6-acceptance-review.md)。
+- [ ] step7：合法审批、工具级动作范围、撤权/断连与真实时钟偏移窗口；跟踪平台 EventStore 迟到追加的 fencing 缺口，不以租约续租或 PG 矩阵完成代替修复证据。
+- [ ] step7/10：本地证据失败时只读继续策略、中心缓冲与补传限额；按实际范围完成 SC03/SC04/SC05/SC06 整场景认证，不仅翻转技术切片。
 
-**主线追加复核：**PR #230 的修正已成为 main 交付事实。基于该主线又修正持久事件分页截断、等待/排队误报终态、旧 Run 借用新尝试状态、重启后提交回执/错误/产物丢失，以及重复取消与取消回执的宕机窗口。新修正的范围、SQLite/PostgreSQL 与独立 wheel 验证、剩余门槛见 [Step6 主线追加复核](step6-followup-review.md)；未合入前按该报告分支状态区分，不据此关闭 Step6 总项。
-
-**2026-10-10 状态收敛：**step6a–6f 的关闭门槛已全部交付（a 受管 CLI/wheel HTTP；b 动作时授权与续租策略；c 持久等待与受管命令链；d 平台原生续跑；e 确定性父子 adapter；f PG 宿主进程矩阵常态化）。Step6 技术交付完成，状态不再以部分完成笼统标注；剩余项逐条列 Step7/10 依赖——合法审批判定、工具级动作范围、撤权与断连窗口策略、中心缓冲/补传限额、SC03/SC06 整场景认证——并保留在各条目的追加修正行内。
-
-**已完成的切片：**
-
-- [x] 平台 Task/Run 提交、查询、事件分页/SSE、控制命令与待对账查询 API。提交前固化身份链、Task/Run ID 与输入；提交后平台登记中断可按原 ID 补齐。仅已接通的内置进程内部署允许进入本入口，不能把外部部署登记成功当作可执行。
-- [x] 独立 `hecate-durable` SQL adapter、PostgreSQL 参考存储、开发 SQLite、事务治理事件、租约 worker、drain 和有界失败／崩溃重试。第二个真实调度器出现前保留具名接缝，不新增通用调度框架。
-- [x] SQL worker 的状态迁移和 Action 意图／领取在事务内校验有效 ownership；同名持有者重启、租约释放和过期均不能复用旧 fencing token。真实平台 dispatcher 传递租约，迟到成功／失败不能覆盖接管方。
-- [x] 八种 Task 生命周期与独立命令回执状态；过期命令和过时 `expected_revision` 在执行前拒绝。SQL 唤醒／排队取消的状态、输入或一次性 token 消费、`applied` 回执与事件原子提交；运行中的取消尚无实际效果时保持 `requested`。
-- [x] 幂等提交校验调用主体、workspace 和请求摘要，异体／跨域复用拒绝；当前底层原始 key 仍为全局唯一，跨作用域同名 key 返回冲突，尚不是独立命名空间。重放保留原关联，不能生成第二个后端 Run。
-- [x] 版本化治理 envelope、重复去重、乱序及缺口标记；平台终态和 outbox 原子提交。中继以逐事件回执而非最大 ID 判定已投递，支持低 ID 晚提交、重启、有界重试和显式毒丸记录；投影失败不能吞掉非去重冲突。
-
-  追加修正：宿主持久事件页按实际 cursor 返回 has_more，缺口也占页容量；兼容事件流只有成功/失败/取消且本页已耗尽才关闭。历史 Run 读取自身状态事实，不能借用后续尝试的 Task 状态；原提交时间/幂等键、错误与已持久事件产物引用在重启后保留。
-- [x] 真实平台共享装配链和独立 Runner 使用持久动作账本钩子；工具名、参数摘要和副作用分类冲突拒绝，领取和结果通过 execution/tool-call 关联。相同动作的已完成结果可真实回填；未确定结果保留待对账。**这不等于平台完整执行上下文已能跨进程恢复。**
-- [x] 本地 Runner 恢复重新验证持久化身份及当前可信配置，不接受重启请求补入新主体／扩大数据域；只调度可执行状态，等待／待对账状态不自动重跑。证据不可写拒绝新受保护动作；回执落盘失败保持待对账；JSONL 清理只删除整日均已过期的文件。
-- [x] 受管接收／投影片段：持久接受记录按投递 ID 和请求摘要去重，确认丢失允许重投，已确认项不挤占新批次；上传游标按来源和 Run 分开。平台只接受对应已登记本地 Task/Run 的事件，同 ID 异体拒绝，旧序号不能回滚终态。接收只表示 `queued`，不伪报已执行。
-
-**剩余实施顺序：**以下属于 Step6 的关闭门槛，不转移给 step16；涉及共享服务、身份和审批的前置能力分别与 step5c、step7 同步交付。
-
-- [x] step6a：受管 CLI、持久接收、串行执行、结果上传与 drain 已接通；接受只代表排队，重投保留原 Task/Run。上传过滤独立来源，并按历史 Run 分流，单个失败流不阻塞其他任务。安装后的 Runner wheel 已对接真实平台 HTTP，验证接受响应丢失、重投去重、执行业务工具、状态投影、宿主重启、重连及多 Run 事件补传；完整 PostgreSQL 宿主故障矩阵仍由 step6f 验收。
-- [ ] step6b：实际受保护 Action 派发前已检查 Lease 的签名、issuer、host subject、workspace、部署、数据域、期限与 nonce；拒绝使执行失败并停止后续工具，未知动作保持待对账。当前每个 Lease 只允许一次受保护派发，HMAC 是预览信任材料；同 Run 多受保护派发的续租采用有界等待策略（等待新拉取的 lease，超时显式拒绝）。**关闭门槛：**与 step7 接通工具级动作范围、合法审批、撤权及声明的断连窗口；完成实际业务调用计数验收。
-
-  追加修正（2026-10-08，`managed-command-acceptance`）：runner 侧 `is_decided_action` 允许已决动作回填（重放时）跳过 Lease gate，否则唤醒后的新 attempt 会以回填名义消耗一次性租约、饿死真实派发；引擎 `_lease_refusal` 在 `CredentialError` 上加入有界等待，由通道持续拉取安装新 lease。进程级证据见 `docs/refactor/step6-followup-review.md` 的 `managed-command-acceptance` 验收记录。
-
-  追加修正（2026-10-10，`lease-renewal-policy`）：多写续租策略正式化并完成技术闭环验收——续租预算声明为 `control_plane.lease_refresh_wait_seconds`（默认 5 s，断连/续租窗口语义进入 runner README）；`LeaseGate.update` 安装前验证（过期/异体/篡改/同 nonce 回注一律拒装且保留当前租约，拒绝计入 `lease_gate_refusals`）；nonce 消费记录持久化到宿主本地状态（`lease-consumed-nonces.jsonl`，写入失败保守拒绝授权），宿主重启后回注已消费租约被拒。SC04 技术切片交付（`tests/scenarios/test_sc04_lease_renewal_policy.py`，4 场景：多动作逐一续租、停发租约有界拒绝零副作用、范围越界立即拒绝、重启后重放记录延续且新租约正常武装）。上方关闭门槛中"实际业务调用计数验收"已完成，剩余收窄为 step7 依赖行：工具级动作范围、合法审批、撤权及断连窗口的策略认证；租约过期对真实时钟偏移的认证归 SC04/step7，场景整体保持 planned。
-- [ ] step6c：Runner 已提供持久等待和 owner/token 技术唤醒。审批等待发生在 claim 前；唤醒原子消费 token、合并/校验输入、绑定新 attempt 并应用命令；前序已完成动作保留原 key、回填结果。拒绝内部字段注入、GET 唤醒、并发重复消费和异体重放；任务列表/事件/动作按 owner 与可信数据域隔离。独立 wheel 进程已验证等待后 kill/restart、合法唤醒和重复回执。**关闭门槛：**step7 合法审批判定、受管命令下发及新 attempt 的平台关联；有 token 不代表有企业审批权限。
-
-  追加修正：旧尝试不返回已消费或新尝试的等待 token；运行中重复取消共用待处理命令，cancelled 与 applied 原子提交；无实际执行的历史 Run 取消如实拒绝，不改写原 applied 回执。
-
-  追加修正（2026-10-08）：受管命令下发、宿主命令处理、效果回执上传与 waiting 唤醒后新 attempt 的平台关联代码已随 #232 交付（平台命令翻译 `managed_channel.command_for_host`、runner 命令 inbox `_apply_command` 与 effect 回执端点），上方关闭门槛中的"受管命令下发及新 attempt 的平台关联"不再列为待实现。剩余门槛收窄为：真实受管进程的全链验收（等待→命令→唤醒→新 attempt→终态，两端重启、确认丢失、重复/过期命令）与 step7 合法审批判定；证据与代码位置见 [Step6 主线追加复核](step6-followup-review.md) 的 2026-10-08 状态记录修正小节。
-
-  追加修正（2026-10-08，`managed-command-acceptance`）：进程级验收套件已交付——安装后的 Runner wheel 对接真实平台 HTTP（TCP，非 ASGI），覆盖全链 happy path、等待期宿主 kill/restart 后唤醒零重做前序写、平台 uvicorn 重启后命令幂等投递与回放、effect 上传首 503 重试仍只 applied、过期命令拒绝零副作用（`tests/scenarios/test_sc05_managed_wake_chain.py`，SQLite 默认参数化；PG 参数化由 `HECATE_STEP6_POSTGRES_URL` 门控，套件供 `step6-pg-process-matrix` 复用）。SC05 manifest slices 同步追加 `managed_wake_chain`/`managed_command_receipt`，场景整体保持 `planned`（剩余项：连接断连陈旧窗口、step7 合法审批判定、step6f 完整平台托管进程矩阵）。本条保留显式 step7 依赖行——技术 token 不等于企业审批权限。
-- [x] step6d：Runner 持久 checkpoint 按 attempt 隔离，同一 attempt 重启可原生继续；无 checkpoint 仅按冻结固定图及账本恢复。旧 task 级 checkpoint 只用于可验证的原 attempt，新等待唤醒不读取它。恢复前校验 manifest、工具顺序/Schema、模型引用与业务派发绑定；缺摘要或漂移不执行。平台派发已重验 Principal/部署/版本，使用冻结配置，但**普通 SessionState 是聊天历史，不是原生 continuation**；已有受保护动作的中断必须待对账。**关闭门槛：**平台共享执行真实 continuation、冻结动作关联和外部写/回执丢失故障矩阵；保持 G2 未关闭，不建设平台通用 checkpoint 引擎。
-
-  追加修正（2026-10-10，`builtin-native-continuation`）：关闭门槛已交付，上方"受保护动作中断必须待对账"的保守默认在摘要门通过时被取代——平台共享执行的中断 attempt 按首派发冻结的定义摘要（工具顺序/Schema、模型、guardrail/资源引用）在原 engine session 原生续跑（Pregel `resume_value` + checkpoint 缓存/日志尾折叠），续跑前重验准入与摘要；已决动作按账本回填零业务重复，回执丢失保守停止在 `reconciliation_required`，摘要漂移与 Principal 撤销先于续跑门拒绝，等待/唤醒与续跑互斥。5 个 PostgreSQL 并发用例（`tests/test_execution/test_builtin_continuation.py`：同 Run 续跑+迟到写 fencing、回执丢失、摘要漂移、准入顺序、等待互斥）在本地真实 PG 与 CI `step6-continuation-pg` 双绿；CI 首跑暴露的续跑分支 fall-through 与 checkpoint 缓存信封/过滤缺陷已修复，过程记录见该归档 change 的 `verification.md`。已知边界：迟到写者的事件日志追加不受 fencing 保护（状态写、动作账本与业务副作用均已闸），归 step6b 租约策略；G2 保持未关闭。
-- [x] step6e：REST 工作流回调已核实同 workspace 的真实子终态，匹配完整 child 引用和一次性 token；附加载荷不能覆盖可信 child ID/state，command ID 绑定完整原请求。**关闭门槛：**将等待/回调接到确定性工作流节点或具名 adapter，运行真实父子执行与各自进程重启；手写或 monkeypatch orchestrator 只能证明原语。
-
-  追加修正（2026-10-10，`workflow-child-adapter`）：关闭门槛已交付——具名 adapter（`WorkflowChildTaskAdapter`）把任务输入中声明式 `workflow.steps` 驱动为真实子任务：每步经 `TaskControlService.submit` 系统发起（载荷盖章父引用）、父任务以 `await_task_ref` 契约挂持久等待；子任务终态路径从自身载荷发现父引用并自动发起经核实的 `submit_workflow_callback`（平台 issuer，幂等 command_id），父任务携带 `step_index`/`child_outcome` 唤醒推进下一步，推进计数全在持久事实。子任务执行异常直接收敛失败终态（触发回调），不走 worker 重试预算——失败处理归父任务的 `on_failure` 声明（fail/await）。验收 `tests/test_execution/test_workflow_child_adapter.py` 4 场景全绿：单步链、多步严格顺序+伪造回调拒绝、失败收敛、双端各自重启零重复提交；全程真实 dispatcher（无 `_execute` monkeypatch），monkeypatch 原语测试保留为契约层验证。`submit` 载荷白名单补 `workflow`/`workflow_parent` passthrough 并在提交时快速校验声明合法性。
-- [x] step6f：独立 wheel 进程已覆盖 SC01/SC02、SC03 的终态写持久化与审批等待重启、SC06 本地证据拒绝切片；受管 Runner wheel + 真实平台 HTTP 的 SC05 执行/重连切片已通过，PostgreSQL durable 存储和 Alembic 升级链另行验证。**关闭门槛：**PostgreSQL 上完整宿主故障矩阵、未决外部写和迟到回执；SC03/SC04/SC05/SC06 按实际范围保持部分覆盖，不因组件测试通过标整场景完成。证据不可写时只读继续及中心缓冲/补传限额仍需 step7/10 明确策略。
-
-  追加修正（2026-10-10，`step6-pg-process-matrix`）：关闭门槛已交付——CI 新增 `step6-pg-process-matrix` job（postgres:16 服务容器 + `HECATE_STEP6_POSTGRES_URL`），SC04/SC05 受管宿主场景以 `[sqlite, postgres]` 双参数常态执行，宿主故障矩阵（已接受未执行/kill-restart/外部写成功但回执丢失/过期命令/租约停发/控制面重启）的数据库、账本、命令与等待记录全部落在真实 PostgreSQL（PR #241 merge queue 全绿，job 首跑通过）。配套修复：场景 fixture 为每个 PG 参数测试分配独立 schema（共享库上多测试 durable 行互见曾使重连断言 14≠1）；同 PR 携带评测报表时间炸弹修复（种子锚定 now-4 天）。SC03/SC06 保持 SQLite 部分覆盖；只读继续与中心缓冲/补传限额策略仍归 step7/10。
-
-**落点：**`packages/hecate-durable` 承载独立契约／SQL adapter／worker，`packages/hecate-runner` 承载宿主装配；`execution/` 承载平台登记、投影和命令入口，`core/composition` 负责绑定。Runtime kernel 只依赖动作钩子语义，不导入平台存储。平台与宿主各自本地事务，不引入跨数据库事务或双主生命周期。
-
-**验收：**提交后断开 HTTP，任务继续；重启不会因确认丢失重复创建同一后端 Run；旧 owner 和重复／迟到回调不能改写实际结果；动作未知显示待对账；命令成功回执必须有已发生的效果。独立宿主未连接控制面也能通过持久等待和恢复；受管组合另行通过授权、投递和重连测试。未达到的能力继续明确拒绝或标注未认证。
-
-**迁移／回退：**平台部署执行 Alembic 后才启动新中继；新增 `durable_outbox_receipt` 为派生投递记录，升级后旧事件可能重放一次，投影必须幂等。独立宿主在停机／drain 后升级本地存储 schema。关闭新入口先 drain 已接受任务；保留 Runtime EventStore，不将 token/superstep 全部写入平台强一致事务。降级前核对状态格式，不能恢复已消费等待或放开待对账动作。
-
-**本轮安全兼容处理：**缺少执行定义摘要的历史 Runner 非终态任务不自动恢复；历史等待拒绝未经原版本验证的唤醒，终态仍可查询。不得用当前定义补签历史输入绕过。受管宿主升级后需要重新 pull 携带 workspace 的 Lease；已消费 token 和动作来源须保留，回退不能重新开放聊天历史恢复或盲目重做前序写入。
+**落点与迁移：**`hecate-durable` 管本地存储/worker，Runner 管宿主装配，`execution/` 管登记、投影与命令；kernel 不导入平台存储。升级前 drain 并迁移 schema，旧 outbox 重放由投影去重。缺定义摘要的历史非终态任务不自动恢复，不以当前定义补签；保留已消费 token/nonce 和动作来源，降级不得重开已完成或待对账动作。
 
 ### step7 — 实现与 Runtime 无关的强制治理
 
@@ -578,7 +406,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 - [ ] 复用已加固的认证入口，补 `actor / agent_principal / on_behalf_of / delegation_id`；主体和 workspace 来自验证后的服务端上下文。
 - [ ] 独立宿主复用动作授权/回执语义，允许业务 App 的身份和权限 adapter 提供可信上下文及本地策略，不强制安装平台 IAM、组织目录或审批 UI。无平台 tenant 时使用客户配置的不可混淆部署/数据域标识；单租户也不可接受任意请求体改写作用域。App 业务 API 再做最终资源权限及状态机校验，不能让模型直写库存表。
 - [ ] 将本地必需的上下文校验、Action/审批绑定和证据写入装配为可独立依赖的应用组件，平台和宿主共用其语义/测试；平台目录查询或策略管理 API 留在 adapter，不让独立运行通过依赖整个 `enterprise/ops` 主应用来获得安全能力，也不复制一套更弱的授权实现。新增边界以宿主这一具名消费者证明必要性。
-- [ ] 定义本地与受管 policy profile：独立模式使用客户配置的信任根和本地有效授权；受管模式验证中心授权的签发者、受众、部署、主体、动作范围、策略版本、期限及防重放信息。断连不能切换为本地自授权。现有可验证的业务令牌/授权机制优先复用，不为每种 provider 新建身份体系。（部分交付(`managed-runner-enrollment`):受管租约为 `security-claims` 语义的限域限时 HMAC 实现(iss/aud/部署绑定/exp/nonce 防重放),宿主 LeaseGate 验证且无本地自授权路径,断连后租约到期即停;策略引擎对接与完整 profile 归 step7 剩余）
+- [ ] 定义本地与受管 policy profile：独立模式使用客户配置的信任根和本地有效授权；受管模式验证中心授权的签发者、受众、部署、主体、动作范围、策略版本、期限及防重放信息。断连不能切换为本地自授权。现有可验证的业务令牌/授权机制优先复用，不为每种 provider 新建身份体系。（租约技术交付见 step6b；本项保留策略与完整 profile 认证。）
 - [ ] 实现平台授权请求：主体、动作、资源、任务、数据类别、环境、委派链及策略版本；先适配现有策略流水线，稳定后允许替换判定引擎。判定服务可外置，但每个副作用必须由 Hecate 工具网关或已验证的执行网关强制执行，并产生决策与执行回执。
 - [ ] 子委派权限取父授权、团队/组织策略、目标资源策略和本次任务范围的交集；默认拒绝，拒绝优先，不能通过换 Runtime 扩权。
 - [ ] 将工具调用包装为受控 Action：固定 invocation_id、参数摘要、目标资源、副作用类别、授权结果、审批引用、执行回执。
@@ -594,7 +422,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 - [ ] 对 MCP 入站工具调用和 A2A 入站任务分别验证协议凭据、目标受众、租户/主体映射、资源授权、限流和回调来源；出站连接固定允许的目标、数据类别与授权范围。远程 Agent Card、工具描述、检索结果和消息体均按不可信内容处理，不能从内容中提升权限或覆盖平台指令。
 - [ ] 为可计量调用设置预算预留和结算，按 invocation_id 幂等记账；远程未知用量标记 estimated/unverified，不宣称可强制控制其内部消费。
 - [ ] 明确策略/凭据服务不可用时的规则：未授权的新副作用停止；受管低风险离线行为必须有预先签发且尚有效的限域授权。中心撤销在断连时无法即时传播，profile 必须规定授权期限和最大陈旧窗口；高风险操作要求在线判定，或已被企业批准且当前可验证的本地审批机制。策略版本固定不允许越过本地已知拒绝，时钟回拨/有效期无法可信判断时拒绝依赖该期限的新动作。
-- [ ] 重连先验证宿主与当前授权、撤销和期望配置，再允许新受保护动作；历史证据按游标去重补传。过期审批、旧授权和迟到命令不能重新激活动作；未对账 Run 维持原身份/版本与待对账状态。信任根更新与退出受管模式须显式管理员流程及审计，不接受普通控制事件修改信任根。（`managed-runner-enrollment`:每个通道请求重验凭据→准入→信任根解析(撤销即 403 拒绝重连);事件按 event_id 去重补传;重复命令经 command_id 幂等;信任根更新/撤销经操作员流程;期望配置指纹刷新有 API,宿主侧指纹比对、实际执行入口的授权闸门与命令恢复仍未接通，不能以通道组件测试标记本项完成；见 step6a/6b）
+- [ ] 重连先验证宿主与当前授权、撤销和期望配置，再允许新受保护动作；历史证据按游标去重补传。过期审批、旧授权和迟到命令不能重新激活动作；未对账 Run 维持原身份/版本与待对账状态。信任根更新与退出受管模式须显式管理员流程及审计，不接受普通控制事件修改信任根。（投递、动作租约和命令恢复技术链已由 step6 验证；本项仍须完成期望配置、撤权与断连策略认证。）
 - [ ] 关键动作留存 attempt/outcome。外部动作成功但回执持久化失败时进入对账；不声称数据库事务能让外部系统达到 exactly-once。
 
 **落点：**`enterprise/`、`tools/gateway/`、`tools/policy/`、`models/approval.py`、`ops/`，由 composition 接入内置及外部 adapter。
@@ -607,7 +435,9 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **独立消费关联：**本步验证管理平台能接入不同实现，不要求外部 Runtime 安装 `hecate-runner` 或内置 Python 包。也不假设某个托管 Agent 服务可在离线客户环境运行；执行组件独立运行的认证与供应商服务可达性分开登记。step3/5 的公开契约和调用样例必须在本步之前可用，生态工具完善留到 step18。
 
-**目标：**用真实异构实现验证可替换性，而不是仅让 Stub 通过测试。
+**目标：**以真实实现验证契约，并判断外部后端是否补足内置能力缺口、降低总维护成本或满足具名消费者需求。框架数量不是交付指标；step7 最小治理与内置产品闭环优先，外部试点按用途单独准入。
+
+**选型与退出：**先列能力缺口和对照任务，再比较继续维护内置实现、接入外部实现及保持现状的代价，包括适配、故障恢复、安全、版本升级、运维和许可。PI 等项目仅为可选比较对象，Python 实现也可参与；无需逐个试用所有框架。记录“采用、保留为可选接入、暂不接入”的证据与限制。暂不接入意味着该组合未获支持，不影响已认证的 builtin；M-A 仍须完成其声明的真实异构与托管认证。
 
 **操作：**
 
@@ -943,13 +773,13 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 ### 已实现能力的边界复核清单
 
-下表中的“移出核心”是架构建议，不等于立即删除。判断依据是 Hecate 应稳定提供企业治理契约，而具体执行算法、编辑器、训练器和供应商适配可由内置参考实现或外部服务承担。功能目录中的 ✅、代码存在、默认安装是三种不同事实；实施前按 step1 复核实际调用和部署使用量。[Microsoft Agent 365](https://learn.microsoft.com/en-us/microsoft-agent-365/guidance/why-agent-365-for-enterprise) 的身份、观测、治理、安全和生命周期能力由多个现有企业服务支撑；这支持“平台保证结果、具体服务可替换”的方向，但下表的处置仍是对 Hecate 的设计判断。
+下表中的“移出核心”是架构建议，不等于立即删除。判断依据是 Hecate 应稳定提供企业治理契约，而具体实现可由内置产品或外部服务承担；内置 Agent/Workflow 仍承担默认执行与兼容责任，训练器等外围能力按实际需求取舍。功能目录中的 ✅、代码存在、默认安装是三种不同事实；实施前按 step1 复核实际调用和部署使用量。[Microsoft Agent 365](https://learn.microsoft.com/en-us/microsoft-agent-365/guidance/why-agent-365-for-enterprise) 的身份、观测、治理、安全和生命周期能力由多个现有企业服务支撑；这支持“平台保证结果、具体服务可替换”的方向，但下表的处置仍是对 Hecate 的设计判断。
 
 当前 [pyproject.toml](../../pyproject.toml) 的基础依赖仍包括 `hecate-ops`、`hecate-llm` 和 `hecate-sandbox`；[main.py](../../src/hecate/main.py) 直接挂载评测、自优化和工作流等路由。相对地，`hecate-memory` 的路由已按安装情况延迟挂载。因此“已经拆成 workspace 包”和“可选安装、可替换”不能画等号，step1 应实际核对依赖与启动行为。
 
 | 已实现能力与代码证据 | 平台应保留的责任 | 建议处置及可执行动作 |
 |---|---|---|
-| Pregel 执行引擎、ReAct/图调度（1.3.1 等；[runtime](../../src/hecate/runtime/pregel.py)） | Task/Run、权限、命令状态和治理事件 | **可独立消费的参考 Runtime**：step5 交付共享装配、独立包及宿主，平台通过 `AgentExecutionBackend` 使用；step8 用异构实现验证可替换性，通用接口不暴露 Pregel Graph/Channel；step19 只清理兼容层与遗留依赖。 |
+| Pregel 执行引擎、ReAct/图调度（1.3.1 等；[runtime](../../packages/hecate-runtime/src/hecate_runtime/pregel.py)） | 默认 Agent/Workflow 执行质量、Task/Run、权限、命令状态和治理事件 | **长期维护、可独立消费的默认 Runtime**：step5a—5c 已交付共享装配、独立包及宿主预览，step5e 补自主与混合执行验证；平台通过 `AgentExecutionBackend` 使用。step8 验证异构契约，step19 按证据清理兼容层，不因可替换性放弃内置产品责任。 |
 | 多层 Memory、反思/融合排序、RAG 解析/爬取及多向量库（4.x、3.1.x—3.2.x；[hecate-memory](../../packages/hecate-memory/README.md)） | ProviderBinding、ACL、来源、删除/导出及数据驻留 | **可选能力后端**：保留现有包作默认实现；step9 用另一 provider 通过相同治理测试，step19 检查主应用是否仍直接依赖具体排序、解析或存储类。 |
 | 内置评估器、AI 合成数据集、在线/离线任务及报告（7.2b—7.4；[evaluation](../../src/hecate/ops/evaluation/engine.py)） | 统一结果、数据集/评估器版本、发布门禁及证据引用 | **可替换评测实现**：step10 将评分、样本生成和报告计算置于 `EvaluationBackend` 后；保留内置实现可选，门禁只消费版本化结果。 |
 | 模型微调、模型目录/生命周期及推理管理（6.6、6.44—6.47；[hecate-llm/hub](../../packages/hecate-llm/src/hecate_llm/hub/fine_tuning.py)） | 允许的模型/提供方、凭据、数据范围、预算和部署绑定 | **外部集成或可选 Model Hub**：停止把训练、推理基础设施管理作为控制面必备能力；step2 复核使用量，step19 将可选 Hub 从核心默认依赖中分离，保留现有 API 的迁移路径。 |
@@ -1027,7 +857,8 @@ step2 为每个候选留一条决策记录：Feature ID、代码/数据 owner、
 
 | 可验收责任 | 归属与首次交付 | 范围限制 |
 |---|---|---|
-| 独立 Runtime 发行包、共享装配与执行宿主 | 内置参考实现；step5a—5c | 可独立消费不意味着其他后端必须安装该包 |
+| 独立 Runtime 发行包、共享装配与执行宿主 | 长期维护的默认实现；step5a—5c | 可独立消费不意味着其他后端必须安装该包 |
+| 内置自主 Agent、确定性 Workflow 与混合执行 | 默认执行产品；step5e，生产依赖 step6/7/10/11/16 | 单独验证模型决策、产物、预算/停止及恢复；不预定内部引擎或新增包 |
 | 本地定义/依赖装配与最小执行制品 | 中立 manifest + 后端专属内容；step3/5，step11 完善发布 | 不把平台 ID、Pregel DSL 或自定义归档格式变成跨后端要求 |
 | 本地可靠任务、业务身份/策略、审批与证据 | 治理语义 + 可替换本地 adapter；step6/7/10 | 不强制部署集中 IAM、评测后台或管理表 |
 | 受管注册、状态投影、限时授权与重连 | 管理平台/宿主接入契约；step4/6/7 | 不追授历史审批，不迁移活跃 Run，不承诺断连实时撤权 |
@@ -1058,7 +889,7 @@ step2 为每个候选留一条决策记录：Feature ID、代码/数据 owner、
 | I-A：基线增补与边界收口 | step1 保留 G1/G2 修复证据并补独立消费基线；step2 的 G5/定位/依赖图分文档与工具 change；登记 P/SC 映射 | 原问题不重复修复；依赖闭包、部署拓扑与 SC 规格明确；清单更新不丢证据 | 不引入新 Runtime、不整体移目录 |
 | I-B：契约与共享装配 | step3 草案和真实非 Python 无副作用验证；step5a 共享装配；step4 增量表可独立推进 | 公共契约不依赖 Pregel/平台 ORM，旧服务能调用共享执行逻辑；平台映射与宿主依赖分开 | 不授予生产写入、不冻结全部高级能力 |
 | I-Ba：独立执行技术预览 | step5b/5c 的 wheel、宿主、最小本地校验与只读 SC；并行 step5d 单入口平台兼容 | 无源码/管理服务/平台管理表环境独立安装冷启动；业务 API 读取和越权拒绝有本地证据，RAG/Memory 可不安装 | 不承诺生产写入、长任务恢复或受管断连保障 |
-| I-Ca：独立产品可靠闭环 | step6 本地持久化、step7 本地 Action/审批、step10 最小证据/评测结果、step11 本地准入/更新、step16 SC 故障集 | 无控制面执行测试任务、等待本地审批并产生可核验写入；重启恢复/对账，制品校验和回退生效；App 可用公开接口观察干预 | 不要求平台 Task 表、管理 UI、企业 Team 或完整 Knowledge 服务 |
+| I-Ca：独立产品可靠闭环 | step5e 自主/混合执行、step6 本地持久化、step7 本地 Action/审批、step10 最小证据/评测结果、step11 本地准入/更新、step16 SC 故障集 | 无控制面完成真实模型多轮工具选择及结构化输出，Workflow 可调用 Agent；等待审批后继续推理并产生可核验写入，预算/取消生效；重启恢复/对账，制品校验和回退生效；App 可用公开接口观察干预 | 不要求平台 Task 表、管理 UI、企业 Team 或完整 Knowledge 服务 |
 | I-Cb：受管任务闭环 | step4/5d 平台接入、step6 投影/控制命令、step7 限时授权及重连、step11 中心发布、step14 最小平台界面、step16 断连集 | 同一宿主连接平台，身份与版本绑定清晰；断连按期限收窄、重连不重复写；人类可见真实状态并阻止可控的新动作 | 不把独立授权模式作为断连 fallback，不假定所有远端可强制取消 |
 | I-D：真实外部执行认证 | step8 拆为自托管异构 Runtime、托管 harness、远程 Sandbox 三个接入 change；沿用 I-Cb 门禁 | 每个组合独立报告数据流、身份、受控动作、事件缺口、取消/终止和恢复限制；完成组合后再冻结对应契约 | 不为了统一而伪造取消、回放或托管内部工具控制 |
 | I-E：独立能力替换 | step9a/9b 与 9c/9d 分别交付；step10 可并行，step11 扩展组合发布，step16 验证单能力升级 | Memory 与完整 Knowledge 服务分别替换；组件化 Knowledge 更换向量库及另一检索/Embedding 组件，知识接入/删除/ACL、逐样本与阶段评测通过；评估/观测独立替换，不触发全平台发布 | 不先做通用在线双写、全部 provider 组合或自研图谱产品 |
@@ -1068,28 +899,13 @@ step2 为每个候选留一条决策记录：Feature ID、代码/数据 owner、
 
 I-C 是 I-Ca 与 I-Cb 的集合：车商 App 可在 I-Ca 对应 profile 通过后集成，不必等待 I-Cb。I-D 使用 I-Cb 的管理平台治理门禁；I-E 的绑定和评测服务可在所需契约稳定后与 I-D 分别推进。I-F 只依赖最小发布门禁、已认证的必要后端及实际使用的数据边界，不依赖所有可选提供方完成。I-Ca 由 App 或测试客户端消费本地 command/approval API，I-Cb 提供平台最小视图，I-F 再扩团队观察界面。独立生产支持与完整平台能力是分别验收的交付范围。
 
-**首轮 change 拆分建议（顺序执行，不一次建完）：**
-
-| change | 前置与具体落点 | 必须交付的证据 |
-|---|---|---|
-| `standalone-consumption-baseline` | 当前已完成 step1 的增量；research 基线 + SC manifest/fixture | 依赖闭包、模式/owner 矩阵、每个 SC 的预期与责任步骤；不声称目标已实现 |
-| `governance-platform-positioning` | 上述差距表；step2 ADR/功能清单/roadmap；G5 工具修复单独 PR | 包边界、profile、Feature 映射一致，历史状态不丢失 |
-| `execution-backend-contract` | step2；schema、标准样例及窄范围非 Python 验证 | 通用请求/事件不要求平台 ORM 或 Pregel；本地 manifest 可被独立解析 |
-| `runtime-shared-assembly` | step3；step5a 的 workflow/composition 依赖整理 | 原执行服务通过共享装配，行为兼容；平台查询没有进入内核 |
-| `runtime-standalone-distribution` | 共享装配；step5b/5c 的包、宿主、最小文档与 SC | wheel 干净安装、无控制面冷启动、只读授权与本地证据通过 |
-| `standalone-durable-actions` | 独立技术预览；step6/7 本地切片，必要时再拆存储与治理 PR | 重启/审批/未知结果/重复提交/证据失败测试通过；高风险仍按准入开关控制 |
-| `standalone-release-conformance` | 本地可靠动作；最小 step10/11 与 step16 | 评测回执、制品校验/更新/回退、数据流及支持矩阵齐备，授予限定独立生产 profile |
-| `managed-runner-enrollment` | step4 模型与 step5d 完成，受管 step6/7 切片 | 注册/投影/命令、断连过期/重连、ownership 与中心发布通过；授予限定受管 profile |
-
-每个 change 开始前指派实现 owner 和验收 owner，引用相应 SC/P/S 场景及现有修复证据。若一个 change 同时修改独立存储与授权边界，先拆兼容契约/存储，再实现策略/审批，再启用 profile，避免将基础设施迁移和生产放量绑在同一 PR。上述名称是建议，不表示本次已创建或授权实施。
-
-每个迭代的共同退出记录包括：基线/PR、迁移前后状态、支持的入口和部署组合、确定性负例与评测报告、故障与回退结果、未支持能力和接手 owner。没有真实业务数据时继续用技术基线；新增行业能力、训练/优化器或商业市场则需其具体需求和效果证据。
+新增工作优先拆为 step5e 执行验证、step7 最小治理与最小发布符合性；已有技术交付按证据复用。每个 change 指派实现与验收 owner，引用实际 SC/P/S 场景，记录迁移、故障、回退及未支持能力。授权边界、存储迁移和生产放量分别评审，不把全部迭代放入同一 change。
 
 ### 阶段能力门槛
 
 | 里程碑 | 覆盖步骤 | 退出条件 | 尚不承诺 |
 |---|---|---|---|
-| M-S：独立执行交付 | step1 增量、step2/3、step5a—5c；生产另需 step6/7 本地切片、最小 step10/11 与 step16 | I-Ba 证明干净安装和独立只读运行；I-Ca 另证明本地身份/审批、持久恢复/对账、制品更新与证据留存；分别授予技术预览和生产支持 | 完整管理平台功能、未单独认证的完全隔离网络/Python 嵌入方式；RAG/向量库均非前提 |
+| M-S：独立执行交付 | step1 增量、step2/3、step5a—5c；生产另需 step5e、step6/7 本地切片、最小 step10/11 与 step16 | I-Ba 证明干净安装和独立只读运行；I-Ca 另证明真实自主工具循环、结构化产物、Workflow/Agent 组合、本地身份/审批、预算/停止及持久恢复/对账、制品更新与证据留存；分别授予技术预览和生产支持 | 完整管理平台功能、未单独认证的完全隔离网络/Python 嵌入方式；RAG/向量库均非前提 |
 | M-A：跨执行后端的治理闭环 | step1—step8，辅以最小 step10/11/14 和分段 step16 | 先交付 I-Cb 的 builtin 受管闭环，再让自托管异构 Runtime 及真实托管 Agent 服务通过相同任务、权限、审批、发布与事件契约；托管组合有数据流/驻留判定、受控工具回执和会话对账，接入等级有旁路与隔离测试证据 | 任意后端无损状态迁移、跨企业或供应商内部动作的强制控制 |
 | M-B：可替换企业能力与发布 | step9—step11，按范围执行 step16 | Memory、完整 Knowledge 服务及组件化检索可替换；知识来源/索引/ACL/删除有证据，评测/观测可替换且发布组合固定；不同检索组合的逐样本与分组比较、引用正确性及失败定位通过；托管条件变化可重新准入，敏感 trace 受控；至少一个 Memory 和一个 Knowledge 组件可独立升级 | 所有后端高级能力完全一致、供应商内部状态可完整重建、所有外部 RAG 均提供内部阶段 trace |
 | M-C：企业内部团队协作 | step12—step14 | 跨 Runtime 团队完成任务，人类能够可靠观察和干预；成员变化不会继承私人 Connector 或越权读取共享数据 | 自由组队的无限 Agent 社会 |
@@ -1105,6 +921,9 @@ I-C 是 I-Ca 与 I-Cb 的集合：车商 App 可在 I-Ca 对应 profile 通过�
 
 | 场景 | 必须观察到的结果 | 首次落实 |
 |---|---|---|
+| 自主 Agent 多轮执行 | 真实模型依据工具结果选择后续动作并输出合格结构化产物；预算/取消可阻止新动作，审批后继续推理；固定工具计划与 Stub 不算该项通过 | step5e、step7、I-Ca |
+| 确定性 Workflow | 显式步骤/条件/失败策略决定流程转移；普通 LLM 节点无需自主工具循环，输出未通过业务条件不得推进 | step5e、step6 |
+| Workflow 与自主 Agent 组合 | 父子 Task/Run 和产物可关联；审批、双方重启及重复/迟到回调不重复副作用，子失败按父策略处理，已知结果不丢失 | step5e、step6/7、I-Ca |
 | SC：干净安装与无控制面冷启动 | 不安装完整 Hecate、不挂载源码或建平台管理表，仅按 profile 配置所需 adapter 即启动；管理服务从未连接且不可达仍完成只读执行 | step1 规格；step5b/5c、step16 |
 | SC：结构化库存读取与越权调用 | 通过模拟业务 API 读取授权数据域，跨域/伪造角色拒绝；生成建议不触发写入；无 Memory/RAG/向量库也能执行并留证据 | step5c；生产权限在 step7 |
 | SC：本地批准写入与重启 | 参数绑定、当前权限与审批均有效才执行；重启后等待/结果可恢复或对账，未知结果不重写；不依赖平台审批服务 | step6/7、I-Ca |
@@ -1167,72 +986,19 @@ I-C 是 I-Ca 与 I-Cb 的集合：车商 App 可在 I-Ca 对应 profile 通过�
 | 只升级 Memory 或 Gateway 的进程外实现 | Runtime、控制面与其他后端保持原版本；已绑定任务不被静默迁移，不兼容新绑定被拒绝 | step9、step16 |
 | 多语言 adapter 使用不同契约版本 | 按能力分别协商与测试；支持窗口内可并存，超出范围显式拒绝，不触发全平台同步升级 | step3、step16、step18 |
 
-共同质量指标：任务完成率、人工接管率、越权拒绝正确性、审批生效正确性、重复副作用次数、任务恢复时间、事件缺口、每任务成本及估算偏差。对比多 Agent 与单 Agent 时固定数据集、资源上限和完成标准。
+共同质量指标：任务完成率、人工接管率、授权/审批正确性、重复副作用、恢复时间、事件缺口、延迟、每任务成本及估算偏差。比较执行机制或单/多 Agent 时固定数据集、模型/prompt/工具及 evaluator 版本、资源上限与完成标准，预先声明阈值；分别报告真实模型质量与确定性安全断言。越权和重复副作用必须独立通过，不能以平均质量分抵消；未知成本保持未知。
 
-## 九、每个 change 的执行模板
+## 九、后续实施约定
 
-后续实施遵守仓库 OpenSpec 流程。本方案不是一次性执行授权；用户选择某一步后，为该步建立独立 proposal/design/specs/tasks。不要把所有步骤放进一个超大 change。
+后续实施按 [AGENTS.md](../../AGENTS.md) 执行，本方案不自动授权所有步骤。每个 change 聚焦一个可验收切片：
 
-### 开始前
-
-1. 读取该步依赖的验收证据和当前代码，不从本研究文档推断功能已经落地。
-2. 检查工作区和在途 change；通过项目工作流建立独立分支/worktree，不能在 main 修改。
-3. 用明确的 change 范围启动用户授权的 propose/apply 流程。`./scripts/opsx-flow.sh start <change-name>` 在 Git Bash/WSL 等可执行 Bash 的环境运行。
-4. 在 design 中写明所属子包、公开应用接口、数据/状态写入 owner、跨包调用、兼容窗口、默认开关、失败语义及回退方式。
-   涉及执行组件时另列发行包依赖闭包、独立/受管/完整平台模式、网络模式、本地授权与证据责任、离线陈旧窗口、技术预览与生产支持差异。新增 Runtime 扩展点必须写明第二实现或具名消费者。
-5. 在 tasks 中逐项列代码、迁移、测试、文档及支持矩阵，完成即更新。
-
-### 拆 PR 的顺序
-
-先契约与兼容类型，再增量 schema 和回填，再 adapter/服务，再 API/UI，再启用和清理。各 PR 保持一个目的；不可在删除旧路径的同一变更中首次上线未验证的新路径。
-
-### 验证与收尾
-
-- 开发期间运行受影响的契约/服务/权限/迁移测试，涉及 web 时执行 `web/package.json` 中适用的检查和构建。
-- 每个新增能力都检查跨子包 import 和表写入；不得因为仍在同一进程就绕过公开接口。已有违规依赖按记录的迁移步骤收敛，禁止新增同类依赖。
-- 推送前按仓库要求运行 `ruff check src/hecate/ tests/`、`ruff format --check src/ tests/`、`mypy src/` 和 `python -m pytest <affected dirs/files> -q`；完整测试套件由 CI 执行。若涉及抽取包，补该包的安装及测试矩阵；检查测试实际收集范围，跳过或扫描空目录不能当作通过证据。
-- 运行对应 OpenSpec 验证，保存契约测试和故障场景结果；没有证据不标 production。
-- 推送遵守用户显式批准规则，不绕过 hooks。
-- 合并后再按用户触发的 archive 流程归档，并检查 positioning、catalog、roadmap 与架构规则是否需要同步。
-- 将每一步的状态、change/PR、迁移结果、验收报告和未支持能力写入路线图。研究文档保留决策依据，不承担实时状态源。
-
-按 I-A → I-B/I-Ba → I-Ca 先交付业务 App 可独立消费且有治理、最小评测/发布和人工控制的任务闭环，再经 I-Cb 接入控制面；step3 同时用真实异构后端验证契约，正式外部接入认证在 I-D。之后独立推进 Memory/评估替换与团队协作，按第四节的实际依赖安排，不能把所有后端替换或自治理设为共同前置。
+- 开始前核对代码、在途工作和前置证据；设计明确包/状态 owner、公开接口、部署及依赖、失败语义、兼容窗口与回退。新增 Runtime 扩展点须有第二实现或具名消费者。
+- 先契约与增量迁移，再装配/入口，最后启用及旧路径退出；不在删除旧路径时首次上线未经验证的新路径。
+- 按变更范围验证契约、权限、安装、迁移和故障场景；检查实际测试收集与跳过范围，保存支持矩阵。推送、检查和归档遵守仓库规则。
+- 收尾同步关联功能清单、路线图与证据。本文保留决策、依赖和未完成门槛，详细修复过程留在 change/复核报告，避免继续膨胀。
 
 ## 十、研究依据及使用边界
 
-下列官方资料支持“跨框架治理、统一登记、身份与任务边界”的方向，但不证明任何产品可以不经适配直接替换 Hecate。所有产品能力在具体选型时应固定版本并重新核验；本方案的模块划分和步骤是对 Hecate 的设计建议。
+[企业 Agent 平台实践对照](agent-platform-practice-review.md)保存逐项目资料和选型依据；[实施基线](platform-evolution-baseline.md)、[独立消费基线](standalone-consumption-baseline.md)及各步骤复核报告保存 Hecate 的代码与运行证据。供应商资料用于发现候选能力，选型时重新核验版本、许可、数据处理和实际控制范围，不能直接转为 Hecate 的生产认证。
 
-### 本轮重新核验的实践与架构裁决
-
-本轮选择与架构决策直接相关的官方资料复核，不将前次全部竞品对照表标为已再次验证。结论是多种执行方式会并存，Hecate 应保持可组合的企业治理边界；这是一项设计判断，不是对某种技术未来市场份额的预测。
-
-| 官方实践 | 对 Hecate 的具体裁决 | 对应交付 |
-|---|---|---|
-| [AWS AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) 支持不同框架和模型的 Agent/工具托管 | 保留执行后端适配层，内置 Runtime 是参考实现；不以重写内置引擎获得跨框架支持 | step3/5/8 的共同契约与真实替换 |
-| [OpenAI Agents API 架构](https://developers.openai.com/api/docs/guides/agents-api/architecture) 将托管 harness 与环境选择分离 | 控制平台 Task/Run 和受保护资源入口；分别认证会话、环境、内部工具和企业网关能力，不把托管运行框架当成只有模型 API | step4/7/8/11 的双轴登记及证据 |
-| [Google Agent Identity](https://docs.cloud.google.com/gemini-enterprise-agent-platform/govern/agent-identity-overview) 将 Agent 身份与鉴权管理、Gateway 和凭据能力连接 | 独立建模 Agent principal、工作负载身份、委派与目标资源授权；仅有用户 JWT 或 Agent Card 签名不够 | step4/7 的身份链和动作授权 |
-| [MCP 授权规范草案](https://modelcontextprotocol.io/specification/draft/basic/authorization) 明确受众与 token 使用边界 | 不把协议接通当作企业授权；入口验证目标受众，出站资源使用独立作用域凭据，版本在 adapter 中固定。草案变化不自动成为生产升级要求 | G1、step7/8/18 的协议准入与版本测试 |
-| [Anthropic Agent 评测实践](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) 区分轨迹与环境实际结果，评测 harness 与模型组合 | 从首个迭代就检查真实工具状态、权限负例和恢复结果；固定组合及 evaluator 版本；线上 trace 和 Agent 自称成功不能替代验收 | step1 基线、I-C 发布门禁、step10 扩展 |
-
-因此本轮不新增竞品功能大清单，而将可替换边界、真实副作用保证、组合发布和持续评测作为近期投入重点。自建完整训练、通用 IDE、完整推理运维、公开商业市场继续按第六节边界处理。
-
-### 延续使用的参考资料
-
-逐项目对照、官方证据及与本方案的裁决见 [企业 Agent 平台实践对照](agent-platform-practice-review.md)。该对照覆盖本轮指定的企业平台、harness、工作台与应用构建产品，并区分官方产品能力声明和 Hecate 的实施推论。
-
-- [Microsoft Agent 365 overview](https://learn.microsoft.com/en-us/microsoft-agent-365/overview)：将观察、治理、安全及生命周期管理作为企业 Agent 控制面的职责，支持本方案的定位选择。
-- [Google Agent Registry overview](https://docs.cloud.google.com/agent-registry/overview)：统一登记 Agent、MCP、Skill、Endpoint 和 Publisher，支持把内部目录与治理绑定。
-- [AWS AgentCore FAQ](https://aws.amazon.com/bedrock/agentcore/faqs/)：不同框架/模型与身份、授权委派等平台能力可以分离，支持后端与治理边界的设计。
-- [A2A specification](https://a2a-protocol.org/latest/specification/)：任务、消息、产物和取消等协议能力；取消请求并不保证成功，因此平台不能把所有外部后端视为强控制运行时。
-- [MCP security best practices](https://modelcontextprotocol.io/docs/draft/tutorials/security/security_best_practices)：令牌、代理与网络访问边界，适用于工具治理和外部资源接入设计。
-- [LangSmith OpenTelemetry integration](https://docs.langchain.com/langsmith/trace-with-opentelemetry)：标准观测接入是可替换性的一个路径；不替代平台授权和企业审计责任。
-- [LangSmith evaluation types](https://docs.langchain.com/langsmith/evaluation-types)：区分发布前离线评测与生产中的线上评测，支持本方案对两种评测流程分别建模。
-- [Pi](https://github.com/earendil-works/pi)、[Mem0](https://github.com/mem0ai/mem0)：仅作为运行时/记忆适配验证的候选示例。平台模型、配置字段、Feature ID 和验收不能绑定这些品牌。
-- [OpenSandbox 架构](https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/architecture/index.md)与[生命周期 API](https://github.com/opensandbox-group/OpenSandbox/blob/main/specs/sandbox-lifecycle.yml)：生命周期与执行接口可独立于具体隔离后端；用于验证 SandboxProvider 的边界，不将其协议或产品指定为唯一实现。
-- [Daytona 生命周期](https://www.daytona.io/docs/sandboxes)与[持久化](https://www.daytona.io/docs/en/persistence/)：区分环境暂停/停止/归档和外部持久数据；支持本方案对工作区、快照与产物分别建模。具体恢复保证仍由后端能力测试确定。
-- [OpenShell 凭据管理](https://github.com/NVIDIA/OpenShell/blob/main/docs/how-it-works/providers/overview.mdx):网络许可与凭据目标绑定分别校验，支持将凭据代理和环境出口作为独立强制边界。
-- [AgentCore Code Interpreter 会话管理](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/code-interpreter-session-characteristics.html)：隔离会话、超时与回收说明，支持为环境定义明确生命周期；不将供应商隔离声明自动认定为 Hecate 已验证的部署保证。
-- [OpenAI Agents API 架构](https://developers.openai.com/api/docs/guides/agents-api/architecture)与[执行方式对比](https://developers.openai.com/api/docs/guides/agents)：托管 harness 持有模型/工具循环及会话，而 Sandbox 可单独选择；自托管循环与托管循环是不同的执行方式，不应把环境位置当成会话位置。
-- [OpenAI Agents API 数据限制](https://developers.openai.com/api/docs/guides/agents-api/overview)、[Sandbox 安全说明](https://developers.openai.com/api/docs/guides/agents-api/environments/security)与[观测/用量](https://developers.openai.com/api/docs/guides/agents-api/observability)：提供当前试点的数据驻留、MCP 连接来源、事件及用量核验依据；这些供应商条件可能变化，选型时须重新核验，不作为平台通用保证。
-
-首次应证明的产品能力是：企业分别用内置、自托管异构 Runtime 和一个真实托管 Agent 服务，结合自己选择的 Memory 与评估系统完成同一受控任务；身份、权限、审批、产物与审计规则保持一致，同时如实标注各后端不能提供的控制和数据保证。通过这个闭环后，再扩大后端数量和生态范围。
+本次决策保留技术中立接入，同时明确内置默认执行能力的产品责任；Agent/Workflow 分别定义行为与状态，内部是否共用 Pregel 由 step5e 的证据决定。首次交付以 I-Ca 的内置独立闭环为准，外部执行、Memory/Knowledge 替换和团队协作按对应切片扩展。
