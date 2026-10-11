@@ -389,6 +389,8 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 
 **目标：**先完成内置执行与独立宿主必需的身份、动作授权、审批、凭据及预算闭环，与 step5e 并行。受管断连策略随 I-Cb 验证；新协议及外部 Agent 集成暂缓，先验证主流程与已有入口。
 
+**状态：本地治理切片已交付（#245，change `runtime-independent-governance`，含评审修复与 CI 修复）：统一受控动作边界贯通平台与独立宿主（readonly 不豁免）、审批绑定与本地审批权威、本地 policy profile 与撤销、预算预留/结算与凭据引用、SC03 场景翻转为 implemented 并登记支持矩阵。受管授权租约 profile 认证（I-Cb）、Sandbox 包装与旁路封闭验证、真实模型多轮验收（step5e）仍开放；交付范围与未验证项见该 change 的 support-matrix.md 与四份新主 spec。**
+
 **操作：**
 
 - [ ] 复用已加固的认证入口，补 `actor / agent_principal / on_behalf_of / delegation_id`；主体和 workspace 来自验证后的服务端上下文。
