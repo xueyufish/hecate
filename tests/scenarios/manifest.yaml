@@ -238,22 +238,26 @@ sc_scenarios:
   - id: SC03
     title: 本地批准写入与重启
     run_mode: standalone
-    status: planned
+    status: implemented
     tier: 1
-    responsible_step: 6/7
-    blocked_by: standalone-durable-actions
-    implemented_slices: [wheel_process_restart, terminal_write_persistence, approval_wait_process_restart, ledger_backfill_no_redo]
+    responsible_step: 6/7（step7 本地切片见 test_sc03_local_governance.py；受管认证归 I-Cb）
     gaps: >-
-      Owner/token wake is a technical waiting primitive. Independent approval
-      authority, separation of duties and parameter-bound business permission
-      remain step7 work; interrupted external writes and PostgreSQL process
-      acceptance remain step6 closure gates.
+      step7 交付了本地审批权威（本地登记审批主体签发、durable 持久化、重启后
+      消费状态保持）、参数/主体/期限绑定的重新判定、跨主体拒绝、readonly 撤销
+      生效、时钟回拨拒绝依赖期限动作、回执写失败待对账与并发去重（tests/
+      scenarios/test_sc03_local_governance.py）。真实模型多轮验收归 step5e；
+      受管断连授权租约的 policy profile 认证归 I-Cb；完全隔离网络 profile
+      归 step11/16 单独认证。
     assertions: >-
       The protected write executes only with valid parameter binding, current
       permission, and approval; after restart the wait/result is recoverable
       or reconciled, unknown results are never rewritten, and no platform
-      approval service is involved. Process-level: wheel clean install, hard
-      kill + restart over the same database, business-side call counting.
+      approval service is involved. step7: the approval binds subject,
+      parameters, expiry and one-time consumption; parameter changes or
+      subject mismatches re-judge; readonly dispatches pass authorization and
+      local revocation; untrustworthy time rejects expiry-dependent actions;
+      duplicate invocations execute once. Process-level: wheel clean install,
+      hard kill + restart over the same database, business-side call counting.
   - id: SC04
     title: 受管断连与授权过期
     run_mode: managed

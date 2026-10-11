@@ -21,6 +21,8 @@ in-memory-only grants collapse to ``ONCE``.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,6 +38,20 @@ from hecate_runtime.tool_access import (
 )
 
 
+def approval_arguments_digest(arguments: dict | None) -> str:
+    """Canonical SHA-256 over the tool arguments minus the call handle.
+
+    The digest pins scope-cached approvals to the exact parameters they
+    authorize: a replay with the same ``tool_call_id`` but changed arguments
+    misses the cache and re-judges instead of silently reusing the grant.
+    Excluding ``tool_call_id`` keeps the digest stable for the same logical
+    arguments across retries of one call.
+    """
+    payload = {k: v for k, v in (arguments or {}).items() if k != "tool_call_id"}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=repr)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 @dataclass
 class _GrantedDecision:
     """Internal record of a granted approval — kept in memory for once-only
@@ -47,7 +63,9 @@ class _GrantedDecision:
     scope: ApprovalScope
     tool_call_id: str
     tool_name: str
+    arguments_digest: str = ""
     consumed: bool = False
+    approval_ref: str | None = None
 
 
 async def rebuild_approval_projection(
@@ -187,14 +205,18 @@ class FailingClosedApprovalCallback(ApprovalCallback):
             # SESSION+/PROJECT/GLOBAL cache lookup: a durable grant (one
             # backed by an APPROVAL_DECIDED event) lets the same tool run
             # again without re-asking. Lookup key includes the scope's
-            # anchor (session_id / workspace_id) + tool_name + tool_call_id.
-            scope_key = self._scope_anchor_key(tool_name, tool_call_id)
+            # anchor (session_id / workspace_id) + tool_name + tool_call_id
+            # + the arguments digest — a parameter change re-judges instead
+            # of replaying the grant (approval binding, step7).
+            arguments_digest = approval_arguments_digest(arguments)
+            scope_key = self._scope_anchor_key(tool_name, tool_call_id, arguments_digest)
             scoped_cached = self._granted.get(scope_key)
             if scoped_cached is not None and scoped_cached.approved:
                 decision = ApprovalDecision(
                     approved=True,
                     reason=scoped_cached.reason,
                     scope=scoped_cached.scope,
+                    approval_ref=scoped_cached.approval_ref,
                 )
             else:
                 try:
@@ -208,14 +230,17 @@ class FailingClosedApprovalCallback(ApprovalCallback):
 
                 if inner.approved and inner.scope != ApprovalScope.ONCE:
                     # Durable SESSION+/PROJECT/GLOBAL grants cache for replay
-                    # within their anchor (session / project / global).
+                    # within their anchor (session / project / global), pinned
+                    # to the parameter digest they were granted for.
                     self._granted[scope_key] = _GrantedDecision(
                         approved=True,
                         reason=inner.reason,
                         scope=inner.scope,
                         tool_call_id=tool_call_id,
                         tool_name=tool_name,
+                        arguments_digest=arguments_digest,
                         consumed=False,
+                        approval_ref=inner.approval_ref,
                     )
                 decision = inner
 
@@ -229,6 +254,7 @@ class FailingClosedApprovalCallback(ApprovalCallback):
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
                 consumed=True,
+                approval_ref=decision.approval_ref,
             )
 
         await self._emit(
@@ -238,24 +264,26 @@ class FailingClosedApprovalCallback(ApprovalCallback):
                 "approved": decision.approved,
                 "reason": decision.reason,
                 "scope": decision.scope.value,
+                "arguments_digest": approval_arguments_digest(arguments),
+                "approval_ref": decision.approval_ref,
                 "log_schema_version": 2,
             },
         )
         return decision
 
-    def _scope_anchor_key(self, tool_name: str, tool_call_id: str) -> str:
+    def _scope_anchor_key(self, tool_name: str, tool_call_id: str, arguments_digest: str = "") -> str:
         """Build a session-/project-/global-scoped cache key.
 
-        The key includes the tool name + tool_call_id and the scope anchor
-        (session_id for SESSION, workspace_id for PROJECT, ``global`` for
-        GLOBAL). Without an event-store-backed durable record, in-memory
-        grants collapse to ONCE semantics.
+        The key includes the tool name + tool_call_id + the arguments digest
+        and the scope anchor (session_id for SESSION, workspace_id for
+        PROJECT, ``global`` for GLOBAL). Without an event-store-backed
+        durable record, in-memory grants collapse to ONCE semantics.
         """
         if self.session_id is not None:
-            return f"session:{self.session_id}:{tool_name}:{tool_call_id}"
+            return f"session:{self.session_id}:{tool_name}:{tool_call_id}:{arguments_digest}"
         if self.workspace_id is not None:
-            return f"project:{self.workspace_id}:{tool_name}:{tool_call_id}"
-        return f"global:{tool_name}:{tool_call_id}"
+            return f"project:{self.workspace_id}:{tool_name}:{tool_call_id}:{arguments_digest}"
+        return f"global:{tool_name}:{tool_call_id}:{arguments_digest}"
 
     async def _delegate_inner(
         self,
@@ -280,4 +308,4 @@ class FailingClosedApprovalCallback(ApprovalCallback):
         )
 
 
-__all__ = ["FailingClosedApprovalCallback"]
+__all__ = ["FailingClosedApprovalCallback", "approval_arguments_digest"]

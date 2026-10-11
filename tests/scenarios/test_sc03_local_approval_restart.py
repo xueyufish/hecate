@@ -139,8 +139,11 @@ def test_sc03_approval_wait_survives_kill_then_wakes_once(tmp_path):
         token = waiting["wait"]["wait_token"]
         runner = runner.restart(kill_previous=True)
         assert runner.request("GET", f"/runs/{run_id}")[1]["status"] == "waiting_approval"
+        approval_ref = runner.approve_wait(token, "sc03-authority")
         status, receipt = runner.request(
-            "POST", f"/runs/{run_id}/resume", {"command_id": "sc03-approval", "wait_token": token}
+            "POST",
+            f"/runs/{run_id}/resume",
+            {"command_id": "sc03-approval", "wait_token": token, "approval_ref": approval_ref},
         )
         assert status == 202 and receipt["state"] == "applied"
         status, tasks = runner.request("GET", "/tasks")
@@ -152,9 +155,11 @@ def test_sc03_approval_wait_survives_kill_then_wakes_once(tmp_path):
         reads = [call for call in calls if "quantity" not in call["arguments"]]
         assert len(reads) == 1
         assert (
-            runner.request("POST", f"/runs/{run_id}/resume", {"command_id": "sc03-approval", "wait_token": token})[1][
-                "state"
-            ]
+            runner.request(
+                "POST",
+                f"/runs/{run_id}/resume",
+                {"command_id": "sc03-approval", "wait_token": token, "approval_ref": approval_ref},
+            )[1]["state"]
             == "applied"
         )
         runner = runner.restart(kill_previous=True)

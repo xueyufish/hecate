@@ -12,7 +12,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel as PydanticBase
 from pydantic import ConfigDict, Field, computed_field
-from sqlalchemy import Boolean, DateTime, Float, Index, String
+from sqlalchemy import Boolean, DateTime, Float, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from hecate.models.base import BaseModel
@@ -87,6 +87,42 @@ class QuotaUsageModel(BaseModel):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         nullable=False, default=uuid.UUID("00000000-0000-0000-0000-000000000000")
     )
+
+
+class QuotaReservationModel(BaseModel):
+    """Per-invocation budget reservation (step7).
+
+    One open reservation per ``invocation_key`` (partial unique index over
+    unreleased/unsettled rows). Lifecycle: reserved → released (pre-dispatch
+    failure / clean cancel) | settled (actual usage) | held (unknown outcome,
+    kept until reconciliation). Settlement is idempotent per key; late
+    revisions merge into the same usage entry.
+    """
+
+    __tablename__ = "quota_reservations"
+    __table_args__ = (
+        Index(
+            "uq_quota_reservations_open",
+            "invocation_key",
+            unique=True,
+            sqlite_where=text("released = 0 AND settled = 0"),
+            postgresql_where=text("released = 0 AND settled = 0"),
+        ),
+        Index("ix_quota_reservations_scope", "resource_type", "scope", "scope_id"),
+    )
+
+    invocation_key: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    resource_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    scope_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    window_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    units: Mapped[float] = mapped_column(Float, nullable=False)
+    released: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    settled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    unknown_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    settled_units: Mapped[float | None] = mapped_column(Float, nullable=True)
+    usage_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class QuotaCreateSchema(PydanticBase):

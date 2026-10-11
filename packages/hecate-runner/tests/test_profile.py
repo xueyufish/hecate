@@ -237,3 +237,20 @@ def test_external_schema_refs_fail_startup_without_network(tmp_path, _shutdown_e
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ProfileError, match="internal references only"):
         load_profile(profile_dir)
+
+
+def test_plaintext_secret_in_runner_config_rejected(tmp_path, monkeypatch):
+    """step7 4.3 — an inline secret-shaped field in runner.json fails startup
+    with an explicit ProfileError; no degraded start, no silent acceptance."""
+    import json
+
+    from conftest_runner import write_profile
+
+    monkeypatch.setenv("RUNNER_SHUTDOWN_TOKEN", "shutdown")
+    profile_dir = write_profile(tmp_path, with_write_tool=True)
+    config_path = profile_dir / "runner.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["model"] = {"backend": "stub", "api_key": "sk-inline-plaintext"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ProfileError, match="plaintext secret"):
+        load_profile(profile_dir)

@@ -14,7 +14,7 @@ from typing import Any
 
 from hecate_runtime.security.guardrail_assembly import GuardrailBundle, tool_rule_from_policy_row
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 async def assemble_guardrails(
@@ -111,7 +111,7 @@ async def assemble_guardrails(
 
     from hecate_runtime.security.guardrail_assembly import assemble_guardrails as kernel_assemble
 
-    return await kernel_assemble(
+    bundle = await kernel_assemble(
         rules=rules,
         guardrail_config=guardrail_config,
         event_store=event_store,
@@ -121,3 +121,22 @@ async def assemble_guardrails(
         workspace_id=workspace_id,
         agent_id=agent_id,
     )
+
+    from hecate.enterprise.approval_binding import AuthorityBackedApprovalCallback
+    from hecate.enterprise.governance_ledgers import SqlApprovalLedger
+
+    previous = bundle.approval_callback
+    callback = AuthorityBackedApprovalCallback(
+        authority=SqlApprovalLedger(db, session_factory=async_sessionmaker(db.bind, expire_on_commit=False)),
+        event_store=event_store,
+        session_id=session_id,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+        identity={
+            "actor": str(user_id) if user_id else (f"agent:{agent_id}" if agent_id else ""),
+            "agent_principal": str(agent_id) if agent_id else None,
+        },
+    )
+    callback._inner_backend = getattr(previous, "_inner_backend", None)
+    bundle.approval_callback = callback
+    return bundle

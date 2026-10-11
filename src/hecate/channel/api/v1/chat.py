@@ -351,6 +351,20 @@ async def _process_chat(
     elif agent_uuid is not None:
         parsed_agent_id = str(agent_uuid)
 
+    from hecate.core.composition.governance import (
+        GovernedModelService,
+        GovernedToolRegistry,
+        build_platform_governance,
+    )
+
+    governance = build_platform_governance(
+        db,
+        workspace_id=workspace_id or (agent.workspace_id if agent else None),
+        agent_id=agent.id if agent else None,
+        identity={"actor": str(user_id), "agent_principal": str(agent.id) if agent else None},
+    )
+    call_llm = GovernedModelService(llm_service, governance)
+
     # Guardrail bundle (T0.2): assembled once and shared by both paths —
     # the direct loop and, when CHAT_TOOL_LOOP_ENGINE_ENABLED, the Pregel
     # engine ToolWorker. Reads the agent's guardrail_config and the
@@ -362,13 +376,14 @@ async def _process_chat(
         bundle = await assemble_guardrails(
             db,
             workspace_id=workspace_id,
-            agent_id=parsed_agent_id if isinstance(parsed_agent_id, uuid.UUID) else None,
+            agent_id=agent.id if agent is not None else None,
             guardrail_config=getattr(agent, "guardrail_config", None) if agent else None,
             event_store=event_store,
             session_id=uuid.UUID(request.session_id) if request.session_id else None,
             # 9.10 wiring: the scanner reaches the output/tool-result hooks,
             # so the documented 3-point scanning actually runs in the chain.
             dlp_scanner=dlp_scanner,
+            user_id=user_id,
         )
 
     # B1b convergence (step5d routing): the effective path resolves per
@@ -399,6 +414,7 @@ async def _process_chat(
             skill_ref_manifest=getattr(agent, "_resolved_ref_manifest", None),
             workspace_id=agent.workspace_id if agent is not None else workspace_id or uuid.UUID(int=0),
         )
+        tool_registry = GovernedToolRegistry(tool_registry, governance)
         provider_cfg = await _get_provider_config(db, effective_model)
         if request.stream:
             return StreamingResponse(
@@ -412,6 +428,7 @@ async def _process_chat(
                     session_id=request.session_id,
                     timeout=provider_cfg.get("timeout"),
                     num_retries=provider_cfg.get("num_retries"),
+                    model_service=call_llm,
                     access_policy=bundle.access_policy,
                     tool_rules=bundle.rules,
                     approval_callback=bundle.approval_callback,
@@ -433,6 +450,7 @@ async def _process_chat(
             session_id=request.session_id,
             timeout=provider_cfg.get("timeout"),
             num_retries=provider_cfg.get("num_retries"),
+            model_service=call_llm,
             access_policy=bundle.access_policy,
             tool_rules=bundle.rules,
             approval_callback=bundle.approval_callback,
@@ -481,7 +499,19 @@ async def _process_chat(
             workspace_id=agent.workspace_id if agent is not None else workspace_id or uuid.UUID(int=0),
         )
 
-        port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
+        port = create_runtime_port(
+            db,
+            llm_service,
+            tool_registry=tool_registry,
+            workspace_id=workspace_id or (agent.workspace_id if agent is not None else None),
+            agent_id=agent.id if agent is not None else None,
+            identity={
+                # Verified entry identity: subject from the server-side auth
+                # context, agent attribution from the resolved agent row.
+                "actor": str(user_id),
+                "agent_principal": str(agent.id) if agent is not None else None,
+            },
+        )
 
         # step5d: the entry service owns assembly + Task/Run correlation;
         # this module keeps protocol adaptation only.
@@ -670,11 +700,12 @@ async def _process_chat(
                 request.tools,
                 timeout=provider_cfg.get("timeout"),
                 num_retries=provider_cfg.get("num_retries"),
+                model_service=call_llm,
             ),
             media_type="text/event-stream",
         )
 
-    response = await llm_service.chat(
+    response = await call_llm.chat(
         messages=msg_dicts,
         model=effective_model,
         tools=request.tools,
@@ -778,13 +809,14 @@ async def _stream_chat(
     tools: list | None,
     timeout: float | None = None,
     num_retries: int | None = None,
+    model_service: Any = None,
 ):
     """Stream chat completion chunks via LiteLLM (simple passthrough).
 
     Yields:
         str: SSE-formatted chunks.
     """
-    async for chunk in llm_service.chat_stream(
+    async for chunk in (model_service or llm_service).chat_stream(
         messages=messages,
         model=model,
         tools=tools,
@@ -859,6 +891,20 @@ async def _execute_tool_calls(
         Independent for each call so the outer caller can dispatch all calls
         concurrently (see ``asyncio.gather`` below).
         """
+        tool_context: dict[str, Any] = {
+            "session_id": session_id or "",
+            "invocation_id": f"chat:{session_id or id(tool_registry)}:{tc.get('id') or uuid.uuid4()}",
+        }
+        if hasattr(tool_registry, "completed_result"):
+            try:
+                replayed, result = await tool_registry.completed_result(
+                    tc["name"], tc.get("arguments") or {}, tool_context
+                )
+                if replayed:
+                    return {"tool_call_id": tc["id"], "result": result, "is_error": False}
+            except Exception as exc:
+                return {"tool_call_id": tc["id"], "result": str(exc), "is_error": True}
+        approval_ref = None
         # Path-A guardrail evaluation (T0.2): same five-layer policy the
         # ToolWorker uses, kept consistent with the production chat surface.
         if access_policy is not None:
@@ -933,8 +979,9 @@ async def _execute_tool_calls(
                     tool_name=tc_name,
                     arguments=tc_args,
                     risk_level=risk_level,
-                    context={"session_id": session_id or ""},
+                    context={"session_id": session_id or "", "tool_call_id": tc_id},
                 )
+                approval_ref = approval.approval_ref
                 if not approval.approved:
                     if denial_tracker is not None and tc_id:
                         denial_tracker.deny(tc_id)
@@ -943,7 +990,7 @@ async def _execute_tool_calls(
                         "result": f"Tool call rejected: {approval.reason}",
                         "is_error": True,
                     }
-        tool_context: dict[str, Any] = {"session_id": session_id or ""}
+        tool_context.update({"approval_ref": approval_ref, "tool_policy_rules": tool_rules or []})
         if agent_id is not None:
             tool_context["agent_id"] = str(agent_id)
         if workspace_id is not None:
@@ -977,6 +1024,7 @@ async def _chat_with_tools(
     session_id: str | None = None,
     timeout: float | None = None,
     num_retries: int | None = None,
+    model_service: Any = None,
     max_iterations: int = 5,
     access_policy: Any | None = None,
     tool_rules: list | None = None,
@@ -997,7 +1045,7 @@ async def _chat_with_tools(
     """
     current_messages = list(messages)
     for _ in range(max_iterations):
-        response = await llm_service.chat(
+        response = await (model_service or llm_service).chat(
             messages=current_messages,
             model=model,
             tools=tools,
@@ -1043,6 +1091,7 @@ async def _stream_chat_with_tools(
     session_id: str | None = None,
     timeout: float | None = None,
     num_retries: int | None = None,
+    model_service: Any = None,
     max_iterations: int = 5,
     access_policy: Any | None = None,
     tool_rules: list | None = None,
@@ -1064,7 +1113,7 @@ async def _stream_chat_with_tools(
     for _ in range(max_iterations):
         tool_calls_buffer: list[dict[str, Any]] = []
         content_buffer: list[str] = []
-        async for chunk in llm_service.chat_stream(
+        async for chunk in (model_service or llm_service).chat_stream(
             messages=current_messages,
             model=model,
             tools=tools,

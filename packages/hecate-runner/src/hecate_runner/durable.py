@@ -233,6 +233,7 @@ class DurableRuntime:
         task_ref: BackendRef,
         wait_token: str,
         input_payload: dict[str, Any] | None = None,
+        approval_ref: str | None = None,
         expires_at: str | None = None,
         run_ref: BackendRef | None = None,
         input_validator: Callable[[dict], None] | None = None,
@@ -258,6 +259,8 @@ class DurableRuntime:
         current_run = run_ref or self.store.run_for_task(task_ref)
         expected_payload = {"input": input_payload} if input_payload is not None else {}
         expected_detail = {"wait_token": wait_token}
+        if approval_ref:
+            expected_detail["approval_ref"] = approval_ref
         existing = self.store.get(command_id)
         if existing is not None:
             if (
@@ -302,6 +305,7 @@ class DurableRuntime:
                     task_ref=task_ref,
                     wait_token=wait_token,
                     input_payload=input_payload,
+                    approval_ref=approval_ref,
                     expires_at=expires_at,
                     run_ref=current_run,
                     input_validator=input_validator,
@@ -380,10 +384,16 @@ class DurableRuntime:
         # the recorded approval; the new attempt's dispatch boundary
         # consumes it instead of re-parking. The waiting tool receives a new
         # action key; completed predecessors retain their original keys.
+        # step7 3.3: the grant carries the approval reference the wake was
+        # justified with; the dispatch boundary validates it against the
+        # approval authority before the protected action may proceed.
         merged["_wake_grant"] = {
             "tool": tool,
             "arguments_digest": tool_arguments_digest(arguments),
         }
+        approval_ref = approval_ref or (input_payload or {}).get("approval_ref")
+        if isinstance(approval_ref, str) and approval_ref:
+            merged["_wake_grant"]["approval_ref"] = approval_ref
         if input_validator is not None:
             try:
                 input_validator({key: value for key, value in merged.items() if not key.startswith("_")})
@@ -681,6 +691,11 @@ async def record_outcome_async(
         "conflict": "failed",
         "needs_review": "failed",
         "reconciliation_required": "unknown",
+        # step7 2.5: schema-invalid dispatches never reached the business
+        # API (terminal failure); off-contract results leave the outcome
+        # unknown and reconcile.
+        "schema_invalid": "failed",
+        "output_invalid": "unknown",
     }.get(str(status), "failed")
     detail = outcome.get("detail") or outcome.get("result")
     try:

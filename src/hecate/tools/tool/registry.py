@@ -62,6 +62,26 @@ class ToolRegistry:
         self._workspace_id = workspace_id
         self._builtin_names: set[str] = set(BUILTIN_TOOL_DEFINITIONS.keys())
 
+    async def describe(self, name: str) -> dict[str, Any]:
+        """Resolve trusted tool metadata and schemas in this registry's scope."""
+        if name in self._builtin_names:
+            return {"name": name, "source": "builtin", **BUILTIN_TOOL_DEFINITIONS[name]}
+        query = select(ToolModel).where(ToolModel.name == name, ~ToolModel.deleted)
+        if self._workspace_id is not None:
+            query = query.where(ToolModel.workspace_id == self._workspace_id)
+        tool = (await self._db.execute(query)).scalar_one_or_none()
+        if tool is None:
+            raise ValueError(f"Tool '{name}' not found")
+        return {
+            "name": name,
+            "source": tool.source,
+            "risk_level": tool.risk_level,
+            "approval_required": tool.approval_required,
+            "sandbox_enabled": tool.sandbox_enabled,
+            "parameters": tool.parameters,
+            "returns": tool.returns,
+        }
+
     async def execute(
         self,
         name: str,

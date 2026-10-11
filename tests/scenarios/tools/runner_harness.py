@@ -38,8 +38,13 @@ def uv_available() -> bool:
     return shutil.which("uv") is not None
 
 
-def _build_wheels(dist_dir: Path) -> tuple[Path, Path, Path]:
-    for package in ("hecate-runtime", "hecate-durable", "hecate-runner"):
+def _build_wheels(dist_dir: Path) -> tuple[Path, Path, Path, Path]:
+    for package in (
+        "hecate-runtime",
+        "hecate-governance",
+        "hecate-durable",
+        "hecate-runner",
+    ):
         result = subprocess.run(
             ["uv", "build", "--package", package, "--out-dir", str(dist_dir)],
             check=False,
@@ -51,13 +56,14 @@ def _build_wheels(dist_dir: Path) -> tuple[Path, Path, Path]:
             diagnostics = (result.stderr or result.stdout).decode("utf-8", errors="replace")
             raise RuntimeError(f"wheel build failed for {package}: {diagnostics}")
     runtime_wheel = next(dist_dir.glob("hecate_runtime-*.whl"))
+    governance_wheel = next(dist_dir.glob("hecate_governance-*.whl"))
     durable_wheel = next(dist_dir.glob("hecate_durable-*.whl"))
     runner_wheel = next(dist_dir.glob("hecate_runner-*.whl"))
-    return runtime_wheel, durable_wheel, runner_wheel
+    return runtime_wheel, governance_wheel, durable_wheel, runner_wheel
 
 
-def ensure_wheels(dist_dir: Path) -> tuple[Path, Path, Path]:
-    """Build the three wheels into ``dist_dir`` once; reuse existing artifacts.
+def ensure_wheels(dist_dir: Path) -> tuple[Path, Path, Path, Path]:
+    """Build the wheels into ``dist_dir`` once; reuse existing artifacts.
 
     Scenario modules share one build across their process tests (serial
     builds; see the SC03 precedent) while each test keeps its own venv,
@@ -67,9 +73,10 @@ def ensure_wheels(dist_dir: Path) -> tuple[Path, Path, Path]:
     if not list(dist_dir.glob("hecate_runner-*.whl")):
         _build_wheels(dist_dir)
     runtime_wheel = next(dist_dir.glob("hecate_runtime-*.whl"))
+    governance_wheel = next(dist_dir.glob("hecate_governance-*.whl"))
     durable_wheel = next(dist_dir.glob("hecate_durable-*.whl"))
     runner_wheel = next(dist_dir.glob("hecate_runner-*.whl"))
-    return runtime_wheel, durable_wheel, runner_wheel
+    return runtime_wheel, governance_wheel, durable_wheel, runner_wheel
 
 
 def _write_profile(
@@ -125,6 +132,12 @@ def _write_profile(
         "model": {"backend": "stub"},
         "tool_allowlist": tools,
         "shutdown_token_ref": "env:RUNNER_SHUTDOWN_TOKEN",
+        "governance": {
+            "rules": [{"tool": tool, "domains": ["domain_a", "domain_b", "domain_fail"]} for tool in tools],
+            "approvers": ["scenario-approver"],
+            "write_enablement": "experimental",
+            "write_attestation": "scenario business API enforces final actor/domain authorization",
+        },
     }
     if durable is not None:
         config["durable"] = durable
@@ -244,6 +257,49 @@ class RunnerInstance:
             time.sleep(0.2)
         return self.request("GET", f"/runs/{run_id}")
 
+    def approve_wait(self, wait_token: str, approval_ref: str) -> str:
+        """Sign the exact persisted waiting action through the installed authority."""
+        script = r"""
+import asyncio, json, sys
+from datetime import UTC, datetime
+from pathlib import Path
+from hecate_durable.storage import SqlDurableStore
+from hecate_governance.action import target_resources_for, tool_arguments_digest
+from hecate_governance.approval import ApprovalBinding
+from hecate_governance.principal import ActionPrincipal, PrincipalSource
+from hecate_runner.local_approvals import DurableLocalApprovalLedger
+from hecate_runner.managed import managed_principal_for
+config = json.loads((Path(sys.argv[1]) / "runner.json").read_text())
+store = SqlDurableStore(config["durable"]["database_url"])
+record = next(r for r in store.list_tasks() if ((r.extra or {}).get("wait") or {}).get("wait_token") == sys.argv[2])
+wait = record.extra["wait"]
+inputs = store.get_task_input(record.task_ref) or {}
+trusted = inputs.get("_host_identity") or {}
+control = config.get("control_plane") or {}
+actor = trusted.get("principal") or managed_principal_for(control["trust_root"])
+domains = tuple(trusted.get("domains") or control.get("data_domains") or ())
+tool = wait["contract_ref"]["tool"]
+raw = inputs.get("tool_arguments") or {}
+arguments = raw.get(tool) if isinstance(raw.get(tool), dict) else raw
+principal = ActionPrincipal.from_verified_claims({"sub": actor}, source=PrincipalSource.RUNNER_LOCAL, domains=domains)
+ledger = DurableLocalApprovalLedger(store.session_factory)
+async def sign():
+    if await ledger.get(sys.argv[3]) is None:
+        await ledger.save(ApprovalBinding(approval_ref=sys.argv[3], principal_fingerprint=principal.fingerprint(),
+            tool_name=tool, arguments_digest=tool_arguments_digest(arguments),
+            target_resources=target_resources_for(arguments), domains=domains, task_scope=record.task_ref.id,
+            issued_at=datetime.now(UTC), judgment="approved", decided_by="scenario-approver", one_time=True))
+asyncio.run(sign())
+store.dispose()
+"""
+        subprocess.run(
+            [str(self.python_exe), "-I", "-c", script, str(self.profile_dir), wait_token, approval_ref],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+        return approval_ref
+
     def stop(self, *, kill: bool = False) -> None:
         if self.process.poll() is None:
             if kill:
@@ -299,13 +355,13 @@ def start_runner(
     dist_target = Path(dist_dir) if dist_dir is not None else workdir / "dist"
     dist_target.mkdir(parents=True, exist_ok=True)
     venv_dir = workdir / "venv"
-    runtime_wheel, durable_wheel, runner_wheel = ensure_wheels(dist_target)
+    runtime_wheel, governance_wheel, durable_wheel, runner_wheel = ensure_wheels(dist_target)
 
     subprocess.run(["uv", "venv", str(venv_dir), "--seed"], check=True, capture_output=True, timeout=120)
     python_exe = venv_dir / "Scripts" / "python.exe" if os.name == "nt" else venv_dir / "bin" / "python"
-    # The runner wheel declares hecate-durable; the local wheel satisfies it
-    # here the same way the clean-install CI job provides it (the package is
-    # not published to PyPI).
+    # The runner wheel declares hecate-durable and hecate-governance; the
+    # local wheels satisfy them here the same way the clean-install CI job
+    # provides them (the packages are not published to PyPI).
     subprocess.run(
         [
             "uv",
@@ -314,6 +370,7 @@ def start_runner(
             "--python",
             str(python_exe),
             str(runtime_wheel),
+            str(governance_wheel),
             str(durable_wheel),
             str(runner_wheel),
         ],

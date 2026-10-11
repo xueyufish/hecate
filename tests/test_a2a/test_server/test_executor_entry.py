@@ -120,8 +120,22 @@ def llm(monkeypatch: pytest.MonkeyPatch) -> StubLLMService:
 @pytest.fixture
 def tool_executor(monkeypatch: pytest.MonkeyPatch) -> StubToolExecutor:
     """Swap the builtin executor behind the real ToolRegistry."""
+    from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
     from hecate.tools.tool.registry import ToolRegistry
 
+    monkeypatch.setitem(
+        BUILTIN_TOOL_DEFINITIONS,
+        TOOL_NAME,
+        {
+            "risk_level": "LOW",
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                "required": ["a", "b"],
+            },
+            "returns": {"type": "string"},
+        },
+    )
     executor = StubToolExecutor()
 
     def _build(db: Any, skill_ref_manifest: Any = None, *, workspace_id: uuid.UUID | None = None) -> ToolRegistry:

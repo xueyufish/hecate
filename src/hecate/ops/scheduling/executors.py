@@ -136,6 +136,7 @@ class AgentExecutor(TaskExecutor):
         from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
 
         effective_workspace = workspace_id or agent.workspace_id
+        session_id = uuid.uuid4()
 
         tool_registry = None
         effective_tools: list[dict[str, Any]] = []
@@ -154,14 +155,20 @@ class AgentExecutor(TaskExecutor):
                     agent_id=agent.id,
                     guardrail_config=getattr(agent, "guardrail_config", None),
                     event_store=event_store,
-                    session_id=None,
+                    session_id=session_id,
                     dlp_scanner=None,
                 )
 
         model_name = (
             agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"
         )
-        port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
+        port = create_runtime_port(
+            db,
+            llm_service,
+            tool_registry=tool_registry,
+            workspace_id=effective_workspace,
+            agent_id=agent.id,
+        )
         entry = EntryExecutionService(
             port=port,
             entry_name="scheduled-agent",
@@ -177,12 +184,13 @@ class AgentExecutor(TaskExecutor):
             workspace_id=effective_workspace,
             agent_id=agent.id,
             user_id=None,
-            session_id=None,
+            session_id=session_id,
             goal=message[:200] or None,
         )
         # agent_id makes the execution service resolve persona/skills from
         # the live agent row; model and tools are caller-resolved inputs.
         outcome = await entry.execute(
+            session_id=session_id,
             agent_mode="chat",
             messages=[{"role": "user", "content": message}],
             model=model_name,

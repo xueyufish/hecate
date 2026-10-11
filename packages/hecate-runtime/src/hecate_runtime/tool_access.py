@@ -87,6 +87,7 @@ class ApprovalDecision:
     approved: bool
     reason: str = ""
     scope: ApprovalScope = ApprovalScope.ONCE
+    approval_ref: str | None = None
 
 
 @dataclass

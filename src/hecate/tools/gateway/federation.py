@@ -80,6 +80,11 @@ class FederatedCatalog:
         self._mcp_manager = mcp_manager
         self._executor = executor or RestToolExecutor()
 
+    @property
+    def session_factory(self) -> Callable[[], Any]:
+        """Database factory shared by catalog lookups and action authority."""
+        return self._session_factory
+
     async def _visible_targets(
         self,
         db: AsyncSession,
@@ -163,6 +168,7 @@ class FederatedCatalog:
         arguments: dict[str, Any],
         workspace_id: str | None,
         include_platform: bool,
+        identity_headers: dict[str, str] | None = None,
     ) -> Any:
         """Execute a federated tool call after resolving it for the caller.
 
@@ -184,7 +190,7 @@ class FederatedCatalog:
             if row is not None and row.target_id is not None:
                 target = await db.get(GatewayTargetModel, row.target_id)
                 if target is not None and target in targets:
-                    return await self._executor.execute(row, target, arguments or {})
+                    return await self._executor.execute(row, target, arguments or {}, identity_headers)
 
         if self._mcp_manager is not None:
             mcp_targets = [t for t in targets if t.kind == GatewayTargetKind.MCP]

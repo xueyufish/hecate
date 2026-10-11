@@ -60,7 +60,15 @@ class ToolInfo:
 
 @dataclass
 class PolicyContext:
-    """Runtime context for policy evaluation."""
+    """Runtime context for policy evaluation.
+
+    The step7 governance fields (``actor`` … ``budget_exhausted``) carry the
+    server-verified identity envelope and budget state as pure data: they are
+    derived by the calling adapter from verified credentials or trusted host
+    stamps, never from request-asserted values. ``arguments`` keeps the
+    validated parameter content — parameter-conditional rules evaluate on it;
+    digests are for approval bindings and ledgers, not policy evaluation.
+    """
 
     agent_id: str | None = None
     workspace_id: str | None = None
@@ -69,6 +77,16 @@ class PolicyContext:
     execution_context: dict[str, Any] = field(default_factory=dict)
     rules: list[Any] = field(default_factory=list)
     workspace_root: str | None = None
+    actor: str | None = None
+    agent_principal: str | None = None
+    on_behalf_of: str | None = None
+    delegation_id: str | None = None
+    data_domains: tuple[str, ...] = ()
+    deployment_id: str | None = None
+    invocation_id: str | None = None
+    task_ref: str | None = None
+    metered: bool = False
+    budget_exhausted: bool = False
 
 
 @dataclass

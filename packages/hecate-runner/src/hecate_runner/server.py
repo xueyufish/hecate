@@ -348,6 +348,7 @@ class RunnerServer:
                         run_ref=run_ref,
                         wait_token=wait_token,
                         input_payload=input_payload,
+                        approval_ref=body.get("approval_ref"),
                         expires_at=body.get("expires_at"),
                         input_validator=server._engine.validate_run_input,
                     )

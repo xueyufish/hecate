@@ -297,3 +297,37 @@ async def test_session_is_task_stable_across_processes(tmp_path: Path):
         assert restarted.engine._resume_from_checkpoint(task_ref) is True
     finally:
         restarted.close()
+
+
+async def test_replayed_completed_action_ignores_consumed_approval(tmp_path):
+    """step7 3.4 — a decided action replays from the ledger without consulting
+    the approval authority: a consumed/expired approval must not block the
+    backfill of an already-completed action, and the gate is never called for
+    it. The claimed (unknown-outcome) write still stops for review."""
+    database_url = f"sqlite:///{tmp_path / 'host.db'}"
+    profile_dir = _profile(tmp_path, database_url)
+    api = _BusinessApi()
+    harness = _Harness(profile_dir, api=api, database_url=database_url)
+    task_ref, _run_ref, session_id = _seed_crash_window(harness, with_checkpoint=True)
+    assert harness.engine._resume_from_checkpoint(task_ref) is True
+    harness.close()
+
+    restarted = _Harness(profile_dir, api=api, database_url=database_url)
+    gate_calls: list = []
+
+    async def refusing_gate(tool, digest, ref):
+        gate_calls.append((tool, ref))
+        return False
+
+    restarted.engine._approval_gate = refusing_gate
+    try:
+        before_run = restarted.durable.store.run_for_task(task_ref)
+        resumed = restarted.engine.resume(task_ref, before_run, {})
+        assert resumed is not None
+        await _wait_task_state(restarted.store, task_ref, "reconciliation_required")
+        # The approval authority was never consulted during recovery: decided
+        # actions replay from the ledger, claimed writes stop for review.
+        assert gate_calls == []
+        assert api.tools() == []
+    finally:
+        restarted.close()

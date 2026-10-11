@@ -68,6 +68,13 @@ def _is_indeterminate_error(exc: Exception) -> bool:
     """
     import httpx
 
+    # step7: governance claim-ledger refusals (duplicate in-flight invocation,
+    # receipt-write failure after a successful business call) flag themselves
+    # with ``outcome_unknown = True`` — duck-typed so the runtime keeps zero
+    # external imports. The prior call may have completed remotely; only human
+    # reconciliation resolves it.
+    if getattr(exc, "outcome_unknown", False):
+        return True
     return isinstance(
         exc,
         (
@@ -678,6 +685,9 @@ class ToolWorker(Worker):
         if recovery is not None:
             return recovery
 
+        approval_ref = None
+        context = dict(context or {})
+        context["tool_call_id"] = tc_id
         access_decision = self._check_access(name, arguments, context, tc_id=tc_id, execution_context=execution_context)
         if access_decision is not None:
             if access_decision == AccessDecision.DENY:
@@ -730,6 +740,7 @@ class ToolWorker(Worker):
                     risk_level=str(context.get("risk_level", "low")),
                     context=context,
                 )
+                approval_ref = approval.approval_ref
                 if not approval.approved:
                     self._capture_evidence(
                         execution_context=execution_context,
@@ -870,6 +881,10 @@ class ToolWorker(Worker):
             # agent-scoped builtin tools (load_skill) can enforce catalog
             # membership; harmless keys for everything else.
             tool_context: dict[str, Any] = dict(context) if context else {}
+            tool_context["invocation_id"] = execution_id
+            tool_context["ledger_owned"] = self._action_hook is not None or self._event_store is not None
+            tool_context["approval_ref"] = approval_ref
+            tool_context["tool_policy_rules"] = self._tool_rules
             if execution_context:
                 tool_context.setdefault("agent_id", execution_context.get("agent_id"))
                 tool_context.setdefault("workspace_id", execution_context.get("workspace_id"))

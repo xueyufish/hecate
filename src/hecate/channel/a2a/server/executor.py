@@ -10,6 +10,7 @@ and IM entries use. There is deliberately no direct LLM call here.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any
 
 from sqlalchemy import select
@@ -166,6 +167,7 @@ class HecateAgentExecutor:
         from hecate.core.composition.runtime_port_adapter import create_runtime_port
         from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
 
+        session_id = uuid.uuid4()
         tool_registry = None
         effective_tools: list[dict[str, Any]] = []
         bundle = None
@@ -185,14 +187,26 @@ class HecateAgentExecutor:
                     agent_id=agent.id,
                     guardrail_config=getattr(agent, "guardrail_config", None),
                     event_store=event_store,
-                    session_id=None,
+                    session_id=session_id,
                     dlp_scanner=None,
                 )
 
         model_name = (
             agent.model_config_db.get("model", "gpt-4o") if isinstance(agent.model_config_db, dict) else "gpt-4o"
         )
-        port = create_runtime_port(self._db, llm_service, tool_registry=tool_registry)
+        port = create_runtime_port(
+            self._db,
+            llm_service,
+            tool_registry=tool_registry,
+            workspace_id=agent.workspace_id,
+            agent_id=agent.id,
+            identity={
+                # A2A per-agent identity: the resolved agent principal is the
+                # server-side actor; protocol callers cannot widen it.
+                "actor": f"agent:{agent.id}",
+                "agent_principal": str(agent.id),
+            },
+        )
         entry = EntryExecutionService(
             port=port,
             entry_name=ENTRY_NAME,
@@ -208,12 +222,13 @@ class HecateAgentExecutor:
             workspace_id=agent.workspace_id,
             agent_id=agent.id,
             user_id=None,
-            session_id=None,
+            session_id=session_id,
             goal=user_message[:200] or None,
         )
         # agent_id makes the execution service resolve persona/skills from
         # the live agent row; model and tools are caller-resolved inputs.
         outcome = await entry.execute(
+            session_id=session_id,
             agent_mode="chat",
             messages=[{"role": "user", "content": user_message}],
             model=model_name,

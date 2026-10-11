@@ -57,7 +57,7 @@ async def test_federated_call_emits_attributed_span(monkeypatch) -> None:
     mcp.add_middleware(GatewayMiddleware(catalog, GatewayAuthorizer()))
 
     async def fixed_identity(self) -> CallerIdentity:
-        return CallerIdentity(workspace_id=str(ws), scope="workspace", authenticated=True)
+        return CallerIdentity(workspace_id=str(ws), scope="workspace", authenticated=True, actor="verified-caller")
 
     monkeypatch.setattr(GatewayMiddleware, "_identity", fixed_identity)
 

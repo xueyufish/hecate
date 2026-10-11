@@ -19,6 +19,7 @@ from hecate_ops.span_adapter import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.core.composition.agent_execution_port import AgentExecutionPort
+from hecate.core.composition.governance import PlatformGovernance
 from hecate.runtime.ports import RuntimePort, SpanContext
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ class _ProductionRuntimePort(RuntimePort):
         pre_hook: Any = None,
         post_hook: Any = None,
         context_engine: Any = None,
+        governance: Any = None,
     ) -> None:
         self._db = db
         self._llm_service = llm_service
@@ -86,6 +88,7 @@ class _ProductionRuntimePort(RuntimePort):
         self._pre_hook = pre_hook
         self._post_hook = post_hook
         self._context_engine = context_engine
+        self._governance = governance
 
     async def llm_invoke(self, messages: list[dict], config: dict) -> AsyncGenerator[str, None]:
         """Invoke LLM via LLMService in streaming mode.
@@ -97,23 +100,28 @@ class _ProductionRuntimePort(RuntimePort):
         model = config.get("model", "gpt-4o")
         tools = config.get("tools")
 
+        model_invocation = await self._begin_model_budget(messages, config)
         content_parts: list[str] = []
         usage: dict[str, Any] | None = None
-        async for chunk in self._llm_service.chat_stream(
-            messages=messages,
-            model=model,
-            tools=tools,
-            **_invoke_params(config),
-        ):
-            if chunk.get("usage"):
-                usage = chunk["usage"]
-                continue
-            content = chunk.get("content", "") or ""
-            if content:
-                content_parts.append(content)
-                yield content
-
+        try:
+            async for chunk in self._llm_service.chat_stream(
+                messages=messages,
+                model=model,
+                tools=tools,
+                **_invoke_params(config),
+            ):
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                    continue
+                content = chunk.get("content", "") or ""
+                if content:
+                    content_parts.append(content)
+                    yield content
+        except BaseException:
+            await self._hold_model_budget_unknown(model_invocation)
+            raise
         await self._record_cost(model, messages, "".join(content_parts), usage)
+        await self._settle_model_budget(model_invocation, messages, "".join(content_parts), usage)
 
     async def llm_invoke_structured(
         self,
@@ -142,47 +150,56 @@ class _ProductionRuntimePort(RuntimePort):
         tool_call_acc: dict[int, dict[str, Any]] = {}
         content_parts: list[str] = []
         usage: dict[str, Any] | None = None
+        _facts_invocation = f"decision:{uuid.uuid4()}"
+        model_invocation = await self._begin_model_budget(messages, config)
 
-        async for chunk in self._llm_service.chat_stream(
-            messages=messages,
-            model=model,
-            tools=tools,
-            **_invoke_params(config),
-        ):
-            if chunk.get("usage"):
-                usage = chunk["usage"]
-                continue
-            content = chunk.get("content") or ""
-            if content:
-                content_parts.append(content)
-                yield {"content": content, "tool_calls": None}
+        try:
+            async for chunk in self._llm_service.chat_stream(
+                messages=messages,
+                model=model,
+                tools=tools,
+                **_invoke_params(config),
+            ):
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                    continue
+                content = chunk.get("content") or ""
+                if content:
+                    content_parts.append(content)
+                    yield {"content": content, "tool_calls": None}
 
-            delta_tool_calls = chunk.get("tool_calls")
-            if delta_tool_calls:
-                for tc in delta_tool_calls:
-                    idx = getattr(tc, "index", 0) or 0
-                    entry = tool_call_acc.setdefault(
-                        idx,
-                        {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
-                    )
-                    tc_id = getattr(tc, "id", None)
-                    if tc_id:
-                        entry["id"] = tc_id
-                    tc_type = getattr(tc, "type", None)
-                    if tc_type:
-                        entry["type"] = tc_type
-                    fn = getattr(tc, "function", None)
-                    if fn is not None:
-                        fn_name = getattr(fn, "name", None)
-                        if fn_name:
-                            entry["function"]["name"] = (entry["function"].get("name") or "") + fn_name
-                        fn_args = getattr(fn, "arguments", None)
-                        if fn_args:
-                            entry["function"]["arguments"] = (entry["function"].get("arguments") or "") + fn_args
+                delta_tool_calls = chunk.get("tool_calls")
+                if delta_tool_calls:
+                    for tc in delta_tool_calls:
+                        idx = getattr(tc, "index", 0) or 0
+                        entry = tool_call_acc.setdefault(
+                            idx,
+                            {"id": None, "type": "function", "function": {"name": "", "arguments": ""}},
+                        )
+                        tc_id = getattr(tc, "id", None)
+                        if tc_id:
+                            entry["id"] = tc_id
+                        tc_type = getattr(tc, "type", None)
+                        if tc_type:
+                            entry["type"] = tc_type
+                        fn = getattr(tc, "function", None)
+                        if fn is not None:
+                            fn_name = getattr(fn, "name", None)
+                            if fn_name:
+                                entry["function"]["name"] = (entry["function"].get("name") or "") + fn_name
+                            fn_args = getattr(fn, "arguments", None)
+                            if fn_args:
+                                entry["function"]["arguments"] = (entry["function"].get("arguments") or "") + fn_args
+        except BaseException:
+            await self._hold_model_budget_unknown(model_invocation)
+            raise
 
         final_tool_calls: list[dict[str, Any]] | None = None
         if tool_call_acc:
             final_tool_calls = [tool_call_acc[k] for k in sorted(tool_call_acc.keys())]
+
+        await self._record_cost(model, messages, "".join(content_parts), usage)
+        await self._settle_model_budget(model_invocation, messages, "".join(content_parts), usage)
 
         if usage:
             # Terminal usage chunk — surfaced for consumers that account for
@@ -191,7 +208,69 @@ class _ProductionRuntimePort(RuntimePort):
 
         yield {"content": None, "tool_calls": final_tool_calls}
 
-        await self._record_cost(model, messages, "".join(content_parts), usage)
+        if final_tool_calls and self._governance is not None:
+            # step7 2.6: record the model's proposed tool calls as observable
+            # facts (digests only, no hidden reasoning) for diagnostics.
+            self._record_tool_candidates(_facts_invocation, final_tool_calls)
+
+    def _record_tool_candidates(self, invocation_id: str, tool_calls: list[dict[str, Any]]) -> None:
+        """Emit one candidate-facts record for the model's decision point."""
+        import hashlib
+        import json as _json
+
+        candidates = []
+        for call in tool_calls:
+            fn = call.get("function") or {}
+            raw = fn.get("arguments", "")
+            try:
+                parsed = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+                digest = _json.dumps(parsed, sort_keys=True, separators=(",", ":"))
+                digest = hashlib.sha256(digest.encode("utf-8")).hexdigest()
+            except Exception:  # noqa: BLE001 — facts must never break the stream
+                digest = hashlib.sha256(str(raw).encode("utf-8")).hexdigest()
+            candidates.append({"tool_name": str(fn.get("name", "")), "arguments_digest": digest})
+        try:
+            self._governance.record_tool_facts(invocation_id=invocation_id, candidates=candidates)
+        except Exception:  # noqa: BLE001 — facts are diagnostics, never fatal
+            logger.debug("tool facts recording failed", exc_info=True)
+
+    async def _begin_model_budget(self, messages: list[dict], config: dict) -> str | None:
+        """Reserve budget for one metered model call (None = unmetered)."""
+        gov = self._governance if isinstance(self._governance, PlatformGovernance) else None
+        if gov is None or gov._model_budget is None:  # noqa: SLF001
+            return None
+        return await gov.begin_model_call(
+            estimated_units=_estimate_usage(messages, "")["total_tokens"] + int(config.get("max_tokens") or 4096)
+        )
+
+    async def _settle_model_budget(
+        self,
+        invocation_id: str | None,
+        messages: list[dict],
+        output: str,
+        usage: dict[str, Any] | None,
+    ) -> None:
+        if invocation_id is None:
+            return
+        gov = self._governance if isinstance(self._governance, PlatformGovernance) else None
+        if gov is None:
+            return
+        if usage:
+            units = int(usage.get("prompt_tokens", 0)) + int(usage.get("completion_tokens", 0))
+            status = "estimated" if usage.get("estimated") else "actual"
+        else:
+            estimated = _estimate_usage(messages, output)
+            units = int(estimated.get("prompt_tokens", 0)) + int(estimated.get("completion_tokens", 0))
+            status = "estimated"
+        await gov.settle_model_call(invocation_id, units=units, status=status)
+
+    async def _hold_model_budget_unknown(self, invocation_id: str | None) -> None:
+        if invocation_id is None:
+            return
+        gov = self._governance if isinstance(self._governance, PlatformGovernance) else None
+        if gov is None:
+            return
+        await gov.hold_model_call_unknown(invocation_id)
 
     async def _record_cost(self, model: str, messages: list[dict], output: str, usage: dict[str, Any] | None) -> None:
         """Record cost usage against quotas after LLM invocation.
@@ -209,6 +288,8 @@ class _ProductionRuntimePort(RuntimePort):
                 model,
                 total,
             )
+        if isinstance(self._governance, PlatformGovernance) and self._governance._model_budget is not None:
+            return
         if _quota_service_factory is None or total == 0:
             return
         try:
@@ -237,6 +318,12 @@ class _ProductionRuntimePort(RuntimePort):
     async def tool_execute(self, name: str, args: dict, context: dict | None = None) -> Any:
         """Execute a tool by name via ToolRegistry.
 
+        Every call is judged by the governance service first (safety floor +
+        policy, per call, no result caching). An assembly without a governance
+        service is refused outright — no context-free executor path exists.
+        Denials raise :class:`GovernanceDeniedError`, which the runtime
+        ToolWorker converts into an error tool result.
+
         Args:
             name: The registered tool name.
             args: Keyword arguments to pass to the tool.
@@ -247,6 +334,15 @@ class _ProductionRuntimePort(RuntimePort):
         """
         if self._tool_registry is None:
             raise RuntimeError("ToolRegistry not configured in RuntimePort")
+        if self._governance is None:
+            raise RuntimeError("governance service not configured; refusing context-free tool execution")
+        if isinstance(self._governance, PlatformGovernance):
+            return await self._governance.execute_tool(self._tool_registry, name, args, context)
+        decision = await self._governance.authorize_tool_call(name=name, arguments=args, context=context)
+        if not decision.allowed:
+            from hecate.core.composition.governance import GovernanceDeniedError
+
+            raise GovernanceDeniedError(decision.reason)
         return await self._tool_registry.execute(name, args, context)
 
     async def knowledge_query(self, query: str, kb_ids: list[UUID]) -> list[dict]:
@@ -389,6 +485,10 @@ def create_runtime_port(
     pre_hook: Any = None,
     post_hook: Any = None,
     context_engine: Any = None,
+    workspace_id: UUID | None = None,
+    agent_id: UUID | None = None,
+    identity: dict[str, Any] | None = None,
+    governance: Any = None,
 ) -> RuntimePort:
     """Create a production RuntimePort adapter.
 
@@ -399,15 +499,31 @@ def create_runtime_port(
         pre_hook: Optional PreLLMHook for input safety checks.
         post_hook: Optional PostLLMHook for output safety checks.
         context_engine: Optional ContextEngine for message selection/compression.
+        workspace_id: Optional workspace scope for the executing session.
+        agent_id: Optional agent scope (drives principal revocation checks).
+        identity: Optional verified entry identity (``actor``, ``agent_principal``,
+            ``on_behalf_of``, ``delegation_id``, ``data_domains``,
+            ``deployment_id``) attributed to tool calls.
+        governance: Optional pre-built governance facade; when omitted the
+            platform default is assembled from settings (mode ``audit``).
 
     Returns:
         A concrete RuntimePort wired to production services.
     """
+    if governance is None:
+        from hecate.core.composition.governance import build_platform_governance
+
+        governance = build_platform_governance(db, agent_id=agent_id, identity=identity, workspace_id=workspace_id)
+    elif isinstance(governance, PlatformGovernance) and identity is not None:
+        governance = governance.with_identity(identity, workspace_id)
     return _ProductionRuntimePort(
         db=db,
         llm_service=llm_service,
         tool_registry=tool_registry,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
         pre_hook=pre_hook,
         post_hook=post_hook,
         context_engine=context_engine,
+        governance=governance,
     )

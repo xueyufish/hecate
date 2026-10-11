@@ -39,11 +39,22 @@ class CallerIdentity:
     ``workspace_id`` is set only for workspace-scoped keys; platform and
     system identities see the first-party catalog (system keys additionally
     see platform-owned federated targets).
+
+    The step7 governance fields (``actor`` … ``deployment_id``) carry the
+    server-verified identity envelope: they are populated from the verified
+    credential/DB row by :func:`resolve_caller_identity`, never from
+    request-asserted values.
     """
 
     workspace_id: str | None
     scope: str
     authenticated: bool
+    actor: str | None = None
+    agent_principal: str | None = None
+    on_behalf_of: str | None = None
+    delegation_id: str | None = None
+    data_domains: tuple[str, ...] = ()
+    deployment_id: str | None = None
 
     @property
     def include_platform_federated(self) -> bool:
@@ -51,7 +62,7 @@ class CallerIdentity:
         return self.scope == "system"
 
 
-_PLATFORM_IDENTITY = CallerIdentity(workspace_id=None, scope="platform", authenticated=True)
+_PLATFORM_IDENTITY = CallerIdentity(workspace_id=None, scope="platform", authenticated=True, actor="platform")
 
 
 async def resolve_caller_identity(
@@ -85,8 +96,18 @@ async def resolve_caller_identity(
         key = await ApiKeyService().verify_key(db, raw)
         if key is not None:
             if key.scope == ApiKeyScope.WORKSPACE and key.workspace_id is not None:
-                return CallerIdentity(workspace_id=str(key.workspace_id), scope="workspace", authenticated=True)
-            return CallerIdentity(workspace_id=None, scope="system", authenticated=True)
+                return CallerIdentity(
+                    workspace_id=str(key.workspace_id),
+                    scope="workspace",
+                    authenticated=True,
+                    actor=f"apikey:{key.id}",
+                )
+            return CallerIdentity(
+                workspace_id=None,
+                scope="system",
+                authenticated=True,
+                actor=f"apikey:{key.id}",
+            )
         if raw in settings.api_keys_list:
             return _PLATFORM_IDENTITY
         raise PermissionError("Invalid API key")
@@ -123,9 +144,32 @@ class GatewayAuthorizer:
                 ]
             )
 
+    @property
+    def pipeline(self) -> ToolPolicyPipeline:
+        """Expose the policy engine to the shared governance composition."""
+        return self._pipeline
+
     @staticmethod
-    def _context(identity: CallerIdentity) -> PolicyContext:
-        return PolicyContext(workspace_id=identity.workspace_id)
+    def _context(
+        identity: CallerIdentity,
+        arguments: dict[str, Any] | None = None,
+    ) -> PolicyContext:
+        """Build the evaluation context from the verified identity.
+
+        ``arguments`` carries the validated call parameters so
+        parameter-conditional rules evaluate on content at this boundary too;
+        the governance envelope fields flow from the verified identity only.
+        """
+        return PolicyContext(
+            workspace_id=identity.workspace_id,
+            arguments=dict(arguments or {}),
+            actor=identity.actor,
+            agent_principal=identity.agent_principal,
+            on_behalf_of=identity.on_behalf_of,
+            delegation_id=identity.delegation_id,
+            data_domains=identity.data_domains,
+            deployment_id=identity.deployment_id,
+        )
 
     def filter_catalog(
         self,
@@ -143,8 +187,12 @@ class GatewayAuthorizer:
         self,
         tool: dict[str, Any],
         identity: CallerIdentity,
+        arguments: dict[str, Any] | None = None,
     ) -> tuple[bool, str]:
         """Execution-time decision for a single tool call.
+
+        ``arguments`` (optional) is the validated call parameter content;
+        parameter-conditional policy rules evaluate on it.
 
         Returns:
             ``(allowed, reason)``.
@@ -162,7 +210,7 @@ class GatewayAuthorizer:
             tool_def=tool,
         )
         try:
-            decision, _ = self._pipeline.evaluate_execution(info, self._context(identity))
+            decision, _ = self._pipeline.evaluate_execution(info, self._context(identity, arguments))
         except Exception:  # noqa: BLE001 — evaluation failure fails closed
             logger.exception("Gateway authorization failed closed for tool '%s'", tool.get("name"))
             return False, "policy evaluation failed"

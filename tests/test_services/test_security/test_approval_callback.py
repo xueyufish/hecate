@@ -201,3 +201,83 @@ async def test_rebuild_approval_projection_from_event_log():
     assert written[0]["workspace_id"] == ws
     assert written[0]["status"] == "rejected"  # fail-closed default
     assert written[0]["scope"] == "once"
+
+
+async def test_session_cache_key_pins_parameter_digest():
+    """step7 2.4 — the scope cache is keyed by the approved parameter digest:
+    a replay with the same tool_call_id but changed arguments misses the
+    cache and re-judges (binding invalid despite the callback having approved
+    the original parameters); an identical replay still hits.
+    """
+    asks: list[dict] = []
+
+    class _CountingApprove:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def request_approval(self, *, tool_name, arguments, risk_level, context):
+            self.calls += 1
+            asks.append(dict(arguments))
+            return ApprovalDecision(approved=True, reason="ok", scope=ApprovalScope.SESSION)
+
+    backend = _CountingApprove()
+    store = _event_store()
+    cb = FailingClosedApprovalCallback(event_store=store, session_id=uuid.uuid4(), workspace_id=uuid.uuid4())
+    cb._inner_backend = backend
+
+    first = await cb.request_approval(
+        tool_name="bash",
+        arguments={"tool_call_id": "tc-1", "command": "ls"},
+        risk_level="low",
+        context={},
+    )
+    assert first.approved is True
+    assert backend.calls == 1
+
+    # Identical replay (same tool_call_id, same arguments): cache hit.
+    replay = await cb.request_approval(
+        tool_name="bash",
+        arguments={"tool_call_id": "tc-1", "command": "ls"},
+        risk_level="low",
+        context={},
+    )
+    assert replay.approved is True
+    assert backend.calls == 1  # inner not re-asked
+
+    # Same tool_call_id, changed arguments: re-judgment (cache miss).
+    changed = await cb.request_approval(
+        tool_name="bash",
+        arguments={"tool_call_id": "tc-1", "command": "rm -rf /"},
+        risk_level="high",
+        context={},
+    )
+    assert changed.approved is True  # backend approves again, but...
+    assert backend.calls == 2  # ...it was asked afresh, not replayed
+
+
+async def test_decided_event_records_arguments_digest():
+    """step7 2.4 — APPROVAL_DECIDED carries the arguments digest so the
+    approval-binding authority can bind the judgment to the parameters."""
+    store = _event_store()
+
+    class _Approve:
+        async def request_approval(self, *, tool_name, arguments, risk_level, context):
+            return ApprovalDecision(approved=True, reason="ok", scope=ApprovalScope.ONCE)
+
+    cb = FailingClosedApprovalCallback(event_store=store, session_id=uuid.uuid4(), workspace_id=uuid.uuid4())
+    cb._inner_backend = _Approve()
+    await cb.request_approval(
+        tool_name="bash",
+        arguments={"tool_call_id": "tc-d", "command": "ls"},
+        risk_level="low",
+        context={},
+    )
+    decided = [
+        call.args[0] for call in store.append.call_args_list if call.args[0].event_type == EventType.APPROVAL_DECIDED
+    ]
+    assert len(decided) == 1
+    assert decided[0].payload["arguments_digest"]
+    # Digest excludes the call handle: stable for the same logical arguments.
+    from hecate.runtime.security.approval import approval_arguments_digest
+
+    assert decided[0].payload["arguments_digest"] == approval_arguments_digest({"command": "ls"})

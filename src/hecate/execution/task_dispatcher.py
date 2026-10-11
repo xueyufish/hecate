@@ -599,11 +599,22 @@ class PlatformTaskDispatcher:
                     agent_id=agent.id,
                     guardrail_config=config.get("guardrail_config"),
                     event_store=event_store,
-                    session_id=None,
+                    session_id=engine_session,
+                    user_id=context.user_id,
                     dlp_scanner=None,
                 )
 
-        port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
+        port = create_runtime_port(
+            db,
+            llm_service,
+            tool_registry=tool_registry,
+            workspace_id=context.workspace_id,
+            agent_id=agent.id,
+            identity={
+                "actor": str(context.user_id) if context.user_id else f"agent:{agent.id}",
+                "agent_principal": str(agent.id),
+            },
+        )
         action_hook = None
         if hasattr(self._store, "claim_ex"):
             from hecate_durable.runtime_hook import SqlActionLedgerHook

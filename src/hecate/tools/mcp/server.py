@@ -136,10 +136,18 @@ async def _chat_via_entry(
                 guardrail_config=getattr(agent, "guardrail_config", None),
                 event_store=event_store,
                 session_id=uuid.UUID(session_id) if session_id else None,
+                user_id=ctx.user_id,
                 dlp_scanner=None,
             )
 
-    port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
+    port = create_runtime_port(
+        db,
+        llm_service,
+        tool_registry=tool_registry,
+        workspace_id=agent.workspace_id,
+        agent_id=agent.id,
+        identity={"actor": str(ctx.user_id) if ctx.user_id else "", "agent_principal": str(agent.id)},
+    )
     entry = EntryExecutionService(
         port=port,
         entry_name="mcp-chat",

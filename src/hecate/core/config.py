@@ -538,6 +538,12 @@ class Settings(BaseSettings):
     ALERT_SMTP_PASSWORD: str = ""
     ALERT_SMTP_FROM: str = "alerts@hecate.local"
 
+    # Execution governance (step7 local slice): audit (default) records every
+    # judgment and leaves approval enforcement to the legacy path; enforced
+    # makes the governance decision authoritative; off is the rollback switch.
+    # The safety floor applies in all modes.
+    GOVERNANCE_MODE: str = "audit"
+
     # Quota management configuration
     QUOTA_ENABLED: bool = True
     QUOTA_DEFAULT_WORKSPACE_RPM: int = 60
