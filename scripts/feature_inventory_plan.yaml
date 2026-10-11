@@ -218,7 +218,6 @@ mappings:
   ids:
   - '11.19'
   - '9.16'
-  - '6.30'
   disposition: core-contract
   responsibility: platform-guarantee
   target_mode: builtin
@@ -227,6 +226,27 @@ mappings:
   step: '7'
   milestone: M-A
   acceptance: Resource policy independent of Ontology; external decision enforced at certified gateway
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-02a
+  section: core
+  scope: Action policy (step7 local slice delivered)
+  ids:
+  - '6.30'
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin reference (ToolPolicyPipeline via PipelinePolicyProfile; runner local policy
+    profile); external policy engines attach through the governance profile seam without losing the enforcement/receipt
+    guarantee
+  state_owner: platform approval_authority + action_claims tables; runner durable local approvals and budget
+    reservations; each field one authoritative writer
+  step: '7'
+  milestone: M-S; M-A
+  acceptance: Every tool dispatch (readonly included) passes one governed boundary with verified identity envelope,
+    parameter digest, side-effect class, decision, approval reference and receipt; approval binds subject/parameters/expiry/one-time
+    consumption atomically with re-judgment on change; unknown outcomes reconcile instead of retrying; budget
+    reserves synchronously and settles idempotently per invocation_id; local revocation takes effect on the
+    next dispatch without platform IAM
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
 - key: core-03
   section: core

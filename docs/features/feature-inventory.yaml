@@ -3485,6 +3485,41 @@ features:
     evidence
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
     actual production support requires per-profile tests
+- id: '6.30'
+  title: Runtime-Independent Policy & Resource Authorization
+  phase: P4
+  category: Security & Compliance
+  status: delivered
+  maturity: unverified
+  dependencies: []
+  evidence: 'openspec/specs/execution-action-governance/spec.md + execution-approval-binding + execution-credential-proxying
+    + execution-usage-accounting (contract); openspec/changes/archive/2026-10-11-runtime-independent-governance/
+    (tasks 29/29, support matrix); packages/hecate-governance + tests/test_core/test_governance_*.py (platform),
+    packages/hecate-runner/tests/test_local_governance.py + test_dispatch_governance.py (runner), tests/scenarios/test_sc03_local_governance.py
+    + test_sc03_local_approval_restart.py (SC03); PR #245 (step7 local slice; managed lease profile certification,
+    bypass-closure validation and real-model multi-turn acceptance remain open - see the change support-matrix)'
+  acceptance: Every tool dispatch (readonly included) passes one governed boundary with verified identity
+    envelope, parameter digest, side-effect class, decision, approval reference and receipt; approval
+    binds subject/parameters/expiry/one-time consumption atomically with re-judgment on change; unknown
+    outcomes reconcile instead of retrying; budget reserves synchronously and settles idempotently per
+    invocation_id; local revocation takes effect on the next dispatch without platform IAM
+  responsibility: platform-guarantee
+  implementation_mode: builtin
+  provider_or_adapter: builtin reference (ToolPolicyPipeline via PipelinePolicyProfile; runner local policy
+    profile); external policy engines attach through the governance profile seam without losing the enforcement/receipt
+    guarantee
+  enforcement_point: governed dispatch boundary - platform runtime_port_adapter tool_execute, GovernedToolRegistry
+    (chat/gateway entries), runner _dispatch_tool after the managed lease gate; policy pipeline evaluates
+    validated argument content, digests bind approvals only
+  state_owner: platform approval_authority + action_claims tables; runner durable local approvals and
+    budget reservations; each field one authoritative writer
+  milestone: M-S; M-A
+  superseded_by: n/a
+  disposition: core-contract
+  plan_mappings:
+  - core-02a
+  target_boundary: builtin now; process-external policy/claim services attach through the governance profile
+    and claim-ledger seams; managed lease profile certification follows in I-Cb; existing runs stay pinned
 - id: 2.10b
   title: Multi-Agent Trust Verification
   phase: P4
@@ -3492,8 +3527,9 @@ features:
   status: planned
   maturity: unverified
   dependencies: []
-  evidence: docs/refactor/step2-review-report.md (planning/static evidence only; target behavior remains
-    unverified)
+  evidence: 'docs/refactor/step2-review-report.md (planning/static evidence only); step7 local slice #245
+    delivered immediate local revocation (profile revoked_principals, effective on next dispatch, readonly
+    included) - trust scoring, attestation and delegation-depth limits remain open'
   acceptance: Per-capability attestation, delegation limits and revocation; unified trust scoring deferred
   responsibility: platform-guarantee
   implementation_mode: builtin
@@ -3604,7 +3640,9 @@ features:
   - '11.16'
   - '11.17'
   evidence: 'plan §一 identity row; #174/#175; docs/refactor/step2-review-report.md (planning/static evidence
-    only; target behavior remains unverified)'
+    only); step7 local slice #245 delivered the verified ActionPrincipal envelope (actor/agent_principal/on_behalf_of/delegation)
+    across chat, A2A, gateway and runner dispatch - credential management and inter-service auth remain
+    open'
   acceptance: agents carry pinned identity across version/execution/audit surfaces; Verify human/application/Agent/workload/delegation
     identity and audience; no automatic elevation
   responsibility: platform-guarantee
@@ -5719,33 +5757,6 @@ features:
   target_boundary: scenario package; target deployment=external-service; step18/19 (conditional); existing
     runs stay pinned
   restart_or_exit: Explicit scenario; packaged separately from core
-  profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
-    actual production support requires per-profile tests
-- id: '6.30'
-  title: Runtime-Independent Policy & Resource Authorization
-  phase: P4
-  category: Security & Compliance
-  status: planned
-  maturity: unverified
-  dependencies: []
-  evidence: plan §一 policy row; docs/refactor/step2-review-report.md (planning/static evidence only; target
-    behavior remains unverified)
-  acceptance: Resource policy independent of Ontology; external decision enforced at certified gateway
-  responsibility: platform-guarantee
-  implementation_mode: builtin
-  provider_or_adapter: builtin reference or enterprise-selected service
-  enforcement_point: Action policy public contract and owning service; step7 conformance; protected actions
-    require verified gateway receipts
-  state_owner: enterprise/governance + tools/policy
-  milestone: M-A
-  superseded_by: n/a
-  disposition: core-contract
-  plan_mappings:
-  - core-02
-  target_boundary: builtin reference or enterprise-selected service; target deployment=builtin; step7;
-    existing runs stay pinned
-  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit
-    evidence
   profile_support: No new profile certified by this planning review; SC01-SC10 remain unsupported/planned;
     actual production support requires per-profile tests
 - id: '6.31'
