@@ -282,6 +282,8 @@ jobs:
         run: python scripts/check_execution_stack_matrix.py
       - name: Build hecate-runtime wheel (non-editable artifact)
         run: uv build --package hecate-runtime
+      - name: Build hecate-governance wheel (non-editable artifact)
+        run: uv build --package hecate-governance
       - name: Build hecate-durable wheel (non-editable artifact)
         run: uv build --package hecate-durable
       - name: Build hecate-runner wheel (non-editable artifact)
@@ -289,7 +291,7 @@ jobs:
       - name: Install wheels into a clean venv (no repo source path)
         run: |
           python -m venv "$RUNNER_TEMP/clean_venv"
-          "$RUNNER_TEMP/clean_venv/bin/python" -m pip install dist/hecate_runtime-*.whl dist/hecate_durable-*.whl dist/hecate_runner-*.whl
+          "$RUNNER_TEMP/clean_venv/bin/python" -m pip install dist/hecate_runtime-*.whl dist/hecate_governance-*.whl dist/hecate_durable-*.whl dist/hecate_runner-*.whl
       - name: Assert no full-hecate dependency leaked in
         run: |
           installed=$("$RUNNER_TEMP/clean_venv/bin/python" -m pip list --format freeze | grep -ixE 'hecate==.*' || true)
