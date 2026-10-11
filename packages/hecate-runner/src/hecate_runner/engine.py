@@ -20,6 +20,7 @@ import os
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 from hecate_durable.contracts.credentials import CredentialError
@@ -48,10 +49,31 @@ from hecate_runtime.types import (
 from hecate_runtime.worker import Worker
 from jsonschema import Draft202012Validator
 
-from .durable import DurableRuntime, gate_dispatch_async, is_decided_action, record_outcome_async
+from .durable import (
+    DurableRuntime,
+    action_key_for,
+    gate_dispatch_async,
+    is_decided_action,
+    record_outcome_async,
+)
 from .evidence import OUTCOME_FAILED, EvidenceStore
 from .managed import MANAGED_ISSUER, LeaseGate, ManagedIdentity
 from .profile import BUILTIN_TOOL_SCHEMAS, Profile
+
+# step7 2.5: dispatch outcome status → governance error category. The four
+# failure classes stay distinguishable in evidence; unknown outcomes never
+# retry blindly and reconcile instead.
+ERROR_CATEGORY_BY_STATUS = {
+    "schema_invalid": "schema_invalid",
+    "authorization": "policy_denied",
+    "business": "business_rejected",
+    "transient": "technical_failure",
+    "unsupported": "technical_failure",
+    "unknown": "outcome_unknown",
+    "store_unavailable": "outcome_unknown",
+    "reconciliation_required": "outcome_unknown",
+    "output_invalid": "outcome_unknown",
+}
 
 DURABLE_CAPABILITIES: dict[str, str] = {
     "durable_tasks": "supported: persistent task/action ledger (hecate-durable)",
@@ -103,6 +125,7 @@ class ModelNodeWorker(Worker):
         prompt = run_input.get("prompt", (run_input.get("input") or {}).get("prompt", ""))
         config = self._profile.config
         content = ""
+        usage = None
         if config.model_backend == "endpoint":
             headers = {}
             if config.model_auth_env:
@@ -118,6 +141,7 @@ class ModelNodeWorker(Worker):
                 if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
                     raise ValueError("model endpoint must return an object with string content")
                 content = payload["content"]
+                usage = payload.get("usage")
         return WorkerResult(
             node_id=node_id,
             channel_updates={
@@ -126,6 +150,7 @@ class ModelNodeWorker(Worker):
                     "prompt": prompt,
                     "model_source": node_config.get("model_source", "stub"),
                     "content": content,
+                    "usage": usage,
                 },
             },
         )
@@ -179,6 +204,7 @@ class RunState:
     wait_request: dict | None = None
     wait_token: str | None = None
     dispatch_denied: bool = False
+    model_invocation_id: str | None = None
 
 
 class EvidenceUnavailableError(Exception):
@@ -198,6 +224,9 @@ class ExecutionEngine:
         lease_gate: LeaseGate | None = None,
         dispatch_binding: str | None = None,
         lease_refresh_wait_seconds: float = _LEASE_REFRESH_WAIT_SECONDS,
+        approval_gate: Any = None,
+        budget_gate: Any = None,
+        governance_service: Any = None,
     ) -> None:
         # ``tool_dispatch`` signature: (tool_name, arguments, principal, domains).
         self._profile = profile
@@ -211,6 +240,16 @@ class ExecutionEngine:
         # only in the managed assembly. None = no lease enforcement, which
         # is the standalone posture.
         self._lease_gate = lease_gate
+        # step7 3.3: optional approval authority gate — (tool, digest,
+        # approval_ref) -> bool. Injected by the local policy assembly (5.x);
+        # None keeps the step6 grant semantics unchanged.
+        self._approval_gate = approval_gate
+        # step7 4.2: optional budget gate for metered model calls.
+        self._budget_gate = budget_gate
+        # step7 5.2: optional local governance service (shared governance
+        # seam over the runner's local policy profile). ALL dispatches —
+        # readonly included — pass through its judgment.
+        self._governance_service = governance_service
         # Declared renewal/disconnect window (step6b): how long a protected
         # dispatch waits for a fresh lease when the previous one is consumed
         # before the refusal becomes final. Profile-injected; the module
@@ -329,10 +368,32 @@ class ExecutionEngine:
             if refusal is not None:
                 state.dispatch_denied = True
                 return refusal
-        if (
-            tool_name in self._approval_tools
-            and tool_name not in origins
-            and not self._consume_wake_grant(state, tool_name, digest)
+        if state.action_hook is not None and await is_decided_action(
+            state.action_hook,
+            run_id=action_run_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            side_effect_class=effect,
+        ):
+            withheld, blocked = await gate_dispatch_async(
+                state.action_hook,
+                run_id=action_run_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                side_effect_class=effect,
+            )
+            replay = withheld if withheld is not None else blocked
+            if replay is not None:
+                self._mark_reconciliation(state, replay)
+                self.record_tool_result(state, tool_name, replay)
+                return replay
+        governance_refusal = await self._governance_refusal(state, tool_name, arguments, effect)
+        if governance_refusal is not None:
+            state.dispatch_denied = governance_refusal.get("status") != "awaiting_approval"
+            self.record_tool_result(state, tool_name, governance_refusal)
+            return governance_refusal
+        if tool_name in self._approval_tools and not await self._consume_wake_grant(
+            state, tool_name, digest, arguments
         ):
             # A wait is not an action claim: no business dispatch has begun.
             state.wait_request = {
@@ -372,6 +433,14 @@ class ExecutionEngine:
                     self.record_tool_result(state, tool_name, blocked)
                     return blocked
         self._evidence.append("tool_dispatch", state.principal, state.run_id, "started", {"tool": tool_name})
+        schema_detail = self._input_schema_violation(tool_name, arguments)
+        if schema_detail is not None:
+            # step7 2.5: schema mismatch is rejected BEFORE the business call
+            # (after ledger arbitration, so recovery of already-claimed
+            # actions is never hijacked by a re-validation).
+            outcome = {"status": "schema_invalid", "detail": schema_detail}
+            self.record_tool_result(state, tool_name, outcome)
+            return outcome
         if arguments.get("domain") not in state.domains:
             outcome = {"status": "authorization", "detail": "requested domain is outside the trusted identity scope"}
         else:
@@ -381,10 +450,23 @@ class ExecutionEngine:
                 if effect is not ToolSideEffectClass.READONLY:
                     state.needs_reconciliation = True
                 raise
-        status = outcome.get("status")
+        output_detail = self._output_schema_violation(tool_name, outcome)
+        if output_detail is not None:
+            # step7 2.5: an off-contract result is not consumed as success —
+            # the side effect already happened, so the outcome is unknown and
+            # the run reconciles instead of trusting the malformed payload.
+            outcome = {
+                "status": "output_invalid",
+                "detail": f"result violates the declared output schema: {output_detail}",
+                "raw_status": str(outcome.get("status") or ""),
+            }
+            if effect is not ToolSideEffectClass.READONLY:
+                state.needs_reconciliation = True
+        status = str(outcome.get("status") or "")
         if status == "authorization":
             state.dispatch_denied = True
-        if status == "input_required" and not self._consume_wake_grant(state, tool_name, digest):
+        if status == "input_required" and not await self._consume_wake_grant(state, tool_name, digest, arguments):
+            contract_value: object = outcome.get("contract")
             # step6c: the business API requested more input (no side effect
             # performed per its contract); park instead of recording an
             # outcome — the wake's new attempt re-dispatches fresh with the
@@ -395,15 +477,17 @@ class ExecutionEngine:
                     "tool": tool_name,
                     "arguments_digest": digest,
                     "kind": "input",
-                    "contract": outcome.get("contract"),
+                    "contract": contract_value,
                 },
             }
             self.record_tool_result(state, tool_name, outcome)
             return outcome
         evidence_outcome = "ok" if status == "ok" else "denied" if status == "authorization" else "failed"
-        self._evidence.append(
-            "tool_result", state.principal, state.run_id, evidence_outcome, {"tool": tool_name, "status": status}
-        )
+        detail: dict[str, str] = {"tool": tool_name, "status": status}
+        category = ERROR_CATEGORY_BY_STATUS.get(status)
+        if category is not None:
+            detail["error_category"] = category
+        self._evidence.append("tool_result", state.principal, state.run_id, evidence_outcome, detail)
         if state.action_hook is not None:
             await record_outcome_async(
                 state.action_hook,
@@ -469,21 +553,164 @@ class ExecutionEngine:
         self.record_tool_result(state, tool_name, denial)
         return denial
 
-    def _consume_wake_grant(self, state: RunState, tool_name: str, digest: str) -> bool:
+    async def _consume_wake_grant(self, state: RunState, tool_name: str, digest: str, arguments: dict) -> bool:
         """True when the persisted input carries a matching one-shot grant.
 
         The grant is stamped by the wake application (the recorded decision)
         and consumed by the first matching dispatch of the new attempt; a
         mismatched or missing grant re-parks the run.
+
+        step7 3.3: when an approval authority gate is configured, the grant
+        must carry an approval reference the gate accepts — a bare wake token
+        never authorizes a protected dispatch. The accepted basis is recorded
+        in evidence; a refused or missing reference re-parks the run without
+        consuming the approval.
         """
 
         granted = None
         if state.task_ref is not None:
             persisted = self._durable.store.get_task_input(state.task_ref) or {}
             granted = persisted.get("_wake_grant")
-        return (
+        if not (
             isinstance(granted, dict) and granted.get("tool") == tool_name and granted.get("arguments_digest") == digest
+        ):
+            return False
+        approval_ref = granted.get("approval_ref")
+        if self._approval_gate is not None:
+            if approval_ref is None:
+                return False
+            from hecate_governance.action import target_resources_for
+            from hecate_governance.approval import ActionRequest
+            from hecate_governance.principal import ActionPrincipal, PrincipalSource
+
+            principal = ActionPrincipal.from_verified_claims(
+                {"sub": state.principal}, source=PrincipalSource.RUNNER_LOCAL, domains=tuple(state.domains)
+            )
+            origins = persisted.get("_action_origins") or {}
+            request = ActionRequest(
+                invocation_id=action_key_for(origins.get(tool_name, state.run_id), tool_name),
+                principal_fingerprint=principal.fingerprint(),
+                tool_name=tool_name,
+                arguments_digest=digest,
+                target_resources=target_resources_for(arguments),
+                domains=tuple(state.domains),
+                task_scope=state.task_ref.id if state.task_ref else None,
+            )
+            accepted = await self._approval_gate(approval_ref, request)
+            if not accepted:
+                return False
+            try:
+                self._evidence.append(
+                    "approval_basis",
+                    state.principal,
+                    state.run_id,
+                    "granted",
+                    {"tool": tool_name, "approval_ref": approval_ref},
+                )
+            except Exception:  # noqa: BLE001 — evidence failure handled by its own gate
+                logger.debug("approval basis evidence failed", exc_info=True)
+        return True
+
+    async def _governance_refusal(
+        self, state: RunState, tool_name: str, arguments: dict, effect: ToolSideEffectClass
+    ) -> dict | None:
+        """Local governance judgment for one dispatch (step7 5.2).
+
+        Runs for every dispatch — readonly included; only the managed lease
+        gate sits before it. Denials leave zero business calls and explicit
+        evidence. ``REQUIRE_APPROVAL`` parks the run via the existing wait
+        machinery when the manifest has not already marked the tool.
+        """
+        if self._governance_service is None:
+            return None
+        from datetime import UTC, datetime
+
+        from hecate_governance.action import ActionDecision, target_resources_for
+        from hecate_governance.policy import PolicyContext as GovContext
+        from hecate_governance.principal import ActionPrincipal, PrincipalSource
+
+        principal = ActionPrincipal.from_verified_claims(
+            {"sub": state.principal},
+            source=PrincipalSource.RUNNER_LOCAL,
+            domains=tuple(state.domains),
         )
+        persisted = self._durable.store.get_task_input(state.task_ref) or {} if self._durable and state.task_ref else {}
+        grant = persisted.get("_wake_grant") or {}
+        approval_ref = grant.get("approval_ref") if grant.get("tool") == tool_name else None
+        origins = persisted.get("_action_origins") or {}
+        gov_context = GovContext(
+            principal=principal,
+            tool_name=tool_name,
+            arguments=arguments,
+            arguments_digest=tool_arguments_digest(arguments),
+            invocation_id=action_key_for(origins.get(tool_name, state.run_id), tool_name),
+            target_resources=target_resources_for(arguments),
+            task_ref=state.task_ref.id if state.task_ref else None,
+            tool_side_effect=effect.value,
+        )
+        decision = await self._governance_service.authorize(
+            gov_context, approval_ref=approval_ref, now=datetime.now(UTC), evidence_writable=True
+        )
+        if decision.allowed:
+            return None
+        if decision.policy_outcome is not None and decision.policy_outcome.decision is ActionDecision.REQUIRE_APPROVAL:
+            state.wait_request = {
+                "wake_kind": "resume",
+                "contract_ref": {
+                    "tool": tool_name,
+                    "arguments_digest": tool_arguments_digest(arguments),
+                    "kind": "approval",
+                },
+            }
+            return {"status": "awaiting_approval", "detail": decision.reason}
+        try:
+            self._evidence.append(
+                "policy_denial",
+                state.principal,
+                state.run_id,
+                "denied",
+                {"tool": tool_name, "reason": decision.reason},
+            )
+        except Exception:  # noqa: BLE001 — evidence failure must not mask the denial
+            logger.debug("policy denial evidence failed", exc_info=True)
+        return {
+            "status": "authorization",
+            "detail": f"local policy denied: {decision.reason}",
+        }
+
+    async def _reserve_model_budget(self, state: RunState) -> WorkerResult | None:
+        """Reserve budget for one metered model call; None = proceed.
+
+        A refusal records explicit evidence and stops the run with a budget
+        error — never a silent skip.
+        """
+        if self._budget_gate is None:
+            return None
+        from hecate_governance.usage import ReservationStatus
+
+        key = f"model:{state.run_id}:{uuid.uuid4()}"
+        state.model_invocation_id = key
+        outcome = await self._budget_gate.ensure_budget(
+            key, 4096 if self._profile.config.model_backend == "endpoint" else 1
+        )
+        if outcome.status is not ReservationStatus.RESERVED:
+            try:
+                self._evidence.append(
+                    "budget",
+                    state.principal,
+                    state.run_id,
+                    "denied",
+                    {"reason": "budget exhausted or reservation refused", "remaining": outcome.remaining},
+                )
+            except Exception:  # noqa: BLE001 — evidence failure must not mask the refusal
+                logger.debug("budget evidence failed", exc_info=True)
+            from hecate_runner.budget import BudgetExhaustedError
+
+            return WorkerResult(
+                node_id="model",
+                error=BudgetExhaustedError("metered model call refused by local budget"),
+            )
+        return None
 
     def _mark_reconciliation(self, state: RunState, outcome: dict) -> None:
         """A withheld/blocked durable action keeps the task pending reconciliation."""
@@ -529,6 +756,34 @@ class ExecutionEngine:
     def closing(self) -> bool:
         """Whether shutdown has begun and new work must be refused."""
         return self._closing
+
+    def _input_schema_violation(self, tool_name: str, arguments: dict) -> str | None:
+        """Return the first schema violation for dispatch arguments, if any.
+
+        Mirrors the admission-time pair (builtin schema + profile-declared
+        schema); a tool without declared schemas is not constrained here.
+        """
+        schemas = []
+        builtin = BUILTIN_TOOL_SCHEMAS.get(tool_name)
+        if builtin is not None:
+            schemas.append(builtin)
+        declared = self._profile.tool_schemas.get(tool_name)
+        if declared is not None:
+            schemas.append(declared)
+        for schema in schemas:
+            error = next(Draft202012Validator(schema).iter_errors(arguments), None)
+            if error is not None:
+                return f"invalid arguments for tool {tool_name}: {error.message}"
+        return None
+
+    def _output_schema_violation(self, tool_name: str, outcome: dict) -> str | None:
+        """Return the first output-schema violation for a dispatch result."""
+        schema = getattr(self._profile, "tool_output_schemas", {}).get(tool_name)
+        if schema is None:
+            return None
+        result = outcome.get("result")
+        error = next(Draft202012Validator(schema).iter_errors(result), None)
+        return error.message if error is not None else None
 
     def validate_run_input(self, run_input: dict) -> None:
         """Validate every scheduled tool before accepting any execution."""
@@ -1030,6 +1285,9 @@ class _FanOutWorker(Worker):
         if self._state.cancel_requested:
             raise CooperativeCancellationError
         if node_id == "model":
+            refusal = await self._engine._reserve_model_budget(self._state)
+            if refusal is not None:
+                return refusal
             worker: Worker = ModelNodeWorker(self._engine._profile)
         else:
             worker = ReadToolNodeWorker(
@@ -1037,7 +1295,31 @@ class _FanOutWorker(Worker):
                     _state, _tool, arguments
                 )
             )
-        return await worker.execute(node_id, node_config, channel_snapshot, execution_context)
+        from hecate_governance.usage import SettleStatus, UsageRecord, UsageStatus
+
+        key = self._state.model_invocation_id if node_id == "model" else None
+        gate = self._engine._budget_gate if key else None
+        try:
+            result = await worker.execute(node_id, node_config, channel_snapshot, execution_context)
+            if gate is not None:
+                plan = result.channel_updates.get("plan", {})
+                usage = plan.get("usage")
+                units = (
+                    int(usage.get("total_tokens", 0))
+                    if isinstance(usage, dict)
+                    else max(1, (len(str(plan.get("prompt") or "")) + len(str(plan.get("content") or "")) + 3) // 4)
+                )
+                outcome = await gate.settle(
+                    UsageRecord(key, units, UsageStatus.ACTUAL if isinstance(usage, dict) else UsageStatus.ESTIMATED)
+                )
+                if outcome.status is SettleStatus.CONFLICT:
+                    raise RuntimeError("model usage settlement failed")
+            return result
+        except BaseException:
+            if gate is not None:
+                await gate.settle(UsageRecord(key, 0, UsageStatus.UNKNOWN, "model call interrupted"))
+                await gate._ledger.hold_for_reconciliation(key)
+            raise
 
 
 def _now_iso() -> str:

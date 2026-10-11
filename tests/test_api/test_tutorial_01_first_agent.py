@@ -375,6 +375,9 @@ class TestStep5AgentTools:
 
         fake_registry = MagicMock()
         fake_registry.execute = AsyncMock(return_value={"results": [{"title": "Python 3.13", "url": "..."}]})
+        # The governed registry seam replays decided receipts before dispatch.
+        fake_registry.completed_result = AsyncMock(return_value=(False, None))
+        fake_registry.describe = AsyncMock(return_value={})
 
         tool_call = {
             "id": "call_1",
@@ -411,7 +414,9 @@ class TestStep5AgentTools:
 
         # The registry executed web_search exactly once with parsed arguments.
         fake_registry.execute.assert_awaited_once()
-        name, args = fake_registry.execute.await_args.args
+        # The governed wrapper threads the call context as the third arg.
+        name, args, call_ctx = fake_registry.execute.await_args.args
+        assert "invocation_id" in call_ctx
         assert name == "web_search"
         assert args == {"query": "latest python"}
 
@@ -439,6 +444,9 @@ class TestStep5AgentTools:
 
         fake_registry = MagicMock()
         fake_registry.execute = AsyncMock(return_value={"results": [{"title": "Python 3.13", "url": "..."}]})
+        # The governed registry seam replays decided receipts before dispatch.
+        fake_registry.completed_result = AsyncMock(return_value=(False, None))
+        fake_registry.describe = AsyncMock(return_value={})
 
         tool_call = {
             "id": "call_1",

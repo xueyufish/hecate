@@ -724,6 +724,7 @@ async def apply_managed_command(
             run_ref=local_run_ref,
             wait_token=str((command.get("detail_ns") or {}).get("wait_token") or ""),
             input_payload=input_payload,
+            approval_ref=(command.get("detail_ns") or {}).get("approval_ref"),
             expires_at=expires_at,
             input_validator=engine.validate_run_input,
         )

@@ -57,6 +57,7 @@ class RestToolExecutor:
         tool: ToolModel,
         target: GatewayTargetModel,
         arguments: dict[str, Any],
+        identity_headers: dict[str, str] | None = None,
     ) -> Any:
         """Execute a rest tool call and return the response payload.
 
@@ -90,9 +91,15 @@ class RestToolExecutor:
         body = {k: v for k, v in arguments.items() if k in body_param_names}
 
         url = target.base_url.rstrip("/") + path
+        # step7 4.3: verified service identity rides dedicated headers added
+        # by the caller from the authenticated envelope — never from tool
+        # arguments; credentials stay proxy-side only.
+        headers = _credential_headers(target)
+        if identity_headers:
+            headers = {**headers, **identity_headers}
         request_kwargs: dict[str, Any] = {
             "params": query or None,
-            "headers": _credential_headers(target) or None,
+            "headers": headers or None,
         }
         if body:
             request_kwargs["json"] = body

@@ -123,8 +123,22 @@ def llm_stub(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
 @pytest.fixture
 def tool_executor(monkeypatch: pytest.MonkeyPatch) -> RecordingExecutor:
     """Swap the builtin executor behind the real ToolRegistry."""
+    from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
     from hecate.tools.tool.registry import ToolRegistry
 
+    monkeypatch.setitem(
+        BUILTIN_TOOL_DEFINITIONS,
+        TOOL_NAME,
+        {
+            "risk_level": "LOW",
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                "required": ["a", "b"],
+            },
+            "returns": {"type": "string"},
+        },
+    )
     executor = RecordingExecutor()
 
     def _build(db, skill_ref_manifest=None, *, workspace_id=None):

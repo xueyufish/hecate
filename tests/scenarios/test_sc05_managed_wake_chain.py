@@ -175,6 +175,8 @@ async def _wait_local_waiting(stack, runner, delivery_id: str, database_url: str
             if record.lifecycle_state is TaskLifecycleState.WAITING_APPROVAL:
                 wait = (record.extra or {}).get("wait") or {}
                 if wait.get("wait_token") and not wait.get("consumed"):
+                    ref = await asyncio.to_thread(runner.approve_wait, wait["wait_token"], f"approval-{delivery_id}")
+                    stack.setdefault("local_approval_refs", {})[wait["wait_token"]] = ref
                     return dict(wait)
         await asyncio.sleep(0.1)
     from hecate_durable.storage import SqlDurableStore
@@ -300,7 +302,7 @@ async def _issue_wake(
             command_id=command_id,
             payload=None,
             expires_at=(expires_at or datetime.now(UTC) + timedelta(seconds=120)).isoformat(),
-            detail_ns={"wait_token": wait_token},
+            detail_ns={"wait_token": wait_token, "approval_ref": stack["local_approval_refs"][wait_token]},
         )
         await db.commit()
         return result

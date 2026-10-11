@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
+from dataclasses import asdict
 from typing import Any
 
 from fastmcp.exceptions import ToolError
@@ -29,6 +31,27 @@ from hecate.tools.gateway.errors import GatewayError
 from hecate.tools.gateway.federation import FederatedCatalog
 
 logger = logging.getLogger(__name__)
+
+_IDENTITY_HEADER_MAP = {
+    "actor": "x-hecate-actor",
+    "on_behalf_of": "x-hecate-on-behalf-of",
+    "delegation_id": "x-hecate-delegation-id",
+    "deployment_id": "x-hecate-deployment",
+}
+
+
+def _identity_headers(identity: CallerIdentity) -> dict[str, str]:
+    """Verified service-identity headers for proxied business calls.
+
+    Built exclusively from the server-verified envelope; request-asserted
+    values never reach these headers.
+    """
+    headers: dict[str, str] = {}
+    for field, header in _IDENTITY_HEADER_MAP.items():
+        value = getattr(identity, field, None)
+        if value:
+            headers[header] = str(value)
+    return headers
 
 
 def _get_tracer() -> Any:
@@ -81,6 +104,10 @@ class GatewayMiddleware(Middleware):
         except PermissionError as exc:
             raise ToolError(str(exc)) from exc
 
+    @staticmethod
+    def _verified_identity_headers(identity: CallerIdentity) -> dict[str, str]:
+        return _identity_headers(identity)
+
     async def on_list_tools(self, context, call_next):
         """Merge federated tools into the first-party listing, then filter."""
         identity = await self._identity()
@@ -102,42 +129,99 @@ class GatewayMiddleware(Middleware):
         return [t for t, _ in entries if t.name in visible_names]
 
     async def on_call_tool(self, context, call_next):
-        """Authorize every call; route federated names to their executors."""
+        """Dispatch first-party and federated calls through the shared authority."""
+        from hecate.core.composition.governance import build_platform_governance
+        from hecate.tools.policy.governance_adapter import PipelinePolicyProfile
+
         identity = await self._identity()
         name = context.message.name
-
+        arguments = dict(context.message.arguments or {})
         federated = await self._catalog.is_federated(name, identity.workspace_id, identity.include_platform_federated)
-        if federated:
-            allowed, reason = self._authorizer.authorize(
-                {"name": name, "source": "rest", "risk_level": "low"}, identity
+        entries = (
+            await self._catalog.list_federated_tools(identity.workspace_id, identity.include_platform_federated)
+            if federated
+            else []
+        )
+        metadata = next((dict(entry) for entry in entries if entry["name"] == name), None)
+        if metadata is None and context.fastmcp_context is not None:
+            tool = await context.fastmcp_context.fastmcp.get_tool(name)
+            metadata = _tool_to_dict(tool)
+        if metadata is None:
+            raise ToolError(f"Tool '{name}' metadata unavailable")
+        output_schema = metadata.pop("returns", None)
+        envelope = asdict(identity)
+        workspace = uuid.UUID(identity.workspace_id) if identity.workspace_id else None
+        async with self._catalog.session_factory() as db:
+            governance = build_platform_governance(
+                db,
+                workspace_id=workspace,
+                identity=envelope,
+                profile=PipelinePolicyProfile(self._authorizer.pipeline, allow_sandbox=False),
             )
-            if not allowed:
-                raise ToolError(f"Tool '{name}' is not available: {reason}")
-            tracer = _get_tracer()
-            cm = tracer.start_as_current_span("gateway.tool_call") if tracer is not None else _NullSpan()
-            with cm as span:
-                if span is not None:
-                    span.set_attributes(
-                        {
-                            "gateway.target": name.split("__", 1)[0],
-                            "workspace_id": identity.workspace_id or "platform",
-                            "tool.name": name,
-                            "caller.scope": identity.scope,
-                        }
-                    )
-                try:
-                    result = await self._catalog.call_federated_tool(
-                        name,
-                        dict(context.message.arguments or {}),
-                        identity.workspace_id,
-                        identity.include_platform_federated,
-                    )
-                except GatewayError as exc:
-                    raise ToolError(str(exc)) from exc
-            return ToolResult(content=json.dumps(result) if not isinstance(result, str) else result)
+            headers = get_http_headers()
+            request_id = headers.get("x-hecate-invocation-id") or str(uuid.uuid4())
+            call_context = {
+                "invocation_id": f"gateway:{identity.actor}:{identity.workspace_id}:{request_id}",
+                "tool_metadata": metadata,
+                "approval_ref": headers.get("x-hecate-approval-ref"),
+            }
 
-        # First-party tools: authorize with minimal metadata, then delegate.
-        allowed, reason = self._authorizer.authorize({"name": name, "source": "builtin", "risk_level": "low"}, identity)
-        if not allowed:
-            raise ToolError(f"Tool '{name}' is not available: {reason}")
-        return await call_next(context)
+            async def dispatch(tool_name, tool_arguments, tool_context):
+                if federated:
+                    tracer = _get_tracer()
+                    cm = tracer.start_as_current_span("gateway.tool_call") if tracer is not None else _NullSpan()
+                    try:
+                        with cm as span:
+                            if span is not None:
+                                span.set_attributes(
+                                    {
+                                        "gateway.target": name.split("__", 1)[0],
+                                        "workspace_id": identity.workspace_id or "platform",
+                                        "tool.name": name,
+                                        "caller.scope": identity.scope,
+                                    }
+                                )
+                            result = await self._catalog.call_federated_tool(
+                                tool_name,
+                                tool_arguments,
+                                identity.workspace_id,
+                                identity.include_platform_federated,
+                                identity_headers=_identity_headers(identity),
+                            )
+                    except GatewayError as exc:
+                        raise ToolError(str(exc)) from exc
+                    if output_schema:
+                        from hecate_governance.claims import OutcomeUnknownError
+                        from jsonschema import Draft202012Validator
+
+                        if list(Draft202012Validator(output_schema).iter_errors(result)):
+                            raise OutcomeUnknownError("federated result violates output schema")
+                    return ToolResult(content=json.dumps(result) if not isinstance(result, str) else result).model_dump(
+                        mode="json"
+                    )
+                result = await call_next(context)
+                return result.model_dump(mode="json")
+
+            registry = _GatewayDispatch(dispatch)
+            try:
+                result = await governance.execute_tool(registry, name, arguments, call_context)
+            except Exception as exc:
+                raise ToolError(str(exc)) from exc
+        from mcp.types import CallToolResult
+
+        return ToolResult.from_mcp_result(
+            CallToolResult(
+                content=result["content"],
+                structured_content=result.get("structured_content"),
+                is_error=result.get("is_error", False),
+                _meta=result.get("meta"),
+            )
+        )
+
+
+class _GatewayDispatch:
+    def __init__(self, dispatch: Any) -> None:
+        self._dispatch = dispatch
+
+    async def execute(self, name: str, arguments: dict, context: dict | None = None) -> Any:
+        return await self._dispatch(name, arguments, context)

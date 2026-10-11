@@ -18,6 +18,7 @@ members = [
     "hecate-channel-slack",
     "hecate-durable",
     "hecate-enterprise",
+    "hecate-governance",
     "hecate-llm",
     "hecate-memory",
     "hecate-ops",
@@ -2237,6 +2238,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fastmcp" },
     { name = "hecate-durable" },
+    { name = "hecate-governance" },
     { name = "hecate-llm" },
     { name = "hecate-ops" },
     { name = "hecate-runtime" },
@@ -2365,6 +2367,7 @@ requires-dist = [
     { name = "fastmcp", specifier = ">=4.0.0b3,<5" },
     { name = "flagembedding", marker = "extra == 'rag'", specifier = ">=1.2" },
     { name = "hecate-durable", editable = "packages/hecate-durable" },
+    { name = "hecate-governance", editable = "packages/hecate-governance" },
     { name = "hecate-llm", editable = "packages/hecate-llm" },
     { name = "hecate-ops", editable = "packages/hecate-ops" },
     { name = "hecate-runtime", editable = "packages/hecate-runtime" },
@@ -2519,6 +2522,17 @@ requires-dist = [
 provides-extras = ["sso", "vault", "tenant"]
 
 [[package]]
+name = "hecate-governance"
+version = "0.1.0"
+source = { editable = "packages/hecate-governance" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.10.0" }]
+
+[[package]]
 name = "hecate-llm"
 version = "0.1.0"
 source = { editable = "packages/hecate-llm" }
@@ -2616,6 +2630,7 @@ version = "0.1.0"
 source = { editable = "packages/hecate-runner" }
 dependencies = [
     { name = "hecate-durable" },
+    { name = "hecate-governance" },
     { name = "hecate-runtime" },
     { name = "jsonschema" },
 ]
@@ -2623,6 +2638,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "hecate-durable", editable = "packages/hecate-durable" },
+    { name = "hecate-governance", editable = "packages/hecate-governance" },
     { name = "hecate-runtime", editable = "packages/hecate-runtime" },
     { name = "jsonschema", specifier = ">=4.23,<5" },
 ]

@@ -109,7 +109,22 @@ async def mcp_env(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession, aut
     monkeypatch.setattr(entry_assembly, "_shared_event_store", event_store)
     monkeypatch.setattr(entry_assembly, "_shared_session_state_store", state_store)
 
+    from hecate.tools.tool.builtin import BUILTIN_TOOL_DEFINITIONS
     from hecate.tools.tool.registry import ToolRegistry
+
+    monkeypatch.setitem(
+        BUILTIN_TOOL_DEFINITIONS,
+        TOOL_NAME,
+        {
+            "risk_level": "LOW",
+            "parameters": {
+                "type": "object",
+                "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                "required": ["a", "b"],
+            },
+            "returns": {"type": "string"},
+        },
+    )
 
     def _build(db, skill_ref_manifest=None, *, workspace_id=None):
         registry = ToolRegistry(db=db, builtin_executor=stub_executor, workspace_id=workspace_id)

@@ -82,7 +82,9 @@ async def test_listing_merges_first_party_and_federated(patch_identity) -> None:
     ws = uuid.uuid4()
     await _seed_mcp_target(ws, "github")
     server = _build_server(ws, {"github": [{"name": "create_issue", "description": "CI", "inputSchema": _OBJ}]})
-    patch_identity(server, CallerIdentity(workspace_id=str(ws), scope="workspace", authenticated=True))
+    patch_identity(
+        server, CallerIdentity(workspace_id=str(ws), scope="workspace", authenticated=True, actor="verified-caller")
+    )
     async with Client(server) as client:
         tools = await client.list_tools()
     names = [t.name for t in tools]
@@ -94,7 +96,7 @@ async def test_platform_scope_sees_first_party_only(patch_identity) -> None:
     ws = uuid.uuid4()
     await _seed_mcp_target(ws, "github")
     server = _build_server(ws, {"github": [{"name": "create_issue", "description": "CI", "inputSchema": _OBJ}]})
-    patch_identity(server, CallerIdentity(workspace_id=None, scope="platform", authenticated=True))
+    patch_identity(server, CallerIdentity(workspace_id=None, scope="platform", authenticated=True, actor="platform"))
     async with Client(server) as client:
         tools = await client.list_tools()
     names = [t.name for t in tools]
@@ -106,7 +108,9 @@ async def test_federated_call_routes_to_upstream(patch_identity) -> None:
     ws = uuid.uuid4()
     await _seed_mcp_target(ws, "github")
     server = _build_server(ws, {"github": [{"name": "create_issue", "description": "CI", "inputSchema": _OBJ}]})
-    patch_identity(server, CallerIdentity(workspace_id=str(ws), scope="workspace", authenticated=True))
+    patch_identity(
+        server, CallerIdentity(workspace_id=str(ws), scope="workspace", authenticated=True, actor="verified-caller")
+    )
     async with Client(server) as client:
         result = await client.call_tool("github__create_issue", {"title": "x"})
     payload = json.loads(result.content[0].text)
@@ -117,7 +121,9 @@ async def test_denied_federated_call_raises(patch_identity) -> None:
     ws = uuid.uuid4()
     await _seed_mcp_target(ws, "github")
     server = _build_server(ws, {"github": [{"name": "create_issue", "description": "CI", "inputSchema": _OBJ}]})
-    patch_identity(server, CallerIdentity(workspace_id=str(ws), scope="workspace", authenticated=True))
+    patch_identity(
+        server, CallerIdentity(workspace_id=str(ws), scope="workspace", authenticated=True, actor="verified-caller")
+    )
 
     class DenyAll(PolicyLayer):
         @property

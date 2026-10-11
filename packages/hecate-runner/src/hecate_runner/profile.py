@@ -24,7 +24,7 @@ import hmac
 import json
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -181,6 +181,93 @@ class DurableConfig:
     workspace: str
 
 
+@dataclass
+class GovernanceLocalConfig:
+    """Local policy profile (step7 5.1): fail-closed tool-level authorization
+    configured by the business App, without any platform IAM.
+
+    - ``rules`` — allow entries: ``{"tool": name, "domains": [...],
+      "approval_required": bool}``. Anything not matching a rule is denied.
+    - ``approvers`` — principals allowed to sign local approvals (5.4).
+    - ``revoked_principals`` — locally revoked actors (5.3); revocation takes
+      effect on the next dispatch.
+    - ``write_enablement`` — protected-write gate (5.5): ``"disabled"``
+      (default) refuses every non-readonly dispatch; ``"experimental"`` is
+      the lower governance tier and requires a business-API attestation.
+    """
+
+    rules: tuple[dict, ...] = ()
+    approvers: tuple[str, ...] = ()
+    revoked_principals: tuple[str, ...] = ()
+    write_enablement: str = "disabled"
+    write_attestation: str | None = None
+    budget_limit: float | None = None
+
+
+def _load_governance(data: dict) -> GovernanceLocalConfig:
+    """Parse and validate the optional ``governance`` block of ``runner.json``."""
+
+    raw = data.get("governance")
+    if raw is None:
+        return GovernanceLocalConfig()
+    if not isinstance(raw, dict):
+        raise ProfileError("invalid runner config: governance must be an object")
+    errors: list[str] = []
+    rules_raw = raw.get("rules", [])
+    if not isinstance(rules_raw, list) or not all(isinstance(r, dict) for r in rules_raw):
+        errors.append("governance.rules must be an array of objects")
+        rules_raw = []
+    rules: list[dict] = []
+    for i, rule in enumerate(rules_raw):
+        tool = rule.get("tool")
+        if not isinstance(tool, str) or not tool:
+            errors.append(f"governance.rules[{i}].tool must be a non-empty string")
+            continue
+        domains = rule.get("domains", [])
+        if not isinstance(domains, list) or not all(isinstance(d, str) for d in domains):
+            errors.append(f"governance.rules[{i}].domains must be an array of strings")
+            continue
+        rules.append(
+            {
+                "tool": tool,
+                "domains": tuple(domains),
+                "approval_required": bool(rule.get("approval_required", False)),
+            }
+        )
+    approvers_raw = raw.get("approvers", [])
+    if not isinstance(approvers_raw, list) or not all(isinstance(a, str) and a for a in approvers_raw):
+        errors.append("governance.approvers must be an array of non-empty strings")
+        approvers_raw = []
+    revoked_raw = raw.get("revoked_principals", [])
+    if not isinstance(revoked_raw, list) or not all(isinstance(a, str) and a for a in revoked_raw):
+        errors.append("governance.revoked_principals must be an array of non-empty strings")
+        revoked_raw = []
+    write_mode = raw.get("write_enablement", "disabled")
+    if write_mode not in ("disabled", "experimental"):
+        errors.append("governance.write_enablement must be 'disabled' or 'experimental'")
+    attestation = raw.get("write_attestation")
+    if write_mode == "experimental" and (not isinstance(attestation, str) or not attestation):
+        errors.append(
+            "governance.write_attestation is required for experimental write enablement: "
+            "declare the business API's independent final-authorization enforcement"
+        )
+    budget_limit = raw.get("budget_limit")
+    if budget_limit is not None and (
+        isinstance(budget_limit, bool) or not isinstance(budget_limit, (int, float)) or budget_limit < 0
+    ):
+        errors.append("governance.budget_limit must be a non-negative number")
+    if errors:
+        raise ProfileError("invalid runner config: " + "; ".join(errors))
+    return GovernanceLocalConfig(
+        rules=tuple(rules),
+        approvers=tuple(approvers_raw),
+        revoked_principals=tuple(revoked_raw),
+        write_enablement=str(write_mode),
+        write_attestation=attestation if isinstance(attestation, str) else None,
+        budget_limit=budget_limit,
+    )
+
+
 def _load_durable(data: dict) -> DurableConfig | None:
     """Parse and validate the optional ``durable`` block of ``runner.json``."""
 
@@ -221,6 +308,11 @@ class RunnerConfig:
     durable: DurableConfig | None = None
     control_plane: ControlPlaneConfig | None = None
     evidence: EvidenceConfig | None = None
+    # Optional per-tool JSON Schemas for dispatch RESULT validation
+    # (runner.json ``tool_output_schemas``). Deliberately NOT part of the
+    # execution-definition digest: it gates result consumption, not admission,
+    # so persisted frozen definitions stay valid across upgrades.
+    tool_output_schemas: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -333,7 +425,17 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
         except ValueError:
             errors.append("model.endpoint must be an HTTP(S) URL")
 
+    # step7 4.3: reject plaintext secrets at load time — a secret-shaped
+    # field must carry a reference (env:/file:/ref:), never an inline value.
+    from hecate_governance.secrets import find_plaintext_secrets
+
+    for leak in find_plaintext_secrets(data):
+        errors.append(f"plaintext secret in configuration: {leak} (use env:/file: references)")
+
     allowlist = data.get("tool_allowlist", [])
+    output_schemas = data.get("tool_output_schemas", {})
+    if not isinstance(output_schemas, dict) or not all(isinstance(v, dict) for v in output_schemas.values()):
+        errors.append("tool_output_schemas must be an object of JSON Schemas")
     if not isinstance(allowlist, list) or any(not isinstance(name, str) or not name for name in allowlist):
         errors.append("tool_allowlist must be an array of non-empty strings")
     elif len(allowlist) != len(set(allowlist)):
@@ -374,6 +476,7 @@ def _load_config(profile_dir: Path) -> RunnerConfig:
         model_endpoint=model_endpoint if model_backend == "endpoint" else None,
         model_auth_env=model_auth_env if isinstance(model_auth_env, str) else None,
         tool_allowlist=tuple(allowlist),
+        tool_output_schemas=output_schemas,
         shutdown_token_ref=shutdown_ref,
         max_request_bytes=max_request_bytes,
         max_concurrency=1,
@@ -492,6 +595,8 @@ class Profile:
     shutdown_token: str
     entry_content: bytes
     tool_schemas: dict[str, dict]
+    tool_output_schemas: dict[str, dict] = field(default_factory=dict)
+    governance: GovernanceLocalConfig = field(default_factory=GovernanceLocalConfig)
 
     def execution_definition_digest(self, dispatch_binding: str | None = None) -> str:
         """Fingerprint the fixed graph inputs and its business dispatch binding."""
@@ -611,4 +716,16 @@ def load_profile(profile_dir: Path) -> Profile:
         shutdown_token=shutdown_token,
         entry_content=entry_content,
         tool_schemas=schemas,
+        tool_output_schemas=getattr(config, "tool_output_schemas", {}),
+        governance=_load_governance(_raw_config_for_governance(profile_dir)),
     )
+
+
+def _raw_config_for_governance(profile_dir: Path) -> dict:
+    """Re-read the raw runner.json for the governance block (kept additive)."""
+    config_path = profile_dir / "runner.json"
+    try:
+        parsed = _load_json(config_path, "runner config")
+    except ProfileError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}

@@ -401,3 +401,20 @@ async def admin_client(auth_context: AuthContext) -> AsyncGenerator[AsyncClient,
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def governance_session_factory(tmp_path, db_session):
+    """Provide independent SQLite connections for transaction race regressions."""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'governance.db'}")
+    async with engine.begin() as connection:
+        tables = [
+            Base.metadata.tables[name]
+            for name in ("action_claims", "quotas", "quota_usage", "quota_reservations", "approval_authority")
+        ]
+        await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=tables))
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        yield factory
+    finally:
+        await engine.dispose()

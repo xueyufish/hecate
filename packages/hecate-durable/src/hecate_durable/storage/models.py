@@ -28,10 +28,13 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Float,
+    Index,
     Integer,
     MetaData,
     String,
+    Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -154,6 +157,78 @@ class ActionOutcomeRow(Base):
     result_ref: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     result_payload: Mapped[Any | None] = mapped_column(JSON)
     recorded_at: Mapped[str] = mapped_column(String(64))
+
+
+class BudgetScopeRow(Base):
+    """Durable mutex row for all reservations in the local budget scope."""
+
+    __tablename__ = "durable_budget_scope"
+    scope: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class BudgetReservationRow(Base):
+    """Per-invocation budget reservation on the standalone host (step7).
+
+    One open reservation per ``invocation_key`` (partial unique index over
+    unreleased/unsettled rows); settlement records actual usage, unknown
+    outcomes hold until reconciliation.
+    """
+
+    __tablename__ = "durable_budget_reservations"
+    __table_args__ = (
+        Index(
+            "uq_durable_budget_open",
+            "invocation_key",
+            unique=True,
+            sqlite_where=text("released = 0 AND settled = 0"),
+            postgresql_where=text("released = false AND settled = false"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    invocation_key: Mapped[str] = mapped_column(String(512), index=True)
+    units: Mapped[float] = mapped_column(Float)
+    released: Mapped[bool] = mapped_column(Boolean, default=False)
+    settled: Mapped[bool] = mapped_column(Boolean, default=False)
+    unknown_hold: Mapped[bool] = mapped_column(Boolean, default=False)
+    settled_units: Mapped[float | None] = mapped_column(Float)
+    usage_status: Mapped[str | None] = mapped_column(String(20))
+    detail: Mapped[str | None] = mapped_column(Text)
+    recorded_at: Mapped[str] = mapped_column(String(64))
+
+
+class LocalApprovalRow(Base):
+    """Local approval authority record on the standalone host (step7 5.4).
+
+    One row per ``approval_ref``; judgment and consumption are separate
+    fields; one-time consumption claims the row by
+    ``consumed_by_invocation_id``. Signed only by locally registered
+    approvers; the record survives restarts.
+    """
+
+    __tablename__ = "durable_local_approvals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    approval_ref: Mapped[str] = mapped_column(String(512), unique=True)
+    principal_fingerprint: Mapped[str] = mapped_column(String(128))
+    tool_name: Mapped[str] = mapped_column(String(512))
+    arguments_digest: Mapped[str] = mapped_column(String(128))
+    target_resources: Mapped[list[str] | None] = mapped_column(JSON)
+    issued_at: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[str | None] = mapped_column(String(64))
+    one_time: Mapped[bool] = mapped_column(Boolean, default=True)
+    judgment: Mapped[str] = mapped_column(String(20), default="approved")
+    decided_by: Mapped[str] = mapped_column(String(256))
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    consumed_by_invocation_id: Mapped[str | None] = mapped_column(String(512))
+    domains: Mapped[list[str] | None] = mapped_column(JSON)
+    task_ref: Mapped[str | None] = mapped_column(String(256))
+    deployment_id: Mapped[str | None] = mapped_column(String(256))
+    reason: Mapped[str | None] = mapped_column(Text)
+    anchor_wall: Mapped[str | None] = mapped_column(String(64))
+    anchor_monotonic: Mapped[float | None] = mapped_column(Float)
+    clock_epoch: Mapped[str | None] = mapped_column(String(64))
 
 
 class EventRow(Base):

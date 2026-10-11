@@ -161,6 +161,38 @@ def main(argv: list[str] | None = None) -> int:
             execution_definition=profile.execution_definition_digest(business_api),
         )
 
+    from hecate_governance.policy import GovernanceService
+    from hecate_governance.usage import BudgetGate
+
+    from .budget import DurableBudgetLedger
+    from .governance import LocalPolicyProfile, LocalRevocationView
+    from .local_approvals import DurableLocalApprovalLedger, make_local_approval_gate
+    from .profile import _load_governance, _raw_config_for_governance
+
+    def current_governance():
+        return _load_governance(_raw_config_for_governance(profile.directory))
+
+    approval_ledger = (
+        DurableLocalApprovalLedger(durable.store.session_factory, approvers=lambda: current_governance().approvers)
+        if durable
+        else None
+    )
+    governance_service = GovernanceService(
+        LocalPolicyProfile(current_governance),
+        approval_ledger=approval_ledger,
+        revocation=LocalRevocationView(current_governance),
+    )
+    approval_gate = (
+        make_local_approval_gate(durable.store.session_factory, approvers=lambda: current_governance().approvers)
+        if durable
+        else None
+    )
+    budget_gate = (
+        BudgetGate(DurableBudgetLedger(durable.store.session_factory, limit=profile.governance.budget_limit))
+        if durable and profile.governance.budget_limit is not None
+        else None
+    )
+
     engine = ExecutionEngine(
         profile,
         evidence,
@@ -169,6 +201,9 @@ def main(argv: list[str] | None = None) -> int:
         managed_identity=managed_identity,
         lease_gate=lease_gate,
         dispatch_binding=business_api,
+        governance_service=governance_service,
+        approval_gate=approval_gate,
+        budget_gate=budget_gate,
         **(
             {"lease_refresh_wait_seconds": control_plane.lease_refresh_wait_seconds}
             if profile.config.control_plane is not None

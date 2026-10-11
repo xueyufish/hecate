@@ -40,6 +40,9 @@ class IMEntryExecutionAdapter:
 
         agent_id = kwargs.get("agent_id")
         workspace_id = kwargs.get("workspace_id")
+        session_id = kwargs.get("session_id") or uuid.uuid4()
+        session_id = session_id if isinstance(session_id, uuid.UUID) else uuid.UUID(str(session_id))
+        kwargs["session_id"] = session_id
         agent = None
         agent_uuid: uuid.UUID | None = None
         if agent_id is not None:
@@ -70,11 +73,24 @@ class IMEntryExecutionAdapter:
                         agent_id=agent.id,
                         guardrail_config=getattr(agent, "guardrail_config", None),
                         event_store=event_store,
-                        session_id=None,
+                        session_id=session_id,
+                        user_id=kwargs.get("user_id"),
                         dlp_scanner=None,
                     )
 
-            port = create_runtime_port(db, llm_service, tool_registry=tool_registry)
+            port = create_runtime_port(
+                db,
+                llm_service,
+                tool_registry=tool_registry,
+                workspace_id=effective_workspace,
+                agent_id=agent.id if agent else None,
+                identity={
+                    "actor": str(kwargs["user_id"])
+                    if kwargs.get("user_id")
+                    else (f"agent:{agent.id}" if agent else ""),
+                    "agent_principal": str(agent.id) if agent else None,
+                },
+            )
             entry = EntryExecutionService(
                 port=port,
                 entry_name=self._entry_name,
@@ -90,7 +106,7 @@ class IMEntryExecutionAdapter:
                 workspace_id=effective_workspace,
                 agent_id=agent.id if agent is not None else agent_uuid,
                 user_id=kwargs.get("user_id"),
-                session_id=None,
+                session_id=session_id,
                 goal=next(
                     (m.get("content", "")[:200] for m in kwargs.get("messages", []) if m.get("content")),
                     None,

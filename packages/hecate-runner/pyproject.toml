@@ -15,6 +15,7 @@ authors = [
 dependencies = [
     "hecate-runtime",
     "hecate-durable",
+    "hecate-governance",
     "jsonschema>=4.23,<5",
 ]
 
@@ -27,3 +28,4 @@ packages = ["src/hecate_runner"]
 [tool.uv.sources]
 hecate-runtime = { workspace = true }
 hecate-durable = { workspace = true }
+hecate-governance = { workspace = true }
