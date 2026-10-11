@@ -56,7 +56,7 @@ def upgrade() -> None:
         ["invocation_key"],
         unique=True,
         sqlite_where=sa.text("released = 0 AND settled = 0"),
-        postgresql_where=sa.text("released = 0 AND settled = 0"),
+        postgresql_where=sa.text("released = false AND settled = false"),
     )
 
 

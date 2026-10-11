@@ -182,7 +182,7 @@ class BudgetReservationRow(Base):
             "invocation_key",
             unique=True,
             sqlite_where=text("released = 0 AND settled = 0"),
-            postgresql_where=text("released = 0 AND settled = 0"),
+            postgresql_where=text("released = false AND settled = false"),
         ),
     )
 

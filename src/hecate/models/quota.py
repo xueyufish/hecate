@@ -106,7 +106,7 @@ class QuotaReservationModel(BaseModel):
             "invocation_key",
             unique=True,
             sqlite_where=text("released = 0 AND settled = 0"),
-            postgresql_where=text("released = 0 AND settled = 0"),
+            postgresql_where=text("released = false AND settled = false"),
         ),
         Index("ix_quota_reservations_scope", "resource_type", "scope", "scope_id"),
     )
