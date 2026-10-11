@@ -233,12 +233,11 @@ class TestApprovalBindingLifecycleEndToEnd:
     (user actor + agent principal) and parsed arguments — the s03/s11
     scripted-loop regression."""
 
-    async def test_callback_binding_consumes_at_dispatch(self, tmp_path):
+    async def test_callback_binding_consumes_at_dispatch(self, db_session):
         import uuid
         from datetime import UTC, datetime
         from unittest.mock import AsyncMock, MagicMock
 
-        from hecate_governance.approval import MemoryApprovalLedger
         from hecate_governance.principal import ActionPrincipal, PrincipalSource
 
         from hecate.enterprise.approval_binding import AuthorityBackedApprovalCallback
@@ -247,10 +246,13 @@ class TestApprovalBindingLifecycleEndToEnd:
         user_id = uuid.uuid4()
         session_id = uuid.uuid4()
         identity = {"actor": str(user_id), "agent_principal": str(agent_id)}
-        ledger = MemoryApprovalLedger()
+        ledger = None  # replaced by the SQL authority below (db_session fixture)
         store = MagicMock()
         store.append = AsyncMock()
 
+        from hecate.enterprise.governance_ledgers import SqlApprovalLedger
+
+        ledger = SqlApprovalLedger(db_session)
         callback = AuthorityBackedApprovalCallback(
             authority=ledger,
             event_store=store,
@@ -283,7 +285,13 @@ class TestApprovalBindingLifecycleEndToEnd:
             async def evaluate(self, context):
                 return PolicyOutcome(ActionDecision.REQUIRE_APPROVAL, self.version)
 
-        approval_ref = next(iter(ledger._records))  # the single saved binding
+        approval_ref = callback._references[
+            callback._reference_key(
+                "create_test_ticket",
+                {"tool_call_id": "tc-1", **arguments},
+                {"session_id": str(session_id), "tool_call_id": "tc-1"},
+            )
+        ]
         principal = ActionPrincipal.from_verified_claims(
             {"sub": str(user_id)},
             source=PrincipalSource.PLATFORM_ENTRY,
@@ -304,7 +312,9 @@ class TestApprovalBindingLifecycleEndToEnd:
         )
         from hecate_governance.approval import ApprovalGate
 
-        outcome = await ApprovalGate(ledger).consume(approval_ref, request, now=datetime.now(UTC))
+        outcome = await ApprovalGate(SqlApprovalLedger(db_session)).consume(
+            approval_ref, request, now=datetime.now(UTC)
+        )
         assert outcome.status.value == "consumed", outcome.status
         # A different action is refused (one-time consumption).
         other = ActionRequest(
@@ -317,7 +327,7 @@ class TestApprovalBindingLifecycleEndToEnd:
             principal_fingerprint=principal.fingerprint(),
             task_scope=str(session_id),
         )
-        outcome2 = await ApprovalGate(ledger).consume(approval_ref, other, now=datetime.now(UTC))
+        outcome2 = await ApprovalGate(SqlApprovalLedger(db_session)).consume(approval_ref, other, now=datetime.now(UTC))
         assert outcome2.status.value == "conflict"
 
 

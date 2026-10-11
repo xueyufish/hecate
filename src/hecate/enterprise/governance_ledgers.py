@@ -37,7 +37,7 @@ from hecate_governance.claims import (
     ClaimStatus,
     identity_matches,
 )
-from sqlalchemy import or_, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -181,6 +181,10 @@ class SqlApprovalLedger(ApprovalLedger):
             return ConsumeOutcome(ConsumeStatus.CONFLICT, binding)
         # The CAS: only an unclaimed, approved row can be claimed. A racing
         # consumer's UPDATE matches zero rows — it re-reads and loses.
+        # Expiry is enforced by check_binding above; the CAS stays free of
+        # datetime comparisons — SQLite's ORM evaluator compares the pending
+        # object's tz-aware attribute against the bound parameter and raises
+        # on mixed offsets (the s03/s11 scripted-loop failure).
         result = await self._db.execute(
             update(ApprovalAuthorityModel)
             .where(
@@ -188,7 +192,6 @@ class SqlApprovalLedger(ApprovalLedger):
                 ApprovalAuthorityModel.consumed_by_invocation_id.is_(None),
                 ApprovalAuthorityModel.judgment == ApprovalJudgment.APPROVED.value,
                 ApprovalAuthorityModel.revoked.is_(False),
-                or_(ApprovalAuthorityModel.expires_at.is_(None), ApprovalAuthorityModel.expires_at > now),
             )
             .values(consumed_by_invocation_id=request.invocation_id)
         )
