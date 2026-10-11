@@ -88,7 +88,7 @@ iterations:
   - No production writes, durable recovery, or managed lease
 - - I-Ca
   - Standalone product reliability loop
-  - step6 local persistence; step7 local actions/approval; minimal step10/11; step16 SC faults
+  - step6 local persistence; step7 local actions/approval (local slice delivered - governed boundary, approval binding, local authority, budget; managed lease certification pending); minimal step10/11; step16 SC faults
   - No-control-plane tasks with local approval, restart recovery, artifact update/rollback
   - No platform tables, management UI, teams, or full Knowledge
 - - I-Cb

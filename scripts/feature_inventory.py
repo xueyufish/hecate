@@ -257,7 +257,7 @@ def _render_dispositions(inventory: dict[str, Any]) -> str:
 
 _PLAN_PATH = Path(__file__).resolve().parent / "feature_inventory_plan.yaml"
 _DISPOSITION_VALUES = {"core-contract", "builtin-reference", "optional-component", "integration", "retire-candidate"}
-_EXPECTED_PLAN_ROWS = {"review": 10, "core": 16, "backend": 13, "defer": 11, "standalone": 5, "labs": 6}
+_EXPECTED_PLAN_ROWS = {"review": 10, "core": 17, "backend": 13, "defer": 11, "standalone": 5, "labs": 6}
 
 
 def _load_plan_mappings() -> list[dict[str, Any]]:

@@ -3517,7 +3517,7 @@ features:
   superseded_by: n/a
   disposition: core-contract
   plan_mappings:
-  - core-02
+  - core-02a
   target_boundary: builtin now; process-external policy/claim services attach through the governance profile
     and claim-ledger seams; managed lease profile certification follows in I-Cb; existing runs stay pinned
 - id: 2.10b
