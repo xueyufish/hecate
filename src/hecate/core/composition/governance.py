@@ -241,11 +241,23 @@ class PlatformGovernance:
             raise OutcomeUnknownError("invocation already claimed; reconciliation required before retry")
         return False, None
 
-    async def execute_tool(self, registry: Any, name: str, arguments: dict, context: dict | None = None) -> Any:
+    async def execute_tool(self, registry: Any, name: str, arguments: dict | str, context: dict | None = None) -> Any:
         """Authorize, claim, dispatch and persist one logical tool action."""
+        import json as _json
+
         from hecate_governance.claims import OutcomeUnknownError
         from jsonschema import Draft202012Validator
 
+        if isinstance(arguments, str):
+            # Model-emitted arguments arrive as a raw JSON string; normalize
+            # BEFORE the digest so the approval binding's arguments_digest
+            # (saved from the parsed dict at approval time) matches.
+            try:
+                arguments = _json.loads(arguments)
+            except _json.JSONDecodeError as exc:
+                raise GovernanceDeniedError("tool arguments are not valid JSON") from exc
+        if not isinstance(arguments, dict):
+            raise GovernanceDeniedError("tool arguments must be a JSON object")
         call_context = dict(context or {})
         replayed, result = await self.completed_result(name, arguments, call_context)
         if replayed:
@@ -549,7 +561,9 @@ def build_platform_governance(
     # in-memory injection by the caller).
     approval_ledger = None
     action_claims = None
-    if db is not None:
+    if db is not None and getattr(db, "bind", None) is not None:
+        # Stub/test sessions without a bound engine cannot host the SQL
+        # authority; composition callers inject in-memory ledgers instead.
         from hecate.enterprise.governance_ledgers import (
             SqlActionClaimLedger,
             SqlApprovalLedger,

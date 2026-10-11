@@ -225,3 +225,113 @@ async def test_injected_facade_preserves_each_factory_identity(db_session):
     await second.tool_execute("write", {"domain": "a"})
     assert profile.actors == ["first", "second"]
     assert facade._identity == {}
+
+
+class TestApprovalBindingLifecycleEndToEnd:
+    """The binding saved by the authority-backed chat callback must be
+    consumable by the governed registry dispatch with the SAME envelope
+    (user actor + agent principal) and parsed arguments — the s03/s11
+    scripted-loop regression."""
+
+    async def test_callback_binding_consumes_at_dispatch(self, tmp_path):
+        import uuid
+        from datetime import UTC, datetime
+        from unittest.mock import AsyncMock, MagicMock
+
+        from hecate_governance.approval import MemoryApprovalLedger
+        from hecate_governance.principal import ActionPrincipal, PrincipalSource
+
+        from hecate.enterprise.approval_binding import AuthorityBackedApprovalCallback
+
+        agent_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+        session_id = uuid.uuid4()
+        identity = {"actor": str(user_id), "agent_principal": str(agent_id)}
+        ledger = MemoryApprovalLedger()
+        store = MagicMock()
+        store.append = AsyncMock()
+
+        callback = AuthorityBackedApprovalCallback(
+            authority=ledger,
+            event_store=store,
+            session_id=session_id,
+            workspace_id=uuid.uuid4(),
+            agent_id=agent_id,
+            identity=identity,
+        )
+        callback._inner_backend = _AlwaysApproveOnce()
+
+        arguments = {"title": "t", "body": "b"}
+        decision = await callback.request_approval(
+            tool_name="create_test_ticket",
+            arguments={"tool_call_id": "tc-1", **arguments},
+            risk_level="high",
+            context={"session_id": str(session_id), "tool_call_id": "tc-1"},
+        )
+        assert decision.approved is True
+
+        # The dispatch consumes through the same governance seam the
+        # GovernedToolRegistry uses: build_principal over the same identity.
+        from hecate_governance.action import ActionDecision
+        from hecate_governance.policy import PolicyOutcome, PolicyProfile
+
+        class _RequireApproval(PolicyProfile):
+            @property
+            def version(self) -> str:
+                return "test-1"
+
+            async def evaluate(self, context):
+                return PolicyOutcome(ActionDecision.REQUIRE_APPROVAL, self.version)
+
+        approval_ref = next(iter(ledger._records))  # the single saved binding
+        principal = ActionPrincipal.from_verified_claims(
+            {"sub": str(user_id)},
+            source=PrincipalSource.PLATFORM_ENTRY,
+            domains=(),
+            agent_principal=str(agent_id),
+        )
+        from hecate_governance.approval import ActionRequest
+
+        request = ActionRequest(
+            invocation_id="chat-dispatch-1",
+            tool_name="create_test_ticket",
+            arguments_digest=__import__(
+                "hecate_governance.action", fromlist=["tool_arguments_digest"]
+            ).tool_arguments_digest(arguments),
+            target_resources=(),
+            principal_fingerprint=principal.fingerprint(),
+            task_scope=str(session_id),
+        )
+        from hecate_governance.approval import ApprovalGate
+
+        outcome = await ApprovalGate(ledger).consume(approval_ref, request, now=datetime.now(UTC))
+        assert outcome.status.value == "consumed", outcome.status
+        # A different action is refused (one-time consumption).
+        other = ActionRequest(
+            invocation_id="chat-dispatch-2",
+            tool_name="create_test_ticket",
+            arguments_digest=__import__(
+                "hecate_governance.action", fromlist=["tool_arguments_digest"]
+            ).tool_arguments_digest(arguments),
+            target_resources=(),
+            principal_fingerprint=principal.fingerprint(),
+            task_scope=str(session_id),
+        )
+        outcome2 = await ApprovalGate(ledger).consume(approval_ref, other, now=datetime.now(UTC))
+        assert outcome2.status.value == "conflict"
+
+
+class _AlwaysApproveOnce:
+    async def request_approval(self, *, tool_name, arguments, risk_level, context):
+        from hecate.runtime.tool_access import ApprovalDecision, ApprovalScope
+
+        return ApprovalDecision(approved=True, reason="ok", scope=ApprovalScope.ONCE)
+
+
+class _RequireApprovalProfileStub(PolicyProfile):
+    @property
+    def version(self) -> str:
+        return "stub"
+
+    async def evaluate(self, context):
+        raise NotImplementedError

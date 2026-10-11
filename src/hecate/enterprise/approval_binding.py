@@ -23,7 +23,10 @@ from hecate_governance.action import target_resources_for, tool_arguments_digest
 from hecate_governance.approval import ApprovalBinding, ApprovalJudgment, ApprovalLedger
 from hecate_governance.principal import ActionPrincipal, PrincipalSource
 
-from hecate.runtime.security.approval import FailingClosedApprovalCallback
+from hecate.runtime.security.approval import (
+    FailingClosedApprovalCallback,
+    approval_arguments_digest,
+)
 from hecate.runtime.tool_access import ApprovalDecision
 
 DEFAULT_BINDING_TTL_MINUTES = 60
@@ -109,7 +112,7 @@ class AuthorityBackedApprovalCallback(FailingClosedApprovalCallback):
                     deployment_id=self._identity.get("deployment_id"),
                 ).fingerprint(),
                 tool_name=tool_name,
-                arguments_digest=tool_arguments_digest(arguments),
+                arguments_digest=approval_arguments_digest(arguments),
                 target_resources=target_resources_for(arguments),
                 domains=tuple(self._identity.get("data_domains") or ()),
                 task_scope=str(self.session_id) if self.session_id else None,

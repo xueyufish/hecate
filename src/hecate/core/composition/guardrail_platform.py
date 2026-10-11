@@ -126,14 +126,22 @@ async def assemble_guardrails(
     from hecate.enterprise.governance_ledgers import SqlApprovalLedger
 
     previous = bundle.approval_callback
+    bind = getattr(db, "bind", None)
+    if bind is None:
+        # Stub/test sessions without a bound engine cannot host the SQL
+        # authority; keep the kernel fail-closed callback unwrapped.
+        return bundle
     callback = AuthorityBackedApprovalCallback(
-        authority=SqlApprovalLedger(db, session_factory=async_sessionmaker(db.bind, expire_on_commit=False)),
+        authority=SqlApprovalLedger(db, session_factory=async_sessionmaker(bind, expire_on_commit=False)),
         event_store=event_store,
         session_id=session_id,
         workspace_id=workspace_id,
         agent_id=agent_id,
         identity={
-            "actor": str(user_id) if user_id else (f"agent:{agent_id}" if agent_id else ""),
+            # Must equal the dispatch envelope: the governed registry consumes
+            # with build_principal(tool_context, identity) where identity is
+            # the same dict chat passes to create_runtime_port (user actor).
+            "actor": str(user_id) if user_id else None,
             "agent_principal": str(agent_id) if agent_id else None,
         },
     )

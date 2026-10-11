@@ -154,6 +154,13 @@ def check_binding(
     if binding.expires_at is not None and now >= binding.expires_at:
         return BindingVerdict(BindingCheck.EXPIRED, detail="approval has expired")
     if binding.principal_fingerprint != request.principal_fingerprint:
+        import os
+
+        if os.environ.get("HECATE_DEBUG_BINDING"):
+            print(
+                f"[BINDING-DEBUG] binding_fp={binding.principal_fingerprint[:16]} "
+                f"request_fp={request.principal_fingerprint[:16]}"
+            )
         return BindingVerdict(BindingCheck.MISMATCH, BindingMismatch.PRINCIPAL, "principal differs")
     if binding.tool_name != request.tool_name:
         return BindingVerdict(BindingCheck.MISMATCH, BindingMismatch.TOOL, "tool differs")

@@ -56,7 +56,11 @@ async def test_assemble_returns_bundle_with_policy_and_callback(db_session):
     )
     assert isinstance(bundle, GuardrailBundle)
     assert isinstance(bundle.access_policy, object)  # ToolAccessPolicy concrete class
-    assert isinstance(bundle.approval_callback, NoAnswerApprovalCallback)
+    # step7: the assembly wraps the fail-closed callback with the
+    # authority-backed binding callback (which subclasses FailingClosed).
+    from hecate.runtime.security.approval import FailingClosedApprovalCallback
+
+    assert isinstance(bundle.approval_callback, FailingClosedApprovalCallback)
     assert bundle.rules == []
 
 

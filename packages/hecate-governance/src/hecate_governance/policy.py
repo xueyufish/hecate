@@ -224,7 +224,12 @@ class GovernanceService:
             return verdict
         consumption = await self._approvals.consume(approval_ref, request, now=now)
         if consumption.status not in (ConsumeStatus.CONSUMED, ConsumeStatus.SAME_ACTION_REBOUND):
-            return BindingVerdict(
-                BindingCheck.NOT_APPROVED, detail="approval consumed by another action or invalidated"
-            )
+            detail = "approval consumed by another action or invalidated"
+            if consumption.binding is not None:
+                detail += (
+                    f" (status={consumption.status.value}, "
+                    f"binding_tool={consumption.binding.tool_name!r}, "
+                    f"binding_digest={consumption.binding.arguments_digest[:12]})"
+                )
+            return BindingVerdict(BindingCheck.NOT_APPROVED, detail=detail)
         return verdict
