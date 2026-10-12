@@ -36,10 +36,10 @@ class _StreamChunk:
     state: dict = field(default_factory=dict)
 
 
-def test_mapping_assigns_task_run_refs_and_monotonic_sequence() -> None:
+async def test_mapping_assigns_task_run_refs_and_monotonic_sequence() -> None:
     mapper = RunEventMapper(_TASK, _RUN)
-    first = mapper.map_stream_event({"type": "message", "content": "hello"})
-    second = mapper.map_stream_event({"type": "message", "content": "world"})
+    first = await mapper.map_stream_event({"type": "message", "content": "hello"})
+    second = await mapper.map_stream_event({"type": "message", "content": "world"})
     assert first.task_ref == _TASK
     assert first.run_ref == _RUN
     assert first.kind is EventKind.EVENT
@@ -48,20 +48,20 @@ def test_mapping_assigns_task_run_refs_and_monotonic_sequence() -> None:
     assert first.payload == {"type": "message", "content": "hello"}
 
 
-def test_original_engine_event_is_preserved_as_backend_detail() -> None:
+async def test_original_engine_event_is_preserved_as_backend_detail() -> None:
     mapper = RunEventMapper(_TASK, _RUN)
     engine_event = {
         "type": "values",
         "state": {"messages": [], "_route": "llm", "_session_id": "s-1", "suggested_questions": ["q1"]},
     }
-    envelope = mapper.map_stream_event(engine_event)
+    envelope = await mapper.map_stream_event(engine_event)
     assert envelope.extra["backend_detail"] == engine_event
 
 
-def test_values_payload_projection_keeps_engine_channels_out() -> None:
+async def test_values_payload_projection_keeps_engine_channels_out() -> None:
     """Internal state channel names never reach the client-safe payload."""
     mapper = RunEventMapper(_TASK, _RUN)
-    envelope = mapper.map_stream_event(
+    envelope = await mapper.map_stream_event(
         {"type": "values", "state": {"_route": "check_tools", "_has_tool_call": True, "suggested_questions": ["q"]}}
     )
     assert envelope.payload == {"type": "values", "suggested_questions": ["q"]}
@@ -69,47 +69,47 @@ def test_values_payload_projection_keeps_engine_channels_out() -> None:
     assert envelope.extra["backend_detail"]["state"]["_route"] == "check_tools"
 
 
-def test_envelopes_round_trip_through_dict() -> None:
+async def test_envelopes_round_trip_through_dict() -> None:
     from hecate.contracts.execution.events import EventEnvelope
 
     mapper = RunEventMapper(_TASK, _RUN)
-    envelope = mapper.map_stream_event({"type": "message", "content": "x"})
+    envelope = await mapper.map_stream_event({"type": "message", "content": "x"})
     restored = EventEnvelope.from_dict(envelope.to_dict())
     assert restored.source_sequence == envelope.source_sequence
     assert restored.task_ref == _TASK
     assert restored.extra["backend_detail"] == envelope.extra["backend_detail"]
 
 
-def test_read_events_pages_by_cursor_without_gaps() -> None:
+async def test_read_events_pages_by_cursor_without_gaps() -> None:
     """The mapped stream pages by run cursor: consecutive, resumable."""
     mapper = RunEventMapper(_TASK, _RUN)
     for index in range(5):
-        mapper.map_stream_event({"type": "message", "content": str(index)})
+        await mapper.map_stream_event({"type": "message", "content": str(index)})
 
-    first = mapper.read_events(limit=2)
+    first = await mapper.read_events(limit=2)
     assert [e.source_sequence for e in first.events] == [0, 1]
     assert first.has_more and first.next_cursor == "1"
 
-    second = mapper.read_events(cursor=first.next_cursor, limit=2)
+    second = await mapper.read_events(cursor=first.next_cursor, limit=2)
     assert [e.source_sequence for e in second.events] == [2, 3]
     assert second.has_more and second.next_cursor == "3"
 
-    tail = mapper.read_events(cursor=second.next_cursor, limit=2)
+    tail = await mapper.read_events(cursor=second.next_cursor, limit=2)
     assert [e.source_sequence for e in tail.events] == [4]
     assert not tail.has_more
 
     # Cursor at the end: empty page, cursor held.
-    done = mapper.read_events(cursor=tail.next_cursor, limit=2)
+    done = await mapper.read_events(cursor=tail.next_cursor, limit=2)
     assert not done.events and not done.has_more
 
 
-def test_read_events_unknown_cursor_fails_closed() -> None:
+async def test_read_events_unknown_cursor_fails_closed() -> None:
     mapper = RunEventMapper(_TASK, _RUN)
-    mapper.map_stream_event({"type": "message", "content": "x"})
+    await mapper.map_stream_event({"type": "message", "content": "x"})
     import pytest
 
     with pytest.raises(ValueError):
-        mapper.read_events(cursor="not-a-number")
+        await mapper.read_events(cursor="not-a-number")
 
 
 def test_tool_pairing_reports_paired_and_leftover_calls() -> None:

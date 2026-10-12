@@ -6,13 +6,14 @@ Provides:
 - :class:`AgentExecutor` — runs an agent through the platform entry
   execution service (same assembly and Task/Run correlation as the
   HTTP/MCP/IM/A2A entries)
-- :class:`WorkflowExecutor` — runs a workflow via the studio test runner
-  (a separately registered non-entry path; see the evolution plan)
+- :class:`WorkflowExecutor` — runs a scheduled workflow through the
+  platform entry execution service (step5d closure)
 - :class:`ExecutorRegistry` — maps task_type strings to executor instances
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from abc import ABC, abstractmethod
@@ -210,13 +211,15 @@ class AgentExecutor(TaskExecutor):
 
 
 class WorkflowExecutor(TaskExecutor):
-    """Execute a scheduled workflow run.
+    """Execute a scheduled workflow run through the platform entry path.
 
-    Runs the workflow through ``WorkflowTestRunner`` — the same
-    workflow-level execution entry the management ``test-run`` endpoint
-    uses — with ``mock=False`` for a real run. This is NOT the platform
-    entry service path; it is registered as a remaining studio test
-    entry in the evolution plan (step5 notes).
+    step5d closure: the scheduler previously drove the studio test
+    runner directly (no Task/Run correlation, no identity chain, no
+    governance or events). The execution now goes through the platform
+    entry execution service — the same path as the scheduled agent
+    executor — while that test runner remains the studio test-run
+    endpoint's own runner. ``ScheduledTaskExecution.result_summary``
+    binding semantics are unchanged (the returned dict flows there).
 
     Expected task_config keys:
 
@@ -241,30 +244,73 @@ class WorkflowExecutor(TaskExecutor):
             return {"status": "failed", "error": "Missing workflow_id in task_config"}
 
         try:
+            from hecate_llm.service import llm_service
+
+            from hecate.core.composition.entry_assembly import (
+                get_shared_event_store,
+                get_shared_session_state_store,
+            )
+            from hecate.core.composition.runtime_port_adapter import create_runtime_port
             from hecate.core.database import async_session_factory
-            from hecate.studio.workflows.test_runner import WorkflowTestRunner
+            from hecate.execution.entry_service import CorrelationInput, EntryExecutionService
+            from hecate.models.workflow import WorkflowModel
 
             async with async_session_factory() as db:
-                runner = WorkflowTestRunner(db)
-                result = await runner.run_test(
-                    workflow_id=uuid.UUID(str(resolved_workflow_id)),
-                    input_data=task_config.get("input_data", {}),
-                    mock=False,
+                workflow_uuid = uuid.UUID(str(resolved_workflow_id))
+                workflow = await db.get(WorkflowModel, workflow_uuid)
+                if workflow is None or workflow.deleted:
+                    return {"status": "failed", "error": f"Workflow {resolved_workflow_id} not found"}
+
+                port = create_runtime_port(
+                    db,
+                    llm_service,
+                    tool_registry=None,
+                    workspace_id=workflow.workspace_id,
+                    agent_id=None,
                 )
-            status = "success" if result.status == "completed" else "failed"
+                entry = EntryExecutionService(
+                    port=port,
+                    entry_name="scheduled-workflow",
+                    db=db,
+                    event_store=get_shared_event_store(),
+                    checkpoint_store=get_shared_session_state_store(),
+                )
+                input_data = task_config.get("input_data") or {}
+                prompt = (
+                    json.dumps(input_data, ensure_ascii=False, default=str)
+                    if input_data
+                    else f"Run workflow {resolved_workflow_id}"
+                )
+                outcome = await entry.execute(
+                    agent_mode="workflow",
+                    workflow_id=workflow_uuid,
+                    workspace_id=workflow.workspace_id,
+                    session_id=uuid.uuid4(),
+                    messages=[{"role": "user", "content": prompt}],
+                    stream=False,
+                    correlation=CorrelationInput(
+                        workspace_id=workflow.workspace_id,
+                        goal=f"scheduled workflow {workflow.name}".strip()[:200] or None,
+                    ),
+                )
+                # Commit so the Task/Run correlation rows and the terminal
+                # projection written on this session survive its close.
+                await db.commit()
+
+            result = outcome.result if isinstance(outcome.result, dict) else {}
+            status = "success" if result.get("finish_reason") == "stop" else "failed"
             logger.info(
                 "WorkflowExecutor completed for task %s workflow %s status %s",
                 task_id,
                 resolved_workflow_id,
-                result.status,
+                status,
             )
             return {
                 "status": status,
                 "result": {
-                    "run_id": str(result.run_id),
-                    "workflow_status": result.status,
-                    "total_duration_ms": result.total_duration_ms,
-                    "error": result.error,
+                    "content": str(result.get("content", "") or "")[:2000],
+                    "finish_reason": result.get("finish_reason"),
+                    "correlation": outcome.correlation.to_dict(),
                 },
             }
         except Exception as e:

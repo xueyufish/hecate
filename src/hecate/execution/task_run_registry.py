@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hecate.contracts.execution.identity import IdentityChain
 from hecate.contracts.execution.references import BackendRef, RefKind, require_kind
 from hecate.execution.registry_support import is_workspace_admin, registry_audit, require_workspace
+from hecate.models.agent import AgentModel
 from hecate.models.agent_deployment import AgentDeploymentModel
 from hecate.models.agent_principal import AgentPrincipalModel, PrincipalLifecycle
 from hecate.models.agent_version import AgentVersionModel
@@ -63,6 +64,9 @@ class TaskRunValidationError(TaskRunRegistryError):
 
 class BackendSessionConflictError(TaskRunRegistryError):
     """Raised when a vendor session is already bound to another run."""
+
+
+_ENTRY_TERMINAL_STATES = {"succeeded", "failed", "cancelled"}
 
 
 def _now() -> datetime:
@@ -248,6 +252,32 @@ class TaskRunRegistry:
         await self._session.flush()
         return run
 
+    async def finalize_run(
+        self,
+        run_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        *,
+        state: str,
+        summary: str | None = None,
+        error_category: str | None = None,
+    ) -> RunModel:
+        """Entry-side terminal projection (step5d contract closure).
+
+        ``state`` reuses the platform terminal vocabulary the dispatcher
+        already reads from the projection; ``summary`` is a contract-level
+        result digest; ``error_category`` carries the entry stop category.
+        Internal exception detail never enters this surface — the caller
+        keeps it in server logs only.
+        """
+        if state not in _ENTRY_TERMINAL_STATES:
+            raise TaskRunValidationError("terminal state must be one of: " + ", ".join(sorted(_ENTRY_TERMINAL_STATES)))
+        projection: dict[str, Any] = {"state": state}
+        if summary is not None:
+            projection["summary"] = summary
+        if error_category is not None:
+            projection["error_category"] = error_category
+        return await self.update_projection(run_id, workspace_id, projection=projection)
+
     async def import_observation_run(
         self,
         *,
@@ -307,6 +337,32 @@ class TaskRunRegistry:
         self._session.add(run)
         await self._session.flush()
         return run
+
+    async def list_workspace_default_deployment_agents(self, workspace_id: uuid.UUID) -> list[AgentModel]:
+        """Agents marked as the workspace's explicit entry target.
+
+        An agent is a default entry target when it holds a default
+        deployment in the workspace (the deployment table is the explicit
+        registration surface). Entry adapters consume the resolved agent
+        rows; the deployment model itself stays registry-owned.
+        """
+        rows = (
+            (
+                await self._session.execute(
+                    select(AgentModel)
+                    .join(AgentDeploymentModel, AgentDeploymentModel.agent_id == AgentModel.id)
+                    .where(
+                        AgentDeploymentModel.workspace_id == workspace_id,
+                        AgentDeploymentModel.is_default.is_(True),
+                        AgentDeploymentModel.deleted.is_(False),
+                        AgentModel.deleted.is_(False),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return list({agent.id: agent for agent in rows}.values())
 
     async def find_local_source_run(
         self,

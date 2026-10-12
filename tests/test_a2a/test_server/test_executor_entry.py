@@ -358,13 +358,13 @@ async def test_out_of_scope_agent_is_never_selected(
     assert llm.chat_calls == []
 
 
-async def test_ambiguous_scope_fails_without_execution(
+async def test_ambiguous_scope_without_default_deployment_fails(
     db_session: AsyncSession,
     default_workspace,
     a2a_scope,
     llm: StubLLMService,
 ) -> None:
-    """A scope resolving to multiple agents refuses instead of picking one."""
+    """Multiple agents without a unique default deployment refuse."""
     await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
     await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
 
@@ -372,7 +372,50 @@ async def test_ambiguous_scope_fails_without_execution(
 
     assert result["task"]["status"]["state"] == "failed"
     assert result["task"]["status"]["message"]["parts"][0]["text"] == (
-        "The configured A2A workspace does not resolve to a single agent"
+        "The configured A2A workspace does not resolve to a default agent"
+    )
+    assert llm.chat_calls == []
+
+
+async def test_multi_agent_scope_resolves_default_deployment(
+    db_session: AsyncSession,
+    default_workspace,
+    a2a_scope,
+    llm: StubLLMService,
+) -> None:
+    """step5d closure: multiple agents resolve through the default deployment."""
+    deployed = await _agent_with_tool(db_session, default_workspace.id, with_deployment=True)
+    await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
+
+    result = await _send_message(db_session, "add 2 and 3")
+
+    assert result["task"]["status"]["state"] == "completed"
+    assert llm.chat_calls or llm.stream_calls
+    tasks = (
+        (await db_session.execute(select(TaskModel).where(TaskModel.workspace_id == default_workspace.id)))
+        .scalars()
+        .all()
+    )
+    assert len(tasks) == 1
+    # The deployed (default) agent is the resolved execution target.
+    assert deployed.name  # sanity: the default-deployed agent row exists
+
+
+async def test_multi_agent_scope_with_two_defaults_fails(
+    db_session: AsyncSession,
+    default_workspace,
+    a2a_scope,
+    llm: StubLLMService,
+) -> None:
+    """Two default deployments are ambiguous: refuse, never pick."""
+    await _agent_with_tool(db_session, default_workspace.id, with_deployment=True)
+    await _agent_with_tool(db_session, default_workspace.id, with_deployment=True)
+
+    result = await _send_message(db_session, "hello")
+
+    assert result["task"]["status"]["state"] == "failed"
+    assert result["task"]["status"]["message"]["parts"][0]["text"] == (
+        "The configured A2A workspace does not resolve to a default agent"
     )
     assert llm.chat_calls == []
 

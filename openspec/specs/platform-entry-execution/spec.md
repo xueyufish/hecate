@@ -42,7 +42,7 @@
 
 ### Requirement: 入口执行关联统一 Task/Run
 
-业务入口(HTTP/MCP/IM/A2A)与定时任务 agent 入口经入口服务的每次执行 SHALL 在 TaskRunRegistry 登记 Task(发起者身份链、workspace 归属)与 Run(尝试、身份链快照),会话型执行并登记 conversation 链接;同一 agent 的同一请求经不同入口执行时,可按 agent/会话追溯到关联的 Task/Run。A2A 与定时任务执行的 workspace 归属 SHALL 取执行所用 agent 行的 workspace,不得无 workspace 归属。评估等平台内部批量入口 SHALL 将其执行关联到单一内部 Task,而非逐条目新建 Task。登记 MUST NOT 改变执行行为;登记失败时执行结果中显式标记关联缺失,MUST NOT 静默宣称已登记。Task 生命周期状态机(queued/waiting_approval 等)属 step6,本能力 MUST NOT 引入其语义。
+业务入口(HTTP/MCP/IM/A2A)与定时任务 agent 入口经入口服务的每次执行 SHALL 在 TaskRunRegistry 登记 Task(发起者身份链、workspace 归属)与 Run(尝试、身份链快照),会话型执行并登记 conversation 链接;同一 agent 的同一请求经不同入口执行时,可按 agent/会话追溯到关联的 Task/Run。A2A 与定时任务执行的 workspace 归属 SHALL 取执行所用 agent 行的 workspace,不得无 workspace 归属。评估等平台内部批量入口 SHALL 将其执行关联到单一内部 Task,而非逐条目新建 Task。登记 MUST NOT 改变执行行为;登记失败时执行结果中显式标记关联缺失,MUST NOT 静默宣称已登记。执行完成或失败后,已登记的 Task/Run 投影 SHALL 反映终态:成功执行携带结果摘要(最终内容摘要/声明的产物引用),失败执行携带停止类别与安全摘要(映射到平台任务生命周期的既有终态词汇,不新增状态语义);执行内部异常细节 MUST 保留在服务端日志,契约面只承载类别与关联引用。流式与非流式对终态与关联信息的呈现 SHALL 对称:两种形状下客户端均可取得 Task/Run 引用,关联缺失时均可显式观察。
 
 #### Scenario: 跨入口追溯同一 Task/Run 关联
 
@@ -64,9 +64,23 @@
 - **WHEN** Task/Run 登记未能完成而执行继续
 - **THEN** 执行结果或日志显式标记关联缺失,不以已登记状态上报
 
+#### Scenario: 失败执行回写终态与类别
+
+- **WHEN** 经入口服务的执行以停止类别(如未知结果/预算耗尽/取消)或内部异常终止,且 Task/Run 已登记
+- **THEN** 关联的 Task 投影反映失败终态并携带该停止类别;响应或事件中的错误契约面只含类别、安全摘要与关联引用,内部异常细节不出现在契约面
+
+#### Scenario: 成功执行回写结果摘要
+
+- **WHEN** 经入口服务的执行成功完成且 Task/Run 已登记
+- **THEN** 关联的 Task 投影反映成功终态并携带结果摘要,可按 Task 查询到最终输出的契约级摘要
+
+#### Scenario: 流式与非流式关联信息对称
+
+- **WHEN** 同一入口分别以流式与非流式执行并产生终止(正常或停止)
+- **THEN** 两种形状的客户端可见输出均可取得本次执行的 Task/Run 引用(或显式的关联缺失标记),不因形状不同而丢失关联可见性
 ### Requirement: 引擎事件映射到平台契约
 
-入口服务 SHALL 将引擎原始流事件映射为 `contracts/execution` 的 `EventEnvelope`(task_ref/run_ref、source_sequence、payload schema 引用),并支持按 run 引用与游标的分页读取;原始引擎事件 MUST 作为后端详情保留,不因映射而丢弃。tool call/result 的配对在映射层校验,未配对事件 MUST 显式暴露(校验失败或告警),不得静默吞掉。客户端可见的 OpenAI 风格响应与 SSE chunk 由适配层转换产生,MUST NOT 携带 backend 专属字段(引擎内部路由/状态通道名等)。经平台任务控制面派发的执行,其映射后的事件 SHALL 持久追加到平台事件存储,分页读取从持久存储出发:跨请求与进程内重连后按游标恢复,不依赖进程内内存保留;内存保留仅可用于未经任务控制面派发的执行。
+入口服务 SHALL 将引擎原始流事件映射为 `contracts/execution` 的 `EventEnvelope`(task_ref/run_ref、source_sequence、payload schema 引用),并支持按 run 引用与游标的分页读取;原始引擎事件 MUST 作为后端详情保留,不因映射而丢弃。tool call/result 的配对在映射层校验,未配对事件 MUST 显式暴露(校验失败或告警),不得静默吞掉。客户端可见的 OpenAI 风格响应与 SSE chunk 由适配层转换产生,MUST NOT 携带 backend 专属字段(引擎内部路由/状态通道名等)。经平台任务控制面派发的执行,其映射后的事件 SHALL 持久追加到平台事件存储,分页读取从持久存储出发:跨请求与进程内重连后按游标恢复,不依赖进程内内存保留;内存保留仅可用于未经任务控制面派发的执行。非控制面派发的入口执行(聊天直连等)在装配了持久事件存储时,其映射后的信封 SHALL 同样持久追加(以 run 作用域键),内存后端装配时允许进程内保留;分页读取先查事件存储,仅对未持久化的执行回退进程内保留。同步(非流式)执行 SHALL 将其已排空的引擎事件经同一映射器产生信封并遵循同一持久化规则,使同步与流式对同一 Task/Run 形成可分页的一致视图。
 
 #### Scenario: 事件可按 run 与游标读取
 
@@ -88,6 +102,17 @@
 - **WHEN** 经任务控制面派发的执行产生流事件后,以新的读取请求(非原请求上下文)按 run 引用从游标 0 读取
 - **THEN** 事件从持久存储返回,与执行时映射的 envelope 一致,不因原请求结束而丢失
 
+#### Scenario: 聊天执行信封随持久后端落库
+
+- **WHEN** 聊天入口执行在装配了持久事件存储的部署上完成(流式或非流式)
+- **THEN** 映射后的平台信封持久追加到事件存储,可按 run 引用从存储分页读取,不依赖原请求进程内存
+
+#### Scenario: 同步与流式同一视图
+
+- **WHEN** 同一入口分别以非流式与流式执行同类请求并按各自 run 引用读取事件页
+- **THEN** 两种形状产生的信封经同一映射与持久化路径可分页读取,视图语义一致(配对校验、游标、后端详情保留)
+
+## ADDED Requirements
 ### Requirement: 入口层禁止新增引擎具体导入
 
 被迁移的入口层模块(channel/api、tools/mcp、channel/im、channel/a2a/server)MUST NOT 直接 import 引擎具体实现类(`PregelRuntime`、`GraphCompiler`);执行装配只发生在入口服务与共享装配内。该约束 SHALL 由分层测试自动化执行,违规时测试失败并指出模块与符号。
@@ -157,3 +182,17 @@ hecate-runtime(内置执行包)、hecate-runner(宿主)与平台主体的组合�
 
 - **WHEN** 使用配置事件存储的 builtin 或平台执行路径完成一次执行
 - **THEN** 同一 session 可读取 TURN_START/TURN_END、CHANNEL_WRITE 和 STEP_END
+
+### Requirement: 入口安装/升级支持矩阵
+
+入口(HTTP、MCP、A2A、IM、定时 agent、定时 workflow、评测、studio 测试)在各消费模式(平台内置安装、独立宿主、受管宿主)下的安装与升级支持性 SHALL 以显式矩阵成文:每个入口×模式单元格声明受支持/不受支持/未认证,并指向可验证证据(CI 作业或测试);未覆盖或未认证的组合 MUST 显式登记为缺口,不得默认当作受支持。矩阵 SHALL 与执行包/宿主的版本窗口矩阵交叉引用,两者变更时同步更新。
+
+#### Scenario: 矩阵单元格可追溯到证据
+
+- **WHEN** 查看入口支持矩阵中声明为受支持的单元格
+- **THEN** 该单元格指向对应的 CI 作业或测试证据,证据实际存在且覆盖该入口×模式组合
+
+#### Scenario: 缺口显式登记
+
+- **WHEN** 某入口在某消费模式下缺少安装/升级证据
+- **THEN** 矩阵将该单元格登记为不受支持或未认证并命名缺口,不将其列为受支持

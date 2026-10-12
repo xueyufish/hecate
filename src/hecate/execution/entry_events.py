@@ -39,14 +39,20 @@ def _utc_now() -> str:
 class RunEventMapper:
     """Stateful per-run mapper from engine stream events to envelopes.
 
-    Mapped envelopes are retained so a consumer can page the run's
-    platform event stream by the opaque cursor returned with each page
-    (step6 replaces the in-memory retention with the durable store).
+    Mapped envelopes are retained in memory for consumers of executions
+    that were not persisted; when an event store is wired, every envelope
+    is also appended under a deterministic run-scoped store key so paging
+    survives the originating request and process (step5d contract
+    closure — the durable replacement for the in-memory retention).
     """
 
-    def __init__(self, task_ref: BackendRef, run_ref: BackendRef) -> None:
+    def __init__(self, task_ref: BackendRef, run_ref: BackendRef, *, event_store: Any | None = None) -> None:
         self._task_ref = task_ref
         self._run_ref = run_ref
+        self._event_store = event_store
+        # Deterministic per-run store key: stable across processes for the
+        # same run reference, disjoint from session-id keys.
+        self._store_key = uuid.uuid5(uuid.NAMESPACE_URL, f"run:{run_ref.issuer_domain}:{run_ref.id}")
         self._sequence = 0
         self._envelopes: list[EventEnvelope] = []
 
@@ -54,13 +60,14 @@ class RunEventMapper:
     def last_sequence(self) -> int:
         return self._sequence
 
-    def map_stream_event(self, event: dict[str, Any]) -> EventEnvelope:
+    async def map_stream_event(self, event: dict[str, Any]) -> EventEnvelope:
         """Map one engine stream event; unrecognised shapes map unchanged.
 
         The original engine event is preserved verbatim under
         ``extra["backend_detail"]``; the envelope payload carries only the
         client-safe projection so downstream protocol layers render from
-        platform data.
+        platform data. With a store wired, the envelope is appended to it
+        in sequence order.
         """
         sequence = self._sequence
         self._sequence += 1
@@ -89,20 +96,44 @@ class RunEventMapper:
             extra={"backend_detail": dict(event)},
         )
         self._envelopes.append(envelope)
+        if self._event_store is not None:
+            from hecate_runtime.eventstore import Event, EventType
+
+            await self._event_store.append(
+                Event(
+                    session_id=self._store_key,
+                    superstep=sequence,
+                    event_type=EventType.CUSTOM,
+                    payload={"envelope": envelope.to_dict()},
+                )
+            )
         return envelope
 
-    def read_events(self, cursor: str | None = None, limit: int = 100) -> EventPage:
+    async def read_events(self, cursor: str | None = None, limit: int = 100) -> EventPage:
         """Page the mapped stream; the cursor is the last seen sequence.
 
-        Returns consecutive envelopes with ``has_more``/``next_cursor`` so
-        consumers resume where they stopped instead of re-reading.
+        With a store wired, persisted envelopes are the source of truth
+        (the view survives the request); the in-memory retention is the
+        fallback for executions that were not persisted.
         """
+        envelopes: list[EventEnvelope] | None = None
+        if self._event_store is not None:
+            stored = await self._event_store.get_events(self._store_key)
+            persisted: list[EventEnvelope] = []
+            for record in stored:
+                envelope_dict = (getattr(record, "payload", None) or {}).get("envelope")
+                if isinstance(envelope_dict, dict):
+                    persisted.append(EventEnvelope.from_dict(envelope_dict))
+            if persisted:
+                envelopes = persisted
+        if envelopes is None:
+            envelopes = self._envelopes
         start = 0
         if cursor is not None:
             start = int(cursor) + 1
-        window = self._envelopes[start : start + limit]
+        window = envelopes[start : start + limit]
         next_index = start + len(window)
-        has_more = next_index < len(self._envelopes)
+        has_more = next_index < len(envelopes)
         return EventPage(
             events=tuple(window),
             next_cursor=str(window[-1].source_sequence) if window else cursor,

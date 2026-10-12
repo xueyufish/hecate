@@ -6,7 +6,8 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -185,58 +186,112 @@ class TestWorkflowExecutor:
         assert result["status"] == "failed"
         assert "workflow_id" in result["error"]
 
-    async def test_runs_workflow_via_test_runner(self, db_session: AsyncSession) -> None:
-        """Regression: WorkflowService.execute no longer exists — the
-        executor must call WorkflowTestRunner.run_test(mock=False)."""
+    async def test_missing_workflow_row_reports_failed(self, db_session: AsyncSession) -> None:
+        with patch("hecate.core.database.async_session_factory", _session_factory(db_session)):
+            result = await WorkflowExecutor().execute(
+                uuid.uuid4(),
+                {"workflow_id": str(uuid.uuid4())},
+            )
+        assert result["status"] == "failed"
+        assert "not found" in result["error"]
+
+    async def test_runs_workflow_through_entry_service(self, db_session: AsyncSession) -> None:
+        """step5d closure: the scheduler drives the platform entry service
+        (agent_mode=workflow, creator-workspace correlation) — no test
+        runner on the scheduled path."""
+        from hecate.contracts.execution.references import run_ref as make_run_ref
+        from hecate.execution.entry_service import CorrelationResult
+        from hecate.models.workflow import WorkflowModel
+
         workflow_id = uuid.uuid4()
-        run_result = SimpleNamespace(
-            status="completed",
-            run_id=uuid.uuid4(),
-            total_duration_ms=7,
-            error=None,
-            nodes=[],
+        db_session.add(
+            WorkflowModel(
+                id=workflow_id,
+                workspace_id=uuid.UUID(int=0),
+                name="scheduled wf",
+            )
         )
-        runner = SimpleNamespace(run_test=AsyncMock(return_value=run_result))
-        runner_cls = MagicMock(return_value=runner)
+        await db_session.flush()
+
+        captured: dict[str, Any] = {}
+        correlation = CorrelationResult(
+            status="registered",
+            task_ref=None,
+            run_ref=make_run_ref("hecate", str(uuid.uuid4())),
+        )
+
+        class _FakeEntry:
+            def __init__(self, **kwargs: Any) -> None:
+                captured["init"] = kwargs
+
+            async def execute(self, **kwargs: Any):
+                captured["execute"] = kwargs
+                from hecate.execution.entry_service import ExecutionOutcome
+
+                return ExecutionOutcome(
+                    result={"content": "workflow output", "finish_reason": "stop"},
+                    correlation=correlation,
+                )
 
         with (
             patch("hecate.core.database.async_session_factory", _session_factory(db_session)),
-            patch("hecate.studio.workflows.test_runner.WorkflowTestRunner", runner_cls),
+            patch("hecate.core.composition.runtime_port_adapter.create_runtime_port", MagicMock(return_value=None)),
+            patch("hecate.execution.entry_service.EntryExecutionService", _FakeEntry),
         ):
             result = await WorkflowExecutor().execute(
                 uuid.uuid4(),
-                {"workflow_id": str(workflow_id), "input_data": {"messages": []}},
+                {"workflow_id": str(workflow_id), "input_data": {"topic": "reorder"}},
             )
 
         assert result["status"] == "success"
-        assert result["result"]["workflow_status"] == "completed"
-        assert result["result"]["run_id"] == str(run_result.run_id)
-        runner.run_test.assert_awaited_once_with(workflow_id=workflow_id, input_data={"messages": []}, mock=False)
+        assert result["result"]["content"] == "workflow output"
+        assert result["result"]["correlation"]["status"] == "registered"
+        execute_kwargs = captured["execute"]
+        assert execute_kwargs["agent_mode"] == "workflow"
+        assert execute_kwargs["workflow_id"] == workflow_id
+        assert execute_kwargs["workspace_id"] == uuid.UUID(int=0)
+        assert execute_kwargs["correlation"].workspace_id == uuid.UUID(int=0)
+        assert execute_kwargs["session_id"] is not None
+        init_kwargs = captured["init"]
+        assert init_kwargs["entry_name"] == "scheduled-workflow"
 
-    async def test_runner_error_status_maps_to_failed(self, db_session: AsyncSession) -> None:
-        run_result = SimpleNamespace(status="error", run_id=uuid.uuid4(), total_duration_ms=3, error="boom", nodes=[])
-        runner = SimpleNamespace(run_test=AsyncMock(return_value=run_result))
-        runner_cls = MagicMock(return_value=runner)
+    async def test_entry_failure_maps_to_failed(self, db_session: AsyncSession) -> None:
+        from hecate.models.workflow import WorkflowModel
+
+        workflow_id = uuid.uuid4()
+        db_session.add(
+            WorkflowModel(
+                id=workflow_id,
+                workspace_id=uuid.UUID(int=0),
+                name="broken wf",
+            )
+        )
+        await db_session.flush()
+
+        class _BrokenEntry:
+            def __init__(self, **kwargs: Any) -> None:
+                pass
+
+            async def execute(self, **kwargs: Any):
+                raise RuntimeError("entry exploded")
 
         with (
             patch("hecate.core.database.async_session_factory", _session_factory(db_session)),
-            patch("hecate.studio.workflows.test_runner.WorkflowTestRunner", runner_cls),
+            patch("hecate.core.composition.runtime_port_adapter.create_runtime_port", MagicMock(return_value=None)),
+            patch("hecate.execution.entry_service.EntryExecutionService", _BrokenEntry),
         ):
-            result = await WorkflowExecutor().execute(uuid.uuid4(), {"workflow_id": str(uuid.uuid4())})
+            result = await WorkflowExecutor().execute(uuid.uuid4(), {"workflow_id": str(workflow_id)})
 
         assert result["status"] == "failed"
-        assert result["result"]["workflow_status"] == "error"
-        assert result["result"]["error"] == "boom"
+        assert "entry exploded" in result["error"]
 
-    async def test_runner_exception_is_reported(self, db_session: AsyncSession) -> None:
-        runner = SimpleNamespace(run_test=AsyncMock(side_effect=RuntimeError("runner exploded")))
-        runner_cls = MagicMock(return_value=runner)
+    async def test_scheduled_path_does_not_use_test_runner(self) -> None:
+        """The scheduled executor source must not reference the studio
+        test runner — that runner serves the studio test endpoint only."""
+        import inspect
 
-        with (
-            patch("hecate.core.database.async_session_factory", _session_factory(db_session)),
-            patch("hecate.studio.workflows.test_runner.WorkflowTestRunner", runner_cls),
-        ):
-            result = await WorkflowExecutor().execute(uuid.uuid4(), {"workflow_id": str(uuid.uuid4())})
+        from hecate.ops.scheduling.executors import WorkflowExecutor
 
-        assert result["status"] == "failed"
-        assert "runner exploded" in result["error"]
+        source = inspect.getsource(WorkflowExecutor)
+        assert "WorkflowTestRunner" not in source
+        assert "test_runner" not in source

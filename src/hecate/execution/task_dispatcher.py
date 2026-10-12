@@ -759,7 +759,7 @@ class PlatformTaskDispatcher:
             events = PlatformEventService(db)
             content_parts: list[str] = []
             async for raw in result_gen:
-                envelope = mapper.map_stream_event(raw if isinstance(raw, dict) else {"type": "raw"})
+                envelope = await mapper.map_stream_event(raw if isinstance(raw, dict) else {"type": "raw"})
                 await events.append_resequenced(envelope, workspace_id=context.workspace_id)
                 if envelope.payload.get("type") == "message" and envelope.payload.get("content"):
                     content_parts.append(str(envelope.payload["content"]))
