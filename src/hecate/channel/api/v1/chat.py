@@ -280,16 +280,34 @@ async def _resolve_agent(
     return resolved_model, out_msgs, agent
 
 
-async def _process_chat(*args: Any, **kwargs: Any) -> dict | StreamingResponse | JSONResponse:
+async def _process_chat(
+    request: ChatCompletionRequest,
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID | None = None,
+    event_store: EventStore | None = None,
+    session_state_store: SessionStateStore | None = None,
+    dlp_scanner: Any = None,
+    *,
+    preloaded_agent: AgentModel | None = None,
+    cancel_check: Any | None = None,
+) -> dict | StreamingResponse | JSONResponse:
     """Render terminal conditions consistently on both chat execution paths."""
-    request = args[0] if args else kwargs["request"]
     if request.stream and request.output_schema is not None:
 
         async def validated_stream():
             non_stream = request.model_copy(update={"stream": False})
-            call_args = (non_stream, *args[1:]) if args else ()
-            call_kwargs = kwargs if args else {**kwargs, "request": non_stream}
-            result = await _process_chat_impl(*call_args, **call_kwargs)
+            result = await _process_chat_impl(
+                non_stream,
+                db,
+                user_id,
+                workspace_id,
+                event_store,
+                session_state_store,
+                dlp_scanner,
+                preloaded_agent=preloaded_agent,
+                cancel_check=cancel_check,
+            )
             if isinstance(result, JSONResponse):
                 yield f"data: {result.body.decode()}\n\n"
                 yield "data: [DONE]\n\n"
@@ -309,7 +327,17 @@ async def _process_chat(*args: Any, **kwargs: Any) -> dict | StreamingResponse |
 
         return StreamingResponse(_stop_safe_stream(validated_stream()), media_type="text/event-stream")
     try:
-        return await _process_chat_impl(*args, **kwargs)
+        return await _process_chat_impl(
+            request,
+            db,
+            user_id,
+            workspace_id,
+            event_store,
+            session_state_store,
+            dlp_scanner,
+            preloaded_agent=preloaded_agent,
+            cancel_check=cancel_check,
+        )
     except (ExecutionStoppedError, BudgetRefusedError, MaxSuperstepsError) as exc:
         return _stopped_response(_as_loop_stop(exc))
 
