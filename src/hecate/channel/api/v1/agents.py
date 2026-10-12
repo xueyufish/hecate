@@ -23,13 +23,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hecate.channel.api.v1.chat import (
     ChatCompletionRequest,
     ChatMessage,
+    _disconnect_check,
     _process_chat,
 )
 from hecate.core.auth_context import AuthContext
@@ -67,6 +68,9 @@ class AgentChatCompletionRequest(BaseModel):
     session_id: str | None = Field(None, description="Session ID for sequential processing")
     agent_id: str | None = Field(None, description="Ignored when the agent_id is in the URL path.")
     generate_opening: bool = Field(default=False, description="Generate opening remarks with starter questions")
+    output_schema: dict | None = None
+    _validate_schema = field_validator("output_schema")(ChatCompletionRequest.validate_output_schema.__func__)
+
     generate_suggestions: bool = Field(default=False, description="Generate follow-up question suggestions")
 
 
@@ -93,6 +97,7 @@ def _request_to_chat_request(req: AgentChatCompletionRequest) -> ChatCompletionR
         agent_id=req.agent_id,
         generate_opening=req.generate_opening,
         generate_suggestions=req.generate_suggestions,
+        output_schema=req.output_schema,
     )
 
 
@@ -158,9 +163,11 @@ async def chat_completion_for_agent(
         try:
             # Lazy: studio is a sibling domain — cross-domain access is
             # function-level only (no module-level structural coupling).
-            from hecate.studio.session_lock import session_lock_manager
+            from hecate.studio.session_lock import hold_lock_over_stream, session_lock_manager
 
-            async with session_lock_manager.acquire(request.session_id) as lock_info:
+            lock_ctx = session_lock_manager.acquire(request.session_id)
+            lock_info = await lock_ctx.__aenter__()
+            try:
                 result = await _process_chat(
                     chat_request,
                     db,
@@ -170,11 +177,17 @@ async def chat_completion_for_agent(
                     session_state_store,
                     dlp_scanner,
                     preloaded_agent=agent,
+                    cancel_check=_disconnect_check(http_request),
                 )
-                if isinstance(result, StreamingResponse):
-                    result.headers["X-Queue-Position"] = str(lock_info["queue_position"])
-                    result.headers["X-Queue-Wait-Ms"] = str(lock_info["wait_ms"])
-                return result
+            except BaseException:
+                await lock_ctx.__aexit__(None, None, None)
+                raise
+            if isinstance(result, StreamingResponse):
+                result.headers["X-Queue-Position"] = str(lock_info["queue_position"])
+                result.headers["X-Queue-Wait-Ms"] = str(lock_info["wait_ms"])
+                return hold_lock_over_stream(lock_ctx, result)
+            await lock_ctx.__aexit__(None, None, None)
+            return result
         except TimeoutError:
             raise HTTPException(
                 status_code=408,
@@ -195,4 +208,5 @@ async def chat_completion_for_agent(
         session_state_store,
         dlp_scanner,
         preloaded_agent=agent,
+        cancel_check=_disconnect_check(http_request),
     )

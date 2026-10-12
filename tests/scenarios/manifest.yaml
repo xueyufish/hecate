@@ -208,6 +208,24 @@ scenarios:
       after the human approval the ticket service executes exactly once with
       the final answer referencing the real ticket id. Content-quality review
       stays in the Tier-2/step10 rubric scope.
+  - id: S12
+    title: 反馈驱动的自主多轮执行（step5e）
+    status: implemented
+    tier: 1
+    entries: [rest_chat_agent]
+    p_groups: [P05, P08]
+    assertions: >-
+      A feedback-driven scripted responder verifies both direct and Pregel
+      HTTP/SSE execution mechanisms: round 1 reads the material,
+      round 2 derives the write arguments from the tool result content, and
+      the final answer satisfies a declared output schema (exactly one
+      bounded retry when violated). An unknown tool outcome terminates the
+      conversation with a needs_review stop and is never fed back to the
+      model; a metered-budget refusal stops with budget_exhausted; the
+      iteration cap stays a distinct reason. A real-model recorded track
+      (tier 2, tests/scenarios/baseline/run_autonomous_baseline.py) scores
+      tool-selection/structured-output/stop-compliance over the same task
+      definition and is never collected by CI.
 sc_scenarios:
   # Standalone-consumption acceptance scenarios (plan §8 SC rows). All entries
   # start `planned`: the standalone runner/wheel does not exist yet. Each flips
@@ -245,7 +263,9 @@ sc_scenarios:
       step7 交付了本地审批权威（本地登记审批主体签发、durable 持久化、重启后
       消费状态保持）、参数/主体/期限绑定的重新判定、跨主体拒绝、readonly 撤销
       生效、时钟回拨拒绝依赖期限动作、回执写失败待对账与并发去重（tests/
-      scenarios/test_sc03_local_governance.py）。真实模型多轮验收归 step5e；
+      scenarios/test_sc03_local_governance.py）。step5e 的双路径确定性多轮场景见
+      test_s12_autonomous_multiturn.py；真实模型轨已登记但因缺少密钥 skipped，
+      不构成真实模型验收（baselines/autonomous_multiturn_baseline.json）；
       受管断连授权租约的 policy profile 认证归 I-Cb；完全隔离网络 profile
       归 step11/16 单独认证。
     assertions: >-
@@ -361,3 +381,12 @@ sc_scenarios:
       synchronized upgrades of unchanged components; incompatible contract or
       state formats refuse activation or migrate first; active runs stay on
       their fixed versions.
+
+recorded_tracks:
+  - id: autonomous_multiturn
+    tier: 2
+    runner: tests/scenarios/baseline/run_autonomous_baseline.py
+    record: tests/scenarios/baselines/autonomous_multiturn_baseline.json
+    status: skipped
+    reason: OPENAI_API_KEY unavailable; deterministic S12 does not certify real-model quality
+    ci_gate: false

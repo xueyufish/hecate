@@ -13,6 +13,7 @@ import json
 import uuid
 
 import pytest
+from hecate_runtime.errors import ExecutionStoppedError
 
 from hecate.execution.temporal.run_worker import main as run_worker_main
 from hecate.execution.temporal.worker_pool import TemporalWorkerPool
@@ -126,12 +127,13 @@ async def test_connection_error_records_unknown_receipt():
     session_id = uuid.uuid4()
     worker = _make_worker(store, _StubPort(raise_exc=ConnectionError("lost")))
 
-    await worker.execute(
-        "tools",
-        {},
-        _payload("call-1", "write_file", {"path": "f", "content": "x"}),
-        _execution_context(session_id),
-    )
+    with pytest.raises(ExecutionStoppedError, match="needs_review"):
+        await worker.execute(
+            "tools",
+            {},
+            _payload("call-1", "write_file", {"path": "f", "content": "x"}),
+            _execution_context(session_id),
+        )
 
     receipts = await _tool_results(store, session_id)
     assert len(receipts) == 1
@@ -305,15 +307,15 @@ async def test_resume_unknown_outcome_goes_to_human_review():
     worker = _make_worker(store, port)
     ctx = _execution_context(session_id)
 
-    await worker.execute("tools", {}, _payload("call-1", "browser_click", {"x": "1"}), ctx)
+    with pytest.raises(ExecutionStoppedError, match="needs_review") as first:
+        await worker.execute("tools", {}, _payload("call-1", "browser_click", {"x": "1"}), ctx)
     assert len(port.calls) == 1
 
     port.raise_exc = None
-    replay = await worker.execute("tools", {}, _payload("call-1", "browser_click", {"x": "1"}), ctx)
+    with pytest.raises(ExecutionStoppedError, match="needs_review") as replay:
+        await worker.execute("tools", {}, _payload("call-1", "browser_click", {"x": "1"}), ctx)
     assert len(port.calls) == 1, "unknown outcome must not auto-retry"
-    replay_msg = replay.channel_updates["messages"][0]
-    assert "[needs review]" in replay_msg["content"]
-    assert replay_msg["is_error"] is True
+    assert replay.value.action_ref == first.value.action_ref
 
 
 @pytest.mark.asyncio

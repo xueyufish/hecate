@@ -16,6 +16,7 @@ import json
 import uuid
 
 import pytest
+from hecate_runtime.errors import ExecutionStoppedError
 
 from hecate.runtime.action_ledger import (
     ActionClaimVerdict,
@@ -172,17 +173,16 @@ async def test_ledger_claimed_write_withholds_without_event_store():
     port = _StubPort()
     worker = ToolWorker(port=port, action_hook=hook)  # no event store at all
 
-    channel = await worker.execute(
-        "tools",
-        {},
-        _payload(call_id, "write_file", {"path": "f", "content": "x"}),
-        _execution_context(session_id),
-    )
+    with pytest.raises(ExecutionStoppedError, match="needs_review") as stopped:
+        await worker.execute(
+            "tools",
+            {},
+            _payload(call_id, "write_file", {"path": "f", "content": "x"}),
+            _execution_context(session_id),
+        )
 
     assert port.calls == [], "a claimed write must not re-execute"
-    message = _last_result(channel)
-    assert message["is_error"] is True
-    assert "needs review" in message["content"]
+    assert stopped.value.action_ref == execution_id
 
 
 @pytest.mark.asyncio

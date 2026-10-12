@@ -30,6 +30,18 @@ class EngineError(HecateError):
     """Engine runtime errors."""
 
 
+class ExecutionStoppedError(EngineError):
+    """A terminal execution condition that must never be retried."""
+
+    terminal_execution = True
+
+    def __init__(self, reason_category: str, detail: str, action_ref: str | None = None) -> None:
+        self.reason_category = reason_category
+        self.detail = detail
+        self.action_ref = action_ref
+        super().__init__(f"{reason_category}: {detail}")
+
+
 class MaxSuperstepsError(EngineError):
     """Graph execution exceeded the configured ``max_supersteps`` limit."""
 

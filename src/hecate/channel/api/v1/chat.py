@@ -8,21 +8,26 @@ and PregelRuntime for unified graph-based execution.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import inspect
 import json
 import logging
 import uuid
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from hecate_llm.service import LLMResponse, llm_service
 from hecate_llm.tool_calling import inject_tool_results, parse_tool_calls
-from pydantic import BaseModel, Field
+from hecate_runtime.errors import ExecutionStoppedError, MaxSuperstepsError
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from hecate.tools.tool.registry import ToolRegistry
+
+from hecate_governance.claims import OutcomeUnknownError
 
 from hecate.core.auth_context import AuthContext
 from hecate.core.composition.entry_assembly import (
@@ -31,11 +36,13 @@ from hecate.core.composition.entry_assembly import (
 from hecate.core.composition.entry_assembly import (
     load_agent_tools as _load_agent_tools,
 )
+from hecate.core.composition.governance import BudgetRefusedError
 from hecate.core.composition.memory_policy import narrowed_tool_names
 from hecate.core.database import get_db
 from hecate.core.deps_event_store import get_event_store
 from hecate.core.deps_state_store import get_session_state_store
 from hecate.core.deps_workspace import get_auth_context
+from hecate.core.output_schema import check_output_schema, output_schema_error
 from hecate.models.agent import AgentModel
 from hecate.models.model_provider import ModelProviderModel, ModelRegistryModel
 from hecate.runtime.eventstore import EventStore
@@ -75,6 +82,18 @@ class ChatCompletionRequest(BaseModel):
     agent_id: str | None = Field(None, description="Agent ID for skill loading")
     generate_opening: bool = Field(default=False, description="Generate opening remarks with starter questions")
     generate_suggestions: bool = Field(default=False, description="Generate follow-up question suggestions")
+    output_schema: dict | None = Field(
+        default=None,
+        description="Optional JSON Schema the final assistant content must satisfy (step5e structured output)",
+    )
+
+    @field_validator("output_schema")
+    @classmethod
+    def validate_output_schema(cls, value: dict | None) -> dict | None:
+        """Reject malformed schemas before any execution is started."""
+        if value is not None:
+            check_output_schema(value)
+        return value
 
 
 class ChatCompletionChoice(BaseModel):
@@ -189,7 +208,14 @@ async def create_chat_completion(
             lock_info = await lock_ctx.__aenter__()
             try:
                 result = await _process_chat(
-                    request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store, dlp_scanner
+                    request,
+                    db,
+                    ctx.user_id,
+                    ctx.workspace_id,
+                    event_store,
+                    session_state_store,
+                    dlp_scanner,
+                    cancel_check=_disconnect_check(http_request),
                 )
             except BaseException:
                 await lock_ctx.__aexit__(None, None, None)
@@ -213,7 +239,14 @@ async def create_chat_completion(
             ) from None
     else:
         return await _process_chat(
-            request, db, ctx.user_id, ctx.workspace_id, event_store, session_state_store, dlp_scanner
+            request,
+            db,
+            ctx.user_id,
+            ctx.workspace_id,
+            event_store,
+            session_state_store,
+            dlp_scanner,
+            cancel_check=_disconnect_check(http_request),
         )
 
 
@@ -247,7 +280,41 @@ async def _resolve_agent(
     return resolved_model, out_msgs, agent
 
 
-async def _process_chat(
+async def _process_chat(*args: Any, **kwargs: Any) -> dict | StreamingResponse | JSONResponse:
+    """Render terminal conditions consistently on both chat execution paths."""
+    request = args[0] if args else kwargs["request"]
+    if request.stream and request.output_schema is not None:
+
+        async def validated_stream():
+            non_stream = request.model_copy(update={"stream": False})
+            call_args = (non_stream, *args[1:]) if args else ()
+            call_kwargs = kwargs if args else {**kwargs, "request": non_stream}
+            result = await _process_chat_impl(*call_args, **call_kwargs)
+            if isinstance(result, JSONResponse):
+                yield f"data: {result.body.decode()}\n\n"
+                yield "data: [DONE]\n\n"
+                return
+            if not isinstance(result, dict):
+                raise TypeError("structured chat must return a non-streaming result")
+            chunk = ChatCompletionChunk(
+                model=result["model"],
+                choices=[
+                    ChatCompletionChunkChoice(
+                        delta=ChatCompletionChunkDelta(content=result["choices"][0]["message"]["content"])
+                    )
+                ],
+            )
+            yield f"data: {json.dumps(chunk.model_dump())}\n\n"
+            yield _format_done_chunk(result["model"])
+
+        return StreamingResponse(_stop_safe_stream(validated_stream()), media_type="text/event-stream")
+    try:
+        return await _process_chat_impl(*args, **kwargs)
+    except (ExecutionStoppedError, BudgetRefusedError, MaxSuperstepsError) as exc:
+        return _stopped_response(_as_loop_stop(exc))
+
+
+async def _process_chat_impl(
     request: ChatCompletionRequest,
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -257,7 +324,8 @@ async def _process_chat(
     dlp_scanner: Any = None,
     *,
     preloaded_agent: AgentModel | None = None,
-) -> dict | StreamingResponse:
+    cancel_check: Any | None = None,
+) -> dict | StreamingResponse | JSONResponse:
     """Process a chat completion request via WorkflowExecutionService.
 
     Agent resolution is split across two entry points:
@@ -363,7 +431,7 @@ async def _process_chat(
         agent_id=agent.id if agent else None,
         identity={"actor": str(user_id), "agent_principal": str(agent.id) if agent else None},
     )
-    call_llm = GovernedModelService(llm_service, governance)
+    call_llm = _CheckedModelService(GovernedModelService(llm_service, governance), cancel_check)
 
     # Guardrail bundle (T0.2): assembled once and shared by both paths —
     # the direct loop and, when CHAT_TOOL_LOOP_ENGINE_ENABLED, the Pregel
@@ -418,47 +486,56 @@ async def _process_chat(
         provider_cfg = await _get_provider_config(db, effective_model)
         if request.stream:
             return StreamingResponse(
-                _stream_chat_with_tools(
-                    effective_model,
-                    msg_dicts,
-                    effective_tools,
-                    tool_registry,
-                    request.temperature,
-                    request.max_tokens,
-                    session_id=request.session_id,
-                    timeout=provider_cfg.get("timeout"),
-                    num_retries=provider_cfg.get("num_retries"),
-                    model_service=call_llm,
-                    access_policy=bundle.access_policy,
-                    tool_rules=bundle.rules,
-                    approval_callback=bundle.approval_callback,
-                    middleware_chains=bundle.middleware_chains,
-                    denial_tracker=bundle.denial_tracker,
-                    agent_id=agent.id if agent is not None else None,
-                    workspace_id=agent.workspace_id if agent is not None else workspace_id,
+                _stop_safe_stream(
+                    _stream_chat_with_tools(
+                        effective_model,
+                        msg_dicts,
+                        effective_tools,
+                        tool_registry,
+                        request.temperature,
+                        request.max_tokens,
+                        session_id=request.session_id,
+                        timeout=provider_cfg.get("timeout"),
+                        num_retries=provider_cfg.get("num_retries"),
+                        model_service=call_llm,
+                        access_policy=bundle.access_policy,
+                        tool_rules=bundle.rules,
+                        approval_callback=bundle.approval_callback,
+                        middleware_chains=bundle.middleware_chains,
+                        denial_tracker=bundle.denial_tracker,
+                        agent_id=agent.id if agent is not None else None,
+                        workspace_id=agent.workspace_id if agent is not None else workspace_id,
+                        cancel_check=cancel_check,
+                        output_schema=request.output_schema,
+                    )
                 ),
                 media_type="text/event-stream",
             )
 
-        response = await _chat_with_tools(
-            msg_dicts,
-            effective_model,
-            effective_tools,
-            tool_registry,
-            request.temperature,
-            request.max_tokens,
-            session_id=request.session_id,
-            timeout=provider_cfg.get("timeout"),
-            num_retries=provider_cfg.get("num_retries"),
-            model_service=call_llm,
-            access_policy=bundle.access_policy,
-            tool_rules=bundle.rules,
-            approval_callback=bundle.approval_callback,
-            middleware_chains=bundle.middleware_chains,
-            denial_tracker=bundle.denial_tracker,
-            agent_id=agent.id if agent is not None else None,
-            workspace_id=agent.workspace_id if agent is not None else workspace_id,
-        )
+        try:
+            response = await _chat_with_tools(
+                msg_dicts,
+                effective_model,
+                effective_tools,
+                tool_registry,
+                request.temperature,
+                request.max_tokens,
+                session_id=request.session_id,
+                timeout=provider_cfg.get("timeout"),
+                num_retries=provider_cfg.get("num_retries"),
+                model_service=call_llm,
+                access_policy=bundle.access_policy,
+                tool_rules=bundle.rules,
+                approval_callback=bundle.approval_callback,
+                middleware_chains=bundle.middleware_chains,
+                denial_tracker=bundle.denial_tracker,
+                agent_id=agent.id if agent is not None else None,
+                workspace_id=agent.workspace_id if agent is not None else workspace_id,
+                cancel_check=cancel_check,
+                output_schema=request.output_schema,
+            )
+        except _LoopStopError as stop:
+            return _stopped_response(stop)
         if response is None:
             from fastapi import HTTPException
 
@@ -501,7 +578,7 @@ async def _process_chat(
 
         port = create_runtime_port(
             db,
-            llm_service,
+            _CheckedModelService(llm_service, cancel_check),
             tool_registry=tool_registry,
             workspace_id=workspace_id or (agent.workspace_id if agent is not None else None),
             agent_id=agent.id if agent is not None else None,
@@ -539,7 +616,7 @@ async def _process_chat(
             goal=goal,
         )
 
-        if request.stream:
+        if request.stream and request.output_schema is None:
 
             async def _stream_with_workflow():
                 outcome = await entry.execute(
@@ -633,7 +710,7 @@ async def _process_chat(
                 yield _format_done_chunk(effective_model)
 
             return StreamingResponse(
-                _stream_with_workflow(),
+                _stop_safe_stream(_stream_with_workflow()),
                 media_type="text/event-stream",
             )
 
@@ -659,6 +736,32 @@ async def _process_chat(
         if not isinstance(result, dict):
             msg = f"Expected dict result for non-streaming chat, got {type(result)}"
             raise TypeError(msg)
+
+        if request.output_schema is not None:
+
+            async def retry_final(feedback: str) -> Any:
+                # Repair only the final answer: restarting the graph with tools
+                # would allow a formatting retry to repeat business actions.
+                return await call_llm.chat(
+                    messages=msg_dicts
+                    + [
+                        {"role": "assistant", "content": result.get("content", "")},
+                        {"role": "user", "content": _schema_feedback(feedback)},
+                    ],
+                    model=effective_model,
+                    tools=None,
+                    temperature=request.temperature,
+                    max_tokens=request.max_tokens,
+                )
+
+            violation = _validate_output_schema(result.get("content", ""), request.output_schema)
+            if violation is not None:
+                repaired = await _enforce_output_schema(
+                    LLMResponse(content=result.get("content", ""), model=effective_model),
+                    request.output_schema,
+                    retry_final,
+                )
+                result = {**result, "content": repaired.content, "finish_reason": repaired.finish_reason or "stop"}
 
         suggested_questions = result.get("suggested_questions")
 
@@ -690,17 +793,19 @@ async def _process_chat(
     # Simple passthrough: no KB, no suggestions — use LLM directly for lowest latency
     provider_cfg = await _get_provider_config(db, effective_model)
 
-    if request.stream:
+    if request.stream and request.output_schema is None:
         return StreamingResponse(
-            _stream_chat(
-                effective_model,
-                msg_dicts,
-                request.temperature,
-                request.max_tokens,
-                request.tools,
-                timeout=provider_cfg.get("timeout"),
-                num_retries=provider_cfg.get("num_retries"),
-                model_service=call_llm,
+            _stop_safe_stream(
+                _stream_chat(
+                    effective_model,
+                    msg_dicts,
+                    request.temperature,
+                    request.max_tokens,
+                    request.tools,
+                    timeout=provider_cfg.get("timeout"),
+                    num_retries=provider_cfg.get("num_retries"),
+                    model_service=call_llm,
+                )
             ),
             media_type="text/event-stream",
         )
@@ -715,6 +820,24 @@ async def _process_chat(
         num_retries=provider_cfg.get("num_retries"),
     )
 
+    if request.output_schema is not None:
+
+        async def retry_plain(feedback: str) -> Any:
+            return await call_llm.chat(
+                messages=msg_dicts
+                + [
+                    {"role": "assistant", "content": response.content},
+                    {"role": "user", "content": _schema_feedback(feedback)},
+                ],
+                model=effective_model,
+                tools=None,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                timeout=provider_cfg.get("timeout"),
+                num_retries=provider_cfg.get("num_retries"),
+            )
+
+        response = await _enforce_output_schema(response, request.output_schema, retry_plain)
     return ChatCompletionResponse(
         model=response.model or effective_model,
         choices=[
@@ -849,11 +972,217 @@ async def _stream_chat(
     yield "data: [DONE]\n\n"
 
 
+def _history_ref(messages: list[dict[str, Any]]) -> str:
+    return hashlib.sha256(json.dumps(messages, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+async def _resume_pending_tool_turn(messages, registry, session_id, *, cancel_check=None, **tool_options):
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.get("role") != "assistant" or not message.get("tool_calls"):
+            continue
+        tail = messages[index + 1 :]
+        if any(item.get("role") != "tool" for item in tail):
+            return messages
+        done = {item.get("tool_call_id") for item in tail}
+        pending = [tc for tc in parse_tool_calls(message["tool_calls"]) if tc["id"] not in done]
+        if not pending:
+            return messages
+        await _CheckedModelService(None, cancel_check)._check()
+        prefix = messages[:index]
+        results = await _execute_tool_calls(
+            registry,
+            pending,
+            session_id,
+            turn_index=_count_tool_turns(prefix),
+            history_ref=_history_ref(prefix),
+            **tool_options,
+        )
+        return inject_tool_results(messages, message["tool_calls"], results)
+    return messages
+
+
+def _count_tool_turns(messages: list[dict[str, Any]]) -> int:
+    """Number of assistant tool-call turns already in the conversation.
+
+    Persisted history makes this stable across restarts and re-entry, unlike
+    the model-generated ``tool_call.id``. Used as the round counter in the
+    replay identity.
+    """
+    return sum(1 for m in messages if m.get("role") == "assistant" and m.get("tool_calls"))
+
+
+def _replay_invocation_id(session_id: str | None, turn_index: int, tool_name: str, arguments: dict[str, Any]) -> str:
+    """Logical-call identity for the direct loop (step5e replay).
+
+    Stable across restarts for the same logical call: session + round +
+    tool + normalized-argument digest. Distinct arguments produce distinct
+    identities without colliding on the round.
+    """
+    import hashlib
+    import json as _json
+
+    digest = hashlib.sha256(
+        _json.dumps(arguments, sort_keys=True, separators=(",", ":"), default=repr).encode("utf-8")
+    ).hexdigest()
+    return f"chat:{session_id or 'anon'}:{turn_index}:{tool_name}:{digest[:16]}"
+
+
+def _validate_output_schema(content: Any, output_schema: dict | None) -> str | None:
+    """First JSON-Schema violation for the final assistant content, if any.
+
+    Content is expected to be a JSON document when a schema is declared;
+    non-JSON content fails with the parse error. Returns None when valid or
+    when no schema is declared.
+    """
+    if output_schema is None:
+        return None
+    import json as _json
+
+    if isinstance(content, str):
+        try:
+            document = _json.loads(content)
+        except _json.JSONDecodeError as exc:
+            return f"final answer is not valid JSON: {exc.msg} at position {exc.pos}"
+    else:
+        document = content
+    return output_schema_error(document, output_schema)
+
+
+async def _enforce_output_schema(response: Any, output_schema: dict | None, reinvoke) -> Any:
+    """Validate the final answer against the declared schema.
+
+    ``reinvoke(feedback_message)`` re-runs the model round exactly once with
+    the violation fed back; a second violation fails with the invalid_output
+    reason. Without a declared schema the response passes through unchanged.
+    """
+    violation = _validate_output_schema(response.content, output_schema)
+    if violation is None:
+        return response
+    retry_response = await reinvoke(violation)
+    if retry_response.tool_calls:
+        raise _LoopStopError("invalid_output", f"output repair requested new tools; initial violation: {violation}")
+    retry_violation = _validate_output_schema(retry_response.content, output_schema)
+    if retry_violation is not None:
+        raise _LoopStopError(
+            "invalid_output",
+            f"final answer violates the declared output schema after retry: {violation}",
+        )
+    return retry_response
+
+
+def _disconnect_check(http_request: Request):
+    """Cancel check bound to a starlette request's disconnect state."""
+
+    async def _check() -> bool:
+        try:
+            return bool(await http_request.is_disconnected())
+        except Exception:  # noqa: BLE001 - transport introspection must not break the loop
+            return False
+
+    return _check
+
+
+def _stopped_response(stop: _LoopStopError) -> JSONResponse:
+    """409 with the machine-readable stop category for non-stream clients."""
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": {
+                "type": "execution_stopped",
+                "reason_category": stop.reason_category,
+                "detail": stop.detail,
+                "action_ref": stop.action_ref,
+            }
+        },
+    )
+
+
+class _LoopStopError(ExecutionStoppedError):
+    """Terminal chat condition rendered as a machine-readable stop."""
+
+
+def _as_loop_stop(exc: Exception) -> _LoopStopError:
+    if isinstance(exc, ExecutionStoppedError):
+        return _LoopStopError(exc.reason_category, exc.detail, exc.action_ref)
+    if isinstance(exc, BudgetRefusedError):
+        return _LoopStopError("budget_exhausted", str(exc))
+    return _LoopStopError("iteration_limit", str(exc))
+
+
+async def _stop_safe_stream(source):
+    try:
+        async for chunk in source:
+            yield chunk
+    except (ExecutionStoppedError, BudgetRefusedError, MaxSuperstepsError) as exc:
+        stop = _as_loop_stop(exc)
+        payload = {
+            "error": {
+                "type": "execution_stopped",
+                "reason_category": stop.reason_category,
+                "detail": stop.detail,
+                "action_ref": stop.action_ref,
+            }
+        }
+        yield f"data: {json.dumps(payload)}\n\n"
+        yield "data: [DONE]\n\n"
+
+
+def _schema_feedback(violation: str) -> str:
+    return f"Your response violates the required output schema: {violation}. Respond again satisfying the schema."
+
+
+class _CheckedModelService:
+    """Check cancellation and classify budget refusal at every model boundary."""
+
+    def __init__(self, service: Any, cancel_check: Any = None) -> None:
+        self._service = service
+        self._cancel_check = cancel_check
+
+    async def _check(self) -> None:
+        if self._cancel_check is not None:
+            signal = self._cancel_check()
+            if inspect.isawaitable(signal):
+                signal = await signal
+            if signal:
+                raise _LoopStopError("cancelled", "caller cancelled or disconnected before the next model round")
+
+    async def chat(self, **kwargs: Any) -> Any:
+        """Check the caller before invoking a metered non-streaming round."""
+        await self._check()
+        try:
+            return await self._service.chat(**kwargs)
+        except BudgetRefusedError as exc:
+            raise _LoopStopError("budget_exhausted", str(exc)) from exc
+
+    async def chat_stream(self, **kwargs: Any):
+        """Handle budget refusal raised while the provider generator advances."""
+        await self._check()
+        try:
+            async for chunk in self._service.chat_stream(**kwargs):
+                yield chunk
+        except BudgetRefusedError as exc:
+            raise _LoopStopError("budget_exhausted", str(exc)) from exc
+
+
+def _is_unknown_outcome_error(exc: BaseException) -> bool:
+    """Whether the exception leaves the tool outcome unknowable.
+
+    Matches the explicit governance exception and the duck-typed
+    ``outcome_unknown`` flag the runtime receipt classifier recognizes.
+    """
+    if isinstance(exc, OutcomeUnknownError):
+        return True
+    return bool(getattr(exc, "outcome_unknown", False))
+
+
 async def _execute_tool_calls(
     tool_registry: ToolRegistry,
     tool_calls: list[dict[str, Any]],
     session_id: str | None,
     *,
+    turn_index: int = 0,
+    history_ref: str | None = None,
     access_policy: Any | None = None,
     tool_rules: list | None = None,
     approval_callback: Any | None = None,
@@ -891,19 +1220,34 @@ async def _execute_tool_calls(
         Independent for each call so the outer caller can dispatch all calls
         concurrently (see ``asyncio.gather`` below).
         """
+        # step5e replay identity: stable across restarts (turn index comes
+        # from the persisted history; the digest from the normalized args).
+        # The model-generated tc.id is display-only and never part of the
+        # identity, so a re-entry re-derives the same logical-call key.
         tool_context: dict[str, Any] = {
             "session_id": session_id or "",
-            "invocation_id": f"chat:{session_id or id(tool_registry)}:{tc.get('id') or uuid.uuid4()}",
+            "invocation_id": _replay_invocation_id(
+                session_id, turn_index, tc.get("name", ""), tc.get("arguments") or {}
+            ),
         }
+        if history_ref is not None:
+            tool_context["invocation_id"] += f":{history_ref}"
         if hasattr(tool_registry, "completed_result"):
             try:
                 replayed, result = await tool_registry.completed_result(
                     tc["name"], tc.get("arguments") or {}, tool_context
                 )
+                if not replayed and session_id:
+                    legacy_context = {**tool_context, "invocation_id": f"chat:{session_id}:{tc['id']}"}
+                    replayed, result = await tool_registry.completed_result(
+                        tc["name"], tc.get("arguments") or {}, legacy_context
+                    )
                 if replayed:
                     return {"tool_call_id": tc["id"], "result": result, "is_error": False}
             except Exception as exc:
-                return {"tool_call_id": tc["id"], "result": str(exc), "is_error": True}
+                if _is_unknown_outcome_error(exc):
+                    raise _LoopStopError("needs_review", str(exc), tool_context["invocation_id"]) from exc
+                raise
         approval_ref = None
         # Path-A guardrail evaluation (T0.2): same five-layer policy the
         # ToolWorker uses, kept consistent with the production chat surface.
@@ -1003,11 +1347,24 @@ async def _execute_tool_calls(
             )
             return {"tool_call_id": tc["id"], "result": result, "is_error": False}
         except Exception as exc:
+            # step5e stop semantics: an unknown outcome must terminate the
+            # conversation (needs_review) — it is NEVER stringified into a
+            # tool message and fed back to the model, because the model would
+            # keep reasoning past an effect whose result is not established.
+            if _is_unknown_outcome_error(exc):
+                raise _LoopStopError(
+                    "needs_review",
+                    str(exc),
+                    action_ref=tool_context.get("invocation_id"),
+                ) from exc
             logger.warning("Tool '%s' execution failed: %s", tc["name"], exc)
             return {"tool_call_id": tc["id"], "result": str(exc), "is_error": True}
 
-    results: list[dict[str, Any]] = await asyncio.gather(*(_execute_one(tc) for tc in tool_calls))
-    return results
+    outcomes = await asyncio.gather(*(_execute_one(tc) for tc in tool_calls), return_exceptions=True)
+    for outcome in outcomes:
+        if isinstance(outcome, BaseException):
+            raise outcome
+    return [outcome for outcome in outcomes if isinstance(outcome, dict)]
 
 
 async def _chat_with_tools(
@@ -1033,38 +1390,97 @@ async def _chat_with_tools(
     denial_tracker: Any | None = None,
     agent_id: Any | None = None,
     workspace_id: Any | None = None,
-) -> LLMResponse | None:
+    cancel_check: Any | None = None,
+    output_schema: dict | None = None,
+) -> LLMResponse:
     """Run a non-streaming chat with a tool-calling loop.
 
     Iterates: the LLM proposes tool calls, the registry executes them, results
     are injected back into the conversation, and the LLM responds again. Stops
     when the LLM returns a final answer without tool calls.
 
+    Raises:
+        _LoopStop: on unknown tool outcome (needs_review), metered-budget
+            refusal (budget_exhausted) or caller cancellation (cancelled).
+            Unknown outcomes are never fed back to the model.
+
     Returns:
-        The final LLM response, or None when the loop exceeds max_iterations.
+        The validated final LLM response. The iteration limit raises an explicit stop.
     """
     current_messages = list(messages)
+    # step5e replay identity: the round counter is anchored to the persisted
+    # history so a re-entry (restart/continuation) resumes the same logical
+    # turn numbering instead of restarting from zero.
+    if session_id is None:
+        session_id = uuid.uuid4().hex
+    current_messages = await _resume_pending_tool_turn(
+        current_messages,
+        tool_registry,
+        session_id,
+        cancel_check=cancel_check,
+        access_policy=access_policy,
+        tool_rules=tool_rules,
+        approval_callback=approval_callback,
+        middleware_chains=middleware_chains,
+        denial_tracker=denial_tracker,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+    )
+    checked_model = (
+        model_service
+        if isinstance(model_service, _CheckedModelService)
+        else _CheckedModelService(model_service or llm_service, cancel_check)
+    )
     for _ in range(max_iterations):
-        response = await (model_service or llm_service).chat(
-            messages=current_messages,
-            model=model,
-            tools=tools,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            num_retries=num_retries,
-        )
+        try:
+            response = await checked_model.chat(
+                messages=current_messages,
+                model=model,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                num_retries=num_retries,
+            )
+        except BudgetRefusedError as exc:
+            raise _LoopStopError("budget_exhausted", str(exc)) from exc
         if not response.tool_calls:
+            if output_schema is not None:
+                bound_messages = current_messages
+                bound_response = response
+
+                async def reinvoke(feedback: str, _messages=bound_messages, _response=bound_response) -> Any:
+                    _messages.append({"role": "assistant", "content": _response.content})
+                    _messages.append(
+                        {
+                            "role": "user",
+                            "content": (_schema_feedback(feedback)),
+                        }
+                    )
+                    return await checked_model.chat(
+                        messages=_messages,
+                        model=model,
+                        tools=None,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        timeout=timeout,
+                        num_retries=num_retries,
+                    )
+
+                response = await _enforce_output_schema(response, output_schema, reinvoke)
             return response
         tool_calls = parse_tool_calls(response.tool_calls)
         tool_results = await _execute_tool_calls(
             tool_registry,
             tool_calls,
             session_id,
+            turn_index=_count_tool_turns(current_messages),
+            history_ref=_history_ref(current_messages),
             access_policy=access_policy,
             tool_rules=tool_rules,
             approval_callback=approval_callback,
             middleware_chains=middleware_chains,
+            denial_tracker=denial_tracker,
             agent_id=agent_id,
             workspace_id=workspace_id,
         )
@@ -1078,7 +1494,7 @@ async def _chat_with_tools(
             }
         )
         current_messages = inject_tool_results(current_messages, response.tool_calls, tool_results)
-    return None
+    raise _LoopStopError("iteration_limit", "tool loop reached its iteration limit")
 
 
 async def _stream_chat_with_tools(
@@ -1100,6 +1516,8 @@ async def _stream_chat_with_tools(
     denial_tracker: Any | None = None,
     agent_id: Any | None = None,
     workspace_id: Any | None = None,
+    cancel_check: Any | None = None,
+    output_schema: dict | None = None,
 ):
     """Stream a chat with a tool-calling loop.
 
@@ -1109,19 +1527,72 @@ async def _stream_chat_with_tools(
     Yields:
         str: SSE-formatted chunks, ending with a done chunk and [DONE].
     """
+    if output_schema is not None:
+        response = await _chat_with_tools(
+            messages,
+            model,
+            tools,
+            tool_registry,
+            temperature,
+            max_tokens,
+            session_id=session_id,
+            timeout=timeout,
+            num_retries=num_retries,
+            model_service=model_service,
+            max_iterations=max_iterations,
+            access_policy=access_policy,
+            tool_rules=tool_rules,
+            approval_callback=approval_callback,
+            middleware_chains=middleware_chains,
+            denial_tracker=denial_tracker,
+            agent_id=agent_id,
+            workspace_id=workspace_id,
+            cancel_check=cancel_check,
+            output_schema=output_schema,
+        )
+        chunk = ChatCompletionChunk(
+            model=model, choices=[ChatCompletionChunkChoice(delta=ChatCompletionChunkDelta(content=response.content))]
+        )
+        yield f"data: {json.dumps(chunk.model_dump())}\n\n"
+        yield _format_done_chunk(model)
+        return
     current_messages = list(messages)
+    if session_id is None:
+        session_id = uuid.uuid4().hex
+    current_messages = await _resume_pending_tool_turn(
+        current_messages,
+        tool_registry,
+        session_id,
+        cancel_check=cancel_check,
+        access_policy=access_policy,
+        tool_rules=tool_rules,
+        approval_callback=approval_callback,
+        middleware_chains=middleware_chains,
+        denial_tracker=denial_tracker,
+        agent_id=agent_id,
+        workspace_id=workspace_id,
+    )
+    checked_model = (
+        model_service
+        if isinstance(model_service, _CheckedModelService)
+        else _CheckedModelService(model_service or llm_service, cancel_check)
+    )
     for _ in range(max_iterations):
         tool_calls_buffer: list[dict[str, Any]] = []
         content_buffer: list[str] = []
-        async for chunk in (model_service or llm_service).chat_stream(
-            messages=current_messages,
-            model=model,
-            tools=tools,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            num_retries=num_retries,
-        ):
+        try:
+            stream_iter = checked_model.chat_stream(
+                messages=current_messages,
+                model=model,
+                tools=tools,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                num_retries=num_retries,
+            )
+        except BudgetRefusedError as exc:
+            raise _LoopStopError("budget_exhausted", str(exc)) from exc
+        async for chunk in stream_iter:
             content = chunk.get("content")
             if content:
                 content_buffer.append(content)
@@ -1138,16 +1609,20 @@ async def _stream_chat_with_tools(
             if chunk.get("tool_calls"):
                 tool_calls_buffer.extend(chunk["tool_calls"])
         if not tool_calls_buffer:
-            break
+            yield _format_done_chunk(model)
+            return
         tool_calls = parse_tool_calls(tool_calls_buffer)
         tool_results = await _execute_tool_calls(
             tool_registry,
             tool_calls,
             session_id,
+            turn_index=_count_tool_turns(current_messages),
+            history_ref=_history_ref(current_messages),
             access_policy=access_policy,
             tool_rules=tool_rules,
             approval_callback=approval_callback,
             middleware_chains=middleware_chains,
+            denial_tracker=denial_tracker,
             agent_id=agent_id,
             workspace_id=workspace_id,
         )
@@ -1161,4 +1636,4 @@ async def _stream_chat_with_tools(
             }
         )
         current_messages = inject_tool_results(current_messages, tool_calls_buffer, tool_results)
-    yield _format_done_chunk(model)
+    raise _LoopStopError("iteration_limit", "tool loop reached its iteration limit")

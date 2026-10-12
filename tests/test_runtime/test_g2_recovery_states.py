@@ -15,6 +15,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import pytest
+from hecate_runtime.errors import ExecutionStoppedError
 
 from hecate.runtime.eventstore import Event, EventType, InMemoryEventStore
 from hecate.runtime.workers.tool_worker import (
@@ -158,12 +159,11 @@ async def test_crash_window_non_idempotent_write_not_reexecuted():
 
     await _inject_crash_window(store, session_id, "call-1", "memory_add", {"content": "x"})
 
-    result = await worker.execute("tools", {}, _payload("call-1", "memory_add", {"content": "x"}), ctx)
+    with pytest.raises(ExecutionStoppedError, match="needs_review") as stopped:
+        await worker.execute("tools", {}, _payload("call-1", "memory_add", {"content": "x"}), ctx)
 
     assert len(port.calls) == 0, "claimed non-idempotent write must not re-execute"
-    msg = result.channel_updates["messages"][0]
-    assert msg["is_error"] is True
-    assert "review" in msg["content"]
+    assert stopped.value.action_ref == _execution_id(session_id, "call-1")
 
 
 @pytest.mark.asyncio
@@ -268,7 +268,8 @@ async def test_resolution_maps_receipt_statuses():
 
     failing = _StubPort(raise_exc=ConnectionError("lost"))
     worker2 = ToolWorker(port=failing, event_store=store)
-    await worker2.execute("tools", {}, _payload("call-2", "browser_click", {"x": "1"}), ctx)
+    with pytest.raises(ExecutionStoppedError, match="needs_review"):
+        await worker2.execute("tools", {}, _payload("call-2", "browser_click", {"x": "1"}), ctx)
     unknown = await resolve_tool_execution_state(store, session_id, _execution_id(session_id, "call-2"))
     assert unknown.state is ToolExecutionState.OUTCOME_UNKNOWN
 
@@ -399,11 +400,12 @@ async def test_claimed_idempotent_write_stops_for_review():
     args = {"path": "x", "content": "x"}
     await _inject_crash_window(store, session_id, "same", "write_file", args)
     port = _StubPort()
-    result = await ToolWorker(port=port, event_store=store).execute(
-        "tools", {}, _payload("same", "write_file", args), _execution_context(session_id)
-    )
+    with pytest.raises(ExecutionStoppedError, match="needs_review") as stopped:
+        await ToolWorker(port=port, event_store=store).execute(
+            "tools", {}, _payload("same", "write_file", args), _execution_context(session_id)
+        )
     assert not port.calls
-    assert "review" in result.channel_updates["messages"][0]["content"]
+    assert stopped.value.action_ref == _execution_id(session_id, "same")
 
 
 async def test_legacy_arguments_still_detect_conflict():
@@ -490,9 +492,10 @@ async def test_failed_write_retry_is_claimed_before_execution():
         assert (
             await resolve_tool_execution_state(store, sid, _execution_id(sid, "same"))
         ).state is ToolExecutionState.CLAIMED
-        replay = await worker.execute("tools", {}, payload, ctx)
+        with pytest.raises(ExecutionStoppedError, match="needs_review") as replay:
+            await worker.execute("tools", {}, payload, ctx)
         assert len(port.calls) == 1
-        assert replay.channel_updates["messages"][0]["is_error"]
+        assert replay.value.action_ref == _execution_id(sid, "same")
     finally:
         release.set()
         await task

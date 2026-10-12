@@ -7,6 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from hecate_runtime.errors import ExecutionStoppedError
 
 from hecate.runtime.retry import NoRetryStrategy, RetryExecutor, RetryStrategy
 from hecate.runtime.types import WorkerResult
@@ -34,6 +35,40 @@ class _NeverRetryStrategy(RetryStrategy):
 
     def get_backoff(self, attempt: int) -> float:
         return 0.0
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("as_result", [False, True])
+@pytest.mark.parametrize("budget", [False, True])
+async def test_terminal_stop_bypasses_configured_retry(stream, as_result, budget):
+    from hecate.core.composition.governance import BudgetRefusedError
+
+    error = BudgetRefusedError("budget exhausted") if budget else ExecutionStoppedError("needs_review", "unknown")
+    attempts = 0
+
+    async def operation(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if not as_result:
+            raise error
+        return WorkerResult(node_id="tools", error=error)
+
+    async def streaming_operation(*args, **kwargs):
+        yield await operation(*args, **kwargs)
+
+    executor = RetryExecutor(_AlwaysRetryStrategy())
+
+    async def run():
+        if stream:
+            return [item async for item in executor.execute_stream(streaming_operation, "tools")][0]
+        return await executor.execute(operation, "tools")
+
+    if as_result:
+        assert (await run()).error is error
+    else:
+        with pytest.raises(type(error)):
+            await run()
+    assert attempts == 1
 
 
 async def _succeed_immediately(*args: Any, **kwargs: Any) -> WorkerResult:

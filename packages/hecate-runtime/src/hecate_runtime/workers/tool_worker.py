@@ -26,6 +26,7 @@ from hecate_runtime.citation_provenance import (
     emit_citation_event,
     mark_tool_result,
 )
+from hecate_runtime.errors import ExecutionStoppedError
 from hecate_runtime.eventstore import Event, EventType
 from hecate_runtime.guardrail import (
     GuardrailAction,
@@ -270,9 +271,16 @@ class ToolWorker(Worker):
                 channel_updates={"messages": []},
             )
 
-        tool_results: list[dict[str, Any]] = await asyncio.gather(
-            *(self._execute_single_tool(tc, channel_snapshot, execution_context, node_id) for tc in tool_calls)
+        outcomes = await asyncio.gather(
+            *(self._execute_single_tool(tc, channel_snapshot, execution_context, node_id) for tc in tool_calls),
+            return_exceptions=True,
         )
+        # Drain already-started calls before propagating a terminal condition;
+        # otherwise gather leaves effects running after the request has ended.
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
+        tool_results = [outcome for outcome in outcomes if isinstance(outcome, dict)]
 
         # 1.3.5e citation provenance: mark at the single choke point where
         # tool results are written to history, so every result shape
@@ -507,7 +515,7 @@ class ToolWorker(Worker):
                 recorded_content=merged.result_content,
             )
             if decision is not None:
-                return decision
+                return self._checked_recovery_result(decision, execution_id)
         if claim and execution_context is not None and arguments is not None and self._event_store is not None:
             await self._append_tool_call(
                 execution_context=execution_context,
@@ -574,8 +582,8 @@ class ToolWorker(Worker):
             return None
         resolution = verdict.resolution
         if resolution is None:  # pragma: no cover - defensive
-            return self._withheld_result(tc_id, "[needs review] ledger verdict missing; retry withheld")
-        return recovery_decision(
+            raise ExecutionStoppedError("needs_review", "ledger verdict missing; retry withheld", execution_id)
+        decision = recovery_decision(
             resolution,
             tc_id=tc_id,
             tool_name=tool_name,
@@ -584,6 +592,15 @@ class ToolWorker(Worker):
             messages=messages,
             recorded_content=resolution.result_content,
         )
+        return self._checked_recovery_result(decision, execution_id)
+
+    @staticmethod
+    def _checked_recovery_result(decision: dict[str, Any] | None, execution_id: str) -> dict[str, Any] | None:
+        if decision is not None and decision.get("is_error"):
+            content = str(decision.get("content", ""))
+            if content.startswith("[needs review]"):
+                raise ExecutionStoppedError("needs_review", content, execution_id)
+        return decision
 
     async def _mirror_outcome(
         self,
@@ -920,10 +937,10 @@ class ToolWorker(Worker):
             # connection failures leave the outcome unknowable (the tool may
             # have completed remotely) — recorded as unknown so recovery
             # sends the case to human review instead of blindly retrying.
+            status = RECEIPT_UNKNOWN if _is_indeterminate_error(e) else RECEIPT_FAILED
             if self._event_store and execution_context:
                 from hecate_runtime.eventstore import CURRENT_LOG_SCHEMA_VERSION
 
-                status = RECEIPT_UNKNOWN if _is_indeterminate_error(e) else RECEIPT_FAILED
                 await self._event_store.append(
                     Event(
                         session_id=execution_context["session_id"],
@@ -953,6 +970,8 @@ class ToolWorker(Worker):
                     status=status,
                     error=str(e)[:500],
                 )
+            if status == RECEIPT_UNKNOWN:
+                raise ExecutionStoppedError("needs_review", str(e), action_ref=execution_id) from e
             self._capture_evidence(
                 execution_context=execution_context,
                 node_id=node_id,

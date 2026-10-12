@@ -23,6 +23,7 @@ The big-picture design that everything else builds on.
 | [ADR-033](033-context-compaction-surface-replacement.md) | LLM-Managed Context Compaction via Surface Replacement | Bracket events + shadowed ranges on the execution log; summary node in the fold; checkpoint source; 4.13 durable backend |
 | [ADR-034](034-platform-governance-semantics.md) | Platform Governance Semantics and Execution Backend Standing | Governance results vs replaceable implementations; built-in Runtime as reference; harness×environment dual-axis; single-writer state ownership; capability negotiation; no lossless state migration |
 | [ADR-035](035-standalone-execution-package-direction.md) | Standalone Execution Component — Package and Directory Migration Direction | `hecate-runtime`/`hecate-runner` package target; contracts→domain→adapter dependency direction; compatibility shims; distribution units, not a microservice split |
+| [ADR-036](036-autonomous-execution-convergence.md) | Autonomous Execution Convergence — Harness Direction for step5e | Direct loop / Pregel graph / lightweight harness comparison; runner model-selection sub-decision; evidence-led, conclusions pending |
 
 ### ⚙️ Engine runtime
 

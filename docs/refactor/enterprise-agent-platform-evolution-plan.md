@@ -336,7 +336,7 @@ step11 拆为最小发布门禁和多能力组合发布：前者在 step7 后服
 | step5b：独立发行包 | 已交付 | `hecate-runtime` wheel、依赖闭包、配置注入、兼容转发与干净安装；不反向依赖完整 Hecate |
 | step5c：独立宿主 | 预览范围已交付 | Runner 与 builtin 共享执行应用服务；公开请求/回执/事件契约、本地制品与身份校验、SC01/SC02 只读场景。固定工具计划与 Stub/endpoint 不能证明自主工具选择 |
 | step5d：平台入口收敛 | 部分完成 | HTTP/MCP/IM/评估/A2A/定时 Agent 已迁移，workspace 路由与会话亲缘、OpenAI/SSE 兼容和分层守卫已交付；剩余项如下 |
-| step5e：内置自主执行收敛与验证 | 待实施 | 对齐自主工具循环、Workflow 与宿主语义，补真实模型及混合执行验收，再决定内部机制 |
+| step5e：内置自主执行收敛与验证 | 技术切片已实现，待验收 | 双路径停止/结构化输出与 Workflow 子任务契约已有本地实现和确定性证据；真实模型记录 skipped，独立 Runner 自主选择与生产退出条件仍开放。见 [复核](../../openspec/changes/archive/2026-10-12-builtin-autonomous-execution/review.md) |
 
 **step5d 剩余项：**
 
