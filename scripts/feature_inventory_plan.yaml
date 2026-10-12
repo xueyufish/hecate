@@ -276,6 +276,41 @@ mappings:
   milestone: M-A
   acceptance: Durable Task/Run/control receipts; sync/stream are views; no blind retry of unknown side effects
   restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-04a
+  section: core
+  scope: Autonomous execution semantics (step5e slice delivered)
+  ids:
+  - 1.3.11h
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin direct tool loop and Pregel engine path behind one chat entry contract
+  state_owner: chat entry owns stop rendering; action claims own decided receipts; each field one authoritative
+    writer
+  step: '5e'
+  milestone: M-A
+  acceptance: Unknown outcomes terminate needs_review with an action reference and never re-enter the model;
+    budget, iteration cap, cancellation and invalid structured output are distinct terminal categories;
+    re-entry replays decided receipts before new dispatch; declared output schemas validate offline with
+    exactly one tools-free repair and buffered streaming
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
+- key: core-04b
+  section: core
+  scope: Workflow agent subtask contract (step6e/5e delivered)
+  ids:
+  - 1.3.11i
+  disposition: core-contract
+  responsibility: platform-guarantee
+  target_mode: builtin
+  provider_or_adapter: builtin deterministic workflow adapter over real child tasks
+  state_owner: parent task owns validated advancement; child task records own committed result facts
+  step: '6e/5e'
+  milestone: M-A
+  acceptance: The parent advances only on committed child facts validated against the declared contract
+    (mode/output_schema/artifact); validation and execution failures route through fail/await with distinguishable
+    sources; terminal callbacks are idempotent per (parent, step); a child finishing before the parent
+    parks is recovered by a post-park recheck
+  restart_or_exit: Existing implementation retained; deletion requires usage, replacement and data-exit evidence
 - key: core-05
   section: core
   scope: Enterprise Team lifecycle
