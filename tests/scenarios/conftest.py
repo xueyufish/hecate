@@ -124,6 +124,21 @@ def tool_call(call_id: str, name: str, arguments: dict[str, Any]) -> dict[str, A
     }
 
 
+class StubToolCallDelta(SimpleNamespace):
+    """Provider-shaped streamed tool call with OpenAI serialization."""
+
+    def model_dump(self) -> dict[str, Any]:
+        """Serialize the same complete call consumed by the direct loop."""
+        return {
+            "id": self.id,
+            "type": "function",
+            "function": {
+                "name": self.function.name,
+                "arguments": self.function.arguments,
+            },
+        }
+
+
 Responder = Callable[[list[dict[str, Any]]], Awaitable[SimpleNamespace]]
 
 
@@ -144,7 +159,17 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
 
             async def chat_stream(self, *, messages: list[dict[str, Any]], **kwargs: Any):
                 if stream_responder is None:
-                    raise RuntimeError("no stream responder installed for this scenario")
+                    response = await responder(messages)
+                    deltas = [
+                        StubToolCallDelta(
+                            index=index, id=tc["id"], type="function", function=SimpleNamespace(**tc["function"])
+                        )
+                        for index, tc in enumerate(response.tool_calls or [])
+                    ]
+                    yield {"content": response.content, "tool_calls": deltas}
+                    yield {"content": "", "usage": response.usage}
+                    yield {"content": "", "finish_reason": response.finish_reason}
+                    return
                 async for chunk in stream_responder(messages):
                     yield chunk
 
@@ -301,3 +326,62 @@ def chat_body(
     if session_id is not None:
         body["session_id"] = str(session_id)
     return body
+
+
+def feedback_driven_responder(
+    *,
+    read_tool: str,
+    material_query: dict[str, Any],
+    material_answer: str,
+    followup_tool: str,
+    followup_args_from_material: Callable[[str], dict[str, Any]],
+    final_content_from: Callable[[str, str], str],
+    structured: bool = False,
+) -> tuple[Responder, dict[str, int]]:
+    """Multi-turn feedback-driven responder (step5e).
+
+    Round 1 proposes a read of the material; round 2 INSPECTS the tool
+    result content and derives the follow-up write arguments from it; the
+    final round produces the structured answer from both results. Returns
+    the responder and a round-counter dict the scenario can assert on
+    (deterministic; no model involved).
+    """
+    from tests.scenarios.conftest import llm_response, tool_call
+
+    counters = {"reads": 0, "writes": 0, "finals": 0, "rounds": 0}
+    material_content = ""
+
+    async def responder(messages: list[dict[str, Any]]) -> SimpleNamespace:
+        nonlocal material_content
+        counters["rounds"] += 1
+        last = messages[-1] if messages else {}
+        if last.get("role") == "tool":
+            content = last.get("content", "")
+            if counters["writes"] == 0 and counters["reads"] > 0 and "status" in content:
+                # PG serializes dict tool results with repr; DL uses JSON.
+                import ast
+
+                try:
+                    material = json.loads(content)
+                except json.JSONDecodeError:
+                    material = ast.literal_eval(content)
+                material_content = json.dumps(material)
+                counters["writes"] += 1
+                return llm_response(
+                    tool_calls=[
+                        tool_call(
+                            f"call_followup_{counters['writes']}",
+                            followup_tool,
+                            followup_args_from_material(material_content),
+                        )
+                    ]
+                )
+            counters["finals"] += 1
+            answer = final_content_from(material_content, content)
+            if structured:
+                answer = json.dumps({"answer": answer})
+            return llm_response(content=answer)
+        counters["reads"] += 1
+        return llm_response(tool_calls=[tool_call("call_read_1", read_tool, material_query)])
+
+    return responder, counters

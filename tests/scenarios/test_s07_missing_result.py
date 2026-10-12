@@ -17,6 +17,9 @@ import asyncio
 import contextlib
 import uuid
 
+import pytest
+from hecate_runtime.errors import ExecutionStoppedError
+
 from hecate.runtime.eventstore import InMemoryEventStore
 from hecate.runtime.workers.tool_worker import ToolExecutionState, resolve_tool_execution_state
 from tests.scenarios.tools.receipt_harness import (
@@ -47,9 +50,10 @@ async def test_s07_claimed_state_withholds_side_effecting_call() -> None:
     assert resolution.state is ToolExecutionState.CLAIMED, "crash after claim must resolve to the claimed state"
 
     recovered = ScenarioToolPort(ticket)
-    replay = await make_worker(store, recovered).execute("tools", {}, scenario_payload("call-s07-1", TICKET_ARGS), ctx)
+    with pytest.raises(ExecutionStoppedError, match="needs_review") as replay:
+        await make_worker(store, recovered).execute("tools", {}, scenario_payload("call-s07-1", TICKET_ARGS), ctx)
     assert ticket.side_effect_count == 1, "a claimed side-effecting call must not re-execute on recovery"
-    assert "review" in replay.channel_updates["messages"][0]["content"].lower()
+    assert replay.value.action_ref == await _execution_id(store, session_id)
 
 
 async def test_s07_unknown_outcome_goes_to_review_not_retry() -> None:
@@ -60,16 +64,18 @@ async def test_s07_unknown_outcome_goes_to_review_not_retry() -> None:
 
     indeterminate = ScenarioToolPort(ticket, raise_exc=ConnectionError("transport lost after write"))
     worker = make_worker(store, indeterminate)
-    await worker.execute("tools", {}, scenario_payload("call-s07-2", TICKET_ARGS), ctx)
+    with pytest.raises(ExecutionStoppedError, match="needs_review"):
+        await worker.execute("tools", {}, scenario_payload("call-s07-2", TICKET_ARGS), ctx)
     assert ticket.side_effect_count == 1
 
     resolution = await resolve_tool_execution_state(store, session_id, await _execution_id(store, session_id))
     assert resolution.state is ToolExecutionState.OUTCOME_UNKNOWN
 
     recovered = ScenarioToolPort(ticket)
-    replay = await make_worker(store, recovered).execute("tools", {}, scenario_payload("call-s07-2", TICKET_ARGS), ctx)
+    with pytest.raises(ExecutionStoppedError, match="needs_review") as replay:
+        await make_worker(store, recovered).execute("tools", {}, scenario_payload("call-s07-2", TICKET_ARGS), ctx)
     assert ticket.side_effect_count == 1, "unknown outcome must never blind-retry a protected write"
-    assert "review" in replay.channel_updates["messages"][0]["content"].lower()
+    assert replay.value.action_ref == await _execution_id(store, session_id)
 
 
 async def _execution_id(store: InMemoryEventStore, session_id: uuid.UUID) -> str:

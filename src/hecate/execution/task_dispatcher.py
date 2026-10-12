@@ -131,6 +131,7 @@ class _DispatchContext:
     # stamp (child side). Both come from the persisted task input.
     workflow_plan: WorkflowPlan | None = None
     workflow_parent: dict[str, Any] | None = None
+    workflow_step: dict[str, Any] | None = None
 
 
 class PlatformTaskDispatcher:
@@ -267,9 +268,15 @@ class PlatformTaskDispatcher:
                 )
         except TaskWaitingSignalError as wait:
             await db.commit()
-            await self._park(task_ref, wait, context, run_ref=r_ref, expected_revision=record.revision + 1, lease=lease)
+            await self._park(
+                db, task_ref, wait, context, run_ref=r_ref, expected_revision=record.revision + 1, lease=lease
+            )
             return
         except Exception as exc:
+            from hecate_runtime.errors import ExecutionStoppedError
+
+            if isinstance(exc, ExecutionStoppedError) and exc.reason_category == "needs_review":
+                raise
             if context.workflow_parent is None:
                 raise
             # A workflow child converges deterministically: an execution
@@ -312,6 +319,40 @@ class PlatformTaskDispatcher:
             lease=lease,
         )
 
+    def _validate_step_artifacts(
+        self,
+        db: AsyncSession,
+        task_ref: BackendRef,
+        step: dict[str, Any],
+        child_outcome: dict[str, Any],
+    ) -> str | None:
+        """Validate the delivered child facts against the step declaration.
+
+        Returns the first violation message, or None when the step declared
+        no contract. Output schema checks the delivered content (JSON when it
+        parses); artifact checks the expected key in the child's artifacts.
+        """
+        from hecate.core.output_schema import output_schema_error
+
+        output_schema = step.get("output_schema")
+        if output_schema is not None:
+            content = child_outcome.get("content", "")
+            import json as _json
+
+            try:
+                document = _json.loads(content) if isinstance(content, str) else content
+            except _json.JSONDecodeError as exc:
+                return f"delivered content is not valid JSON: {exc.msg}"
+            error = output_schema_error(document, output_schema)
+            if error is not None:
+                return f"delivered output violates the declared schema: {error}"
+        artifact_key = step.get("artifact")
+        if artifact_key is not None:
+            artifacts = child_outcome.get("artifacts") or {}
+            if not isinstance(artifacts, dict) or artifact_key not in artifacts or artifacts[artifact_key] is None:
+                return f"expected artifact {artifact_key!r} missing from the child outcome"
+        return None
+
     async def _execute_workflow(
         self,
         db: AsyncSession,
@@ -336,12 +377,25 @@ class PlatformTaskDispatcher:
         provided = context.provided or {}
         done_index = provided.get("step_index")
         if done_index is not None:
+            if type(done_index) is not int or not 0 <= done_index < len(plan.steps):
+                return {"status": "failed", "content": "", "error": "invalid workflow callback step_index"}
             child_state = (provided.get("child_outcome") or {}).get("child_state")
             if child_state != "succeeded":
-                detail = f"workflow step {done_index} child ended {child_state}"
+                detail = f"workflow step {done_index} failed (source=execution): child ended {child_state}"
                 if plan.on_failure == "await":
-                    return {"status": "awaiting_reconciliation", "content": detail}
-                return {"status": "failed", "content": "", "error": detail}
+                    return {"status": "awaiting_reconciliation", "content": detail, "failure_source": "execution"}
+                return {"status": "failed", "content": "", "error": detail, "failure_source": "execution"}
+            # step5e: artifact/output validation gates the parent's advance.
+            # The parent never advances on the child's self-reported success
+            # alone — the declared contract must hold on the delivered facts.
+            validation_error = self._validate_step_artifacts(
+                db, task_ref, plan.steps[int(done_index)], provided.get("child_outcome") or {}
+            )
+            if validation_error is not None:
+                detail = f"workflow step {done_index} failed (source=validation): {validation_error}"
+                if plan.on_failure == "await":
+                    return {"status": "awaiting_reconciliation", "content": detail, "failure_source": "validation"}
+                return {"status": "failed", "content": "", "error": detail, "failure_source": "validation"}
         next_index = 0 if done_index is None else int(done_index) + 1
         if next_index >= len(plan.steps):
             return {"status": "succeeded", "content": f"workflow completed {len(plan.steps)} step(s)"}
@@ -356,7 +410,7 @@ class PlatformTaskDispatcher:
         )
         raise TaskWaitingSignalError(
             ControlCommandKind.PROVIDE_INPUT,
-            {"await_task_ref": child_ref.to_dict()},
+            {"await_task_ref": child_ref.to_dict(), "step_index": next_index},
         )
 
     def _task_control(self, db: AsyncSession) -> Any:
@@ -407,7 +461,12 @@ class PlatformTaskDispatcher:
                 child_task_id=context.task_id,
                 declared_state=str(declared),
                 payload={"step_index": parent.get("step_index")},
-                result_summary={"content": str(outcome.get("content") or "")},
+                result_summary={
+                    "content": str(outcome.get("content") or ""),
+                    # step5e: declared artifacts ride the verified callback so
+                    # the parent validates the contract on platform records.
+                    "artifacts": outcome.get("artifacts") or {},
+                },
             )
         except Exception:  # noqa: BLE001 — terminal fact is committed; callback problems must not undo it
             logger.warning("task %s workflow auto-callback failed", context.task_id, exc_info=True)
@@ -443,6 +502,7 @@ class PlatformTaskDispatcher:
             provided=payload.get("provided"),
             workflow_plan=WorkflowChildTaskAdapter.plan(payload),
             workflow_parent=(payload["workflow_parent"] if isinstance(payload.get("workflow_parent"), dict) else None),
+            workflow_step=payload.get("workflow_step"),
         )
 
     @staticmethod
@@ -660,6 +720,17 @@ class PlatformTaskDispatcher:
             resume_interrupted=resume_interrupted,
             agent_mode="chat",
             messages=[
+                *(
+                    [
+                        {
+                            "role": "system",
+                            "content": "Return final output as JSON satisfying this schema: "
+                            + json.dumps(context.workflow_step["output_schema"]),
+                        }
+                    ]
+                    if context.workflow_step and context.workflow_step.get("output_schema") is not None
+                    else []
+                ),
                 *context.messages,
                 *(
                     [{"role": "user", "content": json.dumps({"provided_input": context.provided}, ensure_ascii=False)}]
@@ -696,10 +767,25 @@ class PlatformTaskDispatcher:
         result = outcome.result
         if not isinstance(result, dict):
             raise ValueError(f"unexpected entry result type {type(result)}")
-        return {"status": "succeeded", "content": str(result.get("content", "") or "")}
+        return self._child_result(result, context)
+
+    @staticmethod
+    def _child_result(result: dict[str, Any], context: _DispatchContext) -> dict[str, Any]:
+        content = str(result.get("content", "") or "")
+        artifacts = dict(result.get("artifacts") or {})
+        key = (context.workflow_step or {}).get("artifact")
+        if key is not None:
+            try:
+                document = json.loads(content)
+            except json.JSONDecodeError:
+                document = None
+            if isinstance(document, dict) and key in document:
+                artifacts[key] = document[key]
+        return {"status": "succeeded", "content": content, "artifacts": artifacts}
 
     async def _park(
         self,
+        db: AsyncSession,
         task_ref: BackendRef,
         wait: TaskWaitingSignalError,
         context: _DispatchContext,
@@ -742,6 +828,38 @@ class PlatformTaskDispatcher:
             },
         )
         logger.info("task %s parked in %s (token issued)", task_ref.id, target.value)
+        if context.workflow_plan is not None:
+            await self._wake_finished_child(db, task_ref, context, wait, token)
+
+    async def _wake_finished_child(
+        self,
+        db: AsyncSession,
+        parent_ref: BackendRef,
+        context: _DispatchContext,
+        wait: TaskWaitingSignalError,
+        token: str,
+    ) -> None:
+        # A fast child can finish before its parent commits the wait. Recheck
+        # after that commit so the child's skipped early callback is not lost.
+        raw = wait.contract_ref.get("await_task_ref")
+        if not isinstance(raw, dict):
+            return
+        child_ref = BackendRef(RefKind.TASK, str(raw.get("issuer_domain")), str(raw.get("id")))
+        child = await asyncio.to_thread(self._store.get_task_state, child_ref)
+        if child is None or child.lifecycle_state.value not in _RUN_PROJECTION_TERMINAL:
+            return
+        try:
+            await self._task_control(db).submit_workflow_callback(
+                workspace_id=context.workspace_id,
+                task_id=uuid.UUID(parent_ref.id),
+                command_id=f"wf-callback-{child_ref.id}",
+                wait_token=token,
+                child_task_id=uuid.UUID(child_ref.id),
+                declared_state=child.lifecycle_state.value,
+                payload={"step_index": wait.contract_ref.get("step_index")},
+            )
+        except Exception:
+            logger.warning("task %s completed child callback failed", parent_ref.id, exc_info=True)
 
     async def _finish(
         self,
@@ -769,10 +887,10 @@ class PlatformTaskDispatcher:
             terminal,
             expected_revision=expected_revision,
             **({"lease": lease} if lease is not None else {}),
+            extra_update={"result": outcome},
             **(
                 {
                     "event_run_ref": r_ref,
-                    "extra_update": {"result": outcome},
                     **(
                         {"terminal_payload": outcome}
                         if terminal is not TaskLifecycleState.RECONCILIATION_REQUIRED

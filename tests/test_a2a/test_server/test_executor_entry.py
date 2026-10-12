@@ -294,7 +294,11 @@ async def test_send_message_protocol_shape_is_pinned(
 
 
 async def test_send_message_registers_task_without_deployment(
-    db_session: AsyncSession, default_workspace, a2a_scope, llm: StubLLMService
+    db_session: AsyncSession,
+    default_workspace,
+    a2a_scope,
+    llm: StubLLMService,
+    tool_executor: StubToolExecutor,
 ) -> None:
     """No default deployment: the Task still registers; the run gap is explicit."""
     await _agent_with_tool(db_session, default_workspace.id, with_deployment=False)
@@ -302,6 +306,10 @@ async def test_send_message_registers_task_without_deployment(
     result = await _send_message(db_session, "hello")
 
     assert result["task"]["status"]["state"] == "completed"
+    # Completion went through a real resolved tool dispatch — under stop
+    # semantics an unresolved tool is a needs_review termination, not a
+    # review message the model reasons past.
+    assert tool_executor.calls == [(TOOL_NAME, {"a": 2, "b": 3})]
     tasks = (
         (await db_session.execute(select(TaskModel).where(TaskModel.workspace_id == default_workspace.id)))
         .scalars()

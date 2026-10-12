@@ -143,7 +143,9 @@ class RetryExecutor:
             result = await func(*args, **kwargs)
             if result.error is None:
                 return result
-            if not self._strategy.should_retry(result.error, attempt):
+            if getattr(result.error, "terminal_execution", False) or not self._strategy.should_retry(
+                result.error, attempt
+            ):
                 return result
             delay = self._strategy.get_backoff(attempt)
             logger.warning(
@@ -197,6 +199,7 @@ class RetryExecutor:
                         if (
                             item.error is not None
                             and not first_token_yielded
+                            and not getattr(item.error, "terminal_execution", False)
                             and self._strategy.should_retry(item.error, attempt)
                         ):
                             last_error = item.error
@@ -208,7 +211,11 @@ class RetryExecutor:
                     first_token_yielded = True
                     yield item
             except Exception as e:
-                if not first_token_yielded and self._strategy.should_retry(e, attempt):
+                if (
+                    not first_token_yielded
+                    and not getattr(e, "terminal_execution", False)
+                    and self._strategy.should_retry(e, attempt)
+                ):
                     last_error = e
                     should_retry = True
                 else:

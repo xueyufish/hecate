@@ -1,0 +1,33 @@
+{
+  "_meta": {
+    "kind": "record",
+    "status": "skipped",
+    "gate": false,
+    "business_value": "unverified",
+    "recorded_at": "2026-10-11T15:16:47.436178+00:00",
+    "rubric_version": "autonomous-execution-rubric-2",
+    "model": "gpt-4o",
+    "model_version": "unverified",
+    "tool_versions": {
+      "lookup_material": "synthetic-2",
+      "create_test_ticket": "synthetic-2"
+    },
+    "dataset_digest": "5315e10ac914921a5838e8302c2d6b02e620ed5807286d679a36edb8933bf7cb",
+    "prompt_digest": "82ebb06d006a4c993ef6a9fb9c8274c231cdabd6793c09f84913308c885cf7e2",
+    "tool_digest": "c3da1c09ef40beff6e55ced75b624a31230dd7a3d97a7323bca16b0d91732711",
+    "thresholds": {
+      "latency_ms": 60000.0,
+      "tokens": 20000,
+      "cost_usd": 1.0
+    },
+    "unverified": [
+      "provider price and final billing",
+      "durable approval/resume with a real model",
+      "standalone Runner model selection",
+      "business value",
+      "managed deployment certification"
+    ],
+    "reason": "OPENAI_API_KEY is not set; no real-model quality measured"
+  },
+  "runs": []
+}

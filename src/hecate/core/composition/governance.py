@@ -58,6 +58,8 @@ class GovernanceMode(StrEnum):
 class BudgetRefusedError(RuntimeError):
     """A metered call was refused by the budget reservation."""
 
+    terminal_execution = True
+
 
 class GovernanceDeniedError(PermissionError):
     """A protected tool call was denied by the governance judgment."""
@@ -223,8 +225,10 @@ class PlatformGovernance:
         """Read a decided receipt before applying authorization for new effects."""
         from hecate_governance.claims import OutcomeUnknownError
 
-        if self._claims is None or context.get("ledger_owned") or not context.get("invocation_id"):
+        if self._claims is None or context.get("ledger_owned"):
             return False, None
+        if not context.get("invocation_id"):
+            raise GovernanceDeniedError("replay requires an invocation_id when action claims are configured")
         key = self._claim_key(name, arguments, context)
         existing = await self._claims.resolve(key)
         if existing is None:
@@ -259,6 +263,7 @@ class PlatformGovernance:
         if not isinstance(arguments, dict):
             raise GovernanceDeniedError("tool arguments must be a JSON object")
         call_context = dict(context or {})
+        call_context.setdefault("invocation_id", self.invocation_key(name, arguments, call_context))
         replayed, result = await self.completed_result(name, arguments, call_context)
         if replayed:
             return result

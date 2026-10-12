@@ -270,6 +270,7 @@ class TaskControlService:
             # durable surface.
             "workflow": input.get("workflow"),
             "workflow_parent": input.get("workflow_parent"),
+            "workflow_step": input.get("workflow_step"),
         }
         key = IdempotencyKey(
             key=idempotency_key or f"auto:{minted_task}",
@@ -781,8 +782,38 @@ class TaskControlService:
             )
             return rejected
 
-        child_summary = {**(result_summary or {}), "child_task_id": str(child.id), "child_state": child_state}
-        merged_payload = {**(payload or {}), "child_outcome": child_summary}
+        child_input = await asyncio.to_thread(self._store.get_task_input, task_ref_of(child.id)) or {}
+        stamp = child_input.get("workflow_parent") or {}
+        verified_payload = dict(payload or {})
+        if stamp:
+            if stamp.get("task_ref") != t_ref.to_dict() or stamp.get("step_index") != (
+                wait.get("contract_ref") or {}
+            ).get("step_index", stamp.get("step_index")):
+                return await self._reject_callback(
+                    command_id,
+                    task,
+                    "child workflow step does not match parent wait",
+                    issuer=issuer,
+                    callback_digest=callback_digest,
+                )
+            if "step_index" in verified_payload and verified_payload["step_index"] != stamp.get("step_index"):
+                return await self._reject_callback(
+                    command_id,
+                    task,
+                    "callback step_index does not match child records",
+                    issuer=issuer,
+                    callback_digest=callback_digest,
+                )
+            verified_payload["step_index"] = stamp["step_index"]
+        # Result contents must come from the child's committed facts. A
+        # caller's success summary cannot manufacture a missing artifact.
+        facts = (child_record.extra or {}).get("result") or {}
+        if stamp and not facts:
+            return await self._reject_callback(
+                command_id, task, "child result facts are missing", issuer=issuer, callback_digest=callback_digest
+            )
+        child_summary = {**(facts or result_summary or {}), "child_task_id": str(child.id), "child_state": child_state}
+        merged_payload = {**verified_payload, "child_outcome": child_summary}
         return await self.issue_command(
             workspace_id=workspace_id,
             task_id=task_id,
@@ -848,6 +879,18 @@ class TaskControlService:
         wake_payload = dict(payload)
         base_input = await asyncio.to_thread(self._store.get_task_input, t_ref) or {}
         merged_input = {**base_input, "provided": wake_payload}
+        extra_update = {"wait": {**wait, "consumed": True}}
+        if record.detail_ns.get("callback_digest") and "step_index" in wake_payload:
+            callbacks = dict((current.extra or {}).get("_workflow_callbacks") or {})
+            index = str(wake_payload["step_index"])
+            if index in callbacks:
+                await asyncio.to_thread(self._recorder.transition, record.command_id, CommandState.REJECTED)
+                return "workflow step callback already applied; rejected"
+            callbacks[index] = {
+                "child_task_id": (wake_payload.get("child_outcome") or {}).get("child_task_id"),
+                "applied_fact_id": record.command_id,
+            }
+            extra_update["_workflow_callbacks"] = callbacks
         try:
             await asyncio.to_thread(
                 self._store.apply_task_state,
@@ -856,7 +899,7 @@ class TaskControlService:
                 expected_revision=record.expected_revision
                 if record.expected_revision is not None
                 else current.revision,
-                extra_update={"wait": {**wait, "consumed": True}},
+                extra_update=extra_update,
                 input_payload=merged_input,
                 **({"applied_command_id": record.command_id} if hasattr(self._store, "engine") else {}),
             )
