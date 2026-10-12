@@ -97,8 +97,23 @@ def _tool_call_delta(call_id: str) -> dict:
     }
 
 
-def _stream_tool_delta(call_id: str) -> SimpleNamespace:
-    return SimpleNamespace(
+class _StreamToolDelta(SimpleNamespace):
+    """Provider-shaped streamed tool call with OpenAI serialization.
+
+    Mirrors the production litellm chunk shape: objects the direct loop
+    flattens via ``model_dump`` and the engine consumes by attribute.
+    """
+
+    def model_dump(self) -> dict:
+        return {
+            "id": self.id,
+            "type": "function",
+            "function": {"name": self.function.name, "arguments": self.function.arguments},
+        }
+
+
+def _stream_tool_delta(call_id: str) -> _StreamToolDelta:
+    return _StreamToolDelta(
         index=0,
         id=call_id,
         type="function",
@@ -506,3 +521,246 @@ async def test_http_entry_correlates_task_and_run(client, db_session, llm, tool_
             break
     assert run is not None, "entry execution opened a run"
     assert run.backend_ref["id"] == session_id
+
+
+# --- G3 remaining evidence: flag-off pin, cancel, multi-turn, denial --------
+
+
+@pytest.fixture
+def direct_path(engine_path, monkeypatch: pytest.MonkeyPatch):
+    """Flag off again after the autouse on-fixture: pin the rollback path.
+
+    Declares a dependency on ``engine_path`` so the monkeypatch ordering
+    is explicit — this fixture's False wins inside the test body.
+    """
+    monkeypatch.setattr(settings, "CHAT_TOOL_LOOP_ENGINE_ENABLED", False)
+    yield
+
+
+async def test_flag_off_real_entry_keeps_direct_loop(client, db_session, llm, tool_executor, direct_path):
+    """Rollback path pin: flag off over the real entry behaves as before.
+
+    The direct loop keeps its pre-migration response semantics on both
+    request shapes and writes nothing to the engine event log — the
+    documented limitation (no engine events, no durable replay) stays
+    observable instead of being silently absorbed by the convergence.
+    """
+    agent = await _agent_with_tool(db_session, uuid.UUID(int=0))
+    session_id = str(uuid.uuid4())
+
+    plain = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "add 2 and 3"}],
+            "session_id": session_id,
+        },
+    )
+    assert plain.status_code == 200
+    data = plain.json()
+    assert data["choices"][0]["message"]["content"] == f"The answer is {TOOL_RESULT}"
+    assert data["choices"][0]["finish_reason"] == "stop"
+
+    other_session = str(uuid.uuid4())
+    streamed = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "add 2 and 3"}],
+            "stream": True,
+            "session_id": other_session,
+        },
+    )
+    assert streamed.status_code == 200
+    chunks = _parse_sse(streamed.text)
+    deltas = [c["choices"][0]["delta"].get("content") for c in chunks if c["choices"][0].get("delta")]
+    assert "".join(d for d in deltas if d) == f"The answer is {TOOL_RESULT}"
+    assert any((c.get("choices") or [{}])[0].get("finish_reason") == "stop" for c in chunks)
+
+    # Two requests, two direct-loop tool dispatches, zero engine events.
+    assert len(tool_executor.calls) == 2
+    all_events = [e for events in app.state.event_store._store.values() for e in events]
+    assert all_events == [], "flag-off direct loop must not write engine events"
+
+
+async def _delayed_set(event: asyncio.Event, delay: float) -> None:
+    await asyncio.sleep(delay)
+    event.set()
+
+
+async def test_engine_cancel_at_model_boundary_stops_and_resume_is_clean(
+    client, db_session, llm, tool_executor, monkeypatch
+):
+    """Mid-conversation cancel: the boundary check stops the loop before
+    the next model round; the completed round stays; resume is clean.
+
+    The disconnect signal is injected at the transport seam — the ASGI
+    test transport cannot deliver a mid-flight client disconnect to
+    ``is_disconnected`` (a real server surfaces it via the response
+    disconnect listener). Everything downstream of that signal is real:
+    the entry cancel wiring, the engine model-boundary check, the SSE
+    stop rendering and the session resume.
+    """
+    from hecate.channel.api.v1 import agents as agents_mod
+
+    agent = await _agent_with_tool(db_session, uuid.UUID(int=0))
+    session_id = str(uuid.uuid4())
+
+    state = {"cancelled": False}
+
+    def check():
+        return state["cancelled"]
+
+    monkeypatch.setattr(agents_mod, "_disconnect_check", lambda request: check)
+
+    original_execute = tool_executor.execute
+
+    async def cancel_after_round(name, args, context=None):
+        result = await original_execute(name, args, context)
+        # The client disconnects once the round's result is in.
+        state["cancelled"] = True
+        return result
+
+    monkeypatch.setattr(tool_executor, "execute", cancel_after_round)
+
+    response = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "add 2 and 3"}],
+            "stream": True,
+            "session_id": session_id,
+        },
+    )
+    assert response.status_code == 200
+    assert response.text.rstrip().endswith("data: [DONE]"), "stream terminated cleanly after the cancel"
+    events = _parse_sse(response.text)
+    stop_payloads = [e for e in events if isinstance(e.get("error"), dict)]
+    assert stop_payloads, "cancelled stop rendered on the SSE stream"
+    assert stop_payloads[0]["error"]["type"] == "execution_stopped"
+    assert stop_payloads[0]["error"]["reason_category"] == "cancelled"
+
+    # The in-flight round completed exactly once; the next model round
+    # never happened — the boundary check raised before it.
+    assert len(tool_executor.calls) == 1
+    total_model_calls = len(llm.chat_calls) + len(llm.stream_calls)
+    assert total_model_calls == 1, "the post-tool model round must be cancelled at the model boundary"
+
+    # Resume: the cancelled turn's completed round is not re-executed.
+    # The client "reconnects" — clear the injected disconnect signal.
+    state["cancelled"] = False
+    resumed = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "turn two"}],
+            "session_id": session_id,
+        },
+    )
+    assert resumed.status_code == 200
+    assert len(tool_executor.calls) == 1, "resume must not re-execute the cancelled turn's completed round"
+    final_messages = llm.chat_calls[-1] if llm.chat_calls else llm.stream_calls[-1]
+    assert any(isinstance(m, dict) and m.get("role") == "tool" for m in final_messages), (
+        "resume saw the restored tool result from the cancelled turn"
+    )
+
+
+async def test_engine_multi_turn_session_continuity(client, db_session, llm, tool_executor):
+    """Cross-request multi-turn: history, affinity, receipts, pairing."""
+    agent = await _agent_with_tool(db_session, uuid.UUID(int=0))
+    session_id = str(uuid.uuid4())
+
+    first = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "turn one: add 2 and 3"}],
+            "session_id": session_id,
+        },
+    )
+    assert first.status_code == 200
+    assert first.json()["choices"][0]["message"]["content"] == f"The answer is {TOOL_RESULT}"
+    assert len(tool_executor.calls) == 1
+
+    second = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "turn two"}],
+            "session_id": session_id,
+        },
+    )
+    assert second.status_code == 200
+    assert second.json()["choices"][0]["message"]["content"] == f"The answer is {TOOL_RESULT}"
+
+    # Turn two continued the persisted conversation: the model round saw
+    # turn one's tool-call exchange restored from the session state, not
+    # a fresh single-message request. (The replayed receipt content is
+    # the runtime's reconciliation marker in this store configuration —
+    # a documented G2 boundary, asserted as presence, not content.)
+    final_messages = llm.chat_calls[-1] if llm.chat_calls else llm.stream_calls[-1]
+    restored = [m for m in final_messages if isinstance(m, dict) and (m.get("tool_calls") or m.get("role") == "tool")]
+    assert any(isinstance(m, dict) and m.get("tool_calls") for m in final_messages), (
+        "turn two saw turn one's assistant tool-call message"
+    )
+    assert any(isinstance(m, dict) and m.get("role") == "tool" for m in final_messages), (
+        "turn two saw turn one's replayed tool receipt"
+    )
+    assert restored, "turn two input restored turn one's exchange"
+
+    # Turn one's decided receipt was not re-executed and turn two
+    # dispatched no new tool (the stub answers from the restored result).
+    assert len(tool_executor.calls) == 1
+
+    # Path affinity held across requests.
+    from hecate.models.session import SessionModel
+
+    session = await db_session.get(SessionModel, uuid.UUID(session_id))
+    if session is not None:
+        assert session.metadata_.get("chat_execution_path") == "engine"
+
+    # Tool call/result pairing stays intact across both turns.
+    from hecate.execution.entry_events import validate_tool_pairing
+
+    all_events = [e for events in app.state.event_store._store.values() for e in events]
+    report = validate_tool_pairing(all_events)
+    assert report.ok, f"unpaired tool events across turns: {report}"
+
+
+async def test_engine_deterministic_policy_denial_does_not_terminate(client, db_session, llm, tool_executor):
+    """A policy DENY (no approval flow) is a tool error message, not a stop."""
+    from hecate_runtime.eventstore import EventType
+
+    from hecate.models.tool_policy import ToolPolicyRuleModel
+
+    agent = await _agent_with_tool(db_session, uuid.UUID(int=0))
+    db_session.add(
+        ToolPolicyRuleModel(
+            workspace_id=uuid.UUID(int=0),
+            agent_id=None,
+            tool_pattern=TOOL_NAME,
+            action="deny",
+        )
+    )
+    await db_session.flush()
+
+    response = await client.post(
+        f"/v1/agents/{agent.id}/chat/completions",
+        json={
+            "messages": [{"role": "user", "content": "add 2 and 3"}],
+            "session_id": str(uuid.uuid4()),
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    # The conversation completed: a deterministic denial never becomes a
+    # needs_review-style termination.
+    assert data["choices"][0]["finish_reason"] == "stop"
+    assert tool_executor.calls == [], "denied dispatch must not execute"
+
+    # The final model round received the denial as the tool result.
+    final_messages = llm.chat_calls[-1] if llm.chat_calls else llm.stream_calls[-1]
+    tool_messages = [m for m in final_messages if isinstance(m, dict) and m.get("role") == "tool"]
+    assert tool_messages, "denial closed the loop with a tool message"
+    denial_text = " ".join(str(m.get("content", "")) for m in tool_messages).lower()
+    assert "denied" in denial_text or "deny" in denial_text or "policy" in denial_text
+
+    # Distinct from the approval flow: no approval pair is recorded.
+    all_events = [e for events in app.state.event_store._store.values() for e in events]
+    kinds = [e.event_type for e in all_events]
+    assert EventType.APPROVAL_ASKED not in kinds
+    assert EventType.APPROVAL_DECIDED not in kinds
