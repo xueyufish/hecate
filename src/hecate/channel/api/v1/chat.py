@@ -666,6 +666,15 @@ async def _process_chat_impl(
                 )
                 result_gen = outcome.result
 
+                # step5d contract closure: the run's Task/Run references
+                # lead the stream, so streaming and non-streaming clients
+                # get the same correlation visibility.
+                # OpenAI-safe frame: an empty choices array is a no-op for
+                # strict chunk consumers, while the correlation rides the
+                # payload for clients that read it.
+                correlation_event = {"choices": [], "hecate_correlation": outcome.correlation.to_dict()}
+                yield "data: " + json.dumps(correlation_event) + "\n\n"
+
                 if isinstance(result_gen, dict):
                     yield _format_done_chunk(effective_model)
                     return
@@ -681,7 +690,7 @@ async def _process_chat_impl(
                     and correlation.run_ref is not None
                 )
                 if use_mapped:
-                    mapper = RunEventMapper(correlation.task_ref, correlation.run_ref)
+                    mapper = RunEventMapper(correlation.task_ref, correlation.run_ref, event_store=event_store)
                     async for envelope in _map_stream(result_gen, mapper):
                         payload = envelope.payload
                         if payload.get("type") == "message":
@@ -811,11 +820,10 @@ async def _process_chat_impl(
                 total_tokens=result.get("usage", {}).get("total_tokens", 0),
             ),
         ).model_dump()
-        # Correlation visibility: a missing registration is explicit in the
-        # response instead of the platform claiming a record it does not
-        # have. Registered executions stay OpenAI-clean (logged server-side).
-        if outcome.correlation.status != "registered":
-            response_payload["hecate_correlation"] = outcome.correlation.to_dict()
+        # step5d contract closure: correlation visibility is symmetric with
+        # the streaming shape — registered executions carry their Task/Run
+        # references, missing registrations carry the explicit reason.
+        response_payload["hecate_correlation"] = outcome.correlation.to_dict()
         return response_payload
 
     # Simple passthrough: no KB, no suggestions — use LLM directly for lowest latency
@@ -889,7 +897,7 @@ async def _process_chat_impl(
 async def _map_stream(result_gen, mapper):
     """Map raw engine stream events to contract envelopes (step5d)."""
     async for event in result_gen:
-        yield mapper.map_stream_event(event)
+        yield await mapper.map_stream_event(event)
 
 
 def _format_done_chunk(model: str) -> str:
@@ -1113,17 +1121,20 @@ def _disconnect_check(http_request: Request):
 
 def _stopped_response(stop: _LoopStopError) -> JSONResponse:
     """409 with the machine-readable stop category for non-stream clients."""
-    return JSONResponse(
-        status_code=409,
-        content={
-            "error": {
-                "type": "execution_stopped",
-                "reason_category": stop.reason_category,
-                "detail": stop.detail,
-                "action_ref": stop.action_ref,
-            }
-        },
-    )
+    payload: dict[str, Any] = {
+        "error": {
+            "type": "execution_stopped",
+            "reason_category": stop.reason_category,
+            "detail": stop.detail,
+            "action_ref": stop.action_ref,
+        }
+    }
+    # step5d contract closure: registered Task/Run references ride the
+    # terminal payload (annotated on the exception by the entry service).
+    correlation = getattr(stop, "platform_correlation", None)
+    if isinstance(correlation, dict):
+        payload["correlation"] = correlation
+    return JSONResponse(status_code=409, content=payload)
 
 
 class _LoopStopError(ExecutionStoppedError):
@@ -1144,7 +1155,7 @@ async def _stop_safe_stream(source):
             yield chunk
     except (ExecutionStoppedError, BudgetRefusedError, MaxSuperstepsError) as exc:
         stop = _as_loop_stop(exc)
-        payload = {
+        payload: dict[str, Any] = {
             "error": {
                 "type": "execution_stopped",
                 "reason_category": stop.reason_category,
@@ -1152,6 +1163,9 @@ async def _stop_safe_stream(source):
                 "action_ref": stop.action_ref,
             }
         }
+        correlation = getattr(exc, "platform_correlation", None)
+        if isinstance(correlation, dict):
+            payload["correlation"] = correlation
         yield f"data: {json.dumps(payload)}\n\n"
         yield "data: [DONE]\n\n"
 

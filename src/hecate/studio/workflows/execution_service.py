@@ -514,6 +514,7 @@ class WorkflowExecutionService:
             Response dict with content, model, usage, etc.
         """
         final_state: dict[str, Any] = {}
+        engine_events: list[dict[str, Any]] = []
         async for event in runtime.execute(
             session_id=session_id,
             initial_input=initial_input,
@@ -521,6 +522,11 @@ class WorkflowExecutionService:
             execution_mode=execution_mode,
             resume_value=resume_value,
         ):
+            # step5d contract closure: non-streaming runs carry their drained
+            # engine stream so the entry service maps the same envelope view
+            # the streaming path produces. The key is popped by the entry
+            # service and never reaches protocol output.
+            engine_events.append(dict(event))
             if event.get("type") == "values":
                 final_state = event.get("state", {})
             elif event.get("type") == "interrupt" and execution_mode == "conversational":
@@ -542,6 +548,7 @@ class WorkflowExecutionService:
         }
         if suggested_questions:
             result["suggested_questions"] = suggested_questions
+        result["_engine_events"] = engine_events
 
         return result
 

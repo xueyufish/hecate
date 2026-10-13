@@ -16,6 +16,7 @@ platform must not report a correlated execution that it did not record.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import uuid
 from dataclasses import dataclass, field, replace
@@ -122,10 +123,11 @@ class EntryExecutionService:
 
         self._db = db
         self._entry_name = entry_name
+        self._event_store = event_store if event_store is not None else get_shared_event_store()
         self._service = WorkflowExecutionService(
             port=port,
             db=db,
-            event_store=event_store if event_store is not None else get_shared_event_store(),
+            event_store=self._event_store,
             checkpoint_store=checkpoint_store if checkpoint_store is not None else get_shared_session_state_store(),
             access_policy=access_policy,
             approval_callback=approval_callback,
@@ -142,7 +144,9 @@ class EntryExecutionService:
         Keyword arguments are forwarded to ``WorkflowExecutionService.execute``
         unchanged. ``session_id`` is minted when absent so the correlation's
         backend run reference points at the engine session that actually
-        executed.
+        executed. Correlation runs BEFORE execution (step5d contract
+        closure): a failed execution leaves a registered Task/Run whose
+        projection this service then finalizes, instead of vanishing.
         """
         correlation = correlation or CorrelationInput()
         session_id = execute_kwargs.get("session_id")
@@ -159,9 +163,147 @@ class EntryExecutionService:
         execute_kwargs["session_id"] = session_id
         correlation = replace(correlation, session_id=session_id)
 
-        result = await self._service.execute(**execute_kwargs)
         correlation_result = await self._correlate(correlation, session_id=session_id)
+        workspace_id = correlation.workspace_id
+        try:
+            result = await self._service.execute(**execute_kwargs)
+        except Exception as exc:
+            await self._finalize_failure(correlation_result, workspace_id, exc)
+            raise
+        if hasattr(result, "__aiter__"):
+            return ExecutionOutcome(
+                result=self._finalizing_stream(result, correlation_result, workspace_id),
+                correlation=correlation_result,
+            )
+        await self._record_engine_events(correlation_result, result)
+        await self._finalize_success(correlation_result, workspace_id, result)
         return ExecutionOutcome(result=result, correlation=correlation_result)
+
+    @staticmethod
+    def _stop_category(exc: BaseException) -> str | None:
+        """Map an execution exception to the entry stop category, if typed."""
+        from hecate_runtime.errors import ExecutionStoppedError, MaxSuperstepsError
+
+        if isinstance(exc, ExecutionStoppedError):
+            return getattr(exc, "reason_category", None) or "execution_failed"
+        if isinstance(exc, MaxSuperstepsError):
+            return "iteration_limit"
+        try:
+            from hecate.core.composition.governance import BudgetRefusedError
+        except ImportError:  # pragma: no cover - composition always present in prod
+            return None
+        if isinstance(exc, BudgetRefusedError):
+            return "budget_exhausted"
+        return None
+
+    async def _finalize_failure(
+        self,
+        correlation_result: CorrelationResult,
+        workspace_id: uuid.UUID | None,
+        exc: BaseException,
+    ) -> None:
+        """Write the failed terminal projection (best-effort, fail-open).
+
+        The registered correlation also rides the exception as
+        ``platform_correlation`` so protocol adapters can render the
+        Task/Run references in terminal payloads.
+        """
+        if correlation_result.run_ref is None or workspace_id is None:
+            return
+        with contextlib.suppress(Exception):
+            # The annotation must never mask the original error.
+            exc.platform_correlation = correlation_result.to_dict()
+        category = self._stop_category(exc)
+        state = "cancelled" if category == "cancelled" else "failed"
+        try:
+            from hecate.execution.task_run_registry import TaskRunRegistry
+
+            async with self._db.begin_nested():
+                await TaskRunRegistry(self._db).finalize_run(
+                    uuid.UUID(correlation_result.run_ref.id),
+                    workspace_id,
+                    state=state,
+                    error_category=category or "execution_failed",
+                )
+        except Exception as exc_inner:  # noqa: BLE001 — finalization must not mask the error
+            logger.warning("Entry %s failure finalization skipped: %s", self._entry_name, exc_inner)
+
+    async def _finalize_success(
+        self,
+        correlation_result: CorrelationResult,
+        workspace_id: uuid.UUID | None,
+        result: Any,
+    ) -> None:
+        if correlation_result.run_ref is None or workspace_id is None:
+            return
+        try:
+            from hecate.execution.task_run_registry import TaskRunRegistry
+
+            async with self._db.begin_nested():
+                await TaskRunRegistry(self._db).finalize_run(
+                    uuid.UUID(correlation_result.run_ref.id),
+                    workspace_id,
+                    state="succeeded",
+                    summary=self._result_summary(result),
+                )
+        except Exception as exc:  # noqa: BLE001 — finalization must not break the response
+            logger.warning("Entry %s success finalization skipped: %s", self._entry_name, exc)
+
+    @staticmethod
+    def _result_summary(result: Any) -> str | None:
+        """Contract-level digest of a successful result (truncated, safe)."""
+        content = None
+        if isinstance(result, dict):
+            choices = result.get("choices")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                message = choices[0].get("message") or {}
+                content = message.get("content") if isinstance(message, dict) else None
+            elif "content" in result:
+                content = result.get("content")
+        if content is None:
+            return None
+        text = str(content).strip()
+        return text[:500] if text else None
+
+    def _finalizing_stream(self, gen: Any, correlation_result: CorrelationResult, workspace_id: uuid.UUID | None):
+        """Wrap a streaming result so its terminal projection is written."""
+
+        async def wrapped():
+            try:
+                async for chunk in gen:
+                    yield chunk
+            except Exception as exc:
+                await self._finalize_failure(correlation_result, workspace_id, exc)
+                raise
+            await self._finalize_success(correlation_result, workspace_id, None)
+
+        return wrapped()
+
+    async def _record_engine_events(self, correlation_result: CorrelationResult, result: Any) -> None:
+        """Map a non-streaming run's drained engine events to envelopes.
+
+        The platform adapter attaches the drained engine stream under
+        ``_engine_events``; mapping them here gives synchronous and
+        streaming executions the same envelope view over one Task/Run.
+        The key is popped, so engine events never reach protocol output.
+        """
+        if correlation_result.task_ref is None or correlation_result.run_ref is None:
+            return
+        if not isinstance(result, dict):
+            return
+        events = result.pop("_engine_events", None)
+        if not isinstance(events, list) or not events:
+            return
+        from hecate.execution.entry_events import RunEventMapper
+
+        mapper = RunEventMapper(
+            correlation_result.task_ref,
+            correlation_result.run_ref,
+            event_store=self._event_store,
+        )
+        for event in events:
+            if isinstance(event, dict):
+                await mapper.map_stream_event(event)
 
     async def _correlate(self, correlation: CorrelationInput, *, session_id: uuid.UUID) -> CorrelationResult:
         """Best-effort Task/Run/conversation registration (fail-open)."""

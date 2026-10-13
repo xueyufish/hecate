@@ -144,15 +144,27 @@ class HecateAgentExecutor:
             logger.error("A2A agent workspace scope %s has no agents; refusing execution", raw)
             self._resolution_failure = "No agent available in the configured A2A workspace"
             return None
-        if len(agents) > 1:
-            logger.error(
-                "A2A agent workspace scope %s resolves to %d agents; refusing execution",
-                raw,
-                len(agents),
-            )
-            self._resolution_failure = "The configured A2A workspace does not resolve to a single agent"
-            return None
-        return agents[0]
+        if len(agents) == 1:
+            return agents[0]
+
+        # step5d closure: multiple agents in scope resolve through the
+        # workspace's default deployment — the deployment table is the
+        # explicit registration surface. No unique default deployment
+        # means no resolution, never a fallback to "first agent".
+        from hecate.execution.task_run_registry import TaskRunRegistry
+
+        default_agents = await TaskRunRegistry(self._db).list_workspace_default_deployment_agents(workspace_uuid)
+        matched = [agent for agent in agents if agent.id in {candidate.id for candidate in default_agents}]
+        if len(matched) == 1:
+            return matched[0]
+        logger.error(
+            "A2A agent workspace scope %s resolves to %d agents without a unique"
+            " default deployment; refusing execution",
+            raw,
+            len(agents),
+        )
+        self._resolution_failure = "The configured A2A workspace does not resolve to a default agent"
+        return None
 
     async def _execute_via_entry_service(self, agent: AgentModel, user_message: str) -> str:
         """Run one execution through the platform entry service."""

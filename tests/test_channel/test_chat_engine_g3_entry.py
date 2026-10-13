@@ -299,7 +299,11 @@ async def test_real_http_streaming_multi_round_silent_intermediates(client, db_s
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
     chunks = _parse_sse(response.text)
-    deltas = [c["choices"][0]["delta"].get("content") for c in chunks if c["choices"][0].get("delta")]
+    deltas = [
+        c["choices"][0]["delta"].get("content")
+        for c in chunks
+        if c.get("choices") and c["choices"] and c["choices"][0].get("delta")
+    ]
     content = "".join(d for d in deltas if d)
     # Only the final answer streams; intermediate tool iteration is silent.
     assert content == f"The answer is {TOOL_RESULT}"
@@ -571,7 +575,11 @@ async def test_flag_off_real_entry_keeps_direct_loop(client, db_session, llm, to
     )
     assert streamed.status_code == 200
     chunks = _parse_sse(streamed.text)
-    deltas = [c["choices"][0]["delta"].get("content") for c in chunks if c["choices"][0].get("delta")]
+    deltas = [
+        c["choices"][0]["delta"].get("content")
+        for c in chunks
+        if c.get("choices") and c["choices"] and c["choices"][0].get("delta")
+    ]
     assert "".join(d for d in deltas if d) == f"The answer is {TOOL_RESULT}"
     assert any((c.get("choices") or [{}])[0].get("finish_reason") == "stop" for c in chunks)
 
