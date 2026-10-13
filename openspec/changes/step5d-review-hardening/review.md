@@ -53,4 +53,6 @@
 
 GitHub Actions 后续发现 S12 流式场景解析了入口新增的 metadata-only correlation frame；该帧合法地带有 `choices=[]`，旧断言直接访问 `choices[0]`。测试现仅消费有内容的 choice 帧，并在 tasks.md 登记为 3.3。
 
+PostgreSQL continuation acceptance 随后暴露了测试 helper 的后台 dispatch 与显式 worker 竞争同一 lease；helper 现关闭 fire-and-forget dispatch，避免竞态及 teardown 后访问测试 schema，并在 tasks.md 登记为 3.4。
+
 修正位于 `feat/step5d-review-hardening`，主修正 commit 已推送；OpenSpec change 尚未归档。

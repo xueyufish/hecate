@@ -207,23 +207,34 @@ def _platform_dispatcher(harness):
 
 
 async def _submit(harness, goal: str):
+    import hecate.execution.task_control as task_control_module
     from hecate.execution.task_control import TaskControlService
 
-    async with harness["session_factory"]() as db:
-        return await TaskControlService(
-            db,
-            store=harness["store"],
-            recorder=harness["store"],
-            backend="postgres",
-            ledger_source="core",
-            session_factory=harness["session_factory"],
-        ).submit(
-            workspace_id=WS,
-            user_id=OWNER,
-            goal=goal,
-            agent_id=harness["agent_id"],
-            input={"messages": [{"role": "user", "content": "go"}]},
-        )
+    # These acceptance tests drive the durable worker explicitly after
+    # submission.  Suppress submit's fire-and-forget dispatch so PostgreSQL
+    # lease acquisition cannot race the worker under test or outlive schema
+    # teardown when a later assertion fails.
+    original_spawn = task_control_module._spawn_background
+    task_control_module._spawn_background = lambda coro: coro.close()
+
+    try:
+        async with harness["session_factory"]() as db:
+            return await TaskControlService(
+                db,
+                store=harness["store"],
+                recorder=harness["store"],
+                backend="postgres",
+                ledger_source="core",
+                session_factory=harness["session_factory"],
+            ).submit(
+                workspace_id=WS,
+                user_id=OWNER,
+                goal=goal,
+                agent_id=harness["agent_id"],
+                input={"messages": [{"role": "user", "content": "go"}]},
+            )
+    finally:
+        task_control_module._spawn_background = original_spawn
 
 
 async def _run_rows(harness, task_id: uuid.UUID) -> list[RunModel]:

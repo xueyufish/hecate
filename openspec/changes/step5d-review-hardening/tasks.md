@@ -15,3 +15,4 @@
 - [x] 3.1 修正文档完成声明、入口矩阵状态和证据路径，交付包含发现/修正/保留缺口的 review.md，逐项核对源文件及测试。
 - [x] 3.2 执行 ruff check、ruff format --check、mypy src、受影响入口/执行/workflow/分层回归和 OpenSpec strict validate，记录实际结果。
 - [x] 3.3 修复关联元数据流式帧导致 S12 场景测试索引空 choices 的回归，并补充仅消费内容帧的测试断言。
+- [x] 3.4 消除 PostgreSQL continuation 测试中提交后台 dispatch 与手动 worker 的 lease 竞争，确保失败时不会有后台任务越过 schema teardown。
